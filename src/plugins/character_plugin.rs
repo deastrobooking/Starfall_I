@@ -25,14 +25,17 @@ struct PoseSample {
 
 fn cartoon_animation_system(
     time: Res<Time>,
-    mut roots: Query<(
-        Entity,
-        &Transform,
-        &mut CartoonAnimator,
-        Option<&PlayerMovement>,
-        Option<&EdgeGrabState>,
-    )>,
-    mut parts: Query<(&CartoonPart, &mut Transform)>,
+    mut roots: Query<
+        (
+            Entity,
+            &Transform,
+            &mut CartoonAnimator,
+            Option<&PlayerMovement>,
+            Option<&EdgeGrabState>,
+        ),
+        Without<CartoonPart>,
+    >,
+    mut parts: Query<(&CartoonPart, &mut Transform), Without<CartoonAnimator>>,
 ) {
     let dt = time.delta_secs();
     let mut samples = HashMap::new();
