@@ -17,7 +17,6 @@
 ///  !          decrement radius by `radius_scale` factor
 ///
 /// All other characters are silently ignored (used as grammar variables).
-
 use bevy::math::{Quat, Vec3};
 
 // ── Output geometry ───────────────────────────────────────────────────────────
@@ -26,13 +25,13 @@ use bevy::math::{Quat, Vec3};
 #[derive(Debug, Clone)]
 pub struct BranchSegment {
     /// Start point in tree-local space.
-    pub start:  Vec3,
+    pub start: Vec3,
     /// End point in tree-local space.
-    pub end:    Vec3,
+    pub end: Vec3,
     /// Radius of the cylinder at this segment.
     pub radius: f32,
     /// How many `[` levels deep this segment is (0 = trunk).
-    pub depth:  u32,
+    pub depth: u32,
 }
 
 /// A leaf cluster to be rendered as a small sphere at a branch tip.
@@ -40,35 +39,35 @@ pub struct BranchSegment {
 pub struct LeafCluster {
     pub position: Vec3,
     /// Sphere radius for the cluster.
-    pub size:     f32,
-    pub depth:    u32,
+    pub size: f32,
+    pub depth: u32,
 }
 
 /// Everything the turtle interpreter produces from one L-system string.
 #[derive(Debug, Default, Clone)]
 pub struct TurtleResult {
     pub branches: Vec<BranchSegment>,
-    pub leaves:   Vec<LeafCluster>,
+    pub leaves: Vec<LeafCluster>,
 }
 
 // ── Internal turtle state ─────────────────────────────────────────────────────
 
 #[derive(Clone)]
 struct State {
-    pos:    Vec3,
-    fwd:    Vec3,   // local +Z in tree space (direction of growth)
-    up:     Vec3,   // local +Y
-    right:  Vec3,   // local +X
+    pos: Vec3,
+    fwd: Vec3,   // local +Z in tree space (direction of growth)
+    up: Vec3,    // local +Y
+    right: Vec3, // local +X
     radius: f32,
-    step:   f32,
-    depth:  u32,
+    step: f32,
+    depth: u32,
 }
 
 // ── Turtle ───────────────────────────────────────────────────────────────────
 
 pub struct Turtle {
-    angle:        f32,   // radians
-    step:         f32,
+    angle: f32, // radians
+    step: f32,
     length_scale: f32,
     start_radius: f32,
     radius_scale: f32,
@@ -76,14 +75,14 @@ pub struct Turtle {
 
 impl Turtle {
     pub fn new(
-        angle_deg:    f32,
-        step:         f32,
+        angle_deg: f32,
+        step: f32,
         length_scale: f32,
         start_radius: f32,
         radius_scale: f32,
     ) -> Self {
         Self {
-            angle:        angle_deg.to_radians(),
+            angle: angle_deg.to_radians(),
             step,
             length_scale,
             start_radius,
@@ -98,13 +97,13 @@ impl Turtle {
 
         // Trees grow upward (+Y world axis).
         let mut state = State {
-            pos:    Vec3::ZERO,
-            fwd:    Vec3::Y,
-            up:     Vec3::Z,
-            right:  Vec3::X,
+            pos: Vec3::ZERO,
+            fwd: Vec3::Y,
+            up: Vec3::Z,
+            right: Vec3::X,
             radius: self.start_radius,
-            step:   self.step,
-            depth:  0,
+            step: self.step,
+            depth: 0,
         };
 
         for ch in string.chars() {
@@ -113,10 +112,10 @@ impl Turtle {
                 'F' | 'A' | 'B' | 'C' => {
                     let end = state.pos + state.fwd * state.step;
                     result.branches.push(BranchSegment {
-                        start:  state.pos,
+                        start: state.pos,
                         end,
                         radius: state.radius,
-                        depth:  state.depth,
+                        depth: state.depth,
                     });
                     state.pos = end;
                 }
@@ -127,55 +126,55 @@ impl Turtle {
                 // ── Yaw (rotate around local Up) ─────────────────────────
                 '+' => {
                     let r = Quat::from_axis_angle(state.up, self.angle);
-                    state.fwd   = r * state.fwd;
+                    state.fwd = r * state.fwd;
                     state.right = r * state.right;
                 }
                 '-' => {
                     let r = Quat::from_axis_angle(state.up, -self.angle);
-                    state.fwd   = r * state.fwd;
+                    state.fwd = r * state.fwd;
                     state.right = r * state.right;
                 }
                 // ── Pitch (rotate around local Right) ─────────────────────
                 '^' => {
                     let r = Quat::from_axis_angle(state.right, self.angle);
                     state.fwd = r * state.fwd;
-                    state.up  = r * state.up;
+                    state.up = r * state.up;
                 }
                 '&' => {
                     let r = Quat::from_axis_angle(state.right, -self.angle);
                     state.fwd = r * state.fwd;
-                    state.up  = r * state.up;
+                    state.up = r * state.up;
                 }
                 // ── Roll (rotate around local Forward) ────────────────────
                 '\\' | 'l' => {
                     let r = Quat::from_axis_angle(state.fwd, self.angle);
                     state.right = r * state.right;
-                    state.up    = r * state.up;
+                    state.up = r * state.up;
                 }
                 '/' | 'r' => {
                     let r = Quat::from_axis_angle(state.fwd, -self.angle);
                     state.right = r * state.right;
-                    state.up    = r * state.up;
+                    state.up = r * state.up;
                 }
                 // ── Reverse ───────────────────────────────────────────────
                 '|' => {
                     let r = Quat::from_axis_angle(state.up, std::f32::consts::PI);
-                    state.fwd   = r * state.fwd;
+                    state.fwd = r * state.fwd;
                     state.right = r * state.right;
                 }
                 // ── Push (enter branch) ───────────────────────────────────
                 '[' => {
                     stack.push(state.clone());
-                    state.depth  += 1;
+                    state.depth += 1;
                     state.radius *= self.radius_scale;
-                    state.step   *= self.length_scale;
+                    state.step *= self.length_scale;
                 }
                 // ── Pop (exit branch, place leaf at tip) ──────────────────
                 ']' => {
                     // Leaf at the tip of the sub-branch (before restoring position).
-                    let leaf_pos  = state.pos;
+                    let leaf_pos = state.pos;
                     let leaf_size = (state.radius * 6.0 + 0.25).clamp(0.2, 1.8);
-                    let leaf_dep  = state.depth;
+                    let leaf_dep = state.depth;
 
                     if let Some(saved) = stack.pop() {
                         state = saved;
@@ -184,8 +183,8 @@ impl Turtle {
                     if leaf_dep >= 2 {
                         result.leaves.push(LeafCluster {
                             position: leaf_pos,
-                            size:     leaf_size,
-                            depth:    leaf_dep,
+                            size: leaf_size,
+                            depth: leaf_dep,
                         });
                     }
                 }
@@ -193,8 +192,8 @@ impl Turtle {
                 'L' => {
                     result.leaves.push(LeafCluster {
                         position: state.pos,
-                        size:     (state.radius * 6.0 + 0.25).clamp(0.2, 1.8),
-                        depth:    state.depth,
+                        size: (state.radius * 6.0 + 0.25).clamp(0.2, 1.8),
+                        depth: state.depth,
                     });
                 }
                 // ── Thin branch ───────────────────────────────────────────

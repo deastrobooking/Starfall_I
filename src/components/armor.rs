@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 
 // ── Element Type ──────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum ElementType {
     #[default]
     None,
@@ -9,7 +11,7 @@ pub enum ElementType {
     Ice,
     Electric,
     DarkEnergy,
-    Insectoid,
+    Rift,
 }
 
 impl ElementType {
@@ -20,7 +22,7 @@ impl ElementType {
             ElementType::Ice => "Ice",
             ElementType::Electric => "Electric",
             ElementType::DarkEnergy => "Dark Energy",
-            ElementType::Insectoid => "Insectoid",
+            ElementType::Rift => "Rift",
         }
     }
 
@@ -32,7 +34,7 @@ impl ElementType {
             ElementType::Ice => 0.05,
             ElementType::Electric => 0.10,
             ElementType::DarkEnergy => 0.20,
-            ElementType::Insectoid => 0.08,
+            ElementType::Rift => 0.08,
         }
     }
 
@@ -44,7 +46,7 @@ impl ElementType {
             ElementType::Ice => 0.15,
             ElementType::Electric => 0.10,
             ElementType::DarkEnergy => 0.0,
-            ElementType::Insectoid => 0.20,
+            ElementType::Rift => 0.20,
         }
     }
 
@@ -56,7 +58,7 @@ impl ElementType {
             ElementType::Ice => 4.0,
             ElementType::Electric => 12.0,
             ElementType::DarkEnergy => 15.0,
-            ElementType::Insectoid => 6.0,
+            ElementType::Rift => 6.0,
         }
     }
 
@@ -68,7 +70,7 @@ impl ElementType {
             ElementType::Ice => 5.0,
             ElementType::Electric => 2.0,
             ElementType::DarkEnergy => 4.0,
-            ElementType::Insectoid => 6.0,
+            ElementType::Rift => 6.0,
         }
     }
 }

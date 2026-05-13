@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-use crate::state::AppState;
-use crate::components::player::{Player, PlayerStats};
 use crate::components::armor::*;
+use crate::components::player::{Player, PlayerStats};
+use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct ArmorPlugin;
@@ -11,15 +11,17 @@ impl Plugin for ArmorPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (apply_armor_health_bonus, element_switch_system)
-                .run_if(in_state(AppState::Playing)),
+            (apply_armor_health_bonus, element_switch_system).run_if(in_state(AppState::Playing)),
         );
     }
 }
 
 /// Keep player max health in sync with total armor health bonuses.
 fn apply_armor_health_bonus(
-    mut player_q: Query<(&ArmorSet, &mut PlayerStats, &mut crate::damage::Health), (With<Player>, Changed<ArmorSet>)>,
+    mut player_q: Query<
+        (&ArmorSet, &mut PlayerStats, &mut crate::damage::Health),
+        (With<Player>, Changed<ArmorSet>),
+    >,
 ) {
     for (armor, mut stats, mut health) in player_q.iter_mut() {
         let bonus = armor.total_health_bonus();
@@ -58,18 +60,18 @@ fn cycle_element_next(e: ElementType) -> ElementType {
         ElementType::Fire => ElementType::Ice,
         ElementType::Ice => ElementType::Electric,
         ElementType::Electric => ElementType::DarkEnergy,
-        ElementType::DarkEnergy => ElementType::Insectoid,
-        ElementType::Insectoid => ElementType::None,
+        ElementType::DarkEnergy => ElementType::Rift,
+        ElementType::Rift => ElementType::None,
     }
 }
 
 fn cycle_element_prev(e: ElementType) -> ElementType {
     match e {
-        ElementType::None => ElementType::Insectoid,
+        ElementType::None => ElementType::Rift,
         ElementType::Fire => ElementType::None,
         ElementType::Ice => ElementType::Fire,
         ElementType::Electric => ElementType::Ice,
         ElementType::DarkEnergy => ElementType::Electric,
-        ElementType::Insectoid => ElementType::DarkEnergy,
+        ElementType::Rift => ElementType::DarkEnergy,
     }
 }

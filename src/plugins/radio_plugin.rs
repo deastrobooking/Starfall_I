@@ -10,44 +10,49 @@ pub struct RadioPlugin;
 
 impl Plugin for RadioPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<RadioChatter>()
+        app.init_resource::<RadioChatter>()
             .add_systems(Startup, setup_radio_panel)
-            .add_systems(Update, (
-                ingest_radio_events,
-                tick_radio_lines,
-                render_radio_panel,
-            ));
+            .add_systems(
+                Update,
+                (ingest_radio_events, tick_radio_lines, render_radio_panel),
+            );
     }
 }
 
-#[derive(Component)] struct RadioRoot;
-#[derive(Component)] struct RadioText(usize); // line index
+#[derive(Component)]
+struct RadioRoot;
+#[derive(Component)]
+struct RadioText(usize); // line index
 
 const MAX_LINES: usize = 4;
 
 fn setup_radio_panel(mut commands: Commands) {
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Percent(15.0),
-            bottom: Val::Px(120.0),
-            width: Val::Percent(70.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(2.0),
-            ..default()
-        },
-        RadioRoot,
-    )).with_children(|p| {
-        for i in 0..MAX_LINES {
-            p.spawn((
-                Text::new(""),
-                TextFont { font_size: 16.0, ..default() },
-                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
-                RadioText(i),
-            ));
-        }
-    });
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(15.0),
+                bottom: Val::Px(120.0),
+                width: Val::Percent(70.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            RadioRoot,
+        ))
+        .with_children(|p| {
+            for i in 0..MAX_LINES {
+                p.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
+                    RadioText(i),
+                ));
+            }
+        });
 }
 
 fn ingest_radio_events(

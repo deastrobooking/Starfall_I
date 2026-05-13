@@ -1,15 +1,15 @@
 use bevy::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::state::AppState;
-use crate::events::UiMessageEvent;
 use crate::components::player::{Player, PlayerStats};
 use crate::damage::Health;
+use crate::events::UiMessageEvent;
 use crate::resources::WaveInfo;
+use crate::state::AppState;
 
-const SAVE_FILE: &str = "heavy_water_save.json";
+const SAVE_FILE: &str = "starfall_i_save.json";
 
 // ── Save Data ─────────────────────────────────────────────────────────────────
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -46,7 +46,10 @@ pub struct SaveState {
 
 impl SaveState {
     pub fn new() -> Self {
-        Self { last_save_timer: 0.0, autosave_interval: 30.0 }
+        Self {
+            last_save_timer: 0.0,
+            autosave_interval: 30.0,
+        }
     }
 }
 
@@ -55,13 +58,11 @@ pub struct SavePlugin;
 
 impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<SaveState>()
+        app.init_resource::<SaveState>()
             .add_systems(OnEnter(AppState::Playing), load_save_on_enter)
             .add_systems(
                 Update,
-                (autosave_system, manual_save_system)
-                    .run_if(in_state(AppState::Playing)),
+                (autosave_system, manual_save_system).run_if(in_state(AppState::Playing)),
             );
     }
 }
@@ -88,7 +89,9 @@ pub fn save_game(stats: &PlayerStats, health: &Health, wave: &WaveInfo) -> Resul
 
 pub fn load_save() -> Option<SaveData> {
     let path = save_path();
-    if !path.exists() { return None; }
+    if !path.exists() {
+        return None;
+    }
     let json = fs::read_to_string(path).ok()?;
     serde_json::from_str(&json).ok()
 }
@@ -126,13 +129,20 @@ fn autosave_system(
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
     save_state.last_save_timer += time.delta_secs();
-    if save_state.last_save_timer < save_state.autosave_interval { return; }
+    if save_state.last_save_timer < save_state.autosave_interval {
+        return;
+    }
     save_state.last_save_timer = 0.0;
 
-    let Ok((stats, health)) = player_q.get_single() else { return };
+    let Ok((stats, health)) = player_q.get_single() else {
+        return;
+    };
     match save_game(stats, health, &wave) {
         Ok(()) => {
-            msg_ev.send(UiMessageEvent { text: "Game autosaved.".to_string(), duration: 1.5 });
+            msg_ev.send(UiMessageEvent {
+                text: "Game autosaved.".to_string(),
+                duration: 1.5,
+            });
         }
         Err(e) => {
             warn!("Autosave failed: {}", e);
@@ -146,14 +156,24 @@ fn manual_save_system(
     wave: Res<WaveInfo>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
-    if !keyboard.just_pressed(KeyCode::F5) { return; }
-    let Ok((stats, health)) = player_q.get_single() else { return };
+    if !keyboard.just_pressed(KeyCode::F5) {
+        return;
+    }
+    let Ok((stats, health)) = player_q.get_single() else {
+        return;
+    };
     match save_game(stats, health, &wave) {
         Ok(()) => {
-            msg_ev.send(UiMessageEvent { text: "Game saved! [F5]".to_string(), duration: 2.0 });
+            msg_ev.send(UiMessageEvent {
+                text: "Game saved! [F5]".to_string(),
+                duration: 2.0,
+            });
         }
         Err(e) => {
-            msg_ev.send(UiMessageEvent { text: format!("Save failed: {}", e), duration: 2.0 });
+            msg_ev.send(UiMessageEvent {
+                text: format!("Save failed: {}", e),
+                duration: 2.0,
+            });
         }
     }
 }

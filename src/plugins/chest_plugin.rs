@@ -1,20 +1,19 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::state::AppState;
-use crate::events::{ChestOpenedEvent, LootCollectedEvent};
 use crate::components::player::{Player, PlayerStats};
 use crate::components::world::{Chest, LootType};
 use crate::damage::Health;
+use crate::events::{ChestOpenedEvent, LootCollectedEvent};
 use crate::resources::PlayerScore;
+use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct ChestPlugin;
 
 impl Plugin for ChestPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_systems(OnEnter(AppState::Playing), spawn_chests)
+        app.add_systems(OnEnter(AppState::Playing), spawn_chests)
             .add_systems(
                 Update,
                 chest_proximity_system.run_if(in_state(AppState::Playing)),
@@ -22,7 +21,11 @@ impl Plugin for ChestPlugin {
     }
 }
 
-fn spawn_chests(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn spawn_chests(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let mut rng = rand::thread_rng();
     let gold_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.9, 0.7, 0.1),
@@ -77,14 +80,20 @@ fn chest_proximity_system(
     mut chest_ev: EventWriter<ChestOpenedEvent>,
     mut score: ResMut<PlayerScore>,
 ) {
-    let Ok((pt, mut stats)) = player_q.get_single_mut() else { return };
+    let Ok((pt, mut stats)) = player_q.get_single_mut() else {
+        return;
+    };
     let player_pos = pt.translation;
 
     for (entity, chest_transform, mut chest) in chest_q.iter_mut() {
-        if chest.is_open { continue; }
+        if chest.is_open {
+            continue;
+        }
 
         let dist = player_pos.distance(chest_transform.translation);
-        if dist > 2.0 { continue; }
+        if dist > 2.0 {
+            continue;
+        }
 
         // Open the chest
         chest.is_open = true;

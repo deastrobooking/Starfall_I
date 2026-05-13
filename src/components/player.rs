@@ -70,6 +70,46 @@ impl Default for PlayerMovement {
     }
 }
 
+// ── Edge Grab / Wall Jump ────────────────────────────────────────────────────
+#[derive(Component, Debug, Clone)]
+pub struct EdgeGrabState {
+    pub is_hanging: bool,
+    pub wall_normal: Vec3,
+    pub cooldown_timer: f32,
+    pub wall_contact_timer: f32,
+    pub hang_timer: f32,
+    pub max_hang_time: f32,
+    pub stamina_drain_per_sec: f32,
+    pub wall_jump_push: f32,
+    pub wall_jump_vertical: f32,
+    pub climb_boost: f32,
+    pub grab_cooldown: f32,
+}
+
+impl Default for EdgeGrabState {
+    fn default() -> Self {
+        Self {
+            is_hanging: false,
+            wall_normal: Vec3::ZERO,
+            cooldown_timer: 0.0,
+            wall_contact_timer: 0.0,
+            hang_timer: 0.0,
+            max_hang_time: 2.5,
+            stamina_drain_per_sec: 12.0,
+            wall_jump_push: 0.48,
+            wall_jump_vertical: 0.58,
+            climb_boost: 0.55,
+            grab_cooldown: 0.22,
+        }
+    }
+}
+
+impl EdgeGrabState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 // ── Jetpack ───────────────────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct JetpackState {
@@ -153,6 +193,8 @@ pub enum PlayerState {
     Stunned,
     Dead,
     Jetpack,
+    WallSliding,
+    Hanging,
 }
 
 #[derive(Component, Debug, Clone, Default)]
@@ -167,14 +209,47 @@ impl PlayerStateMachine {
     pub fn transition(&mut self, next: PlayerState) -> bool {
         use PlayerState::*;
         let allowed = match self.current {
-            Idle => matches!(next, Moving | Sprinting | Dodging | Attacking | Stunned | Dead | Jetpack),
-            Moving => matches!(next, Idle | Sprinting | Dodging | Attacking | Stunned | Dead | Jetpack),
-            Sprinting => matches!(next, Idle | Moving | Dodging | Attacking | Stunned | Dead | Jetpack),
+            Idle => matches!(
+                next,
+                Moving
+                    | Sprinting
+                    | Dodging
+                    | Attacking
+                    | Stunned
+                    | Dead
+                    | Jetpack
+                    | WallSliding
+                    | Hanging
+            ),
+            Moving => matches!(
+                next,
+                Idle | Sprinting
+                    | Dodging
+                    | Attacking
+                    | Stunned
+                    | Dead
+                    | Jetpack
+                    | WallSliding
+                    | Hanging
+            ),
+            Sprinting => matches!(
+                next,
+                Idle | Moving
+                    | Dodging
+                    | Attacking
+                    | Stunned
+                    | Dead
+                    | Jetpack
+                    | WallSliding
+                    | Hanging
+            ),
             Dodging => matches!(next, Idle | Moving | Sprinting | Stunned | Dead),
             Attacking => matches!(next, Idle | Moving | Dodging | Stunned | Dead),
             Stunned => matches!(next, Idle | Dead),
             Dead => false,
-            Jetpack => matches!(next, Idle | Moving | Stunned | Dead),
+            Jetpack => matches!(next, Idle | Moving | Stunned | Dead | WallSliding | Hanging),
+            WallSliding => matches!(next, Idle | Moving | Jetpack | Hanging | Stunned | Dead),
+            Hanging => matches!(next, Idle | Moving | Jetpack | Stunned | Dead),
         };
         if allowed {
             self.previous = Some(self.current);
@@ -202,3 +277,45 @@ pub struct InvulnerabilityFlash {
     pub timer: f32,
     pub duration: f32,
 }
+
+// ── Player Index ──────────────────────────────────────────────────────────────
+/// 0 = P1, 1 = P2, 2 = P3, 3 = P4.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct PlayerIndex(pub u8);
+
+// ── Per-Player Input ──────────────────────────────────────────────────────────
+/// Written by InputPlugin each PreUpdate. One instance per player entity.
+/// P1 = keyboard + mouse + gamepad 0. P2–P4 = gamepad 1–3.
+#[derive(Component, Default, Debug, Clone)]
+pub struct PlayerInput {
+    pub move_axis: Vec2,
+    pub look_delta: Vec2,
+    pub fire: bool,
+    pub aim: bool,
+    pub sprint: bool,
+    pub jetpack: bool,
+    pub jump: bool,
+    pub fire_just: bool,
+    pub dodge: bool,
+    pub reload: bool,
+    pub parry: bool,
+    pub interact: bool,
+    pub melee_light: bool,
+    pub melee_heavy: bool,
+    pub crafting: bool,
+    pub pause: bool,
+    pub weapon_next: bool,
+    pub weapon_prev: bool,
+    pub enter_vehicle: bool,
+    pub open_map: bool,
+    pub sabre_toggle: bool,
+    pub weapon_slot: Option<usize>,
+    /// Digit 7/8/9/0 → slots 0–3. P1 keyboard only; controller binding TBD.
+    pub special_slot: Option<u8>,
+    pub gamepad_active: bool,
+}
+
+// ── Camera-player link ────────────────────────────────────────────────────────
+/// Entity of this player's `PlayerCamera` child. Set during spawn.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PlayerCameraRef(pub Entity);

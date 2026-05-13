@@ -130,20 +130,39 @@ impl Default for RobotStyle {
         Self {
             archetype: RobotArchetype::Scout,
             scale: 1.0,
-            torso_width: 18.0, torso_height: 38.0, torso_depth: 14.0,
-            head_size: 10.0, head_shape: HeadShape::Box,
-            arm_length: 28.0, arm_thickness: 6.0, arm_style: ArmStyle::Box,
-            leg_length: 30.0, leg_thickness: 8.0, leg_style: LegStyle::Box,
-            shoulder_pad_size: 7.0, hip_pad_size: 5.0,
-            has_wings: false, wing_span: 30.0, wing_angle: 45.0,
-            has_cannons: false, cannon_size: 3.0,
-            has_backpack: false, backpack_size: 10.0,
-            has_visor: true, visor_style: VisorStyle::Slit,
-            has_horns: false, horn_length: 12.0,
-            has_tail: false, tail_length: 20.0, tail_segments: 4,
-            has_antennae: false, antenna_length: 20.0,
-            has_shield: false, shield_size: 30.0,
-            extra_plating: 0, asymmetry: 0.0,
+            torso_width: 18.0,
+            torso_height: 38.0,
+            torso_depth: 14.0,
+            head_size: 10.0,
+            head_shape: HeadShape::Box,
+            arm_length: 28.0,
+            arm_thickness: 6.0,
+            arm_style: ArmStyle::Box,
+            leg_length: 30.0,
+            leg_thickness: 8.0,
+            leg_style: LegStyle::Box,
+            shoulder_pad_size: 7.0,
+            hip_pad_size: 5.0,
+            has_wings: false,
+            wing_span: 30.0,
+            wing_angle: 45.0,
+            has_cannons: false,
+            cannon_size: 3.0,
+            has_backpack: false,
+            backpack_size: 10.0,
+            has_visor: true,
+            visor_style: VisorStyle::Slit,
+            has_horns: false,
+            horn_length: 12.0,
+            has_tail: false,
+            tail_length: 20.0,
+            tail_segments: 4,
+            has_antennae: false,
+            antenna_length: 20.0,
+            has_shield: false,
+            shield_size: 30.0,
+            extra_plating: 0,
+            asymmetry: 0.0,
             primary: Color::srgb(0.3, 0.5, 0.8),
             secondary: Color::srgb(0.15, 0.25, 0.4),
             emissive: Color::srgb(0.0, 0.8, 1.0),
@@ -159,55 +178,76 @@ impl RobotStyle {
         match archetype {
             RobotArchetype::Scout => {}
             RobotArchetype::Brute => {
-                s.torso_width = 30.0; s.torso_height = 50.0; s.torso_depth = 22.0;
-                s.arm_thickness = 10.0; s.leg_thickness = 12.0;
-                s.has_cannons = true; s.has_horns = true; s.extra_plating = 2;
+                s.torso_width = 30.0;
+                s.torso_height = 50.0;
+                s.torso_depth = 22.0;
+                s.arm_thickness = 10.0;
+                s.leg_thickness = 12.0;
+                s.has_cannons = true;
+                s.has_horns = true;
+                s.extra_plating = 2;
                 s.primary = Color::srgb(0.7, 0.1, 0.1);
                 s.secondary = Color::srgb(0.35, 0.05, 0.05);
                 s.emissive = Color::srgb(1.0, 0.3, 0.0);
             }
             RobotArchetype::Flyer => {
-                s.has_wings = true; s.wing_span = 45.0;
+                s.has_wings = true;
+                s.wing_span = 45.0;
                 s.leg_style = LegStyle::Hoverpads;
-                s.has_backpack = true; s.backpack_size = 14.0;
+                s.has_backpack = true;
+                s.backpack_size = 14.0;
                 s.primary = Color::srgb(0.3, 0.1, 0.5);
                 s.secondary = Color::srgb(0.15, 0.05, 0.25);
                 s.emissive = Color::srgb(0.6, 0.0, 1.0);
             }
             RobotArchetype::Tank => {
-                s.torso_width = 38.0; s.torso_height = 55.0; s.torso_depth = 28.0;
+                s.torso_width = 38.0;
+                s.torso_height = 55.0;
+                s.torso_depth = 28.0;
                 s.scale = 1.2;
-                s.has_shield = true; s.has_horns = true; s.extra_plating = 3;
-                s.arm_thickness = 12.0; s.leg_thickness = 14.0;
+                s.has_shield = true;
+                s.has_horns = true;
+                s.extra_plating = 3;
+                s.arm_thickness = 12.0;
+                s.leg_thickness = 14.0;
                 s.primary = Color::srgb(0.15, 0.35, 0.15);
                 s.secondary = Color::srgb(0.08, 0.18, 0.08);
                 s.emissive = Color::srgb(0.0, 1.0, 0.2);
             }
             RobotArchetype::Insectoid => {
                 s.leg_style = LegStyle::Digitigrade;
-                s.has_wings = true; s.wing_span = 35.0;
-                s.has_tail = true; s.has_antennae = true;
+                s.has_wings = true;
+                s.wing_span = 35.0;
+                s.has_tail = true;
+                s.has_antennae = true;
                 s.scale = 0.9;
                 s.primary = Color::srgb(0.15, 0.4, 0.1);
                 s.secondary = Color::srgb(0.07, 0.2, 0.05);
                 s.emissive = Color::srgb(0.2, 0.8, 0.0);
             }
             RobotArchetype::Hybrid => {
-                s.scale = 1.4; s.head_shape = HeadShape::Cone;
-                s.has_wings = true; s.has_tail = true; s.has_shield = true;
-                s.has_cannons = true; s.has_horns = true; s.extra_plating = 2;
+                s.scale = 1.4;
+                s.head_shape = HeadShape::Cone;
+                s.has_wings = true;
+                s.has_tail = true;
+                s.has_shield = true;
+                s.has_cannons = true;
+                s.has_horns = true;
+                s.extra_plating = 2;
                 s.primary = Color::srgb(0.3, 0.0, 0.4);
                 s.secondary = Color::srgb(0.15, 0.0, 0.2);
                 s.emissive = Color::srgb(0.8, 0.0, 1.0);
             }
             RobotArchetype::Pet => {
                 s.scale = 0.4;
-                s.has_tail = true; s.has_antennae = true;
+                s.has_tail = true;
+                s.has_antennae = true;
                 s.primary = Color::srgb(0.9, 0.75, 0.1);
                 s.emissive = Color::srgb(1.0, 0.9, 0.0);
             }
             RobotArchetype::Ally => {
-                s.has_cannons = true; s.has_backpack = true;
+                s.has_cannons = true;
+                s.has_backpack = true;
                 s.primary = Color::srgb(0.1, 0.6, 0.6);
                 s.emissive = Color::srgb(0.0, 1.0, 1.0);
             }

@@ -90,7 +90,10 @@ pub struct Health {
 
 impl Health {
     pub fn new(amount: f32) -> Self {
-        Self { current: amount, max: amount }
+        Self {
+            current: amount,
+            max: amount,
+        }
     }
 
     pub fn is_alive(&self) -> bool {

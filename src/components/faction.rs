@@ -1,21 +1,23 @@
 use bevy::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-/// Story factions. Drives enemy color/preset choice, dialogue, and recruitment rules.
+/// Story groups. Drives enemy color/preset choice, dialogue, and recruitment rules.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum Faction {
-    /// Synthetics — Cynthia You's humanoid line (Amp, Atlas, Volt, Chroma, Daria, Prima, Theta, Ion, Valor).
-    Synthetic,
-    /// Mechanoids — Ancient race forged by Sergio Wolfrim from the Star meteor.
-    Mechanoid,
-    /// Swarm — galactic mechanoid empire ruled by Cygnus & Cygni.
-    Swarm,
-    /// Insectoids — Dr. Formic's stolen tech bred into chitinous synth-insects.
-    Insectoid,
-    /// Animatons — Char's animal-DNA mech hybrids built from a captured Mechanoid.
-    Animaton,
-    /// Char's domain forces (human-aligned, scorched-earth tech).
-    Charred,
+    /// Giacoma, Giovanni, and Gabrio: wizard scientists of the Starfall lab.
+    WizardScientist,
+    /// Vincenzo, Antonio/Tony, Angelo, and Joseph/Little Joe.
+    HeroBrother,
+    /// Gabriella, Nova, Aurora, and Fortuna.
+    HeroSister,
+    /// Space aliens invading Earth through another dimension.
+    DimensionalAlien,
+    /// Collosar's dragon royal family.
+    DragonRoyalty,
+    /// Ragar and Blackskull's rival dragon domains.
+    DragonExile,
+    /// Dr. Bile and the four corrupted human mirrors.
+    CorruptedHuman,
     /// Civilians (Earth villagers, Star City inhabitants, etc.).
     Civilian,
     /// Default / unaffiliated.
@@ -26,12 +28,13 @@ pub enum Faction {
 impl Faction {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Faction::Synthetic => "Synthetic",
-            Faction::Mechanoid => "Mechanoid",
-            Faction::Swarm => "Swarm",
-            Faction::Insectoid => "Insectoid",
-            Faction::Animaton => "Animaton",
-            Faction::Charred => "Charred",
+            Faction::WizardScientist => "Wizard Scientist",
+            Faction::HeroBrother => "Hero Brother",
+            Faction::HeroSister => "Hero Sister",
+            Faction::DimensionalAlien => "Dimensional Alien",
+            Faction::DragonRoyalty => "Dragon Royalty",
+            Faction::DragonExile => "Dragon Exile",
+            Faction::CorruptedHuman => "Corrupted Human",
             Faction::Civilian => "Civilian",
             Faction::Neutral => "Neutral",
         }
@@ -40,12 +43,13 @@ impl Faction {
     /// Voice/portrait tint used by the radio-chatter HUD.
     pub fn dialogue_color(&self) -> Color {
         match self {
-            Faction::Synthetic => Color::srgb(0.4, 0.85, 1.0),
-            Faction::Mechanoid => Color::srgb(1.0, 0.75, 0.2),
-            Faction::Swarm => Color::srgb(0.9, 0.1, 0.3),
-            Faction::Insectoid => Color::srgb(0.4, 1.0, 0.2),
-            Faction::Animaton => Color::srgb(1.0, 0.4, 0.1),
-            Faction::Charred => Color::srgb(0.7, 0.25, 0.0),
+            Faction::WizardScientist => Color::srgb(0.55, 0.9, 1.0),
+            Faction::HeroBrother => Color::srgb(1.0, 0.85, 0.25),
+            Faction::HeroSister => Color::srgb(1.0, 0.45, 0.9),
+            Faction::DimensionalAlien => Color::srgb(0.35, 1.0, 0.55),
+            Faction::DragonRoyalty => Color::srgb(1.0, 0.25, 0.15),
+            Faction::DragonExile => Color::srgb(0.55, 0.7, 1.0),
+            Faction::CorruptedHuman => Color::srgb(0.8, 0.15, 0.8),
             Faction::Civilian => Color::srgb(0.85, 0.85, 0.85),
             Faction::Neutral => Color::srgb(0.7, 0.7, 0.8),
         }

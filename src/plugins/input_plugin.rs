@@ -1,39 +1,20 @@
-/// Unified input abstraction — keyboard/mouse + wired/wireless gamepad.
+/// Unified input for up to 4 local players.
 ///
-/// All game systems read `Res<GameInput>` instead of raw device resources.
-/// Adding remapping, dead-zone tuning, or new devices is a one-file change.
+/// Each frame, `update_player_inputs` writes a `PlayerInput` component on
+/// every live player entity:
+///   P1 (PlayerIndex 0) — keyboard + mouse + gamepad 0
+///   P2 (PlayerIndex 1) — gamepad 1
+///   P3 (PlayerIndex 2) — gamepad 2
+///   P4 (PlayerIndex 3) — gamepad 3
 ///
 /// Bevy 0.15 gamepad notes:
-///   - `Gamepad` is a **component** on entities; no `Gamepads` resource.
-///   - `gamepad.pressed(GamepadButton::South)` / `.just_pressed(…)` / `.get(GamepadAxis::…)`
-///   - Button naming: LeftTrigger = LB/L1 (bumper), LeftTrigger2 = LT/L2 (analog trigger)
-///
-/// Controller layout (Xbox / generic HID — PlayStation labels in comments):
-///
-///   Left  stick      → move
-///   Right stick      → look
-///   South  (A / ✕)  → jump / jetpack (hold)
-///   East   (B / ○)  → dodge
-///   West   (X / □)  → reload
-///   North  (Y / △)  → parry
-///   LT  (L2)         → aim-down-sights
-///   RT  (R2)         → fire
-///   LB  (L1)         → sprint
-///   RB  (R1)         → next weapon
-///   L3               → melee heavy
-///   R3               → melee light
-///   D-Pad Left       → previous weapon
-///   D-Pad Right      → next weapon
-///   D-Pad Up         → enter vehicle / jet
-///   D-Pad Down       → interact
-///   Select  (Share)  → crafting menu
-///   Start   (Options)→ pause / menu
-///   Mode    (Guide)  → beam sabre toggle
-
-use bevy::prelude::*;
-use bevy::input::gamepad::{Gamepad, GamepadButton, GamepadAxis};
+///   `Gamepad` is a component on entities; gamepads are sorted by Entity id
+///   for a stable assignment order across reconnects.
+use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
 use bevy::input::mouse::MouseMotion;
+use bevy::prelude::*;
 
+use crate::components::player::{Player, PlayerIndex, PlayerInput};
 use crate::resources::GameSettings;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -41,173 +22,156 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GameInput>()
-            .add_systems(PreUpdate, update_game_input);
+        app.add_systems(PreUpdate, update_player_inputs);
     }
 }
 
 // ── Tuning ────────────────────────────────────────────────────────────────────
-const DEADZONE: f32        = 0.18;
+const DEADZONE: f32 = 0.18;
 const STICK_LOOK_RATE: f32 = std::f32::consts::PI * 1.5; // 270°/s at full deflection
 
-// ── GameInput resource ────────────────────────────────────────────────────────
-#[derive(Resource, Default)]
-pub struct GameInput {
-    // ── Analogue ─────────────────────────────────────────────────────────────
-    /// Normalised movement intent (player-local XZ), range −1..1 per axis.
-    pub move_axis:  Vec2,
-    /// Look rotation delta for this frame in radians (already scaled).
-    pub look_delta: Vec2,
-
-    // ── Held ─────────────────────────────────────────────────────────────────
-    pub fire:    bool,
-    pub aim:     bool,
-    pub sprint:  bool,
-    pub jetpack: bool,
-
-    // ── Just-pressed (cleared each frame) ────────────────────────────────────
-    pub jump:          bool,
-    pub fire_just:     bool,
-    pub dodge:         bool,
-    pub reload:        bool,
-    pub parry:         bool,
-    pub interact:      bool,
-    pub melee_light:   bool,
-    pub melee_heavy:   bool,
-    pub crafting:      bool,
-    pub pause:         bool,
-    pub weapon_next:   bool,
-    pub weapon_prev:   bool,
-    pub enter_vehicle: bool,
-    pub open_map:      bool,
-    pub sabre_toggle:  bool,
-    /// Direct slot key (0-based) if pressed; `None` otherwise.
-    pub weapon_slot:   Option<usize>,
-
-    // ── Metadata ─────────────────────────────────────────────────────────────
-    pub gamepad_active: bool,
-}
-
-// ── Update system ─────────────────────────────────────────────────────────────
-fn update_game_input(
-    keyboard:   Res<ButtonInput<KeyCode>>,
-    mouse_btn:  Res<ButtonInput<MouseButton>>,
+// ── System ────────────────────────────────────────────────────────────────────
+fn update_player_inputs(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_btn: Res<ButtonInput<MouseButton>>,
     mut mouse_ev: EventReader<MouseMotion>,
-    gamepads:   Query<&Gamepad>,
-    time:       Res<Time>,
-    settings:   Res<GameSettings>,
-    mut gi:     ResMut<GameInput>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    time: Res<Time>,
+    settings: Res<GameSettings>,
+    mut players: Query<(&PlayerIndex, &mut PlayerInput), With<Player>>,
 ) {
-    let dt   = time.delta_secs();
+    let dt = time.delta_secs();
     let sens = settings.mouse_sensitivity;
 
-    // Clear all flags so "just-pressed" semantics work correctly.
-    *gi = GameInput::default();
-
-    // ── First connected gamepad (works for USB and Bluetooth) ─────────────────
-    let gp: Option<&Gamepad> = gamepads.iter().next();
-    gi.gamepad_active = gp.is_some();
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(b)).unwrap_or(false);
-    let btn_just = |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false);
-    let axis_val = |a: GamepadAxis| -> f32 {
-        gp.and_then(|g| g.get(a)).unwrap_or(0.0)
-    };
-    let apply_deadzone = |v: Vec2| if v.length() < DEADZONE { Vec2::ZERO } else { v };
-
-    // ── Movement (left stick + WASD) ──────────────────────────────────────────
-    let kb_move = Vec2::new(
-        (keyboard.pressed(KeyCode::KeyD) as i32 - keyboard.pressed(KeyCode::KeyA) as i32) as f32,
-        (keyboard.pressed(KeyCode::KeyW) as i32 - keyboard.pressed(KeyCode::KeyS) as i32) as f32,
-    ).normalize_or_zero();
-
-    let gp_move = apply_deadzone(Vec2::new(
-        axis_val(GamepadAxis::LeftStickX),
-        axis_val(GamepadAxis::LeftStickY),
-    ));
-
-    gi.move_axis = if gp_move.length_squared() > 0.001 { gp_move } else { kb_move };
-
-    // ── Look delta (right stick + mouse) ─────────────────────────────────────
+    // Accumulate mouse delta for this frame.
     let mut raw_mouse = Vec2::ZERO;
     for ev in mouse_ev.read() {
         raw_mouse += ev.delta;
     }
     let mouse_look = raw_mouse * sens;
 
-    let raw_stick = apply_deadzone(Vec2::new(
-        axis_val(GamepadAxis::RightStickX),
-        -axis_val(GamepadAxis::RightStickY),
-    ));
-    // Quadratic curve: small nudges = precision, full deflection = fast sweep.
-    let curved_stick = raw_stick * raw_stick.length();
-    let gp_look = curved_stick * STICK_LOOK_RATE * dt;
+    // Stable gamepad order — sorted by Entity so the assignment doesn't jump
+    // around when controllers connect/disconnect.
+    let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
+    gps.sort_by_key(|(e, _)| *e);
 
-    gi.look_delta = mouse_look + gp_look;
+    let apply_dz = |v: Vec2| if v.length() < DEADZONE { Vec2::ZERO } else { v };
 
-    // ── Fire — RT (R2) / LMB ─────────────────────────────────────────────────
-    gi.fire      = mouse_btn.pressed(MouseButton::Left)      || btn_held(GamepadButton::RightTrigger2);
-    gi.fire_just = mouse_btn.just_pressed(MouseButton::Left) || btn_just(GamepadButton::RightTrigger2);
+    for (idx, mut pi) in players.iter_mut() {
+        *pi = PlayerInput::default();
 
-    // ── Aim — LT (L2) / RMB ──────────────────────────────────────────────────
-    gi.aim = mouse_btn.pressed(MouseButton::Right) || btn_held(GamepadButton::LeftTrigger2);
+        let i = idx.0 as usize;
+        let gp: Option<&Gamepad> = gps.get(i).map(|(_, g)| *g);
+        let is_p1 = i == 0;
 
-    // ── Sprint — LB (L1) / Shift ─────────────────────────────────────────────
-    gi.sprint = keyboard.pressed(KeyCode::ShiftLeft)
-             || keyboard.pressed(KeyCode::ShiftRight)
-             || btn_held(GamepadButton::LeftTrigger);
+        pi.gamepad_active = gp.is_some();
 
-    // ── Jump / Jetpack — South (A/✕) / Space ─────────────────────────────────
-    gi.jump    = keyboard.just_pressed(KeyCode::Space) || btn_just(GamepadButton::South);
-    gi.jetpack = keyboard.pressed(KeyCode::Space)      || btn_held(GamepadButton::South);
+        let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(b)).unwrap_or(false);
+        let btn_just = |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false);
+        let axis = |a: GamepadAxis| -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
 
-    // ── Dodge — East (B/○) / Q ───────────────────────────────────────────────
-    gi.dodge = keyboard.just_pressed(KeyCode::KeyQ) || btn_just(GamepadButton::East);
+        // ── Movement ─────────────────────────────────────────────────────────
+        let gp_move = apply_dz(Vec2::new(axis(GamepadAxis::LeftStickX), axis(GamepadAxis::LeftStickY)));
+        let kb_move = if is_p1 {
+            Vec2::new(
+                (keyboard.pressed(KeyCode::KeyD) as i32 - keyboard.pressed(KeyCode::KeyA) as i32) as f32,
+                (keyboard.pressed(KeyCode::KeyW) as i32 - keyboard.pressed(KeyCode::KeyS) as i32) as f32,
+            )
+            .normalize_or_zero()
+        } else {
+            Vec2::ZERO
+        };
+        pi.move_axis = if gp_move.length_squared() > 0.001 { gp_move } else { kb_move };
 
-    // ── Reload — West (X/□) / R ──────────────────────────────────────────────
-    gi.reload = keyboard.just_pressed(KeyCode::KeyR) || btn_just(GamepadButton::West);
+        // ── Look ──────────────────────────────────────────────────────────────
+        let raw_stick = apply_dz(Vec2::new(axis(GamepadAxis::RightStickX), -axis(GamepadAxis::RightStickY)));
+        let curved = raw_stick * raw_stick.length();
+        let gp_look = curved * STICK_LOOK_RATE * dt;
+        pi.look_delta = if is_p1 { mouse_look } else { Vec2::ZERO } + gp_look;
 
-    // ── Parry — North (Y/△) / F ──────────────────────────────────────────────
-    gi.parry = keyboard.just_pressed(KeyCode::KeyF) || btn_just(GamepadButton::North);
+        // ── Fire ──────────────────────────────────────────────────────────────
+        pi.fire = (is_p1 && mouse_btn.pressed(MouseButton::Left))
+            || btn_held(GamepadButton::RightTrigger2);
+        pi.fire_just = (is_p1 && mouse_btn.just_pressed(MouseButton::Left))
+            || btn_just(GamepadButton::RightTrigger2);
 
-    // ── Interact — D-Down / E ────────────────────────────────────────────────
-    gi.interact = keyboard.just_pressed(KeyCode::KeyE) || btn_just(GamepadButton::DPadDown);
+        // ── Aim ───────────────────────────────────────────────────────────────
+        pi.aim = (is_p1 && mouse_btn.pressed(MouseButton::Right))
+            || btn_held(GamepadButton::LeftTrigger2);
 
-    // ── Melee light — R3 / V ─────────────────────────────────────────────────
-    gi.melee_light = keyboard.just_pressed(KeyCode::KeyV) || btn_just(GamepadButton::RightThumb);
+        // ── Sprint ────────────────────────────────────────────────────────────
+        pi.sprint = (is_p1
+            && (keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight)))
+            || btn_held(GamepadButton::LeftTrigger);
 
-    // ── Melee heavy — L3 / B ─────────────────────────────────────────────────
-    gi.melee_heavy = keyboard.just_pressed(KeyCode::KeyB) || btn_just(GamepadButton::LeftThumb);
+        // ── Jump / Jetpack ────────────────────────────────────────────────────
+        pi.jump = (is_p1 && keyboard.just_pressed(KeyCode::Space)) || btn_just(GamepadButton::South);
+        pi.jetpack = (is_p1 && keyboard.pressed(KeyCode::Space)) || btn_held(GamepadButton::South);
 
-    // ── Crafting — Select / C ────────────────────────────────────────────────
-    gi.crafting = keyboard.just_pressed(KeyCode::KeyC) || btn_just(GamepadButton::Select);
+        // ── Dodge ─────────────────────────────────────────────────────────────
+        pi.dodge = (is_p1 && keyboard.just_pressed(KeyCode::KeyQ)) || btn_just(GamepadButton::East);
 
-    // ── Pause — Start / Escape ────────────────────────────────────────────────
-    gi.pause = keyboard.just_pressed(KeyCode::Escape) || btn_just(GamepadButton::Start);
+        // ── Reload ────────────────────────────────────────────────────────────
+        pi.reload = (is_p1 && keyboard.just_pressed(KeyCode::KeyR)) || btn_just(GamepadButton::West);
 
-    // ── Weapon cycle — RB (R1) / D-Right / ] and D-Left / [ ─────────────────
-    gi.weapon_next = keyboard.just_pressed(KeyCode::BracketRight)
-                   || btn_just(GamepadButton::RightTrigger)
-                   || btn_just(GamepadButton::DPadRight);
-    gi.weapon_prev = keyboard.just_pressed(KeyCode::BracketLeft)
-                   || btn_just(GamepadButton::DPadLeft);
+        // ── Parry ─────────────────────────────────────────────────────────────
+        pi.parry = (is_p1 && keyboard.just_pressed(KeyCode::KeyF)) || btn_just(GamepadButton::North);
 
-    // ── Direct weapon slots — Digit 1-6 ──────────────────────────────────────
-    gi.weapon_slot = if keyboard.just_pressed(KeyCode::Digit1) { Some(0) }
-        else if keyboard.just_pressed(KeyCode::Digit2) { Some(1) }
-        else if keyboard.just_pressed(KeyCode::Digit3) { Some(2) }
-        else if keyboard.just_pressed(KeyCode::Digit4) { Some(3) }
-        else if keyboard.just_pressed(KeyCode::Digit5) { Some(4) }
-        else if keyboard.just_pressed(KeyCode::Digit6) { Some(5) }
-        else { None };
+        // ── Interact ──────────────────────────────────────────────────────────
+        pi.interact = (is_p1 && keyboard.just_pressed(KeyCode::KeyE)) || btn_just(GamepadButton::DPadDown);
 
-    // ── Vehicle — D-Up / J ────────────────────────────────────────────────────
-    gi.enter_vehicle = keyboard.just_pressed(KeyCode::KeyJ) || btn_just(GamepadButton::DPadUp);
+        // ── Melee ─────────────────────────────────────────────────────────────
+        pi.melee_light =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyV)) || btn_just(GamepadButton::RightThumb);
+        pi.melee_heavy =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyB)) || btn_just(GamepadButton::LeftThumb);
 
-    // ── Map / Motorcycle — M ─────────────────────────────────────────────────
-    gi.open_map = keyboard.just_pressed(KeyCode::KeyM);
+        // ── Crafting ──────────────────────────────────────────────────────────
+        pi.crafting =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyC)) || btn_just(GamepadButton::Select);
 
-    // ── Beam sabre toggle — Mode (Guide) / T ─────────────────────────────────
-    gi.sabre_toggle = keyboard.just_pressed(KeyCode::KeyT) || btn_just(GamepadButton::Mode);
+        // ── Pause ─────────────────────────────────────────────────────────────
+        pi.pause =
+            (is_p1 && keyboard.just_pressed(KeyCode::Escape)) || btn_just(GamepadButton::Start);
+
+        // ── Weapon cycle ──────────────────────────────────────────────────────
+        pi.weapon_next = (is_p1 && keyboard.just_pressed(KeyCode::BracketRight))
+            || btn_just(GamepadButton::RightTrigger)
+            || btn_just(GamepadButton::DPadRight);
+        pi.weapon_prev = (is_p1 && keyboard.just_pressed(KeyCode::BracketLeft))
+            || btn_just(GamepadButton::DPadLeft);
+
+        // ── Direct weapon slots (P1 keyboard) ────────────────────────────────
+        pi.weapon_slot = if is_p1 {
+            if keyboard.just_pressed(KeyCode::Digit1) { Some(0) }
+            else if keyboard.just_pressed(KeyCode::Digit2) { Some(1) }
+            else if keyboard.just_pressed(KeyCode::Digit3) { Some(2) }
+            else if keyboard.just_pressed(KeyCode::Digit4) { Some(3) }
+            else if keyboard.just_pressed(KeyCode::Digit5) { Some(4) }
+            else if keyboard.just_pressed(KeyCode::Digit6) { Some(5) }
+            else { None }
+        } else {
+            None
+        };
+
+        // ── Special weapons (P1 keyboard only; controller binding TBD) ───────
+        pi.special_slot = if is_p1 {
+            if keyboard.just_pressed(KeyCode::Digit7) { Some(0) }
+            else if keyboard.just_pressed(KeyCode::Digit8) { Some(1) }
+            else if keyboard.just_pressed(KeyCode::Digit9) { Some(2) }
+            else if keyboard.just_pressed(KeyCode::Digit0) { Some(3) }
+            else { None }
+        } else {
+            None
+        };
+
+        // ── Vehicle / map ─────────────────────────────────────────────────────
+        pi.enter_vehicle =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyJ)) || btn_just(GamepadButton::DPadUp);
+        pi.open_map = is_p1 && keyboard.just_pressed(KeyCode::KeyM);
+
+        // ── Star Sabre toggle ─────────────────────────────────────────────────
+        pi.sabre_toggle =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyT)) || btn_just(GamepadButton::Mode);
+    }
 }

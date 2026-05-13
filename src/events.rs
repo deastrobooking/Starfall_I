@@ -131,7 +131,7 @@ pub struct UiDamageNumberEvent {
     pub is_critical: bool,
 }
 
-// ── Heavy Water — Chapters / Discoverables ────────────────────────────────────
+// ── Starfall I - Chapters / Discoverables ─────────────────────────────────────
 #[derive(Event, Debug)]
 pub struct ChapterStartedEvent {
     pub chapter: u8,
@@ -211,7 +211,7 @@ impl Plugin for EventsPlugin {
             // UI
             .add_event::<UiMessageEvent>()
             .add_event::<UiDamageNumberEvent>()
-            // Heavy Water
+            // Starfall I
             .add_event::<ChapterStartedEvent>()
             .add_event::<EncounterStepAdvancedEvent>()
             .add_event::<ChapterCompletedEvent>()

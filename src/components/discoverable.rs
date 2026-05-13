@@ -12,7 +12,7 @@ pub enum DiscoverableKind {
     ArmorMod(&'static str),
     /// Spawns the named companion as a permanent ally.
     CompanionRecruit(&'static str),
-    /// Unlocks the Beam Sabre (locked by default in Heavy Water).
+    /// Unlocks the Star Sabre (locked by default in Starfall I).
     BeamSabreUnlock,
     /// Lore log; no mechanical effect, just radio chatter.
     LoreFragment(&'static str),
@@ -27,6 +27,10 @@ pub struct Discoverable {
 
 impl Discoverable {
     pub fn new(kind: DiscoverableKind, label: &'static str) -> Self {
-        Self { kind, label, bob_phase: 0.0 }
+        Self {
+            kind,
+            label,
+            bob_phase: 0.0,
+        }
     }
 }

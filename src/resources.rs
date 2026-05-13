@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::chapters::{ChapterId, Biome};
+use crate::chapters::{Biome, ChapterId};
 use crate::robots::designer::RobotStyle;
 
 // ── Wave State (legacy population counter) ────────────────────────────────────
@@ -78,6 +78,7 @@ pub struct PlayerScore {
 
 // ── Camera Shake ──────────────────────────────────────────────────────────────
 // Trauma model: trauma decays over time, shake magnitude = trauma^2.
+// Global resource; all player cameras share the same shake pool.
 #[derive(Resource, Debug, Default)]
 pub struct CameraShake {
     pub trauma: f32,
@@ -89,7 +90,21 @@ impl CameraShake {
     }
 }
 
-// ── Current Chapter (Heavy Water) ─────────────────────────────────────────────
+// ── Local Multiplayer ─────────────────────────────────────────────────────────
+/// How many local players are active (1–4).
+/// Set this before entering `AppState::Playing` to change the player count.
+#[derive(Resource, Debug, Clone)]
+pub struct LocalPlayerConfig {
+    pub active: u8,
+}
+
+impl Default for LocalPlayerConfig {
+    fn default() -> Self {
+        Self { active: 1 }
+    }
+}
+
+// ── Current Chapter (Starfall I) ──────────────────────────────────────────────
 /// The active chapter session. The chapter director system advances `step_index`
 /// when each step's completion condition fires.
 #[derive(Resource, Debug)]
@@ -108,7 +123,7 @@ impl Default for CurrentChapter {
     fn default() -> Self {
         Self {
             id: ChapterId::FIRST,
-            biome: Biome::RuinedCity,
+            biome: Biome::StarfallLab,
             difficulty_scale: 1.0,
             step_index: 0,
             step_timer: 0.0,
@@ -130,8 +145,13 @@ pub struct BiomePalette {
 
 impl Default for BiomePalette {
     fn default() -> Self {
-        let (sky, fog, ground, accent) = Biome::RuinedCity.palette();
-        Self { sky, fog, ground, accent }
+        let (sky, fog, ground, accent) = Biome::StarfallLab.palette();
+        Self {
+            sky,
+            fog,
+            ground,
+            accent,
+        }
     }
 }
 
@@ -154,13 +174,19 @@ pub struct ChapterProgress {
 }
 
 impl ChapterProgress {
-    pub fn is_completed(&self, id: ChapterId) -> bool { self.completed.contains(&id.0) }
+    pub fn is_completed(&self, id: ChapterId) -> bool {
+        self.completed.contains(&id.0)
+    }
     pub fn is_unlocked(&self, id: ChapterId) -> bool {
-        if id == ChapterId::FIRST { return true; }
+        if id == ChapterId::FIRST {
+            return true;
+        }
         self.is_completed(ChapterId(id.0 - 1))
     }
     pub fn mark_completed(&mut self, id: ChapterId) {
-        if !self.completed.contains(&id.0) { self.completed.push(id.0); }
+        if !self.completed.contains(&id.0) {
+            self.completed.push(id.0);
+        }
     }
     pub fn unlock(&mut self, id: &str) {
         if !self.discoverables.iter().any(|d| d == id) {
@@ -189,4 +215,43 @@ pub struct RadioLine {
     pub text: String,
     pub color: Color,
     pub remaining: f32,
+}
+
+// ── Hero Roster ───────────────────────────────────────────────────────────────
+pub const HERO_ROSTER: [&str; 4] = ["Vincenzo", "Antonio", "Angelo", "Joseph"];
+
+// ── Player Select Lobby ───────────────────────────────────────────────────────
+#[derive(Clone)]
+pub struct PlayerSlotConfig {
+    pub joined: bool,
+    pub character_index: usize,
+    pub ready: bool,
+    pub stick_cooldown: f32,
+}
+
+impl Default for PlayerSlotConfig {
+    fn default() -> Self {
+        Self { joined: false, character_index: 0, ready: false, stick_cooldown: 0.0 }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct PlayerSelectState {
+    pub slots: [PlayerSlotConfig; 4],
+}
+
+impl PlayerSelectState {
+    pub fn active_count(&self) -> u8 {
+        self.slots.iter().filter(|s| s.joined).count() as u8
+    }
+
+    pub fn all_ready(&self) -> bool {
+        self.slots.iter().any(|s| s.joined)
+            && self.slots.iter().filter(|s| s.joined).all(|s| s.ready)
+    }
+
+    pub fn character_name(&self, slot: usize) -> &'static str {
+        let idx = self.slots.get(slot).map(|s| s.character_index).unwrap_or(slot % 4);
+        HERO_ROSTER[idx]
+    }
 }

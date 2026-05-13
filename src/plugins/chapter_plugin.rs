@@ -1,4 +1,4 @@
-//! Chapter director — the heart of the Heavy Water gameplay loop.
+//! Chapter director - the heart of the Starfall I gameplay loop.
 //!
 //! Replaces the old wave timer/boss-spawn logic. On `OnEnter(Playing)` the
 //! director starts the chapter selected via `CurrentChapter`. Each frame, the
@@ -6,23 +6,21 @@
 
 use bevy::prelude::*;
 
-use crate::state::AppState;
-use crate::events::*;
-use crate::resources::{CurrentChapter, BiomePalette, ChapterProgress, WaveInfo};
-use crate::chapters::{ChapterId, EncounterStep, get_chapter, all_chapters};
-use crate::components::player::Player;
-use crate::components::enemy::{Enemy, BossEnemy};
-use crate::components::faction::{Faction, NamedCharacter};
+use crate::chapters::{get_chapter, ChapterId, EncounterStep};
 use crate::components::discoverable::{Discoverable, DiscoverableKind};
-use crate::damage::Health;
-use crate::plugins::enemy_plugin::{spawn_enemy_entity, spawn_named_enemy, random_spawn_pos};
+use crate::components::enemy::BossEnemy;
+use crate::components::faction::{Faction, NamedCharacter};
+use crate::components::player::Player;
+use crate::events::*;
+use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
+use crate::resources::{BiomePalette, ChapterProgress, CurrentChapter, WaveInfo};
+use crate::state::AppState;
 
 pub struct ChapterPlugin;
 
 impl Plugin for ChapterPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<CurrentChapter>()
+        app.init_resource::<CurrentChapter>()
             .init_resource::<BiomePalette>()
             .init_resource::<ChapterProgress>()
             .add_systems(OnEnter(AppState::Playing), start_chapter)
@@ -45,7 +43,9 @@ fn start_chapter(
     mut started_ev: EventWriter<ChapterStartedEvent>,
     mut wave: ResMut<WaveInfo>,
 ) {
-    let Some(def) = get_chapter(current.id) else { return };
+    let Some(def) = get_chapter(current.id) else {
+        return;
+    };
     current.biome = def.biome;
     current.difficulty_scale = def.difficulty_scale;
     current.step_index = 0;
@@ -54,10 +54,17 @@ fn start_chapter(
     current.completed = false;
     current.started = true;
     let (sky, fog, ground, accent) = def.biome.palette();
-    *palette = BiomePalette { sky, fog, ground, accent };
+    *palette = BiomePalette {
+        sky,
+        fog,
+        ground,
+        accent,
+    };
     *wave = WaveInfo::new();
     wave.wave_number = current.id.0 as u32;
-    started_ev.send(ChapterStartedEvent { chapter: current.id.0 });
+    started_ev.send(ChapterStartedEvent {
+        chapter: current.id.0,
+    });
 }
 
 // ── Director ──────────────────────────────────────────────────────────────────
@@ -75,11 +82,17 @@ fn chapter_director_system(
     mut completed_ev: EventWriter<ChapterCompletedEvent>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
-    if !current.started || current.completed { return; }
-    let Some(def) = get_chapter(current.id) else { return };
+    if !current.started || current.completed {
+        return;
+    }
+    let Some(def) = get_chapter(current.id) else {
+        return;
+    };
     if current.step_index >= def.script.len() {
         current.completed = true;
-        completed_ev.send(ChapterCompletedEvent { chapter: current.id.0 });
+        completed_ev.send(ChapterCompletedEvent {
+            chapter: current.id.0,
+        });
         msg_ev.send(UiMessageEvent {
             text: format!("CHAPTER {} COMPLETE — {}", current.id.0, def.title),
             duration: 6.0,
@@ -91,16 +104,25 @@ fn chapter_director_system(
     let step = def.script[current.step_index].clone();
 
     // If we're awaiting kills, hold until the count drops to zero.
-    if current.awaiting_kills > 0 { return; }
+    if current.awaiting_kills > 0 {
+        return;
+    }
 
-    let Ok(player_transform) = player_q.get_single() else { return };
+    let Ok(player_transform) = player_q.get_single() else {
+        return;
+    };
     let player_pos = player_transform.translation;
     let mut rng = rand::thread_rng();
 
     let mut advance = false;
 
     match step {
-        EncounterStep::Dialogue { speaker, faction, line, hold } => {
+        EncounterStep::Dialogue {
+            speaker,
+            faction,
+            line,
+            hold,
+        } => {
             if current.step_timer < 0.05 {
                 radio_ev.send(RadioChatterEvent {
                     speaker: speaker.into(),
@@ -109,14 +131,25 @@ fn chapter_director_system(
                     duration: hold + 1.0,
                 });
             }
-            if current.step_timer >= hold { advance = true; }
+            if current.step_timer >= hold {
+                advance = true;
+            }
         }
-        EncounterStep::SpawnGroup { faction, enemy_type, count, scale } => {
+        EncounterStep::SpawnGroup {
+            faction,
+            enemy_type,
+            count,
+            scale,
+        } => {
             for _ in 0..count {
                 let pos = random_spawn_pos(player_pos, &mut rng);
                 spawn_enemy_entity(
-                    &mut commands, &mut meshes, &mut materials,
-                    enemy_type, pos, scale * current.difficulty_scale,
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    enemy_type,
+                    pos,
+                    scale * current.difficulty_scale,
                     Some(faction),
                 );
                 wave.enemy_count += 1;
@@ -124,11 +157,22 @@ fn chapter_director_system(
             current.awaiting_kills = count;
             advance = true;
         }
-        EncounterStep::MidBoss { preset, name, faction, scale } => {
+        EncounterStep::MidBoss {
+            preset,
+            name,
+            faction,
+            scale,
+        } => {
             let pos = player_pos + Vec3::new(20.0, 0.0, 20.0);
             spawn_named_enemy(
-                &mut commands, &mut meshes, &mut materials,
-                preset, name, faction, pos, scale * current.difficulty_scale,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                preset,
+                name,
+                faction,
+                pos,
+                scale * current.difficulty_scale,
                 false,
             );
             wave.enemy_count += 1;
@@ -141,11 +185,23 @@ fn chapter_director_system(
             });
             advance = true;
         }
-        EncounterStep::BossFight { preset, name, faction, intro_line, scale } => {
+        EncounterStep::BossFight {
+            preset,
+            name,
+            faction,
+            intro_line,
+            scale,
+        } => {
             let pos = player_pos + Vec3::new(25.0, 0.0, 25.0);
             spawn_named_enemy(
-                &mut commands, &mut meshes, &mut materials,
-                preset, name, faction, pos, scale * current.difficulty_scale * 1.5,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                preset,
+                name,
+                faction,
+                pos,
+                scale * current.difficulty_scale * 1.5,
                 true,
             );
             wave.enemy_count += 1;
@@ -162,10 +218,18 @@ fn chapter_director_system(
             });
             advance = true;
         }
-        EncounterStep::PlaceDiscoverable { kind, label, offset } => {
+        EncounterStep::PlaceDiscoverable {
+            kind,
+            label,
+            offset,
+        } => {
             spawn_discoverable_beacon(
-                &mut commands, &mut meshes, &mut materials,
-                kind, label, player_pos + offset,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                kind,
+                label,
+                player_pos + offset,
             );
             advance = true;
         }
@@ -174,7 +238,7 @@ fn chapter_director_system(
                 radio_ev.send(RadioChatterEvent {
                     speaker: "—".into(),
                     text: line.into(),
-                    faction: Faction::Synthetic,
+                    faction: Faction::HeroBrother,
                     duration: 5.0,
                 });
             }
@@ -188,7 +252,9 @@ fn chapter_director_system(
     if advance {
         current.step_index += 1;
         current.step_timer = 0.0;
-        step_ev.send(EncounterStepAdvancedEvent { step_index: current.step_index });
+        step_ev.send(EncounterStepAdvancedEvent {
+            step_index: current.step_index,
+        });
     }
 }
 
@@ -211,14 +277,25 @@ fn spawn_discoverable_beacon(
     };
     let mat = materials.add(StandardMaterial {
         base_color: color,
-        emissive: LinearRgba::new(color.to_srgba().red * 4.0, color.to_srgba().green * 4.0, color.to_srgba().blue * 4.0, 1.0),
-        unlit: false, metallic: 0.6, ..default()
+        emissive: LinearRgba::new(
+            color.to_srgba().red * 4.0,
+            color.to_srgba().green * 4.0,
+            color.to_srgba().blue * 4.0,
+            1.0,
+        ),
+        unlit: false,
+        metallic: 0.6,
+        ..default()
     });
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(Sphere::new(0.7))),
             material: MeshMaterial3d(mat),
-            transform: Transform::from_translation(Vec3::new(position.x, position.y + 1.0, position.z)),
+            transform: Transform::from_translation(Vec3::new(
+                position.x,
+                position.y + 1.0,
+                position.z,
+            )),
             ..default()
         },
         Discoverable::new(kind, label),
@@ -268,6 +345,3 @@ fn chapter_complete_check(
 pub fn completed_chapters(progress: &ChapterProgress) -> Vec<u8> {
     progress.completed.clone()
 }
-
-// keep `all_chapters` reachable for UI without a separate import.
-pub use crate::chapters::all_chapters as _all_chapters;

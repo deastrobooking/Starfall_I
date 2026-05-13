@@ -1,11 +1,11 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 
-use super::weapon::WeaponType;
 use super::armor::ElementType;
+use super::weapon::WeaponType;
 
-/// A weapon mod — applied multiplicatively to the active primary weapon.
+/// A star-beam mod applied multiplicatively to the active primary weapon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeaponMod {
     pub id: String,
@@ -19,28 +19,32 @@ pub struct WeaponMod {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WeaponSpecial {
     None,
-    /// Adds a homing missile launcher to special slot 7 (chapter-2 discoverable).
-    MissileLauncher,
-    /// Bullets pierce one enemy.
+    /// Adds a homing star tool to special slot 7 (chapter-2 discoverable).
+    HomingStar,
+    /// Star beams pierce one enemy.
     Piercing,
     /// Infuses fire/ice/etc. on hit.
     ElementalInfusion(ElementType),
 }
 
 impl WeaponMod {
-    pub fn missile_launcher() -> Self {
+    pub fn homing_star() -> Self {
         Self {
-            id: "missile_launcher".into(),
-            name: "Missile Launcher".into(),
-            damage_mult: 1.0, fire_rate_mult: 1.0, ammo_mult: 1.0,
-            special: Some(WeaponSpecial::MissileLauncher),
+            id: "homing_star".into(),
+            name: "Homing Star Focus".into(),
+            damage_mult: 1.0,
+            fire_rate_mult: 1.0,
+            ammo_mult: 1.0,
+            special: Some(WeaponSpecial::HomingStar),
         }
     }
     pub fn piercing_rounds() -> Self {
         Self {
             id: "piercing_rounds".into(),
-            name: "Piercing Rounds".into(),
-            damage_mult: 1.1, fire_rate_mult: 1.0, ammo_mult: 1.0,
+            name: "Star Pierce".into(),
+            damage_mult: 1.1,
+            fire_rate_mult: 1.0,
+            ammo_mult: 1.0,
             special: Some(WeaponSpecial::Piercing),
         }
     }
@@ -61,7 +65,8 @@ impl ArmorMod {
         Self {
             id: "reactive_plating".into(),
             name: "Reactive Plating".into(),
-            max_hp_bonus: 25.0, regen_per_sec: 0.0,
+            max_hp_bonus: 25.0,
+            regen_per_sec: 0.0,
             element_resistance: None,
         }
     }
@@ -69,7 +74,8 @@ impl ArmorMod {
         Self {
             id: "coolant_weave".into(),
             name: "Coolant Weave".into(),
-            max_hp_bonus: 10.0, regen_per_sec: 1.5,
+            max_hp_bonus: 10.0,
+            regen_per_sec: 1.5,
             element_resistance: Some(ElementType::Fire),
         }
     }
@@ -91,14 +97,18 @@ impl PlayerLoadout {
         self.weapon_mods.insert(w.display_name().to_string(), m);
     }
     pub fn add_armor_mod(&mut self, m: ArmorMod) {
-        if self.armor_mods.len() < 3 { self.armor_mods.push(m); }
+        if self.armor_mods.len() < 3 {
+            self.armor_mods.push(m);
+        }
     }
     pub fn has_blueprint(&self, id: &str) -> bool {
         self.blueprints.iter().any(|b| b == id)
     }
     pub fn add_blueprint(&mut self, id: impl Into<String>) {
         let id = id.into();
-        if !self.has_blueprint(&id) { self.blueprints.push(id); }
+        if !self.has_blueprint(&id) {
+            self.blueprints.push(id);
+        }
     }
     /// Aggregate effective max-HP bonus from armor mods.
     pub fn total_armor_hp_bonus(&self) -> f32 {

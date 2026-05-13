@@ -2470,18 +2470,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "heavy-water"
-version = "0.2.0"
-dependencies = [
- "bevy",
- "bevy_rapier3d",
- "noise",
- "rand 0.8.6",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4292,6 +4280,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115beb9c69db2393ff10b75a1b8587a51716e5551d015001e55320ed279d32f9"
 dependencies = [
  "const_panic",
+]
+
+[[package]]
+name = "starfall-i"
+version = "0.2.0"
+dependencies = [
+ "bevy",
+ "bevy_rapier3d",
+ "noise",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

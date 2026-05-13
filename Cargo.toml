@@ -1,11 +1,11 @@
 [package]
-name = "heavy-water"
+name = "starfall-i"
 version = "0.2.0"
 edition = "2021"
-description = "Heavy Water – Story-driven Action RPG (Bevy Engine)"
+description = "Starfall I - cartoon star-beam platformer RPG (Bevy Engine)"
 
 [[bin]]
-name = "heavy-water"
+name = "starfall-i"
 path = "src/main.rs"
 
 [dependencies]

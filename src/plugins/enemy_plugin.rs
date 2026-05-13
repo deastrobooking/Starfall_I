@@ -1,25 +1,25 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::state::AppState;
-use crate::events::*;
-use crate::components::player::{Player, PlayerStats};
-use crate::components::enemy::{Enemy, EnemyType, EnemyStateMachine, EnemyAIState, DeadEnemy, BossEnemy};
-use crate::components::world::WorldLoot;
-use crate::components::inventory::Inventory;
+use crate::characters::{enemy_config, spawn_cartoon_character};
+use crate::components::enemy::{
+    BossEnemy, DeadEnemy, Enemy, EnemyAIState, EnemyStateMachine, EnemyType,
+};
 use crate::components::faction::{Faction, NamedCharacter};
-use crate::damage::{Health, Damageable, DamageInfo, DamageType, apply_damage};
+use crate::components::inventory::Inventory;
+use crate::components::player::{Player, PlayerStats};
+use crate::components::world::WorldLoot;
+use crate::damage::{DamageInfo, DamageType, Damageable, Health};
+use crate::events::*;
 use crate::resources::WaveInfo;
-use crate::robots::presets::robot_by_name;
-use crate::robots::factory::spawn_robot;
+use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct EnemyPlugin;
 
 impl Plugin for EnemyPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<WaveInfo>()
+        app.init_resource::<WaveInfo>()
             .add_systems(OnEnter(AppState::Playing), setup_enemies)
             .add_systems(
                 Update,
@@ -38,7 +38,7 @@ impl Plugin for EnemyPlugin {
 }
 
 // ── Initial Setup ─────────────────────────────────────────────────────────────
-// Heavy Water: chapter director drives all spawns. Reset only the population
+// Starfall I: chapter director drives all spawns. Reset only the population
 // counter; no enemies are pre-spawned here.
 fn setup_enemies(mut wave: ResMut<WaveInfo>) {
     *wave = WaveInfo::new();
@@ -59,25 +59,28 @@ fn preset_for_type(enemy_type: EnemyType, faction: Option<Faction>) -> &'static 
     // Faction first (gives flavor); fall back to type.
     if let Some(f) = faction {
         match (f, enemy_type) {
-            (Faction::Insectoid, EnemyType::Drone)     => return "InsectoidStalker",
-            (Faction::Insectoid, _)                    => return "InsectoidStalker",
-            (Faction::Swarm,     EnemyType::Drone)     => return "Nero",
-            (Faction::Swarm,     EnemyType::Heavy)     => return "Brutus",
-            (Faction::Swarm,     _)                    => return "Brutus",
-            (Faction::Charred,   EnemyType::Heavy)     => return "BruteForge",
-            (Faction::Charred,   _)                    => return "CharredCaptain",
-            (Faction::Animaton,  _)                    => return "WolfAnimaton",
-            (Faction::Mechanoid, _)                    => return "ScoutPrime",
-            (Faction::Synthetic, _)                    => return "ScoutPrime",
+            (Faction::DimensionalAlien, EnemyType::Drone) => return "JetWarden",
+            (Faction::DimensionalAlien, EnemyType::SpikeAlien) => return "InsectoidStalker",
+            (Faction::DimensionalAlien, _) => return "HybridOmega",
+            (Faction::DragonRoyalty, EnemyType::Drone) => return "WolfAnimaton",
+            (Faction::DragonRoyalty, EnemyType::Heavy) => return "BruteForge",
+            (Faction::DragonRoyalty, _) => return "TankTitan",
+            (Faction::DragonExile, EnemyType::Heavy) => return "BruteForge",
+            (Faction::DragonExile, _) => return "CharredCaptain",
+            (Faction::CorruptedHuman, EnemyType::Drone) => return "Nero",
+            (Faction::CorruptedHuman, _) => return "ScoutPrime",
+            (Faction::HeroBrother, _) => return "ScoutPrime",
+            (Faction::HeroSister, _) => return "ScoutPrime",
+            (Faction::WizardScientist, _) => return "ScoutPrime",
             _ => {}
         }
     }
     match enemy_type {
-        EnemyType::Drone     => "JetWarden",
-        EnemyType::Soldier   => "ScoutPrime",
-        EnemyType::Heavy     => "TankTitan",
-        EnemyType::Insectoid => "InsectoidStalker",
-        EnemyType::Hybrid    => "HybridOmega",
+        EnemyType::Drone => "JetWarden",
+        EnemyType::Soldier => "ScoutPrime",
+        EnemyType::Heavy => "TankTitan",
+        EnemyType::SpikeAlien => "InsectoidStalker",
+        EnemyType::Hybrid => "HybridOmega",
     }
 }
 
@@ -91,11 +94,21 @@ pub fn spawn_enemy_entity(
     faction: Option<Faction>,
 ) {
     let preset_name = preset_for_type(enemy_type, faction);
-    let style = robot_by_name(preset_name).unwrap_or_default();
     let enemy_data = Enemy::new(enemy_type, position, difficulty_scale);
     let max_hp = enemy_data.scaled_health();
 
-    let root = spawn_robot(commands, meshes, materials, &style, position);
+    let root = spawn_cartoon_character(
+        commands,
+        meshes,
+        materials,
+        enemy_config(
+            enemy_type,
+            faction,
+            preset_name,
+            difficulty_scale.clamp(0.85, 1.8),
+        ),
+        position,
+    );
     commands.entity(root).insert((
         enemy_data,
         EnemyStateMachine::default(),
@@ -111,19 +124,33 @@ pub fn spawn_named_enemy(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    preset: &'static str,
+    _preset: &'static str,
     name: &'static str,
     faction: Faction,
     position: Vec3,
     scale: f32,
     is_boss: bool,
 ) {
-    let style = robot_by_name(preset).unwrap_or_default();
-    let enemy_type = if is_boss { EnemyType::Hybrid } else { EnemyType::Heavy };
+    let enemy_type = if is_boss {
+        EnemyType::Hybrid
+    } else {
+        EnemyType::Heavy
+    };
     let enemy_data = Enemy::new(enemy_type, position, scale);
     let max_hp = enemy_data.scaled_health() * if is_boss { 3.0 } else { 1.5 };
 
-    let root = spawn_robot(commands, meshes, materials, &style, position);
+    let root = spawn_cartoon_character(
+        commands,
+        meshes,
+        materials,
+        enemy_config(
+            enemy_type,
+            Some(faction),
+            name,
+            scale.clamp(0.95, 2.2) * if is_boss { 1.2 } else { 1.0 },
+        ),
+        position,
+    );
     let mut e = commands.entity(root);
     e.insert((
         enemy_data,
@@ -131,24 +158,37 @@ pub fn spawn_named_enemy(
         Health::new(max_hp),
         Damageable::default(),
         faction,
-        NamedCharacter { id: name, display_name: name, faction },
+        NamedCharacter {
+            id: name,
+            display_name: name,
+            faction,
+        },
     ));
-    if is_boss { e.insert(BossEnemy); }
+    if is_boss {
+        e.insert(BossEnemy);
+    }
 }
 
 // ── AI System ─────────────────────────────────────────────────────────────────
 fn enemy_ai_system(
     time: Res<Time>,
     player_q: Query<&Transform, With<Player>>,
-    mut enemy_q: Query<(&mut Transform, &mut Enemy, &mut EnemyStateMachine, &Health), Without<Player>>,
+    mut enemy_q: Query<
+        (&mut Transform, &mut Enemy, &mut EnemyStateMachine, &Health),
+        Without<Player>,
+    >,
 ) {
     let dt = time.delta_secs();
-    let Ok(player_transform) = player_q.get_single() else { return };
+    let Ok(player_transform) = player_q.get_single() else {
+        return;
+    };
     let player_pos = player_transform.translation;
     let mut rng = rand::thread_rng();
 
     for (mut transform, mut enemy, mut sm, health) in enemy_q.iter_mut() {
-        if !health.is_alive() { continue; }
+        if !health.is_alive() {
+            continue;
+        }
 
         sm.timer += dt;
         enemy.attack_cooldown_timer = (enemy.attack_cooldown_timer - dt).max(0.0);
@@ -163,9 +203,8 @@ fn enemy_ai_system(
                 } else if sm.timer > rng.gen_range(1.0..3.0) {
                     let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
                     let dist: f32 = rng.gen_range(10.0..20.0);
-                    enemy.patrol_target = enemy.spawn_origin + Vec3::new(
-                        angle.cos() * dist, 0.0, angle.sin() * dist,
-                    );
+                    enemy.patrol_target =
+                        enemy.spawn_origin + Vec3::new(angle.cos() * dist, 0.0, angle.sin() * dist);
                     sm.transition(EnemyAIState::Patrol);
                 }
             }
@@ -191,14 +230,17 @@ fn enemy_ai_system(
                 } else if dist_to_player <= config.attack_range {
                     sm.transition(EnemyAIState::Attack);
                 } else {
-                    let to_player = (player_pos - transform.translation).with_y(0.0).normalize_or_zero();
+                    let to_player = (player_pos - transform.translation)
+                        .with_y(0.0)
+                        .normalize_or_zero();
                     transform.translation += to_player * config.chase_speed * dt * 60.0;
                     if to_player.length_squared() > 0.001 {
                         let pos = transform.translation;
                         transform.look_at(pos + to_player, Vec3::Y);
                     }
                     if enemy.enemy_type == EnemyType::Drone {
-                        transform.translation.y = player_pos.y + 5.0
+                        transform.translation.y = player_pos.y
+                            + 5.0
                             + (time.elapsed_secs() * 2.0 + transform.translation.x).sin() * 0.5;
                     }
                 }
@@ -207,7 +249,9 @@ fn enemy_ai_system(
                 if dist_to_player > config.attack_range * 1.3 {
                     sm.transition(EnemyAIState::Chase);
                 } else {
-                    let to_player = (player_pos - transform.translation).with_y(0.0).normalize_or_zero();
+                    let to_player = (player_pos - transform.translation)
+                        .with_y(0.0)
+                        .normalize_or_zero();
                     if to_player.length_squared() > 0.001 {
                         let pos = transform.translation;
                         transform.look_at(pos + to_player, Vec3::Y);
@@ -215,7 +259,9 @@ fn enemy_ai_system(
                 }
             }
             EnemyAIState::Stunned => {
-                if sm.timer >= 1.5 { sm.transition(EnemyAIState::Chase); }
+                if sm.timer >= 1.5 {
+                    sm.transition(EnemyAIState::Chase);
+                }
             }
             EnemyAIState::Dead => {}
         }
@@ -227,20 +273,34 @@ fn enemy_attack_system(
     player_q: Query<&Transform, With<Player>>,
     mut enemy_q: Query<(&Transform, &mut Enemy, &EnemyStateMachine, &Health), Without<Player>>,
     mut player_damage_q: Query<
-        (&mut crate::damage::Health, &mut Damageable, &mut PlayerStats, &mut crate::components::player::ParryState, &crate::components::armor::ArmorSet),
+        (
+            &mut crate::damage::Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut crate::components::player::ParryState,
+            &crate::components::armor::ArmorSet,
+        ),
         With<Player>,
     >,
     mut damaged_ev: EventWriter<PlayerDamagedEvent>,
     mut parry_ev: EventWriter<PlayerParryEvent>,
 ) {
-    let Ok(player_transform) = player_q.get_single() else { return };
+    let Ok(player_transform) = player_q.get_single() else {
+        return;
+    };
     let player_pos = player_transform.translation;
     let mut total_damage = 0.0;
 
     for (e_transform, mut enemy, sm, health) in enemy_q.iter_mut() {
-        if !health.is_alive() { continue; }
-        if sm.current != EnemyAIState::Attack { continue; }
-        if enemy.attack_cooldown_timer > 0.0 { continue; }
+        if !health.is_alive() {
+            continue;
+        }
+        if sm.current != EnemyAIState::Attack {
+            continue;
+        }
+        if enemy.attack_cooldown_timer > 0.0 {
+            continue;
+        }
         let dist = e_transform.translation.distance(player_pos);
         if dist <= enemy.config.attack_range {
             total_damage += enemy.scaled_damage();
@@ -249,11 +309,18 @@ fn enemy_attack_system(
     }
 
     if total_damage > 0.0 {
-        if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) = player_damage_q.get_single_mut() {
+        if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
+            player_damage_q.get_single_mut()
+        {
             crate::plugins::player_plugin::damage_player(
-                &mut health, &mut damageable, &mut stats, &mut parry, &armor,
+                &mut health,
+                &mut damageable,
+                &mut stats,
+                &mut parry,
+                &armor,
                 &DamageInfo::new(total_damage, DamageType::Kinetic),
-                &mut damaged_ev, &mut parry_ev,
+                &mut damaged_ev,
+                &mut parry_ev,
             );
         }
     }
@@ -283,7 +350,9 @@ fn enemy_killed_reward(
     mut enemy_q: Query<(Entity, &mut EnemyStateMachine, &Health), Without<Player>>,
     mut commands: Commands,
 ) {
-    let Ok(mut stats) = player_q.get_single_mut() else { return };
+    let Ok(mut stats) = player_q.get_single_mut() else {
+        return;
+    };
     for ev in killed_ev.read() {
         stats.credits += ev.credits;
         stats.experience += ev.experience;
@@ -291,7 +360,9 @@ fn enemy_killed_reward(
     for (entity, mut sm, health) in enemy_q.iter_mut() {
         if !health.is_alive() && sm.current != EnemyAIState::Dead {
             sm.force(EnemyAIState::Dead);
-            commands.entity(entity).insert(DeadEnemy { despawn_timer: 2.0 });
+            commands
+                .entity(entity)
+                .insert(DeadEnemy { despawn_timer: 2.0 });
         }
     }
 }
@@ -308,18 +379,20 @@ fn enemy_loot_drop_system(
     for ev in killed_ev.read() {
         // ~60% drop chance
         let roll: f32 = rng.gen();
-        if roll > 0.60 { continue; }
+        if roll > 0.60 {
+            continue;
+        }
 
         let (item_id, quantity, r, g, b): (&'static str, u32, f32, f32, f32) = if roll < 0.10 {
-            ("health_pack",    1, 0.2, 1.0, 0.3)
+            ("health_pack", 1, 0.2, 1.0, 0.3)
         } else if roll < 0.20 {
-            ("armor_shard",    1, 0.3, 0.5, 1.0)
+            ("armor_shard", 1, 0.3, 0.5, 1.0)
         } else if roll < 0.35 {
-            ("plasma_cell",    rng.gen_range(10..25), 0.0, 0.6, 1.0)
+            ("plasma_cell", rng.gen_range(10..25), 0.0, 0.6, 1.0)
         } else if roll < 0.48 {
-            ("scrap_metal",    rng.gen_range(1..4),   0.6, 0.5, 0.3)
+            ("scrap_metal", rng.gen_range(1..4), 0.6, 0.5, 0.3)
         } else {
-            ("energy_core",    1, 1.0, 0.8, 0.0)
+            ("energy_core", 1, 1.0, 0.8, 0.0)
         };
 
         let mat = materials.add(StandardMaterial {
@@ -335,19 +408,26 @@ fn enemy_loot_drop_system(
             PbrBundle {
                 mesh: Mesh3d(meshes.add(Sphere::new(0.35))),
                 material: MeshMaterial3d(mat),
-                transform: Transform::from_translation(Vec3::new(ev.position.x, base_y, ev.position.z)),
+                transform: Transform::from_translation(Vec3::new(
+                    ev.position.x,
+                    base_y,
+                    ev.position.z,
+                )),
                 ..default()
             },
-            WorldLoot { item_id, quantity, credits: 0, pickup_radius: 2.5, base_y },
+            WorldLoot {
+                item_id,
+                quantity,
+                credits: 0,
+                pickup_radius: 2.5,
+                base_y,
+            },
         ));
     }
 }
 
 // ── Loot Bob Animation ────────────────────────────────────────────────────────
-fn loot_bob_system(
-    time: Res<Time>,
-    mut loot_q: Query<(&mut Transform, &WorldLoot)>,
-) {
+fn loot_bob_system(time: Res<Time>, mut loot_q: Query<(&mut Transform, &WorldLoot)>) {
     for (mut transform, loot) in loot_q.iter_mut() {
         transform.translation.y = loot.base_y + (time.elapsed_secs() * 2.5).sin() * 0.25;
         transform.rotation = Quat::from_rotation_y(time.elapsed_secs());
@@ -363,16 +443,23 @@ fn loot_pickup_system(
     mut msg_ev: EventWriter<UiMessageEvent>,
     mut loot_ev: EventWriter<LootCollectedEvent>,
 ) {
-    let Ok(player_transform) = player_q.get_single() else { return };
-    let Ok(mut inventory) = inventory_q.get_single_mut() else { return };
+    let Ok(player_transform) = player_q.get_single() else {
+        return;
+    };
+    let Ok(mut inventory) = inventory_q.get_single_mut() else {
+        return;
+    };
     let player_pos = player_transform.translation;
     let item_defs = crate::components::inventory::all_items();
 
     for (entity, loot_transform, loot) in loot_q.iter() {
         let dist = player_pos.distance(loot_transform.translation);
-        if dist > loot.pickup_radius { continue; }
+        if dist > loot.pickup_radius {
+            continue;
+        }
 
-        let max_stack = item_defs.iter()
+        let max_stack = item_defs
+            .iter()
             .find(|i| i.id == loot.item_id)
             .map(|i| i.max_stack)
             .unwrap_or(10);

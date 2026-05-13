@@ -1,18 +1,18 @@
-//! Heavy Water chapter system. Replaces the old wave-based difficulty loop.
+//! Starfall I chapter system. Replaces the old wave-based difficulty loop.
 //!
 //! A chapter is a hand-authored sequence of `EncounterStep`s. The
 //! `chapter_plugin` advances through the steps when their completion
 //! condition fires (group cleared, dialogue timer elapsed, boss dead).
 //!
-//! All 14 chapters are stub-playable; Chapter 1 (`Amp!`) is the polished
-//! reference. Each chapter sets a biome (recoloring the existing world
-//! geometry) and seeds discoverables / companion recruits.
+//! All 14 chapters are playable slices of the new cartoon star-beam
+//! platformer/RPG setup. Each chapter sets a biome, then seeds star tools,
+//! companion recruits, alien waves, dragon bosses, and mirror-human rivals.
 
 use bevy::prelude::*;
 
+use crate::components::discoverable::DiscoverableKind;
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
-use crate::components::discoverable::DiscoverableKind;
 
 // ── Chapter ID ────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,28 +22,34 @@ impl ChapterId {
     pub const FIRST: Self = ChapterId(1);
     pub const LAST: Self = ChapterId(14);
     pub fn next(self) -> Option<Self> {
-        if self.0 < Self::LAST.0 { Some(ChapterId(self.0 + 1)) } else { None }
+        if self.0 < Self::LAST.0 {
+            Some(ChapterId(self.0 + 1))
+        } else {
+            None
+        }
     }
-    pub fn index(self) -> usize { self.0 as usize - 1 }
+    pub fn index(self) -> usize {
+        self.0 as usize - 1
+    }
 }
 
 // ── Biome ─────────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Biome {
-    RuinedCity,        // Ch.1
-    InsectoidMetropolis, // Ch.2
-    LunarLabsRuins,    // Ch.3
-    BrothersFortress,  // Ch.4
-    StarCity,          // Ch.5
-    CharsDomain,       // Ch.6
-    SwarmHive,         // Ch.7
-    Wasteland,         // Ch.8
-    PeacefulSanctuary, // Ch.9
-    Ashur,             // Ch.10
-    EarthVillage,      // Ch.11
-    Battleground,      // Ch.12
-    WinterField,       // Ch.13
-    StarfallArena,     // Ch.14
+    StarfallLab,
+    RiftCity,
+    SisterSanctum,
+    BrotherTrialGrounds,
+    BileLab,
+    TibetPeak,
+    EmberNest,
+    DragonWildland,
+    PinkFlameGarden,
+    RockiesDomain,
+    AntarcticaOutpost,
+    PuzzleBattleground,
+    CrownGate,
+    StarfallArena,
 }
 
 impl Biome {
@@ -51,39 +57,137 @@ impl Biome {
     pub fn palette(&self) -> (Color, Color, Color, Color) {
         use Biome::*;
         match self {
-            RuinedCity        => (c(0.18,0.10,0.06), c(0.10,0.06,0.04), c(0.30,0.25,0.22), c(1.0,0.4,0.1)),
-            InsectoidMetropolis=>(c(0.05,0.20,0.05), c(0.04,0.10,0.04), c(0.18,0.25,0.10), c(0.4,1.0,0.2)),
-            LunarLabsRuins    => (c(0.10,0.10,0.18), c(0.05,0.05,0.10), c(0.30,0.30,0.40), c(0.4,0.85,1.0)),
-            BrothersFortress  => (c(0.15,0.05,0.10), c(0.08,0.03,0.05), c(0.25,0.20,0.20), c(1.0,0.5,0.0)),
-            StarCity          => (c(0.04,0.06,0.18), c(0.02,0.04,0.10), c(0.20,0.25,0.45), c(0.0,1.0,1.0)),
-            CharsDomain       => (c(0.30,0.06,0.02), c(0.18,0.04,0.01), c(0.40,0.15,0.05), c(1.0,0.2,0.0)),
-            SwarmHive         => (c(0.10,0.02,0.15), c(0.05,0.01,0.08), c(0.20,0.05,0.25), c(0.9,0.0,0.6)),
-            Wasteland         => (c(0.25,0.20,0.15), c(0.18,0.14,0.10), c(0.45,0.40,0.30), c(0.8,0.6,0.2)),
-            PeacefulSanctuary => (c(0.40,0.55,0.65), c(0.30,0.45,0.55), c(0.30,0.55,0.30), c(1.0,0.95,0.7)),
-            Ashur             => (c(0.45,0.30,0.10), c(0.25,0.18,0.06), c(0.50,0.40,0.20), c(1.0,0.7,0.2)),
-            EarthVillage      => (c(0.50,0.65,0.85), c(0.40,0.55,0.75), c(0.30,0.55,0.20), c(0.9,0.85,0.5)),
-            Battleground      => (c(0.20,0.20,0.20), c(0.10,0.10,0.10), c(0.35,0.30,0.25), c(1.0,0.3,0.1)),
-            WinterField       => (c(0.55,0.70,0.85), c(0.75,0.85,0.95), c(0.85,0.90,0.95), c(0.7,0.9,1.0)),
-            StarfallArena     => (c(0.02,0.02,0.06), c(0.01,0.01,0.04), c(0.10,0.10,0.20), c(1.0,0.9,0.0)),
+            StarfallLab => (
+                c(0.18, 0.10, 0.06),
+                c(0.10, 0.06, 0.04),
+                c(0.30, 0.25, 0.22),
+                c(1.0, 0.4, 0.1),
+            ),
+            RiftCity => (
+                c(0.05, 0.20, 0.05),
+                c(0.04, 0.10, 0.04),
+                c(0.18, 0.25, 0.10),
+                c(0.4, 1.0, 0.2),
+            ),
+            SisterSanctum => (
+                c(0.10, 0.10, 0.18),
+                c(0.05, 0.05, 0.10),
+                c(0.30, 0.30, 0.40),
+                c(0.4, 0.85, 1.0),
+            ),
+            BrotherTrialGrounds => (
+                c(0.15, 0.05, 0.10),
+                c(0.08, 0.03, 0.05),
+                c(0.25, 0.20, 0.20),
+                c(1.0, 0.5, 0.0),
+            ),
+            BileLab => (
+                c(0.04, 0.06, 0.18),
+                c(0.02, 0.04, 0.10),
+                c(0.20, 0.25, 0.45),
+                c(0.0, 1.0, 1.0),
+            ),
+            TibetPeak => (
+                c(0.30, 0.06, 0.02),
+                c(0.18, 0.04, 0.01),
+                c(0.40, 0.15, 0.05),
+                c(1.0, 0.2, 0.0),
+            ),
+            EmberNest => (
+                c(0.10, 0.02, 0.15),
+                c(0.05, 0.01, 0.08),
+                c(0.20, 0.05, 0.25),
+                c(0.9, 0.0, 0.6),
+            ),
+            DragonWildland => (
+                c(0.25, 0.20, 0.15),
+                c(0.18, 0.14, 0.10),
+                c(0.45, 0.40, 0.30),
+                c(0.8, 0.6, 0.2),
+            ),
+            PinkFlameGarden => (
+                c(0.40, 0.55, 0.65),
+                c(0.30, 0.45, 0.55),
+                c(0.30, 0.55, 0.30),
+                c(1.0, 0.95, 0.7),
+            ),
+            RockiesDomain => (
+                c(0.45, 0.30, 0.10),
+                c(0.25, 0.18, 0.06),
+                c(0.50, 0.40, 0.20),
+                c(1.0, 0.7, 0.2),
+            ),
+            AntarcticaOutpost => (
+                c(0.50, 0.65, 0.85),
+                c(0.40, 0.55, 0.75),
+                c(0.30, 0.55, 0.20),
+                c(0.9, 0.85, 0.5),
+            ),
+            PuzzleBattleground => (
+                c(0.20, 0.20, 0.20),
+                c(0.10, 0.10, 0.10),
+                c(0.35, 0.30, 0.25),
+                c(1.0, 0.3, 0.1),
+            ),
+            CrownGate => (
+                c(0.55, 0.70, 0.85),
+                c(0.75, 0.85, 0.95),
+                c(0.85, 0.90, 0.95),
+                c(0.7, 0.9, 1.0),
+            ),
+            StarfallArena => (
+                c(0.02, 0.02, 0.06),
+                c(0.01, 0.01, 0.04),
+                c(0.10, 0.10, 0.20),
+                c(1.0, 0.9, 0.0),
+            ),
         }
     }
 }
 
-#[inline] fn c(r: f32, g: f32, b: f32) -> Color { Color::srgb(r,g,b) }
+#[inline]
+fn c(r: f32, g: f32, b: f32) -> Color {
+    Color::srgb(r, g, b)
+}
 
 // ── Encounter Steps ───────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub enum EncounterStep {
     /// Fire one or more radio-chatter lines, then advance after `hold` seconds.
-    Dialogue { speaker: &'static str, faction: Faction, line: &'static str, hold: f32 },
+    Dialogue {
+        speaker: &'static str,
+        faction: Faction,
+        line: &'static str,
+        hold: f32,
+    },
     /// Spawn a group of enemies of the given type. Step completes when all are dead.
-    SpawnGroup { faction: Faction, enemy_type: EnemyType, count: u32, scale: f32 },
+    SpawnGroup {
+        faction: Faction,
+        enemy_type: EnemyType,
+        count: u32,
+        scale: f32,
+    },
     /// Spawn a named mid-boss (preset name from `robots/presets.rs`).
-    MidBoss { preset: &'static str, name: &'static str, faction: Faction, scale: f32 },
+    MidBoss {
+        preset: &'static str,
+        name: &'static str,
+        faction: Faction,
+        scale: f32,
+    },
     /// Spawn the chapter's main boss with intro line.
-    BossFight { preset: &'static str, name: &'static str, faction: Faction, intro_line: &'static str, scale: f32 },
+    BossFight {
+        preset: &'static str,
+        name: &'static str,
+        faction: Faction,
+        intro_line: &'static str,
+        scale: f32,
+    },
     /// Place a discoverable beacon at a position offset from the player.
-    PlaceDiscoverable { kind: DiscoverableKind, label: &'static str, offset: Vec3 },
+    PlaceDiscoverable {
+        kind: DiscoverableKind,
+        label: &'static str,
+        offset: Vec3,
+    },
     /// Final outro line + completion fire.
     Outro { line: &'static str },
 }
@@ -101,19 +205,60 @@ pub struct ChapterDef {
 
 // ── Helpers for building scripts ─────────────────────────────────────────────
 fn spawn(faction: Faction, t: EnemyType, count: u32, scale: f32) -> EncounterStep {
-    EncounterStep::SpawnGroup { faction, enemy_type: t, count, scale }
+    EncounterStep::SpawnGroup {
+        faction,
+        enemy_type: t,
+        count,
+        scale,
+    }
 }
-fn dialogue(speaker: &'static str, faction: Faction, line: &'static str, hold: f32) -> EncounterStep {
-    EncounterStep::Dialogue { speaker, faction, line, hold }
+fn dialogue(
+    speaker: &'static str,
+    faction: Faction,
+    line: &'static str,
+    hold: f32,
+) -> EncounterStep {
+    EncounterStep::Dialogue {
+        speaker,
+        faction,
+        line,
+        hold,
+    }
 }
-fn mid_boss(preset: &'static str, name: &'static str, faction: Faction, scale: f32) -> EncounterStep {
-    EncounterStep::MidBoss { preset, name, faction, scale }
+fn mid_boss(
+    preset: &'static str,
+    name: &'static str,
+    faction: Faction,
+    scale: f32,
+) -> EncounterStep {
+    EncounterStep::MidBoss {
+        preset,
+        name,
+        faction,
+        scale,
+    }
 }
-fn boss(preset: &'static str, name: &'static str, faction: Faction, intro_line: &'static str, scale: f32) -> EncounterStep {
-    EncounterStep::BossFight { preset, name, faction, intro_line, scale }
+fn boss(
+    preset: &'static str,
+    name: &'static str,
+    faction: Faction,
+    intro_line: &'static str,
+    scale: f32,
+) -> EncounterStep {
+    EncounterStep::BossFight {
+        preset,
+        name,
+        faction,
+        intro_line,
+        scale,
+    }
 }
 fn place(kind: DiscoverableKind, label: &'static str, offset: Vec3) -> EncounterStep {
-    EncounterStep::PlaceDiscoverable { kind, label, offset }
+    EncounterStep::PlaceDiscoverable {
+        kind,
+        label,
+        offset,
+    }
 }
 fn outro(line: &'static str) -> EncounterStep {
     EncounterStep::Outro { line }
@@ -122,285 +267,259 @@ fn outro(line: &'static str) -> EncounterStep {
 // ── All 14 Chapters ───────────────────────────────────────────────────────────
 pub fn all_chapters() -> Vec<ChapterDef> {
     use Faction::*;
-    // Note: deliberately NOT `use EnemyType::*;` — `EnemyType::Insectoid`
-    // would clash with `Faction::Insectoid`. Only the unambiguous variants
-    // are brought into scope.
-    use EnemyType::{Drone, Soldier, Heavy, Hybrid};
+    // Note: deliberately NOT `use EnemyType::*;` so script calls stay explicit
+    // where the specialized spike alien appears.
+    use EnemyType::{Drone, Heavy, Hybrid, Soldier};
 
     vec![
-        // ── Chapter 1: Amp! ──────────────────────────────────────────────────
         ChapterDef {
             id: ChapterId(1),
-            title: "Amp!",
-            subtitle: "Awakening in the dust",
-            biome: Biome::RuinedCity,
+            title: "Starfall Lab",
+            subtitle: "Giacoma opens the sky",
+            biome: Biome::StarfallLab,
             difficulty_scale: 1.0,
             script: vec![
-                dialogue("Amp", Synthetic, "It is a strange world I live in. Surrounded by dust and rain and wind…", 4.0),
-                dialogue("Amp", Synthetic, "Where my brothers and sisters have ended up, I do not know. I just hope they are safe.", 4.0),
-                spawn(Insectoid, Drone, 4, 1.0),
-                dialogue("Amp", Synthetic, "Formic. I know this is your work.", 2.5),
-                spawn(Insectoid, EnemyType::Insectoid, 6, 1.0),
-                place(DiscoverableKind::BeamSabreUnlock, "Beam Sabre Core", Vec3::new(8.0, 0.5, 0.0)),
-                dialogue("Amp", Synthetic, "Mother's blade. It survived.", 3.0),
-                spawn(Insectoid, Soldier, 5, 1.1),
-                mid_boss("Punisher", "Insectoid Punisher", Insectoid, 1.4),
-                place(DiscoverableKind::Blueprint("motorcycle_blueprint"), "Motorcycle Blueprints", Vec3::new(-10.0, 0.5, 12.0)),
-                spawn(Charred, Heavy, 2, 1.2),
-                boss("AracnoidQueen", "Aracnoid Queen", Insectoid,
-                     "QUEEN: Little doll. The good doctor will be pleased to find you alive.", 2.0),
-                place(DiscoverableKind::CompanionRecruit("Aria"), "Aria — Synthetic", Vec3::new(0.0, 0.5, -8.0)),
-                place(DiscoverableKind::CompanionRecruit("Valor"), "Valor — Synthetic", Vec3::new(4.0, 0.5, -8.0)),
-                outro("Amp: Two of them. Then there is hope."),
+                dialogue("Giacoma", WizardScientist, "The star engine is awake. Nobody sneeze near the dimension dial.", 3.5),
+                dialogue("Giovanni", WizardScientist, "Too late. Something green just waved back.", 3.0),
+                spawn(DimensionalAlien, Drone, 5, 1.0),
+                dialogue("Gabrio", WizardScientist, "Give the brothers the beam gloves. Cartoon settings only.", 3.0),
+                place(DiscoverableKind::BeamSabreUnlock, "Star Sabre Core", Vec3::new(8.0, 0.5, 0.0)),
+                spawn(DimensionalAlien, EnemyType::SpikeAlien, 5, 1.0),
+                mid_boss("JetWarden", "Rift Skipper", DimensionalAlien, 1.25),
+                place(DiscoverableKind::CompanionRecruit("Vincenzo"), "Vincenzo - Oldest Brother", Vec3::new(0.0, 0.5, -8.0)),
+                outro("Vincenzo: Family first. Then we close the sky."),
             ],
         },
 
-        // ── Chapter 2: The Plague ────────────────────────────────────────────
         ChapterDef {
             id: ChapterId(2),
-            title: "The Plague",
-            subtitle: "Three years lost",
-            biome: Biome::InsectoidMetropolis,
+            title: "Tony's Shortcut",
+            subtitle: "Wall jumps across the rift city",
+            biome: Biome::RiftCity,
             difficulty_scale: 1.2,
             script: vec![
-                dialogue("Amp", Synthetic, "Three years. The Insectoids took everything.", 3.5),
-                spawn(Insectoid, Drone, 6, 1.2),
-                spawn(Insectoid, EnemyType::Insectoid, 8, 1.2),
-                place(DiscoverableKind::WeaponMod("missile_launcher"), "Missile Launcher Mod", Vec3::new(6.0, 0.5, 6.0)),
-                dialogue("Lambda", Insectoid, "LAMBDA: …Sister?", 2.0),
-                dialogue("Epsilon", Insectoid, "EPSILON: KILL.", 2.0),
-                mid_boss("Lambda", "Lambda — Corrupted", Insectoid, 1.5),
-                mid_boss("Epsilon", "Epsilon — Corrupted", Insectoid, 1.5),
-                place(DiscoverableKind::Blueprint("jet_blueprint"), "Jet Blueprints", Vec3::new(-8.0, 0.5, 4.0)),
-                boss("InsectoidGeneral", "Insectoid General", Insectoid,
-                     "GENERAL: Formic prepared us for you, Synthetic.", 2.5),
-                place(DiscoverableKind::CompanionRecruit("Volt"), "Volt — Synthetic", Vec3::new(0.0, 0.5, -6.0)),
-                place(DiscoverableKind::CompanionRecruit("Chroma"), "Chroma — Synthetic", Vec3::new(4.0, 0.5, -6.0)),
-                outro("Amp: Volt. Chroma. We need to find the others."),
+                dialogue("Antonio", HeroBrother, "Call me Tony. Also, I found a wall we can bounce off.", 3.0),
+                spawn(DimensionalAlien, Drone, 6, 1.2),
+                spawn(DimensionalAlien, Soldier, 5, 1.2),
+                place(DiscoverableKind::WeaponMod("homing_star"), "Homing Star Focus", Vec3::new(6.0, 0.5, 6.0)),
+                mid_boss("Nero", "Rift Cartographer", DimensionalAlien, 1.4),
+                place(DiscoverableKind::CompanionRecruit("Antonio"), "Antonio aka Tony", Vec3::new(0.0, 0.5, -6.0)),
+                place(DiscoverableKind::Blueprint("jump_gate_blueprint"), "Jump Gate Sketches", Vec3::new(-8.0, 0.5, 4.0)),
+                outro("Tony: See? Falling is just jumping with bad timing."),
             ],
         },
 
-        // ── Chapter 3: A Tale of 3 Sisters ───────────────────────────────────
         ChapterDef {
             id: ChapterId(3),
-            title: "A Tale of 3 Sisters",
-            subtitle: "Lunar Labs, twenty years ago",
-            biome: Biome::LunarLabsRuins,
+            title: "Sisters Of The Star",
+            subtitle: "Gabriella, Nova, Aurora, Fortuna",
+            biome: Biome::SisterSanctum,
             difficulty_scale: 1.3,
             script: vec![
-                dialogue("Cynthia", Civilian, "CYNTHIA: With our minds combined, we will birth Amp first.", 4.0),
-                spawn(Insectoid, Soldier, 4, 1.3),
-                dialogue("Daria", Synthetic, "DARIA: Sisters. Mother is gone. Run.", 3.0),
-                spawn(Insectoid, Heavy, 3, 1.3),
-                mid_boss("FormicAvatar", "Formic — Memory Echo", Insectoid, 1.5),
-                place(DiscoverableKind::CompanionRecruit("Daria"), "Daria", Vec3::new(0.0, 0.5, -6.0)),
-                place(DiscoverableKind::CompanionRecruit("Prima"), "Prima", Vec3::new(4.0, 0.5, -6.0)),
-                boss("AracnoidQueen", "Hive Mother", Insectoid,
-                     "HIVE MOTHER: All of Cynthia's children belong to Formic now.", 1.5),
-                outro("Amp: My sisters. We are reunited."),
+                dialogue("Gabriella", HeroSister, "Nova, paint the sky. Aurora, guard the ledge. Fortuna, keep score.", 3.5),
+                spawn(DimensionalAlien, Soldier, 5, 1.3),
+                dialogue("Nova", HeroSister, "Rainbow Ray is warmed up.", 2.5),
+                spawn(DimensionalAlien, EnemyType::SpikeAlien, 6, 1.3),
+                mid_boss("HybridOmega", "Dimension Bruiser", DimensionalAlien, 1.45),
+                place(DiscoverableKind::CompanionRecruit("Gabriella"), "Gabriella", Vec3::new(0.0, 0.5, -6.0)),
+                place(DiscoverableKind::CompanionRecruit("Nova"), "Nova", Vec3::new(4.0, 0.5, -6.0)),
+                place(DiscoverableKind::CompanionRecruit("Aurora"), "Aurora", Vec3::new(8.0, 0.5, -6.0)),
+                place(DiscoverableKind::CompanionRecruit("Fortuna"), "Fortuna", Vec3::new(12.0, 0.5, -6.0)),
+                outro("Fortuna: Four sisters, four brothers, one very rude portal."),
             ],
         },
 
-        // ── Chapter 4: A Tale of 4 Brothers ──────────────────────────────────
         ChapterDef {
             id: ChapterId(4),
-            title: "A Tale of 4 Brothers",
-            subtitle: "Saturn, Mercury, Apollo, Axe",
-            biome: Biome::BrothersFortress,
+            title: "Four Brothers",
+            subtitle: "Angelo and Little Joe join the fight",
+            biome: Biome::BrotherTrialGrounds,
             difficulty_scale: 1.4,
             script: vec![
-                dialogue("Apollo", Mechanoid, "APOLLO: Stand with us, Synthetic. The Charred press from the east.", 3.0),
-                spawn(Charred, Soldier, 6, 1.4),
-                spawn(Charred, Heavy, 3, 1.4),
-                mid_boss("CharredCaptain", "Charred Captain", Charred, 1.5),
-                place(DiscoverableKind::WeaponMod("piercing_rounds"), "Piercing Rounds", Vec3::new(8.0, 0.5, 0.0)),
-                boss("HarvesterMech", "Char Harvester Mech", Charred,
-                     "HARVESTER: COMPLIANCE. OR INCINERATION.", 2.0),
-                place(DiscoverableKind::CompanionRecruit("Apollo"), "Apollo — Mechanoid", Vec3::new(0.0, 0.5, -6.0)),
-                outro("Apollo: My brothers and I owe you a debt, Synthetic."),
+                dialogue("Angelo", HeroBrother, "If we hit the switches together, the bridge sings.", 3.0),
+                spawn(DimensionalAlien, Soldier, 6, 1.4),
+                spawn(DimensionalAlien, Heavy, 3, 1.4),
+                mid_boss("Brutus", "Portal Bouncer", DimensionalAlien, 1.45),
+                place(DiscoverableKind::WeaponMod("piercing_rounds"), "Star Pierce Mod", Vec3::new(8.0, 0.5, 0.0)),
+                boss("HybridOmega", "Rift Gatekeeper", DimensionalAlien,
+                     "GATEKEEPER: Your family makes too much light.", 1.8),
+                place(DiscoverableKind::CompanionRecruit("Angelo"), "Angelo", Vec3::new(0.0, 0.5, -6.0)),
+                place(DiscoverableKind::CompanionRecruit("Joseph"), "Joseph aka Little Joe", Vec3::new(4.0, 0.5, -6.0)),
+                outro("Little Joe: I am small. My star beam is not."),
             ],
         },
 
-        // ── Chapter 5: StarCity Soldier ──────────────────────────────────────
         ChapterDef {
             id: ChapterId(5),
-            title: "StarCity Soldier",
-            subtitle: "Sergio Wolfrim's last stand",
-            biome: Biome::StarCity,
+            title: "Dr. Bile",
+            subtitle: "The mirror humans appear",
+            biome: Biome::BileLab,
             difficulty_scale: 1.5,
             script: vec![
-                dialogue("Sergio", Civilian, "SERGIO: Amp. The Star whispers your name.", 3.0),
-                spawn(Insectoid, Soldier, 5, 1.5),
-                spawn(Charred, Heavy, 3, 1.5),
-                mid_boss("Octavius", "Octavius", Mechanoid, 1.5),
-                place(DiscoverableKind::ArmorMod("reactive_plating"), "Reactive Plating", Vec3::new(0.0, 0.5, 8.0)),
-                boss("BruteForge", "Star City Sentinel", Mechanoid,
-                     "SENTINEL: Prove you are worthy of the Star.", 2.0),
-                place(DiscoverableKind::CompanionRecruit("Atlas"), "Atlas — Synthetic", Vec3::new(0.0, 0.5, -6.0)),
-                outro("Sergio: The Mechanoids stand with you now."),
+                dialogue("Dr. Bile", CorruptedHuman, "Children with stars. How quaint. I built four shadows.", 3.5),
+                spawn(CorruptedHuman, Soldier, 5, 1.5),
+                mid_boss("ScoutPrime", "Zark", CorruptedHuman, 1.45),
+                mid_boss("TankTitan", "Crush", CorruptedHuman, 1.5),
+                place(DiscoverableKind::ArmorMod("reactive_plating"), "Star Guard Weave", Vec3::new(0.0, 0.5, 8.0)),
+                boss("HybridOmega", "Dr. Bile's Reactor Suit", CorruptedHuman,
+                     "BILE: Same powers, sharper teeth.", 2.0),
+                outro("Giacoma: Bile copied the gifts. He did not copy the heart."),
             ],
         },
 
-        // ── Chapter 6: Char's Domain ─────────────────────────────────────────
         ChapterDef {
             id: ChapterId(6),
-            title: "Char's Domain",
-            subtitle: "Scorched earth",
-            biome: Biome::CharsDomain,
+            title: "Tibet Peak",
+            subtitle: "Collosar, king of the dragons",
+            biome: Biome::TibetPeak,
             difficulty_scale: 1.6,
             script: vec![
-                dialogue("Amp", Synthetic, "Char's flames burn even the ash.", 2.5),
-                spawn(Charred, Soldier, 8, 1.6),
-                spawn(Animaton, Heavy, 4, 1.6),
-                mid_boss("WolfAnimaton", "Wolf Animaton", Animaton, 1.6),
-                mid_boss("TigerAnimaton", "Tiger Animaton", Animaton, 1.6),
-                place(DiscoverableKind::ArmorMod("coolant_weave"), "Coolant Weave", Vec3::new(6.0, 0.5, 6.0)),
-                boss("HarvesterMech", "Char — Final Form", Charred,
-                     "CHAR: I AM THE FIRE THAT MADE THIS WORLD.", 2.5),
-                outro("Amp: Char is broken. The eastern wastes are quiet."),
+                dialogue("Collosar", DragonRoyalty, "Tiny star children. Tibet is under my wing.", 3.0),
+                spawn(DragonRoyalty, Drone, 6, 1.6),
+                spawn(DragonRoyalty, Heavy, 4, 1.6),
+                place(DiscoverableKind::ArmorMod("coolant_weave"), "Dragon Chill Weave", Vec3::new(6.0, 0.5, 6.0)),
+                boss("BruteForge", "Collosar - King of the Dragons", DragonRoyalty,
+                     "COLLOSAR: Prove your light protects Earth.", 2.4),
+                outro("Vincenzo: The king is not our enemy. The invasion is."),
             ],
         },
 
-        // ── Chapter 7: The Swarm ─────────────────────────────────────────────
         ChapterDef {
             id: ChapterId(7),
-            title: "The Swarm",
-            subtitle: "A greater evil from the shadows",
-            biome: Biome::SwarmHive,
+            title: "Tarack's Ember",
+            subtitle: "The queen tests the family",
+            biome: Biome::EmberNest,
             difficulty_scale: 1.8,
             script: vec![
-                dialogue("Cygnus", Swarm, "CYGNUS: Worlds end. We are the ending.", 3.0),
-                spawn(Swarm, Drone, 10, 1.8),
-                spawn(Swarm, Soldier, 6, 1.8),
-                mid_boss("Brutus", "Brutus", Swarm, 1.7),
-                mid_boss("Nero", "Nero", Swarm, 1.7),
-                place(DiscoverableKind::WeaponMod("piercing_rounds"), "Swarm Piercer", Vec3::new(0.0, 0.5, 10.0)),
-                boss("Cygnus", "King Cygnus", Swarm,
-                     "CYGNUS: This world tastes like the last one.", 2.0),
-                outro("Amp: The King falls. The Queen will come for vengeance."),
+                dialogue("Tarack", DragonRoyalty, "A family that fights together must also think together.", 3.0),
+                spawn(DragonRoyalty, Drone, 8, 1.8),
+                spawn(DimensionalAlien, Soldier, 6, 1.8),
+                mid_boss("WolfAnimaton", "Ember Warden", DragonRoyalty, 1.65),
+                place(DiscoverableKind::WeaponMod("piercing_rounds"), "Royal Star Pierce", Vec3::new(0.0, 0.5, 10.0)),
+                boss("HarvesterMech", "Tarack - Dragon Queen", DragonRoyalty,
+                     "TARACK: Carry your light without burning each other.", 2.0),
+                outro("Aurora: A test disguised as a battle. I like her."),
             ],
         },
 
-        // ── Chapter 8: Ruination ─────────────────────────────────────────────
         ChapterDef {
             id: ChapterId(8),
-            title: "Ruination",
-            subtitle: "Earth abandoned",
-            biome: Biome::Wasteland,
+            title: "Spikes And Shreds",
+            subtitle: "The dragon sons run wild",
+            biome: Biome::DragonWildland,
             difficulty_scale: 1.9,
             script: vec![
-                dialogue("Amp", Synthetic, "Nothing left. Nothing but us.", 3.0),
-                spawn(Swarm, Heavy, 5, 1.9),
-                spawn(Insectoid, EnemyType::Insectoid, 6, 1.9),
-                mid_boss("Minerva", "Minerva", Swarm, 1.8),
-                boss("Cygni", "Queen Cygni", Swarm,
-                     "CYGNI: I will eat your stars one by one.", 2.5),
-                outro("Amp: The Swarm Queen falls. We must rebuild."),
+                dialogue("Spikey", DragonRoyalty, "I am the youngest and the fastest and nobody can prove otherwise.", 3.0),
+                spawn(DragonRoyalty, Drone, 8, 1.8),
+                mid_boss("Nero", "Spikey - Youngest Son", DragonRoyalty, 1.7),
+                dialogue("Shread", DragonRoyalty, "Little brother, stop chasing portals with your face.", 2.5),
+                spawn(DimensionalAlien, EnemyType::SpikeAlien, 7, 1.9),
+                boss("TankTitan", "Shread - Oldest Son", DragonRoyalty,
+                     "SHREAD: Show me your best team combo.", 2.2),
+                outro("Tony: Dragon brothers are just us with wings and worse furniture."),
             ],
         },
 
-        // ── Chapter 9: Peaceful DNA ──────────────────────────────────────────
         ChapterDef {
             id: ChapterId(9),
-            title: "Peaceful DNA",
-            subtitle: "Theta's gift",
-            biome: Biome::PeacefulSanctuary,
+            title: "Pink Flame",
+            subtitle: "A garden of puzzles and fire",
+            biome: Biome::PinkFlameGarden,
             difficulty_scale: 1.5,
             script: vec![
-                dialogue("Theta", Synthetic, "THETA: Brother. Free them. Free them all.", 3.0),
-                spawn(Animaton, Drone, 6, 1.4),
-                place(DiscoverableKind::CompanionRecruit("Theta"), "Theta — Synthetic", Vec3::new(0.0, 0.5, -4.0)),
-                place(DiscoverableKind::CompanionRecruit("Ion"), "Ion — Mechanoid", Vec3::new(4.0, 0.5, -4.0)),
-                boss("HarvesterMech", "Last Animaton", Animaton,
-                     "ANIMATON: …let me … rest …", 1.6),
-                outro("Theta: A new soul is born. His name is Ion."),
+                dialogue("Pink Flame", DragonRoyalty, "My brothers broke the garden. Please un-break it with star beams.", 3.5),
+                spawn(DimensionalAlien, Drone, 6, 1.4),
+                spawn(DimensionalAlien, Soldier, 4, 1.4),
+                place(DiscoverableKind::CompanionRecruit("Pink Flame"), "Pink Flame - Dragon Daughter", Vec3::new(0.0, 0.5, -4.0)),
+                boss("WolfAnimaton", "Garden Rift Bloom", DimensionalAlien,
+                     "BLOOM: Pollinating dimension three.", 1.6),
+                outro("Gabriella: Pink Flame stays. The garden gets walls we can jump off."),
             ],
         },
 
-        // ── Chapter 10: The Land of Ashur ────────────────────────────────────
         ChapterDef {
             id: ChapterId(10),
-            title: "The Land of Ashur",
-            subtitle: "Forgotten kingdom",
-            biome: Biome::Ashur,
+            title: "Rockies Domain",
+            subtitle: "Ragar, uncle to the king",
+            biome: Biome::RockiesDomain,
             difficulty_scale: 1.9,
             script: vec![
-                dialogue("Aruna", Mechanoid, "ARUNA: The desert remembers what humans forgot.", 3.0),
-                spawn(Swarm, Drone, 8, 1.9),
-                mid_boss("Helios", "Helios", Mechanoid, 1.7),
-                boss("BruteForge", "Ashur Sentinel", Mechanoid, "SENTINEL: Pass, or perish.", 2.0),
-                outro("Amp: Ashur kneels. The road north is open."),
+                dialogue("Ragar", DragonExile, "Colorado rock remembers every claw mark.", 3.0),
+                spawn(DragonExile, Drone, 8, 1.9),
+                spawn(CorruptedHuman, Soldier, 5, 1.8),
+                mid_boss("CharredCaptain", "Fang", CorruptedHuman, 1.7),
+                boss("BruteForge", "Ragar - Rockies Domain", DragonExile,
+                     "RAGAR: Collosar's crown made him soft.", 2.0),
+                outro("Angelo: Ragar is angry. The aliens are using it."),
             ],
         },
 
-        // ── Chapter 11: A Village Called Earth ───────────────────────────────
         ChapterDef {
             id: ChapterId(11),
-            title: "A Village Called Earth",
-            subtitle: "What humanity became",
-            biome: Biome::EarthVillage,
+            title: "Blackskull Ice",
+            subtitle: "Antarctica opens below",
+            biome: Biome::AntarcticaOutpost,
             difficulty_scale: 2.0,
             script: vec![
-                dialogue("Villager", Civilian, "VILLAGER: Strangers from the metal world!", 3.0),
-                spawn(Swarm, Soldier, 8, 2.0),
-                mid_boss("Caliguon", "Caliguon", Swarm, 1.9),
-                boss("Cygnus", "Swarm Vanguard", Swarm,
-                     "VANGUARD: The Queen sends her regards.", 2.0),
-                outro("Amp: The villagers live. That alone is victory."),
+                dialogue("Blackskull", DragonExile, "Antarctica is quiet because I demand quiet.", 3.0),
+                spawn(DragonExile, Soldier, 8, 2.0),
+                mid_boss("ScoutPrime", "Sharp", CorruptedHuman, 1.9),
+                spawn(DimensionalAlien, Heavy, 4, 2.0),
+                boss("HybridOmega", "Blackskull - Antarctica Domain", DragonExile,
+                     "BLACKSKULL: Your bright little family cracks the ice.", 2.0),
+                outro("Little Joe: Quiet is overrated."),
             ],
         },
 
-        // ── Chapter 12: Evolution or Eradication ─────────────────────────────
         ChapterDef {
             id: ChapterId(12),
-            title: "Evolution or Eradication",
-            subtitle: "The choice",
-            biome: Biome::Battleground,
+            title: "Mana Switchworks",
+            subtitle: "Open-world puzzle battle",
+            biome: Biome::PuzzleBattleground,
             difficulty_scale: 2.2,
             script: vec![
-                dialogue("Amp", Synthetic, "Choose. Adapt or die.", 3.0),
-                spawn(Swarm, Heavy, 6, 2.2),
-                spawn(Insectoid, Hybrid, 2, 2.2),
-                mid_boss("HybridOmega", "Hybrid Omega", Insectoid, 2.0),
-                boss("Cygni", "Cygni — Awakened", Swarm,
-                     "CYGNI: I will not fall again.", 2.5),
-                outro("Amp: We chose. We endured."),
+                dialogue("Giovanni", WizardScientist, "Classic platforming rule: the suspicious crystal is absolutely a switch.", 3.0),
+                spawn(DimensionalAlien, Heavy, 6, 2.2),
+                spawn(CorruptedHuman, Hybrid, 2, 2.2),
+                mid_boss("TankTitan", "Crush - Mirror Brother", CorruptedHuman, 2.0),
+                boss("HybridOmega", "Dr. Bile's Puzzle Engine", CorruptedHuman,
+                     "BILE: Four players, one maze, zero patience.", 2.5),
+                outro("Gabrio: The engine is solved. Mostly. It is only smoking politely."),
             ],
         },
 
-        // ── Chapter 13: A Calm Winter Night ──────────────────────────────────
         ChapterDef {
             id: ChapterId(13),
-            title: "A Calm Winter Night",
-            subtitle: "Before the end",
-            biome: Biome::WinterField,
+            title: "Dimension Front",
+            subtitle: "The invaders reveal the crown gate",
+            biome: Biome::CrownGate,
             difficulty_scale: 1.8,
             script: vec![
-                dialogue("Daria", Synthetic, "DARIA: Snow on metal. It is almost beautiful.", 4.0),
-                dialogue("Amp", Synthetic, "Listen. The sky is too quiet.", 3.0),
-                spawn(Swarm, Drone, 6, 1.8),
-                mid_boss("Selene", "Selene", Mechanoid, 1.8),
-                boss("HybridOmega", "Winter Stalker", Swarm, "STALKER: …", 1.9),
-                outro("Amp: Stars are falling. Tomorrow we end this."),
+                dialogue("Giacoma", WizardScientist, "The crown gate is not a door. It is a mouth.", 3.5),
+                dialogue("Fortuna", HeroSister, "Then we make it bite a star.", 2.5),
+                spawn(DimensionalAlien, Drone, 8, 1.8),
+                mid_boss("Selene", "Rift Herald", DimensionalAlien, 1.8),
+                boss("HybridOmega", "Crown Gate Avatar", DimensionalAlien,
+                     "AVATAR: Earth belongs to the between-place.", 1.9),
+                outro("Nova: Tomorrow we paint over the between-place."),
             ],
         },
 
-        // ── Chapter 14: Starfall ─────────────────────────────────────────────
         ChapterDef {
             id: ChapterId(14),
             title: "Starfall",
-            subtitle: "The Star, the Swarm, and the Six",
+            subtitle: "The family closes the sky",
             biome: Biome::StarfallArena,
             difficulty_scale: 2.5,
             script: vec![
-                dialogue("Amp", Synthetic, "All of us. Together. For the last time.", 3.0),
-                spawn(Swarm, Hybrid, 4, 2.5),
-                mid_boss("Cygnus", "Cygnus — Reborn", Swarm, 2.2),
-                mid_boss("Cygni", "Cygni — Reborn", Swarm, 2.2),
-                dialogue("Amp", Synthetic, "Six unknown signatures. From the future?", 3.0),
-                boss("HybridOmega", "Starfall — Final Form", Swarm,
-                     "VOICE: I am every ending. I am every beginning.", 3.0),
-                outro("Amp: The Star is silent. The world is ours to remake."),
+                dialogue("Vincenzo", HeroBrother, "Brothers left. Sisters right. Scientists, please make the impossible thing possible.", 3.0),
+                spawn(DimensionalAlien, Hybrid, 4, 2.5),
+                mid_boss("Cygnus", "Zark - Final Mirror", CorruptedHuman, 2.2),
+                mid_boss("Cygni", "Dr. Bile - Star Thief", CorruptedHuman, 2.2),
+                dialogue("Collosar", DragonRoyalty, "Dragons hold the earth. Children hold the stars.", 3.0),
+                boss("HybridOmega", "Starfall Rift Core", DimensionalAlien,
+                     "CORE: Every dimension falls inward.", 3.0),
+                outro("Giacoma: The sky is closed. Now someone please label the buttons."),
             ],
         },
     ]

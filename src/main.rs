@@ -2,38 +2,26 @@ use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use bevy_rapier3d::prelude::*;
 
-mod state;
-mod events;
-mod damage;
-mod resources;
-mod components;
-mod robots;
 mod chapters;
-mod perks;
+mod characters;
+mod components;
+mod damage;
+mod events;
 mod lsystem;
+mod perks;
 mod plugins;
+mod resources;
+mod robots;
+mod state;
 
-use state::AppState;
 use events::EventsPlugin;
 use plugins::{
-    InputPlugin,
-    PlayerPlugin,
-    WeaponPlugin,
-    EnemyPlugin,
-    WorldPlugin,
-    ChestPlugin,
-    CompanionPlugin,
-    ArmorPlugin,
-    CraftingPlugin,
-    UiPlugin,
-    SavePlugin,
-    ChapterPlugin,
-    DiscoverablePlugin,
-    RadioPlugin,
-    VehiclePlugin,
-    ChassisEditorPlugin,
+    ArmorPlugin, ChapterPlugin, CharacterPlugin, ChassisEditorPlugin, ChestPlugin, CompanionPlugin,
+    CraftingPlugin, DiscoverablePlugin, EnemyPlugin, InputPlugin, PlayerPlugin, RadioPlugin,
+    SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
-use resources::{WaveInfo, GameSettings, PlayerScore, CameraShake};
+use resources::{CameraShake, GameSettings, LocalPlayerConfig, PlayerScore, PlayerSelectState, WaveInfo};
+use state::AppState;
 
 fn main() {
     App::new()
@@ -42,7 +30,7 @@ fn main() {
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "Heavy Water".to_string(),
+                        title: "Starfall I".to_string(),
                         resolution: WindowResolution::new(1280.0, 720.0),
                         ..default()
                     }),
@@ -59,6 +47,8 @@ fn main() {
         .init_resource::<GameSettings>()
         .init_resource::<PlayerScore>()
         .init_resource::<CameraShake>()
+        .init_resource::<LocalPlayerConfig>()
+        .init_resource::<PlayerSelectState>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
         // Game plugins
@@ -67,6 +57,7 @@ fn main() {
             UiPlugin,
             WorldPlugin,
             PlayerPlugin,
+            CharacterPlugin,
             WeaponPlugin,
             EnemyPlugin,
             ChestPlugin,
