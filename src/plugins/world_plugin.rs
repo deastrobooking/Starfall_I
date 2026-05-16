@@ -50,10 +50,12 @@ fn generate_city(
     spawn_industrial(&mut commands, &mut meshes, &pal, seed + 1);
     spawn_residential(&mut commands, &mut meshes, &pal, seed + 2);
     spawn_highways(&mut commands, &mut meshes, &pal);
+    spawn_city_streets(&mut commands, &mut meshes, &pal);
     spawn_sky_platforms(&mut commands, &mut meshes, &pal, seed + 3);
     spawn_sky_bridges(&mut commands, &mut meshes, &pal, seed + 4);
     spawn_spaceports(&mut commands, &mut meshes, &pal);
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
+    spawn_grasslands(&mut commands, &mut meshes, &pal, seed + 10);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8);
@@ -86,6 +88,10 @@ struct Palette {
 
     residential_a: Handle<StandardMaterial>,
     residential_b: Handle<StandardMaterial>,
+
+    street_asphalt: Handle<StandardMaterial>,
+    street_paint: Handle<StandardMaterial>,
+    grass: Handle<StandardMaterial>,
 
     highway: Handle<StandardMaterial>,
     sky_platform: Handle<StandardMaterial>,
@@ -135,56 +141,99 @@ impl Palette {
                 ..default()
             }),
 
-            downtown_a: m.add(mk(
-                Color::srgb(0.06, 0.09, 0.16),
-                LinearRgba::new(0.0, 0.30, 0.70, 1.0),
-                0.90,
-                0.12,
-            )),
-            downtown_b: m.add(mk(
-                Color::srgb(0.10, 0.07, 0.05),
-                LinearRgba::new(0.60, 0.20, 0.0, 1.0),
-                0.85,
-                0.15,
-            )),
-            downtown_c: m.add(mk(
-                Color::srgb(0.06, 0.11, 0.07),
-                LinearRgba::new(0.0, 0.40, 0.15, 1.0),
-                0.88,
-                0.13,
-            )),
+            // Downtown tower bodies: cel-clean glass blocks with vintage anime
+            // cyan/amber/mint tints so the skyline reads as playful, not realistic.
+            downtown_a: m.add(StandardMaterial {
+                base_color: Color::srgba(0.42, 0.72, 0.96, 0.72),
+                emissive: LinearRgba::new(0.15, 0.45, 1.10, 1.0),
+                metallic: 0.08,
+                perceptual_roughness: 0.05,
+                reflectance: 0.96,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            downtown_b: m.add(StandardMaterial {
+                base_color: Color::srgba(0.96, 0.76, 0.52, 0.70),
+                emissive: LinearRgba::new(1.10, 0.40, 0.10, 1.0),
+                metallic: 0.05,
+                perceptual_roughness: 0.06,
+                reflectance: 0.94,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            downtown_c: m.add(StandardMaterial {
+                base_color: Color::srgba(0.55, 0.86, 0.76, 0.70),
+                emissive: LinearRgba::new(0.18, 0.75, 0.45, 1.0),
+                metallic: 0.06,
+                perceptual_roughness: 0.06,
+                reflectance: 0.95,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
             downtown_facade: m.add(StandardMaterial {
-                base_color: Color::srgb(0.18, 0.18, 0.22),
-                metallic: 0.30,
-                perceptual_roughness: 0.65,
+                base_color: Color::srgb(0.34, 0.36, 0.44),
+                emissive: LinearRgba::new(0.06, 0.08, 0.14, 1.0),
+                metallic: 0.88,
+                perceptual_roughness: 0.22,
+                reflectance: 0.78,
                 ..default()
             }),
 
             industrial_metal: m.add(mk(
-                Color::srgb(0.22, 0.18, 0.12),
-                LinearRgba::new(0.50, 0.15, 0.0, 1.0),
-                0.60,
-                0.55,
+                Color::srgb(0.46, 0.48, 0.55),
+                LinearRgba::new(0.10, 0.12, 0.18, 1.0),
+                0.72,
+                0.36,
             )),
             industrial_rust: m.add(mk(
-                Color::srgb(0.30, 0.14, 0.05),
-                LinearRgba::new(0.20, 0.04, 0.0, 1.0),
-                0.10,
-                0.92,
+                Color::srgb(0.58, 0.56, 0.52),
+                LinearRgba::new(0.08, 0.06, 0.03, 1.0),
+                0.06,
+                0.90,
             )),
 
-            residential_a: m.add(mk(
-                Color::srgb(0.22, 0.20, 0.16),
-                LinearRgba::new(0.15, 0.12, 0.04, 1.0),
-                0.05,
-                0.85,
-            )),
-            residential_b: m.add(mk(
-                Color::srgb(0.18, 0.17, 0.20),
-                LinearRgba::new(0.05, 0.05, 0.18, 1.0),
-                0.08,
-                0.80,
-            )),
+            // Smaller buildings: painterly brick and cinder block with old-anime warmth.
+            residential_a: m.add(StandardMaterial {
+                base_color: Color::srgb(0.72, 0.46, 0.34),
+                emissive: LinearRgba::new(0.12, 0.05, 0.03, 1.0),
+                metallic: 0.02,
+                perceptual_roughness: 0.93,
+                reflectance: 0.20,
+                ..default()
+            }),
+            residential_b: m.add(StandardMaterial {
+                base_color: Color::srgb(0.62, 0.64, 0.68),
+                emissive: LinearRgba::new(0.04, 0.04, 0.06, 1.0),
+                metallic: 0.01,
+                perceptual_roughness: 0.95,
+                reflectance: 0.18,
+                ..default()
+            }),
+
+            street_asphalt: m.add(StandardMaterial {
+                base_color: Color::srgb(0.16, 0.16, 0.19),
+                emissive: LinearRgba::new(0.03, 0.03, 0.05, 1.0),
+                metallic: 0.08,
+                perceptual_roughness: 0.88,
+                reflectance: 0.22,
+                ..default()
+            }),
+            street_paint: m.add(StandardMaterial {
+                base_color: Color::srgb(0.98, 0.86, 0.32),
+                emissive: LinearRgba::new(0.32, 0.26, 0.05, 1.0),
+                metallic: 0.02,
+                perceptual_roughness: 0.72,
+                reflectance: 0.28,
+                ..default()
+            }),
+            grass: m.add(StandardMaterial {
+                base_color: Color::srgb(0.30, 0.58, 0.24),
+                emissive: LinearRgba::new(0.06, 0.12, 0.04, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.96,
+                reflectance: 0.12,
+                ..default()
+            }),
 
             highway: m.add(StandardMaterial {
                 base_color: Color::srgb(0.10, 0.10, 0.13),
@@ -223,28 +272,28 @@ impl Palette {
             }),
 
             window_warm: m.add(StandardMaterial {
-                base_color: Color::srgba(0.92, 0.82, 0.55, 0.82),
-                emissive: LinearRgba::new(2.8, 2.0, 0.9, 1.0),
-                metallic: 0.6,
-                perceptual_roughness: 0.15,
-                reflectance: 0.85,
+                base_color: Color::srgba(1.0, 0.86, 0.58, 0.70),
+                emissive: LinearRgba::new(3.2, 2.2, 0.8, 1.0),
+                metallic: 0.10,
+                perceptual_roughness: 0.05,
+                reflectance: 0.96,
                 alpha_mode: AlphaMode::Blend,
                 ..default()
             }),
             window_cool: m.add(StandardMaterial {
-                base_color: Color::srgba(0.60, 0.78, 1.0, 0.78),
-                emissive: LinearRgba::new(0.8, 1.4, 3.2, 1.0),
-                metallic: 0.7,
-                perceptual_roughness: 0.10,
-                reflectance: 0.90,
+                base_color: Color::srgba(0.58, 0.84, 1.0, 0.70),
+                emissive: LinearRgba::new(0.7, 1.6, 3.6, 1.0),
+                metallic: 0.10,
+                perceptual_roughness: 0.05,
+                reflectance: 0.96,
                 alpha_mode: AlphaMode::Blend,
                 ..default()
             }),
             rooftop: m.add(StandardMaterial {
-                base_color: Color::srgb(0.18, 0.16, 0.14),
-                metallic: 0.72,
-                perceptual_roughness: 0.42,
-                reflectance: 0.55,
+                base_color: Color::srgb(0.42, 0.40, 0.36),
+                metallic: 0.80,
+                perceptual_roughness: 0.32,
+                reflectance: 0.64,
                 ..default()
             }),
             castle_stone: m.add(StandardMaterial {
@@ -899,6 +948,91 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
     }
 }
 
+// ── City Streets ─────────────────────────────────────────────────────────────
+fn spawn_city_streets(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette) {
+    let street_y = 0.04;
+    let avenue_spacing = 48.0_f32;
+    let street_span = 220.0_f32;
+    let street_width = 14.0_f32;
+
+    for i in -4..=4i32 {
+        let x = i as f32 * avenue_spacing;
+        spawn_street_segment(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, street_y, 0.0),
+            street_width,
+            0.18,
+            street_span * 2.0,
+            false,
+        );
+    }
+
+    for i in -4..=4i32 {
+        let z = i as f32 * avenue_spacing;
+        spawn_street_segment(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(0.0, street_y, z),
+            street_span * 2.0,
+            0.18,
+            street_width,
+            true,
+        );
+    }
+}
+
+fn spawn_street_segment(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    horizontal: bool,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width, height, depth))),
+            material: MeshMaterial3d(pal.street_asphalt.clone()),
+            transform: Transform::from_translation(position),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+    ));
+
+    let total = if horizontal { width } else { depth };
+    let dash_len = 7.0_f32;
+    let dash_gap = 9.0_f32;
+    let dash_count = ((total / (dash_len + dash_gap)).floor() as i32).max(1);
+    for i in -dash_count..=dash_count {
+        let offset = i as f32 * (dash_len + dash_gap);
+        let dash_pos = if horizontal {
+            Vec3::new(position.x + offset, position.y + 0.11, position.z)
+        } else {
+            Vec3::new(position.x, position.y + 0.11, position.z + offset)
+        };
+        let dash_mesh = if horizontal {
+            Cuboid::new(dash_len, 0.03, 0.45)
+        } else {
+            Cuboid::new(0.45, 0.03, dash_len)
+        };
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(dash_mesh)),
+                material: MeshMaterial3d(pal.street_paint.clone()),
+                transform: Transform::from_translation(dash_pos),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
 // ── Sky Platforms ─────────────────────────────────────────────────────────────
 fn spawn_sky_platforms(
     commands: &mut Commands,
@@ -1083,6 +1217,43 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
                 }
             }
         }
+    }
+}
+
+// ── Grasslands ───────────────────────────────────────────────────────────────
+fn spawn_grasslands(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    for i in 0..260u64 {
+        let x = seeded(seed, i * 4) * 1100.0 - 550.0;
+        let z = seeded(seed, i * 4 + 1) * 1100.0 - 550.0;
+        let dist = (x * x + z * z).sqrt();
+        if dist < 180.0 {
+            continue;
+        }
+
+        let y = terrain_height(x, z, seed - 10);
+        if !(2.0..72.0).contains(&y) {
+            continue;
+        }
+
+        let radius = 6.0 + seeded(seed, i * 4 + 2) * 18.0;
+        let thickness = 0.20 + seeded(seed, i * 4 + 3) * 0.18;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(radius, thickness))),
+                material: MeshMaterial3d(pal.grass.clone()),
+                transform: Transform::from_xyz(x, y + thickness * 0.5, z)
+                    .with_rotation(Quat::from_rotation_y(
+                        seeded(seed, i * 5) * std::f32::consts::TAU,
+                    )),
+                ..default()
+            },
+            WorldGeometry,
+        ));
     }
 }
 

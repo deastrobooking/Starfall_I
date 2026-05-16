@@ -121,13 +121,14 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                 }
                 CartoonPartKind::Head
                 | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
                 | CartoonPartKind::Hat => {
                     transform.translation.y += wave * 0.025;
                 }
-                CartoonPartKind::LeftArm => {
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
                     transform.rotation *= Quat::from_rotation_z(-0.08 + wave * 0.04);
                 }
-                CartoonPartKind::RightArm => {
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
                     transform.rotation *= Quat::from_rotation_z(0.08 - wave * 0.04);
                 }
                 CartoonPartKind::Shadow => {
@@ -149,20 +150,23 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                     transform.translation.y += wave.abs() * 0.07;
                     transform.rotation *= Quat::from_rotation_z(step * 0.035);
                 }
-                CartoonPartKind::Head | CartoonPartKind::Hair | CartoonPartKind::Hat => {
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
                     transform.translation.y += wave.abs() * 0.05;
                     transform.rotation *= Quat::from_rotation_y(step * 0.06);
                 }
-                CartoonPartKind::LeftArm => {
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
                     transform.rotation *= Quat::from_rotation_x(step * 0.85 * walk_amount);
                 }
-                CartoonPartKind::RightArm => {
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
                     transform.rotation *= Quat::from_rotation_x(-step * 0.85 * walk_amount);
                 }
-                CartoonPartKind::LeftLeg | CartoonPartKind::LeftFoot => {
+                CartoonPartKind::LeftLeg | CartoonPartKind::LeftFoot | CartoonPartKind::LeftBoot => {
                     transform.rotation *= Quat::from_rotation_x(-step * 0.65 * walk_amount);
                 }
-                CartoonPartKind::RightLeg | CartoonPartKind::RightFoot => {
+                CartoonPartKind::RightLeg | CartoonPartKind::RightFoot | CartoonPartKind::RightBoot => {
                     transform.rotation *= Quat::from_rotation_x(step * 0.65 * walk_amount);
                 }
                 CartoonPartKind::Tail => {
@@ -188,13 +192,16 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                     transform.translation.y += 0.08;
                     transform.rotation *= Quat::from_rotation_x(-0.08);
                 }
-                CartoonPartKind::Head | CartoonPartKind::Hair | CartoonPartKind::Hat => {
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
                     transform.translation.y += 0.10;
                 }
-                CartoonPartKind::LeftArm => {
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
                     transform.rotation *= Quat::from_rotation_x(-1.05);
                 }
-                CartoonPartKind::RightArm => {
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
                     transform.rotation *= Quat::from_rotation_x(-0.85);
                 }
                 CartoonPartKind::LeftLeg => {
@@ -225,14 +232,17 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                     transform.translation.y -= 0.12;
                     transform.rotation *= Quat::from_rotation_x(0.08);
                 }
-                CartoonPartKind::Head | CartoonPartKind::Hair | CartoonPartKind::Hat => {
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
                     transform.translation.y -= 0.06;
                 }
-                CartoonPartKind::LeftArm => {
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
                     transform.translation.y += 0.32;
                     transform.rotation *= Quat::from_rotation_x(-1.7);
                 }
-                CartoonPartKind::RightArm => {
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
                     transform.translation.y += 0.32;
                     transform.rotation *= Quat::from_rotation_x(-1.7);
                 }

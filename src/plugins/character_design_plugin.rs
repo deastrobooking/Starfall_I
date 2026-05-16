@@ -63,7 +63,10 @@ enum SwatchCategory {
 
 #[derive(Component, Clone, Copy, PartialEq)]
 enum AccessoryToggle {
+    Hood,
     Cape,
+    Gloves,
+    Boots,
     ShoulderPads,
     Visor,
 }
@@ -82,7 +85,10 @@ fn setup_character_design(
     design_data.outfit_idx = slot.outfit_idx.unwrap_or(0);
     design_data.accent_idx = slot.accent_idx.unwrap_or(0);
     design_data.hair_idx = slot.hair_idx.unwrap_or(0);
+    design_data.has_hood = slot.has_hood.unwrap_or(base.has_hood);
     design_data.has_cape = slot.has_cape.unwrap_or(base.has_cape);
+    design_data.has_gloves = slot.has_gloves.unwrap_or(base.has_gloves);
+    design_data.has_boots = slot.has_boots.unwrap_or(base.has_boots);
     design_data.has_shoulder_pads = slot.has_shoulder_pads.unwrap_or(base.has_shoulder_pads);
     design_data.has_visor = slot.has_visor.unwrap_or(base.has_visor);
     design_data.spin_angle = 0.0;
@@ -175,7 +181,10 @@ fn rebuild_preview_if_dirty(
         Some(outfit_presets()[design_data.outfit_idx]),
         Some(accent_presets()[design_data.accent_idx]),
         Some(hair_presets()[design_data.hair_idx]),
+        Some(design_data.has_hood),
         Some(design_data.has_cape),
+        Some(design_data.has_gloves),
+        Some(design_data.has_boots),
         Some(design_data.has_shoulder_pads),
         Some(design_data.has_visor),
     );
@@ -213,7 +222,10 @@ fn accessory_interaction(
     for (interaction, toggle) in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
             match *toggle {
+                AccessoryToggle::Hood => design_data.has_hood = !design_data.has_hood,
                 AccessoryToggle::Cape => design_data.has_cape = !design_data.has_cape,
+                AccessoryToggle::Gloves => design_data.has_gloves = !design_data.has_gloves,
+                AccessoryToggle::Boots => design_data.has_boots = !design_data.has_boots,
                 AccessoryToggle::ShoulderPads => {
                     design_data.has_shoulder_pads = !design_data.has_shoulder_pads
                 }
@@ -283,7 +295,10 @@ fn save_design(design_data: &CharacterDesignData, select_state: &mut PlayerSelec
     slot.outfit_idx = Some(design_data.outfit_idx);
     slot.accent_idx = Some(design_data.accent_idx);
     slot.hair_idx = Some(design_data.hair_idx);
+    slot.has_hood = Some(design_data.has_hood);
     slot.has_cape = Some(design_data.has_cape);
+    slot.has_gloves = Some(design_data.has_gloves);
+    slot.has_boots = Some(design_data.has_boots);
     slot.has_shoulder_pads = Some(design_data.has_shoulder_pads);
     slot.has_visor = Some(design_data.has_visor);
 }
@@ -320,7 +335,10 @@ fn update_toggle_colors(
     }
     for (toggle, mut bg) in toggle_q.iter_mut() {
         let active = match *toggle {
+            AccessoryToggle::Hood => design_data.has_hood,
             AccessoryToggle::Cape => design_data.has_cape,
+            AccessoryToggle::Gloves => design_data.has_gloves,
+            AccessoryToggle::Boots => design_data.has_boots,
             AccessoryToggle::ShoulderPads => design_data.has_shoulder_pads,
             AccessoryToggle::Visor => design_data.has_visor,
         };
@@ -408,10 +426,21 @@ fn spawn_design_ui(
                     .spawn(Node {
                         flex_direction: FlexDirection::Row,
                         column_gap: Val::Px(8.0),
+                        row_gap: Val::Px(8.0),
+                        flex_wrap: FlexWrap::Wrap,
                         ..default()
                     })
                     .with_children(|row| {
+                        spawn_toggle(row, "HOOD", AccessoryToggle::Hood, design_data.has_hood);
                         spawn_toggle(row, "CAPE", AccessoryToggle::Cape, design_data.has_cape);
+                        spawn_toggle(
+                            row, "GLOVES",
+                            AccessoryToggle::Gloves, design_data.has_gloves,
+                        );
+                        spawn_toggle(
+                            row, "BOOTS",
+                            AccessoryToggle::Boots, design_data.has_boots,
+                        );
                         spawn_toggle(
                             row, "PADS",
                             AccessoryToggle::ShoulderPads, design_data.has_shoulder_pads,

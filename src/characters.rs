@@ -20,11 +20,14 @@ pub struct CartoonCharacterConfig {
     /// Multiplies the body (and proportionally arms/legs) in the X axis.
     pub body_width: f32,
     pub has_hat: bool,
+    pub has_hood: bool,
     pub has_horns: bool,
     pub extra_horns: bool,
     pub has_tail: bool,
     pub has_star_badge: bool,
     pub has_visor: bool,
+    pub has_gloves: bool,
+    pub has_boots: bool,
     pub has_shoulder_pads: bool,
     pub has_cape: bool,
     pub has_spine_ridges: bool,
@@ -46,11 +49,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             scale: 1.0,
             body_width: 1.0,
             has_hat: false,
+            has_hood: true,
             has_horns: false,
             extra_horns: false,
             has_tail: false,
             has_star_badge: true,
             has_visor: false,
+            has_gloves: true,
+            has_boots: true,
             has_shoulder_pads: true,
             has_cape: true,
             has_spine_ridges: false,
@@ -67,11 +73,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             scale: 1.0,
             body_width: 0.92,
             has_hat: false,
+            has_hood: true,
             has_horns: false,
             extra_horns: false,
             has_tail: false,
             has_star_badge: true,
-            has_visor: true,
+            has_visor: false,
+            has_gloves: true,
+            has_boots: true,
             has_shoulder_pads: false,
             has_cape: true,
             has_spine_ridges: false,
@@ -88,11 +97,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             scale: 1.0,
             body_width: 0.94,
             has_hat: false,
+            has_hood: true,
             has_horns: false,
             extra_horns: false,
             has_tail: false,
             has_star_badge: true,
             has_visor: false,
+            has_gloves: true,
+            has_boots: true,
             has_shoulder_pads: false,
             has_cape: true,
             has_spine_ridges: false,
@@ -109,11 +121,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             scale: 1.0,
             body_width: 1.18,
             has_hat: false,
+            has_hood: true,
             has_horns: false,
             extra_horns: false,
             has_tail: false,
             has_star_badge: true,
             has_visor: false,
+            has_gloves: true,
+            has_boots: true,
             has_shoulder_pads: true,
             has_cape: true,
             has_spine_ridges: false,
@@ -130,11 +145,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             scale: 1.0,
             body_width: 1.0,
             has_hat: false,
+            has_hood: true,
             has_horns: false,
             extra_horns: false,
             has_tail: false,
             has_star_badge: true,
             has_visor: false,
+            has_gloves: true,
+            has_boots: true,
             has_shoulder_pads: false,
             has_cape: true,
             has_spine_ridges: false,
@@ -255,11 +273,14 @@ pub fn enemy_config(
         scale: scale * type_scale,
         body_width: type_width,
         has_hat: role == CartoonRole::Wizard,
+        has_hood: matches!(role, CartoonRole::Hero | CartoonRole::Wizard),
         has_horns,
         extra_horns,
         has_tail,
         has_star_badge: matches!(role, CartoonRole::Hero | CartoonRole::Wizard),
         has_visor: false,
+        has_gloves: matches!(role, CartoonRole::Hero | CartoonRole::Wizard),
+        has_boots: matches!(role, CartoonRole::Hero | CartoonRole::Wizard | CartoonRole::Rival),
         has_shoulder_pads: matches!(enemy_type, EnemyType::Heavy | EnemyType::Hybrid),
         has_cape: false,
         has_spine_ridges,
@@ -351,14 +372,40 @@ pub fn attach_cartoon_character(
         Transform::from_xyz(0.0, 0.58 * s, 0.0),
     );
 
-    // ── Hair (back dome, slightly larger than head) ───────────────────────────
+    // ── Hair (long curly volume with ringlets) ──────────────────────────────
     spawn_part(
         commands, meshes, root,
         CartoonPartKind::Hair,
-        Mesh::from(Sphere::new(0.37 * s)),
+        Mesh::from(Sphere::new(0.38 * s)),
         hair.clone(),
-        Transform::from_xyz(0.0, 0.76 * s, -0.04 * s)
-            .with_scale(Vec3::new(1.0, 0.44, 0.88)),
+        Transform::from_xyz(0.0, 0.74 * s, -0.02 * s)
+            .with_scale(Vec3::new(1.02, 0.52, 0.92)),
+    );
+    spawn_part(
+        commands, meshes, root,
+        CartoonPartKind::Hair,
+        Mesh::from(Cuboid::new(0.46 * s, 0.54 * s, 0.18 * s)),
+        hair.clone(),
+        Transform::from_xyz(0.0, 0.42 * s, 0.12 * s)
+            .with_rotation(Quat::from_rotation_x(0.18)),
+    );
+    for (x, rot_z) in [(-0.27_f32, 0.16_f32), (0.27_f32, -0.16_f32)] {
+        spawn_part(
+            commands, meshes, root,
+            CartoonPartKind::Hair,
+            Mesh::from(Cylinder::new(0.085 * s, 0.42 * s)),
+            hair.clone(),
+            Transform::from_xyz(x * s, 0.42 * s, 0.08 * s)
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+        );
+    }
+    spawn_part(
+        commands, meshes, root,
+        CartoonPartKind::Hair,
+        Mesh::from(Cylinder::new(0.06 * s, 0.24 * s)),
+        hair.clone(),
+        Transform::from_xyz(0.0, 0.77 * s, -0.27 * s)
+            .with_rotation(Quat::from_rotation_x(1.35)),
     );
 
     // ── Eyes ──────────────────────────────────────────────────────────────────
@@ -407,6 +454,34 @@ pub fn attach_cartoon_character(
             .with_scale(Vec3::new(0.55, 0.55, 1.0)),
     );
 
+    // ── Hood (default hero silhouette) ──────────────────────────────────────
+    if config.has_hood {
+        spawn_part(
+            commands, meshes, root,
+            CartoonPartKind::Hood,
+            Mesh::from(Sphere::new(0.43 * s)),
+            outfit.clone(),
+            Transform::from_xyz(0.0, 0.77 * s, 0.01 * s)
+                .with_scale(Vec3::new(1.08, 0.90, 1.04)),
+        );
+        spawn_part(
+            commands, meshes, root,
+            CartoonPartKind::Hood,
+            Mesh::from(Cuboid::new(0.52 * s, 0.26 * s, 0.16 * s)),
+            accent.clone(),
+            Transform::from_xyz(0.0, 0.66 * s, -0.22 * s)
+                .with_rotation(Quat::from_rotation_x(-0.20)),
+        );
+        spawn_part(
+            commands, meshes, root,
+            CartoonPartKind::Hood,
+            Mesh::from(Cuboid::new(0.42 * s, 0.22 * s, 0.18 * s)),
+            outfit.clone(),
+            Transform::from_xyz(0.0, 0.32 * s, 0.18 * s)
+                .with_rotation(Quat::from_rotation_x(0.30)),
+        );
+    }
+
     // ── Hat (wizard only) ─────────────────────────────────────────────────────
     if config.has_hat {
         spawn_part(
@@ -426,7 +501,7 @@ pub fn attach_cartoon_character(
         );
     }
 
-    // ── Arms ──────────────────────────────────────────────────────────────────
+    // ── Arms + Hands ─────────────────────────────────────────────────────────
     let arm_x = (0.36 + 0.085) * s * bw; // just outside body edge
     for (kind, x) in [
         (CartoonPartKind::LeftArm, -arm_x),
@@ -435,13 +510,27 @@ pub fn attach_cartoon_character(
         spawn_part(
             commands, meshes, root, kind,
             Mesh::from(Cuboid::new(0.17 * s, 0.62 * s, 0.17 * s)),
-            skin.clone(),
+            outfit.clone(),
             Transform::from_xyz(x, -0.12 * s, 0.0),
         );
     }
+    let hand_mat = if config.has_gloves { accent.clone() } else { skin.clone() };
+    for (kind, x) in [
+        (CartoonPartKind::LeftHand, -arm_x),
+        (CartoonPartKind::RightHand, arm_x),
+    ] {
+        spawn_part(
+            commands, meshes, root, kind,
+            Mesh::from(Sphere::new(0.11 * s)),
+            hand_mat.clone(),
+            Transform::from_xyz(x, -0.49 * s, 0.02 * s)
+                .with_scale(Vec3::new(0.95, 1.05, 0.90)),
+        );
+    }
 
-    // ── Legs + Feet ───────────────────────────────────────────────────────────
+    // ── Legs + Boots ─────────────────────────────────────────────────────────
     let leg_x = 0.195 * s * bw;
+    let boot_mat = if config.has_boots { accent.clone() } else { outfit.clone() };
     for (leg_k, foot_k, x) in [
         (CartoonPartKind::LeftLeg, CartoonPartKind::LeftFoot, -leg_x),
         (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot, leg_x),
@@ -455,9 +544,22 @@ pub fn attach_cartoon_character(
         spawn_part(
             commands, meshes, root, foot_k,
             Mesh::from(Cuboid::new(0.30 * s, 0.14 * s, 0.44 * s)),
-            accent.clone(),
+            boot_mat.clone(),
             Transform::from_xyz(x, -1.22 * s, -0.08 * s),
         );
+        if config.has_boots {
+            let boot_kind = if x < 0.0 {
+                CartoonPartKind::LeftBoot
+            } else {
+                CartoonPartKind::RightBoot
+            };
+            spawn_part(
+                commands, meshes, root, boot_kind,
+                Mesh::from(Cuboid::new(0.24 * s, 0.24 * s, 0.24 * s)),
+                boot_mat.clone(),
+                Transform::from_xyz(x, -1.00 * s, -0.02 * s),
+            );
+        }
     }
 
     // ── Horns ─────────────────────────────────────────────────────────────────
@@ -657,7 +759,10 @@ pub fn hero_config_with_overrides(
     outfit: Option<Color>,
     accent: Option<Color>,
     hair: Option<Color>,
+    has_hood: Option<bool>,
     has_cape: Option<bool>,
+    has_gloves: Option<bool>,
+    has_boots: Option<bool>,
     has_shoulder_pads: Option<bool>,
     has_visor: Option<bool>,
 ) -> CartoonCharacterConfig {
@@ -665,7 +770,10 @@ pub fn hero_config_with_overrides(
     if let Some(c) = outfit { cfg.outfit = c; }
     if let Some(c) = accent { cfg.accent = c; }
     if let Some(c) = hair { cfg.hair = c; }
+    if let Some(v) = has_hood { cfg.has_hood = v; }
     if let Some(v) = has_cape { cfg.has_cape = v; }
+    if let Some(v) = has_gloves { cfg.has_gloves = v; }
+    if let Some(v) = has_boots { cfg.has_boots = v; }
     if let Some(v) = has_shoulder_pads { cfg.has_shoulder_pads = v; }
     if let Some(v) = has_visor { cfg.has_visor = v; }
     cfg
