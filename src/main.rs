@@ -39,7 +39,11 @@ fn main() {
                     }),
                     ..default()
                 })
-                .set(ImagePlugin::default_nearest()),
+                .set(ImagePlugin::default_nearest())
+                .set(AssetPlugin {
+                    file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+                    ..default()
+                }),
         )
         // Physics
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())

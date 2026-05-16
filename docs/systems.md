@@ -38,13 +38,15 @@ Set `LocalPlayerConfig.active` (1–4) before entering `AppState::Playing` to ch
 | State | Trigger | Notes |
 |---|---|---|
 | Idle | No input, grounded | Default ground state |
-| Moving | WASD / left stick | `walk_speed = 0.3` |
+| Moving | WASD / left stick | Smoothed acceleration toward `walk_speed = 0.38` |
 | Sprinting | Shift / LB + move | Drains stamina 15/sec |
 | Jetpack | Hold Space / South while airborne | Burns `fuel_cost_per_sec = 20`/sec; regens on ground |
 | WallSliding | Pushing into wall while falling | Caps fall speed at 0.35 |
 | Hanging | Falling into wall with forward input | Max hang time 2.5s; drains stamina 12/sec |
 
-Wall jump: triggered on jump press while `wall_contact_timer > 0` and airborne. Pushes away from wall normal + 25% input direction.
+Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity.
+
+Wall jump: triggered from buffered jump input while `wall_contact_timer > 0` and airborne. Pushes away from wall normal + 25% input direction.
 
 Climb-up: `E` / D-pad Down while hanging. Boosts player upward `climb_boost * dt * 60`.
 
@@ -121,11 +123,13 @@ Detection / chase / attack ranges are per-type. `difficulty_scale` (from wave or
 
 | Type | HP | Dmg | Speed | Notes |
 |---|---|---|---|---|
-| Drone | 50 | 8 | Fast | Ranged scout, 15 XP |
+| Drone | 50 | 8 | Fast | Flying orbit scout with laser shots, 15 XP |
 | Soldier | 100 | 15 | Med | Standard invader, 25 XP |
 | Heavy | 300 | 25 | Slow | Dragon brute, 50 XP |
 | SpikeAlien | 80 | 20 | Fast | Aggressive, 20 XP |
 | Hybrid | 1000 | 40 | Med | Boss-tier, 200 XP |
+
+Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit above the closest player while leashed to their arena, advance through health phases, fire volleys, breathe cone fire, and create slam shockwaves.
 
 ---
 
@@ -225,9 +229,23 @@ Still not saved: `PerkTree`. See [improvements.md](improvements.md#1-save-data-d
 
 **Module:** `src/lsystem/` | **Plugin:** `WorldPlugin`
 
-- Terrain heightmap via `noise` crate (Perlin); seed from `GameSettings.world_seed`.
+- Terrain heightmap via deterministic layered waves/ridges; seed from `GameSettings.world_seed`.
+- Outer districts, spaceports, trees, crystals, mountains, and authored anchors sample the terrain surface so upgraded props sit on the generated ground rather than the old flat plane.
 - Decorative trees via L-system string rewriting (`lsystem/mod.rs`) + 3-D turtle interpreter (`lsystem/turtle.rs`).
-- Biome lighting/fog/palette set by `WorldPlugin` reading `BiomePalette` resource. Palette comes from `Biome::palette()` in `chapters/mod.rs`.
+- City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.
+- Lush procedural nature adds dense grass, forest pockets, water gardens, reeds, flowers, shrubs, mossy rocks, and darker stone outcrops.
+- `NatureSway` gives trees, water surfaces, reeds, flowers, shrubs, and moss caps a subtle hand-animated motion.
+- Smaller residential and outer-district buildings receive stone plinths, brick or stone courses, corner blocks, roof caps, moss, and warm/cool/dark window panels.
+- Moving platforms bridge rooftops, castles, and high paths; the platform system carries grounded or landing players while avoiding midair drag.
+- Laser turrets track nearby players, show a brief beam windup, then apply laser damage through the same player damage/parry path.
+
+## Character Designer
+
+**Files:** `src/characters.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
+
+- Player slots store optional outfit/accent/hair preset indices plus accessory toggles.
+- Preset indices are normalized before preview, saving, and player spawning, so stale save data cannot panic by indexing outside the palette.
+- The designer preview camera faces the character's front side, while the same spawned character parts are reused by the in-game player model.
 
 ---
 

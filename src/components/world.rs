@@ -67,6 +67,35 @@ pub struct SkyPlatform;
 #[derive(Component, Default)]
 pub struct WalkableSurface;
 
+/// Kinematic platform that travels between two authored points.
+#[derive(Component, Debug, Clone)]
+pub struct MovingPlatform {
+    pub start: Vec3,
+    pub end: Vec3,
+    pub speed: f32,
+    pub phase: f32,
+    pub size: Vec3,
+}
+
+/// Defensive world turret that tracks players and fires a hitscan-style beam.
+#[derive(Component, Debug, Clone)]
+pub struct LaserTurret {
+    pub range: f32,
+    pub cooldown: f32,
+    pub cooldown_timer: f32,
+    pub windup: f32,
+    pub windup_timer: f32,
+    pub locked_target: Option<Entity>,
+    pub damage: f32,
+    pub beam_material: Handle<StandardMaterial>,
+}
+
+/// Short-lived visual beam spawned by turrets and boss attacks.
+#[derive(Component, Debug, Clone)]
+pub struct LaserBeamVfx {
+    pub timer: f32,
+}
+
 /// Authored point used by chapter scripts to place bespoke encounters.
 #[derive(Component, Debug, Clone)]
 pub struct WorldAnchor {

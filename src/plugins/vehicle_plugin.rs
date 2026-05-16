@@ -44,8 +44,12 @@ fn vehicle_input(
                 state.jet_active = false;
             }
             msg_ev.send(UiMessageEvent {
-                text: if state.motorcycle_active { "Motorcycle: ON" } else { "Motorcycle: OFF" }
-                    .into(),
+                text: if state.motorcycle_active {
+                    "Motorcycle: ON"
+                } else {
+                    "Motorcycle: OFF"
+                }
+                .into(),
                 duration: 1.5,
             });
         } else {
@@ -63,7 +67,12 @@ fn vehicle_input(
                 state.motorcycle_active = false;
             }
             msg_ev.send(UiMessageEvent {
-                text: if state.jet_active { "Jet: ON" } else { "Jet: OFF" }.into(),
+                text: if state.jet_active {
+                    "Jet: ON"
+                } else {
+                    "Jet: OFF"
+                }
+                .into(),
                 duration: 1.5,
             });
         } else {
@@ -85,8 +94,9 @@ fn apply_vehicle_buffs(
             mv.walk_speed = 0.7;
             mv.sprint_speed = 1.1;
         } else {
-            mv.walk_speed = 0.3;
-            mv.sprint_speed = 0.55;
+            let base = PlayerMovement::default();
+            mv.walk_speed = base.walk_speed;
+            mv.sprint_speed = base.sprint_speed;
         }
         if state.jet_active {
             jet.force = 0.12;

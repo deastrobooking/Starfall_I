@@ -177,7 +177,7 @@ pub fn spawn_tree(
     position: Vec3,
     rotation_y: f32,
     scale: f32,
-) {
+) -> Entity {
     let root_transform = Transform::from_translation(position)
         .with_rotation(Quat::from_rotation_y(rotation_y))
         .with_scale(Vec3::splat(scale));
@@ -226,4 +226,6 @@ pub fn spawn_tree(
             }
         }
     });
+
+    root
 }

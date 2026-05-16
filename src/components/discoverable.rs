@@ -43,8 +43,13 @@ impl Discoverable {
 #[derive(Component, Debug, Clone)]
 pub enum PuzzleArchetype {
     OrderedSwitches,
-    TimedCrystalChain { window_secs: f32 },
-    CoOpFloorPlates { hold_secs: f32, required_players: usize },
+    TimedCrystalChain {
+        window_secs: f32,
+    },
+    CoOpFloorPlates {
+        hold_secs: f32,
+        required_players: usize,
+    },
     BeamRouting,
 }
 

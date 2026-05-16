@@ -12,14 +12,15 @@ src/
   damage.rs                 Health, Damageable, DamageInfo, apply_damage(), area_damage_falloff()
   resources.rs              Shared resources (WaveInfo, GameSettings, CurrentChapter, ...)
   perks.rs                  PerkTree, PerkBranch, PerkDef — Heart / Star / Acrobat branches
-  characters.rs             Cartoon character construction, hero color configs
+  characters.rs             Cartoon character construction, hero color configs, designer presets
   chapters/mod.rs           All 14 ChapterDef scripts + Biome palettes
   components/
     player.rs               Player, PlayerStats, PlayerMovement, EdgeGrabState, JetpackState,
                             DodgeState, ParryState, PlayerStateMachine, CameraPitch
     weapon.rs               Weapon, WeaponInventory, SpecialWeapon, SpecialWeaponInventory,
                             BeamSabre, Projectile, MeleeCombo
-    enemy.rs                EnemyType, EnemyConfig, EnemyStateMachine, Enemy, DeadEnemy, BossEnemy
+    enemy.rs                EnemyType, EnemyConfig, EnemyStateMachine, Enemy, FlyingDrone,
+                            DragonBoss, EnemyProjectile, DeadEnemy, BossEnemy
     character.rs            CartoonCharacter, CartoonAnimator, CartoonPart, CartoonRole
     armor.rs                ArmorSet (damage reduction)
     companion.rs            Companion component
@@ -27,7 +28,7 @@ src/
     inventory.rs            Inventory, item slots
     mods.rs                 WeaponMod, ArmorMod data
     discoverable.rs         DiscoverableKind, Discoverable marker
-    world.rs                World/terrain components
+    world.rs                World/terrain, moving platform, and turret components
   plugins/
     input_plugin.rs         GameInput resource — unified keyboard + gamepad abstraction
     player_plugin.rs        Movement, ledge hang, wall jump, jetpack, dodge, parry, level-up, death
@@ -36,7 +37,7 @@ src/
     character_plugin.rs     Idle/walk/jump/hang cartoon pose animation
     chapter_plugin.rs       Chapter director — advances EncounterStep sequence
     ui_plugin.rs            HUD, menus, damage numbers, radio chatter overlay
-    world_plugin.rs         Terrain generation (noise), biome swap, lighting
+    world_plugin.rs         Deterministic terrain generation, prop placement, lighting
     save_plugin.rs          F5 manual save + 30s autosave → starfall_i_save.json
     armor_plugin.rs         Armor repair / equip systems
     chest_plugin.rs         Chest spawn, interact, loot roll
@@ -53,13 +54,21 @@ src/
 ## State Flow
 
 ```
-MainMenu ──► ChapterSelect ──► ChassisEditor
-                                     │
-                                     ▼
-                               Playing ◄──── resume ──── Paused
-                                  │
-                                  ▼
-                               GameOver
+MainMenu ──► PlayerSelect ──► CharacterDesign
+                  ▲                  │
+                  └──────────────────┘
+                  │
+                  ▼
+             ChapterSelect
+                  │
+                  ▼
+             ChassisEditor
+                  │
+                  ▼
+             Playing ◄──── resume ──── Paused
+                │
+                ▼
+             GameOver
 ```
 
 ## Core Data Flow
@@ -70,7 +79,7 @@ InputPlugin (GameInput resource)
     ▼
 PlayerPlugin: reads GameInput → mutates PlayerMovement / StateMachine → KinematicCharacterController
 WeaponPlugin: reads GameInput → fires Projectile entities, triggers melee
-EnemyPlugin:  reads Projectile + Player position → updates EnemyStateMachine
+EnemyPlugin:  reads Projectile + Player position → updates EnemyStateMachine, drones, bosses
 ChapterPlugin: listens to EnemyKilledEvent / BossDefeatedEvent → advances EncounterStep
 DiscoverablePlugin: handles collectible beacons and ordered relic-switch puzzles
 UiPlugin:     listens to all events → updates HUD, radio chatter, damage numbers

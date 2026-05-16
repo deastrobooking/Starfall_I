@@ -5,9 +5,12 @@ use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
 };
-use rand::Rng;
 
+use crate::components::armor::ArmorSet;
+use crate::components::player::{ParryState, Player, PlayerMovement, PlayerStats};
 use crate::components::world::*;
+use crate::damage::{DamageInfo, DamageType, Damageable, Health};
+use crate::events::{PlayerDamagedEvent, PlayerParryEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::resources::GameSettings;
 use crate::state::AppState;
@@ -38,6 +41,33 @@ impl Material for GrassMaterial {
     }
 }
 
+#[derive(Component, Clone, Copy)]
+struct NatureSway {
+    base_translation: Vec3,
+    base_rotation: Quat,
+    base_scale: Vec3,
+    phase: f32,
+    speed: f32,
+    sway: f32,
+    bob: f32,
+    pulse: f32,
+}
+
+impl NatureSway {
+    fn new(transform: &Transform, phase: f32, speed: f32, sway: f32, bob: f32, pulse: f32) -> Self {
+        Self {
+            base_translation: transform.translation,
+            base_rotation: transform.rotation,
+            base_scale: transform.scale,
+            phase,
+            speed,
+            sway,
+            bob,
+            pulse,
+        }
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct WorldPlugin;
 
@@ -45,8 +75,224 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
+            .add_systems(
+                Update,
+                (
+                    animate_nature,
+                    moving_platform_system,
+                    laser_turret_system,
+                    laser_beam_cleanup_system,
+                )
+                    .run_if(in_state(AppState::Playing)),
+            )
             .add_systems(OnExit(AppState::Playing), cleanup_world);
     }
+}
+
+fn animate_nature(time: Res<Time>, mut q: Query<(&NatureSway, &mut Transform)>) {
+    let t = time.elapsed_secs();
+    for (sway, mut transform) in q.iter_mut() {
+        let wave = (t * sway.speed + sway.phase).sin();
+        let cross = (t * sway.speed * 0.73 + sway.phase * 1.31).cos();
+        transform.translation = sway.base_translation + Vec3::Y * wave * sway.bob;
+        transform.rotation = sway.base_rotation
+            * Quat::from_rotation_z(wave * sway.sway)
+            * Quat::from_rotation_x(cross * sway.sway * 0.35);
+        transform.scale = sway.base_scale
+            * Vec3::new(
+                1.0 + cross * sway.pulse * 0.35,
+                1.0 + wave * sway.pulse,
+                1.0 - cross * sway.pulse * 0.25,
+            );
+    }
+}
+
+fn moving_platform_system(
+    time: Res<Time>,
+    mut platform_q: Query<(&mut Transform, &MovingPlatform)>,
+    mut player_q: Query<(&mut Transform, &PlayerMovement), (With<Player>, Without<MovingPlatform>)>,
+) {
+    let t = time.elapsed_secs();
+    for (mut transform, platform) in platform_q.iter_mut() {
+        let previous = transform.translation;
+        let travel = platform.end - platform.start;
+        let distance = travel.length().max(0.1);
+        let cycle = t * platform.speed / distance + platform.phase;
+        let eased = 0.5 - 0.5 * cycle.sin();
+        let target = platform.start.lerp(platform.end, eased);
+        let delta = target - previous;
+        transform.translation = target;
+
+        if delta.length_squared() <= 0.000001 {
+            continue;
+        }
+
+        let half = platform.size * 0.5;
+        let top = target.y + half.y;
+        for (mut player_transform, movement) in player_q.iter_mut() {
+            let rel = player_transform.translation - target;
+            let horizontally_on_platform =
+                rel.x.abs() <= half.x + 0.65 && rel.z.abs() <= half.z + 0.65;
+            let feet_y = player_transform.translation.y - 0.95;
+            let vertically_supported =
+                movement.is_grounded && feet_y >= top - 0.35 && feet_y <= top + 0.65;
+            let landing_on_platform = !movement.is_grounded
+                && movement.velocity.y <= 0.0
+                && feet_y >= top - 0.12
+                && feet_y <= top + 0.28;
+            if horizontally_on_platform && (vertically_supported || landing_on_platform) {
+                player_transform.translation += delta;
+            }
+        }
+    }
+}
+
+fn laser_turret_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut turret_q: Query<(&mut Transform, &mut LaserTurret)>,
+    player_pos_q: Query<(Entity, &Transform), (With<Player>, Without<LaserTurret>)>,
+    mut player_damage_q: Query<(
+        &mut Health,
+        &mut Damageable,
+        &mut PlayerStats,
+        &mut ParryState,
+        &ArmorSet,
+    )>,
+    mut damaged_ev: EventWriter<PlayerDamagedEvent>,
+    mut parry_ev: EventWriter<PlayerParryEvent>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut turret) in turret_q.iter_mut() {
+        turret.cooldown_timer = (turret.cooldown_timer - dt).max(0.0);
+        turret.windup_timer = (turret.windup_timer - dt).max(0.0);
+
+        let origin = transform.translation + Vec3::Y * 0.55;
+        let locked_target = turret.locked_target.and_then(|entity| {
+            player_pos_q.get(entity).ok().and_then(|(_, transform)| {
+                let dist = origin.distance(transform.translation);
+                (dist <= turret.range).then_some((entity, transform.translation, dist))
+            })
+        });
+        let target = locked_target.or_else(|| closest_player(origin, turret.range, &player_pos_q));
+        let Some((target_entity, target_pos, target_distance)) = target else {
+            turret.locked_target = None;
+            turret.windup_timer = 0.0;
+            continue;
+        };
+
+        let aim = target_pos + Vec3::Y * 0.65;
+        transform.look_at(aim, Vec3::Y);
+
+        if turret.cooldown_timer > 0.0 {
+            continue;
+        }
+
+        let muzzle = origin + transform.forward().as_vec3() * 1.25;
+        if turret.locked_target != Some(target_entity) {
+            turret.locked_target = Some(target_entity);
+            turret.windup_timer = turret.windup;
+            spawn_beam_vfx(
+                &mut commands,
+                &mut meshes,
+                turret.beam_material.clone(),
+                muzzle,
+                aim,
+                0.035,
+                turret.windup,
+            );
+            continue;
+        }
+
+        if turret.windup_timer > 0.0 {
+            continue;
+        }
+
+        turret.cooldown_timer = turret.cooldown;
+        turret.locked_target = None;
+        spawn_beam_vfx(
+            &mut commands,
+            &mut meshes,
+            turret.beam_material.clone(),
+            muzzle,
+            aim,
+            0.08,
+            0.16,
+        );
+
+        if target_distance <= turret.range {
+            if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
+                player_damage_q.get_mut(target_entity)
+            {
+                crate::plugins::player_plugin::damage_player(
+                    &mut health,
+                    &mut damageable,
+                    &mut stats,
+                    &mut parry,
+                    armor,
+                    &DamageInfo::new(turret.damage, DamageType::Laser),
+                    &mut damaged_ev,
+                    &mut parry_ev,
+                );
+            }
+        }
+    }
+}
+
+fn laser_beam_cleanup_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut beam_q: Query<(Entity, &mut LaserBeamVfx)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut beam) in beam_q.iter_mut() {
+        beam.timer -= dt;
+        if beam.timer <= 0.0 {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+fn closest_player<F: bevy::ecs::query::QueryFilter>(
+    origin: Vec3,
+    max_range: f32,
+    player_q: &Query<(Entity, &Transform), F>,
+) -> Option<(Entity, Vec3, f32)> {
+    player_q
+        .iter()
+        .filter_map(|(entity, transform)| {
+            let dist = origin.distance(transform.translation);
+            (dist <= max_range).then_some((entity, transform.translation, dist))
+        })
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+}
+
+fn spawn_beam_vfx(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    start: Vec3,
+    end: Vec3,
+    radius: f32,
+    timer: f32,
+) {
+    let delta = end - start;
+    let length = delta.length();
+    if length <= 0.05 {
+        return;
+    }
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(radius, length))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(start + delta * 0.5)
+                .with_rotation(Quat::from_rotation_arc(Vec3::Y, delta.normalize())),
+            ..default()
+        },
+        WorldGeometry,
+        LaserBeamVfx { timer },
+    ));
 }
 
 fn cleanup_world(
@@ -79,20 +325,25 @@ fn generate_city(
     spawn_ground_plane(&mut commands);
     spawn_terrain(&mut commands, &mut meshes, &pal, seed);
     spawn_downtown(&mut commands, &mut meshes, &pal, seed);
-    spawn_industrial(&mut commands, &mut meshes, &pal, seed + 1);
-    spawn_residential(&mut commands, &mut meshes, &pal, seed + 2);
+    spawn_industrial(&mut commands, &mut meshes, &pal, seed + 1, seed);
+    spawn_residential(&mut commands, &mut meshes, &pal, seed + 2, seed);
     spawn_highways(&mut commands, &mut meshes, &pal);
     spawn_city_streets(&mut commands, &mut meshes, &pal);
     spawn_sky_platforms(&mut commands, &mut meshes, &pal, seed + 3);
     spawn_sky_bridges(&mut commands, &mut meshes, &pal, seed + 4);
-    spawn_spaceports(&mut commands, &mut meshes, &pal);
+    spawn_moving_platforms(&mut commands, &mut meshes, &pal, seed + 15, seed);
+    spawn_spaceports(&mut commands, &mut meshes, &pal, seed);
+    spawn_laser_turrets(&mut commands, &mut meshes, &pal, seed + 16, seed);
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
     spawn_grasslands(&mut commands, &mut meshes, &mut *grass_mats, seed + 10);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
-    spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8);
+    spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8, seed);
     spawn_river(&mut commands, &mut meshes, &pal);
-    spawn_trees(&mut commands, &mut meshes, m, seed + 9);
+    spawn_water_gardens(&mut commands, &mut meshes, &pal, seed + 12, seed);
+    spawn_rock_fields(&mut commands, &mut meshes, &pal, seed + 13, seed);
+    spawn_understory(&mut commands, &mut meshes, &pal, seed + 14, seed);
+    spawn_trees(&mut commands, &mut meshes, m, seed + 9, seed);
     spawn_aurora_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_collosar_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
@@ -120,6 +371,11 @@ struct Palette {
 
     residential_a: Handle<StandardMaterial>,
     residential_b: Handle<StandardMaterial>,
+    brick_line: Handle<StandardMaterial>,
+    stone_block: Handle<StandardMaterial>,
+    small_window_warm: Handle<StandardMaterial>,
+    small_window_cool: Handle<StandardMaterial>,
+    small_window_dark: Handle<StandardMaterial>,
 
     street_asphalt: Handle<StandardMaterial>,
     street_paint: Handle<StandardMaterial>,
@@ -129,7 +385,15 @@ struct Palette {
     water: Handle<StandardMaterial>,
 
     rock: Handle<StandardMaterial>,
+    rock_dark: Handle<StandardMaterial>,
     snow: Handle<StandardMaterial>,
+    moss: Handle<StandardMaterial>,
+    foliage_a: Handle<StandardMaterial>,
+    foliage_b: Handle<StandardMaterial>,
+    foliage_c: Handle<StandardMaterial>,
+    reed: Handle<StandardMaterial>,
+    flower_a: Handle<StandardMaterial>,
+    flower_b: Handle<StandardMaterial>,
 
     /// Warm glowing window panels — warm office light (yellows/amber).
     window_warm: Handle<StandardMaterial>,
@@ -138,17 +402,17 @@ struct Palette {
     /// Rooftop antenna / water-tank material.
     rooftop: Handle<StandardMaterial>,
 
-    castle_stone: Handle<StandardMaterial>,   // Aurora castle — warm cream/lavender stone
-    castle_trim: Handle<StandardMaterial>,    // Gold trim
-    castle_roof: Handle<StandardMaterial>,    // Deep purple roof cones
-    castle_window: Handle<StandardMaterial>,  // Aurora magic glow windows (purple-cyan emissive)
-    dragon_stone: Handle<StandardMaterial>,   // Collosar — near-black fortress stone
-    dragon_lava: Handle<StandardMaterial>,    // Lava moat (bright orange emissive)
-    dragon_window: Handle<StandardMaterial>,  // Red fire glow windows
+    castle_stone: Handle<StandardMaterial>, // Aurora castle — warm cream/lavender stone
+    castle_trim: Handle<StandardMaterial>,  // Gold trim
+    castle_roof: Handle<StandardMaterial>,  // Deep purple roof cones
+    castle_window: Handle<StandardMaterial>, // Aurora magic glow windows (purple-cyan emissive)
+    dragon_stone: Handle<StandardMaterial>, // Collosar — near-black fortress stone
+    dragon_lava: Handle<StandardMaterial>,  // Lava moat (bright orange emissive)
+    dragon_window: Handle<StandardMaterial>, // Red fire glow windows
     crystal_aurora: Handle<StandardMaterial>, // Glowing purple-blue crystals (alpha blend)
     crystal_dragon: Handle<StandardMaterial>, // Glowing orange-red crystals (alpha blend)
-    aurora_banner: Handle<StandardMaterial>,  // Violet banner
-    dragon_banner: Handle<StandardMaterial>,  // Dark crimson banner
+    aurora_banner: Handle<StandardMaterial>, // Violet banner
+    dragon_banner: Handle<StandardMaterial>, // Dark crimson banner
 }
 
 impl Palette {
@@ -240,6 +504,49 @@ impl Palette {
                 reflectance: 0.18,
                 ..default()
             }),
+            brick_line: m.add(StandardMaterial {
+                base_color: Color::srgb(0.34, 0.24, 0.20),
+                emissive: LinearRgba::new(0.03, 0.02, 0.01, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.98,
+                reflectance: 0.08,
+                ..default()
+            }),
+            stone_block: m.add(StandardMaterial {
+                base_color: Color::srgb(0.50, 0.50, 0.48),
+                emissive: LinearRgba::new(0.03, 0.03, 0.03, 1.0),
+                metallic: 0.02,
+                perceptual_roughness: 0.96,
+                reflectance: 0.14,
+                ..default()
+            }),
+            small_window_warm: m.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 0.80, 0.40, 0.82),
+                emissive: LinearRgba::new(2.3, 1.3, 0.35, 1.0),
+                metallic: 0.05,
+                perceptual_roughness: 0.08,
+                reflectance: 0.78,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            small_window_cool: m.add(StandardMaterial {
+                base_color: Color::srgba(0.42, 0.92, 1.0, 0.78),
+                emissive: LinearRgba::new(0.35, 1.8, 2.6, 1.0),
+                metallic: 0.05,
+                perceptual_roughness: 0.08,
+                reflectance: 0.80,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            small_window_dark: m.add(StandardMaterial {
+                base_color: Color::srgba(0.05, 0.07, 0.10, 0.90),
+                emissive: LinearRgba::new(0.01, 0.02, 0.04, 1.0),
+                metallic: 0.02,
+                perceptual_roughness: 0.18,
+                reflectance: 0.40,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
 
             street_asphalt: m.add(StandardMaterial {
                 base_color: Color::srgb(0.16, 0.16, 0.19),
@@ -286,10 +593,65 @@ impl Palette {
                 perceptual_roughness: 0.95,
                 ..default()
             }),
+            rock_dark: m.add(StandardMaterial {
+                base_color: Color::srgb(0.12, 0.11, 0.10),
+                metallic: 0.02,
+                perceptual_roughness: 0.98,
+                ..default()
+            }),
             snow: m.add(StandardMaterial {
                 base_color: Color::srgb(0.88, 0.92, 1.00),
                 metallic: 0.0,
                 perceptual_roughness: 0.80,
+                ..default()
+            }),
+            moss: m.add(StandardMaterial {
+                base_color: Color::srgb(0.10, 0.36, 0.13),
+                emissive: LinearRgba::new(0.02, 0.08, 0.02, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.92,
+                ..default()
+            }),
+            foliage_a: m.add(StandardMaterial {
+                base_color: Color::srgb(0.06, 0.42, 0.15),
+                emissive: LinearRgba::new(0.01, 0.08, 0.02, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.86,
+                ..default()
+            }),
+            foliage_b: m.add(StandardMaterial {
+                base_color: Color::srgb(0.14, 0.58, 0.22),
+                emissive: LinearRgba::new(0.02, 0.10, 0.02, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.84,
+                ..default()
+            }),
+            foliage_c: m.add(StandardMaterial {
+                base_color: Color::srgb(0.20, 0.52, 0.34),
+                emissive: LinearRgba::new(0.02, 0.08, 0.05, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.88,
+                ..default()
+            }),
+            reed: m.add(StandardMaterial {
+                base_color: Color::srgb(0.42, 0.62, 0.24),
+                emissive: LinearRgba::new(0.04, 0.08, 0.02, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.80,
+                ..default()
+            }),
+            flower_a: m.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.35, 0.70),
+                emissive: LinearRgba::new(0.55, 0.08, 0.28, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.72,
+                ..default()
+            }),
+            flower_b: m.add(StandardMaterial {
+                base_color: Color::srgb(0.40, 0.90, 1.0),
+                emissive: LinearRgba::new(0.08, 0.50, 0.70, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.70,
                 ..default()
             }),
 
@@ -411,12 +773,7 @@ fn spawn_lighting(commands: &mut Commands) {
             shadows_enabled: true,
             ..default()
         },
-        transform: Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            -0.65,
-            0.55,
-            0.0,
-        )),
+        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.65, 0.55, 0.0)),
         ..default()
     });
 
@@ -498,7 +855,7 @@ fn spawn_puzzle_anchors(commands: &mut Commands, seed: u64) {
     ];
 
     for &(id, x, y_offset, z) in anchors {
-        let y = terrain_height(x, z, seed) + y_offset;
+        let y = terrain_surface_y(x, z, seed) + y_offset;
         spawn_world_anchor(commands, id, Vec3::new(x, y, z));
     }
 }
@@ -560,16 +917,21 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     let qilian = qilian_blend * 42.0 + (z * 0.013 + so).sin() * qilian_blend * 10.0;
 
     // Tibetan plateau — southwest quadrant (neg X, neg Z)
-    let plat_x = smoothstep(-200.0, -450.0, x);   // 0 at x>=-200, rises toward -450
-    let plat_z = smoothstep(-150.0, -400.0, z);   // 0 at z>=-150, rises toward -400
+    let plat_x = smoothstep(-200.0, -450.0, x); // 0 at x>=-200, rises toward -450
+    let plat_z = smoothstep(-150.0, -400.0, z); // 0 at z>=-150, rises toward -400
     let plateau = plat_x * plat_z * 65.0;
 
     // Mt. Everest mega-peak centred at (-550, -480)
     let ed = ((x + 550.0).powi(2) + (z + 480.0).powi(2)).sqrt();
     let everest = smoothstep(160.0, 0.0, ed) * 230.0;
 
-    // Flatten the city zone; outer areas get full amplitude.
-    (base + edge_lift + peak_boost + qilian + plateau + everest) * (1.0 - city_flat)
+    // Flatten the city zone; outer areas get full amplitude. Keep the terrain
+    // on or above the invisible gameplay floor so collision and visuals agree.
+    ((base + edge_lift + peak_boost + qilian + plateau + everest) * (1.0 - city_flat)).max(0.0)
+}
+
+fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
+    terrain_height(x, z, seed)
 }
 
 fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
@@ -663,14 +1025,13 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         &pal.downtown_c,
         &pal.downtown_facade,
     ];
-    let mut rng = rand::thread_rng();
 
     for i in 0..60u64 {
         let x = seeded(seed, i * 3) * 200.0 - 100.0;
         let z = seeded(seed, i * 3 + 1) * 200.0 - 100.0;
         let h = 30.0 + seeded(seed, i * 3 + 2) * 120.0;
-        let w = 12.0 + rng.gen_range(0.0f32..18.0);
-        let d = 12.0 + rng.gen_range(0.0f32..18.0);
+        let w = 12.0 + seeded(seed, i * 5 + 3) * 18.0;
+        let d = 12.0 + seeded(seed, i * 5 + 4) * 18.0;
 
         let mat = glass[(i % 4) as usize].clone();
         spawn_building(
@@ -850,13 +1211,20 @@ fn spawn_rooftop_details(
 }
 
 // ── Industrial ────────────────────────────────────────────────────────────────
-fn spawn_industrial(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
+fn spawn_industrial(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
     for i in 0..35u64 {
         let x = 120.0 + seeded(seed, i * 3) * 200.0;
         let z = seeded(seed, i * 3 + 1) * 400.0 - 200.0;
         let h = 15.0 + seeded(seed, i * 3 + 2) * 40.0;
         let w = 20.0 + seeded(seed, i * 4) * 30.0;
         let d = 20.0 + seeded(seed, i * 4 + 1) * 30.0;
+        let ground_y = terrain_surface_y(x, z, terrain_seed);
 
         let body_mat = if i % 2 == 0 {
             pal.industrial_metal.clone()
@@ -867,7 +1235,7 @@ fn spawn_industrial(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pa
             commands,
             meshes,
             body_mat,
-            Vec3::new(x, h * 0.5, z),
+            Vec3::new(x, ground_y + h * 0.5, z),
             w,
             h,
             d,
@@ -879,7 +1247,7 @@ fn spawn_industrial(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pa
             commands,
             meshes,
             pal.industrial_rust.clone(),
-            Vec3::new(x + 5.0, h + 10.0, z + 5.0),
+            Vec3::new(x + 5.0, ground_y + h + 10.0, z + 5.0),
             3.0,
             20.0,
             3.0,
@@ -889,13 +1257,20 @@ fn spawn_industrial(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pa
 }
 
 // ── Residential ───────────────────────────────────────────────────────────────
-fn spawn_residential(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
+fn spawn_residential(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
     for i in 0..50u64 {
         let x = -120.0 - seeded(seed, i * 3) * 200.0;
         let z = seeded(seed, i * 3 + 1) * 400.0 - 200.0;
         let h = 8.0 + seeded(seed, i * 3 + 2) * 25.0;
         let w = 10.0 + seeded(seed, i * 4) * 14.0;
         let d = 8.0 + seeded(seed, i * 4 + 1) * 14.0;
+        let ground_y = terrain_surface_y(x, z, terrain_seed);
 
         let mat = if i % 2 == 0 {
             pal.residential_a.clone()
@@ -906,11 +1281,22 @@ fn spawn_residential(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
             commands,
             meshes,
             mat,
-            Vec3::new(x, h * 0.5, z),
+            Vec3::new(x, ground_y + h * 0.5, z),
             w,
             h,
             d,
             WorldZone::Residential,
+        );
+        spawn_small_building_details(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, ground_y + h * 0.5, z),
+            w,
+            h,
+            d,
+            seed + i,
+            i % 3 == 0,
         );
     }
 }
@@ -1114,21 +1500,180 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
     }
 }
 
-// ── Spaceports ────────────────────────────────────────────────────────────────
-fn spawn_spaceports(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette) {
-    let positions = [
-        Vec3::new(350.0, 0.5, 350.0),
-        Vec3::new(-350.0, 0.5, 350.0),
-        Vec3::new(350.0, 0.5, -350.0),
-        Vec3::new(-350.0, 0.5, -350.0),
+fn spawn_moving_platforms(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let routes = [
+        (
+            Vec3::new(-64.0, 11.0, -42.0),
+            Vec3::new(52.0, 24.0, -42.0),
+            Vec3::new(13.0, 1.2, 7.0),
+        ),
+        (
+            Vec3::new(120.0, 18.0, 96.0),
+            Vec3::new(120.0, 46.0, 176.0),
+            Vec3::new(12.0, 1.2, 12.0),
+        ),
+        (
+            Vec3::new(-210.0, 16.0, 40.0),
+            Vec3::new(-286.0, 34.0, 126.0),
+            Vec3::new(14.0, 1.2, 8.0),
+        ),
+        (
+            Vec3::new(286.0, 22.0, -132.0),
+            Vec3::new(386.0, 54.0, -132.0),
+            Vec3::new(16.0, 1.2, 8.0),
+        ),
+        (
+            Vec3::new(430.0, 86.0, -40.0),
+            Vec3::new(490.0, 126.0, -40.0),
+            Vec3::new(12.0, 1.2, 8.0),
+        ),
+        (
+            Vec3::new(-430.0, 70.0, -330.0),
+            Vec3::new(-508.0, 116.0, -390.0),
+            Vec3::new(14.0, 1.2, 9.0),
+        ),
     ];
 
-    for pos in positions {
+    for (i, &(start_offset, end_offset, size)) in routes.iter().enumerate() {
+        let start = Vec3::new(
+            start_offset.x,
+            terrain_surface_y(start_offset.x, start_offset.z, terrain_seed) + start_offset.y,
+            start_offset.z,
+        );
+        let end = Vec3::new(
+            end_offset.x,
+            terrain_surface_y(end_offset.x, end_offset.z, terrain_seed) + end_offset.y,
+            end_offset.z,
+        );
+        let phase = seeded(seed, i as u64) * std::f32::consts::TAU;
+        let speed = 5.5 + seeded(seed, i as u64 + 20) * 4.5;
+        let initial = start.lerp(end, 0.5 - 0.5 * phase.sin());
+
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(pal.sky_platform.clone()),
+                transform: Transform::from_translation(initial),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            MovingPlatform {
+                start,
+                end,
+                speed,
+                phase,
+                size,
+            },
+            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        ));
+
+        for point in [start, end] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cylinder::new(0.55, 1.8))),
+                    material: MeshMaterial3d(pal.window_cool.clone()),
+                    transform: Transform::from_xyz(point.x, point.y - 1.4, point.z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_laser_turrets(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let placements = [
+        (-78.0_f32, 48.0_f32, 10.0_f32),
+        (92.0, -68.0, 12.0),
+        (238.0, 110.0, 18.0),
+        (-255.0, 148.0, 16.0),
+        (356.0, 352.0, 3.2),
+        (-348.0, 344.0, 3.2),
+        (430.0, -96.0, 20.0),
+        (-426.0, -330.0, 22.0),
+    ];
+
+    for (i, &(x, z, y_offset)) in placements.iter().enumerate() {
+        let y = terrain_surface_y(x, z, terrain_seed) + y_offset;
+        let transform = Transform::from_xyz(x, y, z).with_rotation(Quat::from_rotation_y(
+            seeded(seed, i as u64) * std::f32::consts::TAU,
+        ));
+        let turret = commands
+            .spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cylinder::new(0.9, 1.2))),
+                    material: MeshMaterial3d(pal.rooftop.clone()),
+                    transform,
+                    ..default()
+                },
+                WorldGeometry,
+                LaserTurret {
+                    range: 62.0,
+                    cooldown: 1.7 + seeded(seed, i as u64 + 30) * 0.9,
+                    cooldown_timer: seeded(seed, i as u64 + 60) * 1.5,
+                    windup: 0.34,
+                    windup_timer: 0.0,
+                    locked_target: None,
+                    damage: 7.0 + seeded(seed, i as u64 + 90) * 5.0,
+                    beam_material: pal.window_cool.clone(),
+                },
+                bevy_rapier3d::prelude::RigidBody::Fixed,
+                bevy_rapier3d::prelude::Collider::cylinder(0.6, 0.9),
+            ))
+            .id();
+
+        commands.entity(turret).with_children(|parent| {
+            parent.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.28, 0.24, 2.1))),
+                material: MeshMaterial3d(pal.window_cool.clone()),
+                transform: Transform::from_xyz(0.0, 0.35, -1.0),
+                ..default()
+            });
+            parent.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(0.26))),
+                material: MeshMaterial3d(pal.dragon_lava.clone()),
+                transform: Transform::from_xyz(0.0, 0.62, -0.78),
+                ..default()
+            });
+        });
+    }
+}
+
+// ── Spaceports ────────────────────────────────────────────────────────────────
+fn spawn_spaceports(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    terrain_seed: u64,
+) {
+    let positions = [
+        (350.0_f32, 350.0_f32),
+        (-350.0, 350.0),
+        (350.0, -350.0),
+        (-350.0, -350.0),
+    ];
+
+    for (x, z) in positions {
+        let y = terrain_surface_y(x, z, terrain_seed) + 1.0;
         commands.spawn((
             PbrBundle {
                 mesh: Mesh3d(meshes.add(Cylinder::new(50.0, 2.0))),
                 material: MeshMaterial3d(pal.sky_platform.clone()),
-                transform: Transform::from_translation(pos),
+                transform: Transform::from_xyz(x, y, z),
                 ..default()
             },
             WorldGeometry,
@@ -1165,7 +1710,7 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
             let wz = corner.z + oz;
 
             // Base Y from terrain so spires sit flush on the landscape.
-            let ground_y = terrain_height(wx, wz, seed - 5);
+            let ground_y = terrain_surface_y(wx, wz, seed - 5);
 
             let peak_h = 50.0 + seeded(seed, idx * 5 + 2) * 130.0;
             let base_r = 22.0 + seeded(seed, idx * 5 + 3) * 35.0;
@@ -1261,9 +1806,15 @@ fn spawn_grasslands(
 
     // ── Three wind-grass material variants (linear sRGB greens) ──────────
     let mats: [Handle<GrassMaterial>; 3] = [
-        grass_mats.add(GrassMaterial { color: Vec4::new(0.09, 0.27, 0.07, 1.0) }),
-        grass_mats.add(GrassMaterial { color: Vec4::new(0.13, 0.35, 0.10, 1.0) }),
-        grass_mats.add(GrassMaterial { color: Vec4::new(0.07, 0.22, 0.05, 1.0) }),
+        grass_mats.add(GrassMaterial {
+            color: Vec4::new(0.09, 0.27, 0.07, 1.0),
+        }),
+        grass_mats.add(GrassMaterial {
+            color: Vec4::new(0.13, 0.35, 0.10, 1.0),
+        }),
+        grass_mats.add(GrassMaterial {
+            color: Vec4::new(0.07, 0.22, 0.05, 1.0),
+        }),
     ];
 
     // ── L-system string, evaluated once ──────────────────────────────────
@@ -1289,16 +1840,16 @@ fn spawn_grasslands(
     const BASE_STEP: f32 = 0.38;
     const STEP_SCALE: f32 = 0.76; // branches shrink each push level
 
-    for i in 0..300u64 {
+    for i in 0..760u64 {
         let x = seeded(seed, i * 4) * 1100.0 - 550.0;
         let z = seeded(seed, i * 4 + 1) * 1100.0 - 550.0;
         let dist = (x * x + z * z).sqrt();
-        if dist < 180.0 {
+        if dist < 95.0 {
             continue;
         }
 
-        let y = terrain_height(x, z, seed - 10);
-        if !(2.0..72.0).contains(&y) {
+        let y = terrain_surface_y(x, z, seed - 10);
+        if !(0.05..115.0).contains(&y) {
             continue;
         }
 
@@ -1417,6 +1968,7 @@ fn spawn_outer_districts(
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
     seed: u64,
+    terrain_seed: u64,
 ) {
     let offsets = [
         Vec3::new(300.0, 0.0, 0.0),
@@ -1440,16 +1992,30 @@ fn spawn_outer_districts(
             let h = 10.0 + seeded(seed, idx * 3 + 2) * 50.0;
             let w = 8.0 + seeded(seed, idx * 4) * 15.0;
             let d = 8.0 + seeded(seed, idx * 4 + 1) * 15.0;
+            let x = offset.x + ox;
+            let z = offset.z + oz;
+            let ground_y = terrain_surface_y(x, z, terrain_seed);
 
             spawn_building(
                 commands,
                 meshes,
                 mat.clone(),
-                offset + Vec3::new(ox, h * 0.5, oz),
+                Vec3::new(x, ground_y + h * 0.5, z),
                 w,
                 h,
                 d,
                 WorldZone::OuterDistrict,
+            );
+            spawn_small_building_details(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, ground_y + h * 0.5, z),
+                w,
+                h,
+                d,
+                seed + idx,
+                (di + i as usize) % 2 == 0,
             );
         }
     }
@@ -1473,12 +2039,292 @@ fn spawn_river(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette
     }
 }
 
+fn spawn_water_gardens(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let ponds = [
+        (185.0_f32, 150.0_f32, 24.0_f32, 1.45_f32, 0.70_f32),
+        (-235.0, 130.0, 32.0, 1.20, 0.82),
+        (420.0, -118.0, 30.0, 1.55, 0.62),
+        (-305.0, -245.0, 28.0, 1.30, 0.75),
+        (92.0, -285.0, 22.0, 0.95, 1.25),
+        (-70.0, 335.0, 26.0, 1.50, 0.70),
+    ];
+
+    for (i, &(x, z, r, sx, sz)) in ponds.iter().enumerate() {
+        let y = terrain_surface_y(x, z, terrain_seed) + 0.08;
+        let rot = seeded(seed, i as u64) * std::f32::consts::TAU;
+        let transform = Transform::from_xyz(x, y, z)
+            .with_rotation(Quat::from_rotation_y(rot))
+            .with_scale(Vec3::new(sx, 1.0, sz));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(r, 0.12))),
+                material: MeshMaterial3d(pal.water.clone()),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(
+                &transform,
+                seeded(seed, i as u64 + 10) * 6.28,
+                0.9,
+                0.002,
+                0.025,
+                0.010,
+            ),
+        ));
+
+        for stone in 0..8u64 {
+            let a = stone as f32 * std::f32::consts::TAU / 8.0 + rot * 0.2;
+            let rr = r * (0.78 + seeded(seed, i as u64 * 30 + stone) * 0.34);
+            let px = x + a.cos() * rr * sx;
+            let pz = z + a.sin() * rr * sz;
+            let py = terrain_surface_y(px, pz, terrain_seed) + 0.12;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Sphere::new(1.2 + seeded(seed, 400 + stone) * 1.1))),
+                    material: MeshMaterial3d(if stone % 3 == 0 {
+                        pal.moss.clone()
+                    } else {
+                        pal.rock.clone()
+                    }),
+                    transform: Transform::from_xyz(px, py, pz)
+                        .with_scale(Vec3::new(1.6, 0.28, 1.05))
+                        .with_rotation(Quat::from_rotation_y(a)),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+
+        spawn_reed_ring(
+            commands,
+            meshes,
+            pal,
+            seed + i as u64 * 100,
+            terrain_seed,
+            x,
+            z,
+            r,
+            sx,
+            sz,
+        );
+    }
+}
+
+fn spawn_reed_ring(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+    cx: f32,
+    cz: f32,
+    radius: f32,
+    scale_x: f32,
+    scale_z: f32,
+) {
+    let reed_mesh = meshes.add(Cylinder::new(0.045, 1.0));
+    for i in 0..26u64 {
+        let a = seeded(seed, i * 3) * std::f32::consts::TAU;
+        let rr = radius * (0.82 + seeded(seed, i * 3 + 1) * 0.36);
+        let h = 0.8 + seeded(seed, i * 3 + 2) * 1.2;
+        let x = cx + a.cos() * rr * scale_x;
+        let z = cz + a.sin() * rr * scale_z;
+        let y = terrain_surface_y(x, z, terrain_seed);
+        let transform = Transform::from_xyz(x, y + h * 0.5, z)
+            .with_rotation(Quat::from_rotation_z((seeded(seed, i + 40) - 0.5) * 0.22))
+            .with_scale(Vec3::new(1.0, h, 1.0));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(reed_mesh.clone()),
+                material: MeshMaterial3d(pal.reed.clone()),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(
+                &transform,
+                seeded(seed, i + 80) * 6.28,
+                2.0,
+                0.08,
+                0.02,
+                0.012,
+            ),
+        ));
+    }
+}
+
+fn spawn_rock_fields(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let rock_mesh = meshes.add(Sphere::new(1.0));
+    for i in 0..170u64 {
+        let x = seeded(seed, i * 4) * 1100.0 - 550.0;
+        let z = seeded(seed, i * 4 + 1) * 1100.0 - 550.0;
+        let dist = (x * x + z * z).sqrt();
+        if dist < 135.0 && seeded(seed, i * 4 + 2) < 0.72 {
+            continue;
+        }
+        let y = terrain_surface_y(x, z, terrain_seed);
+        if y > 155.0 {
+            continue;
+        }
+        let sx = 0.8 + seeded(seed, i * 7) * 3.4;
+        let sy = 0.28 + seeded(seed, i * 7 + 1) * 1.1;
+        let sz = 0.7 + seeded(seed, i * 7 + 2) * 2.7;
+        let transform = Transform::from_xyz(x, y + sy * 0.45, z)
+            .with_scale(Vec3::new(sx, sy, sz))
+            .with_rotation(Quat::from_rotation_y(
+                seeded(seed, i * 7 + 3) * std::f32::consts::TAU,
+            ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(rock_mesh.clone()),
+                material: MeshMaterial3d(if i % 5 == 0 {
+                    pal.rock_dark.clone()
+                } else {
+                    pal.rock.clone()
+                }),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        if i % 4 == 0 {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(rock_mesh.clone()),
+                    material: MeshMaterial3d(pal.moss.clone()),
+                    transform: Transform::from_xyz(x, y + sy * 0.95, z).with_scale(Vec3::new(
+                        sx * 0.46,
+                        0.08,
+                        sz * 0.40,
+                    )),
+                    ..default()
+                },
+                WorldGeometry,
+                NatureSway::new(
+                    &Transform::from_xyz(x, y + sy * 0.95, z).with_scale(Vec3::new(
+                        sx * 0.46,
+                        0.08,
+                        sz * 0.40,
+                    )),
+                    seeded(seed, i + 500) * 6.28,
+                    1.4,
+                    0.003,
+                    0.010,
+                    0.012,
+                ),
+            ));
+        }
+    }
+}
+
+fn spawn_understory(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let bush_mesh = meshes.add(Sphere::new(1.0));
+    let flower_mesh = meshes.add(Sphere::new(0.20));
+    let stem_mesh = meshes.add(Cylinder::new(0.025, 0.55));
+
+    for i in 0..520u64 {
+        let x = seeded(seed, i * 5) * 1040.0 - 520.0;
+        let z = seeded(seed, i * 5 + 1) * 1040.0 - 520.0;
+        let dist = (x * x + z * z).sqrt();
+        if dist < 75.0 && seeded(seed, i * 5 + 2) < 0.55 {
+            continue;
+        }
+        let y = terrain_surface_y(x, z, terrain_seed);
+        if y > 128.0 {
+            continue;
+        }
+        let phase = seeded(seed, i + 300) * std::f32::consts::TAU;
+        if i % 3 == 0 {
+            let s = 0.45 + seeded(seed, i * 5 + 3) * 1.15;
+            let mat = match i % 9 {
+                0 | 1 => pal.foliage_a.clone(),
+                2 | 3 | 4 => pal.foliage_b.clone(),
+                _ => pal.foliage_c.clone(),
+            };
+            for lobe in 0..3u64 {
+                let ox = (seeded(seed, i * 9 + lobe) - 0.5) * s * 0.9;
+                let oz = (seeded(seed, i * 9 + lobe + 3) - 0.5) * s * 0.9;
+                let lobe_scale = s * (0.7 + seeded(seed, i * 9 + lobe + 6) * 0.55);
+                let transform = Transform::from_xyz(x + ox, y + lobe_scale * 0.48, z + oz)
+                    .with_scale(Vec3::new(lobe_scale, lobe_scale * 0.75, lobe_scale));
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(bush_mesh.clone()),
+                        material: MeshMaterial3d(mat.clone()),
+                        transform,
+                        ..default()
+                    },
+                    WorldGeometry,
+                    NatureSway::new(
+                        &transform,
+                        phase + lobe as f32,
+                        1.1 + seeded(seed, i + lobe) * 0.8,
+                        0.035,
+                        0.025,
+                        0.020,
+                    ),
+                ));
+            }
+        } else {
+            let h = 0.35 + seeded(seed, i * 5 + 3) * 0.55;
+            let stem_transform =
+                Transform::from_xyz(x, y + h * 0.5, z).with_scale(Vec3::new(1.0, h, 1.0));
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(stem_mesh.clone()),
+                    material: MeshMaterial3d(pal.reed.clone()),
+                    transform: stem_transform,
+                    ..default()
+                },
+                WorldGeometry,
+                NatureSway::new(&stem_transform, phase, 1.8, 0.055, 0.018, 0.010),
+            ));
+            let flower_transform = Transform::from_xyz(x, y + h + 0.10, z)
+                .with_scale(Vec3::splat(0.9 + seeded(seed, i * 7) * 0.7));
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(flower_mesh.clone()),
+                    material: MeshMaterial3d(if i % 4 == 0 {
+                        pal.flower_a.clone()
+                    } else {
+                        pal.flower_b.clone()
+                    }),
+                    transform: flower_transform,
+                    ..default()
+                },
+                WorldGeometry,
+                NatureSway::new(&flower_transform, phase + 0.8, 2.2, 0.080, 0.030, 0.025),
+            ));
+        }
+    }
+}
+
 // ── Trees ─────────────────────────────────────────────────────────────────────
 fn spawn_trees(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     mats: &mut Assets<StandardMaterial>,
     seed: u64,
+    terrain_seed: u64,
 ) {
     // Build one template per species (L-system evaluated once, materials allocated once).
     let oak = TreeTemplate::new(TreeKind::Oak, mats);
@@ -1501,7 +2347,7 @@ fn spawn_trees(
         Placement {
             offset: Vec3::new(-150.0, 0.0, 0.0),
             spread: 140.0,
-            count: 12,
+            count: 36,
             template: &oak,
             scale_base: 0.9,
             scale_range: 0.6,
@@ -1509,8 +2355,8 @@ fn spawn_trees(
         // Oak — outer district north
         Placement {
             offset: Vec3::new(0.0, 0.0, 250.0),
-            spread: 100.0,
-            count: 8,
+            spread: 170.0,
+            count: 32,
             template: &oak,
             scale_base: 0.7,
             scale_range: 0.5,
@@ -1518,8 +2364,8 @@ fn spawn_trees(
         // Pine — near mountain corners (NE)
         Placement {
             offset: Vec3::new(320.0, 0.0, 320.0),
-            spread: 80.0,
-            count: 8,
+            spread: 150.0,
+            count: 28,
             template: &pine,
             scale_base: 1.0,
             scale_range: 0.8,
@@ -1527,8 +2373,8 @@ fn spawn_trees(
         // Pine — mountain corner SW
         Placement {
             offset: Vec3::new(-320.0, 0.0, -320.0),
-            spread: 80.0,
-            count: 8,
+            spread: 150.0,
+            count: 28,
             template: &pine,
             scale_base: 1.0,
             scale_range: 0.8,
@@ -1537,7 +2383,7 @@ fn spawn_trees(
         Placement {
             offset: Vec3::new(200.0, 0.0, 0.0),
             spread: 100.0,
-            count: 6,
+            count: 12,
             template: &dead,
             scale_base: 0.8,
             scale_range: 0.4,
@@ -1545,24 +2391,54 @@ fn spawn_trees(
         // Cyber — downtown fringe, neon accent trees
         Placement {
             offset: Vec3::new(60.0, 0.0, 60.0),
-            spread: 60.0,
-            count: 6,
+            spread: 130.0,
+            count: 20,
             template: &cyber,
             scale_base: 0.6,
             scale_range: 0.4,
+        },
+        // Mixed forest pockets between the city and fantasy domains.
+        Placement {
+            offset: Vec3::new(260.0, 0.0, -120.0),
+            spread: 180.0,
+            count: 30,
+            template: &oak,
+            scale_base: 0.55,
+            scale_range: 0.65,
+        },
+        Placement {
+            offset: Vec3::new(-260.0, 0.0, 230.0),
+            spread: 170.0,
+            count: 26,
+            template: &oak,
+            scale_base: 0.60,
+            scale_range: 0.55,
         },
     ];
 
     let mut idx = 0u64;
     for p in &placements {
-        for i in 0..p.count {
+        for _ in 0..p.count {
             let ox = (seeded(seed, idx * 4) - 0.5) * 2.0 * p.spread;
             let oz = (seeded(seed, idx * 4 + 1) - 0.5) * 2.0 * p.spread;
             let rot = seeded(seed, idx * 4 + 2) * std::f32::consts::TAU;
             let sc = p.scale_base + seeded(seed, idx * 4 + 3) * p.scale_range;
-            let pos = p.offset + Vec3::new(ox, 0.0, oz);
+            let x = p.offset.x + ox;
+            let z = p.offset.z + oz;
+            let y = terrain_surface_y(x, z, terrain_seed);
+            let pos = Vec3::new(x, y, z);
 
-            spawn_tree(commands, meshes, p.template, pos, rot, sc);
+            let tree = spawn_tree(commands, meshes, p.template, pos, rot, sc);
+            commands.entity(tree).insert(NatureSway {
+                base_translation: pos,
+                base_rotation: Quat::from_rotation_y(rot),
+                base_scale: Vec3::splat(sc),
+                phase: seeded(seed, idx * 4 + 4) * std::f32::consts::TAU,
+                speed: 0.55 + seeded(seed, idx * 4 + 5) * 0.55,
+                sway: 0.012 + seeded(seed, idx * 4 + 6) * 0.018,
+                bob: 0.0,
+                pulse: 0.002,
+            });
             idx += 1;
         }
         idx += 100; // separate seed regions between placement groups
@@ -1595,6 +2471,183 @@ fn spawn_building(
     ));
 }
 
+fn spawn_small_building_details(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    seed: u64,
+    stone_variant: bool,
+) {
+    let ground_y = position.y - height * 0.5;
+    let top_y = position.y + height * 0.5;
+    let facade = if stone_variant {
+        pal.stone_block.clone()
+    } else {
+        pal.brick_line.clone()
+    };
+
+    // Stone plinth and roof cap keep the smaller buildings grounded and tactile.
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.45, 0.42, depth + 0.45))),
+            material: MeshMaterial3d(pal.stone_block.clone()),
+            transform: Transform::from_xyz(position.x, ground_y + 0.21, position.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.65, 0.34, depth + 0.65))),
+            material: MeshMaterial3d(facade.clone()),
+            transform: Transform::from_xyz(position.x, top_y + 0.17, position.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    if seeded(seed, 91) > 0.45 {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(width * 0.62, 0.16, depth * 0.52))),
+                material: MeshMaterial3d(pal.moss.clone()),
+                transform: Transform::from_xyz(position.x, top_y + 0.42, position.z),
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(
+                &Transform::from_xyz(position.x, top_y + 0.42, position.z),
+                seeded(seed, 92) * std::f32::consts::TAU,
+                1.2,
+                0.004,
+                0.015,
+                0.015,
+            ),
+        ));
+    }
+
+    let row_count = ((height - 2.0) / 3.2).floor().clamp(1.0, 9.0) as i32;
+    for row in 1..=row_count {
+        let y = ground_y + row as f32 * height / (row_count as f32 + 1.0);
+        let row_h = if stone_variant { 0.10 } else { 0.045 };
+        for &z in &[
+            position.z - depth * 0.5 - 0.055,
+            position.z + depth * 0.5 + 0.055,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.10, row_h, 0.09))),
+                    material: MeshMaterial3d(facade.clone()),
+                    transform: Transform::from_xyz(position.x, y, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        for &x in &[
+            position.x - width * 0.5 - 0.055,
+            position.x + width * 0.5 + 0.055,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.09, row_h, depth + 0.10))),
+                    material: MeshMaterial3d(facade.clone()),
+                    transform: Transform::from_xyz(x, y, position.z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    // Corner blocks read as stone quoins from a distance.
+    for &x in &[
+        position.x - width * 0.5 - 0.08,
+        position.x + width * 0.5 + 0.08,
+    ] {
+        for &z in &[
+            position.z - depth * 0.5 - 0.08,
+            position.z + depth * 0.5 + 0.08,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.22, height * 0.88, 0.22))),
+                    material: MeshMaterial3d(pal.stone_block.clone()),
+                    transform: Transform::from_xyz(x, ground_y + height * 0.44, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    let floors = ((height - 3.0) / 4.6).floor().clamp(1.0, 5.0) as i32;
+    let front_cols = ((width - 2.0) / 4.0).floor().clamp(1.0, 4.0) as i32;
+    let side_cols = ((depth - 2.0) / 4.0).floor().clamp(1.0, 4.0) as i32;
+    let win_w = 1.15;
+    let win_h = 1.55;
+
+    for floor in 0..floors {
+        let y = ground_y + 2.7 + floor as f32 * 4.4;
+        if y > top_y - 1.0 {
+            continue;
+        }
+
+        for col in 0..front_cols {
+            let x = position.x + (col as f32 - (front_cols - 1) as f32 * 0.5) * 3.6;
+            let mat = small_window_material(pal, seed + floor as u64 * 11 + col as u64);
+            for &z in &[
+                position.z - depth * 0.5 - 0.12,
+                position.z + depth * 0.5 + 0.12,
+            ] {
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cuboid::new(win_w, win_h, 0.12))),
+                        material: MeshMaterial3d(mat.clone()),
+                        transform: Transform::from_xyz(x, y, z),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
+
+        for col in 0..side_cols {
+            let z = position.z + (col as f32 - (side_cols - 1) as f32 * 0.5) * 3.6;
+            let mat = small_window_material(pal, seed + 200 + floor as u64 * 13 + col as u64);
+            for &x in &[
+                position.x - width * 0.5 - 0.12,
+                position.x + width * 0.5 + 0.12,
+            ] {
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cuboid::new(0.12, win_h, win_w))),
+                        material: MeshMaterial3d(mat.clone()),
+                        transform: Transform::from_xyz(x, y, z),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
+    }
+}
+
+fn small_window_material(pal: &Palette, seed: u64) -> Handle<StandardMaterial> {
+    let r = seeded(seed, 17);
+    if r < 0.18 {
+        pal.small_window_dark.clone()
+    } else if r < 0.58 {
+        pal.small_window_warm.clone()
+    } else {
+        pal.small_window_cool.clone()
+    }
+}
+
 // ── Tower helper ──────────────────────────────────────────────────────────────
 fn spawn_tower(
     commands: &mut Commands,
@@ -1619,7 +2672,10 @@ fn spawn_tower(
     ));
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cone { radius: radius * 1.25, height: cap_h })),
+            mesh: Mesh3d(meshes.add(Cone {
+                radius: radius * 1.25,
+                height: cap_h,
+            })),
             material: MeshMaterial3d(cap_mat),
             transform: Transform::from_xyz(base.x, base.y + body_h + cap_h * 0.5, base.z),
             ..default()
@@ -1637,10 +2693,10 @@ fn spawn_aurora_castle(
 ) {
     let cx = 490.0_f32;
     let cz = -40.0_f32;
-    let ground = terrain_height(cx, cz, seed);
+    let ground = terrain_surface_y(cx, cz, seed);
     let floor = ground + 8.0; // castle floor sits atop the mesa
     let hw = 38.0_f32; // half-width of the curtain wall square
-    let wt = 4.0_f32;  // wall thickness
+    let wt = 4.0_f32; // wall thickness
 
     // ── Mesa / Foundation platform ─────────────────────────────────────────
     commands.spawn((
@@ -1650,7 +2706,8 @@ fn spawn_aurora_castle(
             transform: Transform::from_xyz(cx, ground + 4.0, cz),
             ..default()
         },
-        WorldGeometry, WalkableSurface,
+        WorldGeometry,
+        WalkableSurface,
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cylinder(4.0, 92.0),
     ));
@@ -1668,10 +2725,10 @@ fn spawn_aurora_castle(
     // ── Curtain walls ──────────────────────────────────────────────────────
     let wall_h = 15.0_f32;
     let wall_specs: &[(f32, f32, f32, f32)] = &[
-        (cx,         cz - hw, hw * 2.0 + wt * 2.0, wt),   // north
-        (cx,         cz + hw, hw * 2.0 + wt * 2.0, wt),   // south
-        (cx - hw,   cz,       wt,   hw * 2.0),              // west
-        (cx + hw,   cz,       wt,   hw * 2.0),              // east
+        (cx, cz - hw, hw * 2.0 + wt * 2.0, wt), // north
+        (cx, cz + hw, hw * 2.0 + wt * 2.0, wt), // south
+        (cx - hw, cz, wt, hw * 2.0),            // west
+        (cx + hw, cz, wt, hw * 2.0),            // east
     ];
     for &(wx, wz, ww, wd) in wall_specs {
         commands.spawn((
@@ -1681,7 +2738,8 @@ fn spawn_aurora_castle(
                 transform: Transform::from_xyz(wx, floor + wall_h * 0.5, wz),
                 ..default()
             },
-            WorldGeometry, WalkableSurface,
+            WorldGeometry,
+            WalkableSurface,
             bevy_rapier3d::prelude::RigidBody::Fixed,
             bevy_rapier3d::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
         ));
@@ -1704,8 +2762,16 @@ fn spawn_aurora_castle(
         (cx - hw, cz + hw),
         (cx + hw, cz + hw),
     ] {
-        spawn_tower(commands, meshes, pal.castle_stone.clone(), pal.castle_roof.clone(),
-            Vec3::new(tx, floor, tz), 7.0, 52.0, 22.0);
+        spawn_tower(
+            commands,
+            meshes,
+            pal.castle_stone.clone(),
+            pal.castle_roof.clone(),
+            Vec3::new(tx, floor, tz),
+            7.0,
+            52.0,
+            22.0,
+        );
         // Glowing window slit
         commands.spawn((
             PbrBundle {
@@ -1731,8 +2797,16 @@ fn spawn_aurora_castle(
     // ── Gatehouse (south entry, flanking the south wall gap) ──────────────
     let gate_z = cz + hw + 3.0;
     for &gx in &[cx - 7.0_f32, cx + 7.0] {
-        spawn_tower(commands, meshes, pal.castle_stone.clone(), pal.castle_roof.clone(),
-            Vec3::new(gx, floor, gate_z), 4.5, 22.0, 10.0);
+        spawn_tower(
+            commands,
+            meshes,
+            pal.castle_stone.clone(),
+            pal.castle_roof.clone(),
+            Vec3::new(gx, floor, gate_z),
+            4.5,
+            22.0,
+            10.0,
+        );
     }
     // Arch lintel
     commands.spawn((
@@ -1746,8 +2820,16 @@ fn spawn_aurora_castle(
     ));
 
     // ── Great central tower ────────────────────────────────────────────────
-    spawn_tower(commands, meshes, pal.castle_stone.clone(), pal.castle_roof.clone(),
-        Vec3::new(cx, floor, cz), 13.0, 88.0, 32.0);
+    spawn_tower(
+        commands,
+        meshes,
+        pal.castle_stone.clone(),
+        pal.castle_roof.clone(),
+        Vec3::new(cx, floor, cz),
+        13.0,
+        88.0,
+        32.0,
+    );
     // Trim ring at 2/3 height
     commands.spawn((
         PbrBundle {
@@ -1759,7 +2841,12 @@ fn spawn_aurora_castle(
         WorldGeometry,
     ));
     // Four tall glowing windows on great tower
-    for angle in [0.0_f32, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, 3.0 * std::f32::consts::FRAC_PI_2] {
+    for angle in [
+        0.0_f32,
+        std::f32::consts::FRAC_PI_2,
+        std::f32::consts::PI,
+        3.0 * std::f32::consts::FRAC_PI_2,
+    ] {
         let win_x = cx + angle.cos() * 13.6;
         let win_z = cz + angle.sin() * 13.6;
         commands.spawn((
@@ -1783,7 +2870,8 @@ fn spawn_aurora_castle(
             transform: Transform::from_xyz(cx, floor + keep_h * 0.5, cz),
             ..default()
         },
-        WorldGeometry, WalkableSurface,
+        WorldGeometry,
+        WalkableSurface,
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cuboid(21.0, keep_h * 0.5, 16.0),
     ));
@@ -1818,10 +2906,28 @@ fn spawn_aurora_castle(
 
     // ── Aurora magic point lights ─────────────────────────────────────────
     let aurora_lights: &[(f32, f32, f32, Color, f32)] = &[
-        (cx,         floor + 92.0, cz,          Color::srgb(0.55, 0.25, 1.0), 120_000.0),
-        (cx - 32.0, floor + 18.0, cz - 32.0,   Color::srgb(0.15, 0.70, 1.0), 60_000.0),
-        (cx + 32.0, floor + 18.0, cz + 32.0,   Color::srgb(0.70, 0.35, 1.0), 60_000.0),
-        (cx,         floor + 20.0, cz,           Color::srgb(0.30, 0.80, 1.0), 40_000.0),
+        (
+            cx,
+            floor + 92.0,
+            cz,
+            Color::srgb(0.55, 0.25, 1.0),
+            120_000.0,
+        ),
+        (
+            cx - 32.0,
+            floor + 18.0,
+            cz - 32.0,
+            Color::srgb(0.15, 0.70, 1.0),
+            60_000.0,
+        ),
+        (
+            cx + 32.0,
+            floor + 18.0,
+            cz + 32.0,
+            Color::srgb(0.70, 0.35, 1.0),
+            60_000.0,
+        ),
+        (cx, floor + 20.0, cz, Color::srgb(0.30, 0.80, 1.0), 40_000.0),
     ];
     for &(lx, ly, lz, ref col, intensity) in aurora_lights {
         commands.spawn((
@@ -1842,10 +2948,10 @@ fn spawn_aurora_castle(
 
     // ── Banner poles ──────────────────────────────────────────────────────
     let banner_positions: &[(f32, f32, f32)] = &[
-        (cx,         floor + 92.0, cz),            // great tower top
-        (cx + hw,   floor + 55.0, cz - hw),         // NE corner tower
-        (cx - hw,   floor + 55.0, cz + hw),         // SW corner tower
-        (cx,         floor + 22.0, gate_z + 2.0),   // above gatehouse
+        (cx, floor + 92.0, cz),           // great tower top
+        (cx + hw, floor + 55.0, cz - hw), // NE corner tower
+        (cx - hw, floor + 55.0, cz + hw), // SW corner tower
+        (cx, floor + 22.0, gate_z + 2.0), // above gatehouse
     ];
     for &(bx, by, bz) in banner_positions {
         commands.spawn((
@@ -1877,7 +2983,10 @@ fn spawn_aurora_castle(
         let ch = 10.0 + seeded(seed + i as u64 * 7, 0) * 14.0;
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cone { radius: 1.5 + seeded(seed + i as u64, 1) * 1.5, height: ch })),
+                mesh: Mesh3d(meshes.add(Cone {
+                    radius: 1.5 + seeded(seed + i as u64, 1) * 1.5,
+                    height: ch,
+                })),
                 material: MeshMaterial3d(pal.crystal_aurora.clone()),
                 transform: Transform::from_xyz(ck_x, ground + ch * 0.5 + 4.0, ck_z),
                 ..default()
@@ -1896,7 +3005,7 @@ fn spawn_collosar_castle(
 ) {
     let cx = -490.0_f32;
     let cz = -390.0_f32;
-    let ground = terrain_height(cx, cz, seed);
+    let ground = terrain_surface_y(cx, cz, seed);
     let floor = ground + 6.0;
     let hw = 42.0_f32;
     let wt = 6.0_f32;
@@ -1909,7 +3018,8 @@ fn spawn_collosar_castle(
             transform: Transform::from_xyz(cx, ground + 3.0, cz),
             ..default()
         },
-        WorldGeometry, WalkableSurface,
+        WorldGeometry,
+        WalkableSurface,
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cylinder(3.0, 82.0),
     ));
@@ -1920,9 +3030,16 @@ fn spawn_collosar_castle(
         let rh = 20.0 + seeded(seed + i as u64, 98) * 30.0;
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cone { radius: rh * 0.25, height: rh })),
+                mesh: Mesh3d(meshes.add(Cone {
+                    radius: rh * 0.25,
+                    height: rh,
+                })),
                 material: MeshMaterial3d(pal.dragon_stone.clone()),
-                transform: Transform::from_xyz(cx + ang.cos() * rr, ground + rh * 0.5, cz + ang.sin() * rr),
+                transform: Transform::from_xyz(
+                    cx + ang.cos() * rr,
+                    ground + rh * 0.5,
+                    cz + ang.sin() * rr,
+                ),
                 ..default()
             },
             WorldGeometry,
@@ -1934,10 +3051,10 @@ fn spawn_collosar_castle(
     // ── Outer walls ────────────────────────────────────────────────────────
     let wall_h = 20.0_f32;
     let wall_specs: &[(f32, f32, f32, f32)] = &[
-        (cx,       cz - hw, hw * 2.0 + wt * 2.0, wt),
-        (cx,       cz + hw, hw * 2.0 + wt * 2.0, wt),
-        (cx - hw, cz,       wt, hw * 2.0),
-        (cx + hw, cz,       wt, hw * 2.0),
+        (cx, cz - hw, hw * 2.0 + wt * 2.0, wt),
+        (cx, cz + hw, hw * 2.0 + wt * 2.0, wt),
+        (cx - hw, cz, wt, hw * 2.0),
+        (cx + hw, cz, wt, hw * 2.0),
     ];
     for &(wx, wz, ww, wd) in wall_specs {
         commands.spawn((
@@ -1947,7 +3064,8 @@ fn spawn_collosar_castle(
                 transform: Transform::from_xyz(wx, floor + wall_h * 0.5, wz),
                 ..default()
             },
-            WorldGeometry, WalkableSurface,
+            WorldGeometry,
+            WalkableSurface,
             bevy_rapier3d::prelude::RigidBody::Fixed,
             bevy_rapier3d::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
         ));
@@ -1990,7 +3108,10 @@ fn spawn_collosar_castle(
         // Fang-like spire cap
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cone { radius: 8.0, height: 42.0 })),
+                mesh: Mesh3d(meshes.add(Cone {
+                    radius: 8.0,
+                    height: 42.0,
+                })),
                 material: MeshMaterial3d(pal.dragon_stone.clone()),
                 transform: Transform::from_xyz(tx, floor + 92.0 + 21.0, tz),
                 ..default()
@@ -2039,7 +3160,8 @@ fn spawn_collosar_castle(
             transform: Transform::from_xyz(cx, floor + keep_h * 0.5, cz),
             ..default()
         },
-        WorldGeometry, WalkableSurface,
+        WorldGeometry,
+        WalkableSurface,
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cuboid(29.0, keep_h * 0.5, 24.0),
     ));
@@ -2059,7 +3181,10 @@ fn spawn_collosar_castle(
     ));
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cone { radius: 11.0, height: 58.0 })),
+            mesh: Mesh3d(meshes.add(Cone {
+                radius: 11.0,
+                height: 58.0,
+            })),
             material: MeshMaterial3d(pal.dragon_stone.clone()),
             transform: Transform::from_xyz(cx, floor + 135.0 + 29.0, cz),
             ..default()
@@ -2090,10 +3215,7 @@ fn spawn_collosar_castle(
     ));
 
     // ── Dragon wing-perch arms ──────────────────────────────────────────────
-    for &(px, pz) in &[
-        (cx - 38.0, cz),
-        (cx + 38.0, cz),
-    ] {
+    for &(px, pz) in &[(cx - 38.0, cz), (cx + 38.0, cz)] {
         commands.spawn((
             PbrBundle {
                 mesh: Mesh3d(meshes.add(Cuboid::new(40.0, 3.5, 7.0))),
@@ -2101,7 +3223,8 @@ fn spawn_collosar_castle(
                 transform: Transform::from_xyz(px, floor + 88.0, pz),
                 ..default()
             },
-            WorldGeometry, WalkableSurface,
+            WorldGeometry,
+            WalkableSurface,
             bevy_rapier3d::prelude::RigidBody::Fixed,
             bevy_rapier3d::prelude::Collider::cuboid(20.0, 1.75, 3.5),
         ));
@@ -2162,12 +3285,12 @@ fn spawn_collosar_castle(
 
     // ── Dragon fire point lights ───────────────────────────────────────────
     let fire_lights: &[(f32, f32, f32, f32)] = &[
-        (cx,         floor + 140.0, cz,          250_000.0),
-        (cx - 44.0, floor + 24.0,  cz - 44.0,   90_000.0),
-        (cx + 44.0, floor + 24.0,  cz + 44.0,   90_000.0),
-        (cx - 44.0, floor + 24.0,  cz + 44.0,   70_000.0),
-        (cx + 44.0, floor + 24.0,  cz - 44.0,   70_000.0),
-        (cx,         floor + 12.0,  cz,           40_000.0),
+        (cx, floor + 140.0, cz, 250_000.0),
+        (cx - 44.0, floor + 24.0, cz - 44.0, 90_000.0),
+        (cx + 44.0, floor + 24.0, cz + 44.0, 90_000.0),
+        (cx - 44.0, floor + 24.0, cz + 44.0, 70_000.0),
+        (cx + 44.0, floor + 24.0, cz - 44.0, 70_000.0),
+        (cx, floor + 12.0, cz, 40_000.0),
     ];
     for &(lx, ly, lz, intensity) in fire_lights {
         commands.spawn((
@@ -2190,7 +3313,7 @@ fn spawn_collosar_castle(
     for &(bx, by, bz) in &[
         (cx - hw, floor + 96.0, cz - hw),
         (cx + hw, floor + 96.0, cz - hw),
-        (cx,       floor + 143.0, cz),
+        (cx, floor + 143.0, cz),
     ] {
         commands.spawn((
             PbrBundle {
@@ -2215,7 +3338,7 @@ fn spawn_collosar_castle(
     // ── Everest snow cap (decorative, near the peak at -550, -480) ─────────
     let ex_x = -550.0_f32;
     let ex_z = -480.0_f32;
-    let ev_ground = terrain_height(ex_x, ex_z, seed);
+    let ev_ground = terrain_surface_y(ex_x, ex_z, seed);
     // Snow cap spheres sitting on the Everest terrain peak
     for &(sox, soz, sr) in &[
         (0.0_f32, 0.0, 35.0_f32),
@@ -2259,36 +3382,41 @@ fn spawn_magic_crystals(
 ) {
     // Crystal fields: (zone_center_x, zone_center_z, count, is_dragon_crystal)
     let zones: &[(f32, f32, u64, bool)] = &[
-        (320.0, -20.0, 14, false),   // Qilian approach (aurora)
-        (390.0, 30.0,  10, false),   // Qilian mid (aurora)
-        (440.0, -70.0, 8,  false),   // Castle approach (aurora)
-        (-200.0, -150.0, 8, true),   // Tibetan border (dragon)
-        (-320.0, -260.0, 10, true),  // Dragon approach
-        (-80.0, 200.0, 6, false),    // Aurora domain north (aurora)
+        (320.0, -20.0, 14, false),  // Qilian approach (aurora)
+        (390.0, 30.0, 10, false),   // Qilian mid (aurora)
+        (440.0, -70.0, 8, false),   // Castle approach (aurora)
+        (-200.0, -150.0, 8, true),  // Tibetan border (dragon)
+        (-320.0, -260.0, 10, true), // Dragon approach
+        (-80.0, 200.0, 6, false),   // Aurora domain north (aurora)
     ];
 
     for (zi, &(zx, zz, count, is_dragon)) in zones.iter().enumerate() {
         for i in 0..count {
             let idx = zi as u64 * 30 + i;
-            let ox = (seeded(seed + 50, idx * 3)      - 0.5) * 70.0;
-            let oz = (seeded(seed + 50, idx * 3 + 1)  - 0.5) * 70.0;
-            let h  =  5.0 + seeded(seed + 50, idx * 3 + 2) * 16.0;
-            let r  =  1.2 + seeded(seed + 50, idx * 4)      * 2.8;
+            let ox = (seeded(seed + 50, idx * 3) - 0.5) * 70.0;
+            let oz = (seeded(seed + 50, idx * 3 + 1) - 0.5) * 70.0;
+            let h = 5.0 + seeded(seed + 50, idx * 3 + 2) * 16.0;
+            let r = 1.2 + seeded(seed + 50, idx * 4) * 2.8;
             let wx = zx + ox;
             let wz = zz + oz;
-            let wy = terrain_height(wx, wz, seed);
+            let wy = terrain_surface_y(wx, wz, seed);
 
-            let mat = if is_dragon { pal.crystal_dragon.clone() } else { pal.crystal_aurora.clone() };
+            let mat = if is_dragon {
+                pal.crystal_dragon.clone()
+            } else {
+                pal.crystal_aurora.clone()
+            };
 
             // Main crystal spire
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cone { radius: r, height: h })),
+                    mesh: Mesh3d(meshes.add(Cone {
+                        radius: r,
+                        height: h,
+                    })),
                     material: MeshMaterial3d(mat.clone()),
                     transform: Transform::from_xyz(wx, wy + h * 0.5, wz)
-                        .with_rotation(Quat::from_rotation_z(
-                            (seeded(seed + 51, idx) - 0.5) * 0.3,
-                        )),
+                        .with_rotation(Quat::from_rotation_z((seeded(seed + 51, idx) - 0.5) * 0.3)),
                     ..default()
                 },
                 WorldGeometry,
@@ -2299,7 +3427,10 @@ fn spawn_magic_crystals(
                 let r2 = r * 0.60;
                 commands.spawn((
                     PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cone { radius: r2, height: h2 })),
+                        mesh: Mesh3d(meshes.add(Cone {
+                            radius: r2,
+                            height: h2,
+                        })),
                         material: MeshMaterial3d(mat.clone()),
                         transform: Transform::from_xyz(wx + r * 1.8, wy + h2 * 0.5, wz + r)
                             .with_rotation(Quat::from_rotation_z(0.22)),

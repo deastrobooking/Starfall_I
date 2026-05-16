@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::components::armor::ArmorSet;
 use crate::components::enemy::Enemy;
 use crate::components::player::*;
 use crate::components::weapon::*;
@@ -111,7 +112,11 @@ fn star_muzzle_origin(player_transform: &GlobalTransform, aim_forward: Vec3) -> 
     let facing = if facing.length_squared() > 0.001 {
         facing
     } else {
-        player_transform.forward().as_vec3().with_y(0.0).normalize_or_zero()
+        player_transform
+            .forward()
+            .as_vec3()
+            .with_y(0.0)
+            .normalize_or_zero()
     };
     player_transform.translation() + Vec3::Y * 0.75 + facing * 0.75
 }
@@ -160,6 +165,7 @@ fn weapon_fire_system(
             &mut PlayerStateMachine,
             &PlayerInput,
             &PlayerCameraRef,
+            &ArmorSet,
         ),
         With<Player>,
     >,
@@ -167,13 +173,19 @@ fn weapon_fire_system(
     mut fired_ev: EventWriter<WeaponFiredEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_transform, mut inv, mut sm, pi, cam_ref) in player_q.iter_mut() {
-        let Ok(cam) = cam_q.get(cam_ref.0) else { continue };
+    for (player_transform, mut inv, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
+        let Ok(cam) = cam_q.get(cam_ref.0) else {
+            continue;
+        };
 
         let weapon = inv.active_mut();
         weapon.fire_timer = (weapon.fire_timer - dt).max(0.0);
 
-        let should_fire = if weapon.automatic { pi.fire } else { pi.fire_just };
+        let should_fire = if weapon.automatic {
+            pi.fire
+        } else {
+            pi.fire_just
+        };
         if !should_fire || !weapon.can_fire() {
             continue;
         }
@@ -183,7 +195,7 @@ fn weapon_fire_system(
         let right = cam.right().as_vec3();
         let up = cam.up().as_vec3();
 
-        let damage = weapon.damage;
+        let damage = armor.modified_outgoing_damage(weapon.damage);
         let speed = weapon.speed;
         let spread = weapon.spread;
         let pellets = weapon.pellets;
@@ -192,12 +204,24 @@ fn weapon_fire_system(
         let gravity_affected = weapon.weapon_type == WeaponType::Grenade;
 
         let (mesh_h, mat_h) = match weapon.weapon_type {
-            WeaponType::Pistol => (proj_assets.sphere_sm.clone(), proj_assets.mat_pistol.clone()),
+            WeaponType::Pistol => (
+                proj_assets.sphere_sm.clone(),
+                proj_assets.mat_pistol.clone(),
+            ),
             WeaponType::Rifle => (proj_assets.sphere_sm.clone(), proj_assets.mat_rifle.clone()),
-            WeaponType::Shotgun => (proj_assets.sphere_sm.clone(), proj_assets.mat_shotgun.clone()),
-            WeaponType::Rocket => (proj_assets.sphere_md.clone(), proj_assets.mat_rocket.clone()),
+            WeaponType::Shotgun => (
+                proj_assets.sphere_sm.clone(),
+                proj_assets.mat_shotgun.clone(),
+            ),
+            WeaponType::Rocket => (
+                proj_assets.sphere_md.clone(),
+                proj_assets.mat_rocket.clone(),
+            ),
             WeaponType::Laser => (proj_assets.sphere_sm.clone(), proj_assets.mat_laser.clone()),
-            WeaponType::Grenade => (proj_assets.sphere_md.clone(), proj_assets.mat_grenade.clone()),
+            WeaponType::Grenade => (
+                proj_assets.sphere_md.clone(),
+                proj_assets.mat_grenade.clone(),
+            ),
         };
 
         weapon.ammo = weapon.ammo.saturating_sub(1);
@@ -207,7 +231,10 @@ fn weapon_fire_system(
             use rand::Rng;
             let mut rng = rand::thread_rng();
             let (sx, sy) = if spread > 0.0 {
-                (rng.gen_range(-spread..spread), rng.gen_range(-spread..spread))
+                (
+                    rng.gen_range(-spread..spread),
+                    rng.gen_range(-spread..spread),
+                )
             } else {
                 (0.0, 0.0)
             };
@@ -260,7 +287,13 @@ fn special_weapon_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     mut player_q: Query<
-        (&GlobalTransform, &mut SpecialWeaponInventory, &PlayerInput, &PlayerCameraRef),
+        (
+            &GlobalTransform,
+            &mut SpecialWeaponInventory,
+            &PlayerInput,
+            &PlayerCameraRef,
+            &ArmorSet,
+        ),
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
@@ -268,24 +301,29 @@ fn special_weapon_system(
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_transform, mut inv, pi, cam_ref) in player_q.iter_mut() {
+    for (player_transform, mut inv, pi, cam_ref, armor) in player_q.iter_mut() {
         // Tick all cooldowns every frame.
         inv.slot7.cooldown_timer = (inv.slot7.cooldown_timer - dt).max(0.0);
         inv.slot8.cooldown_timer = (inv.slot8.cooldown_timer - dt).max(0.0);
         inv.slot9.cooldown_timer = (inv.slot9.cooldown_timer - dt).max(0.0);
         inv.slot0.cooldown_timer = (inv.slot0.cooldown_timer - dt).max(0.0);
 
-        let Some(slot) = pi.special_slot else { continue };
-        let Ok(cam) = cam_q.get(cam_ref.0) else { continue };
+        let Some(slot) = pi.special_slot else {
+            continue;
+        };
+        let Ok(cam) = cam_q.get(cam_ref.0) else {
+            continue;
+        };
 
         let fwd = cam.forward().as_vec3();
         let pos = star_muzzle_origin(player_transform, fwd);
+        let armor_damage_mult = armor.modified_outgoing_damage(1.0);
 
         match slot {
             // Slot 7 — Homing Star
             0 => {
                 if inv.slot7.can_fire() {
-                    let dmg = inv.slot7.effective_damage();
+                    let dmg = inv.slot7.effective_damage() * armor_damage_mult;
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;
                     inv.slot7.ammo = inv.slot7.ammo.saturating_sub(1);
                     commands.spawn((
@@ -324,7 +362,7 @@ fn special_weapon_system(
             // Slot 8 — Tri-Star Burst
             1 => {
                 if inv.slot8.can_fire() {
-                    let dmg = inv.slot8.effective_damage();
+                    let dmg = inv.slot8.effective_damage() * armor_damage_mult;
                     inv.slot8.cooldown_timer = inv.slot8.cooldown;
                     inv.slot8.ammo = inv.slot8.ammo.saturating_sub(1);
                     use rand::Rng;
@@ -372,7 +410,7 @@ fn special_weapon_system(
             // Slot 9 — Moon Bubble
             2 => {
                 if inv.slot9.can_fire() {
-                    let dmg = inv.slot9.effective_damage();
+                    let dmg = inv.slot9.effective_damage() * armor_damage_mult;
                     inv.slot9.cooldown_timer = inv.slot9.cooldown;
                     inv.slot9.ammo = inv.slot9.ammo.saturating_sub(1);
                     commands.spawn((
@@ -411,7 +449,7 @@ fn special_weapon_system(
             // Slot 0 — Sprite Turret
             3 => {
                 if inv.slot0.can_fire() {
-                    let dmg = inv.slot0.effective_damage();
+                    let dmg = inv.slot0.effective_damage() * armor_damage_mult;
                     inv.slot0.cooldown_timer = inv.slot0.cooldown;
                     inv.slot0.ammo = inv.slot0.ammo.saturating_sub(1);
                     use rand::Rng;
@@ -524,8 +562,11 @@ fn projectile_update_system(
             let dist = proj_transform.translation.distance(e_transform.translation);
             if dist < 1.5 {
                 if proj.is_explosive {
-                    explosion =
-                        Some((proj_transform.translation, proj.explosion_radius, proj.damage));
+                    explosion = Some((
+                        proj_transform.translation,
+                        proj.explosion_radius,
+                        proj.damage,
+                    ));
                     hit = true;
                     break;
                 } else {
@@ -553,7 +594,14 @@ fn projectile_update_system(
         }
 
         if let Some((pos, radius, dmg)) = explosion {
-            explode(&pos, radius, dmg, &mut enemy_q, &mut enemy_damaged_ev, &mut enemy_killed_ev);
+            explode(
+                &pos,
+                radius,
+                dmg,
+                &mut enemy_q,
+                &mut enemy_damaged_ev,
+                &mut enemy_killed_ev,
+            );
         }
         if hit {
             commands.entity(proj_entity).despawn_recursive();
@@ -615,7 +663,14 @@ fn melee_combo_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     mut player_q: Query<
-        (&GlobalTransform, &mut MeleeCombo, &mut PlayerStateMachine, &PlayerInput, &PlayerCameraRef),
+        (
+            &GlobalTransform,
+            &mut MeleeCombo,
+            &mut PlayerStateMachine,
+            &PlayerInput,
+            &PlayerCameraRef,
+            &ArmorSet,
+        ),
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
@@ -626,8 +681,10 @@ fn melee_combo_system(
     mut killed_ev: EventWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_transform, mut combo, mut sm, pi, cam_ref) in player_q.iter_mut() {
-        let Ok(cam) = cam_q.get(cam_ref.0) else { continue };
+    for (player_transform, mut combo, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
+        let Ok(cam) = cam_q.get(cam_ref.0) else {
+            continue;
+        };
 
         combo.light_timer = (combo.light_timer - dt).max(0.0);
         combo.heavy_timer = (combo.heavy_timer - dt).max(0.0);
@@ -662,10 +719,11 @@ fn melee_combo_system(
 
         let cam_fwd = cam.forward().as_vec3();
         let cam_pos = star_muzzle_origin(player_transform, cam_fwd);
+        let armor_damage_mult = armor.modified_outgoing_damage(1.0);
 
         if do_light && combo.light_index < LIGHT_COMBO.len() {
             let (name, base_damage, _knockback, duration) = LIGHT_COMBO[combo.light_index];
-            let damage = base_damage * combo.damage_multiplier;
+            let damage = base_damage * combo.damage_multiplier * armor_damage_mult;
 
             execute_melee_hit(
                 cam_pos,
@@ -692,11 +750,13 @@ fn melee_combo_system(
             sm.force(PlayerState::Attacking);
 
             if combo.light_index == 0 {
-                finished_ev.send(ComboFinishedEvent { combo_name: "Light".to_string() });
+                finished_ev.send(ComboFinishedEvent {
+                    combo_name: "Light".to_string(),
+                });
             }
         } else if do_heavy && combo.heavy_index < HEAVY_COMBO.len() {
             let (name, base_damage, _knockback, duration) = HEAVY_COMBO[combo.heavy_index];
-            let damage = base_damage * combo.damage_multiplier;
+            let damage = base_damage * combo.damage_multiplier * armor_damage_mult;
 
             execute_melee_hit(
                 cam_pos,
@@ -723,7 +783,9 @@ fn melee_combo_system(
             sm.force(PlayerState::Attacking);
 
             if combo.heavy_index == 0 {
-                finished_ev.send(ComboFinishedEvent { combo_name: "Heavy".to_string() });
+                finished_ev.send(ComboFinishedEvent {
+                    combo_name: "Heavy".to_string(),
+                });
             }
         }
     }
@@ -787,7 +849,14 @@ fn beam_sabre_update_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     mut player_q: Query<
-        (&GlobalTransform, &mut BeamSabre, &mut PlayerStateMachine, &PlayerInput, &PlayerCameraRef),
+        (
+            &GlobalTransform,
+            &mut BeamSabre,
+            &mut PlayerStateMachine,
+            &PlayerInput,
+            &PlayerCameraRef,
+            &ArmorSet,
+        ),
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
@@ -796,10 +865,13 @@ fn beam_sabre_update_system(
     mut killed_ev: EventWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_transform, mut sabre, mut sm, pi, cam_ref) in player_q.iter_mut() {
-        let Ok(cam) = cam_q.get(cam_ref.0) else { continue };
+    for (player_transform, mut sabre, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
+        let Ok(cam) = cam_q.get(cam_ref.0) else {
+            continue;
+        };
         let fwd = cam.forward().as_vec3();
         let origin = star_muzzle_origin(player_transform, fwd);
+        let armor_damage_mult = armor.modified_outgoing_damage(1.0);
 
         if pi.sabre_toggle {
             if sabre.unlocked {
@@ -824,7 +896,7 @@ fn beam_sabre_update_system(
                         fwd,
                         3.5,
                         2.5,
-                        sabre.slash_damage,
+                        sabre.slash_damage * armor_damage_mult,
                         DamageType::Melee,
                         &mut enemy_q,
                         &mut damaged_ev,
@@ -853,7 +925,7 @@ fn beam_sabre_update_system(
                 fwd,
                 3.5,
                 2.5,
-                sabre.slash_damage,
+                sabre.slash_damage * armor_damage_mult,
                 DamageType::Melee,
                 &mut enemy_q,
                 &mut damaged_ev,
@@ -873,7 +945,7 @@ fn beam_sabre_update_system(
                             ..default()
                         },
                         Projectile {
-                            damage: sabre.wave_damage,
+                            damage: sabre.wave_damage * armor_damage_mult,
                             speed: 20.0,
                             direction: dir,
                             lifetime: 1.5,

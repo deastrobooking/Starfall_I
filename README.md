@@ -23,11 +23,12 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 
 ## Gameplay Direction
 
-- Classic action platforming with wall jumps, edge grabs, ledge hanging, and climb-ups.
+- Classic action platforming with tuned acceleration, jump buffering, coyote time, wall jumps, edge grabs, ledge hanging, and climb-ups.
 - Simple retro RPG-style cartoon characters with idle, walk, jump, and hanging poses.
 - RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, and chapter progression.
 - Cartoon star beams and energy weapons instead of guns.
-- Open-world level spaces with puzzle gates, encounter waves, and boss fights.
+- Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, encounter waves, and boss fights.
+- Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, and shockwave hazards.
 - 4-player local multiplayer is the design target; the current code path is still primarily single-player and ready for a future multiplayer input/entity split.
 
 ## Controls
@@ -122,16 +123,17 @@ cargo run --features dynamic
 ```text
 src/
   main.rs                  App bootstrap and plugin registration
-  characters.rs            Retro cartoon character construction and color roles
+  characters.rs            Retro cartoon character construction, colors, and presets
   chapters/mod.rs          Starfall I chapter scripts and biomes
   components/character.rs  Cartoon body parts, roles, and pose animator state
   components/player.rs     Player stats, movement, wall jump, edge grab state
   components/weapon.rs     Star beam and energy tool definitions
-  components/enemy.rs      Enemy stats and rift/dragon labels
+  components/enemy.rs      Enemy stats, flying drones, dragon bosses, projectiles
   components/faction.rs    Story groups and radio colors
   plugins/character_plugin.rs Simple idle/walk/jump/hang animation poses
-  plugins/player_plugin.rs Movement, ledge hang, wall jump, stamina, damage
+  plugins/player_plugin.rs Movement feel, ledge hang, wall jump, stamina, damage
+  plugins/character_design_plugin.rs Color/accessory designer and preview
   plugins/weapon_plugin.rs Star beam firing, specials, melee, VFX
-  plugins/enemy_plugin.rs  Enemy spawning, AI, rewards, loot
+  plugins/enemy_plugin.rs  Enemy spawning, AI, drones, bosses, rewards, loot
   plugins/ui_plugin.rs     Menus and HUD
 ```

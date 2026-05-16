@@ -2,7 +2,8 @@ use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
 
 use crate::characters::{
-    accent_presets, hair_presets, hero_config, hero_config_with_overrides, outfit_presets,
+    accent_preset, accent_presets, hair_preset, hair_presets, hero_config,
+    hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
     spawn_cartoon_character,
 };
 use crate::resources::{CharacterDesignData, PlayerSelectState};
@@ -79,12 +80,20 @@ fn setup_character_design(
     select_state: Res<PlayerSelectState>,
     mut cam_q: Query<&mut Transform, With<Camera3d>>,
 ) {
+    design_data.player_index = design_data.player_index.min(select_state.slots.len() - 1);
+
     // Pre-populate design data from current slot overrides (or hero defaults)
     let slot = &select_state.slots[design_data.player_index];
     let base = hero_config(select_state.character_name(design_data.player_index));
-    design_data.outfit_idx = slot.outfit_idx.unwrap_or(0);
-    design_data.accent_idx = slot.accent_idx.unwrap_or(0);
-    design_data.hair_idx = slot.hair_idx.unwrap_or(0);
+    design_data.outfit_idx = slot
+        .outfit_idx
+        .map(normalize_color_preset_index)
+        .unwrap_or(0);
+    design_data.accent_idx = slot
+        .accent_idx
+        .map(normalize_color_preset_index)
+        .unwrap_or(0);
+    design_data.hair_idx = slot.hair_idx.map(normalize_color_preset_index).unwrap_or(0);
     design_data.has_hood = slot.has_hood.unwrap_or(base.has_hood);
     design_data.has_cape = slot.has_cape.unwrap_or(base.has_cape);
     design_data.has_gloves = slot.has_gloves.unwrap_or(base.has_gloves);
@@ -97,8 +106,7 @@ fn setup_character_design(
 
     // Reposition the menu camera for a character preview angle
     if let Ok(mut t) = cam_q.get_single_mut() {
-        *t = Transform::from_xyz(0.0, 0.5, 3.2)
-            .looking_at(Vec3::new(0.0, -0.1, 0.0), Vec3::Y);
+        *t = Transform::from_xyz(0.0, 0.5, -3.2).looking_at(Vec3::new(0.0, -0.1, 0.0), Vec3::Y);
     }
 
     // Key fill light (warm)
@@ -109,7 +117,7 @@ fn setup_character_design(
             range: 14.0,
             ..default()
         },
-        Transform::from_xyz(-2.0, 3.5, 2.5),
+        Transform::from_xyz(-2.0, 3.5, -2.5),
         DesignLight,
     ));
     // Rim / fill light (cool)
@@ -120,7 +128,7 @@ fn setup_character_design(
             range: 10.0,
             ..default()
         },
-        Transform::from_xyz(2.5, 1.5, -1.5),
+        Transform::from_xyz(2.5, 1.5, 1.5),
         DesignLight,
     ));
 
@@ -175,12 +183,17 @@ fn rebuild_preview_if_dirty(
         commands.entity(e).despawn_recursive();
     }
 
+    design_data.player_index = design_data.player_index.min(select_state.slots.len() - 1);
+    design_data.outfit_idx = normalize_color_preset_index(design_data.outfit_idx);
+    design_data.accent_idx = normalize_color_preset_index(design_data.accent_idx);
+    design_data.hair_idx = normalize_color_preset_index(design_data.hair_idx);
+
     let name = select_state.character_name(design_data.player_index);
     let config = hero_config_with_overrides(
         name,
-        Some(outfit_presets()[design_data.outfit_idx]),
-        Some(accent_presets()[design_data.accent_idx]),
-        Some(hair_presets()[design_data.hair_idx]),
+        Some(outfit_preset(design_data.outfit_idx)),
+        Some(accent_preset(design_data.accent_idx)),
+        Some(hair_preset(design_data.hair_idx)),
         Some(design_data.has_hood),
         Some(design_data.has_cape),
         Some(design_data.has_gloves),
@@ -189,7 +202,13 @@ fn rebuild_preview_if_dirty(
         Some(design_data.has_visor),
     );
 
-    let entity = spawn_cartoon_character(&mut commands, &mut meshes, &mut materials, config, Vec3::ZERO);
+    let entity = spawn_cartoon_character(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        config,
+        Vec3::ZERO,
+    );
     commands.entity(entity).insert(PreviewRoot);
     design_data.preview_entity = Some(entity);
     design_data.dirty = false;
@@ -291,10 +310,12 @@ fn design_keyboard_input(
 }
 
 fn save_design(design_data: &CharacterDesignData, select_state: &mut PlayerSelectState) {
-    let slot = &mut select_state.slots[design_data.player_index];
-    slot.outfit_idx = Some(design_data.outfit_idx);
-    slot.accent_idx = Some(design_data.accent_idx);
-    slot.hair_idx = Some(design_data.hair_idx);
+    let Some(slot) = select_state.slots.get_mut(design_data.player_index) else {
+        return;
+    };
+    slot.outfit_idx = Some(normalize_color_preset_index(design_data.outfit_idx));
+    slot.accent_idx = Some(normalize_color_preset_index(design_data.accent_idx));
+    slot.hair_idx = Some(normalize_color_preset_index(design_data.hair_idx));
     slot.has_hood = Some(design_data.has_hood);
     slot.has_cape = Some(design_data.has_cape);
     slot.has_gloves = Some(design_data.has_gloves);
@@ -307,17 +328,18 @@ fn save_design(design_data: &CharacterDesignData, select_state: &mut PlayerSelec
 
 fn update_swatch_borders(
     design_data: Res<CharacterDesignData>,
-    mut swatch_q: Query<(&SwatchButton, &mut BorderColor)>,
+    mut swatch_q: Query<(&SwatchButton, &mut BorderColor, &mut Node)>,
 ) {
     if !design_data.is_changed() {
         return;
     }
-    for (swatch, mut border) in swatch_q.iter_mut() {
+    for (swatch, mut border, mut node) in swatch_q.iter_mut() {
         let selected = match swatch.category {
             SwatchCategory::Outfit => design_data.outfit_idx == swatch.index,
             SwatchCategory::Accent => design_data.accent_idx == swatch.index,
             SwatchCategory::Hair => design_data.hair_idx == swatch.index,
         };
+        node.border = UiRect::all(Val::Px(if selected { 3.0 } else { 1.0 }));
         *border = BorderColor(if selected {
             Color::WHITE
         } else {
@@ -396,30 +418,51 @@ fn spawn_design_ui(
             .with_children(|panel| {
                 panel.spawn((
                     Text::new(format!("CUSTOMIZE\n{}", hero_name.to_uppercase())),
-                    TextFont { font_size: 26.0, ..default() },
+                    TextFont {
+                        font_size: 26.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(1.0, 0.9, 0.25)),
                 ));
 
-                panel.spawn(Node { height: Val::Px(6.0), ..default() });
+                panel.spawn(Node {
+                    height: Val::Px(6.0),
+                    ..default()
+                });
 
                 spawn_swatch_row(
-                    panel, "OUTFIT", SwatchCategory::Outfit,
-                    &outfits, design_data.outfit_idx,
+                    panel,
+                    "OUTFIT",
+                    SwatchCategory::Outfit,
+                    &outfits,
+                    design_data.outfit_idx,
                 );
                 spawn_swatch_row(
-                    panel, "ACCENT", SwatchCategory::Accent,
-                    &accents, design_data.accent_idx,
+                    panel,
+                    "ACCENT",
+                    SwatchCategory::Accent,
+                    &accents,
+                    design_data.accent_idx,
                 );
                 spawn_swatch_row(
-                    panel, "HAIR", SwatchCategory::Hair,
-                    &hairs, design_data.hair_idx,
+                    panel,
+                    "HAIR",
+                    SwatchCategory::Hair,
+                    &hairs,
+                    design_data.hair_idx,
                 );
 
-                panel.spawn(Node { height: Val::Px(6.0), ..default() });
+                panel.spawn(Node {
+                    height: Val::Px(6.0),
+                    ..default()
+                });
 
                 panel.spawn((
                     Text::new("ACCESSORIES"),
-                    TextFont { font_size: 14.0, ..default() },
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.70, 0.72, 0.92)),
                 ));
                 panel
@@ -434,25 +477,26 @@ fn spawn_design_ui(
                         spawn_toggle(row, "HOOD", AccessoryToggle::Hood, design_data.has_hood);
                         spawn_toggle(row, "CAPE", AccessoryToggle::Cape, design_data.has_cape);
                         spawn_toggle(
-                            row, "GLOVES",
-                            AccessoryToggle::Gloves, design_data.has_gloves,
+                            row,
+                            "GLOVES",
+                            AccessoryToggle::Gloves,
+                            design_data.has_gloves,
                         );
+                        spawn_toggle(row, "BOOTS", AccessoryToggle::Boots, design_data.has_boots);
                         spawn_toggle(
-                            row, "BOOTS",
-                            AccessoryToggle::Boots, design_data.has_boots,
+                            row,
+                            "PADS",
+                            AccessoryToggle::ShoulderPads,
+                            design_data.has_shoulder_pads,
                         );
-                        spawn_toggle(
-                            row, "PADS",
-                            AccessoryToggle::ShoulderPads, design_data.has_shoulder_pads,
-                        );
-                        spawn_toggle(
-                            row, "VISOR",
-                            AccessoryToggle::Visor, design_data.has_visor,
-                        );
+                        spawn_toggle(row, "VISOR", AccessoryToggle::Visor, design_data.has_visor);
                     });
 
                 // Expand to push buttons to bottom
-                panel.spawn(Node { flex_grow: 1.0, ..default() });
+                panel.spawn(Node {
+                    flex_grow: 1.0,
+                    ..default()
+                });
 
                 // Back / Confirm row
                 panel
@@ -464,28 +508,40 @@ fn spawn_design_ui(
                     .with_children(|row| {
                         row.spawn((
                             Button,
-                            Node { padding: UiRect::all(Val::Px(14.0)), ..default() },
+                            Node {
+                                padding: UiRect::all(Val::Px(14.0)),
+                                ..default()
+                            },
                             BackgroundColor(Color::srgb(0.35, 0.08, 0.08)),
                             BackButton,
                         ))
                         .with_children(|btn| {
                             btn.spawn((
                                 Text::new("← BACK"),
-                                TextFont { font_size: 18.0, ..default() },
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
                                 TextColor(Color::WHITE),
                             ));
                         });
 
                         row.spawn((
                             Button,
-                            Node { padding: UiRect::all(Val::Px(14.0)), ..default() },
+                            Node {
+                                padding: UiRect::all(Val::Px(14.0)),
+                                ..default()
+                            },
                             BackgroundColor(Color::srgb(0.08, 0.38, 0.12)),
                             ConfirmButton,
                         ))
                         .with_children(|btn| {
                             btn.spawn((
                                 Text::new("CONFIRM"),
-                                TextFont { font_size: 18.0, ..default() },
+                                TextFont {
+                                    font_size: 18.0,
+                                    ..default()
+                                },
                                 TextColor(Color::WHITE),
                             ));
                         });
@@ -493,7 +549,10 @@ fn spawn_design_ui(
 
                 panel.spawn((
                     Text::new("Click swatches to customize  |  ESC: back  |  Enter: confirm"),
-                    TextFont { font_size: 11.0, ..default() },
+                    TextFont {
+                        font_size: 11.0,
+                        ..default()
+                    },
                     TextColor(Color::srgba(0.5, 0.5, 0.7, 0.8)),
                 ));
             });
@@ -509,7 +568,10 @@ fn spawn_swatch_row(
 ) {
     parent.spawn((
         Text::new(label),
-        TextFont { font_size: 13.0, ..default() },
+        TextFont {
+            font_size: 13.0,
+            ..default()
+        },
         TextColor(Color::srgb(0.70, 0.72, 0.92)),
     ));
     parent
@@ -542,12 +604,7 @@ fn spawn_swatch_row(
         });
 }
 
-fn spawn_toggle(
-    parent: &mut ChildBuilder,
-    label: &str,
-    toggle: AccessoryToggle,
-    active: bool,
-) {
+fn spawn_toggle(parent: &mut ChildBuilder, label: &str, toggle: AccessoryToggle, active: bool) {
     parent
         .spawn((
             Button,
@@ -565,7 +622,10 @@ fn spawn_toggle(
         .with_children(|btn| {
             btn.spawn((
                 Text::new(label),
-                TextFont { font_size: 15.0, ..default() },
+                TextFont {
+                    font_size: 15.0,
+                    ..default()
+                },
                 TextColor(Color::WHITE),
             ));
         });

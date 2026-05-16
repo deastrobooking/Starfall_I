@@ -25,7 +25,10 @@ impl Plugin for UiPlugin {
             .init_resource::<CraftingPanelState>()
             .add_systems(Startup, spawn_menu_camera)
             .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
-            .add_systems(OnEnter(AppState::PlayerSelect), (despawn_menu, setup_player_select))
+            .add_systems(
+                OnEnter(AppState::PlayerSelect),
+                (despawn_menu, setup_player_select),
+            )
             .add_systems(OnExit(AppState::PlayerSelect), despawn_player_select)
             .add_systems(OnEnter(AppState::ChapterSelect), setup_chapter_select)
             .add_systems(OnExit(AppState::ChapterSelect), despawn_chapter_select)
@@ -36,7 +39,8 @@ impl Plugin for UiPlugin {
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
             .add_systems(
                 Update,
-                hud_update_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                hud_update_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
@@ -45,27 +49,33 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                message_timer_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                message_timer_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
-                ui_message_listener.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                ui_message_listener
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
-                damage_vignette_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                damage_vignette_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
-                crafting_panel_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                crafting_panel_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
-                boss_alert_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                boss_alert_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
-                game_over_input.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                game_over_input
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
@@ -349,10 +359,7 @@ fn slot_label_color(i: u8) -> Color {
     }
 }
 
-fn setup_player_select(
-    mut commands: Commands,
-    mut select: ResMut<PlayerSelectState>,
-) {
+fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectState>) {
     // Reset lobby: P1 always joined, others cleared.
     *select = PlayerSelectState::default();
     select.slots[0].joined = true;
@@ -460,10 +467,7 @@ fn setup_player_select(
         });
 }
 
-fn despawn_player_select(
-    mut commands: Commands,
-    q: Query<Entity, With<PlayerSelectRoot>>,
-) {
+fn despawn_player_select(mut commands: Commands, q: Query<Entity, With<PlayerSelectRoot>>) {
     for e in q.iter() {
         commands.entity(e).despawn_recursive();
     }
@@ -480,15 +484,27 @@ fn player_select_update(
     // Text queries — each set is disjoint via Without<> guards
     mut char_q: Query<
         (&mut Text, &PlayerSlotCharText),
-        (Without<PlayerSlotStatusText>, Without<PlayerSlotInputText>, Without<PlayerSelectPrompt>),
+        (
+            Without<PlayerSlotStatusText>,
+            Without<PlayerSlotInputText>,
+            Without<PlayerSelectPrompt>,
+        ),
     >,
     mut status_q: Query<
         (&mut Text, &PlayerSlotStatusText),
-        (Without<PlayerSlotCharText>, Without<PlayerSlotInputText>, Without<PlayerSelectPrompt>),
+        (
+            Without<PlayerSlotCharText>,
+            Without<PlayerSlotInputText>,
+            Without<PlayerSelectPrompt>,
+        ),
     >,
     mut input_q: Query<
         (&mut Text, &PlayerSlotInputText),
-        (Without<PlayerSlotCharText>, Without<PlayerSlotStatusText>, Without<PlayerSelectPrompt>),
+        (
+            Without<PlayerSlotCharText>,
+            Without<PlayerSlotStatusText>,
+            Without<PlayerSelectPrompt>,
+        ),
     >,
     mut prompt_q: Query<
         &mut Text,
@@ -619,7 +635,12 @@ fn player_select_update(
         let i = marker.0 as usize;
         let s = &select.slots[i];
         *t = Text::new(if !s.joined {
-            if i == 0 { "[ ENTER ] Ready" } else { "Press any btn to join" }.to_string()
+            if i == 0 {
+                "[ ENTER ] Ready"
+            } else {
+                "Press any btn to join"
+            }
+            .to_string()
         } else if s.ready {
             "✓  READY".to_string()
         } else if i == 0 {
@@ -665,7 +686,11 @@ fn player_select_update(
             "{}/{} players ready  —  {}",
             ready,
             joined,
-            if ready == joined && joined > 0 { "Starting..." } else { "mark ready to begin" }
+            if ready == joined && joined > 0 {
+                "Starting..."
+            } else {
+                "mark ready to begin"
+            }
         ));
     }
 }
@@ -1314,7 +1339,10 @@ fn puzzle_status_text(encounter: &PuzzleRelicEncounter) -> String {
             encounter.timer_remaining.max(0.0),
             encounter.hint
         ),
-        PuzzleArchetype::CoOpFloorPlates { hold_secs, required_players } => format!(
+        PuzzleArchetype::CoOpFloorPlates {
+            hold_secs,
+            required_players,
+        } => format!(
             "{} Plates: {}/{} active. Hold {:.1}/{:.1}s with up to {} players. {}",
             encounter.scientist,
             encounter.active_nodes,

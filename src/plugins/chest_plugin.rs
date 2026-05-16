@@ -72,7 +72,6 @@ fn spawn_chests(
 
 fn chest_proximity_system(
     mut commands: Commands,
-    time: Res<Time>,
     mut player_q: Query<(&Transform, &mut PlayerStats), With<Player>>,
     mut player_health_q: Query<&mut Health, With<Player>>,
     mut chest_q: Query<(Entity, &Transform, &mut Chest)>,

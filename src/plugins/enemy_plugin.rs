@@ -2,17 +2,30 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::characters::{enemy_config, spawn_cartoon_character};
+use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
-    BossEnemy, DeadEnemy, Enemy, EnemyAIState, EnemyStateMachine, EnemyType,
+    BossEnemy, DeadEnemy, DragonBoss, Enemy, EnemyAIState, EnemyAttackVfx, EnemyProjectile,
+    EnemyProjectileKind, EnemyStateMachine, EnemyType, FlyingDrone,
 };
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
-use crate::components::player::{Player, PlayerStats};
+use crate::components::player::{ParryState, Player, PlayerStats};
 use crate::components::world::WorldLoot;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
 use crate::resources::WaveInfo;
 use crate::state::AppState;
+
+#[derive(Resource, Clone)]
+struct EnemyAttackAssets {
+    laser_mesh: Handle<Mesh>,
+    fireball_mesh: Handle<Mesh>,
+    beam_mesh: Handle<Mesh>,
+    shockwave_mesh: Handle<Mesh>,
+    laser_mat: Handle<StandardMaterial>,
+    fire_mat: Handle<StandardMaterial>,
+    shockwave_mat: Handle<StandardMaterial>,
+}
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct EnemyPlugin;
@@ -20,11 +33,18 @@ pub struct EnemyPlugin;
 impl Plugin for EnemyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaveInfo>()
-            .add_systems(OnEnter(AppState::Playing), setup_enemies)
+            .add_systems(
+                OnEnter(AppState::Playing),
+                (setup_enemies, setup_enemy_attack_assets),
+            )
             .add_systems(
                 Update,
                 (
                     enemy_ai_system,
+                    flying_drone_attack_system,
+                    dragon_boss_system,
+                    enemy_projectile_update_system,
+                    enemy_attack_vfx_cleanup,
                     enemy_attack_system,
                     enemy_dead_cleanup,
                     enemy_killed_reward,
@@ -42,6 +62,41 @@ impl Plugin for EnemyPlugin {
 // counter; no enemies are pre-spawned here.
 fn setup_enemies(mut wave: ResMut<WaveInfo>) {
     *wave = WaveInfo::new();
+}
+
+fn setup_enemy_attack_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let laser_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.38, 0.92, 1.0, 0.86),
+        emissive: LinearRgba::new(0.2, 2.4, 3.6, 1.0),
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+    let fire_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(1.0, 0.32, 0.06, 0.90),
+        emissive: LinearRgba::new(5.0, 1.1, 0.0, 1.0),
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+    let shockwave_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(1.0, 0.68, 0.18, 0.45),
+        emissive: LinearRgba::new(2.8, 1.2, 0.12, 1.0),
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+
+    commands.insert_resource(EnemyAttackAssets {
+        laser_mesh: meshes.add(Sphere::new(0.20)),
+        fireball_mesh: meshes.add(Sphere::new(0.70)),
+        beam_mesh: meshes.add(Cylinder::new(0.22, 1.0)),
+        shockwave_mesh: meshes.add(Cylinder::new(1.0, 0.10)),
+        laser_mat,
+        fire_mat,
+        shockwave_mat,
+    });
 }
 
 // Spawn helpers are pub so the chapter director can call them.
@@ -116,6 +171,9 @@ pub fn spawn_enemy_entity(
         Damageable::default(),
         faction.unwrap_or_default(),
     ));
+    if enemy_type == EnemyType::Drone {
+        commands.entity(root).insert(FlyingDrone::new(position));
+    }
 }
 
 /// Spawn a story-named enemy (mid-boss or boss).
@@ -131,24 +189,36 @@ pub fn spawn_named_enemy(
     scale: f32,
     is_boss: bool,
 ) {
+    let is_dragon_boss =
+        is_boss && matches!(faction, Faction::DragonRoyalty | Faction::DragonExile);
     let enemy_type = if is_boss {
         EnemyType::Hybrid
     } else {
         EnemyType::Heavy
     };
     let enemy_data = Enemy::new(enemy_type, position, scale);
-    let max_hp = enemy_data.scaled_health() * if is_boss { 3.0 } else { 1.5 };
+    let max_hp = enemy_data.scaled_health()
+        * if is_dragon_boss {
+            4.5
+        } else if is_boss {
+            3.0
+        } else {
+            1.5
+        };
+    let visual_scale = scale.clamp(0.95, 2.2)
+        * if is_dragon_boss {
+            1.85
+        } else if is_boss {
+            1.2
+        } else {
+            1.0
+        };
 
     let root = spawn_cartoon_character(
         commands,
         meshes,
         materials,
-        enemy_config(
-            enemy_type,
-            Some(faction),
-            name,
-            scale.clamp(0.95, 2.2) * if is_boss { 1.2 } else { 1.0 },
-        ),
+        enemy_config(enemy_type, Some(faction), name, visual_scale),
         position,
     );
     let mut e = commands.entity(root);
@@ -167,25 +237,31 @@ pub fn spawn_named_enemy(
     if is_boss {
         e.insert(BossEnemy);
     }
+    if is_dragon_boss {
+        e.insert(DragonBoss::new(position));
+    }
 }
 
 // ── AI System ─────────────────────────────────────────────────────────────────
 fn enemy_ai_system(
     time: Res<Time>,
-    player_q: Query<&Transform, With<Player>>,
+    player_q: Query<(Entity, &Transform), (With<Player>, Without<Enemy>)>,
     mut enemy_q: Query<
-        (&mut Transform, &mut Enemy, &mut EnemyStateMachine, &Health),
+        (
+            &mut Transform,
+            &mut Enemy,
+            &mut EnemyStateMachine,
+            &Health,
+            Option<&mut FlyingDrone>,
+            Option<&DragonBoss>,
+        ),
         Without<Player>,
     >,
 ) {
     let dt = time.delta_secs();
-    let Ok(player_transform) = player_q.get_single() else {
-        return;
-    };
-    let player_pos = player_transform.translation;
     let mut rng = rand::thread_rng();
 
-    for (mut transform, mut enemy, mut sm, health) in enemy_q.iter_mut() {
+    for (mut transform, mut enemy, mut sm, health, drone, dragon_boss) in enemy_q.iter_mut() {
         if !health.is_alive() {
             continue;
         }
@@ -193,12 +269,39 @@ fn enemy_ai_system(
         sm.timer += dt;
         enemy.attack_cooldown_timer = (enemy.attack_cooldown_timer - dt).max(0.0);
 
-        let dist_to_player = transform.translation.distance(player_pos);
-        let config = &enemy.config;
+        if dragon_boss.is_some() {
+            continue;
+        }
+
+        let Some((_player_entity, player_pos, dist_to_player)) =
+            closest_player(transform.translation, f32::MAX, &player_q)
+        else {
+            continue;
+        };
+
+        if let Some(mut drone) = drone {
+            update_flying_drone(
+                &mut transform,
+                &mut enemy,
+                &mut sm,
+                &mut drone,
+                player_pos,
+                dist_to_player,
+                time.elapsed_secs(),
+                dt,
+            );
+            continue;
+        }
+
+        let detection_range = enemy.config.detection_range;
+        let chase_range = enemy.config.chase_range;
+        let attack_range = enemy.config.attack_range;
+        let patrol_speed = enemy.config.patrol_speed;
+        let chase_speed = enemy.config.chase_speed;
 
         match sm.current {
             EnemyAIState::Idle => {
-                if dist_to_player < config.detection_range {
+                if dist_to_player < detection_range {
                     sm.transition(EnemyAIState::Chase);
                 } else if sm.timer > rng.gen_range(1.0..3.0) {
                     let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
@@ -209,7 +312,7 @@ fn enemy_ai_system(
                 }
             }
             EnemyAIState::Patrol => {
-                if dist_to_player < config.detection_range {
+                if dist_to_player < detection_range {
                     sm.transition(EnemyAIState::Chase);
                     continue;
                 }
@@ -220,33 +323,28 @@ fn enemy_ai_system(
                 } else {
                     let move_dir = to_target_flat.normalize();
                     let pos = transform.translation;
-                    transform.translation += move_dir * config.patrol_speed * dt * 60.0;
+                    transform.translation += move_dir * patrol_speed * dt * 60.0;
                     transform.look_at(pos + move_dir, Vec3::Y);
                 }
             }
             EnemyAIState::Chase => {
-                if dist_to_player > config.chase_range * 1.5 {
+                if dist_to_player > chase_range * 1.5 {
                     sm.transition(EnemyAIState::Patrol);
-                } else if dist_to_player <= config.attack_range {
+                } else if dist_to_player <= attack_range {
                     sm.transition(EnemyAIState::Attack);
                 } else {
                     let to_player = (player_pos - transform.translation)
                         .with_y(0.0)
                         .normalize_or_zero();
-                    transform.translation += to_player * config.chase_speed * dt * 60.0;
+                    transform.translation += to_player * chase_speed * dt * 60.0;
                     if to_player.length_squared() > 0.001 {
                         let pos = transform.translation;
                         transform.look_at(pos + to_player, Vec3::Y);
                     }
-                    if enemy.enemy_type == EnemyType::Drone {
-                        transform.translation.y = player_pos.y
-                            + 5.0
-                            + (time.elapsed_secs() * 2.0 + transform.translation.x).sin() * 0.5;
-                    }
                 }
             }
             EnemyAIState::Attack => {
-                if dist_to_player > config.attack_range * 1.3 {
+                if dist_to_player > attack_range * 1.3 {
                     sm.transition(EnemyAIState::Chase);
                 } else {
                     let to_player = (player_pos - transform.translation)
@@ -268,10 +366,498 @@ fn enemy_ai_system(
     }
 }
 
+fn update_flying_drone(
+    transform: &mut Transform,
+    enemy: &mut Enemy,
+    sm: &mut EnemyStateMachine,
+    drone: &mut FlyingDrone,
+    player_pos: Vec3,
+    dist_to_player: f32,
+    elapsed: f32,
+    dt: f32,
+) {
+    drone.fire_timer = (drone.fire_timer - dt).max(0.0);
+    drone.orbit_phase += dt * 0.85;
+
+    if dist_to_player < enemy.config.detection_range * 1.8 {
+        if dist_to_player <= enemy.config.attack_range + 10.0 {
+            sm.transition(EnemyAIState::Attack);
+        } else {
+            sm.transition(EnemyAIState::Chase);
+        }
+    } else if sm.timer > 2.0 {
+        sm.transition(EnemyAIState::Patrol);
+    }
+
+    let hover = player_pos.y + drone.altitude + (elapsed * 2.2 + drone.orbit_phase).sin() * 0.7;
+    let orbit = Vec3::new(drone.orbit_phase.cos(), 0.0, drone.orbit_phase.sin());
+    let side = Vec3::new(-orbit.z, 0.0, orbit.x);
+    let desired = match sm.current {
+        EnemyAIState::Attack | EnemyAIState::Chase => {
+            player_pos + orbit * drone.orbit_radius + side * (elapsed * 1.3).sin() * 3.0
+        }
+        EnemyAIState::Patrol => {
+            enemy.spawn_origin
+                + Vec3::new(
+                    (elapsed * 0.7 + drone.orbit_phase).cos() * 10.0,
+                    0.0,
+                    (elapsed * 0.9 + drone.orbit_phase).sin() * 10.0,
+                )
+        }
+        _ => transform.translation,
+    }
+    .with_y(hover.max(enemy.spawn_origin.y + 3.0));
+
+    let to_desired = desired - transform.translation;
+    let speed = if sm.current == EnemyAIState::Attack {
+        13.0
+    } else {
+        9.0
+    };
+    if to_desired.length_squared() > 0.01 {
+        transform.translation += to_desired.clamp_length_max(speed * dt);
+    }
+
+    let look = player_pos + Vec3::Y * 0.7;
+    if transform.translation.distance_squared(look) > 0.01 {
+        transform.look_at(look, Vec3::Y);
+    }
+}
+
+fn flying_drone_attack_system(
+    mut commands: Commands,
+    assets: Res<EnemyAttackAssets>,
+    player_q: Query<(Entity, &Transform), (With<Player>, Without<FlyingDrone>)>,
+    mut drone_q: Query<(
+        &Transform,
+        &mut Enemy,
+        &mut FlyingDrone,
+        &EnemyStateMachine,
+        &Health,
+    )>,
+) {
+    for (transform, mut enemy, mut drone, sm, health) in drone_q.iter_mut() {
+        if !health.is_alive() || sm.current != EnemyAIState::Attack {
+            continue;
+        }
+        if drone.fire_timer > 0.0 || enemy.attack_cooldown_timer > 0.0 {
+            continue;
+        }
+
+        let Some((_player_entity, player_pos, _distance)) = closest_player(
+            transform.translation,
+            enemy.config.detection_range * 2.4,
+            &player_q,
+        ) else {
+            continue;
+        };
+
+        let target = player_pos + Vec3::Y * 0.75;
+        let muzzle = transform.translation + Vec3::Y * 0.15 + transform.forward().as_vec3() * 0.8;
+        let direction = (target - muzzle).normalize_or_zero();
+        if direction.length_squared() <= 0.001 {
+            continue;
+        }
+
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(assets.laser_mesh.clone()),
+                material: MeshMaterial3d(assets.laser_mat.clone()),
+                transform: Transform::from_translation(muzzle),
+                ..default()
+            },
+            EnemyProjectile {
+                kind: EnemyProjectileKind::Laser,
+                damage: enemy.scaled_damage() * 0.85,
+                speed: 36.0,
+                direction,
+                lifetime: 1.8,
+                hit_radius: 0.75,
+                splash_radius: 0.0,
+            },
+        ));
+        drone.fire_timer = 0.45;
+        enemy.attack_cooldown_timer = enemy.config.attack_cooldown * 0.55;
+    }
+}
+
+fn dragon_boss_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Res<EnemyAttackAssets>,
+    player_pos_q: Query<(Entity, &Transform), (With<Player>, Without<BossEnemy>)>,
+    mut player_damage_q: Query<(
+        &mut Health,
+        &mut Damageable,
+        &mut PlayerStats,
+        &mut ParryState,
+        &ArmorSet,
+    )>,
+    mut boss_q: Query<(&mut Transform, &mut Enemy, &mut DragonBoss, &Health), With<BossEnemy>>,
+    mut damaged_ev: EventWriter<PlayerDamagedEvent>,
+    mut parry_ev: EventWriter<PlayerParryEvent>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, enemy, mut boss, health) in boss_q.iter_mut() {
+        if !health.is_alive() {
+            continue;
+        }
+        let Some((_player_entity, player_pos, distance)) =
+            closest_player(transform.translation, 140.0, &player_pos_q)
+        else {
+            continue;
+        };
+
+        let health_ratio = (health.current / health.max).clamp(0.0, 1.0);
+        boss.phase = if health_ratio < 0.33 {
+            3
+        } else if health_ratio < 0.66 {
+            2
+        } else {
+            1
+        };
+
+        boss.orbit_angle += dt * (0.35 + boss.phase as f32 * 0.16);
+        boss.fireball_timer -= dt;
+        boss.breath_timer -= dt;
+        boss.slam_timer -= dt;
+
+        let phase = boss.phase as f32;
+        let orbit_radius = 24.0 - phase * 3.0;
+        let arena_focus = boss.home + (player_pos - boss.home).clamp_length_max(82.0);
+        let desired = arena_focus
+            + Vec3::new(
+                boss.orbit_angle.cos() * orbit_radius,
+                8.0 + phase * 2.0 + (time.elapsed_secs() * 2.4).sin(),
+                boss.orbit_angle.sin() * orbit_radius,
+            );
+        let to_desired = desired - transform.translation;
+        if to_desired.length_squared() > 0.05 {
+            transform.translation += to_desired.clamp_length_max((7.5 + phase * 2.5) * dt);
+        }
+        transform.look_at(player_pos + Vec3::Y * 1.1, Vec3::Y);
+
+        let mouth = transform.translation + Vec3::Y * 1.4 + transform.forward().as_vec3() * 2.4;
+        if boss.fireball_timer <= 0.0 {
+            let count = boss.phase as i32;
+            for i in 0..count {
+                let spread = (i as f32 - (count - 1) as f32 * 0.5) * 0.09;
+                let direction = ((player_pos + Vec3::Y * 0.8 - mouth)
+                    + transform.right().as_vec3() * spread * distance.min(40.0))
+                .normalize_or_zero();
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(assets.fireball_mesh.clone()),
+                        material: MeshMaterial3d(assets.fire_mat.clone()),
+                        transform: Transform::from_translation(mouth),
+                        ..default()
+                    },
+                    EnemyProjectile {
+                        kind: EnemyProjectileKind::Fireball,
+                        damage: enemy.scaled_damage() * (0.32 + phase * 0.08),
+                        speed: 16.0 + phase * 2.0,
+                        direction,
+                        lifetime: 4.0,
+                        hit_radius: 1.35,
+                        splash_radius: 5.0 + phase * 1.5,
+                    },
+                ));
+            }
+            boss.fireball_timer = 3.2 - phase * 0.45;
+        }
+
+        if boss.breath_timer <= 0.0 && distance < 34.0 {
+            let target = player_pos + Vec3::Y * 0.9;
+            spawn_enemy_beam_vfx(&mut commands, &assets, mouth, target, 0.42);
+            damage_players_in_cone(
+                mouth,
+                (target - mouth).normalize_or_zero(),
+                34.0,
+                0.82,
+                enemy.scaled_damage() * (0.28 + phase * 0.08),
+                DamageType::Fire,
+                &mut player_damage_q,
+                &player_pos_q,
+                &mut damaged_ev,
+                &mut parry_ev,
+            );
+            boss.breath_timer = 4.4 - phase * 0.55;
+        }
+
+        if boss.slam_timer <= 0.0 {
+            let center = Vec3::new(player_pos.x, player_pos.y + 0.12, player_pos.z);
+            let radius = 8.0 + phase * 2.2;
+            spawn_shockwave_vfx(&mut commands, &assets, center, radius, 0.45);
+            damage_players_in_radius(
+                center,
+                radius,
+                enemy.scaled_damage() * (0.20 + phase * 0.06),
+                DamageType::Collision,
+                &mut player_damage_q,
+                &player_pos_q,
+                &mut damaged_ev,
+                &mut parry_ev,
+            );
+            boss.slam_timer = 6.6 - phase * 0.7;
+        }
+    }
+}
+
+fn enemy_projectile_update_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Res<EnemyAttackAssets>,
+    mut projectile_q: Query<(Entity, &mut Transform, &mut EnemyProjectile)>,
+    player_pos_q: Query<(Entity, &Transform), (With<Player>, Without<EnemyProjectile>)>,
+    mut player_damage_q: Query<(
+        &mut Health,
+        &mut Damageable,
+        &mut PlayerStats,
+        &mut ParryState,
+        &ArmorSet,
+    )>,
+    mut damaged_ev: EventWriter<PlayerDamagedEvent>,
+    mut parry_ev: EventWriter<PlayerParryEvent>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut transform, mut projectile) in projectile_q.iter_mut() {
+        transform.translation += projectile.direction * projectile.speed * dt;
+        projectile.lifetime -= dt;
+
+        let mut impact = projectile.lifetime <= 0.0 || transform.translation.y <= 0.2;
+        let mut hit_player = None;
+        for (player_entity, player_transform) in player_pos_q.iter() {
+            if transform
+                .translation
+                .distance(player_transform.translation + Vec3::Y * 0.7)
+                <= projectile.hit_radius
+            {
+                hit_player = Some(player_entity);
+                impact = true;
+                break;
+            }
+        }
+
+        if impact {
+            match projectile.kind {
+                EnemyProjectileKind::Laser => {
+                    if let Some(player_entity) = hit_player {
+                        if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
+                            player_damage_q.get_mut(player_entity)
+                        {
+                            crate::plugins::player_plugin::damage_player(
+                                &mut health,
+                                &mut damageable,
+                                &mut stats,
+                                &mut parry,
+                                armor,
+                                &DamageInfo::new(projectile.damage, DamageType::Laser),
+                                &mut damaged_ev,
+                                &mut parry_ev,
+                            );
+                        }
+                    }
+                }
+                EnemyProjectileKind::Fireball => {
+                    let radius = projectile.splash_radius.max(projectile.hit_radius);
+                    spawn_shockwave_vfx(
+                        &mut commands,
+                        &assets,
+                        transform.translation,
+                        radius,
+                        0.35,
+                    );
+                    damage_players_in_radius(
+                        transform.translation,
+                        radius,
+                        projectile.damage,
+                        DamageType::Fire,
+                        &mut player_damage_q,
+                        &player_pos_q,
+                        &mut damaged_ev,
+                        &mut parry_ev,
+                    );
+                }
+            }
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+fn enemy_attack_vfx_cleanup(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut vfx_q: Query<(Entity, &mut EnemyAttackVfx)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut vfx) in vfx_q.iter_mut() {
+        vfx.timer -= dt;
+        if vfx.timer <= 0.0 {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+fn closest_player<F: bevy::ecs::query::QueryFilter>(
+    origin: Vec3,
+    max_range: f32,
+    player_q: &Query<(Entity, &Transform), F>,
+) -> Option<(Entity, Vec3, f32)> {
+    player_q
+        .iter()
+        .filter_map(|(entity, transform)| {
+            let dist = origin.distance(transform.translation);
+            (dist <= max_range).then_some((entity, transform.translation, dist))
+        })
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+}
+
+fn damage_players_in_radius(
+    center: Vec3,
+    radius: f32,
+    damage: f32,
+    damage_type: DamageType,
+    player_damage_q: &mut Query<(
+        &mut Health,
+        &mut Damageable,
+        &mut PlayerStats,
+        &mut ParryState,
+        &ArmorSet,
+    )>,
+    player_pos_q: &Query<(Entity, &Transform), impl bevy::ecs::query::QueryFilter>,
+    damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
+    parry_ev: &mut EventWriter<PlayerParryEvent>,
+) {
+    for (player_entity, player_transform) in player_pos_q.iter() {
+        let dist = center.distance(player_transform.translation);
+        if dist > radius {
+            continue;
+        }
+        let falloff = 1.0 - (dist / radius).clamp(0.0, 0.8);
+        if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
+            player_damage_q.get_mut(player_entity)
+        {
+            crate::plugins::player_plugin::damage_player(
+                &mut health,
+                &mut damageable,
+                &mut stats,
+                &mut parry,
+                armor,
+                &DamageInfo::new(damage * falloff, damage_type),
+                damaged_ev,
+                parry_ev,
+            );
+        }
+    }
+}
+
+fn damage_players_in_cone(
+    origin: Vec3,
+    direction: Vec3,
+    range: f32,
+    min_dot: f32,
+    damage: f32,
+    damage_type: DamageType,
+    player_damage_q: &mut Query<(
+        &mut Health,
+        &mut Damageable,
+        &mut PlayerStats,
+        &mut ParryState,
+        &ArmorSet,
+    )>,
+    player_pos_q: &Query<(Entity, &Transform), impl bevy::ecs::query::QueryFilter>,
+    damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
+    parry_ev: &mut EventWriter<PlayerParryEvent>,
+) {
+    if direction.length_squared() <= 0.001 {
+        return;
+    }
+    for (player_entity, player_transform) in player_pos_q.iter() {
+        let target = player_transform.translation + Vec3::Y * 0.7;
+        let to_player = target - origin;
+        let dist = to_player.length();
+        if dist > range || dist <= 0.01 {
+            continue;
+        }
+        if direction.dot(to_player / dist) < min_dot {
+            continue;
+        }
+        let falloff = 1.0 - (dist / range).clamp(0.0, 0.7);
+        if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
+            player_damage_q.get_mut(player_entity)
+        {
+            crate::plugins::player_plugin::damage_player(
+                &mut health,
+                &mut damageable,
+                &mut stats,
+                &mut parry,
+                armor,
+                &DamageInfo::new(damage * falloff, damage_type),
+                damaged_ev,
+                parry_ev,
+            );
+        }
+    }
+}
+
+fn spawn_enemy_beam_vfx(
+    commands: &mut Commands,
+    assets: &EnemyAttackAssets,
+    start: Vec3,
+    end: Vec3,
+    timer: f32,
+) {
+    let delta = end - start;
+    let length = delta.length();
+    if length <= 0.05 {
+        return;
+    }
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.beam_mesh.clone()),
+            material: MeshMaterial3d(assets.fire_mat.clone()),
+            transform: Transform::from_translation(start + delta * 0.5)
+                .with_rotation(Quat::from_rotation_arc(Vec3::Y, delta.normalize()))
+                .with_scale(Vec3::new(1.0, length, 1.0)),
+            ..default()
+        },
+        EnemyAttackVfx { timer },
+    ));
+}
+
+fn spawn_shockwave_vfx(
+    commands: &mut Commands,
+    assets: &EnemyAttackAssets,
+    center: Vec3,
+    radius: f32,
+    timer: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.shockwave_mesh.clone()),
+            material: MeshMaterial3d(assets.shockwave_mat.clone()),
+            transform: Transform::from_translation(center)
+                .with_scale(Vec3::new(radius, 1.0, radius)),
+            ..default()
+        },
+        EnemyAttackVfx { timer },
+    ));
+}
+
 // ── Attack System ─────────────────────────────────────────────────────────────
 fn enemy_attack_system(
-    player_q: Query<&Transform, With<Player>>,
-    mut enemy_q: Query<(&Transform, &mut Enemy, &EnemyStateMachine, &Health), Without<Player>>,
+    player_q: Query<(Entity, &Transform), With<Player>>,
+    mut enemy_q: Query<
+        (
+            &Transform,
+            &mut Enemy,
+            &EnemyStateMachine,
+            &Health,
+            Option<&FlyingDrone>,
+            Option<&DragonBoss>,
+        ),
+        Without<Player>,
+    >,
     mut player_damage_q: Query<
         (
             &mut crate::damage::Health,
@@ -285,14 +871,11 @@ fn enemy_attack_system(
     mut damaged_ev: EventWriter<PlayerDamagedEvent>,
     mut parry_ev: EventWriter<PlayerParryEvent>,
 ) {
-    let Ok(player_transform) = player_q.get_single() else {
-        return;
-    };
-    let player_pos = player_transform.translation;
-    let mut total_damage = 0.0;
-
-    for (e_transform, mut enemy, sm, health) in enemy_q.iter_mut() {
+    for (e_transform, mut enemy, sm, health, drone, dragon_boss) in enemy_q.iter_mut() {
         if !health.is_alive() {
+            continue;
+        }
+        if drone.is_some() || dragon_boss.is_some() {
             continue;
         }
         if sm.current != EnemyAIState::Attack {
@@ -301,16 +884,17 @@ fn enemy_attack_system(
         if enemy.attack_cooldown_timer > 0.0 {
             continue;
         }
-        let dist = e_transform.translation.distance(player_pos);
-        if dist <= enemy.config.attack_range {
-            total_damage += enemy.scaled_damage();
-            enemy.attack_cooldown_timer = enemy.config.attack_cooldown;
-        }
-    }
 
-    if total_damage > 0.0 {
+        let Some((player_entity, _player_pos, _distance)) = closest_player(
+            e_transform.translation,
+            enemy.config.attack_range,
+            &player_q,
+        ) else {
+            continue;
+        };
+
         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
-            player_damage_q.get_single_mut()
+            player_damage_q.get_mut(player_entity)
         {
             crate::plugins::player_plugin::damage_player(
                 &mut health,
@@ -318,11 +902,12 @@ fn enemy_attack_system(
                 &mut stats,
                 &mut parry,
                 &armor,
-                &DamageInfo::new(total_damage, DamageType::Kinetic),
+                &DamageInfo::new(enemy.scaled_damage(), DamageType::Kinetic),
                 &mut damaged_ev,
                 &mut parry_ev,
             );
         }
+        enemy.attack_cooldown_timer = enemy.config.attack_cooldown;
     }
 }
 

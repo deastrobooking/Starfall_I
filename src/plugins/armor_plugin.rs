@@ -25,6 +25,7 @@ fn apply_armor_health_bonus(
 ) {
     for (armor, mut stats, mut health) in player_q.iter_mut() {
         let bonus = armor.total_health_bonus();
+        let stamina_bonus = armor.total_stamina_bonus();
         // Recalculate max health: base 100 + level bonus + armor
         let new_max = 100.0 + (stats.level.saturating_sub(1) as f32 * 10.0) + bonus;
         if (stats.max_health - new_max).abs() > 0.1 {
@@ -32,6 +33,16 @@ fn apply_armor_health_bonus(
             stats.max_health = new_max;
             health.max = new_max;
             health.current = new_max * ratio;
+        }
+        let new_stamina_max = 100.0 + stamina_bonus;
+        if (stats.max_stamina - new_stamina_max).abs() > 0.1 {
+            let ratio = if stats.max_stamina > 0.0 {
+                stats.stamina / stats.max_stamina
+            } else {
+                1.0
+            };
+            stats.max_stamina = new_stamina_max;
+            stats.stamina = (new_stamina_max * ratio).min(new_stamina_max);
         }
     }
 }

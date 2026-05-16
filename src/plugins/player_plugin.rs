@@ -4,8 +4,7 @@ use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_rapier3d::prelude::*;
 
 use crate::characters::{
-    accent_presets, attach_cartoon_character, hair_presets, hero_config_with_overrides,
-    outfit_presets,
+    accent_preset, attach_cartoon_character, hair_preset, hero_config_with_overrides, outfit_preset,
 };
 use crate::components::armor::ArmorSet;
 use crate::components::inventory::Inventory;
@@ -164,9 +163,9 @@ fn spawn_players(
             player,
             hero_config_with_overrides(
                 select.character_name(i as usize),
-                slot.outfit_idx.map(|j| outfit_presets()[j]),
-                slot.accent_idx.map(|j| accent_presets()[j]),
-                slot.hair_idx.map(|j| hair_presets()[j]),
+                slot.outfit_idx.map(outfit_preset),
+                slot.accent_idx.map(accent_preset),
+                slot.hair_idx.map(hair_preset),
                 slot.has_hood,
                 slot.has_cape,
                 slot.has_gloves,
@@ -309,30 +308,47 @@ fn player_movement(
         mut stats,
         mut jetpack,
         mut edge_grab,
-        mut dodge,
+        dodge,
         transform,
         mut state,
         pi,
     ) in player_q.iter_mut()
     {
+        if pi.jump {
+            movement.jump_buffer_timer = movement.jump_buffer_time;
+        } else {
+            movement.jump_buffer_timer = (movement.jump_buffer_timer - dt).max(0.0);
+        }
+
         movement.is_grounded = output.grounded;
         edge_grab.cooldown_timer = (edge_grab.cooldown_timer - dt).max(0.0);
         edge_grab.wall_contact_timer = (edge_grab.wall_contact_timer - dt).max(0.0);
 
         if movement.is_grounded {
+            movement.coyote_timer = movement.coyote_time;
             jetpack.fuel = (jetpack.fuel + jetpack.regen_rate * dt).min(jetpack.max_fuel);
             movement.velocity.y = movement.velocity.y.max(0.0);
             edge_grab.is_hanging = false;
             edge_grab.hang_timer = 0.0;
             edge_grab.wall_contact_timer = 0.0;
+        } else {
+            movement.coyote_timer = (movement.coyote_timer - dt).max(0.0);
         }
 
-        let fwd = transform.forward().as_vec3().with_y(0.0).normalize_or_zero();
+        let fwd = transform
+            .forward()
+            .as_vec3()
+            .with_y(0.0)
+            .normalize_or_zero();
         let right = transform.right().as_vec3().with_y(0.0).normalize_or_zero();
         let input = (fwd * pi.move_axis.y + right * pi.move_axis.x).normalize_or_zero();
 
         let sprinting = pi.sprint && stats.stamina > 0.0 && input.length_squared() > 0.0;
-        let speed = if sprinting { movement.sprint_speed } else { movement.walk_speed };
+        let speed = if sprinting {
+            movement.sprint_speed
+        } else {
+            movement.walk_speed
+        };
 
         if sprinting {
             stats.stamina = (stats.stamina - 15.0 * dt).max(0.0);
@@ -347,6 +363,8 @@ fn player_movement(
             edge_grab.wall_contact_timer > 0.0 && edge_grab.wall_normal.length_squared() > 0.25;
         let pushing_into_wall = has_wall_contact && input.dot(-edge_grab.wall_normal) > 0.15;
 
+        let mut started_jump = false;
+
         if edge_grab.is_hanging {
             edge_grab.hang_timer += dt;
             stats.stamina = (stats.stamina - edge_grab.stamina_drain_per_sec * dt).max(0.0);
@@ -354,14 +372,17 @@ fn player_movement(
             movement.ground_velocity = Vec3::ZERO;
             jetpack.is_active = false;
 
-            if pi.jump {
+            if movement.jump_buffer_timer > 0.0 {
                 let jump_dir = (edge_grab.wall_normal + input * 0.25)
                     .with_y(0.0)
                     .normalize_or_zero();
                 movement.velocity.y = edge_grab.wall_jump_vertical;
                 movement.ground_velocity = jump_dir * edge_grab.wall_jump_push;
+                movement.jump_buffer_timer = 0.0;
+                movement.coyote_timer = 0.0;
                 edge_grab.is_hanging = false;
                 edge_grab.cooldown_timer = edge_grab.grab_cooldown;
+                started_jump = true;
                 state.force(PlayerState::Jetpack);
             } else if pi.interact {
                 controller.translation = Some(
@@ -388,17 +409,27 @@ fn player_movement(
             }
         }
 
-        if pi.jump && !movement.is_grounded && has_wall_contact && edge_grab.cooldown_timer <= 0.0 {
+        if movement.jump_buffer_timer > 0.0
+            && !movement.is_grounded
+            && has_wall_contact
+            && edge_grab.cooldown_timer <= 0.0
+        {
             let jump_dir = (edge_grab.wall_normal + input * 0.25)
                 .with_y(0.0)
                 .normalize_or_zero();
             movement.velocity.y = edge_grab.wall_jump_vertical;
             movement.ground_velocity = jump_dir * edge_grab.wall_jump_push;
+            movement.jump_buffer_timer = 0.0;
+            movement.coyote_timer = 0.0;
             edge_grab.cooldown_timer = edge_grab.grab_cooldown;
+            started_jump = true;
             state.force(PlayerState::Jetpack);
-        } else if pi.jump && movement.is_grounded {
+        } else if movement.jump_buffer_timer > 0.0 && movement.coyote_timer > 0.0 {
             movement.velocity.y = movement.jump_force;
+            movement.jump_buffer_timer = 0.0;
+            movement.coyote_timer = 0.0;
             movement.is_grounded = false;
+            started_jump = true;
             state.transition(PlayerState::Jetpack);
         }
 
@@ -419,7 +450,7 @@ fn player_movement(
             continue;
         }
 
-        if pi.jetpack && !movement.is_grounded && jetpack.fuel > 0.0 {
+        if pi.jetpack && !started_jump && !movement.is_grounded && jetpack.fuel > 0.0 {
             movement.velocity.y =
                 (movement.velocity.y + jetpack.force).min(jetpack.max_vertical_vel);
             jetpack.fuel -= jetpack.fuel_cost_per_sec * dt;
@@ -431,22 +462,44 @@ fn player_movement(
         }
 
         if !movement.is_grounded {
-            movement.velocity.y -= movement.gravity;
-            movement.velocity.y = movement.velocity.y.max(-2.0);
+            if !pi.jetpack && movement.velocity.y > movement.jump_release_cutoff {
+                movement.velocity.y = movement.jump_release_cutoff;
+            }
+
+            let mut gravity = if movement.velocity.y < 0.0 {
+                movement.gravity * movement.fall_gravity_mult
+            } else {
+                movement.gravity
+            };
+            if movement.velocity.y.abs() < 0.08 {
+                gravity *= movement.apex_gravity_mult;
+            }
+            movement.velocity.y -= gravity;
+            movement.velocity.y = movement.velocity.y.max(-movement.max_fall_speed);
             if pushing_into_wall && movement.velocity.y < -0.35 {
                 movement.velocity.y = -0.35;
                 state.transition(PlayerState::WallSliding);
             }
         }
 
+        let target_h_vel = input * speed;
         let mut h_vel = if movement.is_grounded {
-            let v = input * speed;
-            movement.ground_velocity = v;
-            v
+            let accel = if input.length_squared() > 0.01 {
+                movement.ground_accel
+            } else {
+                movement.ground_decel
+            };
+            movement.ground_velocity =
+                approach_vec3(movement.ground_velocity, target_h_vel, accel * dt);
+            movement.ground_velocity
         } else {
-            let target = input * speed;
-            let air_control = if edge_grab.cooldown_timer > 0.0 { 0.04 } else { 0.15 };
-            movement.ground_velocity = movement.ground_velocity.lerp(target, air_control);
+            let air_accel = if edge_grab.cooldown_timer > 0.0 {
+                movement.air_accel * 0.35
+            } else {
+                movement.air_accel
+            };
+            movement.ground_velocity =
+                approach_vec3(movement.ground_velocity, target_h_vel, air_accel * dt);
             movement.ground_velocity
         };
 
@@ -498,6 +551,16 @@ fn wall_normal_from_controller_output(output: &KinematicCharacterControllerOutpu
     best.map(|(normal, _)| normal)
 }
 
+fn approach_vec3(current: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
+    let delta = target - current;
+    let dist = delta.length();
+    if dist <= max_delta || dist <= f32::EPSILON {
+        target
+    } else {
+        current + delta / dist * max_delta
+    }
+}
+
 // ── Dodge Update ──────────────────────────────────────────────────────────────
 fn player_dodge_update(
     time: Res<Time>,
@@ -534,11 +597,19 @@ fn player_dodge_update(
             && stats.stamina >= dodge.dodge_cost
             && state.current != PlayerState::Dead
         {
-            let fwd = transform.forward().as_vec3().with_y(0.0).normalize_or_zero();
+            let fwd = transform
+                .forward()
+                .as_vec3()
+                .with_y(0.0)
+                .normalize_or_zero();
             let right = transform.right().as_vec3().with_y(0.0).normalize_or_zero();
             // Dodge in the direction the player is moving, or backward if idle.
             let input = (fwd * pi.move_axis.y + right * pi.move_axis.x).normalize_or_zero();
-            dodge.dodge_direction = if input.length_squared() > 0.01 { -input } else { -fwd };
+            dodge.dodge_direction = if input.length_squared() > 0.01 {
+                input
+            } else {
+                -fwd
+            };
             dodge.is_dodging = true;
             dodge.dodge_timer = dodge.dodge_duration;
             dodge.cooldown_timer = dodge.dodge_cooldown;
@@ -555,7 +626,7 @@ fn player_parry_update(
     mut player_q: Query<(&mut ParryState, &mut PlayerStateMachine, &PlayerInput), With<Player>>,
 ) {
     let dt = time.delta_secs();
-    for (mut parry, mut state, pi) in player_q.iter_mut() {
+    for (mut parry, state, pi) in player_q.iter_mut() {
         parry.cooldown_timer = (parry.cooldown_timer - dt).max(0.0);
 
         if parry.is_parrying {
@@ -595,7 +666,9 @@ fn player_stamina_regen(
     for (mut stats, dodge) in q.iter_mut() {
         if !dodge.is_dodging && stats.stamina < stats.max_stamina {
             stats.stamina = (stats.stamina + 10.0 * dt).min(stats.max_stamina);
-            ev.send(PlayerStaminaChangedEvent { stamina: stats.stamina });
+            ev.send(PlayerStaminaChangedEvent {
+                stamina: stats.stamina,
+            });
         }
     }
 }

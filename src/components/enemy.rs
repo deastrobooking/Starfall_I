@@ -214,3 +214,71 @@ pub struct DeadEnemy {
 /// Marks a boss-tier enemy (spawned every 5th wave).
 #[derive(Component, Default)]
 pub struct BossEnemy;
+
+/// Adds flying strafe/orbit behavior to drone enemies.
+#[derive(Component, Debug, Clone)]
+pub struct FlyingDrone {
+    pub altitude: f32,
+    pub orbit_radius: f32,
+    pub orbit_phase: f32,
+    pub fire_timer: f32,
+}
+
+impl FlyingDrone {
+    pub fn new(position: Vec3) -> Self {
+        Self {
+            altitude: 5.0 + (position.x * 0.07).sin().abs() * 2.0,
+            orbit_radius: 9.0 + (position.z * 0.05).cos().abs() * 5.0,
+            orbit_phase: position.x * 0.11 + position.z * 0.07,
+            fire_timer: 0.8,
+        }
+    }
+}
+
+/// Boss controller for dragon-domain bosses.
+#[derive(Component, Debug, Clone)]
+pub struct DragonBoss {
+    pub home: Vec3,
+    pub phase: u8,
+    pub orbit_angle: f32,
+    pub fireball_timer: f32,
+    pub breath_timer: f32,
+    pub slam_timer: f32,
+}
+
+impl DragonBoss {
+    pub fn new(position: Vec3) -> Self {
+        Self {
+            home: position,
+            phase: 1,
+            orbit_angle: 0.0,
+            fireball_timer: 1.5,
+            breath_timer: 3.0,
+            slam_timer: 5.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnemyProjectileKind {
+    Laser,
+    Fireball,
+}
+
+/// Projectile fired by enemy drones and dragon bosses.
+#[derive(Component, Debug, Clone)]
+pub struct EnemyProjectile {
+    pub kind: EnemyProjectileKind,
+    pub damage: f32,
+    pub speed: f32,
+    pub direction: Vec3,
+    pub lifetime: f32,
+    pub hit_radius: f32,
+    pub splash_radius: f32,
+}
+
+/// Short-lived enemy attack telegraph/impact visual.
+#[derive(Component, Debug, Clone)]
+pub struct EnemyAttackVfx {
+    pub timer: f32,
+}

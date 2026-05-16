@@ -328,7 +328,11 @@ impl PlayerSelectState {
     }
 
     pub fn character_name(&self, slot: usize) -> &'static str {
-        let idx = self.slots.get(slot).map(|s| s.character_index).unwrap_or(slot % 4);
-        HERO_ROSTER[idx]
+        let idx = self
+            .slots
+            .get(slot)
+            .map(|s| s.character_index)
+            .unwrap_or(slot % 4);
+        HERO_ROSTER[idx % HERO_ROSTER.len()]
     }
 }

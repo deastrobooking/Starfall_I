@@ -176,7 +176,6 @@ fn crafting_queue_system(
         return;
     };
 
-    let all = all_recipes();
     // Max stack default for result items (use 10 if unknown)
     let mut finished = vec![];
     for (i, craft) in queue.items.iter_mut().enumerate() {

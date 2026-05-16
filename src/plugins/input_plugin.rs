@@ -122,35 +122,47 @@ fn update_player_inputs(
         pi.gamepad_active = gp.is_some();
 
         // Helper closures — all capture `gp`.
-        let btn_held  = |b: GamepadButton| gp.map(|g| g.pressed(b)).unwrap_or(false);
-        let btn_just  = |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false);
-        let axis_val  = |a: GamepadAxis|  -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
+        let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(b)).unwrap_or(false);
+        let btn_just = |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false);
+        let axis_val = |a: GamepadAxis| -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
 
         // ── Movement ──────────────────────────────────────────────────────────
-        let raw_move = Vec2::new(axis_val(GamepadAxis::LeftStickX), axis_val(GamepadAxis::LeftStickY));
-        let gp_move  = apply_deadzone(raw_move);
-        let kb_move  = if is_p1 {
+        let raw_move = Vec2::new(
+            axis_val(GamepadAxis::LeftStickX),
+            axis_val(GamepadAxis::LeftStickY),
+        );
+        let gp_move = apply_deadzone(raw_move);
+        let kb_move = if is_p1 {
             Vec2::new(
-                (keyboard.pressed(KeyCode::KeyD) as i32 - keyboard.pressed(KeyCode::KeyA) as i32) as f32,
-                (keyboard.pressed(KeyCode::KeyW) as i32 - keyboard.pressed(KeyCode::KeyS) as i32) as f32,
+                (keyboard.pressed(KeyCode::KeyD) as i32 - keyboard.pressed(KeyCode::KeyA) as i32)
+                    as f32,
+                (keyboard.pressed(KeyCode::KeyW) as i32 - keyboard.pressed(KeyCode::KeyS) as i32)
+                    as f32,
             )
             .normalize_or_zero()
         } else {
             Vec2::ZERO
         };
-        pi.move_axis = if gp_move.length_squared() > 0.001 { gp_move } else { kb_move };
+        pi.move_axis = if gp_move.length_squared() > 0.001 {
+            gp_move
+        } else {
+            kb_move
+        };
 
         // ── Look ──────────────────────────────────────────────────────────────
-        let raw_look = Vec2::new(axis_val(GamepadAxis::RightStickX), -axis_val(GamepadAxis::RightStickY));
-        let clean    = apply_deadzone(raw_look);
+        let raw_look = Vec2::new(
+            axis_val(GamepadAxis::RightStickX),
+            -axis_val(GamepadAxis::RightStickY),
+        );
+        let clean = apply_deadzone(raw_look);
         // Quadratic curve: more precision at low deflection, full speed at max.
-        let curved   = clean * clean.length();
-        let gp_look  = curved * STICK_LOOK_RATE * dt;
+        let curved = clean * clean.length();
+        let gp_look = curved * STICK_LOOK_RATE * dt;
         // P1 gets both mouse and gamepad look simultaneously.
         pi.look_delta = if is_p1 { mouse_look } else { Vec2::ZERO } + gp_look;
 
         // ── Fire ──────────────────────────────────────────────────────────────
-        pi.fire      = (is_p1 && mouse_btn.pressed(MouseButton::Left))
+        pi.fire = (is_p1 && mouse_btn.pressed(MouseButton::Left))
             || btn_held(GamepadButton::RightTrigger2);
         pi.fire_just = (is_p1 && mouse_btn.just_pressed(MouseButton::Left))
             || btn_just(GamepadButton::RightTrigger2);
@@ -165,38 +177,49 @@ fn update_player_inputs(
             || btn_held(GamepadButton::LeftTrigger);
 
         // ── Jump / Jetpack ────────────────────────────────────────────────────
-        pi.jump   = (is_p1 && keyboard.just_pressed(KeyCode::Space)) || btn_just(GamepadButton::South);
-        pi.jetpack = (is_p1 && keyboard.pressed(KeyCode::Space))     || btn_held(GamepadButton::South);
+        pi.jump =
+            (is_p1 && keyboard.just_pressed(KeyCode::Space)) || btn_just(GamepadButton::South);
+        pi.jetpack = (is_p1 && keyboard.pressed(KeyCode::Space)) || btn_held(GamepadButton::South);
 
         // ── Dodge ─────────────────────────────────────────────────────────────
         pi.dodge = (is_p1 && keyboard.just_pressed(KeyCode::KeyQ)) || btn_just(GamepadButton::East);
 
         // ── Reload ────────────────────────────────────────────────────────────
-        pi.reload = (is_p1 && keyboard.just_pressed(KeyCode::KeyR)) || btn_just(GamepadButton::West);
+        pi.reload =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyR)) || btn_just(GamepadButton::West);
 
         // ── Parry ─────────────────────────────────────────────────────────────
-        pi.parry = (is_p1 && keyboard.just_pressed(KeyCode::KeyF)) || btn_just(GamepadButton::North);
+        pi.parry =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyF)) || btn_just(GamepadButton::North);
 
         // ── Melee ─────────────────────────────────────────────────────────────
-        pi.melee_light = (is_p1 && keyboard.just_pressed(KeyCode::KeyV))
-            || btn_just(GamepadButton::RightThumb);
-        pi.melee_heavy = (is_p1 && keyboard.just_pressed(KeyCode::KeyB))
-            || btn_just(GamepadButton::LeftThumb);
+        pi.melee_light =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyV)) || btn_just(GamepadButton::RightThumb);
+        pi.melee_heavy =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyB)) || btn_just(GamepadButton::LeftThumb);
 
         // ── Weapon cycle ──────────────────────────────────────────────────────
         pi.weapon_next = (is_p1 && keyboard.just_pressed(KeyCode::BracketRight))
             || btn_just(GamepadButton::RightTrigger); // RB only — DPadRight freed for open_map
-        pi.weapon_prev = (is_p1 && keyboard.just_pressed(KeyCode::BracketLeft));
+        pi.weapon_prev = is_p1 && keyboard.just_pressed(KeyCode::BracketLeft);
 
         // ── Direct weapon slots (P1 keyboard) ────────────────────────────────
         pi.weapon_slot = if is_p1 {
-            if      keyboard.just_pressed(KeyCode::Digit1) { Some(0) }
-            else if keyboard.just_pressed(KeyCode::Digit2) { Some(1) }
-            else if keyboard.just_pressed(KeyCode::Digit3) { Some(2) }
-            else if keyboard.just_pressed(KeyCode::Digit4) { Some(3) }
-            else if keyboard.just_pressed(KeyCode::Digit5) { Some(4) }
-            else if keyboard.just_pressed(KeyCode::Digit6) { Some(5) }
-            else { None }
+            if keyboard.just_pressed(KeyCode::Digit1) {
+                Some(0)
+            } else if keyboard.just_pressed(KeyCode::Digit2) {
+                Some(1)
+            } else if keyboard.just_pressed(KeyCode::Digit3) {
+                Some(2)
+            } else if keyboard.just_pressed(KeyCode::Digit4) {
+                Some(3)
+            } else if keyboard.just_pressed(KeyCode::Digit5) {
+                Some(4)
+            } else if keyboard.just_pressed(KeyCode::Digit6) {
+                Some(5)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -212,20 +235,35 @@ fn update_player_inputs(
             || btn_just(GamepadButton::DPadRight);
 
         pi.special_slot = if is_p1 {
-            if      keyboard.just_pressed(KeyCode::Digit7) { Some(0) }
-            else if keyboard.just_pressed(KeyCode::Digit8) { Some(1) }
-            else if keyboard.just_pressed(KeyCode::Digit9) { Some(2) }
-            else if keyboard.just_pressed(KeyCode::Digit0) { Some(3) }
-            else if select_held && btn_just(GamepadButton::DPadUp)    { Some(0) }
-            else if select_held && btn_just(GamepadButton::DPadDown)   { Some(1) }
-            else if select_held && btn_just(GamepadButton::DPadLeft)   { Some(2) }
-            else if select_held && btn_just(GamepadButton::DPadRight)  { Some(3) }
-            else { None }
+            if keyboard.just_pressed(KeyCode::Digit7) {
+                Some(0)
+            } else if keyboard.just_pressed(KeyCode::Digit8) {
+                Some(1)
+            } else if keyboard.just_pressed(KeyCode::Digit9) {
+                Some(2)
+            } else if keyboard.just_pressed(KeyCode::Digit0) {
+                Some(3)
+            } else if select_held && btn_just(GamepadButton::DPadUp) {
+                Some(0)
+            } else if select_held && btn_just(GamepadButton::DPadDown) {
+                Some(1)
+            } else if select_held && btn_just(GamepadButton::DPadLeft) {
+                Some(2)
+            } else if select_held && btn_just(GamepadButton::DPadRight) {
+                Some(3)
+            } else {
+                None
+            }
         } else if select_held && dpad_any_just {
-            if      btn_just(GamepadButton::DPadUp)    { Some(0) }
-            else if btn_just(GamepadButton::DPadDown)  { Some(1) }
-            else if btn_just(GamepadButton::DPadLeft)  { Some(2) }
-            else                                       { Some(3) }
+            if btn_just(GamepadButton::DPadUp) {
+                Some(0)
+            } else if btn_just(GamepadButton::DPadDown) {
+                Some(1)
+            } else if btn_just(GamepadButton::DPadLeft) {
+                Some(2)
+            } else {
+                Some(3)
+            }
         } else {
             None
         };
@@ -239,8 +277,7 @@ fn update_player_inputs(
         pi.enter_vehicle = (is_p1 && keyboard.just_pressed(KeyCode::KeyJ))
             || (dpad_free && btn_just(GamepadButton::DPadUp));
 
-        pi.weapon_prev = pi.weapon_prev
-            || (dpad_free && btn_just(GamepadButton::DPadLeft));
+        pi.weapon_prev = pi.weapon_prev || (dpad_free && btn_just(GamepadButton::DPadLeft));
 
         // ── Open map ──────────────────────────────────────────────────────────
         // DPadRight freed from weapon_next (RB covers that); assigned to map.
@@ -253,8 +290,8 @@ fn update_player_inputs(
             || (btn_just(GamepadButton::Select) && !dpad_any_just);
 
         // ── Pause ─────────────────────────────────────────────────────────────
-        pi.pause = (is_p1 && keyboard.just_pressed(KeyCode::Escape))
-            || btn_just(GamepadButton::Start);
+        pi.pause =
+            (is_p1 && keyboard.just_pressed(KeyCode::Escape)) || btn_just(GamepadButton::Start);
 
         // ── Star Sabre toggle ─────────────────────────────────────────────────
         // Primary:  Guide/Home button (Xbox/PS/Switch).

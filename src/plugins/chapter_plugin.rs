@@ -87,6 +87,7 @@ fn chapter_director_system(
     mut radio_ev: EventWriter<RadioChatterEvent>,
     mut step_ev: EventWriter<EncounterStepAdvancedEvent>,
     mut completed_ev: EventWriter<ChapterCompletedEvent>,
+    mut boss_spawned_ev: EventWriter<BossSpawnedEvent>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
     if !current.started || current.completed {
@@ -184,6 +185,10 @@ fn chapter_director_system(
             );
             wave.enemy_count += 1;
             current.awaiting_kills = 1;
+            boss_spawned_ev.send(BossSpawnedEvent {
+                wave: wave.wave_number,
+                position: pos,
+            });
             radio_ev.send(RadioChatterEvent {
                 speaker: name.into(),
                 text: format!("{} approaches.", name),
@@ -435,7 +440,10 @@ fn spawn_relic_puzzle(
     commands.spawn(PuzzleRelicEncounter {
         relic_id,
         scientist,
-        kind: DiscoverableKind::ScientistRelic { scientist, relic_id },
+        kind: DiscoverableKind::ScientistRelic {
+            scientist,
+            relic_id,
+        },
         label,
         hint,
         archetype: archetype.clone(),
@@ -496,30 +504,38 @@ fn puzzle_node_mesh(
 
 fn puzzle_node_material(node_kind: PuzzleNodeKind, active: bool) -> StandardMaterial {
     let (base, emissive) = match (node_kind, active) {
-        (PuzzleNodeKind::SwitchPylon, false) => {
-            (Color::srgb(0.16, 0.24, 0.85), LinearRgba::new(0.3, 0.5, 2.8, 1.0))
-        }
-        (PuzzleNodeKind::SwitchPylon, true) => {
-            (Color::srgb(0.95, 0.78, 0.22), LinearRgba::new(4.2, 3.0, 0.3, 1.0))
-        }
-        (PuzzleNodeKind::Crystal, false) => {
-            (Color::srgb(0.50, 0.18, 0.95), LinearRgba::new(1.0, 0.3, 3.8, 1.0))
-        }
-        (PuzzleNodeKind::Crystal, true) => {
-            (Color::srgb(0.20, 0.90, 1.0), LinearRgba::new(0.8, 3.0, 4.5, 1.0))
-        }
-        (PuzzleNodeKind::FloorPlate, false) => {
-            (Color::srgb(0.12, 0.38, 0.42), LinearRgba::new(0.1, 0.5, 0.6, 1.0))
-        }
-        (PuzzleNodeKind::FloorPlate, true) => {
-            (Color::srgb(0.25, 0.95, 0.70), LinearRgba::new(0.5, 3.5, 2.0, 1.0))
-        }
-        (PuzzleNodeKind::Relay, false) => {
-            (Color::srgb(0.90, 0.35, 0.10), LinearRgba::new(2.2, 0.7, 0.1, 1.0))
-        }
-        (PuzzleNodeKind::Relay, true) => {
-            (Color::srgb(1.0, 0.85, 0.25), LinearRgba::new(4.4, 2.8, 0.3, 1.0))
-        }
+        (PuzzleNodeKind::SwitchPylon, false) => (
+            Color::srgb(0.16, 0.24, 0.85),
+            LinearRgba::new(0.3, 0.5, 2.8, 1.0),
+        ),
+        (PuzzleNodeKind::SwitchPylon, true) => (
+            Color::srgb(0.95, 0.78, 0.22),
+            LinearRgba::new(4.2, 3.0, 0.3, 1.0),
+        ),
+        (PuzzleNodeKind::Crystal, false) => (
+            Color::srgb(0.50, 0.18, 0.95),
+            LinearRgba::new(1.0, 0.3, 3.8, 1.0),
+        ),
+        (PuzzleNodeKind::Crystal, true) => (
+            Color::srgb(0.20, 0.90, 1.0),
+            LinearRgba::new(0.8, 3.0, 4.5, 1.0),
+        ),
+        (PuzzleNodeKind::FloorPlate, false) => (
+            Color::srgb(0.12, 0.38, 0.42),
+            LinearRgba::new(0.1, 0.5, 0.6, 1.0),
+        ),
+        (PuzzleNodeKind::FloorPlate, true) => (
+            Color::srgb(0.25, 0.95, 0.70),
+            LinearRgba::new(0.5, 3.5, 2.0, 1.0),
+        ),
+        (PuzzleNodeKind::Relay, false) => (
+            Color::srgb(0.90, 0.35, 0.10),
+            LinearRgba::new(2.2, 0.7, 0.1, 1.0),
+        ),
+        (PuzzleNodeKind::Relay, true) => (
+            Color::srgb(1.0, 0.85, 0.25),
+            LinearRgba::new(4.4, 2.8, 0.3, 1.0),
+        ),
     };
     StandardMaterial {
         base_color: base,
@@ -560,12 +576,9 @@ fn track_kills_system(
 fn chapter_complete_check(
     mut completed_ev: EventReader<ChapterCompletedEvent>,
     mut progress: ResMut<ChapterProgress>,
-    mut next_state: ResMut<NextState<AppState>>,
 ) {
     for ev in completed_ev.read() {
         progress.mark_completed(ChapterId(ev.chapter));
-        // Return to chapter select after a short delay (handled by UI).
-        let _ = next_state; // future hook
     }
 }
 

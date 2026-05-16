@@ -185,15 +185,29 @@ pub fn enemy_config(
 ) -> CartoonCharacterConfig {
     let faction = faction.unwrap_or_default();
 
-    let (role, outfit, accent, skin, hair, has_horns, extra_horns, has_tail, has_spine_ridges,
-        eye_color, emissive_eyes) = match faction {
+    let (
+        role,
+        outfit,
+        accent,
+        skin,
+        hair,
+        has_horns,
+        extra_horns,
+        has_tail,
+        has_spine_ridges,
+        eye_color,
+        emissive_eyes,
+    ) = match faction {
         Faction::DragonRoyalty => (
             CartoonRole::Dragon,
             Color::srgb(0.92, 0.16, 0.06),
             Color::srgb(1.0, 0.72, 0.12),
             Color::srgb(0.72, 0.20, 0.10),
             Color::srgb(0.12, 0.02, 0.01),
-            true, true, true, true,
+            true,
+            true,
+            true,
+            true,
             Color::srgb(1.0, 0.58, 0.0),
             true,
         ),
@@ -203,7 +217,10 @@ pub fn enemy_config(
             Color::srgb(0.70, 0.88, 1.0),
             Color::srgb(0.38, 0.50, 0.78),
             Color::srgb(0.03, 0.04, 0.10),
-            true, false, true, true,
+            true,
+            false,
+            true,
+            true,
             Color::srgb(0.3, 0.75, 1.0),
             true,
         ),
@@ -213,7 +230,10 @@ pub fn enemy_config(
             Color::srgb(1.0, 0.18, 0.88),
             Color::srgb(0.75, 0.55, 0.48),
             Color::srgb(0.05, 0.02, 0.06),
-            false, false, false, false,
+            false,
+            false,
+            false,
+            false,
             Color::srgb(1.0, 0.1, 0.9),
             true,
         ),
@@ -223,7 +243,10 @@ pub fn enemy_config(
             Color::srgb(1.0, 0.94, 0.52),
             Color::srgb(0.92, 0.68, 0.45),
             Color::srgb(0.22, 0.16, 0.08),
-            false, false, false, false,
+            false,
+            false,
+            false,
+            false,
             Color::srgb(0.0, 0.85, 1.0),
             true,
         ),
@@ -233,7 +256,10 @@ pub fn enemy_config(
             Color::srgb(0.45, 0.95, 1.0),
             Color::srgb(0.92, 0.68, 0.45),
             Color::srgb(0.18, 0.05, 0.20),
-            false, false, false, false,
+            false,
+            false,
+            false,
+            false,
             Color::srgb(0.05, 0.04, 0.10),
             false,
         ),
@@ -243,7 +269,10 @@ pub fn enemy_config(
             Color::srgb(1.0, 0.85, 0.18),
             Color::srgb(0.93, 0.70, 0.48),
             Color::srgb(0.10, 0.06, 0.03),
-            false, false, false, false,
+            false,
+            false,
+            false,
+            false,
             Color::srgb(0.05, 0.05, 0.10),
             false,
         ),
@@ -263,16 +292,16 @@ pub fn enemy_config(
     };
 
     let type_scale = match enemy_type {
-        EnemyType::Drone   => 0.82,
+        EnemyType::Drone => 0.82,
         EnemyType::Soldier => 1.0,
-        EnemyType::Heavy   => 1.22,
+        EnemyType::Heavy => 1.22,
         EnemyType::SpikeAlien => 1.05,
-        EnemyType::Hybrid  => 1.35,
+        EnemyType::Hybrid => 1.35,
     };
     let type_width = match enemy_type {
-        EnemyType::Heavy  => 1.15,
+        EnemyType::Heavy => 1.15,
         EnemyType::Hybrid => 1.28,
-        _                 => 1.0,
+        _ => 1.0,
     };
 
     CartoonCharacterConfig {
@@ -292,7 +321,10 @@ pub fn enemy_config(
         has_star_badge: matches!(role, CartoonRole::Hero | CartoonRole::Wizard),
         has_visor: false,
         has_gloves: matches!(role, CartoonRole::Hero | CartoonRole::Wizard),
-        has_boots: matches!(role, CartoonRole::Hero | CartoonRole::Wizard | CartoonRole::Rival),
+        has_boots: matches!(
+            role,
+            CartoonRole::Hero | CartoonRole::Wizard | CartoonRole::Rival
+        ),
         has_shoulder_pads: matches!(enemy_type, EnemyType::Heavy | EnemyType::Hybrid),
         has_cape: false,
         has_spine_ridges,
@@ -313,7 +345,10 @@ pub fn spawn_cartoon_character(
     position: Vec3,
 ) -> Entity {
     let root = commands
-        .spawn((Transform::from_translation(position), GlobalTransform::default()))
+        .spawn((
+            Transform::from_translation(position),
+            GlobalTransform::default(),
+        ))
         .id();
     attach_cartoon_character(commands, meshes, materials, root, config, position);
     root
@@ -337,10 +372,10 @@ pub fn attach_cartoon_character(
     ));
 
     // ── Materials ─────────────────────────────────────────────────────────────
-    let skin   = char_mat(materials, config.skin);
+    let skin = char_mat(materials, config.skin);
     let outfit = char_mat(materials, config.outfit);
     let accent = char_mat(materials, config.accent);
-    let hair   = char_mat(materials, config.hair);
+    let hair = char_mat(materials, config.hair);
     let shadow = materials.add(StandardMaterial {
         base_color: Color::srgba(0.02, 0.02, 0.04, 0.35),
         alpha_mode: AlphaMode::Blend,
@@ -355,12 +390,14 @@ pub fn attach_cartoon_character(
     let brow_color = darken(config.hair, 0.7);
     let brow = char_mat(materials, brow_color);
 
-    let s  = config.scale;
+    let s = config.scale;
     let bw = config.body_width;
 
     // ── Shadow ────────────────────────────────────────────────────────────────
     spawn_part(
-        commands, meshes, root,
+        commands,
+        meshes,
+        root,
         CartoonPartKind::Shadow,
         Mesh::from(Cylinder::new(0.62 * s, 0.02 * s)),
         shadow,
@@ -369,7 +406,9 @@ pub fn attach_cartoon_character(
 
     // ── Body ──────────────────────────────────────────────────────────────────
     spawn_part(
-        commands, meshes, root,
+        commands,
+        meshes,
+        root,
         CartoonPartKind::Body,
         Mesh::from(Cuboid::new(0.72 * s * bw, 0.86 * s, 0.42 * s)),
         outfit.clone(),
@@ -379,14 +418,18 @@ pub fn attach_cartoon_character(
     // ── Belt (waist strap + centre buckle) ────────────────────────────────────
     if config.has_belt {
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Belt,
             Mesh::from(Cuboid::new(0.80 * s * bw, 0.11 * s, 0.46 * s)),
             accent.clone(),
             Transform::from_xyz(0.0, -0.38 * s, 0.0),
         );
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Belt,
             Mesh::from(Cuboid::new(0.19 * s, 0.17 * s, 0.06 * s)),
             emissive_mat(materials, config.accent, 1.6),
@@ -397,7 +440,9 @@ pub fn attach_cartoon_character(
     // ── Head ──────────────────────────────────────────────────────────────────
     // Slightly enlarged for bolder cartoon silhouette.
     spawn_part(
-        commands, meshes, root,
+        commands,
+        meshes,
+        root,
         CartoonPartKind::Head,
         Mesh::from(Sphere::new(0.38 * s)),
         skin.clone(),
@@ -407,26 +452,30 @@ pub fn attach_cartoon_character(
     // ── Hair ──────────────────────────────────────────────────────────────────
     // Cap volume
     spawn_part(
-        commands, meshes, root,
+        commands,
+        meshes,
+        root,
         CartoonPartKind::Hair,
         Mesh::from(Sphere::new(0.40 * s)),
         hair.clone(),
-        Transform::from_xyz(0.0, 0.76 * s, -0.02 * s)
-            .with_scale(Vec3::new(1.02, 0.52, 0.94)),
+        Transform::from_xyz(0.0, 0.76 * s, -0.02 * s).with_scale(Vec3::new(1.02, 0.52, 0.94)),
     );
     // Back curtain
     spawn_part(
-        commands, meshes, root,
+        commands,
+        meshes,
+        root,
         CartoonPartKind::Hair,
         Mesh::from(Cuboid::new(0.48 * s, 0.56 * s, 0.18 * s)),
         hair.clone(),
-        Transform::from_xyz(0.0, 0.42 * s, 0.13 * s)
-            .with_rotation(Quat::from_rotation_x(0.18)),
+        Transform::from_xyz(0.0, 0.42 * s, 0.13 * s).with_rotation(Quat::from_rotation_x(0.18)),
     );
     // Side ringlets
     for (x, rot_z) in [(-0.28_f32, 0.16_f32), (0.28_f32, -0.16_f32)] {
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Hair,
             Mesh::from(Cylinder::new(0.088 * s, 0.44 * s)),
             hair.clone(),
@@ -436,27 +485,34 @@ pub fn attach_cartoon_character(
     }
     // Nape curl
     spawn_part(
-        commands, meshes, root,
+        commands,
+        meshes,
+        root,
         CartoonPartKind::Hair,
         Mesh::from(Cylinder::new(0.062 * s, 0.26 * s)),
         hair.clone(),
-        Transform::from_xyz(0.0, 0.79 * s, -0.28 * s)
-            .with_rotation(Quat::from_rotation_x(1.35)),
+        Transform::from_xyz(0.0, 0.79 * s, -0.28 * s).with_rotation(Quat::from_rotation_x(1.35)),
     );
 
     // ── Eyes (sclera + iris; bigger for cartoon readability) ──────────────────
     for (kind, eye_x) in [
-        (CartoonPartKind::LeftEye,  -0.13_f32),
-        (CartoonPartKind::RightEye,  0.13_f32),
+        (CartoonPartKind::LeftEye, -0.13_f32),
+        (CartoonPartKind::RightEye, 0.13_f32),
     ] {
         spawn_part(
-            commands, meshes, root, kind,
+            commands,
+            meshes,
+            root,
+            kind,
             Mesh::from(Sphere::new(0.070 * s)),
             char_mat(materials, Color::srgb(0.95, 0.95, 0.97)),
             Transform::from_xyz(eye_x * s, 0.62 * s, -0.33 * s),
         );
         spawn_part(
-            commands, meshes, root, kind,
+            commands,
+            meshes,
+            root,
+            kind,
             Mesh::from(Sphere::new(0.050 * s)),
             eye_mat.clone(),
             Transform::from_xyz(eye_x * s, 0.62 * s, -0.37 * s),
@@ -465,11 +521,14 @@ pub fn attach_cartoon_character(
 
     // ── Eyebrows (bold inward tilt for personality) ───────────────────────────
     for (kind, brow_x, tilt_z) in [
-        (CartoonPartKind::LeftEyebrow,  -0.13_f32,  0.22_f32),
-        (CartoonPartKind::RightEyebrow,  0.13_f32, -0.22_f32),
+        (CartoonPartKind::LeftEyebrow, -0.13_f32, 0.22_f32),
+        (CartoonPartKind::RightEyebrow, 0.13_f32, -0.22_f32),
     ] {
         spawn_part(
-            commands, meshes, root, kind,
+            commands,
+            meshes,
+            root,
+            kind,
             Mesh::from(Cuboid::new(0.125 * s, 0.036 * s, 0.055 * s)),
             brow.clone(),
             Transform::from_xyz(brow_x * s, 0.710 * s, -0.33 * s)
@@ -479,46 +538,53 @@ pub fn attach_cartoon_character(
 
     // ── Nose ─────────────────────────────────────────────────────────────────
     spawn_part(
-        commands, meshes, root,
+        commands,
+        meshes,
+        root,
         CartoonPartKind::Nose,
         Mesh::from(Sphere::new(0.068 * s)),
         skin.clone(),
-        Transform::from_xyz(0.0, 0.565 * s, -0.37 * s)
-            .with_scale(Vec3::new(0.55, 0.55, 1.0)),
+        Transform::from_xyz(0.0, 0.565 * s, -0.37 * s).with_scale(Vec3::new(0.55, 0.55, 1.0)),
     );
 
     // ── Mouth (neutral set; line + lower-lip bump) ────────────────────────────
     if config.has_mouth {
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Mouth,
             Mesh::from(Cuboid::new(0.135 * s, 0.030 * s, 0.055 * s)),
             char_mat(materials, Color::srgb(0.17, 0.08, 0.08)),
             Transform::from_xyz(0.0, 0.500 * s, -0.37 * s),
         );
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Mouth,
             Mesh::from(Sphere::new(0.033 * s)),
             skin.clone(),
-            Transform::from_xyz(0.0, 0.475 * s, -0.39 * s)
-                .with_scale(Vec3::new(2.6, 0.85, 1.0)),
+            Transform::from_xyz(0.0, 0.475 * s, -0.39 * s).with_scale(Vec3::new(2.6, 0.85, 1.0)),
         );
     }
 
     // ── Hood (default hero silhouette, sized for bigger head) ────────────────
     if config.has_hood {
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Hood,
             Mesh::from(Sphere::new(0.46 * s)),
             outfit.clone(),
-            Transform::from_xyz(0.0, 0.79 * s, 0.01 * s)
-                .with_scale(Vec3::new(1.08, 0.90, 1.04)),
+            Transform::from_xyz(0.0, 0.79 * s, 0.01 * s).with_scale(Vec3::new(1.08, 0.90, 1.04)),
         );
         // Face-opening accent trim
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Hood,
             Mesh::from(Cuboid::new(0.54 * s, 0.28 * s, 0.18 * s)),
             accent.clone(),
@@ -527,26 +593,34 @@ pub fn attach_cartoon_character(
         );
         // Lower drape onto shoulders
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Hood,
             Mesh::from(Cuboid::new(0.44 * s, 0.24 * s, 0.20 * s)),
             outfit.clone(),
-            Transform::from_xyz(0.0, 0.32 * s, 0.19 * s)
-                .with_rotation(Quat::from_rotation_x(0.30)),
+            Transform::from_xyz(0.0, 0.32 * s, 0.19 * s).with_rotation(Quat::from_rotation_x(0.30)),
         );
     }
 
     // ── Hat (wizard only) ─────────────────────────────────────────────────────
     if config.has_hat {
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Hat,
-            Mesh::from(Cone { radius: 0.36 * s, height: 0.72 * s }),
+            Mesh::from(Cone {
+                radius: 0.36 * s,
+                height: 0.72 * s,
+            }),
             accent.clone(),
             Transform::from_xyz(0.0, 1.12 * s, 0.0),
         );
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Hat,
             Mesh::from(Cylinder::new(0.44 * s, 0.06 * s)),
             accent.clone(),
@@ -557,46 +631,65 @@ pub fn attach_cartoon_character(
     // ── Arms + Hands (chunkier limbs, bigger cartoon hands) ──────────────────
     let arm_x = (0.36 + 0.095) * s * bw;
     for (kind, x) in [
-        (CartoonPartKind::LeftArm,  -arm_x),
-        (CartoonPartKind::RightArm,  arm_x),
+        (CartoonPartKind::LeftArm, -arm_x),
+        (CartoonPartKind::RightArm, arm_x),
     ] {
         spawn_part(
-            commands, meshes, root, kind,
+            commands,
+            meshes,
+            root,
+            kind,
             Mesh::from(Cuboid::new(0.19 * s, 0.62 * s, 0.19 * s)),
             outfit.clone(),
             Transform::from_xyz(x, -0.12 * s, 0.0),
         );
     }
-    let hand_mat = if config.has_gloves { accent.clone() } else { skin.clone() };
+    let hand_mat = if config.has_gloves {
+        accent.clone()
+    } else {
+        skin.clone()
+    };
     for (kind, x) in [
-        (CartoonPartKind::LeftHand,  -arm_x),
-        (CartoonPartKind::RightHand,  arm_x),
+        (CartoonPartKind::LeftHand, -arm_x),
+        (CartoonPartKind::RightHand, arm_x),
     ] {
         spawn_part(
-            commands, meshes, root, kind,
+            commands,
+            meshes,
+            root,
+            kind,
             Mesh::from(Sphere::new(0.135 * s)),
             hand_mat.clone(),
-            Transform::from_xyz(x, -0.50 * s, 0.02 * s)
-                .with_scale(Vec3::new(1.05, 1.10, 0.92)),
+            Transform::from_xyz(x, -0.50 * s, 0.02 * s).with_scale(Vec3::new(1.05, 1.10, 0.92)),
         );
     }
 
     // ── Legs + Boots (chunkier, more exaggerated feet) ───────────────────────
-    let leg_x    = 0.195 * s * bw;
-    let boot_mat = if config.has_boots { accent.clone() } else { outfit.clone() };
+    let leg_x = 0.195 * s * bw;
+    let boot_mat = if config.has_boots {
+        accent.clone()
+    } else {
+        outfit.clone()
+    };
     for (leg_k, foot_k, x) in [
-        (CartoonPartKind::LeftLeg,  CartoonPartKind::LeftFoot,  -leg_x),
-        (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot,  leg_x),
+        (CartoonPartKind::LeftLeg, CartoonPartKind::LeftFoot, -leg_x),
+        (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot, leg_x),
     ] {
         spawn_part(
-            commands, meshes, root, leg_k,
+            commands,
+            meshes,
+            root,
+            leg_k,
             Mesh::from(Cuboid::new(0.22 * s, 0.68 * s, 0.22 * s)),
             outfit.clone(),
             Transform::from_xyz(x, -0.80 * s, 0.0),
         );
         // Oversized cartoon foot
         spawn_part(
-            commands, meshes, root, foot_k,
+            commands,
+            meshes,
+            root,
+            foot_k,
             Mesh::from(Cuboid::new(0.34 * s, 0.14 * s, 0.50 * s)),
             boot_mat.clone(),
             Transform::from_xyz(x, -1.22 * s, -0.12 * s),
@@ -608,7 +701,10 @@ pub fn attach_cartoon_character(
                 CartoonPartKind::RightBoot
             };
             spawn_part(
-                commands, meshes, root, boot_kind,
+                commands,
+                meshes,
+                root,
+                boot_kind,
                 Mesh::from(Cuboid::new(0.27 * s, 0.27 * s, 0.27 * s)),
                 boot_mat.clone(),
                 Transform::from_xyz(x, -1.00 * s, -0.03 * s),
@@ -619,12 +715,18 @@ pub fn attach_cartoon_character(
     // ── Horns ─────────────────────────────────────────────────────────────────
     if config.has_horns {
         for (kind, x, rot_z) in [
-            (CartoonPartKind::LeftHorn,  -0.22_f32,  0.40_f32),
-            (CartoonPartKind::RightHorn,  0.22_f32, -0.40_f32),
+            (CartoonPartKind::LeftHorn, -0.22_f32, 0.40_f32),
+            (CartoonPartKind::RightHorn, 0.22_f32, -0.40_f32),
         ] {
             spawn_part(
-                commands, meshes, root, kind,
-                Mesh::from(Cone { radius: 0.10 * s, height: 0.48 * s }),
+                commands,
+                meshes,
+                root,
+                kind,
+                Mesh::from(Cone {
+                    radius: 0.10 * s,
+                    height: 0.48 * s,
+                }),
                 accent.clone(),
                 Transform::from_xyz(x * s, 0.98 * s, 0.04 * s)
                     .with_rotation(Quat::from_rotation_z(rot_z)),
@@ -632,17 +734,21 @@ pub fn attach_cartoon_character(
         }
         if config.extra_horns {
             for (kind, x, rot_z, rot_x) in [
-                (CartoonPartKind::LeftHorn,  -0.14_f32,  0.22_f32, -0.30_f32),
-                (CartoonPartKind::RightHorn,  0.14_f32, -0.22_f32, -0.30_f32),
+                (CartoonPartKind::LeftHorn, -0.14_f32, 0.22_f32, -0.30_f32),
+                (CartoonPartKind::RightHorn, 0.14_f32, -0.22_f32, -0.30_f32),
             ] {
                 spawn_part(
-                    commands, meshes, root, kind,
-                    Mesh::from(Cone { radius: 0.065 * s, height: 0.30 * s }),
+                    commands,
+                    meshes,
+                    root,
+                    kind,
+                    Mesh::from(Cone {
+                        radius: 0.065 * s,
+                        height: 0.30 * s,
+                    }),
                     accent.clone(),
                     Transform::from_xyz(x * s, 0.88 * s, -0.16 * s)
-                        .with_rotation(
-                            Quat::from_rotation_z(rot_z) * Quat::from_rotation_x(rot_x),
-                        ),
+                        .with_rotation(Quat::from_rotation_z(rot_z) * Quat::from_rotation_x(rot_x)),
                 );
             }
         }
@@ -651,7 +757,9 @@ pub fn attach_cartoon_character(
     // ── Tail ──────────────────────────────────────────────────────────────────
     if config.has_tail {
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Tail,
             Mesh::from(Cuboid::new(0.18 * s, 0.18 * s, 0.55 * s)),
             accent.clone(),
@@ -659,7 +767,9 @@ pub fn attach_cartoon_character(
                 .with_rotation(Quat::from_rotation_x(0.40)),
         );
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Tail,
             Mesh::from(Cuboid::new(0.12 * s, 0.12 * s, 0.38 * s)),
             skin.clone(),
@@ -682,9 +792,14 @@ pub fn attach_cartoon_character(
         {
             let ridge_y = 0.16 * s - i as f32 * 0.04 * s;
             spawn_part(
-                commands, meshes, root,
+                commands,
+                meshes,
+                root,
                 CartoonPartKind::SpineRidge,
-                Mesh::from(Cone { radius: ridge_s * s * 0.45, height: ridge_s * s }),
+                Mesh::from(Cone {
+                    radius: ridge_s * s * 0.45,
+                    height: ridge_s * s,
+                }),
                 accent.clone(),
                 Transform::from_xyz(0.0, ridge_y, z * s + 0.15 * s)
                     .with_rotation(Quat::from_rotation_x(-0.15)),
@@ -696,7 +811,9 @@ pub fn attach_cartoon_character(
     if config.has_star_badge {
         for rot_z in [0.0_f32, PI / 3.0, -PI / 3.0] {
             spawn_part(
-                commands, meshes, root,
+                commands,
+                meshes,
+                root,
                 CartoonPartKind::StarBadge,
                 Mesh::from(Cuboid::new(0.28 * s, 0.09 * s, 0.05 * s)),
                 accent.clone(),
@@ -705,7 +822,9 @@ pub fn attach_cartoon_character(
             );
         }
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::StarBadge,
             Mesh::from(Sphere::new(0.055 * s)),
             emissive_mat(materials, config.accent, 3.5),
@@ -716,7 +835,9 @@ pub fn attach_cartoon_character(
     // ── Tech Visor ────────────────────────────────────────────────────────────
     if config.has_visor {
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Visor,
             Mesh::from(Cuboid::new(0.40 * s, 0.11 * s, 0.05 * s)),
             emissive_mat(materials, config.accent, 2.2),
@@ -727,26 +848,35 @@ pub fn attach_cartoon_character(
     // ── Shoulder pads (3-piece: base + ridge + emissive trim) ────────────────
     if config.has_shoulder_pads {
         for (kind, x) in [
-            (CartoonPartKind::ShoulderPadLeft,  -arm_x),
-            (CartoonPartKind::ShoulderPadRight,  arm_x),
+            (CartoonPartKind::ShoulderPadLeft, -arm_x),
+            (CartoonPartKind::ShoulderPadRight, arm_x),
         ] {
             // Base plate
             spawn_part(
-                commands, meshes, root, kind,
+                commands,
+                meshes,
+                root,
+                kind,
                 Mesh::from(Cuboid::new(0.32 * s, 0.14 * s, 0.34 * s)),
                 accent.clone(),
                 Transform::from_xyz(x, 0.22 * s, 0.0),
             );
             // Raised ridge on top
             spawn_part(
-                commands, meshes, root, kind,
+                commands,
+                meshes,
+                root,
+                kind,
                 Mesh::from(Cuboid::new(0.26 * s, 0.08 * s, 0.26 * s)),
                 accent.clone(),
                 Transform::from_xyz(x, 0.31 * s, 0.0),
             );
             // Emissive edge trim
             spawn_part(
-                commands, meshes, root, kind,
+                commands,
+                meshes,
+                root,
+                kind,
                 Mesh::from(Cuboid::new(0.36 * s, 0.06 * s, 0.38 * s)),
                 emissive_mat(materials, config.accent, 0.9),
                 Transform::from_xyz(x, 0.17 * s, 0.0),
@@ -758,7 +888,9 @@ pub fn attach_cartoon_character(
     if config.has_cape {
         // Collar strip across shoulders
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Cape,
             Mesh::from(Cuboid::new(0.64 * s, 0.13 * s, 0.07 * s)),
             accent.clone(),
@@ -766,7 +898,9 @@ pub fn attach_cartoon_character(
         );
         // Upper panel — accent colour, slight backward lean
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Cape,
             Mesh::from(Cuboid::new(0.60 * s, 0.56 * s, 0.05 * s)),
             accent.clone(),
@@ -775,7 +909,9 @@ pub fn attach_cartoon_character(
         );
         // Mid panel — outfit colour, more angled
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Cape,
             Mesh::from(Cuboid::new(0.48 * s, 0.42 * s, 0.04 * s)),
             outfit.clone(),
@@ -784,7 +920,9 @@ pub fn attach_cartoon_character(
         );
         // Tip flap — accent colour, most swept back
         spawn_part(
-            commands, meshes, root,
+            commands,
+            meshes,
+            root,
             CartoonPartKind::Cape,
             Mesh::from(Cuboid::new(0.32 * s, 0.20 * s, 0.03 * s)),
             accent.clone(),
@@ -795,6 +933,12 @@ pub fn attach_cartoon_character(
 }
 
 // ── Color presets for character designer ─────────────────────────────────────
+
+pub const COLOR_PRESET_COUNT: usize = 8;
+
+pub fn normalize_color_preset_index(index: usize) -> usize {
+    index.min(COLOR_PRESET_COUNT - 1)
+}
 
 pub fn outfit_presets() -> [Color; 8] {
     [
@@ -835,6 +979,18 @@ pub fn hair_presets() -> [Color; 8] {
     ]
 }
 
+pub fn outfit_preset(index: usize) -> Color {
+    outfit_presets()[normalize_color_preset_index(index)]
+}
+
+pub fn accent_preset(index: usize) -> Color {
+    accent_presets()[normalize_color_preset_index(index)]
+}
+
+pub fn hair_preset(index: usize) -> Color {
+    hair_presets()[normalize_color_preset_index(index)]
+}
+
 /// Returns a hero config with per-slot customization overrides applied.
 pub fn hero_config_with_overrides(
     name: &'static str,
@@ -849,34 +1005,52 @@ pub fn hero_config_with_overrides(
     has_visor: Option<bool>,
 ) -> CartoonCharacterConfig {
     let mut cfg = hero_config(name);
-    if let Some(c) = outfit        { cfg.outfit           = c; }
-    if let Some(c) = accent        { cfg.accent           = c; }
-    if let Some(c) = hair          { cfg.hair             = c; }
-    if let Some(v) = has_hood      { cfg.has_hood         = v; }
-    if let Some(v) = has_cape      { cfg.has_cape         = v; }
-    if let Some(v) = has_gloves    { cfg.has_gloves       = v; }
-    if let Some(v) = has_boots     { cfg.has_boots        = v; }
-    if let Some(v) = has_shoulder_pads { cfg.has_shoulder_pads = v; }
-    if let Some(v) = has_visor     { cfg.has_visor        = v; }
+    if let Some(c) = outfit {
+        cfg.outfit = c;
+    }
+    if let Some(c) = accent {
+        cfg.accent = c;
+    }
+    if let Some(c) = hair {
+        cfg.hair = c;
+    }
+    if let Some(v) = has_hood {
+        cfg.has_hood = v;
+    }
+    if let Some(v) = has_cape {
+        cfg.has_cape = v;
+    }
+    if let Some(v) = has_gloves {
+        cfg.has_gloves = v;
+    }
+    if let Some(v) = has_boots {
+        cfg.has_boots = v;
+    }
+    if let Some(v) = has_shoulder_pads {
+        cfg.has_shoulder_pads = v;
+    }
+    if let Some(v) = has_visor {
+        cfg.has_visor = v;
+    }
     cfg
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn spawn_part(
-    commands:  &mut Commands,
-    meshes:    &mut Assets<Mesh>,
-    root:      Entity,
-    kind:      CartoonPartKind,
-    mesh:      Mesh,
-    material:  Handle<StandardMaterial>,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    root: Entity,
+    kind: CartoonPartKind,
+    mesh: Mesh,
+    material: Handle<StandardMaterial>,
     transform: Transform,
 ) {
-    let part   = CartoonPart::new(root, kind, &transform);
+    let part = CartoonPart::new(root, kind, &transform);
     let entity = commands
         .spawn((
             PbrBundle {
-                mesh:     Mesh3d(meshes.add(mesh)),
+                mesh: Mesh3d(meshes.add(mesh)),
                 material: MeshMaterial3d(material),
                 transform,
                 ..default()
@@ -893,12 +1067,7 @@ fn char_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<St
     let lin = color.to_linear();
     materials.add(StandardMaterial {
         base_color: color,
-        emissive: LinearRgba::new(
-            lin.red   * 0.20,
-            lin.green * 0.20,
-            lin.blue  * 0.20,
-            1.0,
-        ),
+        emissive: LinearRgba::new(lin.red * 0.20, lin.green * 0.20, lin.blue * 0.20, 1.0),
         perceptual_roughness: 0.78,
         metallic: 0.0,
         reflectance: 0.16,
@@ -916,9 +1085,9 @@ fn emissive_mat(
     materials.add(StandardMaterial {
         base_color: color,
         emissive: LinearRgba::new(
-            lin.red   * strength,
+            lin.red * strength,
             lin.green * strength,
-            lin.blue  * strength,
+            lin.blue * strength,
             1.0,
         ),
         perceptual_roughness: 0.38,

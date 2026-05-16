@@ -74,7 +74,6 @@ fn relic_puzzle_system(
     mut encounter_q: Query<&mut PuzzleRelicEncounter>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut current: ResMut<CurrentChapter>,
     mut msg_ev: EventWriter<UiMessageEvent>,
     mut radio_ev: EventWriter<RadioChatterEvent>,
 ) {
@@ -178,7 +177,12 @@ fn relic_puzzle_system(
 
 fn update_ordered_switches(
     player_positions: &[Vec3],
-    node_q: &mut Query<(Entity, &Transform, &mut PuzzleNode, &MeshMaterial3d<StandardMaterial>)>,
+    node_q: &mut Query<(
+        Entity,
+        &Transform,
+        &mut PuzzleNode,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     encounter: &mut PuzzleRelicEncounter,
     materials: &mut Assets<StandardMaterial>,
     msg_ev: &mut EventWriter<UiMessageEvent>,
@@ -228,7 +232,12 @@ fn update_ordered_switches(
 
 fn update_timed_chain(
     player_positions: &[Vec3],
-    node_q: &mut Query<(Entity, &Transform, &mut PuzzleNode, &MeshMaterial3d<StandardMaterial>)>,
+    node_q: &mut Query<(
+        Entity,
+        &Transform,
+        &mut PuzzleNode,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     encounter: &mut PuzzleRelicEncounter,
     materials: &mut Assets<StandardMaterial>,
     msg_ev: &mut EventWriter<UiMessageEvent>,
@@ -268,7 +277,12 @@ fn update_timed_chain(
 
 fn update_floor_plates(
     player_positions: &[Vec3],
-    node_q: &mut Query<(Entity, &Transform, &mut PuzzleNode, &MeshMaterial3d<StandardMaterial>)>,
+    node_q: &mut Query<(
+        Entity,
+        &Transform,
+        &mut PuzzleNode,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     encounter: &mut PuzzleRelicEncounter,
     materials: &mut Assets<StandardMaterial>,
     dt: f32,
@@ -309,7 +323,12 @@ fn update_floor_plates(
 
 fn update_beam_routing(
     player_positions: &[Vec3],
-    node_q: &mut Query<(Entity, &Transform, &mut PuzzleNode, &MeshMaterial3d<StandardMaterial>)>,
+    node_q: &mut Query<(
+        Entity,
+        &Transform,
+        &mut PuzzleNode,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     encounter: &mut PuzzleRelicEncounter,
     materials: &mut Assets<StandardMaterial>,
     msg_ev: &mut EventWriter<UiMessageEvent>,
@@ -334,7 +353,10 @@ fn update_beam_routing(
     if wrong_node_hit && encounter.next_switch_index > 1 {
         reset_nodes(node_q, materials, encounter, true);
         msg_ev.send(UiMessageEvent {
-            text: format!("Beam route collapsed. Re-align the relays for {}.", encounter.label),
+            text: format!(
+                "Beam route collapsed. Re-align the relays for {}.",
+                encounter.label
+            ),
             duration: 3.5,
         });
         return;
@@ -357,12 +379,21 @@ fn touching_node(position: Vec3, player_positions: &[Vec3], radius: f32) -> bool
 }
 
 fn reset_nodes(
-    node_q: &mut Query<(Entity, &Transform, &mut PuzzleNode, &MeshMaterial3d<StandardMaterial>)>,
+    node_q: &mut Query<(
+        Entity,
+        &Transform,
+        &mut PuzzleNode,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     materials: &mut Assets<StandardMaterial>,
     encounter: &mut PuzzleRelicEncounter,
     keep_source_active: bool,
 ) {
-    encounter.active_nodes = if keep_source_active { 1.min(encounter.total_nodes) } else { 0 };
+    encounter.active_nodes = if keep_source_active {
+        1.min(encounter.total_nodes)
+    } else {
+        0
+    };
     encounter.next_switch_index = encounter.active_nodes;
     encounter.hold_progress = 0.0;
     for (_, _, mut node, material) in node_q.iter_mut() {
@@ -382,30 +413,38 @@ fn set_node_material(
 ) {
     if let Some(mat) = materials.get_mut(&material.0) {
         let (base_color, emissive) = match (node_kind, active) {
-            (PuzzleNodeKind::SwitchPylon, false) => {
-                (Color::srgb(0.16, 0.24, 0.85), LinearRgba::new(0.3, 0.5, 2.8, 1.0))
-            }
-            (PuzzleNodeKind::SwitchPylon, true) => {
-                (Color::srgb(0.95, 0.78, 0.22), LinearRgba::new(4.2, 3.0, 0.3, 1.0))
-            }
-            (PuzzleNodeKind::Crystal, false) => {
-                (Color::srgb(0.50, 0.18, 0.95), LinearRgba::new(1.0, 0.3, 3.8, 1.0))
-            }
-            (PuzzleNodeKind::Crystal, true) => {
-                (Color::srgb(0.20, 0.90, 1.0), LinearRgba::new(0.8, 3.0, 4.5, 1.0))
-            }
-            (PuzzleNodeKind::FloorPlate, false) => {
-                (Color::srgb(0.12, 0.38, 0.42), LinearRgba::new(0.1, 0.5, 0.6, 1.0))
-            }
-            (PuzzleNodeKind::FloorPlate, true) => {
-                (Color::srgb(0.25, 0.95, 0.70), LinearRgba::new(0.5, 3.5, 2.0, 1.0))
-            }
-            (PuzzleNodeKind::Relay, false) => {
-                (Color::srgb(0.90, 0.35, 0.10), LinearRgba::new(2.2, 0.7, 0.1, 1.0))
-            }
-            (PuzzleNodeKind::Relay, true) => {
-                (Color::srgb(1.0, 0.85, 0.25), LinearRgba::new(4.4, 2.8, 0.3, 1.0))
-            }
+            (PuzzleNodeKind::SwitchPylon, false) => (
+                Color::srgb(0.16, 0.24, 0.85),
+                LinearRgba::new(0.3, 0.5, 2.8, 1.0),
+            ),
+            (PuzzleNodeKind::SwitchPylon, true) => (
+                Color::srgb(0.95, 0.78, 0.22),
+                LinearRgba::new(4.2, 3.0, 0.3, 1.0),
+            ),
+            (PuzzleNodeKind::Crystal, false) => (
+                Color::srgb(0.50, 0.18, 0.95),
+                LinearRgba::new(1.0, 0.3, 3.8, 1.0),
+            ),
+            (PuzzleNodeKind::Crystal, true) => (
+                Color::srgb(0.20, 0.90, 1.0),
+                LinearRgba::new(0.8, 3.0, 4.5, 1.0),
+            ),
+            (PuzzleNodeKind::FloorPlate, false) => (
+                Color::srgb(0.12, 0.38, 0.42),
+                LinearRgba::new(0.1, 0.5, 0.6, 1.0),
+            ),
+            (PuzzleNodeKind::FloorPlate, true) => (
+                Color::srgb(0.25, 0.95, 0.70),
+                LinearRgba::new(0.5, 3.5, 2.0, 1.0),
+            ),
+            (PuzzleNodeKind::Relay, false) => (
+                Color::srgb(0.90, 0.35, 0.10),
+                LinearRgba::new(2.2, 0.7, 0.1, 1.0),
+            ),
+            (PuzzleNodeKind::Relay, true) => (
+                Color::srgb(1.0, 0.85, 0.25),
+                LinearRgba::new(4.4, 2.8, 0.3, 1.0),
+            ),
         };
         mat.base_color = base_color;
         mat.emissive = emissive;
@@ -428,10 +467,9 @@ fn discoverable_pickup_system(
     mut companion_ev: EventWriter<CompanionRecruitedEvent>,
 ) {
     for (e, t, d) in disc_q.iter() {
-        let Some((player_entity, _)) = player_q
-            .iter()
-            .find(|(_, player_transform)| player_transform.translation.distance(t.translation) <= 2.5)
-        else {
+        let Some((player_entity, _)) = player_q.iter().find(|(_, player_transform)| {
+            player_transform.translation.distance(t.translation) <= 2.5
+        }) else {
             continue;
         };
         match &d.kind {
