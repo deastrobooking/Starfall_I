@@ -10,6 +10,7 @@ use crate::components::player::{JetpackState, Player, PlayerStats};
 use crate::components::weapon::{BeamSabre, SpecialWeaponInventory, WeaponInventory};
 use crate::damage::Health;
 use crate::events::*;
+use crate::perks::{all_perks, PerkTree};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlayerSelectState,
@@ -87,7 +88,12 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                chapter_select_input.run_if(in_state(AppState::ChapterSelect)),
+                (
+                    chapter_select_input,
+                    chapter_select_perk_input,
+                    chapter_select_perk_panel_update,
+                )
+                    .run_if(in_state(AppState::ChapterSelect)),
             );
     }
 }
@@ -212,8 +218,14 @@ fn menu_start_button(
 // ── Chapter Select ────────────────────────────────────────────────────────────
 #[derive(Component)]
 struct ChapterSelectRoot;
+#[derive(Component)]
+struct PerkPanelText;
 
-fn setup_chapter_select(mut commands: Commands, progress: Res<ChapterProgress>) {
+fn setup_chapter_select(
+    mut commands: Commands,
+    progress: Res<ChapterProgress>,
+    perks: Res<PerkTree>,
+) {
     let chapters = all_chapters();
     commands
         .spawn((
@@ -240,7 +252,7 @@ fn setup_chapter_select(mut commands: Commands, progress: Res<ChapterProgress>) 
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
             p.spawn((
-                Text::new("Press 1-9 / 0 / Q W E R for chapters 1-14   |   [E]ditor   [Esc] Back"),
+                Text::new("Press 1-9 / 0 / Q W R T for chapters 1-14   |   [E]ditor   [Esc] Back"),
                 TextFont {
                     font_size: 18.0,
                     ..default()
@@ -280,6 +292,19 @@ fn setup_chapter_select(mut commands: Commands, progress: Res<ChapterProgress>) 
                     TextColor(color),
                 ));
             }
+            p.spawn(Node {
+                height: Val::Px(10.0),
+                ..default()
+            });
+            p.spawn((
+                Text::new(format_perk_panel(&perks)),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.8, 0.9, 1.0)),
+                PerkPanelText,
+            ));
         });
 }
 
@@ -329,6 +354,61 @@ fn chapter_select_input(
     if keyboard.just_pressed(KeyCode::Escape) {
         next_state.set(AppState::MainMenu);
     }
+}
+
+fn chapter_select_perk_input(keyboard: Res<ButtonInput<KeyCode>>, mut perks: ResMut<PerkTree>) {
+    let picks = [
+        (KeyCode::KeyA, "heart_vitality"),
+        (KeyCode::KeyS, "heart_regen"),
+        (KeyCode::KeyD, "star_focus"),
+        (KeyCode::KeyF, "star_charges"),
+        (KeyCode::KeyG, "acro_evasion"),
+        (KeyCode::KeyH, "acro_parry"),
+    ];
+    for (key, perk_id) in picks {
+        if keyboard.just_pressed(key) {
+            perks.try_spend(perk_id);
+            break;
+        }
+    }
+}
+
+fn chapter_select_perk_panel_update(
+    perks: Res<PerkTree>,
+    mut text_q: Query<&mut Text, With<PerkPanelText>>,
+) {
+    if !perks.is_changed() {
+        return;
+    }
+    for mut text in text_q.iter_mut() {
+        *text = Text::new(format_perk_panel(&perks));
+    }
+}
+
+fn format_perk_panel(perks: &PerkTree) -> String {
+    let keys = [
+        ("A", "heart_vitality"),
+        ("S", "heart_regen"),
+        ("D", "star_focus"),
+        ("F", "star_charges"),
+        ("G", "acro_evasion"),
+        ("H", "acro_parry"),
+    ];
+    let defs = all_perks();
+    let mut lines = vec![format!("PERK TRAINING  Points: {}", perks.points_unspent)];
+    for (key, perk_id) in keys {
+        if let Some(def) = defs.iter().find(|def| def.id == perk_id) {
+            lines.push(format!(
+                "[{}] {} {}/{} - {}",
+                key,
+                def.name,
+                perks.rank(def.id),
+                def.max_rank,
+                def.description
+            ));
+        }
+    }
+    lines.join("\n")
 }
 
 // ── Player Select ─────────────────────────────────────────────────────────────
@@ -1230,7 +1310,8 @@ fn hud_update_system(
         ),
     >,
 ) {
-    let Ok((health, stats, jetpack, weapons, special, armor, sabre)) = player_q.get_single() else {
+    let Some((health, stats, jetpack, weapons, special, armor, sabre)) = player_q.iter().next()
+    else {
         return;
     };
 

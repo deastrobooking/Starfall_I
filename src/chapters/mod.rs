@@ -182,6 +182,21 @@ pub enum EncounterStep {
         intro_line: &'static str,
         scale: f32,
     },
+    /// Story beat after a castle boss drops: their airship appears and they flee.
+    AirshipEscape {
+        boss_name: &'static str,
+        faction: Faction,
+        airship_label: &'static str,
+        line: &'static str,
+        hold: f32,
+    },
+    /// Move the party onto the boss airship and clear its deck guards.
+    AirshipDeckRaid {
+        faction: Faction,
+        enemy_type: EnemyType,
+        count: u32,
+        scale: f32,
+    },
     /// Place a discoverable beacon at a position offset from the player.
     PlaceDiscoverable {
         kind: DiscoverableKind,
@@ -260,6 +275,28 @@ fn boss(
         name,
         faction,
         intro_line,
+        scale,
+    }
+}
+fn airship_escape(
+    boss_name: &'static str,
+    faction: Faction,
+    airship_label: &'static str,
+    line: &'static str,
+) -> EncounterStep {
+    EncounterStep::AirshipEscape {
+        boss_name,
+        faction,
+        airship_label,
+        line,
+        hold: 4.0,
+    }
+}
+fn airship_raid(faction: Faction, enemy_type: EnemyType, count: u32, scale: f32) -> EncounterStep {
+    EncounterStep::AirshipDeckRaid {
+        faction,
+        enemy_type,
+        count,
         scale,
     }
 }
@@ -438,6 +475,15 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 place(DiscoverableKind::ArmorMod("coolant_weave"), "Dragon Chill Weave", Vec3::new(6.0, 0.5, 6.0)),
                 boss("BruteForge", "Collosar - King of the Dragons", DragonRoyalty,
                      "COLLOSAR: Prove your light protects Earth.", 2.4),
+                airship_escape(
+                    "Collosar",
+                    DragonRoyalty,
+                    "Collosar's Crown Airship",
+                    "COLLOSAR: The castle falls. My crownship does not.",
+                ),
+                airship_raid(DragonRoyalty, Drone, 7, 1.7),
+                boss("BruteForge", "Collosar - Crown Airship", DragonRoyalty,
+                     "COLLOSAR: Now fight where the sky can judge us.", 2.1),
                 outro("Vincenzo: The king is not our enemy. The invasion is."),
             ],
         },
@@ -456,6 +502,15 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 place(DiscoverableKind::WeaponMod("piercing_rounds"), "Royal Star Pierce", Vec3::new(0.0, 0.5, 10.0)),
                 boss("HarvesterMech", "Tarack - Dragon Queen", DragonRoyalty,
                      "TARACK: Carry your light without burning each other.", 2.0),
+                airship_escape(
+                    "Tarack",
+                    DragonRoyalty,
+                    "Tarack's Ember Airship",
+                    "TARACK: Good. Now climb aboard and prove you can keep balance.",
+                ),
+                airship_raid(DragonRoyalty, Drone, 8, 1.8),
+                boss("HarvesterMech", "Tarack - Ember Airship", DragonRoyalty,
+                     "TARACK: A true family fights even when the floor is moving.", 2.0),
                 outro("Aurora: A test disguised as a battle. I like her."),
             ],
         },
@@ -474,6 +529,15 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 spawn(DimensionalAlien, EnemyType::SpikeAlien, 7, 1.9),
                 boss("TankTitan", "Shread - Oldest Son", DragonRoyalty,
                      "SHREAD: Show me your best team combo.", 2.2),
+                airship_escape(
+                    "Shread",
+                    DragonRoyalty,
+                    "Shread's Scrapwing Airship",
+                    "SHREAD: Castle rules are boring. Chase me onto the Scrapwing.",
+                ),
+                airship_raid(DragonRoyalty, EnemyType::SpikeAlien, 8, 1.9),
+                boss("TankTitan", "Shread - Scrapwing Airship", DragonRoyalty,
+                     "SHREAD: No walls, no excuses. Show me the combo again.", 2.15),
                 outro("Tony: Dragon brothers are just us with wings and worse furniture."),
             ],
         },
@@ -522,6 +586,15 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 mid_boss("CharredCaptain", "Fang", CorruptedHuman, 1.7),
                 boss("BruteForge", "Ragar - Rockies Domain", DragonExile,
                      "RAGAR: Collosar's crown made him soft.", 2.0),
+                airship_escape(
+                    "Ragar",
+                    DragonExile,
+                    "Ragar's Granite Airship",
+                    "RAGAR: My castle is only the first stone. The sky fortress is next.",
+                ),
+                airship_raid(DragonExile, Drone, 8, 2.0),
+                boss("BruteForge", "Ragar - Granite Airship", DragonExile,
+                     "RAGAR: Up here, every fall teaches respect.", 2.1),
                 outro("Angelo: Ragar is angry. The aliens are using it."),
             ],
         },
@@ -539,6 +612,15 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 spawn(DimensionalAlien, Heavy, 4, 2.0),
                 boss("HybridOmega", "Blackskull - Antarctica Domain", DragonExile,
                      "BLACKSKULL: Your bright little family cracks the ice.", 2.0),
+                airship_escape(
+                    "Blackskull",
+                    DragonExile,
+                    "Blackskull's Icebreaker Airship",
+                    "BLACKSKULL: The ice is cracked. The Icebreaker still hunts.",
+                ),
+                airship_raid(DragonExile, Soldier, 8, 2.05),
+                boss("HybridOmega", "Blackskull - Icebreaker Airship", DragonExile,
+                     "BLACKSKULL: Let the high cold finish what the castle began.", 2.15),
                 outro("Little Joe: Quiet is overrated."),
             ],
         },

@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::components::armor::*;
 use crate::components::player::{Player, PlayerStats};
+use crate::perks::PerkTree;
 use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -18,16 +19,15 @@ impl Plugin for ArmorPlugin {
 
 /// Keep player max health in sync with total armor health bonuses.
 fn apply_armor_health_bonus(
-    mut player_q: Query<
-        (&ArmorSet, &mut PlayerStats, &mut crate::damage::Health),
-        (With<Player>, Changed<ArmorSet>),
-    >,
+    perks: Res<PerkTree>,
+    mut player_q: Query<(&ArmorSet, &mut PlayerStats, &mut crate::damage::Health), With<Player>>,
 ) {
     for (armor, mut stats, mut health) in player_q.iter_mut() {
         let bonus = armor.total_health_bonus();
         let stamina_bonus = armor.total_stamina_bonus();
-        // Recalculate max health: base 100 + level bonus + armor
-        let new_max = 100.0 + (stats.level.saturating_sub(1) as f32 * 10.0) + bonus;
+        // Recalculate max health from stable sources so armor/perks cannot stack.
+        let new_max =
+            100.0 + (stats.level.saturating_sub(1) as f32 * 10.0) + bonus + perks.hp_bonus();
         if (stats.max_health - new_max).abs() > 0.1 {
             let ratio = health.current / health.max;
             stats.max_health = new_max;

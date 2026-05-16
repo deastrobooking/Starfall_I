@@ -332,7 +332,7 @@ pub struct PlayerInput {
     pub open_map: bool,
     pub sabre_toggle: bool,
     pub weapon_slot: Option<usize>,
-    /// Digit 7/8/9/0 → slots 0–3. P1 keyboard only; controller binding TBD.
+    /// Digit 7/8/9/0 or Select + D-pad → slots 0–3.
     pub special_slot: Option<u8>,
     pub gamepad_active: bool,
 }

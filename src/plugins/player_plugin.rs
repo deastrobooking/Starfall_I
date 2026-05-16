@@ -12,6 +12,7 @@ use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::damage::{apply_damage, DamageInfo, Damageable, Health};
 use crate::events::*;
+use crate::perks::PerkTree;
 use crate::resources::{CameraShake, LocalPlayerConfig, PlayerSelectState};
 use crate::state::AppState;
 
@@ -36,6 +37,7 @@ impl Plugin for PlayerPlugin {
                     player_parry_update,
                     player_state_update,
                     player_stamina_regen,
+                    player_perk_health_regen,
                     player_invulnerability_update,
                     player_level_up,
                     player_died_check,
@@ -564,6 +566,7 @@ fn approach_vec3(current: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
 // ── Dodge Update ──────────────────────────────────────────────────────────────
 fn player_dodge_update(
     time: Res<Time>,
+    perks: Res<PerkTree>,
     mut player_q: Query<
         (
             &mut DodgeState,
@@ -578,8 +581,10 @@ fn player_dodge_update(
     mut dodge_ev: EventWriter<PlayerDodgeEvent>,
 ) {
     let dt = time.delta_secs();
+    let dodge_cost_mult = perks.dodge_cost_mult();
     for (mut dodge, mut stats, mut damageable, transform, mut state, pi) in player_q.iter_mut() {
         dodge.cooldown_timer = (dodge.cooldown_timer - dt).max(0.0);
+        let dodge_cost = dodge.dodge_cost * dodge_cost_mult;
 
         if dodge.is_dodging {
             dodge.dodge_timer -= dt;
@@ -594,7 +599,7 @@ fn player_dodge_update(
         if pi.dodge
             && !dodge.is_dodging
             && dodge.cooldown_timer <= 0.0
-            && stats.stamina >= dodge.dodge_cost
+            && stats.stamina >= dodge_cost
             && state.current != PlayerState::Dead
         {
             let fwd = transform
@@ -613,7 +618,7 @@ fn player_dodge_update(
             dodge.is_dodging = true;
             dodge.dodge_timer = dodge.dodge_duration;
             dodge.cooldown_timer = dodge.dodge_cooldown;
-            stats.stamina -= dodge.dodge_cost;
+            stats.stamina -= dodge_cost;
             state.force(PlayerState::Dodging);
             dodge_ev.send(PlayerDodgeEvent);
         }
@@ -623,9 +628,11 @@ fn player_dodge_update(
 // ── Parry Update ──────────────────────────────────────────────────────────────
 fn player_parry_update(
     time: Res<Time>,
+    perks: Res<PerkTree>,
     mut player_q: Query<(&mut ParryState, &mut PlayerStateMachine, &PlayerInput), With<Player>>,
 ) {
     let dt = time.delta_secs();
+    let parry_window_bonus = perks.parry_window_bonus();
     for (mut parry, state, pi) in player_q.iter_mut() {
         parry.cooldown_timer = (parry.cooldown_timer - dt).max(0.0);
 
@@ -642,7 +649,7 @@ fn player_parry_update(
             && state.current != PlayerState::Dead
         {
             parry.is_parrying = true;
-            parry.parry_timer = parry.parry_window;
+            parry.parry_timer = parry.parry_window + parry_window_bonus;
             parry.cooldown_timer = parry.parry_cooldown;
         }
     }
@@ -673,6 +680,23 @@ fn player_stamina_regen(
     }
 }
 
+fn player_perk_health_regen(
+    time: Res<Time>,
+    perks: Res<PerkTree>,
+    mut q: Query<(&mut Health, &PlayerStateMachine), With<Player>>,
+) {
+    let regen = perks.regen_per_sec();
+    if regen <= 0.0 {
+        return;
+    }
+    let dt = time.delta_secs();
+    for (mut health, state) in q.iter_mut() {
+        if state.current != PlayerState::Dead && health.is_alive() && health.current < health.max {
+            health.current = (health.current + regen * dt).min(health.max);
+        }
+    }
+}
+
 // ── Invulnerability Update ────────────────────────────────────────────────────
 fn player_invulnerability_update(time: Res<Time>, mut q: Query<&mut Damageable, With<Player>>) {
     let dt = time.delta_secs();
@@ -690,6 +714,7 @@ fn player_invulnerability_update(time: Res<Time>, mut q: Query<&mut Damageable, 
 // ── Level Up ──────────────────────────────────────────────────────────────────
 fn player_level_up(
     mut q: Query<(&mut PlayerStats, &mut Health), With<Player>>,
+    mut perks: ResMut<PerkTree>,
     mut level_ev: EventWriter<PlayerLevelUpEvent>,
 ) {
     for (mut stats, mut health) in q.iter_mut() {
@@ -702,6 +727,7 @@ fn player_level_up(
             health.max = stats.max_health;
             health.current = health.max;
             stats.stamina = stats.max_stamina;
+            perks.award(1);
             level_ev.send(PlayerLevelUpEvent { level: stats.level });
         }
     }

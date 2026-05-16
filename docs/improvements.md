@@ -1,176 +1,105 @@
-# Starfall I — Improvement Notes
+# Starfall I - Improvement Notes
 
-Issues and suggestions found during review, grouped by severity.
+Open issues and design follow-ups found during the May 2026 documentation/code review.
 
----
+## Fixed In This Pass
 
-## Bugs
+- `SaveState` now defaults to a 30 second autosave interval instead of autosaving every frame.
+- `PerkTree` is initialized, awarded on level-up, saved/loaded, spendable from chapter select, and wired into HP, HP regen, beam damage, ammo/charge caps, dodge cost, and parry timing.
+- Controller special tools are documented and wired through Select + D-pad.
+- Castle/domain bosses in chapters 6, 7, 8, 10, and 11 now escape to faction-colored airship decks before their rematch.
+- Chapter director and HUD no longer fail outright when multiple players exist; they use the first active player as the shared chapter/HUD anchor.
+- Kill rewards are shared across active players.
+- The stale Rapier compatibility comment in `Cargo.toml` now matches the pinned dependency.
 
-### 1. Save data doesn't persist chapter progress or perks
-**File:** `src/plugins/save_plugin.rs`, `SaveData` struct
+## High Priority
 
-`SaveData` saves only `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, and `wave_number`. `ChapterProgress` (completed chapters, discoverables, companion recruits) and `PerkTree` are never written to disk. Restarting the game loses all chapter and perk state.
+### 1. Finish per-player multiplayer ownership
+**Files:** `src/plugins/*`
 
-**Fix:** Add `ChapterProgress` and `PerkTree` serialization to `SaveData` and restore them in `load_save_on_enter`.
+The player-select, input, movement, camera, combat, and death paths support multiple players, but several support systems are still first-player or shared-state oriented.
 
----
+Known remaining areas:
 
-### 2. Leftover dev save file
-**File:** `heavy_water_save.json` (project root)
+- `crafting_plugin.rs` and the crafting panel use one player inventory.
+- `chest_plugin.rs` grants rewards through a single player interaction path.
+- `companion_plugin.rs` generally follows/heals/assists one player.
+- `vehicle_plugin.rs` uses a shared vehicle state and P1-style control model.
+- `save_plugin.rs` snapshots the first active player's stats.
+- The primary HUD displays the first active player rather than per-player panels.
 
-A save file from an earlier game name sits in the repo root. The current constant (`SAVE_FILE = "starfall_i_save.json"`) is different, so this file is never read or written — it's just dead data.
+**Design direction:** add explicit owner/player index fields to interaction systems, then decide which resources are campaign-shared and which are per-player.
 
-**Fix:** Delete the file and add `*.json` (or specifically `heavy_water_save.json`) to `.gitignore`.
+### 2. Add a real perk training screen
+**Files:** `src/plugins/ui_plugin.rs`, `src/perks.rs`
 
----
+The current chapter-select perk UI is intentionally small: keyboard shortcuts spend points and the text panel updates ranks. This proves the system, but it is not the final UX.
 
-### 3. Several resources not initialized in `main.rs`
-**File:** `src/main.rs`, `src/resources.rs`
+**Design direction:** make a dedicated perk screen with branch tabs, rank pips, disabled states, previews of stat changes, and controller navigation.
 
-The following resources are defined and used in plugins but never `init_resource`'d at app startup:
-- `CurrentChapter` (chapter_plugin presumably adds it, verify)
-- `BiomePalette`
-- `PlayerChassis`
-- `ChapterProgress`
-- `RadioChatter`
-- `UiMessage`
-- `PerkTree` (defined in `perks.rs`)
+### 3. Deepen airship levels
+**Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
 
-If any system runs before the owning plugin inserts the resource, Bevy will panic.
+Airship levels currently spawn a solid deck, rail blockers, engine visuals, a guard wave, and a boss rematch. That supports the requested chapter loop, but the levels could become richer platforming spaces.
 
-**Fix:** Either `init_resource` each in `main.rs` or verify each plugin inserts it in `OnEnter(Playing)` before any `Update` system that reads it.
+**Design direction:** add moving deck hazards, side-scrolling sky debris, engine weak points, airship-specific loot, and boarding/extraction transitions.
 
----
+### 4. Clarify save-game scope
+**File:** `src/plugins/save_plugin.rs`
 
-### 4. ~~Dodge direction ignores move input~~ ✓ Fixed
-**File:** `src/plugins/player_plugin.rs` — fixed during multiplayer refactor
+Save data now persists chapter progress and perks, but still mixes legacy `wave_number`, derived max stats, and first-player stats. That is serviceable for the current prototype, but the schema should be cleaned up before serious campaign progression.
 
-```rust
-dodge.dodge_direction = -fwd;  // always dodges straight backward
-```
+**Design direction:** save shared campaign data separately from per-player character data. Treat max health/stamina as derived values when possible.
 
-The dodge direction is hardcoded to the backward facing vector regardless of left-stick / WASD input. Players expecting directional dodge (e.g. side-roll) won't get it.
+## Medium Priority
 
-**Fix:**
-```rust
-let input_dir = (fwd * gi.move_axis.y + right * gi.move_axis.x).normalize_or_zero();
-dodge.dodge_direction = if input_dir.length_squared() > 0.01 { -input_dir } else { -fwd };
-```
+### 5. Remove legacy root save data
+**File:** `heavy_water_save.json`
 
----
+The repo still contains a tracked save file from the previous project identity. The active save path is `starfall_i_save.json`, so this file is dead data.
 
-### 5. `manual_save_system` bypasses `InputPlugin`
-**File:** `src/plugins/save_plugin.rs:153`
+**Fix:** delete the file. The active runtime save, `starfall_i_save.json`, is now ignored.
 
-```rust
-if !keyboard.just_pressed(KeyCode::F5) { ... }
-```
+### 6. Dual armor tracking can drift
+**Files:** `src/components/player.rs`, `src/components/armor.rs`, `src/plugins/armor_plugin.rs`
 
-Every other input reads from `PlayerInput` (the component written by `input_plugin.rs`), but the manual save reads `ButtonInput<KeyCode>` directly. Controller users can't trigger a manual save.
+`PlayerStats` tracks numeric `armor` / `max_armor`, while `ArmorSet` tracks equipped armor pieces and damage reduction. Incoming damage uses both concepts. This should be named and documented as two distinct mechanics, or consolidated.
 
-**Fix:** Add a `save` bool field to `PlayerInput` (mapped to F5 / Start+Select for P1) and read `pi.save` in `manual_save_system`.
+**Design direction:** either rename `PlayerStats.armor` to `current_armor_points`, or move armor durability into `ArmorSet`.
 
----
+### 7. Health maximum has multiple writers
+**Files:** `src/plugins/player_plugin.rs`, `src/plugins/armor_plugin.rs`, `src/plugins/save_plugin.rs`
 
-## Code Quality
+Level-up, armor bonuses, perk bonuses, and loading all write max health. The armor/perk sync now recalculates from stable sources, but the data model would be cleaner with one source of truth.
 
-### 6. `EdgeGrabState::new()` is redundant
-**File:** `src/components/player.rs:108`
+**Design direction:** make `Health.max` the canonical runtime value and derive it from level + equipment + perks.
 
-```rust
-pub fn new() -> Self { Self::default() }
-```
+### 8. Chapter lookup allocates
+**File:** `src/chapters/mod.rs`
 
-This is identical to `Default::default()`. Callers in `player_plugin.rs` already use `EdgeGrabState::new()`. Either remove `new()` and update callers to `EdgeGrabState::default()`, or keep `new()` as a named constructor alias and remove the manual `Default` impl to let `#[derive(Default)]` handle it.
+`get_chapter(id)` calls `all_chapters()`, which builds the 14-chapter Vec on each lookup.
 
----
+**Fix:** cache the chapter list in a `OnceLock<Vec<ChapterDef>>`, initialize it as a resource, or index by `ChapterId::index()`.
 
-### 7. `all_chapters()` allocates on every call; `get_chapter()` does linear search
-**File:** `src/chapters/mod.rs:268,528`
+## Lower Priority
 
-`get_chapter(id)` calls `all_chapters()` which builds a 14-element Vec each call, then iterates it to find one entry. With 14 chapters this is negligible, but it creates unnecessary allocations if called frequently (e.g., per-frame from chapter_plugin).
+### 9. Move away from deprecated Bevy bundle APIs
+**Files:** many rendering systems
 
-**Fix:** Cache the result in a `OnceLock<Vec<ChapterDef>>` or initialize once as a resource. At minimum, add a chapter lookup by `id.index()` since `ChapterId` is 1-based with a stable `index()` method.
+`cargo check` succeeds, but Bevy emits many deprecation warnings for `PbrBundle`, `Camera3dBundle`, `PointLightBundle`, and related APIs.
 
----
+**Fix:** migrate gradually to direct `Mesh3d`, `MeshMaterial3d`, `Camera3d`, `PointLight`, and related component insertion.
 
-### 8. Dual armor tracking
-**File:** `src/components/player.rs:16-18`, `src/components/armor.rs`
+### 10. Second Wind needs an out-of-combat timer
+**Files:** `src/plugins/player_plugin.rs`, `src/perks.rs`
 
-`PlayerStats` has both `armor: f32` and `max_armor: f32`. There is also an `ArmorSet` component. `damage_player()` reads `armor_set.calculate_damage_reduction()` AND deducts from `stats.armor`. Two components track the same concept in different forms, which will diverge if one is updated without the other.
+`Second Wind` currently regenerates HP while the player is alive and below max health. The design text says "out of combat," but there is no combat timer yet.
 
-**Fix:** Remove `armor`/`max_armor` from `PlayerStats` and read all armor values exclusively from `ArmorSet`. Or rename `PlayerStats.armor` to `current_armor_points` and document that it is the numeric pool, not the ArmorSet tier.
+**Fix:** track recent damage/dealt-damage timestamps and enable regen only after a short quiet window.
 
----
+### 11. Input conflicts need a final control pass
+**Files:** `src/plugins/input_plugin.rs`, `src/plugins/armor_plugin.rs`
 
-### 9. `PlayerStats.max_health` and `Health.max` must be kept in sync manually
-**File:** `src/plugins/player_plugin.rs:578-581`
+Bracket keys currently overlap weapon cycling and developer elemental armor cycling. This is fine for a prototype, but final controls should separate player-facing actions from debug actions.
 
-Level-up updates both `stats.max_health` and `health.max`:
-```rust
-stats.max_health += 10.0;
-health.max = stats.max_health;
-```
-This dual write must happen together every time max health changes. If one is missed, the values drift.
-
-**Fix:** Make `Health.max` the single source of truth. Remove `PlayerStats.max_health` or make it a derived getter that reads `Health`.
-
----
-
-### 10. `bevy_rapier3d` version comment is stale
-**File:** `Cargo.toml:8`
-
-```toml
-# bevy_rapier3d compatibility: 0.27 targets bevy 0.15; update if needed
-bevy_rapier3d = { version = "0.28", ... }
-```
-
-The comment says 0.27 but the version is 0.28.
-
-**Fix:** Update the comment to match the pinned version, or remove it.
-
----
-
-## Suggestions
-
-### 11. `wall_normal_from_controller_output` can be simplified
-**File:** `src/plugins/player_plugin.rs:414`
-
-The inner match for tracking the best-strength collision is hard to follow:
-```rust
-match best {
-    Some((_, current_strength)) if current_strength >= strength => {}
-    _ => best = Some((normal, strength)),
-}
-```
-More readable as:
-```rust
-if best.map_or(true, |(_, s)| s < strength) {
-    best = Some((normal, strength));
-}
-```
-
----
-
-### 12. `SpecialSlot` naming is unintuitive
-**File:** `src/components/weapon.rs:177`
-
-`SpecialSlot::Slot0` is the last slot (Sprite Turret, keyboard key `0`) but its name suggests "first slot." Consider `Slot7`, `Slot8`, `Slot9`, `SlotZero` or use descriptive names (`HomingStar`, `TriStarBurst`, `MoonBubble`, `SpriteTurret`) directly as the enum variant names.
-
----
-
-### 13. `SaveData.wave_number` vs chapter system
-**File:** `src/plugins/save_plugin.rs:22`
-
-`wave_number` in `SaveData` maps to the legacy `WaveInfo`, which the code comments describe as superseded by the chapter director. Saving and restoring `wave_number` only partially restores game state — the current chapter, step index, and completion list are what actually matter now.
-
-This ties back to **Bug #1** but also suggests `wave_number` can be removed from `SaveData` once chapter progress is properly persisted.
-
----
-
-### 14. `PerkTree` is never applied to player stats
-**File:** `src/perks.rs`
-
-`PerkTree` has methods like `damage_mult()`, `hp_bonus()`, `dodge_cost_mult()`, etc. but there are no calls to these methods in any plugin (grep finds no usages outside perks.rs itself). The perk tree is fully defined but currently a no-op.
-
-**Fix:** In `player_plugin.rs`, read `PerkTree` resource and apply bonuses at the appropriate points (level-up, dodge init, etc.).
+**Fix:** move element cycling behind a debug flag, menu, or dedicated dev-only chord.

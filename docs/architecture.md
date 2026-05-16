@@ -30,15 +30,15 @@ src/
     discoverable.rs         DiscoverableKind, Discoverable marker
     world.rs                World/terrain, moving platform, and turret components
   plugins/
-    input_plugin.rs         GameInput resource — unified keyboard + gamepad abstraction
-    player_plugin.rs        Movement, ledge hang, wall jump, jetpack, dodge, parry, level-up, death
-    weapon_plugin.rs        Projectile firing, melee combo, Star Sabre, specials, VFX
+    input_plugin.rs         Writes per-player PlayerInput from keyboard + gamepads
+    player_plugin.rs        Movement, ledge hang, wall jump, jetpack, dodge, parry, perks, death
+    weapon_plugin.rs        Projectile firing, melee combo, Star Sabre, specials, perk ammo/damage, VFX
     enemy_plugin.rs         AI state machine, spawning, loot drops
     character_plugin.rs     Idle/walk/jump/hang cartoon pose animation
-    chapter_plugin.rs       Chapter director — advances EncounterStep sequence
-    ui_plugin.rs            HUD, menus, damage numbers, radio chatter overlay
+    chapter_plugin.rs       Chapter director, relic puzzles, castle airship escalation
+    ui_plugin.rs            HUD, menus, chapter select, perk training, damage numbers
     world_plugin.rs         Deterministic terrain generation, prop placement, lighting
-    save_plugin.rs          F5 manual save + 30s autosave → starfall_i_save.json
+    save_plugin.rs          F5 manual save + 30s autosave -> starfall_i_save.json
     armor_plugin.rs         Armor repair / equip systems
     chest_plugin.rs         Chest spawn, interact, loot roll
     crafting_plugin.rs      Crafting menu, recipe matching
@@ -74,16 +74,20 @@ MainMenu ──► PlayerSelect ──► CharacterDesign
 ## Core Data Flow
 
 ```
-InputPlugin (GameInput resource)
+InputPlugin
     │
     ▼
-PlayerPlugin: reads GameInput → mutates PlayerMovement / StateMachine → KinematicCharacterController
-WeaponPlugin: reads GameInput → fires Projectile entities, triggers melee
+PlayerInput components on each Player
+    │
+    ├─► PlayerPlugin: mutates PlayerMovement / StateMachine → KinematicCharacterController
+    ├─► WeaponPlugin: fires Projectile entities, triggers melee, applies perk damage/ammo caps
+    └─► UiPlugin: handles menu/chapter/perk/crafting input
+
 EnemyPlugin:  reads Projectile + Player position → updates EnemyStateMachine, drones, bosses
 ChapterPlugin: listens to EnemyKilledEvent / BossDefeatedEvent → advances EncounterStep
 DiscoverablePlugin: handles collectible beacons and ordered relic-switch puzzles
 UiPlugin:     listens to all events → updates HUD, radio chatter, damage numbers
-SavePlugin:   reads PlayerStats + Health + WaveInfo → JSON on disk
+SavePlugin:   reads PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree → JSON on disk
 ```
 
 ## Key Design Choices
@@ -92,5 +96,7 @@ SavePlugin:   reads PlayerStats + Health + WaveInfo → JSON on disk
 - **State machines on components**: Both `PlayerStateMachine` and `EnemyStateMachine` use allow-list transition tables so illegal state jumps are caught at the call site. `force()` bypasses the table for death/reset paths.
 - **Chapter director replaces wave loop**: `CurrentChapter` + `ChapterPlugin` replaces the old `WaveInfo`-driven loop. `WaveInfo` is kept alive only for legacy loot and save compatibility.
 - **Puzzle objectives are data-driven**: relic recovery uses chapter-scripted `PlaceRelicPuzzle` steps so new collectible objectives can be added without bespoke level code.
-- **GameInput abstraction**: All input is funneled through the `GameInput` resource so keyboard and gamepad bindings are swappable in one place.
+- **Castle airships are encounter steps**: boss escapes and airship-deck raids are authored as `EncounterStep`s, so castle chapters can add a flying rematch without creating a separate top-level game state.
+- **PlayerInput abstraction**: All gameplay input is written into a `PlayerInput` component per player, keeping keyboard/gamepad mapping in `input_plugin.rs` and player behavior in feature plugins.
+- **Global perk tree**: `PerkTree` is a shared campaign resource. Level-ups award points, chapter select spends them, combat/movement systems read the resulting multipliers, and save/load persists the ranks.
 - **Damage pipeline**: `DamageInfo → apply_damage() → DamageResult` with resistance multipliers, then callers emit events. Parry and armor are handled in `damage_player()` in player_plugin before the generic pipeline.

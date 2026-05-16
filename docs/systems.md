@@ -4,7 +4,7 @@
 
 **Resource:** `LocalPlayerConfig` | **Files:** `src/resources.rs`, `src/plugins/input_plugin.rs`, `src/plugins/player_plugin.rs`
 
-Set `LocalPlayerConfig.active` (1–4) before entering `AppState::Playing` to change the player count.
+Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to change the player count. The player-select screen writes this resource before chapter select.
 
 | Players | Camera layout |
 |---|---|
@@ -20,14 +20,16 @@ Set `LocalPlayerConfig.active` (1–4) before entering `AppState::Playing` to ch
 **Character assignment per index:**
 - P1: Vincenzo &nbsp; P2: Antonio &nbsp; P3: Angelo &nbsp; P4: Joseph
 
-**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. All game systems iterate over all `Player` entities rather than using `get_single`. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon and movement systems can resolve the correct camera per player.
+**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon and movement systems can resolve the correct camera per player.
 
 **Game over:** triggers only when ALL players are dead simultaneously.
 
 **Known limitations:**
-- Special weapon keys 7–0 are keyboard-only (P1). Controller binding TBD.
+- Chapter director spawns use the first active player as the encounter anchor.
+- The primary HUD and save snapshot display/store the first active player's stats.
+- Crafting, chests, companions, and vehicles still need a complete per-player ownership pass.
 - Vehicles are controlled by P1; all players share the speed/force buff.
-- Camera shake is a single global pool — any player being hit shakes all cameras.
+- Camera shake is a single global pool - any player being hit shakes all cameras.
 
 ---
 
@@ -86,7 +88,7 @@ Incoming DamageInfo
 
 ## Weapons
 
-**Component:** `WeaponInventory` (slots 1–6), `SpecialWeaponInventory` (slots 7–0), `BeamSabre`
+**Component:** `WeaponInventory` (slots 1-6), `SpecialWeaponInventory` (slots 7-0), `BeamSabre`
 
 | Slot | Name | Type | Auto | Notes |
 |---|---|---|---|---|
@@ -105,6 +107,8 @@ Incoming DamageInfo
 | Sprite Turret | 0 | 10.0s | 3 |
 
 **Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T`. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash.
+
+Special tools fire from keyboard `7`, `8`, `9`, `0`, or from controller Select + D-pad Up/Down/Left/Right.
 
 ---
 
@@ -145,6 +149,8 @@ Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit abov
 | `SpawnGroup` | All enemies in group dead |
 | `MidBoss` | Boss entity dead |
 | `BossFight` | Boss entity dead |
+| `AirshipEscape` | Escape airship prop appears; short dialogue timer elapses |
+| `AirshipDeckRaid` | Party moves to a spawned airship deck; all deck guards dead |
 | `PlaceDiscoverable` | Beacon spawned (collected separately) |
 | `PlaceRelicPuzzle` | Ordered switch puzzle solved, then relic beacon spawned |
 | `Outro` | Fires `ChapterCompletedEvent` |
@@ -152,6 +158,26 @@ Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit abov
 `CurrentChapter.step_index` is advanced by `ChapterPlugin` each time the current step's condition fires.
 
 Chapter unlock: `ChapterProgress.is_unlocked(id)` returns true if the previous chapter is in `completed`. Chapter 1 is always unlocked.
+
+## Castle Airship Escalation
+
+**Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
+
+Major castle/domain bosses can use a three-part escalation:
+
+1. `BossFight` resolves the castle fight.
+2. `AirshipEscape` spawns a visible airship and plays the boss escape line.
+3. `AirshipDeckRaid` spawns a walkable airship deck, moves active players onto it, and fills it with guards before the boss rematch.
+
+Current chapters using this loop:
+
+- Chapter 6: Collosar's Crown Airship
+- Chapter 7: Tarack's Ember Airship
+- Chapter 8: Shread's Scrapwing Airship
+- Chapter 10: Ragar's Granite Airship
+- Chapter 11: Blackskull's Icebreaker Airship
+
+The airship deck is a temporary chapter-spawned platform with colliders, rail blockers, engine visuals, and faction-colored materials. It is cleaned up when the next chapter starts.
 
 ## Relic Puzzles
 
@@ -194,7 +220,7 @@ HUD support:
 
 **File:** `src/perks.rs` | **Resource:** `PerkTree`
 
-Three branches, 6 perks total. One point per level-up via `PerkTree.award(1)`.
+Three branches, 6 perks total. One point per level-up via `PerkTree.award(1)`. Spend points in chapter select with `A/S/D/F/G/H`.
 
 | Branch | Perk | Effect | Max Rank |
 |---|---|---|---|
@@ -205,7 +231,14 @@ Three branches, 6 perks total. One point per level-up via `PerkTree.award(1)`.
 | Acrobat | Wall-Dancer Evasion | -10% dodge stamina cost | 3 |
 | Acrobat | Lucky Parry | +0.05s parry window/rank | 3 |
 
-> Note: perk multipliers are computed by `PerkTree` methods but are not yet wired into player systems. See [improvements.md](improvements.md#14-perktree-is-never-applied-to-player-stats).
+Current wiring:
+
+- `Family Vitality` increases max HP through the armor/perk max-health sync.
+- `Second Wind` passively restores HP while alive; a true out-of-combat timer is still future work.
+- `Star Focus` increases primary beam, special tool, and Star Sabre damage.
+- `Pocket Constellation` increases primary ammo and special tool charge caps.
+- `Wall-Dancer Evasion` lowers dodge stamina cost.
+- `Lucky Parry` extends the parry window.
 
 ---
 
@@ -219,9 +252,9 @@ Save file: `starfall_i_save.json` (written next to the binary).
 - **Manual save**: F5 key.
 - **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
 
-Saved fields: `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics.
+Saved fields: `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, unspent perk points, and perk ranks.
 
-Still not saved: `PerkTree`. See [improvements.md](improvements.md#1-save-data-doesnt-persist-chapter-progress-or-perks).
+Multiplayer note: the current save snapshot stores the first active player's stats plus shared progression/perk data.
 
 ---
 

@@ -4,6 +4,24 @@ A Bevy 0.15 action platformer RPG prototype about a family of star-powered heroe
 
 The current build keeps the existing open 3D world, chapter director, RPG stats, loot, crafting, armor, companions, and Bevy/Rapier physics stack, then rethemes the game around cartoon star beams, energy tools, wall jumps, ledge hanging, and Mario-style platforming layered over Secret of Mana-style combat pacing.
 
+## Current Build
+
+Implemented:
+
+- Player-select flow for 1-4 local players, split-screen cameras, keyboard/gamepad input, and character customization.
+- Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, city props, and dragon-domain spaces.
+- Chapter director with 14 scripted chapters, dialogue, spawn waves, relic puzzles, discoverable beacons, bosses, and unlock progression.
+- Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
+- Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
+- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, armor elements, XP, perks, crafting, chests, companions, and save/load.
+
+In progress:
+
+- Local multiplayer is playable at the input/camera/player level, but several supporting systems still use a first-player or shared-state model. Crafting, chests, companions, vehicles, the primary HUD, and save snapshots need a full per-player pass.
+- Perks are functional and saved, but the chapter-select perk UI is intentionally lightweight and keyboard-only.
+- `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
+- The robot/chassis editor exists as a simple preset and scale screen; deeper part-by-part design is still future design work.
+
 ## Cast
 
 Wizard Scientists:
@@ -25,11 +43,47 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 
 - Classic action platforming with tuned acceleration, jump buffering, coyote time, wall jumps, edge grabs, ledge hanging, and climb-ups.
 - Simple retro RPG-style cartoon characters with idle, walk, jump, and hanging poses.
-- RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, and chapter progression.
+- RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, perks, and chapter progression.
 - Cartoon star beams and energy weapons instead of guns.
 - Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, encounter waves, and boss fights.
+- Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto their airship, clear the deck, then defeat them again.
 - Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, and shockwave hazards.
-- 4-player local multiplayer is the design target; the current code path is still primarily single-player and ready for a future multiplayer input/entity split.
+- 4-player local multiplayer remains the design target; the current implementation has the core player split but still needs per-player support in several RPG and interaction systems.
+
+## Quick Start
+
+```sh
+cargo run
+```
+
+For faster incremental builds:
+
+```sh
+cargo run --features dynamic
+```
+
+## Game Flow
+
+1. Main Menu
+2. Player Select
+3. Character Design
+4. Chapter Select
+5. Chassis Editor
+6. Playing
+7. Game Over
+
+Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor.
+
+Perk training is also in chapter select. Leveling up grants one perk point; spend points with:
+
+| Key | Perk |
+|---|---|
+| `A` | Family Vitality |
+| `S` | Second Wind |
+| `D` | Star Focus |
+| `F` | Pocket Constellation |
+| `G` | Wall-Dancer Evasion |
+| `H` | Lucky Parry |
 
 ## Controls
 
@@ -42,10 +96,12 @@ Keyboard and mouse:
 | `Space` | Jump, wall jump, hold for jetpack |
 | Hold toward wall/ledge while falling | Grab and hang |
 | `E` while hanging | Climb up |
+| `E` | Interact |
 | `Q` | Dodge or drop from hang |
 | `LMB` | Fire active star beam / Star Sabre slash |
 | `RMB` | Aim |
 | `Shift` | Sprint |
+| `R` | Reload active star beam |
 | `V` / `B` | Light / heavy mana combo |
 | `F` | Parry |
 | `T` | Toggle Star Sabre after unlock |
@@ -55,6 +111,9 @@ Keyboard and mouse:
 | `9` | Moon Bubble |
 | `0` | Sprite Turret |
 | `C` | Crafting |
+| `J` | Enter vehicle |
+| `M` | Open map |
+| `Esc` | Back / pause |
 | `F5` | Save |
 
 Controller:
@@ -65,14 +124,23 @@ Controller:
 | Right stick | Look |
 | South | Jump, wall jump, hold for jetpack |
 | East | Dodge / drop |
-| West | Recharge active beam |
+| West | Reload active star beam |
 | North | Parry |
 | RT | Fire star beam |
 | LT | Aim |
 | LB | Sprint |
-| RB / D-Pad Right | Next beam |
+| RB | Next beam |
 | D-Pad Left | Previous beam |
 | D-Pad Down | Interact / climb |
+| D-Pad Up | Enter vehicle |
+| D-Pad Right | Open map |
+| Select | Crafting |
+| Select + D-Pad Up | Homing Star |
+| Select + D-Pad Down | Tri-Star Burst |
+| Select + D-Pad Left | Moon Bubble |
+| Select + D-Pad Right | Sprite Turret |
+| Start | Pause |
+| Guide / L3 + R3 | Toggle Star Sabre |
 | R3 / L3 | Light / heavy combo |
 
 ## Star Beam Loadout
@@ -96,44 +164,46 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 3. Sisters Of The Star - Gabriella, Nova, Aurora, and Fortuna join.
 4. Four Brothers - Angelo and Little Joe complete the team.
 5. Dr. Bile - Zark, Crush, Fang, and Sharp emerge.
-6. Tibet Peak - Collosar tests the heroes.
-7. Tarack's Ember - the dragon queen tests the family.
-8. Spikes And Shreds - Spikey and Shread run wild.
+6. Tibet Peak - Collosar tests the heroes, then flees to the Crown Airship.
+7. Tarack's Ember - the dragon queen tests the family aboard the Ember Airship.
+8. Spikes And Shreds - Spikey and Shread run wild before Shread's Scrapwing rematch.
 9. Pink Flame - garden puzzles and rift blooms.
-10. Rockies Domain - Ragar's Colorado mountain domain.
-11. Blackskull Ice - Antarctica opens below.
+10. Rockies Domain - Ragar's Colorado mountain domain and Granite Airship.
+11. Blackskull Ice - Antarctica opens below, then the Icebreaker Airship hunts overhead.
 12. Mana Switchworks - open-world puzzle battle.
 13. Dimension Front - the crown gate appears.
 14. Starfall - the family closes the sky.
 
-## Quick Start
+## Documentation
 
-```sh
-cargo run
-```
-
-For faster incremental builds:
-
-```sh
-cargo run --features dynamic
-```
+- [Architecture Overview](docs/architecture.md)
+- [Gameplay Systems Reference](docs/systems.md)
+- [Improvement Notes](docs/improvements.md)
 
 ## Project Structure
 
 ```text
 src/
-  main.rs                  App bootstrap and plugin registration
-  characters.rs            Retro cartoon character construction, colors, and presets
-  chapters/mod.rs          Starfall I chapter scripts and biomes
-  components/character.rs  Cartoon body parts, roles, and pose animator state
-  components/player.rs     Player stats, movement, wall jump, edge grab state
-  components/weapon.rs     Star beam and energy tool definitions
-  components/enemy.rs      Enemy stats, flying drones, dragon bosses, projectiles
-  components/faction.rs    Story groups and radio colors
-  plugins/character_plugin.rs Simple idle/walk/jump/hang animation poses
-  plugins/player_plugin.rs Movement feel, ledge hang, wall jump, stamina, damage
+  main.rs                         App bootstrap and plugin registration
+  state.rs                        AppState flow
+  resources.rs                    Shared resources and progression state
+  perks.rs                        Heart / Star / Acrobat perk tree
+  characters.rs                   Retro cartoon character construction, colors, and presets
+  chapters/mod.rs                 Starfall I chapter scripts and biomes
+  components/player.rs            Player stats, movement, wall jump, edge grab, input state
+  components/weapon.rs            Star beam, special tool, projectile, and Star Sabre definitions
+  components/enemy.rs             Enemy stats, flying drones, dragon bosses, projectiles
+  components/faction.rs           Story groups and radio colors
+  plugins/input_plugin.rs         Keyboard/gamepad input mapping
+  plugins/player_plugin.rs        Movement feel, ledge hang, wall jump, stamina, perks, damage
+  plugins/character_plugin.rs     Simple idle/walk/jump/hang animation poses
   plugins/character_design_plugin.rs Color/accessory designer and preview
-  plugins/weapon_plugin.rs Star beam firing, specials, melee, VFX
-  plugins/enemy_plugin.rs  Enemy spawning, AI, drones, bosses, rewards, loot
-  plugins/ui_plugin.rs     Menus and HUD
+  plugins/chapter_plugin.rs       Chapter director and encounter progression
+  plugins/weapon_plugin.rs        Star beam firing, specials, melee, Star Sabre, VFX
+  plugins/enemy_plugin.rs         Enemy spawning, AI, drones, bosses, rewards, loot
+  plugins/world_plugin.rs         Terrain, props, moving platforms, laser turrets
+  plugins/ui_plugin.rs            Menus, HUD, crafting panel, chapter/perk UI
+  plugins/save_plugin.rs          Save/load and autosave
+  robots/                         Chassis editor data, presets, and factory
+  lsystem/                        Procedural tree grammar and turtle interpreter
 ```

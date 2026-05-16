@@ -935,12 +935,11 @@ fn enemy_killed_reward(
     mut enemy_q: Query<(Entity, &mut EnemyStateMachine, &Health), Without<Player>>,
     mut commands: Commands,
 ) {
-    let Ok(mut stats) = player_q.get_single_mut() else {
-        return;
-    };
     for ev in killed_ev.read() {
-        stats.credits += ev.credits;
-        stats.experience += ev.experience;
+        for mut stats in player_q.iter_mut() {
+            stats.credits += ev.credits;
+            stats.experience += ev.experience;
+        }
     }
     for (entity, mut sm, health) in enemy_q.iter_mut() {
         if !health.is_alive() && sm.current != EnemyAIState::Dead {

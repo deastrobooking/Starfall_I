@@ -5,6 +5,7 @@
 //! `chapter_director_system` advances through the script.
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::Collider;
 
 use crate::chapters::{get_chapter, ChapterId, EncounterStep};
 use crate::components::discoverable::{
@@ -13,14 +14,17 @@ use crate::components::discoverable::{
 };
 use crate::components::enemy::BossEnemy;
 use crate::components::faction::{Faction, NamedCharacter};
-use crate::components::player::Player;
-use crate::components::world::WorldAnchor;
+use crate::components::player::{Player, PlayerMovement};
+use crate::components::world::{WalkableSurface, WorldAnchor, WorldGeometry};
 use crate::events::*;
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
 use crate::resources::{BiomePalette, ChapterProgress, CurrentChapter, WaveInfo};
 use crate::state::AppState;
 
 pub struct ChapterPlugin;
+
+#[derive(Component)]
+struct AirshipLevelPiece;
 
 impl Plugin for ChapterPlugin {
     fn build(&self, app: &mut App) {
@@ -42,11 +46,17 @@ impl Plugin for ChapterPlugin {
 
 // ── Start Chapter ─────────────────────────────────────────────────────────────
 fn start_chapter(
+    mut commands: Commands,
     mut current: ResMut<CurrentChapter>,
     mut palette: ResMut<BiomePalette>,
     mut started_ev: EventWriter<ChapterStartedEvent>,
     mut wave: ResMut<WaveInfo>,
+    airship_q: Query<Entity, With<AirshipLevelPiece>>,
 ) {
+    for entity in airship_q.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+
     let Some(def) = get_chapter(current.id) else {
         return;
     };
@@ -80,7 +90,7 @@ fn chapter_director_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    player_q: Query<&Transform, With<Player>>,
+    mut player_q: Query<(&mut Transform, &mut PlayerMovement), With<Player>>,
     anchor_q: Query<(&WorldAnchor, &Transform)>,
     mut wave: ResMut<WaveInfo>,
     progress: Res<ChapterProgress>,
@@ -116,10 +126,13 @@ fn chapter_director_system(
         return;
     }
 
-    let Ok(player_transform) = player_q.get_single() else {
+    let Some(player_pos) = player_q
+        .iter_mut()
+        .next()
+        .map(|(transform, _)| transform.translation)
+    else {
         return;
     };
-    let player_pos = player_transform.translation;
     let mut rng = rand::thread_rng();
 
     let mut advance = false;
@@ -226,6 +239,85 @@ fn chapter_director_system(
             });
             msg_ev.send(UiMessageEvent {
                 text: format!("!! BOSS — {} !!", name),
+                duration: 4.0,
+            });
+            advance = true;
+        }
+        EncounterStep::AirshipEscape {
+            boss_name,
+            faction,
+            airship_label,
+            line,
+            hold,
+        } => {
+            if current.step_timer < 0.05 {
+                let airship_pos = player_pos + Vec3::new(0.0, 18.0, 46.0);
+                spawn_airship_escape_prop(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    airship_pos,
+                    faction,
+                );
+                radio_ev.send(RadioChatterEvent {
+                    speaker: boss_name.into(),
+                    text: line.into(),
+                    faction,
+                    duration: hold + 1.0,
+                });
+                msg_ev.send(UiMessageEvent {
+                    text: format!(
+                        "{} appears. Board it before {} escapes!",
+                        airship_label, boss_name
+                    ),
+                    duration: hold + 1.0,
+                });
+            }
+            if current.step_timer >= hold {
+                advance = true;
+            }
+        }
+        EncounterStep::AirshipDeckRaid {
+            faction,
+            enemy_type,
+            count,
+            scale,
+        } => {
+            let deck_center = player_pos + Vec3::new(0.0, 36.0, 86.0);
+            spawn_airship_arena(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                deck_center,
+                faction,
+            );
+            move_players_to_airship_deck(&mut player_q, deck_center);
+            for i in 0..count {
+                let angle = i as f32 / count.max(1) as f32 * std::f32::consts::TAU;
+                let radius_x = 22.0 + (i % 2) as f32 * 4.0;
+                let radius_z = 12.0 + (i % 3) as f32 * 2.0;
+                let pos =
+                    deck_center + Vec3::new(angle.cos() * radius_x, 4.0, angle.sin() * radius_z);
+                spawn_enemy_entity(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    enemy_type,
+                    pos,
+                    scale * current.difficulty_scale,
+                    Some(faction),
+                );
+                wave.enemy_count += 1;
+            }
+            current.awaiting_kills = count;
+            radio_ev.send(RadioChatterEvent {
+                speaker: "Airship".into(),
+                text: "Clear the deck, then force the boss back out.".into(),
+                faction,
+                duration: 4.0,
+            });
+            msg_ev.send(UiMessageEvent {
+                text: "AIRSHIP LEVEL - clear the deck guards".into(),
                 duration: 4.0,
             });
             advance = true;
@@ -362,6 +454,187 @@ fn resolve_anchor_positions(
         positions.push(resolve_anchor_position(anchor_q, anchor_id)?);
     }
     Some(positions)
+}
+
+fn move_players_to_airship_deck(
+    player_q: &mut Query<(&mut Transform, &mut PlayerMovement), With<Player>>,
+    deck_center: Vec3,
+) {
+    const OFFSETS: [Vec3; 4] = [
+        Vec3::new(-4.0, 6.0, -10.0),
+        Vec3::new(4.0, 6.0, -10.0),
+        Vec3::new(-4.0, 6.0, -4.0),
+        Vec3::new(4.0, 6.0, -4.0),
+    ];
+    for (index, (mut transform, mut movement)) in player_q.iter_mut().enumerate() {
+        transform.translation = deck_center + OFFSETS[index.min(OFFSETS.len() - 1)];
+        movement.velocity = Vec3::ZERO;
+        movement.ground_velocity = Vec3::ZERO;
+        movement.is_grounded = false;
+    }
+}
+
+fn airship_palette(faction: Faction) -> (Color, Color, Color) {
+    match faction {
+        Faction::DragonRoyalty => (
+            Color::srgb(0.25, 0.03, 0.03),
+            Color::srgb(0.95, 0.55, 0.12),
+            Color::srgb(1.0, 0.22, 0.08),
+        ),
+        Faction::DragonExile => (
+            Color::srgb(0.08, 0.10, 0.14),
+            Color::srgb(0.55, 0.80, 1.0),
+            Color::srgb(0.20, 0.65, 1.0),
+        ),
+        _ => (
+            Color::srgb(0.16, 0.12, 0.28),
+            Color::srgb(0.80, 0.65, 1.0),
+            Color::srgb(0.60, 0.30, 1.0),
+        ),
+    }
+}
+
+fn airship_mat(
+    materials: &mut Assets<StandardMaterial>,
+    color: Color,
+    glow: f32,
+) -> Handle<StandardMaterial> {
+    let c = color.to_srgba();
+    materials.add(StandardMaterial {
+        base_color: color,
+        emissive: LinearRgba::new(c.red * glow, c.green * glow, c.blue * glow, 1.0),
+        metallic: 0.35,
+        perceptual_roughness: 0.42,
+        ..default()
+    })
+}
+
+fn spawn_airship_escape_prop(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    position: Vec3,
+    faction: Faction,
+) {
+    let (hull, trim, glow) = airship_palette(faction);
+    let hull_mat = airship_mat(materials, hull, 0.7);
+    let trim_mat = airship_mat(materials, trim, 1.2);
+    let glow_mat = airship_mat(materials, glow, 4.0);
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(10.0, 2.0, 24.0))),
+            material: MeshMaterial3d(hull_mat.clone()),
+            transform: Transform::from_translation(position),
+            ..default()
+        },
+        AirshipLevelPiece,
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(1.0))),
+            material: MeshMaterial3d(trim_mat.clone()),
+            transform: Transform {
+                translation: position + Vec3::new(0.0, 3.2, 0.0),
+                scale: Vec3::new(7.0, 1.8, 12.0),
+                ..default()
+            },
+            ..default()
+        },
+        AirshipLevelPiece,
+    ));
+    for x in [-6.0, 6.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(1.0, 3.0))),
+                material: MeshMaterial3d(glow_mat.clone()),
+                transform: Transform::from_translation(position + Vec3::new(x, -0.2, -10.0))
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ..default()
+            },
+            AirshipLevelPiece,
+        ));
+    }
+}
+
+fn spawn_airship_arena(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    center: Vec3,
+    faction: Faction,
+) {
+    let (hull, trim, glow) = airship_palette(faction);
+    let deck_mat = airship_mat(materials, hull, 0.45);
+    let trim_mat = airship_mat(materials, trim, 1.0);
+    let glow_mat = airship_mat(materials, glow, 3.8);
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(86.0, 4.0, 48.0))),
+            material: MeshMaterial3d(deck_mat.clone()),
+            transform: Transform::from_translation(center),
+            ..default()
+        },
+        Collider::cuboid(43.0, 2.0, 24.0),
+        WorldGeometry,
+        WalkableSurface,
+        AirshipLevelPiece,
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(1.0))),
+            material: MeshMaterial3d(trim_mat.clone()),
+            transform: Transform {
+                translation: center + Vec3::new(0.0, 9.0, 0.0),
+                scale: Vec3::new(30.0, 5.5, 17.0),
+                ..default()
+            },
+            ..default()
+        },
+        AirshipLevelPiece,
+    ));
+
+    for z in [-25.5, 25.5] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(88.0, 2.0, 1.3))),
+                material: MeshMaterial3d(trim_mat.clone()),
+                transform: Transform::from_translation(center + Vec3::new(0.0, 3.0, z)),
+                ..default()
+            },
+            Collider::cuboid(44.0, 1.0, 0.65),
+            WorldGeometry,
+            AirshipLevelPiece,
+        ));
+    }
+    for x in [-44.5, 44.5] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(1.3, 2.0, 48.0))),
+                material: MeshMaterial3d(trim_mat.clone()),
+                transform: Transform::from_translation(center + Vec3::new(x, 3.0, 0.0)),
+                ..default()
+            },
+            Collider::cuboid(0.65, 1.0, 24.0),
+            WorldGeometry,
+            AirshipLevelPiece,
+        ));
+    }
+    for x in [-32.0, 32.0] {
+        for z in [-18.0, 18.0] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cylinder::new(1.8, 4.0))),
+                    material: MeshMaterial3d(glow_mat.clone()),
+                    transform: Transform::from_translation(center + Vec3::new(x, -2.6, z))
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    ..default()
+                },
+                AirshipLevelPiece,
+            ));
+        }
+    }
 }
 
 // ── Discoverable beacon spawn ─────────────────────────────────────────────────

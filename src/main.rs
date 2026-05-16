@@ -15,6 +15,7 @@ mod robots;
 mod state;
 
 use events::EventsPlugin;
+use perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChassisEditorPlugin,
     ChestPlugin, CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, InputPlugin,
@@ -57,6 +58,7 @@ fn main() {
         .init_resource::<LocalPlayerConfig>()
         .init_resource::<PlayerSelectState>()
         .init_resource::<CharacterDesignData>()
+        .init_resource::<PerkTree>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
         // Game plugins

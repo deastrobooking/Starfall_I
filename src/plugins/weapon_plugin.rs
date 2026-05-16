@@ -8,6 +8,7 @@ use crate::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
 };
 use crate::events::*;
+use crate::perks::PerkTree;
 use crate::state::AppState;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ impl Plugin for WeaponPlugin {
             Update,
             (
                 weapon_select_system,
+                apply_perk_ammo_caps_system,
                 weapon_fire_system,
                 weapon_reload_system,
                 special_weapon_system,
@@ -158,6 +160,7 @@ fn weapon_fire_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
+    perks: Res<PerkTree>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -173,6 +176,7 @@ fn weapon_fire_system(
     mut fired_ev: EventWriter<WeaponFiredEvent>,
 ) {
     let dt = time.delta_secs();
+    let perk_damage_mult = perks.damage_mult();
     for (player_transform, mut inv, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
@@ -195,7 +199,7 @@ fn weapon_fire_system(
         let right = cam.right().as_vec3();
         let up = cam.up().as_vec3();
 
-        let damage = armor.modified_outgoing_damage(weapon.damage);
+        let damage = armor.modified_outgoing_damage(weapon.damage * perk_damage_mult);
         let speed = weapon.speed;
         let spread = weapon.spread;
         let pellets = weapon.pellets;
@@ -281,11 +285,48 @@ fn weapon_reload_system(
     }
 }
 
+fn apply_perk_ammo_caps_system(
+    perks: Res<PerkTree>,
+    mut player_q: Query<(&mut WeaponInventory, &mut SpecialWeaponInventory), With<Player>>,
+) {
+    let ammo_mult = perks.ammo_mult();
+    for (mut weapons, mut specials) in player_q.iter_mut() {
+        for weapon in weapons.slots.iter_mut() {
+            let base_max = Weapon::new(weapon.weapon_type).max_ammo;
+            rescale_ammo_cap(&mut weapon.ammo, &mut weapon.max_ammo, base_max, ammo_mult);
+        }
+        rescale_special_ammo_cap(&mut specials.slot7, ammo_mult);
+        rescale_special_ammo_cap(&mut specials.slot8, ammo_mult);
+        rescale_special_ammo_cap(&mut specials.slot9, ammo_mult);
+        rescale_special_ammo_cap(&mut specials.slot0, ammo_mult);
+    }
+}
+
+fn rescale_special_ammo_cap(weapon: &mut SpecialWeapon, ammo_mult: f32) {
+    let base_max = SpecialWeapon::new(weapon.slot).max_ammo;
+    rescale_ammo_cap(&mut weapon.ammo, &mut weapon.max_ammo, base_max, ammo_mult);
+}
+
+fn rescale_ammo_cap(current: &mut u32, max: &mut u32, base_max: u32, ammo_mult: f32) {
+    let new_max = ((base_max as f32 * ammo_mult).round() as u32).max(1);
+    if *max == new_max {
+        return;
+    }
+    let ratio = if *max > 0 {
+        *current as f32 / *max as f32
+    } else {
+        1.0
+    };
+    *max = new_max;
+    *current = ((*max as f32 * ratio).round() as u32).min(*max);
+}
+
 // ── Special Energy Tools ──────────────────────────────────────────────────────
 fn special_weapon_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
+    perks: Res<PerkTree>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -301,6 +342,7 @@ fn special_weapon_system(
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
+    let perk_damage_mult = perks.damage_mult();
     for (player_transform, mut inv, pi, cam_ref, armor) in player_q.iter_mut() {
         // Tick all cooldowns every frame.
         inv.slot7.cooldown_timer = (inv.slot7.cooldown_timer - dt).max(0.0);
@@ -317,7 +359,7 @@ fn special_weapon_system(
 
         let fwd = cam.forward().as_vec3();
         let pos = star_muzzle_origin(player_transform, fwd);
-        let armor_damage_mult = armor.modified_outgoing_damage(1.0);
+        let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
 
         match slot {
             // Slot 7 — Homing Star
@@ -848,6 +890,7 @@ fn beam_sabre_update_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
+    perks: Res<PerkTree>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -865,13 +908,14 @@ fn beam_sabre_update_system(
     mut killed_ev: EventWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
+    let perk_damage_mult = perks.damage_mult();
     for (player_transform, mut sabre, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
         };
         let fwd = cam.forward().as_vec3();
         let origin = star_muzzle_origin(player_transform, fwd);
-        let armor_damage_mult = armor.modified_outgoing_damage(1.0);
+        let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
 
         if pi.sabre_toggle {
             if sabre.unlocked {

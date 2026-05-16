@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 bevy = "0.15"
-# bevy_rapier3d compatibility: 0.27 targets bevy 0.15; update if needed
+# bevy_rapier3d 0.28 is pinned for the current Bevy 0.15 prototype.
 bevy_rapier3d = { version = "0.28", features = ["dim3"] }
 rand = "0.8"
 noise = "0.8"
