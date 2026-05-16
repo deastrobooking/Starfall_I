@@ -44,6 +44,7 @@ fn generate_city(
     let pal = Palette::build(m);
 
     spawn_lighting(&mut commands);
+    spawn_ground_plane(&mut commands);
     spawn_terrain(&mut commands, &mut meshes, &pal, seed);
     spawn_downtown(&mut commands, &mut meshes, &pal, seed);
     spawn_industrial(&mut commands, &mut meshes, &pal, seed + 1);
@@ -58,6 +59,9 @@ fn generate_city(
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8);
     spawn_river(&mut commands, &mut meshes, &pal);
     spawn_trees(&mut commands, &mut meshes, m, seed + 9);
+    spawn_aurora_castle(&mut commands, &mut meshes, &pal, seed);
+    spawn_collosar_castle(&mut commands, &mut meshes, &pal, seed);
+    spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
 }
 
 // ── Seeded RNG helper ─────────────────────────────────────────────────────────
@@ -95,6 +99,18 @@ struct Palette {
     window_cool: Handle<StandardMaterial>,
     /// Rooftop antenna / water-tank material.
     rooftop: Handle<StandardMaterial>,
+
+    castle_stone: Handle<StandardMaterial>,   // Aurora castle — warm cream/lavender stone
+    castle_trim: Handle<StandardMaterial>,    // Gold trim
+    castle_roof: Handle<StandardMaterial>,    // Deep purple roof cones
+    castle_window: Handle<StandardMaterial>,  // Aurora magic glow windows (purple-cyan emissive)
+    dragon_stone: Handle<StandardMaterial>,   // Collosar — near-black fortress stone
+    dragon_lava: Handle<StandardMaterial>,    // Lava moat (bright orange emissive)
+    dragon_window: Handle<StandardMaterial>,  // Red fire glow windows
+    crystal_aurora: Handle<StandardMaterial>, // Glowing purple-blue crystals (alpha blend)
+    crystal_dragon: Handle<StandardMaterial>, // Glowing orange-red crystals (alpha blend)
+    aurora_banner: Handle<StandardMaterial>,  // Violet banner
+    dragon_banner: Handle<StandardMaterial>,  // Dark crimson banner
 }
 
 impl Palette {
@@ -230,6 +246,78 @@ impl Palette {
                 reflectance: 0.55,
                 ..default()
             }),
+            castle_stone: m.add(StandardMaterial {
+                base_color: Color::srgb(0.88, 0.86, 0.94),
+                emissive: LinearRgba::new(0.08, 0.07, 0.12, 1.0),
+                perceptual_roughness: 0.72,
+                ..default()
+            }),
+            castle_trim: m.add(StandardMaterial {
+                base_color: Color::srgb(0.95, 0.80, 0.22),
+                emissive: LinearRgba::new(0.6, 0.5, 0.05, 1.0),
+                metallic: 0.7,
+                perceptual_roughness: 0.3,
+                ..default()
+            }),
+            castle_roof: m.add(StandardMaterial {
+                base_color: Color::srgb(0.28, 0.10, 0.48),
+                emissive: LinearRgba::new(0.12, 0.04, 0.22, 1.0),
+                perceptual_roughness: 0.60,
+                ..default()
+            }),
+            castle_window: m.add(StandardMaterial {
+                base_color: Color::srgba(0.55, 0.35, 1.0, 0.85),
+                emissive: LinearRgba::new(1.8, 0.6, 4.0, 1.0),
+                perceptual_roughness: 0.10,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            dragon_stone: m.add(StandardMaterial {
+                base_color: Color::srgb(0.11, 0.08, 0.08),
+                emissive: LinearRgba::new(0.04, 0.02, 0.02, 1.0),
+                perceptual_roughness: 0.90,
+                ..default()
+            }),
+            dragon_lava: m.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.38, 0.05),
+                emissive: LinearRgba::new(4.5, 1.2, 0.0, 1.0),
+                perceptual_roughness: 0.20,
+                ..default()
+            }),
+            dragon_window: m.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 0.25, 0.05, 0.80),
+                emissive: LinearRgba::new(4.0, 0.6, 0.0, 1.0),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            crystal_aurora: m.add(StandardMaterial {
+                base_color: Color::srgba(0.55, 0.28, 1.0, 0.72),
+                emissive: LinearRgba::new(1.6, 0.4, 4.5, 1.0),
+                perceptual_roughness: 0.05,
+                metallic: 0.25,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            crystal_dragon: m.add(StandardMaterial {
+                base_color: Color::srgba(1.0, 0.32, 0.08, 0.70),
+                emissive: LinearRgba::new(4.5, 0.9, 0.0, 1.0),
+                perceptual_roughness: 0.05,
+                metallic: 0.25,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            aurora_banner: m.add(StandardMaterial {
+                base_color: Color::srgb(0.60, 0.15, 0.95),
+                emissive: LinearRgba::new(0.35, 0.06, 0.60, 1.0),
+                perceptual_roughness: 0.80,
+                ..default()
+            }),
+            dragon_banner: m.add(StandardMaterial {
+                base_color: Color::srgb(0.55, 0.04, 0.04),
+                emissive: LinearRgba::new(0.30, 0.02, 0.02, 1.0),
+                perceptual_roughness: 0.80,
+                ..default()
+            }),
         }
     }
 }
@@ -287,6 +375,21 @@ fn spawn_lighting(commands: &mut Commands) {
     });
 }
 
+// ── Ground plane ─────────────────────────────────────────────────────────────
+/// A wide invisible cuboid at Y = 0 that guarantees solid footing across the
+/// entire city area. The terrain trimesh sits on top of it for the outer hills,
+/// but the flat city core (where players spawn) needs a reliable floor.
+fn spawn_ground_plane(commands: &mut Commands) {
+    commands.spawn((
+        Transform::from_xyz(0.0, -0.5, 0.0),
+        GlobalTransform::default(),
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(600.0, 0.5, 600.0),
+    ));
+}
+
 // ── Terrain ───────────────────────────────────────────────────────────────────
 
 /// Smooth hermite interpolation.
@@ -339,8 +442,21 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
         peak_boost += smoothstep(220.0, 0.0, d) * 60.0;
     }
 
+    // Qilian foothills — east of city (positive X), gentle cartoon-cartoon hill range
+    let qilian_blend = smoothstep(220.0, 480.0, x);
+    let qilian = qilian_blend * 42.0 + (z * 0.013 + so).sin() * qilian_blend * 10.0;
+
+    // Tibetan plateau — southwest quadrant (neg X, neg Z)
+    let plat_x = smoothstep(-200.0, -450.0, x);   // 0 at x>=-200, rises toward -450
+    let plat_z = smoothstep(-150.0, -400.0, z);   // 0 at z>=-150, rises toward -400
+    let plateau = plat_x * plat_z * 65.0;
+
+    // Mt. Everest mega-peak centred at (-550, -480)
+    let ed = ((x + 550.0).powi(2) + (z + 480.0).powi(2)).sqrt();
+    let everest = smoothstep(160.0, 0.0, ed) * 230.0;
+
     // Flatten the city zone; outer areas get full amplitude.
-    (base + edge_lift + peak_boost) * (1.0 - city_flat)
+    (base + edge_lift + peak_boost + qilian + plateau + everest) * (1.0 - city_flat)
 }
 
 fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
@@ -1167,4 +1283,743 @@ fn spawn_building(
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, height * 0.5, depth * 0.5),
     ));
+}
+
+// ── Tower helper ──────────────────────────────────────────────────────────────
+fn spawn_tower(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    body_mat: Handle<StandardMaterial>,
+    cap_mat: Handle<StandardMaterial>,
+    base: Vec3,
+    radius: f32,
+    body_h: f32,
+    cap_h: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(radius, body_h))),
+            material: MeshMaterial3d(body_mat),
+            transform: Transform::from_xyz(base.x, base.y + body_h * 0.5, base.z),
+            ..default()
+        },
+        WorldGeometry,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(body_h * 0.5, radius),
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cone { radius: radius * 1.25, height: cap_h })),
+            material: MeshMaterial3d(cap_mat),
+            transform: Transform::from_xyz(base.x, base.y + body_h + cap_h * 0.5, base.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+// ── Aurora Castle ─────────────────────────────────────────────────────────────
+fn spawn_aurora_castle(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let cx = 490.0_f32;
+    let cz = -40.0_f32;
+    let ground = terrain_height(cx, cz, seed);
+    let floor = ground + 8.0; // castle floor sits atop the mesa
+    let hw = 38.0_f32; // half-width of the curtain wall square
+    let wt = 4.0_f32;  // wall thickness
+
+    // ── Mesa / Foundation platform ─────────────────────────────────────────
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(92.0, 8.0))),
+            material: MeshMaterial3d(pal.castle_stone.clone()),
+            transform: Transform::from_xyz(cx, ground + 4.0, cz),
+            ..default()
+        },
+        WorldGeometry, WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(4.0, 92.0),
+    ));
+    // Mesa trim ring
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(93.5, 1.0))),
+            material: MeshMaterial3d(pal.castle_trim.clone()),
+            transform: Transform::from_xyz(cx, ground + 8.5, cz),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // ── Curtain walls ──────────────────────────────────────────────────────
+    let wall_h = 15.0_f32;
+    let wall_specs: &[(f32, f32, f32, f32)] = &[
+        (cx,         cz - hw, hw * 2.0 + wt * 2.0, wt),   // north
+        (cx,         cz + hw, hw * 2.0 + wt * 2.0, wt),   // south
+        (cx - hw,   cz,       wt,   hw * 2.0),              // west
+        (cx + hw,   cz,       wt,   hw * 2.0),              // east
+    ];
+    for &(wx, wz, ww, wd) in wall_specs {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(ww, wall_h, wd))),
+                material: MeshMaterial3d(pal.castle_stone.clone()),
+                transform: Transform::from_xyz(wx, floor + wall_h * 0.5, wz),
+                ..default()
+            },
+            WorldGeometry, WalkableSurface,
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
+        ));
+        // Gold parapet atop each wall
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(ww + 0.6, 2.0, wd + 0.6))),
+                material: MeshMaterial3d(pal.castle_trim.clone()),
+                transform: Transform::from_xyz(wx, floor + wall_h + 1.0, wz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Corner towers ──────────────────────────────────────────────────────
+    for &(tx, tz) in &[
+        (cx - hw, cz - hw),
+        (cx + hw, cz - hw),
+        (cx - hw, cz + hw),
+        (cx + hw, cz + hw),
+    ] {
+        spawn_tower(commands, meshes, pal.castle_stone.clone(), pal.castle_roof.clone(),
+            Vec3::new(tx, floor, tz), 7.0, 52.0, 22.0);
+        // Glowing window slit
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(3.5, 3.5, 0.5))),
+                material: MeshMaterial3d(pal.castle_window.clone()),
+                transform: Transform::from_xyz(tx, floor + 28.0, tz + 7.2),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        // Trim ring mid-tower
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(7.8, 1.2))),
+                material: MeshMaterial3d(pal.castle_trim.clone()),
+                transform: Transform::from_xyz(tx, floor + 34.0, tz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Gatehouse (south entry, flanking the south wall gap) ──────────────
+    let gate_z = cz + hw + 3.0;
+    for &gx in &[cx - 7.0_f32, cx + 7.0] {
+        spawn_tower(commands, meshes, pal.castle_stone.clone(), pal.castle_roof.clone(),
+            Vec3::new(gx, floor, gate_z), 4.5, 22.0, 10.0);
+    }
+    // Arch lintel
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(17.0, 3.5, 3.0))),
+            material: MeshMaterial3d(pal.castle_trim.clone()),
+            transform: Transform::from_xyz(cx, floor + 22.5, gate_z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // ── Great central tower ────────────────────────────────────────────────
+    spawn_tower(commands, meshes, pal.castle_stone.clone(), pal.castle_roof.clone(),
+        Vec3::new(cx, floor, cz), 13.0, 88.0, 32.0);
+    // Trim ring at 2/3 height
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(14.2, 1.5))),
+            material: MeshMaterial3d(pal.castle_trim.clone()),
+            transform: Transform::from_xyz(cx, floor + 60.0, cz),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+    // Four tall glowing windows on great tower
+    for angle in [0.0_f32, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, 3.0 * std::f32::consts::FRAC_PI_2] {
+        let win_x = cx + angle.cos() * 13.6;
+        let win_z = cz + angle.sin() * 13.6;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(4.5, 9.0, 0.5))),
+                material: MeshMaterial3d(pal.castle_window.clone()),
+                transform: Transform::from_xyz(win_x, floor + 48.0, win_z)
+                    .with_rotation(Quat::from_rotation_y(angle)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Keep / Great Hall ──────────────────────────────────────────────────
+    let keep_h = 22.0_f32;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(42.0, keep_h, 32.0))),
+            material: MeshMaterial3d(pal.castle_stone.clone()),
+            transform: Transform::from_xyz(cx, floor + keep_h * 0.5, cz),
+            ..default()
+        },
+        WorldGeometry, WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(21.0, keep_h * 0.5, 16.0),
+    ));
+    // Keep roof trim
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(44.0, 2.0, 34.0))),
+            material: MeshMaterial3d(pal.castle_trim.clone()),
+            transform: Transform::from_xyz(cx, floor + keep_h + 1.0, cz),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // ── Moat ring (magical cyan water) ────────────────────────────────────
+    for i in 0..18u32 {
+        let angle = i as f32 * std::f32::consts::TAU / 18.0;
+        let mr = 78.0_f32;
+        let mx = cx + angle.cos() * mr;
+        let mz = cz + angle.sin() * mr;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(30.0, 0.6, 13.0))),
+                material: MeshMaterial3d(pal.water.clone()),
+                transform: Transform::from_xyz(mx, floor - 1.5, mz)
+                    .with_rotation(Quat::from_rotation_y(angle)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Aurora magic point lights ─────────────────────────────────────────
+    let aurora_lights: &[(f32, f32, f32, Color, f32)] = &[
+        (cx,         floor + 92.0, cz,          Color::srgb(0.55, 0.25, 1.0), 120_000.0),
+        (cx - 32.0, floor + 18.0, cz - 32.0,   Color::srgb(0.15, 0.70, 1.0), 60_000.0),
+        (cx + 32.0, floor + 18.0, cz + 32.0,   Color::srgb(0.70, 0.35, 1.0), 60_000.0),
+        (cx,         floor + 20.0, cz,           Color::srgb(0.30, 0.80, 1.0), 40_000.0),
+    ];
+    for &(lx, ly, lz, ref col, intensity) in aurora_lights {
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: *col,
+                    intensity,
+                    range: 70.0,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_xyz(lx, ly, lz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Banner poles ──────────────────────────────────────────────────────
+    let banner_positions: &[(f32, f32, f32)] = &[
+        (cx,         floor + 92.0, cz),            // great tower top
+        (cx + hw,   floor + 55.0, cz - hw),         // NE corner tower
+        (cx - hw,   floor + 55.0, cz + hw),         // SW corner tower
+        (cx,         floor + 22.0, gate_z + 2.0),   // above gatehouse
+    ];
+    for &(bx, by, bz) in banner_positions {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(0.30, 9.0))),
+                material: MeshMaterial3d(pal.castle_trim.clone()),
+                transform: Transform::from_xyz(bx, by + 4.5, bz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.0, 4.0, 0.22))),
+                material: MeshMaterial3d(pal.aurora_banner.clone()),
+                transform: Transform::from_xyz(bx + 3.0, by + 8.5, bz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Crystal spires ringing the mesa ───────────────────────────────────
+    for i in 0..8u32 {
+        let angle = i as f32 * std::f32::consts::TAU / 8.0 + 0.3;
+        let cr = 85.0_f32;
+        let ck_x = cx + angle.cos() * cr;
+        let ck_z = cz + angle.sin() * cr;
+        let ch = 10.0 + seeded(seed + i as u64 * 7, 0) * 14.0;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cone { radius: 1.5 + seeded(seed + i as u64, 1) * 1.5, height: ch })),
+                material: MeshMaterial3d(pal.crystal_aurora.clone()),
+                transform: Transform::from_xyz(ck_x, ground + ch * 0.5 + 4.0, ck_z),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+// ── Collosar Castle ───────────────────────────────────────────────────────────
+fn spawn_collosar_castle(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let cx = -490.0_f32;
+    let cz = -390.0_f32;
+    let ground = terrain_height(cx, cz, seed);
+    let floor = ground + 6.0;
+    let hw = 42.0_f32;
+    let wt = 6.0_f32;
+
+    // ── Castle platform / base ─────────────────────────────────────────────
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(82.0, 6.0))),
+            material: MeshMaterial3d(pal.dragon_stone.clone()),
+            transform: Transform::from_xyz(cx, ground + 3.0, cz),
+            ..default()
+        },
+        WorldGeometry, WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(3.0, 82.0),
+    ));
+    // Rocky outcrop ring around platform (jagged stone spires)
+    for i in 0..10u32 {
+        let ang = i as f32 * std::f32::consts::TAU / 10.0;
+        let rr = 80.0_f32 + seeded(seed + i as u64, 99) * 15.0;
+        let rh = 20.0 + seeded(seed + i as u64, 98) * 30.0;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cone { radius: rh * 0.25, height: rh })),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_xyz(cx + ang.cos() * rr, ground + rh * 0.5, cz + ang.sin() * rr),
+                ..default()
+            },
+            WorldGeometry,
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cylinder(rh * 0.5, rh * 0.1),
+        ));
+    }
+
+    // ── Outer walls ────────────────────────────────────────────────────────
+    let wall_h = 20.0_f32;
+    let wall_specs: &[(f32, f32, f32, f32)] = &[
+        (cx,       cz - hw, hw * 2.0 + wt * 2.0, wt),
+        (cx,       cz + hw, hw * 2.0 + wt * 2.0, wt),
+        (cx - hw, cz,       wt, hw * 2.0),
+        (cx + hw, cz,       wt, hw * 2.0),
+    ];
+    for &(wx, wz, ww, wd) in wall_specs {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(ww, wall_h, wd))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_xyz(wx, floor + wall_h * 0.5, wz),
+                ..default()
+            },
+            WorldGeometry, WalkableSurface,
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
+        ));
+    }
+    // Battlements (notched crenellations along north/south walls)
+    for i in 0..12i32 {
+        let bx = cx - hw + 4.0 + i as f32 * 7.0;
+        for &bz_wall in &[cz - hw, cz + hw] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(4.0, 5.0, wt + 1.0))),
+                    material: MeshMaterial3d(pal.dragon_stone.clone()),
+                    transform: Transform::from_xyz(bx, floor + wall_h + 2.5, bz_wall),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    // ── Dragon corner towers ───────────────────────────────────────────────
+    for &(tx, tz) in &[
+        (cx - hw, cz - hw),
+        (cx + hw, cz - hw),
+        (cx - hw, cz + hw),
+        (cx + hw, cz + hw),
+    ] {
+        // Tower body
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(11.0, 92.0))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_xyz(tx, floor + 46.0, tz),
+                ..default()
+            },
+            WorldGeometry,
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cylinder(46.0, 11.0),
+        ));
+        // Fang-like spire cap
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cone { radius: 8.0, height: 42.0 })),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_xyz(tx, floor + 92.0 + 21.0, tz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        // Red fire slit window
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(2.8, 7.0, 0.6))),
+                material: MeshMaterial3d(pal.dragon_window.clone()),
+                transform: Transform::from_xyz(tx, floor + 52.0, tz + 11.2),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        // Dragon skull atop tower (white sphere + small red eye spheres)
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(5.0))),
+                material: MeshMaterial3d(pal.snow.clone()),
+                transform: Transform::from_xyz(tx, floor + 136.0, tz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        for &ex in &[-2.2_f32, 2.2] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Sphere::new(1.4))),
+                    material: MeshMaterial3d(pal.dragon_window.clone()),
+                    transform: Transform::from_xyz(tx + ex, floor + 137.0, tz - 5.2),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    // ── Great Keep ─────────────────────────────────────────────────────────
+    let keep_h = 28.0_f32;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(58.0, keep_h, 48.0))),
+            material: MeshMaterial3d(pal.dragon_stone.clone()),
+            transform: Transform::from_xyz(cx, floor + keep_h * 0.5, cz),
+            ..default()
+        },
+        WorldGeometry, WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(29.0, keep_h * 0.5, 24.0),
+    ));
+
+    // ── Collosar's Sanctum Spire ───────────────────────────────────────────
+    // The tallest structure — visible from the city below
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(16.0, 135.0))),
+            material: MeshMaterial3d(pal.dragon_stone.clone()),
+            transform: Transform::from_xyz(cx, floor + 67.5, cz),
+            ..default()
+        },
+        WorldGeometry,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(67.5, 16.0),
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cone { radius: 11.0, height: 58.0 })),
+            material: MeshMaterial3d(pal.dragon_stone.clone()),
+            transform: Transform::from_xyz(cx, floor + 135.0 + 29.0, cz),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+    // Dragon eyes on sanctum (large emissive orbs facing south toward city)
+    for &ex in &[-7.0_f32, 7.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(3.2))),
+                material: MeshMaterial3d(pal.dragon_window.clone()),
+                transform: Transform::from_xyz(cx + ex, floor + 100.0, cz - 16.5),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+    // Sanctum trim band
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(17.0, 1.8))),
+            material: MeshMaterial3d(pal.dragon_lava.clone()),
+            transform: Transform::from_xyz(cx, floor + 80.0, cz),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // ── Dragon wing-perch arms ──────────────────────────────────────────────
+    for &(px, pz) in &[
+        (cx - 38.0, cz),
+        (cx + 38.0, cz),
+    ] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(40.0, 3.5, 7.0))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_xyz(px, floor + 88.0, pz),
+                ..default()
+            },
+            WorldGeometry, WalkableSurface,
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(20.0, 1.75, 3.5),
+        ));
+    }
+
+    // ── Lava moat ──────────────────────────────────────────────────────────
+    for i in 0..20u32 {
+        let angle = i as f32 * std::f32::consts::TAU / 20.0;
+        let mr = 70.0_f32;
+        let mx = cx + angle.cos() * mr;
+        let mz = cz + angle.sin() * mr;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(26.0, 0.9, 12.0))),
+                material: MeshMaterial3d(pal.dragon_lava.clone()),
+                transform: Transform::from_xyz(mx, floor - 2.0, mz)
+                    .with_rotation(Quat::from_rotation_y(angle)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Cave entrance (dark arch cut into south wall) ──────────────────────
+    let cave_z = cz + hw + 5.0;
+    for &gx in &[cx - 9.0_f32, cx + 9.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.0, 22.0, 6.0))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_xyz(gx, floor + 11.0, cave_z),
+                ..default()
+            },
+            WorldGeometry,
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(3.0, 11.0, 3.0),
+        ));
+    }
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(25.0, 5.0, 6.0))),
+            material: MeshMaterial3d(pal.dragon_stone.clone()),
+            transform: Transform::from_xyz(cx, floor + 23.5, cave_z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+    // Cave darkness sphere (emissive void)
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(16.0))),
+            material: MeshMaterial3d(pal.dragon_stone.clone()),
+            transform: Transform::from_xyz(cx, floor + 6.0, cave_z + 12.0),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // ── Dragon fire point lights ───────────────────────────────────────────
+    let fire_lights: &[(f32, f32, f32, f32)] = &[
+        (cx,         floor + 140.0, cz,          250_000.0),
+        (cx - 44.0, floor + 24.0,  cz - 44.0,   90_000.0),
+        (cx + 44.0, floor + 24.0,  cz + 44.0,   90_000.0),
+        (cx - 44.0, floor + 24.0,  cz + 44.0,   70_000.0),
+        (cx + 44.0, floor + 24.0,  cz - 44.0,   70_000.0),
+        (cx,         floor + 12.0,  cz,           40_000.0),
+    ];
+    for &(lx, ly, lz, intensity) in fire_lights {
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: Color::srgb(1.0, 0.38, 0.06),
+                    intensity,
+                    range: 90.0,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_xyz(lx, ly, lz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Dragon banners ────────────────────────────────────────────────────
+    for &(bx, by, bz) in &[
+        (cx - hw, floor + 96.0, cz - hw),
+        (cx + hw, floor + 96.0, cz - hw),
+        (cx,       floor + 143.0, cz),
+    ] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(0.4, 12.0))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_xyz(bx, by + 6.0, bz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(7.0, 4.5, 0.25))),
+                material: MeshMaterial3d(pal.dragon_banner.clone()),
+                transform: Transform::from_xyz(bx + 3.5, by + 11.0, bz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Everest snow cap (decorative, near the peak at -550, -480) ─────────
+    let ex_x = -550.0_f32;
+    let ex_z = -480.0_f32;
+    let ev_ground = terrain_height(ex_x, ex_z, seed);
+    // Snow cap spheres sitting on the Everest terrain peak
+    for &(sox, soz, sr) in &[
+        (0.0_f32, 0.0, 35.0_f32),
+        (-18.0, 12.0, 22.0),
+        (16.0, -14.0, 20.0),
+        (0.0, -8.0, 28.0),
+    ] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(sr))),
+                material: MeshMaterial3d(pal.snow.clone()),
+                transform: Transform::from_xyz(ex_x + sox, ev_ground - sr * 0.4, ex_z + soz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+    // Cold blue glow at Everest peak
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.6, 0.8, 1.0),
+                intensity: 150_000.0,
+                range: 120.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(ex_x, ev_ground + 5.0, ex_z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+// ── Magic Crystals ────────────────────────────────────────────────────────────
+fn spawn_magic_crystals(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    // Crystal fields: (zone_center_x, zone_center_z, count, is_dragon_crystal)
+    let zones: &[(f32, f32, u64, bool)] = &[
+        (320.0, -20.0, 14, false),   // Qilian approach (aurora)
+        (390.0, 30.0,  10, false),   // Qilian mid (aurora)
+        (440.0, -70.0, 8,  false),   // Castle approach (aurora)
+        (-200.0, -150.0, 8, true),   // Tibetan border (dragon)
+        (-320.0, -260.0, 10, true),  // Dragon approach
+        (-80.0, 200.0, 6, false),    // Aurora domain north (aurora)
+    ];
+
+    for (zi, &(zx, zz, count, is_dragon)) in zones.iter().enumerate() {
+        for i in 0..count {
+            let idx = zi as u64 * 30 + i;
+            let ox = (seeded(seed + 50, idx * 3)      - 0.5) * 70.0;
+            let oz = (seeded(seed + 50, idx * 3 + 1)  - 0.5) * 70.0;
+            let h  =  5.0 + seeded(seed + 50, idx * 3 + 2) * 16.0;
+            let r  =  1.2 + seeded(seed + 50, idx * 4)      * 2.8;
+            let wx = zx + ox;
+            let wz = zz + oz;
+            let wy = terrain_height(wx, wz, seed);
+
+            let mat = if is_dragon { pal.crystal_dragon.clone() } else { pal.crystal_aurora.clone() };
+
+            // Main crystal spire
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cone { radius: r, height: h })),
+                    material: MeshMaterial3d(mat.clone()),
+                    transform: Transform::from_xyz(wx, wy + h * 0.5, wz)
+                        .with_rotation(Quat::from_rotation_z(
+                            (seeded(seed + 51, idx) - 0.5) * 0.3,
+                        )),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+            // Companion shard
+            if i % 3 != 0 {
+                let h2 = h * 0.55;
+                let r2 = r * 0.60;
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cone { radius: r2, height: h2 })),
+                        material: MeshMaterial3d(mat.clone()),
+                        transform: Transform::from_xyz(wx + r * 1.8, wy + h2 * 0.5, wz + r)
+                            .with_rotation(Quat::from_rotation_z(0.22)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+            // Point light every other crystal
+            if i % 2 == 0 {
+                let light_col = if is_dragon {
+                    Color::srgb(1.0, 0.35, 0.08)
+                } else {
+                    Color::srgb(0.55, 0.25, 1.0)
+                };
+                commands.spawn((
+                    PointLightBundle {
+                        point_light: PointLight {
+                            color: light_col,
+                            intensity: 14_000.0,
+                            range: 24.0,
+                            shadows_enabled: false,
+                            ..default()
+                        },
+                        transform: Transform::from_xyz(wx, wy + h + 1.0, wz),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
+    }
 }

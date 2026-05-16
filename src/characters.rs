@@ -39,11 +39,10 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
         "Vincenzo" => CartoonCharacterConfig {
             name,
             role: CartoonRole::Hero,
-            // Warm tan skin, navy-blue military jacket, gold trim
             skin: Color::srgb(0.93, 0.70, 0.48),
             outfit: Color::srgb(0.09, 0.28, 0.80),
             accent: Color::srgb(0.95, 0.78, 0.12),
-            hair: Color::srgb(0.12, 0.07, 0.03),
+            hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
             body_width: 1.0,
             has_hat: false,
@@ -53,7 +52,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_star_badge: true,
             has_visor: false,
             has_shoulder_pads: true,
-            has_cape: false,
+            has_cape: true,
             has_spine_ridges: false,
             eye_color: Color::srgb(0.06, 0.06, 0.12),
             emissive_eyes: false,
@@ -61,11 +60,10 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
         "Antonio" => CartoonCharacterConfig {
             name,
             role: CartoonRole::Hero,
-            // Light olive skin, blue-teal lab coat, cyan highlights — the tech guy
             skin: Color::srgb(0.90, 0.74, 0.56),
             outfit: Color::srgb(0.16, 0.48, 0.82),
             accent: Color::srgb(0.10, 0.92, 0.98),
-            hair: Color::srgb(0.42, 0.28, 0.10),
+            hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
             body_width: 0.92,
             has_hat: false,
@@ -75,7 +73,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_star_badge: true,
             has_visor: true,
             has_shoulder_pads: false,
-            has_cape: false,
+            has_cape: true,
             has_spine_ridges: false,
             eye_color: Color::srgb(0.04, 0.06, 0.14),
             emissive_eyes: false,
@@ -83,11 +81,10 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
         "Angelo" => CartoonCharacterConfig {
             name,
             role: CartoonRole::Hero,
-            // Medium brown skin, forest-green acrobat suit, silver-chrome accent
             skin: Color::srgb(0.88, 0.68, 0.48),
             outfit: Color::srgb(0.08, 0.52, 0.20),
             accent: Color::srgb(0.78, 0.86, 0.92),
-            hair: Color::srgb(0.85, 0.85, 0.90),
+            hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
             body_width: 0.94,
             has_hat: false,
@@ -105,11 +102,10 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
         "Joseph" => CartoonCharacterConfig {
             name,
             role: CartoonRole::Hero,
-            // Olive skin, deep-crimson heavy outfit, off-white trim — the big brother
             skin: Color::srgb(0.86, 0.65, 0.44),
             outfit: Color::srgb(0.75, 0.12, 0.08),
             accent: Color::srgb(0.92, 0.90, 0.84),
-            hair: Color::srgb(0.60, 0.58, 0.56),
+            hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
             body_width: 1.18,
             has_hat: false,
@@ -119,7 +115,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_star_badge: true,
             has_visor: false,
             has_shoulder_pads: true,
-            has_cape: false,
+            has_cape: true,
             has_spine_ridges: false,
             eye_color: Color::srgb(0.05, 0.04, 0.10),
             emissive_eyes: false,
@@ -130,7 +126,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             skin: Color::srgb(0.95, 0.68, 0.45),
             outfit: Color::srgb(0.15, 0.45, 0.95),
             accent: Color::srgb(1.0, 0.86, 0.2),
-            hair: Color::srgb(0.10, 0.06, 0.03),
+            hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
             body_width: 1.0,
             has_hat: false,
@@ -140,7 +136,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_star_badge: true,
             has_visor: false,
             has_shoulder_pads: false,
-            has_cape: false,
+            has_cape: true,
             has_spine_ridges: false,
             eye_color: Color::srgb(0.03, 0.03, 0.05),
             emissive_eyes: false,
@@ -334,7 +330,7 @@ pub fn attach_cartoon_character(
         CartoonPartKind::Shadow,
         Mesh::from(Cylinder::new(0.58 * s, 0.02 * s)),
         shadow,
-        Transform::from_xyz(0.0, -0.92 * s, 0.0),
+        Transform::from_xyz(0.0, -1.30 * s, 0.0),
     );
 
     // ── Body ──────────────────────────────────────────────────────────────────
@@ -377,14 +373,9 @@ pub fn attach_cartoon_character(
             char_mat(materials, Color::srgb(0.95, 0.95, 0.97)),
             Transform::from_xyz(eye_x * s, 0.61 * s, -0.30 * s),
         );
-        // Iris / pupil on top
-        let iris_kind = if eye_x < 0.0 {
-            CartoonPartKind::LeftEyebrow // reuse kind slot for iris overlay
-        } else {
-            CartoonPartKind::RightEyebrow
-        };
+        // Iris / pupil — same kind as sclera so both follow head animation
         spawn_part(
-            commands, meshes, root, iris_kind,
+            commands, meshes, root, kind,
             Mesh::from(Sphere::new(0.044 * s)),
             eye_mat.clone(),
             Transform::from_xyz(eye_x * s, 0.61 * s, -0.34 * s),
@@ -394,8 +385,8 @@ pub fn attach_cartoon_character(
     // ── Eyebrows ──────────────────────────────────────────────────────────────
     // Thin flat cuboids above the eyes; slight inward tilt gives personality.
     for (kind, brow_x, tilt_z) in [
-        (CartoonPartKind::Nose, -0.13_f32, 0.18_f32),
-        (CartoonPartKind::Visor, 0.13_f32, -0.18_f32),
+        (CartoonPartKind::LeftEyebrow, -0.13_f32, 0.18_f32),
+        (CartoonPartKind::RightEyebrow, 0.13_f32, -0.18_f32),
     ] {
         spawn_part(
             commands, meshes, root, kind,
@@ -409,7 +400,7 @@ pub fn attach_cartoon_character(
     // ── Nose (small rounded bump on face) ─────────────────────────────────────
     spawn_part(
         commands, meshes, root,
-        CartoonPartKind::SpineRidge, // temporarily borrow kind for nose geometry
+        CartoonPartKind::Nose,
         Mesh::from(Sphere::new(0.065 * s)),
         skin.clone(),
         Transform::from_xyz(0.0, 0.575 * s, -0.34 * s)
@@ -457,15 +448,15 @@ pub fn attach_cartoon_character(
     ] {
         spawn_part(
             commands, meshes, root, leg_k,
-            Mesh::from(Cuboid::new(0.20 * s, 0.56 * s, 0.20 * s)),
+            Mesh::from(Cuboid::new(0.20 * s, 0.68 * s, 0.20 * s)),
             outfit.clone(),
-            Transform::from_xyz(x, -0.74 * s, 0.0),
+            Transform::from_xyz(x, -0.80 * s, 0.0),
         );
         spawn_part(
             commands, meshes, root, foot_k,
             Mesh::from(Cuboid::new(0.30 * s, 0.14 * s, 0.44 * s)),
             accent.clone(),
-            Transform::from_xyz(x, -1.08 * s, -0.08 * s),
+            Transform::from_xyz(x, -1.22 * s, -0.08 * s),
         );
     }
 
@@ -616,6 +607,68 @@ pub fn attach_cartoon_character(
                 .with_rotation(Quat::from_rotation_x(0.50)),
         );
     }
+}
+
+// ── Color presets for character designer ─────────────────────────────────────
+
+pub fn outfit_presets() -> [Color; 8] {
+    [
+        Color::srgb(0.09, 0.28, 0.80), // navy
+        Color::srgb(0.75, 0.12, 0.08), // crimson
+        Color::srgb(0.08, 0.52, 0.20), // forest green
+        Color::srgb(0.52, 0.10, 0.52), // purple
+        Color::srgb(0.80, 0.48, 0.06), // bronze
+        Color::srgb(0.08, 0.42, 0.56), // teal
+        Color::srgb(0.18, 0.18, 0.22), // charcoal
+        Color::srgb(0.62, 0.56, 0.48), // tan
+    ]
+}
+
+pub fn accent_presets() -> [Color; 8] {
+    [
+        Color::srgb(0.95, 0.78, 0.12), // gold
+        Color::srgb(0.10, 0.92, 0.98), // cyan
+        Color::srgb(0.78, 0.86, 0.92), // silver
+        Color::srgb(0.92, 0.90, 0.84), // off-white
+        Color::srgb(0.95, 0.40, 0.10), // orange
+        Color::srgb(0.65, 0.92, 0.30), // lime
+        Color::srgb(0.98, 0.28, 0.60), // pink
+        Color::srgb(0.20, 0.80, 1.00), // sky blue
+    ]
+}
+
+pub fn hair_presets() -> [Color; 8] {
+    [
+        Color::srgb(0.06, 0.04, 0.02), // near-black (hero default)
+        Color::srgb(0.20, 0.12, 0.06), // dark brown
+        Color::srgb(0.45, 0.28, 0.12), // medium brown
+        Color::srgb(0.70, 0.45, 0.18), // auburn
+        Color::srgb(0.88, 0.76, 0.32), // blonde
+        Color::srgb(0.85, 0.85, 0.90), // silver white
+        Color::srgb(0.60, 0.58, 0.56), // gray
+        Color::srgb(0.18, 0.05, 0.20), // dark purple
+    ]
+}
+
+/// Returns a hero config with per-slot customization overrides applied.
+/// Pass `None` for any field to keep the hero's default value.
+pub fn hero_config_with_overrides(
+    name: &'static str,
+    outfit: Option<Color>,
+    accent: Option<Color>,
+    hair: Option<Color>,
+    has_cape: Option<bool>,
+    has_shoulder_pads: Option<bool>,
+    has_visor: Option<bool>,
+) -> CartoonCharacterConfig {
+    let mut cfg = hero_config(name);
+    if let Some(c) = outfit { cfg.outfit = c; }
+    if let Some(c) = accent { cfg.accent = c; }
+    if let Some(c) = hair { cfg.hair = c; }
+    if let Some(v) = has_cape { cfg.has_cape = v; }
+    if let Some(v) = has_shoulder_pads { cfg.has_shoulder_pads = v; }
+    if let Some(v) = has_visor { cfg.has_visor = v; }
+    cfg
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 pub mod armor_plugin;
 pub mod chapter_plugin;
+pub mod character_design_plugin;
 pub mod character_plugin;
 pub mod chassis_editor_plugin;
 pub mod chest_plugin;
@@ -18,6 +19,7 @@ pub mod world_plugin;
 
 pub use armor_plugin::ArmorPlugin;
 pub use chapter_plugin::ChapterPlugin;
+pub use character_design_plugin::CharacterDesignPlugin;
 pub use character_plugin::CharacterPlugin;
 pub use chassis_editor_plugin::ChassisEditorPlugin;
 pub use chest_plugin::ChestPlugin;

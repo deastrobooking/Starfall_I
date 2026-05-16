@@ -3,7 +3,10 @@ use bevy::render::camera::Viewport;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_rapier3d::prelude::*;
 
-use crate::characters::{attach_cartoon_character, hero_config};
+use crate::characters::{
+    accent_presets, attach_cartoon_character, hair_presets, hero_config_with_overrides,
+    outfit_presets,
+};
 use crate::components::armor::ArmorSet;
 use crate::components::inventory::Inventory;
 use crate::components::player::*;
@@ -47,7 +50,9 @@ impl Plugin for PlayerPlugin {
 // ── Spawn helpers ─────────────────────────────────────────────────────────────
 
 fn player_spawn_position(index: u8) -> Vec3 {
-    let base = Vec3::new(350.0, 15.0, 150.0);
+    // City centre — terrain_height(x, z) is forced to 0 when city_flat == 1.0
+    // (within ~120 units of origin), so ground is reliably at Y = 0 here.
+    let base = Vec3::new(10.0, 30.0, 10.0);
     match index {
         0 => base,
         1 => base + Vec3::new(3.0, 0.0, 0.0),
@@ -151,12 +156,21 @@ fn spawn_players(
             ))
             .id();
 
+        let slot = &select.slots[i as usize];
         attach_cartoon_character(
             &mut commands,
             &mut meshes,
             &mut materials,
             player,
-            hero_config(select.character_name(i as usize)),
+            hero_config_with_overrides(
+                select.character_name(i as usize),
+                slot.outfit_idx.map(|j| outfit_presets()[j]),
+                slot.accent_idx.map(|j| accent_presets()[j]),
+                slot.hair_idx.map(|j| hair_presets()[j]),
+                slot.has_cape,
+                slot.has_shoulder_pads,
+                slot.has_visor,
+            ),
             spawn_pos,
         );
 

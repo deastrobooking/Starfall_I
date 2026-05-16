@@ -11,8 +11,8 @@ use crate::damage::Health;
 use crate::events::*;
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::resources::{
-    ChapterProgress, CurrentChapter, LocalPlayerConfig, PlayerSelectState, UiMessage, WaveInfo,
-    HERO_ROSTER,
+    ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlayerSelectState,
+    UiMessage, WaveInfo, HERO_ROSTER,
 };
 use crate::state::AppState;
 
@@ -428,7 +428,7 @@ fn setup_player_select(
 
             // Footer hints
             root.spawn((
-                Text::new("P1: ← → chars  |  Enter = ready  |  ESC = back\nP2-P4: any button joins  |  D-pad/stick = chars  |  A = ready  |  B = leave"),
+                Text::new("P1: ← → chars  |  Enter = ready  |  C = customize  |  ESC = back\nP2-P4: any button joins  |  D-pad/stick = chars  |  A = ready  |  Y = customize  |  B = leave"),
                 TextFont { font_size: 14.0, ..default() },
                 TextColor(Color::srgb(0.38, 0.38, 0.5)),
             ));
@@ -450,6 +450,7 @@ fn player_select_update(
     time: Res<Time>,
     mut select: ResMut<PlayerSelectState>,
     mut config: ResMut<LocalPlayerConfig>,
+    mut design_data: ResMut<CharacterDesignData>,
     mut next_state: ResMut<NextState<AppState>>,
     // Text queries — each set is disjoint via Without<> guards
     mut char_q: Query<
@@ -505,6 +506,12 @@ fn player_select_update(
         if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
             slot.ready = !slot.ready;
         }
+        // C = open character designer for P1
+        if keyboard.just_pressed(KeyCode::KeyC) && !slot.ready {
+            design_data.player_index = 0;
+            next_state.set(AppState::CharacterDesign);
+            return;
+        }
     }
 
     // ── P2-P4 (gamepads) ──────────────────────────────────────────────────────
@@ -556,6 +563,12 @@ fn player_select_update(
             // B = leave (only if not ready)
             if gp.just_pressed(GamepadButton::East) && !slot.ready {
                 slot.joined = false;
+            }
+            // Y = open character designer
+            if gp.just_pressed(GamepadButton::North) && !slot.ready {
+                design_data.player_index = i as usize;
+                next_state.set(AppState::CharacterDesign);
+                return;
             }
         }
     }

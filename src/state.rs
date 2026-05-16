@@ -6,6 +6,7 @@ pub enum AppState {
     #[default]
     MainMenu,
     PlayerSelect,
+    CharacterDesign,
     ChapterSelect,
     ChassisEditor,
     Playing,

@@ -217,6 +217,40 @@ pub struct RadioLine {
     pub remaining: f32,
 }
 
+// ── Character Design State ────────────────────────────────────────────────────
+/// Transient resource holding the in-progress customization for one player slot.
+/// Set `player_index` before transitioning to `AppState::CharacterDesign`.
+#[derive(Resource, Debug)]
+pub struct CharacterDesignData {
+    pub player_index: usize,
+    pub outfit_idx: usize,
+    pub accent_idx: usize,
+    pub hair_idx: usize,
+    pub has_cape: bool,
+    pub has_shoulder_pads: bool,
+    pub has_visor: bool,
+    pub spin_angle: f32,
+    pub dirty: bool,
+    pub preview_entity: Option<Entity>,
+}
+
+impl Default for CharacterDesignData {
+    fn default() -> Self {
+        Self {
+            player_index: 0,
+            outfit_idx: 0,
+            accent_idx: 0,
+            hair_idx: 0,
+            has_cape: true,
+            has_shoulder_pads: false,
+            has_visor: false,
+            spin_angle: 0.0,
+            dirty: false,
+            preview_entity: None,
+        }
+    }
+}
+
 // ── Hero Roster ───────────────────────────────────────────────────────────────
 pub const HERO_ROSTER: [&str; 4] = ["Vincenzo", "Antonio", "Angelo", "Joseph"];
 
@@ -227,11 +261,29 @@ pub struct PlayerSlotConfig {
     pub character_index: usize,
     pub ready: bool,
     pub stick_cooldown: f32,
+    // Customization overrides — None means use the hero's default
+    pub outfit_idx: Option<usize>,
+    pub accent_idx: Option<usize>,
+    pub hair_idx: Option<usize>,
+    pub has_cape: Option<bool>,
+    pub has_shoulder_pads: Option<bool>,
+    pub has_visor: Option<bool>,
 }
 
 impl Default for PlayerSlotConfig {
     fn default() -> Self {
-        Self { joined: false, character_index: 0, ready: false, stick_cooldown: 0.0 }
+        Self {
+            joined: false,
+            character_index: 0,
+            ready: false,
+            stick_cooldown: 0.0,
+            outfit_idx: None,
+            accent_idx: None,
+            hair_idx: None,
+            has_cape: None,
+            has_shoulder_pads: None,
+            has_visor: None,
+        }
     }
 }
 

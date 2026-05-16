@@ -11,7 +11,9 @@ impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            cartoon_animation_system.run_if(in_state(AppState::Playing)),
+            cartoon_animation_system.run_if(
+                in_state(AppState::Playing).or(in_state(AppState::CharacterDesign)),
+            ),
         );
     }
 }

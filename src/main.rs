@@ -16,11 +16,14 @@ mod state;
 
 use events::EventsPlugin;
 use plugins::{
-    ArmorPlugin, ChapterPlugin, CharacterPlugin, ChassisEditorPlugin, ChestPlugin, CompanionPlugin,
-    CraftingPlugin, DiscoverablePlugin, EnemyPlugin, InputPlugin, PlayerPlugin, RadioPlugin,
-    SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
+    ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChassisEditorPlugin,
+    ChestPlugin, CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, InputPlugin,
+    PlayerPlugin, RadioPlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
-use resources::{CameraShake, GameSettings, LocalPlayerConfig, PlayerScore, PlayerSelectState, WaveInfo};
+use resources::{
+    CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlayerScore,
+    PlayerSelectState, WaveInfo,
+};
 use state::AppState;
 
 fn main() {
@@ -49,6 +52,7 @@ fn main() {
         .init_resource::<CameraShake>()
         .init_resource::<LocalPlayerConfig>()
         .init_resource::<PlayerSelectState>()
+        .init_resource::<CharacterDesignData>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
         // Game plugins
@@ -58,6 +62,7 @@ fn main() {
             WorldPlugin,
             PlayerPlugin,
             CharacterPlugin,
+            CharacterDesignPlugin,
             WeaponPlugin,
             EnemyPlugin,
             ChestPlugin,
