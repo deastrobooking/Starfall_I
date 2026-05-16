@@ -4,6 +4,7 @@ use bevy::input::gamepad::{GamepadAxis, GamepadButton};
 
 use crate::chapters::{all_chapters, ChapterId};
 use crate::components::armor::ArmorSet;
+use crate::components::discoverable::{PuzzleArchetype, PuzzleRelicEncounter};
 use crate::components::inventory::Inventory;
 use crate::components::player::{JetpackState, Player, PlayerStats};
 use crate::components::weapon::{BeamSabre, SpecialWeaponInventory, WeaponInventory};
@@ -35,16 +36,36 @@ impl Plugin for UiPlugin {
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
             .add_systems(
                 Update,
-                (
-                    hud_update_system,
-                    message_timer_system,
-                    ui_message_listener,
-                    damage_vignette_system,
-                    crafting_panel_system,
-                    boss_alert_system,
-                    game_over_input,
-                )
+                hud_update_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                puzzle_objective_hud_system
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                message_timer_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                ui_message_listener.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                damage_vignette_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                crafting_panel_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                boss_alert_system.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                game_over_input.run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
@@ -96,6 +117,10 @@ struct WeaponNameText;
 struct AmmoText;
 #[derive(Component)]
 struct SpecialAmmoText;
+#[derive(Component)]
+struct ObjectiveTitleText;
+#[derive(Component)]
+struct ObjectiveStatusText;
 #[derive(Component)]
 struct MessageText;
 #[derive(Component)]
@@ -849,6 +874,41 @@ fn setup_hud(mut commands: Commands) {
                 ));
             });
 
+            // ── Active puzzle objective (upper center-left) ─────────────────────
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(34.0),
+                    top: Val::Px(18.0),
+                    width: Val::Px(420.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(10.0)),
+                    row_gap: Val::Px(3.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.04, 0.05, 0.10, 0.84)),
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.92, 0.30)),
+                    ObjectiveTitleText,
+                ));
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                    ObjectiveStatusText,
+                ));
+            });
+
             // ── Primary weapon selector bar (bottom center) ───────────────────────
             root.spawn(Node {
                 position_type: PositionType::Absolute,
@@ -1201,6 +1261,73 @@ fn hud_update_system(
             "7:Star({})  8:Tri({})  9:Moon({})  0:Sprite({})",
             special.slot7.ammo, special.slot8.ammo, special.slot9.ammo, special.slot0.ammo,
         ));
+    }
+}
+
+fn puzzle_objective_hud_system(
+    encounter_q: Query<&PuzzleRelicEncounter>,
+    mut objective_title_q: Query<
+        &mut Text,
+        (
+            With<ObjectiveTitleText>,
+            Without<ObjectiveStatusText>,
+            Without<WaveText>,
+            Without<EnemyCountText>,
+        ),
+    >,
+    mut objective_status_q: Query<
+        &mut Text,
+        (
+            With<ObjectiveStatusText>,
+            Without<ObjectiveTitleText>,
+            Without<WaveText>,
+            Without<EnemyCountText>,
+        ),
+    >,
+) {
+    let objective = encounter_q.iter().next();
+    if let Ok(mut t) = objective_title_q.get_single_mut() {
+        *t = Text::new(match objective {
+            Some(encounter) => format!("OBJECTIVE: Recover {}", encounter.label),
+            None => String::new(),
+        });
+    }
+    if let Ok(mut t) = objective_status_q.get_single_mut() {
+        *t = Text::new(match objective {
+            Some(encounter) => puzzle_status_text(encounter),
+            None => String::new(),
+        });
+    }
+}
+
+fn puzzle_status_text(encounter: &PuzzleRelicEncounter) -> String {
+    match encounter.archetype {
+        PuzzleArchetype::OrderedSwitches => format!(
+            "{} Progress: {}/{} pylons aligned. {}",
+            encounter.scientist, encounter.active_nodes, encounter.total_nodes, encounter.hint
+        ),
+        PuzzleArchetype::TimedCrystalChain { .. } => format!(
+            "{} Progress: {}/{} crystals lit. {:.1}s remaining. {}",
+            encounter.scientist,
+            encounter.active_nodes,
+            encounter.total_nodes,
+            encounter.timer_remaining.max(0.0),
+            encounter.hint
+        ),
+        PuzzleArchetype::CoOpFloorPlates { hold_secs, required_players } => format!(
+            "{} Plates: {}/{} active. Hold {:.1}/{:.1}s with up to {} players. {}",
+            encounter.scientist,
+            encounter.active_nodes,
+            encounter.total_nodes,
+            encounter.hold_progress,
+            hold_secs,
+            required_players,
+            encounter.hint
+        ),
+        PuzzleArchetype::BeamRouting => format!(
+            "{} Route: {}/{} relays energized. {}",
+            encounter.scientist, encounter.active_nodes, encounter.total_nodes, encounter.hint
+        ),
     }
 }
 

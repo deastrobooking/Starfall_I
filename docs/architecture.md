@@ -42,7 +42,7 @@ src/
     chest_plugin.rs         Chest spawn, interact, loot roll
     crafting_plugin.rs      Crafting menu, recipe matching
     companion_plugin.rs     Companion follow AI, assist attacks
-    discoverable_plugin.rs  Beacon spawn, collection trigger
+    discoverable_plugin.rs  Beacon spawn, collection trigger, relic puzzle runtime
     radio_plugin.rs         RadioChatter queue drain → UiMessage
     vehicle_plugin.rs       Vehicle enter/exit, driving physics
     chassis_editor_plugin.rs Robot chassis color/part editor
@@ -72,6 +72,7 @@ PlayerPlugin: reads GameInput → mutates PlayerMovement / StateMachine → Kine
 WeaponPlugin: reads GameInput → fires Projectile entities, triggers melee
 EnemyPlugin:  reads Projectile + Player position → updates EnemyStateMachine
 ChapterPlugin: listens to EnemyKilledEvent / BossDefeatedEvent → advances EncounterStep
+DiscoverablePlugin: handles collectible beacons and ordered relic-switch puzzles
 UiPlugin:     listens to all events → updates HUD, radio chatter, damage numbers
 SavePlugin:   reads PlayerStats + Health + WaveInfo → JSON on disk
 ```
@@ -81,5 +82,6 @@ SavePlugin:   reads PlayerStats + Health + WaveInfo → JSON on disk
 - **KinematicPositionBased physics**: Player is a Rapier kinematic capsule; movement is computed manually each frame via `KinematicCharacterController.translation`. This gives full control over wall jumps, edge grabs, and jetpack without fighting Rapier's dynamic solver.
 - **State machines on components**: Both `PlayerStateMachine` and `EnemyStateMachine` use allow-list transition tables so illegal state jumps are caught at the call site. `force()` bypasses the table for death/reset paths.
 - **Chapter director replaces wave loop**: `CurrentChapter` + `ChapterPlugin` replaces the old `WaveInfo`-driven loop. `WaveInfo` is kept alive only for legacy loot and save compatibility.
+- **Puzzle objectives are data-driven**: relic recovery uses chapter-scripted `PlaceRelicPuzzle` steps so new collectible objectives can be added without bespoke level code.
 - **GameInput abstraction**: All input is funneled through the `GameInput` resource so keyboard and gamepad bindings are swappable in one place.
 - **Damage pipeline**: `DamageInfo → apply_damage() → DamageResult` with resistance multipliers, then callers emit events. Parry and armor are handled in `damage_player()` in player_plugin before the generic pipeline.

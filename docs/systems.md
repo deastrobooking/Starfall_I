@@ -142,11 +142,47 @@ Detection / chase / attack ranges are per-type. `difficulty_scale` (from wave or
 | `MidBoss` | Boss entity dead |
 | `BossFight` | Boss entity dead |
 | `PlaceDiscoverable` | Beacon spawned (collected separately) |
+| `PlaceRelicPuzzle` | Ordered switch puzzle solved, then relic beacon spawned |
 | `Outro` | Fires `ChapterCompletedEvent` |
 
 `CurrentChapter.step_index` is advanced by `ChapterPlugin` each time the current step's condition fires.
 
 Chapter unlock: `ChapterProgress.is_unlocked(id)` returns true if the previous chapter is in `completed`. Chapter 1 is always unlocked.
+
+## Relic Puzzles
+
+**Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
+
+Scientist relics are now chapter objectives rather than free pickups. A `PlaceRelicPuzzle` step now references authored world anchors rather than player-relative offsets and spawns:
+
+- An ordered set of glowing puzzle switches.
+- A `PuzzleRelicEncounter` runtime tracker.
+- A scientist relic beacon that appears only after the switch sequence is solved.
+
+Supported archetypes:
+
+- `OrderedSwitches`: touch pylons in authored order.
+- `TimedCrystalChain`: light every crystal before the countdown expires.
+- `CoOpFloorPlates`: keep enough floor plates held for a short duration.
+- `BeamRouting`: energize relay nodes from source to sink without collapsing the route.
+
+Runtime behavior:
+
+- Touch switches in the authored order.
+- Touching a wrong switch after making progress resets the whole sequence.
+- Solving the full sequence spawns the relic reward and clears `CurrentChapter.awaiting_puzzle` so the chapter can continue.
+- Collecting the reward stores `scientist:relic_id` in `ChapterProgress.scientist_relics`.
+
+Current seeded relic objectives:
+
+- Chapter 1: Giacoma's Star Engine Focus
+- Chapter 4: Giacoma's Harmonic Seal
+- Chapter 9: Giovanni's Garden Prism
+- Chapter 12: Gabrio's Mana Compass
+
+HUD support:
+
+- The playing HUD shows the active relic objective, archetype-specific progress, timer/hold state, and current node count while a puzzle is active.
 
 ---
 
@@ -177,11 +213,11 @@ Save file: `starfall_i_save.json` (written next to the binary).
 
 - **Autosave**: every 30 seconds while `Playing`.
 - **Manual save**: F5 key.
-- **Load**: on `OnEnter(Playing)`.
+- **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
 
-Saved fields: `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, `wave_number`.
+Saved fields: `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics.
 
-Not saved (bug): `ChapterProgress`, `PerkTree`. See [improvements.md](improvements.md#1-save-data-doesnt-persist-chapter-progress-or-perks).
+Still not saved: `PerkTree`. See [improvements.md](improvements.md#1-save-data-doesnt-persist-chapter-progress-or-perks).
 
 ---
 

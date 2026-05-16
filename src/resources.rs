@@ -115,6 +115,7 @@ pub struct CurrentChapter {
     pub step_index: usize,
     pub step_timer: f32,
     pub awaiting_kills: u32,
+    pub awaiting_puzzle: bool,
     pub completed: bool,
     pub started: bool,
 }
@@ -128,6 +129,7 @@ impl Default for CurrentChapter {
             step_index: 0,
             step_timer: 0.0,
             awaiting_kills: 0,
+            awaiting_puzzle: false,
             completed: false,
             started: false,
         }
@@ -171,6 +173,7 @@ pub struct ChapterProgress {
     pub completed: Vec<u8>,
     pub discoverables: Vec<String>,
     pub companions_recruited: Vec<String>,
+    pub scientist_relics: Vec<String>,
 }
 
 impl ChapterProgress {
@@ -200,6 +203,16 @@ impl ChapterProgress {
         if !self.companions_recruited.iter().any(|c| c == name) {
             self.companions_recruited.push(name.to_string());
         }
+    }
+    pub fn recover_relic(&mut self, scientist: &str, relic_id: &str) {
+        let key = format!("{scientist}:{relic_id}");
+        if !self.scientist_relics.iter().any(|entry| entry == &key) {
+            self.scientist_relics.push(key);
+        }
+    }
+    pub fn has_relic(&self, scientist: &str, relic_id: &str) -> bool {
+        let key = format!("{scientist}:{relic_id}");
+        self.scientist_relics.iter().any(|entry| entry == &key)
     }
 }
 

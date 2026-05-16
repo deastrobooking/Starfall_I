@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::components::player::{Player, PlayerStats};
 use crate::damage::Health;
 use crate::events::UiMessageEvent;
-use crate::resources::WaveInfo;
+use crate::resources::{ChapterProgress, WaveInfo};
 use crate::state::AppState;
 
 const SAVE_FILE: &str = "starfall_i_save.json";
@@ -21,6 +21,10 @@ pub struct SaveData {
     pub max_stamina: f32,
     pub max_armor: f32,
     pub wave_number: u32,
+    pub completed_chapters: Vec<u8>,
+    pub discoverables: Vec<String>,
+    pub companions_recruited: Vec<String>,
+    pub scientist_relics: Vec<String>,
 }
 
 impl Default for SaveData {
@@ -33,6 +37,10 @@ impl Default for SaveData {
             max_stamina: 100.0,
             max_armor: 100.0,
             wave_number: 1,
+            completed_chapters: Vec::new(),
+            discoverables: Vec::new(),
+            companions_recruited: Vec::new(),
+            scientist_relics: Vec::new(),
         }
     }
 }
@@ -59,6 +67,7 @@ pub struct SavePlugin;
 impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SaveState>()
+            .add_systems(Startup, hydrate_progress_from_disk)
             .add_systems(OnEnter(AppState::Playing), load_save_on_enter)
             .add_systems(
                 Update,
@@ -73,7 +82,12 @@ fn save_path() -> PathBuf {
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────────
-pub fn save_game(stats: &PlayerStats, health: &Health, wave: &WaveInfo) -> Result<(), String> {
+pub fn save_game(
+    stats: &PlayerStats,
+    health: &Health,
+    wave: &WaveInfo,
+    progress: &ChapterProgress,
+) -> Result<(), String> {
     let data = SaveData {
         level: stats.level,
         experience: stats.experience,
@@ -82,6 +96,10 @@ pub fn save_game(stats: &PlayerStats, health: &Health, wave: &WaveInfo) -> Resul
         max_stamina: stats.max_stamina,
         max_armor: stats.max_armor,
         wave_number: wave.wave_number,
+        completed_chapters: progress.completed.clone(),
+        discoverables: progress.discoverables.clone(),
+        companions_recruited: progress.companions_recruited.clone(),
+        scientist_relics: progress.scientist_relics.clone(),
     };
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(save_path(), json).map_err(|e| e.to_string())
@@ -97,9 +115,19 @@ pub fn load_save() -> Option<SaveData> {
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
+fn hydrate_progress_from_disk(mut progress: ResMut<ChapterProgress>) {
+    if let Some(data) = load_save() {
+        progress.completed = data.completed_chapters;
+        progress.discoverables = data.discoverables;
+        progress.companions_recruited = data.companions_recruited;
+        progress.scientist_relics = data.scientist_relics;
+    }
+}
+
 fn load_save_on_enter(
     mut player_q: Query<(&mut PlayerStats, &mut Health), With<Player>>,
     mut wave: ResMut<WaveInfo>,
+    mut progress: ResMut<ChapterProgress>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
     if let Some(data) = load_save() {
@@ -114,6 +142,10 @@ fn load_save_on_enter(
             health.current = data.max_health;
         }
         wave.wave_number = data.wave_number;
+        progress.completed = data.completed_chapters;
+        progress.discoverables = data.discoverables;
+        progress.companions_recruited = data.companions_recruited;
+        progress.scientist_relics = data.scientist_relics;
         msg_ev.send(UiMessageEvent {
             text: format!("Save loaded — LVL {} Wave {}", data.level, data.wave_number),
             duration: 3.0,
@@ -126,6 +158,7 @@ fn autosave_system(
     mut save_state: ResMut<SaveState>,
     player_q: Query<(&PlayerStats, &Health), With<Player>>,
     wave: Res<WaveInfo>,
+    progress: Res<ChapterProgress>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
     save_state.last_save_timer += time.delta_secs();
@@ -137,7 +170,7 @@ fn autosave_system(
     let Ok((stats, health)) = player_q.get_single() else {
         return;
     };
-    match save_game(stats, health, &wave) {
+    match save_game(stats, health, &wave, &progress) {
         Ok(()) => {
             msg_ev.send(UiMessageEvent {
                 text: "Game autosaved.".to_string(),
@@ -154,6 +187,7 @@ fn manual_save_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     player_q: Query<(&PlayerStats, &Health), With<Player>>,
     wave: Res<WaveInfo>,
+    progress: Res<ChapterProgress>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
     if !keyboard.just_pressed(KeyCode::F5) {
@@ -162,7 +196,7 @@ fn manual_save_system(
     let Ok((stats, health)) = player_q.get_single() else {
         return;
     };
-    match save_game(stats, health, &wave) {
+    match save_game(stats, health, &wave, &progress) {
         Ok(()) => {
             msg_ev.send(UiMessageEvent {
                 text: "Game saved! [F5]".to_string(),

@@ -10,7 +10,7 @@
 
 use bevy::prelude::*;
 
-use crate::components::discoverable::DiscoverableKind;
+use crate::components::discoverable::{DiscoverableKind, PuzzleArchetype};
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
 
@@ -188,6 +188,16 @@ pub enum EncounterStep {
         label: &'static str,
         offset: Vec3,
     },
+    /// Spawn an activation puzzle; the reward beacon appears when all switches are hit in order.
+    PlaceRelicPuzzle {
+        scientist: &'static str,
+        relic_id: &'static str,
+        label: &'static str,
+        hint: &'static str,
+        archetype: PuzzleArchetype,
+        reward_anchor: &'static str,
+        node_anchors: Vec<&'static str>,
+    },
     /// Final outro line + completion fire.
     Outro { line: &'static str },
 }
@@ -260,6 +270,25 @@ fn place(kind: DiscoverableKind, label: &'static str, offset: Vec3) -> Encounter
         offset,
     }
 }
+fn relic_puzzle(
+    scientist: &'static str,
+    relic_id: &'static str,
+    label: &'static str,
+    hint: &'static str,
+    archetype: PuzzleArchetype,
+    reward_anchor: &'static str,
+    node_anchors: &[&'static str],
+) -> EncounterStep {
+    EncounterStep::PlaceRelicPuzzle {
+        scientist,
+        relic_id,
+        label,
+        hint,
+        archetype,
+        reward_anchor,
+        node_anchors: node_anchors.to_vec(),
+    }
+}
 fn outro(line: &'static str) -> EncounterStep {
     EncounterStep::Outro { line }
 }
@@ -284,6 +313,19 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 spawn(DimensionalAlien, Drone, 5, 1.0),
                 dialogue("Gabrio", WizardScientist, "Give the brothers the beam gloves. Cartoon settings only.", 3.0),
                 place(DiscoverableKind::BeamSabreUnlock, "Star Sabre Core", Vec3::new(8.0, 0.5, 0.0)),
+                relic_puzzle(
+                    "Giacoma",
+                    "star_engine_focus",
+                    "Giacoma's Star Engine Focus",
+                    "Tune the star engine pylons from left to right to restore Giacoma's stolen focus lens.",
+                    PuzzleArchetype::OrderedSwitches,
+                    "ch01_giacoma_reward",
+                    &[
+                        "ch01_giacoma_node_1",
+                        "ch01_giacoma_node_2",
+                        "ch01_giacoma_node_3",
+                    ],
+                ),
                 spawn(DimensionalAlien, EnemyType::SpikeAlien, 5, 1.0),
                 mid_boss("JetWarden", "Rift Skipper", DimensionalAlien, 1.25),
                 place(DiscoverableKind::CompanionRecruit("Vincenzo"), "Vincenzo - Oldest Brother", Vec3::new(0.0, 0.5, -8.0)),
@@ -343,6 +385,22 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 place(DiscoverableKind::WeaponMod("piercing_rounds"), "Star Pierce Mod", Vec3::new(8.0, 0.5, 0.0)),
                 boss("HybridOmega", "Rift Gatekeeper", DimensionalAlien,
                      "GATEKEEPER: Your family makes too much light.", 1.8),
+                relic_puzzle(
+                    "Giacoma",
+                    "harmonic_seal",
+                    "Giacoma's Harmonic Seal",
+                    "Hold the trial floor plates together long enough to unlock the harmonic seal.",
+                    PuzzleArchetype::CoOpFloorPlates {
+                        hold_secs: 2.4,
+                        required_players: 2,
+                    },
+                    "ch04_giacoma_reward",
+                    &[
+                        "ch04_giacoma_plate_1",
+                        "ch04_giacoma_plate_2",
+                        "ch04_giacoma_plate_3",
+                    ],
+                ),
                 place(DiscoverableKind::CompanionRecruit("Angelo"), "Angelo", Vec3::new(0.0, 0.5, -6.0)),
                 place(DiscoverableKind::CompanionRecruit("Joseph"), "Joseph aka Little Joe", Vec3::new(4.0, 0.5, -6.0)),
                 outro("Little Joe: I am small. My star beam is not."),
@@ -430,6 +488,20 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 dialogue("Pink Flame", DragonRoyalty, "My brothers broke the garden. Please un-break it with star beams.", 3.5),
                 spawn(DimensionalAlien, Drone, 6, 1.4),
                 spawn(DimensionalAlien, Soldier, 4, 1.4),
+                relic_puzzle(
+                    "Giovanni",
+                    "garden_prism",
+                    "Giovanni's Garden Prism",
+                    "Light the crystal beds in sequence to reveal Giovanni's stolen prism.",
+                    PuzzleArchetype::TimedCrystalChain { window_secs: 8.0 },
+                    "ch09_giovanni_reward",
+                    &[
+                        "ch09_giovanni_node_1",
+                        "ch09_giovanni_node_2",
+                        "ch09_giovanni_node_3",
+                        "ch09_giovanni_node_4",
+                    ],
+                ),
                 place(DiscoverableKind::CompanionRecruit("Pink Flame"), "Pink Flame - Dragon Daughter", Vec3::new(0.0, 0.5, -4.0)),
                 boss("WolfAnimaton", "Garden Rift Bloom", DimensionalAlien,
                      "BLOOM: Pollinating dimension three.", 1.6),
@@ -481,6 +553,20 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 dialogue("Giovanni", WizardScientist, "Classic platforming rule: the suspicious crystal is absolutely a switch.", 3.0),
                 spawn(DimensionalAlien, Heavy, 6, 2.2),
                 spawn(CorruptedHuman, Hybrid, 2, 2.2),
+                relic_puzzle(
+                    "Gabrio",
+                    "mana_compass",
+                    "Gabrio's Mana Compass",
+                    "Charge every mana switch in order before the maze resets and Bile keeps the compass.",
+                    PuzzleArchetype::BeamRouting,
+                    "ch12_gabrio_reward",
+                    &[
+                        "ch12_gabrio_node_1",
+                        "ch12_gabrio_node_2",
+                        "ch12_gabrio_node_3",
+                        "ch12_gabrio_node_4",
+                    ],
+                ),
                 mid_boss("TankTitan", "Crush - Mirror Brother", CorruptedHuman, 2.0),
                 boss("HybridOmega", "Dr. Bile's Puzzle Engine", CorruptedHuman,
                      "BILE: Four players, one maze, zero patience.", 2.5),

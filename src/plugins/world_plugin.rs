@@ -62,6 +62,7 @@ fn generate_city(
     spawn_aurora_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_collosar_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
+    spawn_puzzle_anchors(&mut commands, seed);
 }
 
 // ── Seeded RNG helper ─────────────────────────────────────────────────────────
@@ -388,6 +389,47 @@ fn spawn_ground_plane(commands: &mut Commands) {
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cuboid(600.0, 0.5, 600.0),
     ));
+}
+
+fn spawn_world_anchor(commands: &mut Commands, id: &'static str, position: Vec3) {
+    commands.spawn((
+        Transform::from_translation(position),
+        GlobalTransform::default(),
+        WorldGeometry,
+        WorldAnchor { id },
+    ));
+}
+
+fn spawn_puzzle_anchors(commands: &mut Commands, seed: u64) {
+    let anchors: &[(&str, f32, f32, f32)] = &[
+        // Chapter 1: downtown lab promenade
+        ("ch01_giacoma_reward", 26.0, 0.4, 28.0),
+        ("ch01_giacoma_node_1", 6.0, 0.0, 18.0),
+        ("ch01_giacoma_node_2", 14.0, 0.0, 24.0),
+        ("ch01_giacoma_node_3", 22.0, 0.0, 18.0),
+        // Chapter 4: training court plates
+        ("ch04_giacoma_reward", 104.0, 0.2, -18.0),
+        ("ch04_giacoma_plate_1", 88.0, 0.0, -12.0),
+        ("ch04_giacoma_plate_2", 96.0, 0.0, -22.0),
+        ("ch04_giacoma_plate_3", 104.0, 0.0, -12.0),
+        // Chapter 9: aurora garden crystal run
+        ("ch09_giovanni_reward", 454.0, 0.8, -8.0),
+        ("ch09_giovanni_node_1", 420.0, 0.0, -14.0),
+        ("ch09_giovanni_node_2", 438.0, 0.0, 12.0),
+        ("ch09_giovanni_node_3", 458.0, 0.0, -20.0),
+        ("ch09_giovanni_node_4", 476.0, 0.0, 8.0),
+        // Chapter 12: switchworks relay lane
+        ("ch12_gabrio_reward", 348.0, 0.6, -68.0),
+        ("ch12_gabrio_node_1", 304.0, 0.0, -46.0),
+        ("ch12_gabrio_node_2", 326.0, 0.0, -38.0),
+        ("ch12_gabrio_node_3", 348.0, 0.0, -50.0),
+        ("ch12_gabrio_node_4", 372.0, 0.0, -40.0),
+    ];
+
+    for &(id, x, y_offset, z) in anchors {
+        let y = terrain_height(x, z, seed) + y_offset;
+        spawn_world_anchor(commands, id, Vec3::new(x, y, z));
+    }
 }
 
 // ── Terrain ───────────────────────────────────────────────────────────────────

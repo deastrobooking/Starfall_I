@@ -67,6 +67,12 @@ pub struct SkyPlatform;
 #[derive(Component, Default)]
 pub struct WalkableSurface;
 
+/// Authored point used by chapter scripts to place bespoke encounters.
+#[derive(Component, Debug, Clone)]
+pub struct WorldAnchor {
+    pub id: &'static str,
+}
+
 /// A world-space loot pickup spawned when enemies die.
 #[derive(Component, Debug, Clone)]
 pub struct WorldLoot {
