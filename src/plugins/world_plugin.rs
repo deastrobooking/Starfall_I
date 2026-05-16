@@ -1,6 +1,10 @@
+use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::{
+    AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
+};
 use rand::Rng;
 
 use crate::components::world::*;
@@ -8,12 +12,39 @@ use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::resources::GameSettings;
 use crate::state::AppState;
 
+// ── Grass wind material ───────────────────────────────────────────────────────
+
+#[derive(Asset, TypePath, AsBindGroup, Clone)]
+struct GrassMaterial {
+    #[uniform(0)]
+    color: Vec4, // linear RGBA packed for the WGSL uniform
+}
+
+impl Material for GrassMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/grass.wgsl".into()
+    }
+    fn fragment_shader() -> ShaderRef {
+        "shaders/grass.wgsl".into()
+    }
+    fn specialize(
+        _pipeline: &MaterialPipeline<Self>,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None; // render both faces of each blade
+        Ok(())
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::Playing), generate_city)
+        app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
+            .add_systems(OnEnter(AppState::Playing), generate_city)
             .add_systems(OnExit(AppState::Playing), cleanup_world);
     }
 }
@@ -36,6 +67,7 @@ fn generate_city(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut grass_mats: ResMut<Assets<GrassMaterial>>,
     settings: Res<GameSettings>,
 ) {
     let seed = settings.world_seed;
@@ -55,7 +87,7 @@ fn generate_city(
     spawn_sky_bridges(&mut commands, &mut meshes, &pal, seed + 4);
     spawn_spaceports(&mut commands, &mut meshes, &pal);
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
-    spawn_grasslands(&mut commands, &mut meshes, &pal, seed + 10);
+    spawn_grasslands(&mut commands, &mut meshes, &mut *grass_mats, seed + 10);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8);
@@ -91,7 +123,6 @@ struct Palette {
 
     street_asphalt: Handle<StandardMaterial>,
     street_paint: Handle<StandardMaterial>,
-    grass: Handle<StandardMaterial>,
 
     highway: Handle<StandardMaterial>,
     sky_platform: Handle<StandardMaterial>,
@@ -226,15 +257,6 @@ impl Palette {
                 reflectance: 0.28,
                 ..default()
             }),
-            grass: m.add(StandardMaterial {
-                base_color: Color::srgb(0.30, 0.58, 0.24),
-                emissive: LinearRgba::new(0.06, 0.12, 0.04, 1.0),
-                metallic: 0.0,
-                perceptual_roughness: 0.96,
-                reflectance: 0.12,
-                ..default()
-            }),
-
             highway: m.add(StandardMaterial {
                 base_color: Color::srgb(0.10, 0.10, 0.13),
                 metallic: 0.20,
@@ -1221,13 +1243,53 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
 }
 
 // ── Grasslands ───────────────────────────────────────────────────────────────
+//
+// L-system grass: axiom F, rule F→F[+F][-F], 2 iterations.
+// The turtle runs on the XZ floor plane (Y is up). Each F step records a blade
+// position. At each position two crossed vertical Rectangle quads are spawned,
+// giving the old-school cross-billboard tuft look without any camera-facing math.
 fn spawn_grasslands(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    pal: &Palette,
+    grass_mats: &mut Assets<GrassMaterial>,
     seed: u64,
 ) {
-    for i in 0..260u64 {
+    // ── Shared blade meshes (two sizes for variety) ───────────────────────
+    // Rectangle lives in local XY; standing upright in world space by default.
+    let blade_tall = meshes.add(Rectangle::new(0.07, 0.72));
+    let blade_wide = meshes.add(Rectangle::new(0.09, 0.52));
+
+    // ── Three wind-grass material variants (linear sRGB greens) ──────────
+    let mats: [Handle<GrassMaterial>; 3] = [
+        grass_mats.add(GrassMaterial { color: Vec4::new(0.09, 0.27, 0.07, 1.0) }),
+        grass_mats.add(GrassMaterial { color: Vec4::new(0.13, 0.35, 0.10, 1.0) }),
+        grass_mats.add(GrassMaterial { color: Vec4::new(0.07, 0.22, 0.05, 1.0) }),
+    ];
+
+    // ── L-system string, evaluated once ──────────────────────────────────
+    // F → F[+F][-F], 2 iterations → 9 F nodes per tuft.
+    let ls: String = {
+        let mut s = String::from("F");
+        for _ in 0..2 {
+            s = s
+                .chars()
+                .flat_map(|c| {
+                    if c == 'F' {
+                        "F[+F][-F]".chars().collect::<Vec<_>>()
+                    } else {
+                        vec![c]
+                    }
+                })
+                .collect();
+        }
+        s
+    };
+
+    const ANGLE: f32 = 22.0 * std::f32::consts::PI / 180.0;
+    const BASE_STEP: f32 = 0.38;
+    const STEP_SCALE: f32 = 0.76; // branches shrink each push level
+
+    for i in 0..300u64 {
         let x = seeded(seed, i * 4) * 1100.0 - 550.0;
         let z = seeded(seed, i * 4 + 1) * 1100.0 - 550.0;
         let dist = (x * x + z * z).sqrt();
@@ -1240,20 +1302,55 @@ fn spawn_grasslands(
             continue;
         }
 
-        let radius = 6.0 + seeded(seed, i * 4 + 2) * 18.0;
-        let thickness = 0.20 + seeded(seed, i * 4 + 3) * 0.18;
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Cylinder::new(radius, thickness))),
-                material: MeshMaterial3d(pal.grass.clone()),
-                transform: Transform::from_xyz(x, y + thickness * 0.5, z)
-                    .with_rotation(Quat::from_rotation_y(
-                        seeded(seed, i * 5) * std::f32::consts::TAU,
-                    )),
-                ..default()
-            },
-            WorldGeometry,
-        ));
+        let root_dir = seeded(seed, i * 5) * std::f32::consts::TAU;
+        let mat = &mats[(i % 3) as usize];
+        let is_tall = seeded(seed, i * 7) > 0.45;
+        let blade_mesh = if is_tall { &blade_tall } else { &blade_wide };
+        let blade_h = if is_tall { 0.72_f32 } else { 0.52_f32 };
+
+        // ── XZ-plane turtle ───────────────────────────────────────────────
+        // State: (local_x, local_z, direction_radians, step_length)
+        let mut stack: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut lx = 0.0_f32;
+        let mut lz = 0.0_f32;
+        let mut dir = root_dir;
+        let mut step = BASE_STEP;
+
+        for ch in ls.chars() {
+            match ch {
+                'F' => {
+                    lx += step * dir.sin();
+                    lz += step * dir.cos();
+                    let wx = x + lx;
+                    let wz = z + lz;
+                    // Two crossed quads: one at dir, one rotated 90°
+                    for cross in [0.0_f32, std::f32::consts::FRAC_PI_2] {
+                        commands.spawn((
+                            Mesh3d(blade_mesh.clone()),
+                            MeshMaterial3d(mat.clone()),
+                            Transform::from_xyz(wx, y + blade_h * 0.5, wz)
+                                .with_rotation(Quat::from_rotation_y(dir + cross)),
+                            WorldGeometry,
+                        ));
+                    }
+                }
+                '+' => dir += ANGLE,
+                '-' => dir -= ANGLE,
+                '[' => {
+                    stack.push((lx, lz, dir, step));
+                    step *= STEP_SCALE;
+                }
+                ']' => {
+                    if let Some((sx, sz, sd, ss)) = stack.pop() {
+                        lx = sx;
+                        lz = sz;
+                        dir = sd;
+                        step = ss;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 

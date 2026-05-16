@@ -21,6 +21,7 @@ pub enum CartoonPose {
     #[default]
     Idle,
     Walk,
+    Run,
     Jump,
     Hang,
 }
@@ -57,6 +58,7 @@ pub enum CartoonPartKind {
     LeftEyebrow,
     RightEyebrow,
     Nose,
+    Mouth,
     Visor,
     LeftArm,
     RightArm,
@@ -76,6 +78,7 @@ pub enum CartoonPartKind {
     SpineRidge,
     Tail,
     StarBadge,
+    Belt,
 }
 
 #[derive(Component, Debug, Clone)]
