@@ -204,6 +204,13 @@ pub enum EncounterStep {
         label: &'static str,
         offset: Vec3,
     },
+    /// Place an optional secret-cave discovery beacon at an authored world anchor.
+    PlaceSecretCave {
+        chapter: u8,
+        cave_id: &'static str,
+        label: &'static str,
+        anchor: &'static str,
+    },
     /// Spawn an activation puzzle; the reward beacon appears when all switches are hit in order.
     PlaceRelicPuzzle {
         scientist: &'static str,
@@ -317,6 +324,14 @@ fn place(kind: DiscoverableKind, label: &'static str, offset: Vec3) -> Encounter
         offset,
     }
 }
+fn secret_cave(chapter: u8, cave_id: &'static str, label: &'static str) -> EncounterStep {
+    EncounterStep::PlaceSecretCave {
+        chapter,
+        cave_id,
+        label,
+        anchor: cave_id,
+    }
+}
 fn relic_puzzle(
     scientist: &'static str,
     relic_id: &'static str,
@@ -372,6 +387,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.0,
             script: vec![
                 dialogue("Giacoma", WizardScientist, "The star engine is awake. Nobody sneeze near the dimension dial.", 3.5),
+                secret_cave(1, "secret_cave_ch01", "Star Engine Grotto"),
                 dialogue("Giovanni", WizardScientist, "Too late. Something green just waved back.", 3.0),
                 spawn(DimensionalAlien, Drone, 5, 1.0),
                 dialogue("Gabrio", WizardScientist, "Give the brothers the beam gloves. Cartoon settings only.", 3.0),
@@ -404,6 +420,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.2,
             script: vec![
                 dialogue("Antonio", HeroBrother, "Call me Tony. Also, I found a wall we can bounce off.", 3.0),
+                secret_cave(2, "secret_cave_ch02", "Rift-Glass Underpass"),
                 spawn(DimensionalAlien, Drone, 6, 1.2),
                 spawn(DimensionalAlien, Soldier, 5, 1.2),
                 place(DiscoverableKind::WeaponMod("homing_star"), "Homing Star Focus", Vec3::new(6.0, 0.5, 6.0)),
@@ -429,6 +446,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.3,
             script: vec![
                 dialogue("Gabriella", HeroSister, "Nova, paint the sky. Aurora, guard the ledge. Fortuna, keep score.", 3.5),
+                secret_cave(3, "secret_cave_ch03", "Sister Starwell Cave"),
                 spawn(DimensionalAlien, Soldier, 5, 1.3),
                 dialogue("Nova", HeroSister, "Rainbow Ray is warmed up.", 2.5),
                 spawn(DimensionalAlien, EnemyType::SpikeAlien, 6, 1.3),
@@ -449,6 +467,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.4,
             script: vec![
                 dialogue("Angelo", HeroBrother, "If we hit the switches together, the bridge sings.", 3.0),
+                secret_cave(4, "secret_cave_ch04", "Brother Trial Burrow"),
                 spawn(DimensionalAlien, Soldier, 6, 1.4),
                 spawn(DimensionalAlien, Heavy, 3, 1.4),
                 mid_boss("Brutus", "Portal Bouncer", DimensionalAlien, 1.45),
@@ -485,6 +504,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.5,
             script: vec![
                 dialogue("Dr. Bile", CorruptedHuman, "Children with stars. How quaint. I built four shadows.", 3.5),
+                secret_cave(5, "secret_cave_ch05", "Mirror Sludge Cavern"),
                 spawn(CorruptedHuman, Soldier, 5, 1.5),
                 mid_boss("ScoutPrime", "Zark", CorruptedHuman, 1.45),
                 mid_boss("TankTitan", "Crush", CorruptedHuman, 1.5),
@@ -510,6 +530,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.6,
             script: vec![
                 dialogue("Collosar", DragonRoyalty, "Tiny star children. Tibet is under my wing.", 3.0),
+                secret_cave(6, "secret_cave_ch06", "Crownroot Ice Cave"),
                 spawn(DragonRoyalty, Drone, 6, 1.6),
                 spawn(DragonRoyalty, Heavy, 4, 1.6),
                 place(DiscoverableKind::ArmorMod("coolant_weave"), "Dragon Chill Weave", Vec3::new(6.0, 0.5, 6.0)),
@@ -536,6 +557,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.8,
             script: vec![
                 dialogue("Tarack", DragonRoyalty, "A family that fights together must also think together.", 3.0),
+                secret_cave(7, "secret_cave_ch07", "Ember Breathing Hollow"),
                 spawn(DragonRoyalty, Drone, 8, 1.8),
                 spawn(DimensionalAlien, Soldier, 6, 1.8),
                 mid_boss("WolfAnimaton", "Ember Warden", DragonRoyalty, 1.65),
@@ -563,6 +585,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.9,
             script: vec![
                 dialogue("Spikey", DragonRoyalty, "I am the youngest and the fastest and nobody can prove otherwise.", 3.0),
+                secret_cave(8, "secret_cave_ch08", "Fangroot Scrap Tunnel"),
                 spawn(DragonRoyalty, Drone, 8, 1.8),
                 mid_boss("Nero", "Spikey - Youngest Son", DragonRoyalty, 1.7),
                 dialogue("Shread", DragonRoyalty, "Little brother, stop chasing portals with your face.", 2.5),
@@ -590,6 +613,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.5,
             script: vec![
                 dialogue("Pink Flame", DragonRoyalty, "My brothers broke the garden. Please un-break it with star beams.", 3.5),
+                secret_cave(9, "secret_cave_ch09", "Pink Flame Root Cave"),
                 spawn(DimensionalAlien, Drone, 6, 1.4),
                 spawn(DimensionalAlien, Soldier, 4, 1.4),
                 relic_puzzle(
@@ -621,6 +645,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.9,
             script: vec![
                 dialogue("Ragar", DragonExile, "Colorado rock remembers every claw mark.", 3.0),
+                secret_cave(10, "secret_cave_ch10", "Granite Echo Cave"),
                 spawn(DragonExile, Drone, 8, 1.9),
                 spawn(CorruptedHuman, Soldier, 5, 1.8),
                 mid_boss("CharredCaptain", "Fang", CorruptedHuman, 1.7),
@@ -654,6 +679,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 2.0,
             script: vec![
                 dialogue("Blackskull", DragonExile, "Antarctica is quiet because I demand quiet.", 3.0),
+                secret_cave(11, "secret_cave_ch11", "Icebreaker Under-Cave"),
                 spawn(DragonExile, Soldier, 8, 2.0),
                 mid_boss("ScoutPrime", "Sharp", CorruptedHuman, 1.9),
                 spawn(DimensionalAlien, Heavy, 4, 2.0),
@@ -680,6 +706,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 2.2,
             script: vec![
                 dialogue("Giovanni", WizardScientist, "Classic platforming rule: the suspicious crystal is absolutely a switch.", 3.0),
+                secret_cave(12, "secret_cave_ch12", "Mana Gear Grotto"),
                 spawn(DimensionalAlien, Heavy, 6, 2.2),
                 spawn(CorruptedHuman, Hybrid, 2, 2.2),
                 relic_puzzle(
@@ -711,6 +738,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 1.8,
             script: vec![
                 dialogue("Giacoma", WizardScientist, "The crown gate is not a door. It is a mouth.", 3.5),
+                secret_cave(13, "secret_cave_ch13", "Crown Gate Underpath"),
                 dialogue("Fortuna", HeroSister, "Then we make it bite a star.", 2.5),
                 spawn(DimensionalAlien, Drone, 8, 1.8),
                 mid_boss("Selene", "Rift Herald", DimensionalAlien, 1.8),
@@ -728,6 +756,7 @@ fn build_chapters() -> Vec<ChapterDef> {
             difficulty_scale: 2.5,
             script: vec![
                 dialogue("Vincenzo", HeroBrother, "Brothers left. Sisters right. Scientists, please make the impossible thing possible.", 3.0),
+                secret_cave(14, "secret_cave_ch14", "Starfall Core Hollow"),
                 spawn(DimensionalAlien, Hybrid, 4, 2.5),
                 mid_boss("Cygnus", "Zark - Final Mirror", CorruptedHuman, 2.2),
                 mid_boss("Cygni", "Dr. Bile - Star Thief", CorruptedHuman, 2.2),

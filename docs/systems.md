@@ -154,6 +154,7 @@ Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit abov
 | `AirshipEscape` | Escape airship prop appears; short dialogue timer elapses |
 | `AirshipDeckRaid` | Party moves to a spawned airship deck; all deck guards dead |
 | `PlaceDiscoverable` | Beacon spawned (collected separately) |
+| `PlaceSecretCave` | Secret cave discovery beacon spawned at an authored cave anchor |
 | `PlaceRelicPuzzle` | Ordered switch puzzle solved, then relic beacon spawned |
 | `PlaceRelicFragmentPuzzle` | Five relic fragments collected from a moving obstacle course |
 | `Outro` | Fires `ChapterCompletedEvent` |
@@ -181,6 +182,37 @@ Current chapters using this loop:
 - Chapter 11: Blackskull's Icebreaker Airship
 
 The airship deck is a temporary chapter-spawned platform with colliders, rail blockers, engine visuals, and faction-colored materials. It is cleaned up when the next chapter starts.
+
+## Secret Caves
+
+**Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/world_plugin.rs`, `src/plugins/discoverable_plugin.rs`
+
+Every chapter now has one optional cave route to discover. `WorldPlugin` spawns the physical cave systems when the world is generated:
+
+- Stone and dark-rock tunnel entrances.
+- Walkable tunnel floors, side walls, back chambers, and colliders.
+- Brushed-metal ribs, glass panels, glowing crystals, and point lights so the caves keep the ancient/new style.
+- Two small moving platforms inside each chamber.
+- A `WorldAnchor` named `secret_cave_ch01` through `secret_cave_ch14` at each cave's inner discovery point.
+
+Chapter scripts use `PlaceSecretCave` to spawn a green discovery beacon at the matching anchor. Collecting it stores the cave id in `ChapterProgress.discoverables`, sends a UI message/radio line, and prevents that chapter's cave beacon from respawning after save/load.
+
+Current cave routes:
+
+- Chapter 1: Star Engine Grotto
+- Chapter 2: Rift-Glass Underpass
+- Chapter 3: Sister Starwell Cave
+- Chapter 4: Brother Trial Burrow
+- Chapter 5: Mirror Sludge Cavern
+- Chapter 6: Crownroot Ice Cave
+- Chapter 7: Ember Breathing Hollow
+- Chapter 8: Fangroot Scrap Tunnel
+- Chapter 9: Pink Flame Root Cave
+- Chapter 10: Granite Echo Cave
+- Chapter 11: Icebreaker Under-Cave
+- Chapter 12: Mana Gear Grotto
+- Chapter 13: Crown Gate Underpath
+- Chapter 14: Starfall Core Hollow
 
 ## Relic Puzzles
 
@@ -288,6 +320,7 @@ Multiplayer note: the current save snapshot stores the first active player's sta
 - Downtown towers mix transparent glass panels, glowing window facades, metal mullion grids, brushed-metal skins, and occasional stone-brick bodies for the ancient/new skyline style.
 - Industrial buildings can receive ribbed metal cladding and factory ribbon windows.
 - Smaller residential and outer-district buildings receive stone-brick variants, mortar courses, stone plinths, corner blocks, roof caps, moss, and warm/cool/dark window panels.
+- Secret caves are spawned from authored chapter specs and combine stone tunnels, metal ribs, glass panels, glowing crystals, small moving platforms, and save-backed discovery anchors.
 - Moving platforms bridge rooftops, castles, and high paths; the platform system carries grounded or landing players while avoiding midair drag.
 - Laser turrets track nearby players, show a brief beam windup, then apply laser damage through the same player damage/parry path.
 

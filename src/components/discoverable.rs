@@ -26,6 +26,8 @@ pub enum DiscoverableKind {
         piece: u8,
         total: u8,
     },
+    /// Optional cave route found inside a chapter's level space.
+    SecretCave { chapter: u8, cave_id: &'static str },
     /// Lore log; no mechanical effect, just radio chatter.
     LoreFragment(&'static str),
 }

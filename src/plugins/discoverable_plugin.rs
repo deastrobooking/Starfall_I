@@ -617,6 +617,30 @@ fn discoverable_pickup_system(
                     });
                 }
             }
+            DiscoverableKind::SecretCave { chapter, cave_id } => {
+                let was_new = !progress.has_discoverable(cave_id);
+                progress.unlock(cave_id);
+                if was_new {
+                    msg_ev.send(UiMessageEvent {
+                        text: format!("Secret cave discovered: {}", d.label),
+                        duration: 4.0,
+                    });
+                    radio_ev.send(RadioChatterEvent {
+                        speaker: "Giacoma".into(),
+                        text: format!(
+                            "Chapter {} cave charted. Marking {} on the family map.",
+                            chapter, d.label
+                        ),
+                        faction: crate::components::faction::Faction::WizardScientist,
+                        duration: 4.0,
+                    });
+                } else {
+                    msg_ev.send(UiMessageEvent {
+                        text: format!("Secret cave already charted: {}", d.label),
+                        duration: 2.5,
+                    });
+                }
+            }
             DiscoverableKind::LoreFragment(text) => {
                 msg_ev.send(UiMessageEvent {
                     text: format!("LORE: {}", text),

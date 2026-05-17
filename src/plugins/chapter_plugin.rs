@@ -337,6 +337,48 @@ fn chapter_director_system(
             );
             advance = true;
         }
+        EncounterStep::PlaceSecretCave {
+            chapter,
+            cave_id,
+            label,
+            anchor,
+        } => {
+            if progress.has_discoverable(cave_id) {
+                advance = true;
+                if advance {
+                    current.step_index += 1;
+                    current.step_timer = 0.0;
+                    step_ev.send(EncounterStepAdvancedEvent {
+                        step_index: current.step_index,
+                    });
+                }
+                return;
+            }
+            let Some(position) = resolve_anchor_position(&anchor_q, anchor) else {
+                msg_ev.send(UiMessageEvent {
+                    text: format!("Missing secret cave anchor: {}", anchor),
+                    duration: 4.0,
+                });
+                advance = true;
+                if advance {
+                    current.step_index += 1;
+                    current.step_timer = 0.0;
+                    step_ev.send(EncounterStepAdvancedEvent {
+                        step_index: current.step_index,
+                    });
+                }
+                return;
+            };
+            spawn_discoverable_beacon(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                DiscoverableKind::SecretCave { chapter, cave_id },
+                label,
+                position,
+            );
+            advance = true;
+        }
         EncounterStep::PlaceRelicPuzzle {
             scientist,
             relic_id,
@@ -720,6 +762,7 @@ pub(crate) fn spawn_discoverable_beacon(
         DiscoverableKind::BeamSabreUnlock => Color::srgb(0.8, 0.1, 1.0),
         DiscoverableKind::ScientistRelic { .. } => Color::srgb(1.0, 0.95, 0.45),
         DiscoverableKind::RelicFragment { .. } => Color::srgb(0.45, 1.0, 0.95),
+        DiscoverableKind::SecretCave { .. } => Color::srgb(0.35, 0.95, 0.65),
         DiscoverableKind::LoreFragment(_) => Color::srgb(0.7, 0.7, 0.9),
     };
     let mat = materials.add(StandardMaterial {

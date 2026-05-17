@@ -347,6 +347,7 @@ fn generate_city(
     spawn_aurora_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_collosar_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
+    spawn_secret_cave_systems(&mut commands, &mut meshes, &pal, seed);
     spawn_puzzle_anchors(&mut commands, seed);
 }
 
@@ -895,6 +896,386 @@ fn spawn_puzzle_anchors(commands: &mut Commands, seed: u64) {
         let y = terrain_surface_y(x, z, seed) + y_offset;
         spawn_world_anchor(commands, id, Vec3::new(x, y, z));
     }
+}
+
+#[derive(Clone, Copy)]
+struct SecretCaveSpec {
+    chapter: u8,
+    anchor_id: &'static str,
+    x: f32,
+    z: f32,
+    yaw: f32,
+    length: f32,
+}
+
+fn spawn_secret_cave_systems(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let caves = [
+        SecretCaveSpec {
+            chapter: 1,
+            anchor_id: "secret_cave_ch01",
+            x: 42.0,
+            z: 54.0,
+            yaw: -0.55,
+            length: 38.0,
+        },
+        SecretCaveSpec {
+            chapter: 2,
+            anchor_id: "secret_cave_ch02",
+            x: 92.0,
+            z: 82.0,
+            yaw: -1.10,
+            length: 42.0,
+        },
+        SecretCaveSpec {
+            chapter: 3,
+            anchor_id: "secret_cave_ch03",
+            x: -78.0,
+            z: 92.0,
+            yaw: 0.70,
+            length: 36.0,
+        },
+        SecretCaveSpec {
+            chapter: 4,
+            anchor_id: "secret_cave_ch04",
+            x: 120.0,
+            z: -48.0,
+            yaw: 0.25,
+            length: 40.0,
+        },
+        SecretCaveSpec {
+            chapter: 5,
+            anchor_id: "secret_cave_ch05",
+            x: -96.0,
+            z: 38.0,
+            yaw: 1.20,
+            length: 40.0,
+        },
+        SecretCaveSpec {
+            chapter: 6,
+            anchor_id: "secret_cave_ch06",
+            x: -520.0,
+            z: -430.0,
+            yaw: 0.78,
+            length: 46.0,
+        },
+        SecretCaveSpec {
+            chapter: 7,
+            anchor_id: "secret_cave_ch07",
+            x: -430.0,
+            z: 178.0,
+            yaw: -0.40,
+            length: 44.0,
+        },
+        SecretCaveSpec {
+            chapter: 8,
+            anchor_id: "secret_cave_ch08",
+            x: -338.0,
+            z: 256.0,
+            yaw: -0.90,
+            length: 38.0,
+        },
+        SecretCaveSpec {
+            chapter: 9,
+            anchor_id: "secret_cave_ch09",
+            x: 438.0,
+            z: -34.0,
+            yaw: 1.00,
+            length: 36.0,
+        },
+        SecretCaveSpec {
+            chapter: 10,
+            anchor_id: "secret_cave_ch10",
+            x: 540.0,
+            z: 170.0,
+            yaw: -1.35,
+            length: 46.0,
+        },
+        SecretCaveSpec {
+            chapter: 11,
+            anchor_id: "secret_cave_ch11",
+            x: 210.0,
+            z: -328.0,
+            yaw: 0.95,
+            length: 42.0,
+        },
+        SecretCaveSpec {
+            chapter: 12,
+            anchor_id: "secret_cave_ch12",
+            x: 340.0,
+            z: -96.0,
+            yaw: 0.35,
+            length: 38.0,
+        },
+        SecretCaveSpec {
+            chapter: 13,
+            anchor_id: "secret_cave_ch13",
+            x: -164.0,
+            z: -254.0,
+            yaw: -0.20,
+            length: 42.0,
+        },
+        SecretCaveSpec {
+            chapter: 14,
+            anchor_id: "secret_cave_ch14",
+            x: 22.0,
+            z: -246.0,
+            yaw: 0.0,
+            length: 44.0,
+        },
+    ];
+
+    for spec in caves {
+        spawn_secret_cave_system(commands, meshes, pal, seed, spec);
+    }
+}
+
+fn secret_cave_accent(pal: &Palette, chapter: u8) -> Handle<StandardMaterial> {
+    match chapter {
+        6..=8 | 10..=11 => pal.crystal_dragon.clone(),
+        2 | 5 | 12 | 13 => pal.window_cool.clone(),
+        _ => pal.crystal_aurora.clone(),
+    }
+}
+
+fn spawn_secret_cave_solid(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    size: Vec3,
+    transform: Transform,
+    walkable: bool,
+) {
+    let mut entity = commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+            material: MeshMaterial3d(material),
+            transform,
+            ..default()
+        },
+        WorldGeometry,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+    ));
+    if walkable {
+        entity.insert(WalkableSurface);
+    }
+}
+
+fn spawn_secret_cave_system(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    spec: SecretCaveSpec,
+) {
+    let floor_y = terrain_surface_y(spec.x, spec.z, seed) + 0.25;
+    let entrance = Vec3::new(spec.x, floor_y, spec.z);
+    let forward = Vec3::new(spec.yaw.sin(), 0.0, spec.yaw.cos());
+    let right = Vec3::new(forward.z, 0.0, -forward.x);
+    let rotation = Quat::from_rotation_y(spec.yaw);
+    let accent = secret_cave_accent(pal, spec.chapter);
+    let wall_mat = if matches!(spec.chapter, 5 | 11 | 13 | 14) {
+        pal.rock_dark.clone()
+    } else {
+        pal.rock.clone()
+    };
+    let floor_mat = if matches!(spec.chapter, 1..=5 | 12..=14) {
+        pal.stone_block.clone()
+    } else {
+        pal.dragon_stone.clone()
+    };
+    let width = 10.0 + (spec.chapter % 3) as f32 * 1.5;
+
+    for side in [-1.0, 1.0] {
+        let pillar_pos = entrance + right * side * (width * 0.5 + 1.2) + Vec3::Y * 3.4;
+        spawn_secret_cave_solid(
+            commands,
+            meshes,
+            wall_mat.clone(),
+            Vec3::new(2.0, 6.8, 2.4),
+            Transform::from_translation(pillar_pos).with_rotation(rotation),
+            false,
+        );
+    }
+    spawn_secret_cave_solid(
+        commands,
+        meshes,
+        wall_mat.clone(),
+        Vec3::new(width + 4.5, 1.3, 2.8),
+        Transform::from_translation(entrance + Vec3::Y * 7.0).with_rotation(rotation),
+        false,
+    );
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(4.2))),
+            material: MeshMaterial3d(pal.rock_dark.clone()),
+            transform: Transform {
+                translation: entrance + forward * 3.2 + Vec3::Y * 2.9,
+                scale: Vec3::new(1.25, 0.72, 0.30),
+                rotation,
+            },
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for segment in 0..3 {
+        let along = 7.0 + segment as f32 * 10.5;
+        let center = entrance + forward * along + Vec3::Y * 0.05;
+        spawn_secret_cave_solid(
+            commands,
+            meshes,
+            floor_mat.clone(),
+            Vec3::new(width, 0.55, 10.6),
+            Transform::from_translation(center).with_rotation(rotation),
+            true,
+        );
+        for side in [-1.0, 1.0] {
+            spawn_secret_cave_solid(
+                commands,
+                meshes,
+                wall_mat.clone(),
+                Vec3::new(0.95, 4.0, 10.8),
+                Transform::from_translation(
+                    center + right * side * (width * 0.5 + 0.65) + Vec3::Y * 2.2,
+                )
+                .with_rotation(rotation),
+                false,
+            );
+        }
+        let rib_pos = center + Vec3::Y * 4.5 + forward * 4.4;
+        spawn_secret_cave_solid(
+            commands,
+            meshes,
+            pal.brushed_metal.clone(),
+            Vec3::new(width + 1.6, 0.45, 0.75),
+            Transform::from_translation(rib_pos).with_rotation(rotation),
+            false,
+        );
+    }
+
+    let chamber = entrance + forward * spec.length + Vec3::Y * 0.1;
+    spawn_secret_cave_solid(
+        commands,
+        meshes,
+        floor_mat.clone(),
+        Vec3::new(width + 9.0, 0.65, 17.0),
+        Transform::from_translation(chamber).with_rotation(rotation),
+        true,
+    );
+    for side in [-1.0, 1.0] {
+        spawn_secret_cave_solid(
+            commands,
+            meshes,
+            wall_mat.clone(),
+            Vec3::new(1.2, 5.0, 17.0),
+            Transform::from_translation(
+                chamber + right * side * ((width + 9.0) * 0.5 + 0.5) + Vec3::Y * 2.6,
+            )
+            .with_rotation(rotation),
+            false,
+        );
+    }
+    spawn_secret_cave_solid(
+        commands,
+        meshes,
+        wall_mat,
+        Vec3::new(width + 9.0, 5.0, 1.0),
+        Transform::from_translation(chamber + forward * 8.5 + Vec3::Y * 2.6)
+            .with_rotation(rotation),
+        false,
+    );
+
+    for i in 0..4 {
+        let side = if i % 2 == 0 { -1.0 } else { 1.0 };
+        let crystal_pos = chamber
+            + right * side * (3.0 + i as f32 * 0.9)
+            + forward * (-5.0 + i as f32 * 3.0)
+            + Vec3::Y * 1.8;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(1.2, 3.8, 1.2))),
+                material: MeshMaterial3d(accent.clone()),
+                transform: Transform::from_translation(crystal_pos)
+                    .with_rotation(rotation * Quat::from_rotation_y(i as f32 * 0.7)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    for side in [-1.0, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(2.6, 2.0, 0.18))),
+                material: MeshMaterial3d(pal.glass_panel.clone()),
+                transform: Transform::from_translation(
+                    chamber + right * side * ((width + 9.0) * 0.5 + 0.62) + Vec3::Y * 2.8,
+                )
+                .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let platform_size = Vec3::new(4.2, 0.5, 4.2);
+    for i in 0..2 {
+        let base = chamber + right * (-3.5 + i as f32 * 7.0) + forward * -8.0 + Vec3::Y * 1.2;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(
+                    platform_size.x,
+                    platform_size.y,
+                    platform_size.z,
+                ))),
+                material: MeshMaterial3d(accent.clone()),
+                transform: Transform::from_translation(base).with_rotation(rotation),
+                ..default()
+            },
+            bevy_rapier3d::prelude::Collider::cuboid(
+                platform_size.x * 0.5,
+                platform_size.y * 0.5,
+                platform_size.z * 0.5,
+            ),
+            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+            WorldGeometry,
+            WalkableSurface,
+            MovingPlatform {
+                start: base + Vec3::Y * -1.0,
+                end: base + Vec3::Y * 2.2,
+                speed: 2.2 + i as f32 * 0.35,
+                phase: spec.chapter as f32 * 0.31 + i as f32,
+                size: platform_size,
+            },
+        ));
+    }
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: if matches!(spec.chapter, 6..=11) {
+                    Color::srgb(1.0, 0.45, 0.18)
+                } else {
+                    Color::srgb(0.35, 0.92, 1.0)
+                },
+                intensity: 18_000.0,
+                range: 38.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(chamber + Vec3::Y * 4.0),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    spawn_world_anchor(commands, spec.anchor_id, chamber + Vec3::Y * 1.4);
 }
 
 // ── Terrain ───────────────────────────────────────────────────────────────────

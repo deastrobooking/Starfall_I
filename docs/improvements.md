@@ -10,6 +10,7 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Castle/domain bosses in chapters 6, 7, 8, 10, and 11 now escape to faction-colored airship decks before their rematch.
 - Relic-fragment sub puzzles now support five collectible pieces that assemble into one scientist relic, save partial progress, and spawn moving obstacle courses around the fragments.
 - City generation now mixes glass panels, glowing window grids, brushed-metal cladding, factory ribbon windows, and stone-brick/mortar facade variants.
+- Each chapter now has a secret cave system with walkable tunnel geometry, ancient/new cave dressing, moving platforms, and a save-backed discovery beacon.
 - Chapter director and HUD no longer fail outright when multiple players exist; they use the first active player as the shared chapter/HUD anchor.
 - Kill rewards are shared across active players.
 - The stale Rapier compatibility comment in `Cargo.toml` now matches the pinned dependency.
@@ -65,14 +66,21 @@ Fragment puzzles now prove the five-pieces-make-a-relic loop with moving bars, l
 
 ## Medium Priority
 
-### 6. Dual armor tracking can drift
+### 6. Add cave-specific rewards and secrets
+**Files:** `src/plugins/world_plugin.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
+
+Secret caves now exist as discoverable places, but they currently reward charting/progression rather than unique cave loot.
+
+**Design direction:** add cave-only chests, lore tablets, biome hazards, hidden relic-fragment shortcuts, and a cave completion count on the map/HUD.
+
+### 7. Dual armor tracking can drift
 **Files:** `src/components/player.rs`, `src/components/armor.rs`, `src/plugins/armor_plugin.rs`
 
 `PlayerStats` tracks numeric `armor` / `max_armor`, while `ArmorSet` tracks equipped armor pieces and damage reduction. Incoming damage uses both concepts. This should be named and documented as two distinct mechanics, or consolidated.
 
 **Design direction:** either rename `PlayerStats.armor` to `current_armor_points`, or move armor durability into `ArmorSet`.
 
-### 7. Health maximum has multiple writers
+### 8. Health maximum has multiple writers
 **Files:** `src/plugins/player_plugin.rs`, `src/plugins/armor_plugin.rs`, `src/plugins/save_plugin.rs`
 
 Level-up, armor bonuses, perk bonuses, and loading all write max health. The armor/perk sync now recalculates from stable sources, but the data model would be cleaner with one source of truth.
