@@ -9,8 +9,8 @@ The current build keeps the existing open 3D world, chapter director, RPG stats,
 Implemented:
 
 - Player-select flow for 1-4 local players, split-screen cameras, keyboard/gamepad input, and character customization.
-- Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, city props, and dragon-domain spaces.
-- Chapter director with 14 scripted chapters, dialogue, spawn waves, relic puzzles, discoverable beacons, bosses, and unlock progression.
+- Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, and dragon-domain spaces.
+- Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, discoverable beacons, bosses, and unlock progression.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
 - RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, armor elements, XP, perks, crafting, chests, companions, and save/load.
@@ -45,7 +45,7 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 - Simple retro RPG-style cartoon characters with idle, walk, jump, and hanging poses.
 - RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, perks, and chapter progression.
 - Cartoon star beams and energy weapons instead of guns.
-- Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, encounter waves, and boss fights.
+- Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
 - Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto their airship, clear the deck, then defeat them again.
 - Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, and shockwave hazards.
 - 4-player local multiplayer remains the design target; the current implementation has the core player split but still needs per-player support in several RPG and interaction systems.
@@ -70,9 +70,10 @@ cargo run --features dynamic
 4. Chapter Select
 5. Chassis Editor
 6. Playing
-7. Game Over
+7. Paused
+8. Game Over
 
-Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor.
+Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume.
 
 Perk training is also in chapter select. Leveling up grants one perk point; spend points with:
 
@@ -160,15 +161,15 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 ## Chapters
 
 1. Starfall Lab - Giacoma opens the sky.
-2. Tony's Shortcut - wall jumps across the rift city.
+2. Tony's Shortcut - wall jumps across the rift city and Giovanni's scattered rift-caliper fragments.
 3. Sisters Of The Star - Gabriella, Nova, Aurora, and Fortuna join.
 4. Four Brothers - Angelo and Little Joe complete the team.
-5. Dr. Bile - Zark, Crush, Fang, and Sharp emerge.
+5. Dr. Bile - Zark, Crush, Fang, and Sharp emerge around Gabrio's mirror-resonator fragments.
 6. Tibet Peak - Collosar tests the heroes, then flees to the Crown Airship.
 7. Tarack's Ember - the dragon queen tests the family aboard the Ember Airship.
 8. Spikes And Shreds - Spikey and Shread run wild before Shread's Scrapwing rematch.
 9. Pink Flame - garden puzzles and rift blooms.
-10. Rockies Domain - Ragar's Colorado mountain domain and Granite Airship.
+10. Rockies Domain - Ragar's Colorado mountain domain, Giovanni's granite-sextant fragments, and Granite Airship.
 11. Blackskull Ice - Antarctica opens below, then the Icebreaker Airship hunts overhead.
 12. Mana Switchworks - open-world puzzle battle.
 13. Dimension Front - the crown gate appears.
@@ -186,6 +187,8 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 src/
   main.rs                         App bootstrap and plugin registration
   state.rs                        AppState flow
+  events.rs                       Event definitions and EventsPlugin
+  damage.rs                       Health, resistances, and shared damage helpers
   resources.rs                    Shared resources and progression state
   perks.rs                        Heart / Star / Acrobat perk tree
   characters.rs                   Retro cartoon character construction, colors, and presets
@@ -194,6 +197,12 @@ src/
   components/weapon.rs            Star beam, special tool, projectile, and Star Sabre definitions
   components/enemy.rs             Enemy stats, flying drones, dragon bosses, projectiles
   components/faction.rs           Story groups and radio colors
+  components/discoverable.rs      Discoverable, relic puzzle, and relic fragment data
+  components/armor.rs             Armor sets and elemental damage reduction
+  components/companion.rs         Companion identity and assist behavior data
+  components/inventory.rs         Inventory item stacks
+  components/mods.rs              Weapon and armor mod definitions
+  components/world.rs             Buildings, chests, moving platforms, turrets, anchors, loot
   plugins/input_plugin.rs         Keyboard/gamepad input mapping
   plugins/player_plugin.rs        Movement feel, ledge hang, wall jump, stamina, perks, damage
   plugins/character_plugin.rs     Simple idle/walk/jump/hang animation poses
@@ -201,9 +210,19 @@ src/
   plugins/chapter_plugin.rs       Chapter director and encounter progression
   plugins/weapon_plugin.rs        Star beam firing, specials, melee, Star Sabre, VFX
   plugins/enemy_plugin.rs         Enemy spawning, AI, drones, bosses, rewards, loot
-  plugins/world_plugin.rs         Terrain, props, moving platforms, laser turrets
+  plugins/world_plugin.rs         Terrain, mixed ancient/new city facades, props, platforms, turrets
+  plugins/discoverable_plugin.rs  Discoverable pickups, relic puzzles, and fragment assembly
+  plugins/armor_plugin.rs         Armor repair, elemental cycling, and perk max-health sync
+  plugins/chest_plugin.rs         Chest spawn, interaction, and loot rolls
+  plugins/crafting_plugin.rs      Crafting recipes and crafting panel state
+  plugins/companion_plugin.rs     Companion follow, healing, and assist attacks
+  plugins/radio_plugin.rs         Radio chatter queue to UI messages
+  plugins/vehicle_plugin.rs       Vehicle enter/exit and driving physics
   plugins/ui_plugin.rs            Menus, HUD, crafting panel, chapter/perk UI
   plugins/save_plugin.rs          Save/load and autosave
-  robots/                         Chassis editor data, presets, and factory
+  plugins/chassis_editor_plugin.rs Robot chassis editor flow
+  robots/                         Chassis editor data, robot presets, and factory
   lsystem/                        Procedural tree grammar and turtle interpreter
+assets/
+  shaders/grass.wgsl              Wind-animated grass shader
 ```

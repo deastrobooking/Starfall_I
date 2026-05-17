@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
-    PuzzleRelicEncounter,
+    PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
 use crate::components::mods::{ArmorMod, PlayerLoadout, WeaponMod};
 use crate::components::player::Player;
@@ -24,6 +24,7 @@ impl Plugin for DiscoverablePlugin {
             (
                 beacon_bob_system,
                 puzzle_switch_bob_system,
+                fragment_obstacle_system,
                 relic_puzzle_system,
                 discoverable_pickup_system,
             )
@@ -37,7 +38,7 @@ fn beacon_bob_system(time: Res<Time>, mut q: Query<(&mut Transform, &mut Discove
     for (mut t, mut d) in q.iter_mut() {
         d.bob_phase += dt * 2.5;
         let bob = d.bob_phase.sin() * 0.25;
-        t.translation.y = t.translation.y * 0.99 + (1.6 + bob) * 0.01;
+        t.translation.y = t.translation.y * 0.99 + (d.base_y + bob) * 0.01;
         t.rotation = Quat::from_rotation_y(d.bob_phase);
     }
 }
@@ -56,6 +57,21 @@ fn puzzle_switch_bob_system(time: Res<Time>, mut q: Query<(&mut Transform, &mut 
                 t.translation.y = t.translation.y * 0.94 + (0.9 + bob) * 0.06;
                 t.rotate_y(dt * 0.8);
             }
+        }
+    }
+}
+
+fn fragment_obstacle_system(
+    time: Res<Time>,
+    mut q: Query<(&RelicFragmentObstacle, &mut Transform)>,
+) {
+    let elapsed = time.elapsed_secs();
+    for (obstacle, mut transform) in q.iter_mut() {
+        let wave = (elapsed * obstacle.speed + obstacle.phase).sin();
+        transform.translation = obstacle.base + obstacle.travel * wave;
+        if obstacle.spin_speed.abs() > f32::EPSILON {
+            transform.rotation =
+                Quat::from_rotation_y(elapsed * obstacle.spin_speed + obstacle.phase);
         }
     }
 }
@@ -457,6 +473,7 @@ fn discoverable_pickup_system(
     player_q: Query<(Entity, &Transform), With<Player>>,
     disc_q: Query<(Entity, &Transform, &Discoverable)>,
     encounter_q: Query<(Entity, &PuzzleRelicEncounter)>,
+    fragment_piece_q: Query<(Entity, &RelicFragmentPuzzlePiece)>,
     mut beam_q: Query<&mut BeamSabre>,
     mut progress: ResMut<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
@@ -554,6 +571,50 @@ fn discoverable_pickup_system(
                     if encounter.scientist == *scientist && encounter.relic_id == *relic_id {
                         commands.entity(encounter_entity).despawn_recursive();
                     }
+                }
+            }
+            DiscoverableKind::RelicFragment {
+                scientist,
+                relic_id,
+                piece,
+                total,
+            } => {
+                let was_new = progress.recover_relic_fragment(scientist, relic_id, *piece);
+                let recovered = progress.relic_fragment_count(scientist, relic_id);
+                if recovered >= *total as usize {
+                    progress.recover_relic(scientist, relic_id);
+                    progress.unlock(relic_id);
+                    current.awaiting_puzzle = false;
+                    msg_ev.send(UiMessageEvent {
+                        text: format!("Assembled relic: {} ({}/{})", d.label, total, total),
+                        duration: 4.5,
+                    });
+                    radio_ev.send(RadioChatterEvent {
+                        speaker: (*scientist).into(),
+                        text: format!(
+                            "All five fragments of {} are back together. Bring it home.",
+                            d.label
+                        ),
+                        faction: crate::components::faction::Faction::WizardScientist,
+                        duration: 4.0,
+                    });
+                    for (piece_entity, puzzle_piece) in fragment_piece_q.iter() {
+                        if puzzle_piece.scientist == *scientist
+                            && puzzle_piece.relic_id == *relic_id
+                        {
+                            commands.entity(piece_entity).despawn_recursive();
+                        }
+                    }
+                } else if was_new {
+                    msg_ev.send(UiMessageEvent {
+                        text: format!("Relic fragment {}/{}: {}", recovered, total, d.label),
+                        duration: 3.0,
+                    });
+                } else {
+                    msg_ev.send(UiMessageEvent {
+                        text: format!("Relic fragment already recovered: {}", d.label),
+                        duration: 2.5,
+                    });
                 }
             }
             DiscoverableKind::LoreFragment(text) => {

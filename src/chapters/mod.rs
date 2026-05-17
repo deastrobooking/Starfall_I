@@ -9,6 +9,7 @@
 //! companion recruits, alien waves, dragon bosses, and mirror-human rivals.
 
 use bevy::prelude::*;
+use std::sync::OnceLock;
 
 use crate::components::discoverable::{DiscoverableKind, PuzzleArchetype};
 use crate::components::enemy::EnemyType;
@@ -213,6 +214,15 @@ pub enum EncounterStep {
         reward_anchor: &'static str,
         node_anchors: Vec<&'static str>,
     },
+    /// Scatter small relic fragments through a moving obstacle course.
+    PlaceRelicFragmentPuzzle {
+        scientist: &'static str,
+        relic_id: &'static str,
+        label: &'static str,
+        hint: &'static str,
+        total: u8,
+        center_offset: Vec3,
+    },
     /// Final outro line + completion fire.
     Outro { line: &'static str },
 }
@@ -326,12 +336,28 @@ fn relic_puzzle(
         node_anchors: node_anchors.to_vec(),
     }
 }
+fn relic_fragment_puzzle(
+    scientist: &'static str,
+    relic_id: &'static str,
+    label: &'static str,
+    hint: &'static str,
+    center_offset: Vec3,
+) -> EncounterStep {
+    EncounterStep::PlaceRelicFragmentPuzzle {
+        scientist,
+        relic_id,
+        label,
+        hint,
+        total: 5,
+        center_offset,
+    }
+}
 fn outro(line: &'static str) -> EncounterStep {
     EncounterStep::Outro { line }
 }
 
 // ── All 14 Chapters ───────────────────────────────────────────────────────────
-pub fn all_chapters() -> Vec<ChapterDef> {
+fn build_chapters() -> Vec<ChapterDef> {
     use Faction::*;
     // Note: deliberately NOT `use EnemyType::*;` so script calls stay explicit
     // where the specialized spike alien appears.
@@ -384,6 +410,13 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 mid_boss("Nero", "Rift Cartographer", DimensionalAlien, 1.4),
                 place(DiscoverableKind::CompanionRecruit("Antonio"), "Antonio aka Tony", Vec3::new(0.0, 0.5, -6.0)),
                 place(DiscoverableKind::Blueprint("jump_gate_blueprint"), "Jump Gate Sketches", Vec3::new(-8.0, 0.5, 4.0)),
+                relic_fragment_puzzle(
+                    "Giovanni",
+                    "rift_caliper",
+                    "Giovanni's Rift Caliper",
+                    "Find five caliper shards while the rift blocks slide and rotate around Tony's shortcut.",
+                    Vec3::new(18.0, 1.0, -18.0),
+                ),
                 outro("Tony: See? Falling is just jumping with bad timing."),
             ],
         },
@@ -456,6 +489,13 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 mid_boss("ScoutPrime", "Zark", CorruptedHuman, 1.45),
                 mid_boss("TankTitan", "Crush", CorruptedHuman, 1.5),
                 place(DiscoverableKind::ArmorMod("reactive_plating"), "Star Guard Weave", Vec3::new(0.0, 0.5, 8.0)),
+                relic_fragment_puzzle(
+                    "Gabrio",
+                    "mirror_resonator",
+                    "Gabrio's Mirror Resonator",
+                    "Collect the five resonator teeth hidden between Bile's moving mirror presses.",
+                    Vec3::new(-18.0, 1.0, 18.0),
+                ),
                 boss("HybridOmega", "Dr. Bile's Reactor Suit", CorruptedHuman,
                      "BILE: Same powers, sharper teeth.", 2.0),
                 outro("Giacoma: Bile copied the gifts. He did not copy the heart."),
@@ -584,6 +624,13 @@ pub fn all_chapters() -> Vec<ChapterDef> {
                 spawn(DragonExile, Drone, 8, 1.9),
                 spawn(CorruptedHuman, Soldier, 5, 1.8),
                 mid_boss("CharredCaptain", "Fang", CorruptedHuman, 1.7),
+                relic_fragment_puzzle(
+                    "Giovanni",
+                    "granite_sextant",
+                    "Giovanni's Granite Sextant",
+                    "Gather five sextant stones from Ragar's shifting rock machinery.",
+                    Vec3::new(22.0, 1.0, 12.0),
+                ),
                 boss("BruteForge", "Ragar - Rockies Domain", DragonExile,
                      "RAGAR: Collosar's crown made him soft.", 2.0),
                 airship_escape(
@@ -693,6 +740,18 @@ pub fn all_chapters() -> Vec<ChapterDef> {
     ]
 }
 
+pub fn chapter_catalog() -> &'static [ChapterDef] {
+    static CHAPTERS: OnceLock<Vec<ChapterDef>> = OnceLock::new();
+    CHAPTERS.get_or_init(build_chapters).as_slice()
+}
+
+pub fn all_chapters() -> Vec<ChapterDef> {
+    chapter_catalog().to_vec()
+}
+
 pub fn get_chapter(id: ChapterId) -> Option<ChapterDef> {
-    all_chapters().into_iter().find(|c| c.id == id)
+    chapter_catalog()
+        .iter()
+        .find(|chapter| chapter.id == id)
+        .cloned()
 }

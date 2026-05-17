@@ -27,6 +27,8 @@ pub struct SaveData {
     pub companions_recruited: Vec<String>,
     pub scientist_relics: Vec<String>,
     #[serde(default)]
+    pub relic_fragments: Vec<String>,
+    #[serde(default)]
     pub perk_points_unspent: u32,
     #[serde(default)]
     pub perk_ranks: Vec<(String, u32)>,
@@ -46,6 +48,7 @@ impl Default for SaveData {
             discoverables: Vec::new(),
             companions_recruited: Vec::new(),
             scientist_relics: Vec::new(),
+            relic_fragments: Vec::new(),
             perk_points_unspent: 0,
             perk_ranks: Vec::new(),
         }
@@ -108,6 +111,7 @@ pub fn save_game(
         discoverables: progress.discoverables.clone(),
         companions_recruited: progress.companions_recruited.clone(),
         scientist_relics: progress.scientist_relics.clone(),
+        relic_fragments: progress.relic_fragments.clone(),
         perk_points_unspent: perks.points_unspent,
         perk_ranks: perks.ranks.clone(),
     };
@@ -131,6 +135,7 @@ fn hydrate_progress_from_disk(mut progress: ResMut<ChapterProgress>, mut perks: 
         progress.discoverables = data.discoverables;
         progress.companions_recruited = data.companions_recruited;
         progress.scientist_relics = data.scientist_relics;
+        progress.relic_fragments = data.relic_fragments;
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
     }
@@ -159,6 +164,7 @@ fn load_save_on_enter(
         progress.discoverables = data.discoverables;
         progress.companions_recruited = data.companions_recruited;
         progress.scientist_relics = data.scientist_relics;
+        progress.relic_fragments = data.relic_fragments;
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
         msg_ev.send(UiMessageEvent {

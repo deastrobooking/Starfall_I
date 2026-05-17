@@ -24,6 +24,8 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 
 **Game over:** triggers only when ALL players are dead simultaneously.
 
+**Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause overlay keeps the current HUD/world entities alive, while gameplay systems that are gated to `Playing` stop updating until resume.
+
 **Known limitations:**
 - Chapter director spawns use the first active player as the encounter anchor.
 - The primary HUD and save snapshot display/store the first active player's stats.
@@ -141,7 +143,7 @@ Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit abov
 
 **File:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
 
-14 chapters, each a `Vec<EncounterStep>`. Step types:
+14 chapters, each a `Vec<EncounterStep>`. The chapter catalog is built once through `OnceLock`, while `get_chapter()` returns a cloned definition for the active chapter. Step types:
 
 | Step | Completion |
 |---|---|
@@ -153,6 +155,7 @@ Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit abov
 | `AirshipDeckRaid` | Party moves to a spawned airship deck; all deck guards dead |
 | `PlaceDiscoverable` | Beacon spawned (collected separately) |
 | `PlaceRelicPuzzle` | Ordered switch puzzle solved, then relic beacon spawned |
+| `PlaceRelicFragmentPuzzle` | Five relic fragments collected from a moving obstacle course |
 | `Outro` | Fires `ChapterCompletedEvent` |
 
 `CurrentChapter.step_index` is advanced by `ChapterPlugin` each time the current step's condition fires.
@@ -203,6 +206,13 @@ Runtime behavior:
 - Solving the full sequence spawns the relic reward and clears `CurrentChapter.awaiting_puzzle` so the chapter can continue.
 - Collecting the reward stores `scientist:relic_id` in `ChapterProgress.scientist_relics`.
 
+Relic-fragment sub puzzles use `PlaceRelicFragmentPuzzle` for smaller level-side challenges:
+
+- Each fragment puzzle scatters 5 `RelicFragment` beacons around a temporary obstacle course.
+- Red moving bars and carry-aware lift platforms make the fragments harder to reach.
+- Each collected piece is stored as `scientist:relic_id:piece` in `ChapterProgress.relic_fragments`.
+- When all 5 pieces are collected, the game automatically assembles the full relic, unlocks its `relic_id`, clears `CurrentChapter.awaiting_puzzle`, and despawns the temporary course geometry.
+
 Current seeded relic objectives:
 
 - Chapter 1: Giacoma's Star Engine Focus
@@ -210,9 +220,16 @@ Current seeded relic objectives:
 - Chapter 9: Giovanni's Garden Prism
 - Chapter 12: Gabrio's Mana Compass
 
+Current seeded relic-fragment objectives:
+
+- Chapter 2: Giovanni's Rift Caliper
+- Chapter 5: Gabrio's Mirror Resonator
+- Chapter 10: Giovanni's Granite Sextant
+
 HUD support:
 
-- The playing HUD shows the active relic objective, archetype-specific progress, timer/hold state, and current node count while a puzzle is active.
+- Full relic puzzles show the active objective, archetype-specific progress, timer/hold state, and current node count while a puzzle is active.
+- Fragment puzzles currently use radio chatter and pickup messages for shard count feedback.
 
 ---
 
@@ -252,7 +269,7 @@ Save file: `starfall_i_save.json` (written next to the binary).
 - **Manual save**: F5 key.
 - **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
 
-Saved fields: `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, unspent perk points, and perk ranks.
+Saved fields: `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, and perk ranks.
 
 Multiplayer note: the current save snapshot stores the first active player's stats plus shared progression/perk data.
 
@@ -268,7 +285,9 @@ Multiplayer note: the current save snapshot stores the first active player's sta
 - City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.
 - Lush procedural nature adds dense grass, forest pockets, water gardens, reeds, flowers, shrubs, mossy rocks, and darker stone outcrops.
 - `NatureSway` gives trees, water surfaces, reeds, flowers, shrubs, and moss caps a subtle hand-animated motion.
-- Smaller residential and outer-district buildings receive stone plinths, brick or stone courses, corner blocks, roof caps, moss, and warm/cool/dark window panels.
+- Downtown towers mix transparent glass panels, glowing window facades, metal mullion grids, brushed-metal skins, and occasional stone-brick bodies for the ancient/new skyline style.
+- Industrial buildings can receive ribbed metal cladding and factory ribbon windows.
+- Smaller residential and outer-district buildings receive stone-brick variants, mortar courses, stone plinths, corner blocks, roof caps, moss, and warm/cool/dark window panels.
 - Moving platforms bridge rooftops, castles, and high paths; the platform system carries grounded or landing players while avoiding midair drag.
 - Laser turrets track nearby players, show a brief beam windup, then apply laser damage through the same player damage/parry path.
 

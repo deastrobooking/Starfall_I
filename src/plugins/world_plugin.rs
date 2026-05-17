@@ -365,6 +365,10 @@ struct Palette {
     downtown_b: Handle<StandardMaterial>,
     downtown_c: Handle<StandardMaterial>,
     downtown_facade: Handle<StandardMaterial>,
+    glass_panel: Handle<StandardMaterial>,
+    brushed_metal: Handle<StandardMaterial>,
+    stone_brick: Handle<StandardMaterial>,
+    mortar_line: Handle<StandardMaterial>,
 
     industrial_metal: Handle<StandardMaterial>,
     industrial_rust: Handle<StandardMaterial>,
@@ -471,6 +475,39 @@ impl Palette {
                 metallic: 0.88,
                 perceptual_roughness: 0.22,
                 reflectance: 0.78,
+                ..default()
+            }),
+            glass_panel: m.add(StandardMaterial {
+                base_color: Color::srgba(0.44, 0.86, 1.0, 0.48),
+                emissive: LinearRgba::new(0.18, 0.55, 1.15, 1.0),
+                metallic: 0.04,
+                perceptual_roughness: 0.02,
+                reflectance: 0.98,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            brushed_metal: m.add(StandardMaterial {
+                base_color: Color::srgb(0.30, 0.33, 0.38),
+                emissive: LinearRgba::new(0.05, 0.07, 0.10, 1.0),
+                metallic: 0.92,
+                perceptual_roughness: 0.26,
+                reflectance: 0.82,
+                ..default()
+            }),
+            stone_brick: m.add(StandardMaterial {
+                base_color: Color::srgb(0.58, 0.55, 0.50),
+                emissive: LinearRgba::new(0.04, 0.035, 0.03, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.98,
+                reflectance: 0.12,
+                ..default()
+            }),
+            mortar_line: m.add(StandardMaterial {
+                base_color: Color::srgb(0.22, 0.21, 0.20),
+                emissive: LinearRgba::new(0.015, 0.012, 0.010, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 1.0,
+                reflectance: 0.06,
                 ..default()
             }),
 
@@ -1033,7 +1070,15 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         let w = 12.0 + seeded(seed, i * 5 + 3) * 18.0;
         let d = 12.0 + seeded(seed, i * 5 + 4) * 18.0;
 
-        let mat = glass[(i % 4) as usize].clone();
+        let mat = if i % 13 == 0 {
+            pal.stone_brick.clone()
+        } else if i % 7 == 0 {
+            pal.brushed_metal.clone()
+        } else if i % 5 == 0 {
+            pal.glass_panel.clone()
+        } else {
+            glass[(i % 4) as usize].clone()
+        };
         spawn_building(
             commands,
             meshes,
@@ -1067,6 +1112,31 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             pal.window_cool.clone()
         };
         spawn_window_facades(commands, meshes, win_mat, x, z, h, w, d);
+        spawn_modern_window_grid(commands, meshes, pal, x, z, h, w, d, seed + i * 17);
+        if i % 7 == 0 {
+            spawn_metal_cladding(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, h * 0.5, z),
+                w,
+                h,
+                d,
+                seed + i,
+            );
+        }
+        if i % 13 == 0 {
+            spawn_stone_brick_courses(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, h * 0.5, z),
+                w,
+                h,
+                d,
+                true,
+            );
+        }
 
         // Rooftop details on taller buildings
         if h > 50.0 {
@@ -1116,6 +1186,357 @@ fn spawn_window_facades(
             },
             WorldGeometry,
         ));
+    }
+}
+
+fn spawn_modern_window_grid(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    x: f32,
+    z: f32,
+    h: f32,
+    w: f32,
+    d: f32,
+    seed: u64,
+) {
+    let win_h = h * 0.70;
+    let win_base_y = h * 0.15;
+    let center_y = win_base_y + win_h * 0.5;
+    let glass_thickness = 0.18;
+    let frame_thickness = 0.16;
+    let frame_mat = if seeded(seed, 3) > 0.35 {
+        pal.brushed_metal.clone()
+    } else {
+        pal.downtown_facade.clone()
+    };
+
+    if seeded(seed, 7) > 0.35 {
+        for &fz in &[z - d * 0.5 - 0.45, z + d * 0.5 + 0.45] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(w - 1.2, win_h, glass_thickness))),
+                    material: MeshMaterial3d(pal.glass_panel.clone()),
+                    transform: Transform::from_xyz(x, center_y, fz),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        for &fx in &[x - w * 0.5 - 0.45, x + w * 0.5 + 0.45] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(glass_thickness, win_h, d - 1.2))),
+                    material: MeshMaterial3d(pal.glass_panel.clone()),
+                    transform: Transform::from_xyz(fx, center_y, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    let rows = (h / 14.0).floor().clamp(3.0, 10.0) as i32;
+    for row in 0..=rows {
+        let y = win_base_y + row as f32 * win_h / rows as f32;
+        for &fz in &[z - d * 0.5 - 0.58, z + d * 0.5 + 0.58] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(w - 0.7, frame_thickness, 0.24))),
+                    material: MeshMaterial3d(frame_mat.clone()),
+                    transform: Transform::from_xyz(x, y, fz),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        for &fx in &[x - w * 0.5 - 0.58, x + w * 0.5 + 0.58] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.24, frame_thickness, d - 0.7))),
+                    material: MeshMaterial3d(frame_mat.clone()),
+                    transform: Transform::from_xyz(fx, y, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    let front_cols = (w / 6.0).floor().clamp(2.0, 6.0) as i32;
+    for col in 0..=front_cols {
+        let x_off = -w * 0.5 + col as f32 * w / front_cols as f32;
+        for &fz in &[z - d * 0.5 - 0.60, z + d * 0.5 + 0.60] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(frame_thickness, win_h, 0.26))),
+                    material: MeshMaterial3d(frame_mat.clone()),
+                    transform: Transform::from_xyz(x + x_off, center_y, fz),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    let side_cols = (d / 6.0).floor().clamp(2.0, 6.0) as i32;
+    for col in 0..=side_cols {
+        let z_off = -d * 0.5 + col as f32 * d / side_cols as f32;
+        for &fx in &[x - w * 0.5 - 0.60, x + w * 0.5 + 0.60] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.26, win_h, frame_thickness))),
+                    material: MeshMaterial3d(frame_mat.clone()),
+                    transform: Transform::from_xyz(fx, center_y, z + z_off),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_metal_cladding(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    seed: u64,
+) {
+    let rib_h = height * 0.84;
+    let rib_y = position.y + height * 0.02;
+    let rib_mat = if seeded(seed, 1) > 0.5 {
+        pal.brushed_metal.clone()
+    } else {
+        pal.industrial_metal.clone()
+    };
+    let front_cols = (width / 5.5).floor().clamp(3.0, 8.0) as i32;
+    for col in 0..=front_cols {
+        let x_off = -width * 0.5 + col as f32 * width / front_cols as f32;
+        for &fz in &[
+            position.z - depth * 0.5 - 0.18,
+            position.z + depth * 0.5 + 0.18,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.26, rib_h, 0.28))),
+                    material: MeshMaterial3d(rib_mat.clone()),
+                    transform: Transform::from_xyz(position.x + x_off, rib_y, fz),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    let side_cols = (depth / 5.5).floor().clamp(3.0, 8.0) as i32;
+    for col in 0..=side_cols {
+        let z_off = -depth * 0.5 + col as f32 * depth / side_cols as f32;
+        for &fx in &[
+            position.x - width * 0.5 - 0.18,
+            position.x + width * 0.5 + 0.18,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.28, rib_h, 0.26))),
+                    material: MeshMaterial3d(rib_mat.clone()),
+                    transform: Transform::from_xyz(fx, rib_y, position.z + z_off),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    for y in [
+        position.y - height * 0.40,
+        position.y + height * 0.08,
+        position.y + height * 0.43,
+    ] {
+        for &fz in &[
+            position.z - depth * 0.5 - 0.20,
+            position.z + depth * 0.5 + 0.20,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.55, 0.22, 0.30))),
+                    material: MeshMaterial3d(rib_mat.clone()),
+                    transform: Transform::from_xyz(position.x, y, fz),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        for &fx in &[
+            position.x - width * 0.5 - 0.20,
+            position.x + width * 0.5 + 0.20,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.30, 0.22, depth + 0.55))),
+                    material: MeshMaterial3d(rib_mat.clone()),
+                    transform: Transform::from_xyz(fx, y, position.z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_factory_window_ribbons(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    x: f32,
+    ground_y: f32,
+    z: f32,
+    h: f32,
+    w: f32,
+    d: f32,
+) {
+    for y in [ground_y + h * 0.38, ground_y + h * 0.66] {
+        for &fz in &[z - d * 0.5 - 0.24, z + d * 0.5 + 0.24] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(w * 0.62, 1.25, 0.20))),
+                    material: MeshMaterial3d(pal.glass_panel.clone()),
+                    transform: Transform::from_xyz(x, y, fz),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        for &fx in &[x - w * 0.5 - 0.24, x + w * 0.5 + 0.24] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.20, 1.25, d * 0.62))),
+                    material: MeshMaterial3d(pal.glass_panel.clone()),
+                    transform: Transform::from_xyz(fx, y, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_stone_brick_courses(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    heavy_corners: bool,
+) {
+    let ground_y = position.y - height * 0.5;
+    let row_count = (height / 3.4).floor().clamp(3.0, 18.0) as i32;
+    let row_step = height / row_count as f32;
+    for row in 1..row_count {
+        let y = ground_y + row as f32 * row_step;
+        for &fz in &[
+            position.z - depth * 0.5 - 0.09,
+            position.z + depth * 0.5 + 0.09,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.20, 0.08, 0.12))),
+                    material: MeshMaterial3d(pal.mortar_line.clone()),
+                    transform: Transform::from_xyz(position.x, y, fz),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        for &fx in &[
+            position.x - width * 0.5 - 0.09,
+            position.x + width * 0.5 + 0.09,
+        ] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.12, 0.08, depth + 0.20))),
+                    material: MeshMaterial3d(pal.mortar_line.clone()),
+                    transform: Transform::from_xyz(fx, y, position.z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    let front_cols = (width / 4.4).floor().clamp(2.0, 8.0) as i32;
+    let side_cols = (depth / 4.4).floor().clamp(2.0, 8.0) as i32;
+    for row in 0..row_count {
+        let y = ground_y + (row as f32 + 0.5) * row_step;
+        let seam_h = row_step * 0.52;
+        let offset = if row % 2 == 0 { 0.0 } else { 0.5 };
+        for col in 0..front_cols {
+            let x_off = -width * 0.5 + (col as f32 + offset) * width / front_cols as f32;
+            if x_off.abs() > width * 0.45 {
+                continue;
+            }
+            for &fz in &[
+                position.z - depth * 0.5 - 0.11,
+                position.z + depth * 0.5 + 0.11,
+            ] {
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cuboid::new(0.08, seam_h, 0.14))),
+                        material: MeshMaterial3d(pal.mortar_line.clone()),
+                        transform: Transform::from_xyz(position.x + x_off, y, fz),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
+        for col in 0..side_cols {
+            let z_off = -depth * 0.5 + (col as f32 + offset) * depth / side_cols as f32;
+            if z_off.abs() > depth * 0.45 {
+                continue;
+            }
+            for &fx in &[
+                position.x - width * 0.5 - 0.11,
+                position.x + width * 0.5 + 0.11,
+            ] {
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cuboid::new(0.14, seam_h, 0.08))),
+                        material: MeshMaterial3d(pal.mortar_line.clone()),
+                        transform: Transform::from_xyz(fx, y, position.z + z_off),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
+    }
+
+    if heavy_corners {
+        for &x in &[
+            position.x - width * 0.5 - 0.16,
+            position.x + width * 0.5 + 0.16,
+        ] {
+            for &z in &[
+                position.z - depth * 0.5 - 0.16,
+                position.z + depth * 0.5 + 0.16,
+            ] {
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cuboid::new(0.42, height * 0.92, 0.42))),
+                        material: MeshMaterial3d(pal.stone_block.clone()),
+                        transform: Transform::from_xyz(x, position.y, z),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
     }
 }
 
@@ -1226,7 +1647,9 @@ fn spawn_industrial(
         let d = 20.0 + seeded(seed, i * 4 + 1) * 30.0;
         let ground_y = terrain_surface_y(x, z, terrain_seed);
 
-        let body_mat = if i % 2 == 0 {
+        let body_mat = if i % 5 == 0 {
+            pal.brushed_metal.clone()
+        } else if i % 2 == 0 {
             pal.industrial_metal.clone()
         } else {
             pal.industrial_rust.clone()
@@ -1241,6 +1664,19 @@ fn spawn_industrial(
             d,
             WorldZone::Industrial,
         );
+        spawn_metal_cladding(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, ground_y + h * 0.5, z),
+            w,
+            h,
+            d,
+            seed + i * 23,
+        );
+        if i % 3 == 0 {
+            spawn_factory_window_ribbons(commands, meshes, pal, x, ground_y, z, h, w, d);
+        }
 
         // Chimney
         spawn_building(
@@ -1272,7 +1708,12 @@ fn spawn_residential(
         let d = 8.0 + seeded(seed, i * 4 + 1) * 14.0;
         let ground_y = terrain_surface_y(x, z, terrain_seed);
 
-        let mat = if i % 2 == 0 {
+        let stone_variant = i % 3 == 0;
+        let mat = if stone_variant {
+            pal.stone_brick.clone()
+        } else if i % 8 == 0 {
+            pal.brushed_metal.clone()
+        } else if i % 2 == 0 {
             pal.residential_a.clone()
         } else {
             pal.residential_b.clone()
@@ -1296,7 +1737,7 @@ fn spawn_residential(
             h,
             d,
             seed + i,
-            i % 3 == 0,
+            stone_variant,
         );
     }
 }
@@ -1979,12 +2420,6 @@ fn spawn_outer_districts(
     ];
 
     for (di, &offset) in offsets.iter().enumerate() {
-        let mat = if di % 2 == 0 {
-            pal.residential_a.clone()
-        } else {
-            pal.residential_b.clone()
-        };
-
         for i in 0..20u64 {
             let idx = di as u64 * 20 + i;
             let ox = seeded(seed, idx * 3) * 120.0 - 60.0;
@@ -1995,11 +2430,21 @@ fn spawn_outer_districts(
             let x = offset.x + ox;
             let z = offset.z + oz;
             let ground_y = terrain_surface_y(x, z, terrain_seed);
+            let stone_variant = (di + i as usize) % 2 == 0;
+            let mat = if stone_variant {
+                pal.stone_brick.clone()
+            } else if idx % 7 == 0 {
+                pal.brushed_metal.clone()
+            } else if di % 2 == 0 {
+                pal.residential_a.clone()
+            } else {
+                pal.residential_b.clone()
+            };
 
             spawn_building(
                 commands,
                 meshes,
-                mat.clone(),
+                mat,
                 Vec3::new(x, ground_y + h * 0.5, z),
                 w,
                 h,
@@ -2015,7 +2460,7 @@ fn spawn_outer_districts(
                 h,
                 d,
                 seed + idx,
-                (di + i as usize) % 2 == 0,
+                stone_variant,
             );
         }
     }
@@ -2484,8 +2929,13 @@ fn spawn_small_building_details(
 ) {
     let ground_y = position.y - height * 0.5;
     let top_y = position.y + height * 0.5;
-    let facade = if stone_variant {
+    let trim = if stone_variant {
         pal.stone_block.clone()
+    } else {
+        pal.brick_line.clone()
+    };
+    let course_line = if stone_variant {
+        pal.mortar_line.clone()
     } else {
         pal.brick_line.clone()
     };
@@ -2503,7 +2953,7 @@ fn spawn_small_building_details(
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.65, 0.34, depth + 0.65))),
-            material: MeshMaterial3d(facade.clone()),
+            material: MeshMaterial3d(trim.clone()),
             transform: Transform::from_xyz(position.x, top_y + 0.17, position.z),
             ..default()
         },
@@ -2541,7 +2991,7 @@ fn spawn_small_building_details(
             commands.spawn((
                 PbrBundle {
                     mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.10, row_h, 0.09))),
-                    material: MeshMaterial3d(facade.clone()),
+                    material: MeshMaterial3d(course_line.clone()),
                     transform: Transform::from_xyz(position.x, y, z),
                     ..default()
                 },
@@ -2555,7 +3005,7 @@ fn spawn_small_building_details(
             commands.spawn((
                 PbrBundle {
                     mesh: Mesh3d(meshes.add(Cuboid::new(0.09, row_h, depth + 0.10))),
-                    material: MeshMaterial3d(facade.clone()),
+                    material: MeshMaterial3d(course_line.clone()),
                     transform: Transform::from_xyz(x, y, position.z),
                     ..default()
                 },
@@ -2583,6 +3033,10 @@ fn spawn_small_building_details(
                 WorldGeometry,
             ));
         }
+    }
+
+    if stone_variant {
+        spawn_stone_brick_courses(commands, meshes, pal, position, width, height, depth, false);
     }
 
     let floors = ((height - 3.0) / 4.6).floor().clamp(1.0, 5.0) as i32;

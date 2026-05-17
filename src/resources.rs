@@ -174,6 +174,7 @@ pub struct ChapterProgress {
     pub discoverables: Vec<String>,
     pub companions_recruited: Vec<String>,
     pub scientist_relics: Vec<String>,
+    pub relic_fragments: Vec<String>,
 }
 
 impl ChapterProgress {
@@ -213,6 +214,26 @@ impl ChapterProgress {
     pub fn has_relic(&self, scientist: &str, relic_id: &str) -> bool {
         let key = format!("{scientist}:{relic_id}");
         self.scientist_relics.iter().any(|entry| entry == &key)
+    }
+    pub fn recover_relic_fragment(&mut self, scientist: &str, relic_id: &str, piece: u8) -> bool {
+        let key = format!("{scientist}:{relic_id}:{piece}");
+        if self.relic_fragments.iter().any(|entry| entry == &key) {
+            false
+        } else {
+            self.relic_fragments.push(key);
+            true
+        }
+    }
+    pub fn relic_fragment_count(&self, scientist: &str, relic_id: &str) -> usize {
+        let prefix = format!("{scientist}:{relic_id}:");
+        self.relic_fragments
+            .iter()
+            .filter(|entry| entry.starts_with(&prefix))
+            .count()
+    }
+    pub fn has_relic_fragment(&self, scientist: &str, relic_id: &str, piece: u8) -> bool {
+        let key = format!("{scientist}:{relic_id}:{piece}");
+        self.relic_fragments.iter().any(|entry| entry == &key)
     }
 }
 

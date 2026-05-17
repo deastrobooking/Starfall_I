@@ -19,6 +19,13 @@ pub enum DiscoverableKind {
         scientist: &'static str,
         relic_id: &'static str,
     },
+    /// One of several small shards; collecting all shards restores the full relic.
+    RelicFragment {
+        scientist: &'static str,
+        relic_id: &'static str,
+        piece: u8,
+        total: u8,
+    },
     /// Lore log; no mechanical effect, just radio chatter.
     LoreFragment(&'static str),
 }
@@ -27,14 +34,16 @@ pub enum DiscoverableKind {
 pub struct Discoverable {
     pub kind: DiscoverableKind,
     pub label: &'static str,
+    pub base_y: f32,
     pub bob_phase: f32,
 }
 
 impl Discoverable {
-    pub fn new(kind: DiscoverableKind, label: &'static str) -> Self {
+    pub fn new(kind: DiscoverableKind, label: &'static str, base_y: f32) -> Self {
         Self {
             kind,
             label,
+            base_y,
             bob_phase: 0.0,
         }
     }
@@ -87,4 +96,21 @@ pub struct PuzzleRelicEncounter {
     pub hold_progress: f32,
     pub solved: bool,
     pub reward_spawned: bool,
+}
+
+/// Moving obstacle spawned around small relic-fragment puzzles.
+#[derive(Component, Debug, Clone)]
+pub struct RelicFragmentObstacle {
+    pub base: Vec3,
+    pub travel: Vec3,
+    pub speed: f32,
+    pub phase: f32,
+    pub spin_speed: f32,
+}
+
+/// Static temporary geometry belonging to a relic-fragment sub puzzle.
+#[derive(Component, Debug, Clone)]
+pub struct RelicFragmentPuzzlePiece {
+    pub scientist: &'static str,
+    pub relic_id: &'static str,
 }

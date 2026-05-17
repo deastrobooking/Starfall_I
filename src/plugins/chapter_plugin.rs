@@ -5,17 +5,17 @@
 //! `chapter_director_system` advances through the script.
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::Collider;
+use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use crate::chapters::{get_chapter, ChapterId, EncounterStep};
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
-    PuzzleRelicEncounter,
+    PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
 use crate::components::enemy::BossEnemy;
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::player::{Player, PlayerMovement};
-use crate::components::world::{WalkableSurface, WorldAnchor, WorldGeometry};
+use crate::components::world::{MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry};
 use crate::events::*;
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
 use crate::resources::{BiomePalette, ChapterProgress, CurrentChapter, WaveInfo};
@@ -93,7 +93,7 @@ fn chapter_director_system(
     mut player_q: Query<(&mut Transform, &mut PlayerMovement), With<Player>>,
     anchor_q: Query<(&WorldAnchor, &Transform)>,
     mut wave: ResMut<WaveInfo>,
-    progress: Res<ChapterProgress>,
+    mut progress: ResMut<ChapterProgress>,
     mut radio_ev: EventWriter<RadioChatterEvent>,
     mut step_ev: EventWriter<EncounterStepAdvancedEvent>,
     mut completed_ev: EventWriter<ChapterCompletedEvent>,
@@ -410,6 +410,71 @@ fn chapter_director_system(
             });
             advance = true;
         }
+        EncounterStep::PlaceRelicFragmentPuzzle {
+            scientist,
+            relic_id,
+            label,
+            hint,
+            total,
+            center_offset,
+        } => {
+            if progress.has_relic(scientist, relic_id) {
+                msg_ev.send(UiMessageEvent {
+                    text: format!("Fragment relic already assembled: {}", label),
+                    duration: 4.0,
+                });
+                advance = true;
+                if advance {
+                    current.step_index += 1;
+                    current.step_timer = 0.0;
+                    step_ev.send(EncounterStepAdvancedEvent {
+                        step_index: current.step_index,
+                    });
+                }
+                return;
+            }
+            if progress.relic_fragment_count(scientist, relic_id) >= total as usize {
+                progress.recover_relic(scientist, relic_id);
+                progress.unlock(relic_id);
+                msg_ev.send(UiMessageEvent {
+                    text: format!("Fragment relic assembled from saved pieces: {}", label),
+                    duration: 4.0,
+                });
+                advance = true;
+                if advance {
+                    current.step_index += 1;
+                    current.step_timer = 0.0;
+                    step_ev.send(EncounterStepAdvancedEvent {
+                        step_index: current.step_index,
+                    });
+                }
+                return;
+            }
+            let center = player_pos + center_offset;
+            spawn_relic_fragment_puzzle(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &progress,
+                scientist,
+                relic_id,
+                label,
+                total,
+                center,
+            );
+            current.awaiting_puzzle = true;
+            msg_ev.send(UiMessageEvent {
+                text: format!("Fragment puzzle: {}", hint),
+                duration: 5.0,
+            });
+            radio_ev.send(RadioChatterEvent {
+                speaker: scientist.into(),
+                text: format!("That relic broke into {} pieces. Find them all.", total),
+                faction: Faction::WizardScientist,
+                duration: 4.0,
+            });
+            advance = true;
+        }
         EncounterStep::Outro { line } => {
             if current.step_timer < 0.05 {
                 radio_ev.send(RadioChatterEvent {
@@ -646,6 +711,7 @@ pub(crate) fn spawn_discoverable_beacon(
     label: &'static str,
     position: Vec3,
 ) {
+    let beacon_y = position.y + 1.0;
     let color = match &kind {
         DiscoverableKind::Blueprint(_) => Color::srgb(0.2, 0.7, 1.0),
         DiscoverableKind::WeaponMod(_) => Color::srgb(1.0, 0.5, 0.0),
@@ -653,6 +719,7 @@ pub(crate) fn spawn_discoverable_beacon(
         DiscoverableKind::CompanionRecruit(_) => Color::srgb(1.0, 0.85, 0.3),
         DiscoverableKind::BeamSabreUnlock => Color::srgb(0.8, 0.1, 1.0),
         DiscoverableKind::ScientistRelic { .. } => Color::srgb(1.0, 0.95, 0.45),
+        DiscoverableKind::RelicFragment { .. } => Color::srgb(0.45, 1.0, 0.95),
         DiscoverableKind::LoreFragment(_) => Color::srgb(0.7, 0.7, 0.9),
     };
     let mat = materials.add(StandardMaterial {
@@ -671,15 +738,142 @@ pub(crate) fn spawn_discoverable_beacon(
         PbrBundle {
             mesh: Mesh3d(meshes.add(Sphere::new(0.7))),
             material: MeshMaterial3d(mat),
-            transform: Transform::from_translation(Vec3::new(
-                position.x,
-                position.y + 1.0,
-                position.z,
-            )),
+            transform: Transform::from_translation(Vec3::new(position.x, beacon_y, position.z)),
             ..default()
         },
-        Discoverable::new(kind, label),
+        Discoverable::new(kind, label, beacon_y),
     ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_relic_fragment_puzzle(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    progress: &ChapterProgress,
+    scientist: &'static str,
+    relic_id: &'static str,
+    label: &'static str,
+    total: u8,
+    center: Vec3,
+) {
+    let pedestal_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.12, 0.24, 0.30),
+        emissive: LinearRgba::new(0.1, 0.6, 0.7, 1.0),
+        metallic: 0.35,
+        perceptual_roughness: 0.30,
+        ..default()
+    });
+    let obstacle_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.82, 0.16, 0.12),
+        emissive: LinearRgba::new(3.2, 0.4, 0.2, 1.0),
+        metallic: 0.50,
+        perceptual_roughness: 0.22,
+        ..default()
+    });
+    let platform_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.16, 0.38, 0.72),
+        emissive: LinearRgba::new(0.2, 0.8, 2.5, 1.0),
+        metallic: 0.45,
+        perceptual_roughness: 0.28,
+        ..default()
+    });
+
+    let total = total.max(1);
+    for piece in 1..=total {
+        if progress.has_relic_fragment(scientist, relic_id, piece) {
+            continue;
+        }
+        let t = (piece - 1) as f32 / total as f32 * std::f32::consts::TAU;
+        let radius = 12.0 + (piece % 2) as f32 * 5.0;
+        let fragment_pos = center + Vec3::new(t.cos() * radius, 1.4, t.sin() * radius);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(3.2, 0.45, 3.2))),
+                material: MeshMaterial3d(pedestal_mat.clone()),
+                transform: Transform::from_translation(fragment_pos + Vec3::Y * -0.85),
+                ..default()
+            },
+            Collider::cuboid(1.6, 0.22, 1.6),
+            WorldGeometry,
+            WalkableSurface,
+            RelicFragmentPuzzlePiece {
+                scientist,
+                relic_id,
+            },
+        ));
+        spawn_discoverable_beacon(
+            commands,
+            meshes,
+            materials,
+            DiscoverableKind::RelicFragment {
+                scientist,
+                relic_id,
+                piece,
+                total,
+            },
+            label,
+            fragment_pos,
+        );
+    }
+
+    for i in 0..5 {
+        let lane = i as f32 - 2.0;
+        let base = center + Vec3::new(lane * 6.5, 1.0, 0.0);
+        let travel = if i % 2 == 0 {
+            Vec3::new(0.0, 0.0, 13.0)
+        } else {
+            Vec3::new(9.0, 0.0, 0.0)
+        };
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.8, 1.1, 1.1))),
+                material: MeshMaterial3d(obstacle_mat.clone()),
+                transform: Transform::from_translation(base),
+                ..default()
+            },
+            Collider::cuboid(3.4, 0.55, 0.55),
+            RigidBody::KinematicPositionBased,
+            RelicFragmentObstacle {
+                base,
+                travel,
+                speed: 0.85 + i as f32 * 0.18,
+                phase: i as f32 * 0.7,
+                spin_speed: 0.9 + i as f32 * 0.15,
+            },
+            RelicFragmentPuzzlePiece {
+                scientist,
+                relic_id,
+            },
+        ));
+    }
+
+    for i in 0..3 {
+        let base = center + Vec3::new(-13.0 + i as f32 * 13.0, 1.0, -8.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(5.2, 0.55, 5.2))),
+                material: MeshMaterial3d(platform_mat.clone()),
+                transform: Transform::from_translation(base),
+                ..default()
+            },
+            Collider::cuboid(2.6, 0.28, 2.6),
+            RigidBody::KinematicPositionBased,
+            WorldGeometry,
+            WalkableSurface,
+            MovingPlatform {
+                start: base + Vec3::new(0.0, -1.4, 0.0),
+                end: base + Vec3::new(0.0, 2.6, 0.0),
+                speed: 3.0 + i as f32 * 0.55,
+                phase: i as f32 * 1.1,
+                size: Vec3::new(5.2, 0.55, 5.2),
+            },
+            RelicFragmentPuzzlePiece {
+                scientist,
+                relic_id,
+            },
+        ));
+    }
 }
 
 fn spawn_relic_puzzle(

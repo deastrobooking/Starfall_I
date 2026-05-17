@@ -6,7 +6,7 @@ use crate::chapters::{all_chapters, ChapterId};
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::{PuzzleArchetype, PuzzleRelicEncounter};
 use crate::components::inventory::Inventory;
-use crate::components::player::{JetpackState, Player, PlayerStats};
+use crate::components::player::{JetpackState, Player, PlayerInput, PlayerStats};
 use crate::components::weapon::{BeamSabre, SpecialWeaponInventory, WeaponInventory};
 use crate::damage::Health;
 use crate::events::*;
@@ -37,7 +37,14 @@ impl Plugin for UiPlugin {
                 OnEnter(AppState::Playing),
                 (setup_hud, despawn_menu, despawn_menu_camera),
             )
+            .add_systems(OnEnter(AppState::Paused), setup_pause_menu)
+            .add_systems(OnExit(AppState::Paused), despawn_pause_menu)
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
+            .add_systems(
+                Update,
+                pause_input_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
+            )
             .add_systems(
                 Update,
                 hud_update_system
@@ -105,6 +112,8 @@ struct MenuCamera;
 struct MainMenuRoot;
 #[derive(Component)]
 struct HudRoot;
+#[derive(Component)]
+struct PauseRoot;
 #[derive(Component)]
 struct GameOverRoot;
 #[derive(Component)]
@@ -212,6 +221,72 @@ fn menu_start_button(
         if *interaction == Interaction::Pressed {
             next_state.set(AppState::PlayerSelect);
         }
+    }
+}
+
+fn setup_pause_menu(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(14.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.58)),
+            PauseRoot,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Text::new("PAUSED"),
+                TextFont {
+                    font_size: 58.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.95, 1.0)),
+            ));
+            root.spawn((
+                Text::new("Esc / Start to resume"),
+                TextFont {
+                    font_size: 22.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.85, 1.0)),
+            ));
+        });
+}
+
+fn despawn_pause_menu(mut commands: Commands, q: Query<Entity, With<PauseRoot>>) {
+    for entity in q.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+fn pause_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    input_q: Query<&PlayerInput, With<Player>>,
+    state: Res<State<AppState>>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    let pause_pressed = keyboard.just_pressed(KeyCode::Escape)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::Start))
+        || input_q.iter().any(|input| input.pause);
+
+    if !pause_pressed {
+        return;
+    }
+
+    match state.get() {
+        AppState::Playing => next_state.set(AppState::Paused),
+        AppState::Paused => next_state.set(AppState::Playing),
+        _ => {}
     }
 }
 
@@ -776,7 +851,11 @@ fn player_select_update(
 }
 
 // ── HUD Setup ─────────────────────────────────────────────────────────────────
-fn setup_hud(mut commands: Commands) {
+fn setup_hud(mut commands: Commands, existing_hud: Query<Entity, With<HudRoot>>) {
+    if !existing_hud.is_empty() {
+        return;
+    }
+
     commands
         .spawn((
             Node {
