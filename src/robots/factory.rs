@@ -1,6 +1,8 @@
 use super::designer::{HeadShape, LegStyle, RobotStyle, VisorStyle};
 use bevy::prelude::*;
 
+use crate::rendering::{PbrBundle, SpatialBundle};
+
 /// Procedurally generate a robot mesh hierarchy at the given world position.
 /// Returns the root `Entity`. All sub-parts are children of the root.
 ///

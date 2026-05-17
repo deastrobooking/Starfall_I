@@ -12,9 +12,10 @@ use crate::damage::Health;
 use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
+use crate::rendering::Camera3dBundle;
 use crate::resources::{
-    ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlayerSelectState,
-    UiMessage, WaveInfo, HERO_ROSTER,
+    ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
+    PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
 };
 use crate::state::AppState;
 
@@ -37,6 +38,10 @@ impl Plugin for UiPlugin {
                 OnEnter(AppState::Playing),
                 (setup_hud, despawn_menu, despawn_menu_camera),
             )
+            .add_systems(
+                Update,
+                despawn_menu_camera.run_if(in_state(AppState::Playing)),
+            )
             .add_systems(OnEnter(AppState::Paused), setup_pause_menu)
             .add_systems(OnExit(AppState::Paused), despawn_pause_menu)
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
@@ -44,6 +49,10 @@ impl Plugin for UiPlugin {
                 Update,
                 pause_input_system
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
+            )
+            .add_systems(
+                Update,
+                clear_play_session_transition_flags.run_if(in_state(AppState::Playing)),
             )
             .add_systems(
                 Update,
@@ -167,7 +176,16 @@ struct CraftingPanelState {
 
 // ── Menu Camera ───────────────────────────────────────────────────────────────
 fn spawn_menu_camera(mut commands: Commands) {
-    commands.spawn((Camera3dBundle::default(), MenuCamera));
+    commands.spawn((
+        Camera3dBundle {
+            camera: Camera {
+                order: -100,
+                ..default()
+            },
+            ..default()
+        },
+        MenuCamera,
+    ));
 }
 
 fn despawn_menu_camera(mut commands: Commands, q: Query<Entity, With<MenuCamera>>) {
@@ -271,6 +289,7 @@ fn pause_input_system(
     gamepads: Query<&Gamepad>,
     input_q: Query<&PlayerInput, With<Player>>,
     state: Res<State<AppState>>,
+    mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let pause_pressed = keyboard.just_pressed(KeyCode::Escape)
@@ -284,10 +303,23 @@ fn pause_input_system(
     }
 
     match state.get() {
-        AppState::Playing => next_state.set(AppState::Paused),
-        AppState::Paused => next_state.set(AppState::Playing),
+        AppState::Playing => {
+            transition.pausing = true;
+            transition.resuming_from_pause = false;
+            next_state.set(AppState::Paused);
+        }
+        AppState::Paused => {
+            transition.pausing = false;
+            transition.resuming_from_pause = true;
+            next_state.set(AppState::Playing);
+        }
         _ => {}
     }
+}
+
+fn clear_play_session_transition_flags(mut transition: ResMut<PlaySessionTransition>) {
+    transition.pausing = false;
+    transition.resuming_from_pause = false;
 }
 
 // ── Chapter Select ────────────────────────────────────────────────────────────

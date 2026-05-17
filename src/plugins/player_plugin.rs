@@ -1,19 +1,23 @@
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
+use bevy::transform::TransformSystem;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_rapier3d::prelude::*;
 
 use crate::characters::{
-    accent_preset, attach_cartoon_character, hair_preset, hero_config_with_overrides, outfit_preset,
+    accent_preset, attach_cartoon_character, despawn_cartoon_character_parts, hair_preset,
+    hero_config_with_overrides, outfit_preset,
 };
 use crate::components::armor::ArmorSet;
+use crate::components::character::CartoonPart;
 use crate::components::inventory::Inventory;
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::damage::{apply_damage, DamageInfo, Damageable, Health};
 use crate::events::*;
 use crate::perks::PerkTree;
-use crate::resources::{CameraShake, LocalPlayerConfig, PlayerSelectState};
+use crate::rendering::Camera3dBundle;
+use crate::resources::{CameraShake, LocalPlayerConfig, PlaySessionTransition, PlayerSelectState};
 use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -26,10 +30,12 @@ fn third_person_camera_offset() -> Vec3 {
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Playing), (spawn_players, grab_cursor))
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_players_for_menu)
             .add_systems(OnExit(AppState::Playing), release_cursor)
             .add_systems(
                 Update,
                 (
+                    dedupe_player_entities,
                     player_look,
                     camera_shake_system,
                     player_movement,
@@ -44,6 +50,13 @@ impl Plugin for PlayerPlugin {
                 )
                     .chain()
                     .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                PostUpdate,
+                player_camera_follow_system
+                    .after(PhysicsSet::Writeback)
+                    .before(TransformSystem::TransformPropagate)
+                    .run_if(in_state(AppState::Playing)),
             );
     }
 }
@@ -51,9 +64,9 @@ impl Plugin for PlayerPlugin {
 // ── Spawn helpers ─────────────────────────────────────────────────────────────
 
 fn player_spawn_position(index: u8) -> Vec3 {
-    // City centre — terrain_height(x, z) is forced to 0 when city_flat == 1.0
-    // (within ~120 units of origin), so ground is reliably at Y = 0 here.
-    let base = Vec3::new(10.0, 30.0, 10.0);
+    // City centre: terrain is flat at Y = 0, so spawn just above the ground
+    // instead of dropping the controller through a long startup fall.
+    let base = Vec3::new(10.0, 1.2, 10.0);
     match index {
         0 => base,
         1 => base + Vec3::new(3.0, 0.0, 0.0),
@@ -100,10 +113,17 @@ fn spawn_players(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    transition: Res<PlaySessionTransition>,
     config: Res<LocalPlayerConfig>,
     select: Res<PlayerSelectState>,
     window_q: Query<&Window, With<PrimaryWindow>>,
+    existing_players: Query<Entity, With<Player>>,
+    existing_parts: Query<(Entity, &CartoonPart)>,
 ) {
+    if transition.resuming_from_pause || !existing_players.is_empty() {
+        return;
+    }
+
     let active = config.active.clamp(1, 4);
     let (win_w, win_h) = window_q
         .get_single()
@@ -120,6 +140,9 @@ fn spawn_players(
                 PlayerInput::default(),
                 Transform::from_translation(spawn_pos),
                 GlobalTransform::default(),
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
                 RigidBody::KinematicPositionBased,
                 Collider::capsule_y(0.6, 0.35),
                 KinematicCharacterController {
@@ -158,6 +181,7 @@ fn spawn_players(
             .id();
 
         let slot = &select.slots[i as usize];
+        despawn_cartoon_character_parts(&mut commands, player, &existing_parts);
         attach_cartoon_character(
             &mut commands,
             &mut meshes,
@@ -183,7 +207,11 @@ fn spawn_players(
         let cam_entity = commands
             .spawn((
                 Camera3dBundle {
-                    transform: Transform::from_translation(third_person_camera_offset()),
+                    transform: player_camera_transform(
+                        &Transform::from_translation(spawn_pos),
+                        0.0,
+                        Vec3::ZERO,
+                    ),
                     camera: Camera {
                         hdr: true,
                         order: i as isize,
@@ -204,11 +232,75 @@ fn spawn_players(
                     ..default()
                 },
             ))
-            .set_parent(player)
             .id();
 
         commands.entity(player).insert(PlayerCameraRef(cam_entity));
     }
+}
+
+fn cleanup_players_for_menu(
+    mut commands: Commands,
+    players: Query<(Entity, Option<&PlayerCameraRef>), With<Player>>,
+    cameras: Query<Entity, With<PlayerCamera>>,
+) {
+    for (entity, camera_ref) in players.iter() {
+        despawn_player_with_camera(&mut commands, entity, camera_ref);
+    }
+    for camera in cameras.iter() {
+        commands.entity(camera).try_despawn_recursive();
+    }
+}
+
+fn dedupe_player_entities(
+    mut commands: Commands,
+    mut seen: Local<[Option<(Entity, bool)>; 4]>,
+    player_q: Query<(Entity, &PlayerIndex, Option<&PlayerCameraRef>), With<Player>>,
+) {
+    *seen = [None; 4];
+
+    for (entity, index, camera_ref) in player_q.iter() {
+        let slot = usize::from(index.0.min(3));
+        let has_camera = camera_ref.is_some();
+
+        match seen[slot] {
+            None => {
+                seen[slot] = Some((entity, has_camera));
+            }
+            Some((kept, false)) if has_camera => {
+                warn!(
+                    "Removing duplicate P{} entity {:?}; keeping camera-backed entity {:?}",
+                    slot + 1,
+                    kept,
+                    entity
+                );
+                commands.entity(kept).try_despawn_recursive();
+                seen[slot] = Some((entity, true));
+            }
+            Some((kept, _)) => {
+                warn!(
+                    "Removing duplicate P{} entity {:?}; {:?} is already active",
+                    slot + 1,
+                    entity,
+                    kept
+                );
+                if let Some(camera_ref) = camera_ref {
+                    commands.entity(camera_ref.0).try_despawn_recursive();
+                }
+                commands.entity(entity).try_despawn_recursive();
+            }
+        }
+    }
+}
+
+fn despawn_player_with_camera(
+    commands: &mut Commands,
+    player: Entity,
+    camera_ref: Option<&PlayerCameraRef>,
+) {
+    if let Some(camera_ref) = camera_ref {
+        commands.entity(camera_ref.0).try_despawn_recursive();
+    }
+    commands.entity(player).try_despawn_recursive();
 }
 
 fn grab_cursor(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
@@ -253,7 +345,6 @@ fn player_look(
 fn camera_shake_system(
     time: Res<Time>,
     mut shake: ResMut<CameraShake>,
-    mut cam_q: Query<&mut Transform, With<PlayerCamera>>,
     mut damage_ev: EventReader<PlayerDamagedEvent>,
 ) {
     for ev in damage_ev.read() {
@@ -262,24 +353,57 @@ fn camera_shake_system(
     }
 
     shake.trauma = (shake.trauma - time.delta_secs() * 2.0).max(0.0);
+}
 
-    let base = third_person_camera_offset();
-    if shake.trauma > 0.01 {
+fn player_camera_follow_system(
+    mut commands: Commands,
+    shake: Res<CameraShake>,
+    player_q: Query<(&Transform, &PlayerCameraRef), (With<Player>, Without<PlayerCamera>)>,
+    mut cam_q: Query<(Entity, &mut Transform, &CameraPitch), (With<PlayerCamera>, Without<Player>)>,
+) {
+    let mut referenced = Vec::new();
+
+    let shake_offset = camera_shake_offset(shake.trauma);
+    for (player_transform, camera_ref) in player_q.iter() {
+        referenced.push(camera_ref.0);
+        if let Ok((_, mut camera_transform, pitch)) = cam_q.get_mut(camera_ref.0) {
+            *camera_transform = player_camera_transform(player_transform, pitch.0, shake_offset);
+        }
+    }
+
+    for (camera, mut camera_transform, _) in cam_q.iter_mut() {
+        if !referenced.contains(&camera) {
+            camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
+            commands.entity(camera).try_despawn_recursive();
+        }
+    }
+}
+
+fn player_camera_transform(
+    player_transform: &Transform,
+    pitch: f32,
+    shake_offset: Vec3,
+) -> Transform {
+    let local_offset = third_person_camera_offset() + shake_offset;
+    Transform {
+        translation: player_transform.translation + player_transform.rotation * local_offset,
+        rotation: player_transform.rotation * Quat::from_rotation_x(pitch),
+        scale: Vec3::ONE,
+    }
+}
+
+fn camera_shake_offset(trauma: f32) -> Vec3 {
+    if trauma > 0.01 {
         use rand::Rng;
         let mut rng = rand::thread_rng();
-        let mag = shake.trauma * shake.trauma * 0.18;
-        for mut cam in cam_q.iter_mut() {
-            cam.translation = base
-                + Vec3::new(
-                    rng.gen_range(-1.0f32..1.0) * mag,
-                    rng.gen_range(-0.5f32..0.5) * mag,
-                    rng.gen_range(-1.0f32..1.0) * mag,
-                );
-        }
+        let mag = trauma * trauma * 0.18;
+        Vec3::new(
+            rng.gen_range(-1.0f32..1.0) * mag,
+            rng.gen_range(-0.5f32..0.5) * mag,
+            rng.gen_range(-1.0f32..1.0) * mag,
+        )
     } else {
-        for mut cam in cam_q.iter_mut() {
-            cam.translation = base;
-        }
+        Vec3::ZERO
     }
 }
 

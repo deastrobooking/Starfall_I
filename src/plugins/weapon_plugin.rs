@@ -9,6 +9,7 @@ use crate::damage::{
 };
 use crate::events::*;
 use crate::perks::PerkTree;
+use crate::rendering::PbrBundle;
 use crate::state::AppState;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────

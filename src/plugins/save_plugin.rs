@@ -7,7 +7,7 @@ use crate::components::player::{Player, PlayerStats};
 use crate::damage::Health;
 use crate::events::UiMessageEvent;
 use crate::perks::PerkTree;
-use crate::resources::{ChapterProgress, WaveInfo};
+use crate::resources::{ChapterProgress, PlaySessionTransition, WaveInfo};
 use crate::state::AppState;
 
 const SAVE_FILE: &str = "starfall_i_save.json";
@@ -146,8 +146,13 @@ fn load_save_on_enter(
     mut wave: ResMut<WaveInfo>,
     mut progress: ResMut<ChapterProgress>,
     mut perks: ResMut<PerkTree>,
+    transition: Res<PlaySessionTransition>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
+    if transition.resuming_from_pause {
+        return;
+    }
+
     if let Some(data) = load_save() {
         for (mut stats, mut health) in player_q.iter_mut() {
             stats.level = data.level;

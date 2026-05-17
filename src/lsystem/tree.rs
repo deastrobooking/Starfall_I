@@ -13,6 +13,7 @@ use bevy::prelude::*;
 
 use super::{turtle::TurtleResult, LSystem};
 use crate::components::world::WorldGeometry;
+use crate::rendering::{PbrBundle, SpatialBundle};
 
 // ── Tree species ──────────────────────────────────────────────────────────────
 

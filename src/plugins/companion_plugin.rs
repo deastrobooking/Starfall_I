@@ -8,6 +8,8 @@ use crate::events::{
     CompanionRecruitedEvent, EnemyDamagedEvent, EnemyKilledEvent, PlayerHealedEvent,
 };
 use crate::plugins::weapon_plugin::ProjectileAssets;
+use crate::rendering::PbrBundle;
+use crate::resources::PlaySessionTransition;
 use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -16,6 +18,7 @@ pub struct CompanionPlugin;
 impl Plugin for CompanionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Playing), setup_companions)
+            .add_systems(OnExit(AppState::Playing), cleanup_companions)
             .add_systems(
                 Update,
                 (
@@ -35,8 +38,14 @@ fn setup_companions(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    transition: Res<PlaySessionTransition>,
     player_q: Query<&Transform, With<Player>>,
+    existing_companions: Query<Entity, With<Companion>>,
 ) {
+    if transition.resuming_from_pause || !existing_companions.is_empty() {
+        return;
+    }
+
     let Ok(pt) = player_q.get_single() else {
         return;
     };
@@ -94,6 +103,21 @@ fn spawn_companion_entity(
         },
         companion,
     ));
+}
+
+fn cleanup_companions(
+    mut commands: Commands,
+    transition: Res<PlaySessionTransition>,
+    companion_q: Query<Entity, With<Companion>>,
+    projectile_q: Query<Entity, With<CompanionProjectile>>,
+) {
+    if transition.pausing {
+        return;
+    }
+
+    for entity in companion_q.iter().chain(projectile_q.iter()) {
+        commands.entity(entity).despawn_recursive();
+    }
 }
 
 // ── Follow ────────────────────────────────────────────────────────────────────

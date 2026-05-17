@@ -1,3 +1,7 @@
+// Starfall intentionally carries design data, future robot presets, and event
+// fields before every gameplay path consumes them.
+#![allow(dead_code)]
+
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 use bevy_rapier3d::prelude::*;
@@ -10,6 +14,7 @@ mod events;
 mod lsystem;
 mod perks;
 mod plugins;
+mod rendering;
 mod resources;
 mod robots;
 mod state;
@@ -22,13 +27,17 @@ use plugins::{
     PlayerPlugin, RadioPlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
 use resources::{
-    CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlayerScore,
-    PlayerSelectState, WaveInfo,
+    CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlaySessionTransition,
+    PlayerScore, PlayerSelectState, WaveInfo,
 };
 use state::AppState;
 
 fn main() {
-    App::new()
+    install_crash_logger();
+
+    let mut app = App::new();
+
+    app
         // Default plugins with window setup
         .add_plugins(
             DefaultPlugins
@@ -55,6 +64,7 @@ fn main() {
         .init_resource::<GameSettings>()
         .init_resource::<PlayerScore>()
         .init_resource::<CameraShake>()
+        .init_resource::<PlaySessionTransition>()
         .init_resource::<LocalPlayerConfig>()
         .init_resource::<PlayerSelectState>()
         .init_resource::<CharacterDesignData>()
@@ -83,6 +93,22 @@ fn main() {
             RadioPlugin,
             VehiclePlugin,
             ChassisEditorPlugin,
-        ))
-        .run();
+        ));
+
+    if std::env::var_os("STARFALL_AUTOSTART").is_some() {
+        app.insert_state(AppState::Playing);
+    }
+
+    app.run();
+}
+
+fn install_crash_logger() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let log = format!("Starfall I crash\n\n{panic_info}\n\nBacktrace:\n{backtrace}\n");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("starfall_crash.log");
+        let _ = std::fs::write(path, log);
+        default_hook(panic_info);
+    }));
 }

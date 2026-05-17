@@ -189,6 +189,7 @@ src/
   state.rs                        AppState flow
   events.rs                       Event definitions and EventsPlugin
   damage.rs                       Health, resistances, and shared damage helpers
+  rendering.rs                    Local Bevy render bundles used by world/entity spawners
   resources.rs                    Shared resources and progression state
   perks.rs                        Heart / Star / Acrobat perk tree
   characters.rs                   Retro cartoon character construction, colors, and presets

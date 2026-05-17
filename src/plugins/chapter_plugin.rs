@@ -18,7 +18,10 @@ use crate::components::player::{Player, PlayerMovement};
 use crate::components::world::{MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry};
 use crate::events::*;
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
-use crate::resources::{BiomePalette, ChapterProgress, CurrentChapter, WaveInfo};
+use crate::rendering::PbrBundle;
+use crate::resources::{
+    BiomePalette, ChapterProgress, CurrentChapter, PlaySessionTransition, WaveInfo,
+};
 use crate::state::AppState;
 
 pub struct ChapterPlugin;
@@ -49,10 +52,15 @@ fn start_chapter(
     mut commands: Commands,
     mut current: ResMut<CurrentChapter>,
     mut palette: ResMut<BiomePalette>,
+    transition: Res<PlaySessionTransition>,
     mut started_ev: EventWriter<ChapterStartedEvent>,
     mut wave: ResMut<WaveInfo>,
     airship_q: Query<Entity, With<AirshipLevelPiece>>,
 ) {
+    if transition.resuming_from_pause {
+        return;
+    }
+
     for entity in airship_q.iter() {
         commands.entity(entity).despawn_recursive();
     }
@@ -91,7 +99,7 @@ fn chapter_director_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut player_q: Query<(&mut Transform, &mut PlayerMovement), With<Player>>,
-    anchor_q: Query<(&WorldAnchor, &Transform)>,
+    anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
     mut wave: ResMut<WaveInfo>,
     mut progress: ResMut<ChapterProgress>,
     mut radio_ev: EventWriter<RadioChatterEvent>,
@@ -542,8 +550,8 @@ fn chapter_director_system(
     }
 }
 
-fn resolve_anchor_position(
-    anchor_q: &Query<(&WorldAnchor, &Transform)>,
+fn resolve_anchor_position<AnchorFilter: bevy::ecs::query::QueryFilter>(
+    anchor_q: &Query<(&WorldAnchor, &Transform), AnchorFilter>,
     anchor_id: &'static str,
 ) -> Option<Vec3> {
     anchor_q
@@ -552,8 +560,8 @@ fn resolve_anchor_position(
         .map(|(_, transform)| transform.translation)
 }
 
-fn resolve_anchor_positions(
-    anchor_q: &Query<(&WorldAnchor, &Transform)>,
+fn resolve_anchor_positions<AnchorFilter: bevy::ecs::query::QueryFilter>(
+    anchor_q: &Query<(&WorldAnchor, &Transform), AnchorFilter>,
     anchor_ids: &[&'static str],
 ) -> Option<Vec<Vec3>> {
     let mut positions = Vec::with_capacity(anchor_ids.len());

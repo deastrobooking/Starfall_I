@@ -12,7 +12,8 @@ use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
-use crate::resources::GameSettings;
+use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
+use crate::resources::{GameSettings, PlaySessionTransition};
 use crate::state::AppState;
 
 // ── Grass wind material ───────────────────────────────────────────────────────
@@ -297,9 +298,14 @@ fn spawn_beam_vfx(
 
 fn cleanup_world(
     mut commands: Commands,
-    world_q: Query<Entity, With<WorldGeometry>>,
-    tree_q: Query<Entity, With<TreeRoot>>,
+    transition: Res<PlaySessionTransition>,
+    world_q: Query<Entity, (With<WorldGeometry>, Without<Parent>)>,
+    tree_q: Query<Entity, (With<TreeRoot>, Without<Parent>, Without<WorldGeometry>)>,
 ) {
+    if transition.pausing {
+        return;
+    }
+
     for e in world_q.iter() {
         commands.entity(e).despawn_recursive();
     }
@@ -314,8 +320,14 @@ fn generate_city(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut grass_mats: ResMut<Assets<GrassMaterial>>,
+    transition: Res<PlaySessionTransition>,
     settings: Res<GameSettings>,
+    existing_world: Query<Entity, With<WorldGeometry>>,
 ) {
+    if transition.resuming_from_pause || !existing_world.is_empty() {
+        return;
+    }
+
     let seed = settings.world_seed;
     let m = &mut *mats;
 

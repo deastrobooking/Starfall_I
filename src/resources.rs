@@ -90,6 +90,15 @@ impl CameraShake {
     }
 }
 
+// ── Play Session Transitions ─────────────────────────────────────────────────
+/// Tracks pause/resume transitions so `OnEnter(Playing)` setup systems do not
+/// rebuild the active chapter when returning from the pause menu.
+#[derive(Resource, Debug, Default)]
+pub struct PlaySessionTransition {
+    pub pausing: bool,
+    pub resuming_from_pause: bool,
+}
+
 // ── Local Multiplayer ─────────────────────────────────────────────────────────
 /// How many local players are active (1–4).
 /// Set this before entering `AppState::Playing` to change the player count.

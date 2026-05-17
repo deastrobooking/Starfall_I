@@ -9,15 +9,3 @@ pub mod mods;
 pub mod player;
 pub mod weapon;
 pub mod world;
-
-pub use armor::*;
-pub use character::*;
-pub use companion::*;
-pub use discoverable::*;
-pub use enemy::*;
-pub use faction::*;
-pub use inventory::*;
-pub use mods::*;
-pub use player::*;
-pub use weapon::*;
-pub use world::*;

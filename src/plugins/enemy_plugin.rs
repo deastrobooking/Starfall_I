@@ -13,7 +13,8 @@ use crate::components::player::{ParryState, Player, PlayerStats};
 use crate::components::world::WorldLoot;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
-use crate::resources::WaveInfo;
+use crate::rendering::PbrBundle;
+use crate::resources::{PlaySessionTransition, WaveInfo};
 use crate::state::AppState;
 
 #[derive(Resource, Clone)]
@@ -37,6 +38,7 @@ impl Plugin for EnemyPlugin {
                 OnEnter(AppState::Playing),
                 (setup_enemies, setup_enemy_attack_assets),
             )
+            .add_systems(OnExit(AppState::Playing), cleanup_enemies)
             .add_systems(
                 Update,
                 (
@@ -60,7 +62,11 @@ impl Plugin for EnemyPlugin {
 // ── Initial Setup ─────────────────────────────────────────────────────────────
 // Starfall I: chapter director drives all spawns. Reset only the population
 // counter; no enemies are pre-spawned here.
-fn setup_enemies(mut wave: ResMut<WaveInfo>) {
+fn setup_enemies(mut wave: ResMut<WaveInfo>, transition: Res<PlaySessionTransition>) {
+    if transition.resuming_from_pause {
+        return;
+    }
+
     *wave = WaveInfo::new();
 }
 
@@ -68,7 +74,12 @@ fn setup_enemy_attack_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    transition: Res<PlaySessionTransition>,
 ) {
+    if transition.resuming_from_pause {
+        return;
+    }
+
     let laser_mat = materials.add(StandardMaterial {
         base_color: Color::srgba(0.38, 0.92, 1.0, 0.86),
         emissive: LinearRgba::new(0.2, 2.4, 3.6, 1.0),
@@ -97,6 +108,28 @@ fn setup_enemy_attack_assets(
         fire_mat,
         shockwave_mat,
     });
+}
+
+fn cleanup_enemies(
+    mut commands: Commands,
+    transition: Res<PlaySessionTransition>,
+    enemy_q: Query<Entity, With<Enemy>>,
+    projectile_q: Query<Entity, With<EnemyProjectile>>,
+    vfx_q: Query<Entity, With<EnemyAttackVfx>>,
+    loot_q: Query<Entity, With<WorldLoot>>,
+) {
+    if transition.pausing {
+        return;
+    }
+
+    for entity in enemy_q
+        .iter()
+        .chain(projectile_q.iter())
+        .chain(vfx_q.iter())
+        .chain(loot_q.iter())
+    {
+        commands.entity(entity).despawn_recursive();
+    }
 }
 
 // Spawn helpers are pub so the chapter director can call them.
@@ -486,14 +519,20 @@ fn dragon_boss_system(
     time: Res<Time>,
     assets: Res<EnemyAttackAssets>,
     player_pos_q: Query<(Entity, &Transform), (With<Player>, Without<BossEnemy>)>,
-    mut player_damage_q: Query<(
-        &mut Health,
-        &mut Damageable,
-        &mut PlayerStats,
-        &mut ParryState,
-        &ArmorSet,
-    )>,
-    mut boss_q: Query<(&mut Transform, &mut Enemy, &mut DragonBoss, &Health), With<BossEnemy>>,
+    mut player_damage_q: Query<
+        (
+            &mut Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut ParryState,
+            &ArmorSet,
+        ),
+        (With<Player>, Without<BossEnemy>),
+    >,
+    mut boss_q: Query<
+        (&mut Transform, &mut Enemy, &mut DragonBoss, &Health),
+        (With<BossEnemy>, Without<Player>),
+    >,
     mut damaged_ev: EventWriter<PlayerDamagedEvent>,
     mut parry_ev: EventWriter<PlayerParryEvent>,
 ) {
@@ -712,19 +751,25 @@ fn closest_player<F: bevy::ecs::query::QueryFilter>(
         .min_by(|a, b| a.2.total_cmp(&b.2))
 }
 
-fn damage_players_in_radius(
+fn damage_players_in_radius<
+    DamageFilter: bevy::ecs::query::QueryFilter,
+    PositionFilter: bevy::ecs::query::QueryFilter,
+>(
     center: Vec3,
     radius: f32,
     damage: f32,
     damage_type: DamageType,
-    player_damage_q: &mut Query<(
-        &mut Health,
-        &mut Damageable,
-        &mut PlayerStats,
-        &mut ParryState,
-        &ArmorSet,
-    )>,
-    player_pos_q: &Query<(Entity, &Transform), impl bevy::ecs::query::QueryFilter>,
+    player_damage_q: &mut Query<
+        (
+            &mut Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut ParryState,
+            &ArmorSet,
+        ),
+        DamageFilter,
+    >,
+    player_pos_q: &Query<(Entity, &Transform), PositionFilter>,
     damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
     parry_ev: &mut EventWriter<PlayerParryEvent>,
 ) {
@@ -751,21 +796,27 @@ fn damage_players_in_radius(
     }
 }
 
-fn damage_players_in_cone(
+fn damage_players_in_cone<
+    DamageFilter: bevy::ecs::query::QueryFilter,
+    PositionFilter: bevy::ecs::query::QueryFilter,
+>(
     origin: Vec3,
     direction: Vec3,
     range: f32,
     min_dot: f32,
     damage: f32,
     damage_type: DamageType,
-    player_damage_q: &mut Query<(
-        &mut Health,
-        &mut Damageable,
-        &mut PlayerStats,
-        &mut ParryState,
-        &ArmorSet,
-    )>,
-    player_pos_q: &Query<(Entity, &Transform), impl bevy::ecs::query::QueryFilter>,
+    player_damage_q: &mut Query<
+        (
+            &mut Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut ParryState,
+            &ArmorSet,
+        ),
+        DamageFilter,
+    >,
+    player_pos_q: &Query<(Entity, &Transform), PositionFilter>,
     damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
     parry_ev: &mut EventWriter<PlayerParryEvent>,
 ) {

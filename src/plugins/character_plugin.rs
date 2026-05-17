@@ -43,7 +43,12 @@ fn cartoon_animation_system(
 
     for (entity, transform, mut animator, movement, edge_grab) in roots.iter_mut() {
         let delta = transform.translation - animator.last_position;
-        animator.speed = delta.with_y(0.0).length() / dt.max(0.001);
+        let raw_speed = delta.with_y(0.0).length() / dt.max(0.001);
+        let blend = 1.0 - (-dt * 14.0).exp();
+        animator.speed += (raw_speed - animator.speed) * blend;
+        if animator.speed < 0.04 {
+            animator.speed = 0.0;
+        }
         animator.last_position = transform.translation;
 
         animator.pose = if edge_grab.map(|e| e.is_hanging).unwrap_or(false) {

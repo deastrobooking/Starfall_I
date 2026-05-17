@@ -6,6 +6,7 @@ use crate::components::character::{
 };
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
+use crate::rendering::PbrBundle;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -348,6 +349,9 @@ pub fn spawn_cartoon_character(
         .spawn((
             Transform::from_translation(position),
             GlobalTransform::default(),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
         ))
         .id();
     attach_cartoon_character(commands, meshes, materials, root, config, position);
@@ -369,6 +373,9 @@ pub fn attach_cartoon_character(
             scale: config.scale,
         },
         CartoonAnimator::new(root_position),
+        Visibility::Visible,
+        InheritedVisibility::default(),
+        ViewVisibility::default(),
     ));
 
     // ── Materials ─────────────────────────────────────────────────────────────
@@ -929,6 +936,18 @@ pub fn attach_cartoon_character(
             Transform::from_xyz(0.0, -0.74 * s, 0.40 * s)
                 .with_rotation(Quat::from_rotation_x(0.55)),
         );
+    }
+}
+
+pub fn despawn_cartoon_character_parts(
+    commands: &mut Commands,
+    root: Entity,
+    parts: &Query<(Entity, &CartoonPart)>,
+) {
+    for (entity, part) in parts.iter() {
+        if part.root == root {
+            commands.entity(entity).try_despawn_recursive();
+        }
     }
 }
 

@@ -5,7 +5,8 @@ use crate::components::player::{Player, PlayerStats};
 use crate::components::world::{Chest, LootType};
 use crate::damage::Health;
 use crate::events::{ChestOpenedEvent, LootCollectedEvent};
-use crate::resources::PlayerScore;
+use crate::rendering::PbrBundle;
+use crate::resources::{PlaySessionTransition, PlayerScore};
 use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@ pub struct ChestPlugin;
 impl Plugin for ChestPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Playing), spawn_chests)
+            .add_systems(OnExit(AppState::Playing), cleanup_chests)
             .add_systems(
                 Update,
                 chest_proximity_system.run_if(in_state(AppState::Playing)),
@@ -25,7 +27,13 @@ fn spawn_chests(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    transition: Res<PlaySessionTransition>,
+    existing_chests: Query<Entity, With<Chest>>,
 ) {
+    if transition.resuming_from_pause || !existing_chests.is_empty() {
+        return;
+    }
+
     let mut rng = rand::thread_rng();
     let gold_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.9, 0.7, 0.1),
@@ -67,6 +75,20 @@ fn spawn_chests(
                 ..default()
             },
         ));
+    }
+}
+
+fn cleanup_chests(
+    mut commands: Commands,
+    transition: Res<PlaySessionTransition>,
+    chest_q: Query<Entity, With<Chest>>,
+) {
+    if transition.pausing {
+        return;
+    }
+
+    for entity in chest_q.iter() {
+        commands.entity(entity).despawn_recursive();
     }
 }
 
