@@ -6,7 +6,7 @@ use crate::chapters::{all_chapters, ChapterId};
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::{PuzzleArchetype, PuzzleRelicEncounter};
 use crate::components::inventory::Inventory;
-use crate::components::player::{JetpackState, Player, PlayerInput, PlayerStats};
+use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats};
 use crate::components::weapon::{BeamSabre, SpecialWeaponInventory, WeaponInventory};
 use crate::damage::Health;
 use crate::events::*;
@@ -127,30 +127,41 @@ struct PauseRoot;
 struct GameOverRoot;
 #[derive(Component)]
 struct StartButton;
-#[derive(Component, Default)]
-struct HealthBar;
-#[derive(Component, Default)]
-struct ArmorBar;
-#[derive(Component, Default)]
-struct StaminaBar;
-#[derive(Component, Default)]
-struct JetpackBar;
 #[derive(Component)]
-struct CreditsText;
+struct PlayerHudBar {
+    player_index: u8,
+    kind: PlayerHudBarKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayerHudBarKind {
+    Health,
+    Armor,
+    Stamina,
+    Jetpack,
+}
+
 #[derive(Component)]
-struct LevelText;
-#[derive(Component)]
-struct ElementBadge;
+struct PlayerHudText {
+    player_index: u8,
+    kind: PlayerHudTextKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayerHudTextKind {
+    Header,
+    Credits,
+    Level,
+    Element,
+    WeaponName,
+    Ammo,
+    SpecialAmmo,
+}
+
 #[derive(Component)]
 struct EnemyCountText;
 #[derive(Component)]
 struct WaveText;
-#[derive(Component)]
-struct WeaponNameText;
-#[derive(Component)]
-struct AmmoText;
-#[derive(Component)]
-struct SpecialAmmoText;
 #[derive(Component)]
 struct ObjectiveTitleText;
 #[derive(Component)]
@@ -172,6 +183,7 @@ struct CraftingPanelText;
 #[derive(Resource, Default)]
 struct CraftingPanelState {
     visible: bool,
+    owner: Option<u8>,
 }
 
 // ── Menu Camera ───────────────────────────────────────────────────────────────
@@ -547,9 +559,26 @@ fn slot_label_color(i: u8) -> Color {
 }
 
 fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectState>) {
-    // Reset lobby: P1 always joined, others cleared.
-    *select = PlayerSelectState::default();
-    select.slots[0].joined = true;
+    // P1 is always present. Preserve saved/customized blueprints when this
+    // screen is re-entered from the in-game character designer.
+    if select.slots.iter().any(|slot| slot.joined) {
+        for slot in &mut select.slots {
+            slot.ready = false;
+            slot.stick_cooldown = 0.0;
+        }
+        select.slots[0].joined = true;
+    } else {
+        let blueprints: Vec<_> = select
+            .slots
+            .iter()
+            .map(|slot| slot.blueprint.clone())
+            .collect();
+        *select = PlayerSelectState::default();
+        for (slot, blueprint) in select.slots.iter_mut().zip(blueprints.into_iter()) {
+            slot.blueprint = blueprint;
+        }
+        select.slots[0].joined = true;
+    }
 
     commands
         .spawn((
@@ -883,7 +912,11 @@ fn player_select_update(
 }
 
 // ── HUD Setup ─────────────────────────────────────────────────────────────────
-fn setup_hud(mut commands: Commands, existing_hud: Query<Entity, With<HudRoot>>) {
+fn setup_hud(
+    mut commands: Commands,
+    config: Res<LocalPlayerConfig>,
+    existing_hud: Query<Entity, With<HudRoot>>,
+) {
     if !existing_hud.is_empty() {
         return;
     }
@@ -911,49 +944,10 @@ fn setup_hud(mut commands: Commands, existing_hud: Query<Entity, With<HudRoot>>)
                 DamageVignette { alpha: 0.0 },
             ));
 
-            // ── Top-left stats panel ──────────────────────────────────────────────
-            root.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
-                top: Val::Px(16.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                width: Val::Px(220.0),
-                ..default()
-            })
-            .with_children(|panel| {
-                spawn_bar(panel, "HP", HealthBar, Color::srgb(0.2, 0.8, 0.2));
-                spawn_bar(panel, "AR", ArmorBar, Color::srgb(0.2, 0.5, 1.0));
-                spawn_bar(panel, "ST", StaminaBar, Color::srgb(0.9, 0.7, 0.0));
-                spawn_bar(panel, "JP", JetpackBar, Color::srgb(0.0, 0.9, 0.9));
-                panel.spawn((
-                    Text::new("¢ 0"),
-                    TextFont {
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.9, 0.75, 0.1)),
-                    CreditsText,
-                ));
-                panel.spawn((
-                    Text::new("LVL 1"),
-                    TextFont {
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.7, 0.4, 1.0)),
-                    LevelText,
-                ));
-                panel.spawn((
-                    Text::new("Element: None"),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.7, 0.7, 0.9)),
-                    ElementBadge,
-                ));
-            });
+            // ── Per-player stat panels ───────────────────────────────────────────
+            for player_index in 0..config.active.clamp(1, 4) {
+                spawn_player_hud_panel(root, player_index);
+            }
 
             // ── Top-right wave/enemy ──────────────────────────────────────────────
             root.spawn(Node {
@@ -992,45 +986,6 @@ fn setup_hud(mut commands: Commands, existing_hud: Query<Entity, With<HudRoot>>)
                     },
                     TextColor(Color::srgb(1.0, 0.2, 0.1)),
                     BossAlertText,
-                ));
-            });
-
-            // ── Bottom-left weapon ────────────────────────────────────────────────
-            root.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
-                bottom: Val::Px(80.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            })
-            .with_children(|panel| {
-                panel.spawn((
-                    Text::new("Starlight Popper"),
-                    TextFont {
-                        font_size: 22.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(1.0, 0.9, 0.25)),
-                    WeaponNameText,
-                ));
-                panel.spawn((
-                    Text::new("60 / 60"),
-                    TextFont {
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    AmmoText,
-                ));
-                panel.spawn((
-                    Text::new("7:Star 8:Tri 9:Moon 0:Sprite"),
-                    TextFont {
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.6, 0.6, 0.8)),
-                    SpecialAmmoText,
                 ));
             });
 
@@ -1196,10 +1151,118 @@ fn setup_hud(mut commands: Commands, existing_hud: Query<Entity, With<HudRoot>>)
         });
 }
 
-fn spawn_bar<L: Component + Default>(
+fn spawn_player_hud_panel(parent: &mut ChildBuilder, player_index: u8) {
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(16.0),
+                top: Val::Px(16.0 + f32::from(player_index) * 144.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(5.0),
+                width: Val::Px(246.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.04, 0.05, 0.10, 0.78)),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new(format!("P{}", player_index + 1)),
+                TextFont {
+                    font_size: 15.0,
+                    ..default()
+                },
+                TextColor(slot_label_color(player_index)),
+                PlayerHudText {
+                    player_index,
+                    kind: PlayerHudTextKind::Header,
+                },
+            ));
+            spawn_bar(
+                panel,
+                player_index,
+                "HP",
+                PlayerHudBarKind::Health,
+                Color::srgb(0.2, 0.8, 0.2),
+            );
+            spawn_bar(
+                panel,
+                player_index,
+                "AR",
+                PlayerHudBarKind::Armor,
+                Color::srgb(0.2, 0.5, 1.0),
+            );
+            spawn_bar(
+                panel,
+                player_index,
+                "ST",
+                PlayerHudBarKind::Stamina,
+                Color::srgb(0.9, 0.7, 0.0),
+            );
+            spawn_bar(
+                panel,
+                player_index,
+                "JP",
+                PlayerHudBarKind::Jetpack,
+                Color::srgb(0.0, 0.9, 0.9),
+            );
+            spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Credits, "¢ 0", 13.0);
+            spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Level, "LVL 1", 13.0);
+            spawn_player_hud_text(
+                panel,
+                player_index,
+                PlayerHudTextKind::Element,
+                "Element: None",
+                12.0,
+            );
+            spawn_player_hud_text(
+                panel,
+                player_index,
+                PlayerHudTextKind::WeaponName,
+                "Starlight Popper",
+                13.0,
+            );
+            spawn_player_hud_text(
+                panel,
+                player_index,
+                PlayerHudTextKind::Ammo,
+                "60 / 60",
+                12.0,
+            );
+            spawn_player_hud_text(
+                panel,
+                player_index,
+                PlayerHudTextKind::SpecialAmmo,
+                "7:Star 8:Tri 9:Moon 0:Sprite",
+                10.0,
+            );
+        });
+}
+
+fn spawn_player_hud_text(
     parent: &mut ChildBuilder,
+    player_index: u8,
+    kind: PlayerHudTextKind,
+    text: &str,
+    font_size: f32,
+) {
+    parent.spawn((
+        Text::new(text),
+        TextFont {
+            font_size,
+            ..default()
+        },
+        TextColor(Color::srgb(0.78, 0.82, 0.94)),
+        PlayerHudText { player_index, kind },
+    ));
+}
+
+fn spawn_bar(
+    parent: &mut ChildBuilder,
+    player_index: u8,
     label: &str,
-    _marker: L,
+    kind: PlayerHudBarKind,
     color: Color,
 ) {
     parent
@@ -1220,8 +1283,8 @@ fn spawn_bar<L: Component + Default>(
             ));
             row.spawn((
                 Node {
-                    width: Val::Px(150.0),
-                    height: Val::Px(12.0),
+                    width: Val::Px(188.0),
+                    height: Val::Px(9.0),
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.8)),
@@ -1234,7 +1297,7 @@ fn spawn_bar<L: Component + Default>(
                         ..default()
                     },
                     BackgroundColor(color),
-                    L::default(),
+                    PlayerHudBar { player_index, kind },
                 ));
             });
         });
@@ -1244,6 +1307,7 @@ fn spawn_bar<L: Component + Default>(
 fn hud_update_system(
     player_q: Query<
         (
+            &PlayerIndex,
             &Health,
             &PlayerStats,
             &JetpackState,
@@ -1256,228 +1320,63 @@ fn hud_update_system(
     >,
     wave: Res<WaveInfo>,
     current: Res<CurrentChapter>,
-    mut hp_q: Query<
-        &mut Node,
-        (
-            With<HealthBar>,
-            Without<ArmorBar>,
-            Without<StaminaBar>,
-            Without<JetpackBar>,
-        ),
-    >,
-    mut ar_q: Query<
-        &mut Node,
-        (
-            With<ArmorBar>,
-            Without<HealthBar>,
-            Without<StaminaBar>,
-            Without<JetpackBar>,
-        ),
-    >,
-    mut st_q: Query<
-        &mut Node,
-        (
-            With<StaminaBar>,
-            Without<HealthBar>,
-            Without<ArmorBar>,
-            Without<JetpackBar>,
-        ),
-    >,
-    mut jp_q: Query<
-        &mut Node,
-        (
-            With<JetpackBar>,
-            Without<HealthBar>,
-            Without<ArmorBar>,
-            Without<StaminaBar>,
-        ),
-    >,
-    mut credits_q: Query<
-        &mut Text,
-        (
-            With<CreditsText>,
-            Without<LevelText>,
-            Without<ElementBadge>,
-            Without<WaveText>,
-            Without<EnemyCountText>,
-            Without<WeaponNameText>,
-            Without<AmmoText>,
-            Without<SpecialAmmoText>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
-    mut level_q: Query<
-        &mut Text,
-        (
-            With<LevelText>,
-            Without<CreditsText>,
-            Without<ElementBadge>,
-            Without<WaveText>,
-            Without<EnemyCountText>,
-            Without<WeaponNameText>,
-            Without<AmmoText>,
-            Without<SpecialAmmoText>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
-    mut elem_q: Query<
-        &mut Text,
-        (
-            With<ElementBadge>,
-            Without<CreditsText>,
-            Without<LevelText>,
-            Without<WaveText>,
-            Without<EnemyCountText>,
-            Without<WeaponNameText>,
-            Without<AmmoText>,
-            Without<SpecialAmmoText>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
-    mut wave_q: Query<
-        &mut Text,
-        (
-            With<WaveText>,
-            Without<EnemyCountText>,
-            Without<CreditsText>,
-            Without<LevelText>,
-            Without<ElementBadge>,
-            Without<WeaponNameText>,
-            Without<AmmoText>,
-            Without<SpecialAmmoText>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
-    mut enm_q: Query<
-        &mut Text,
-        (
-            With<EnemyCountText>,
-            Without<WaveText>,
-            Without<CreditsText>,
-            Without<LevelText>,
-            Without<ElementBadge>,
-            Without<WeaponNameText>,
-            Without<AmmoText>,
-            Without<SpecialAmmoText>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
-    mut wname_q: Query<
-        &mut Text,
-        (
-            With<WeaponNameText>,
-            Without<AmmoText>,
-            Without<SpecialAmmoText>,
-            Without<WaveText>,
-            Without<EnemyCountText>,
-            Without<CreditsText>,
-            Without<LevelText>,
-            Without<ElementBadge>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
-    mut ammo_q: Query<
-        &mut Text,
-        (
-            With<AmmoText>,
-            Without<WeaponNameText>,
-            Without<SpecialAmmoText>,
-            Without<WaveText>,
-            Without<EnemyCountText>,
-            Without<CreditsText>,
-            Without<LevelText>,
-            Without<ElementBadge>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
-    mut spammo_q: Query<
-        &mut Text,
-        (
-            With<SpecialAmmoText>,
-            Without<WeaponNameText>,
-            Without<AmmoText>,
-            Without<WaveText>,
-            Without<EnemyCountText>,
-            Without<CreditsText>,
-            Without<LevelText>,
-            Without<ElementBadge>,
-            Without<MessageText>,
-            Without<BossAlertText>,
-            Without<CraftingPanelText>,
-        ),
-    >,
+    mut bar_q: Query<(&mut Node, &PlayerHudBar)>,
+    mut text_sets: ParamSet<(
+        Query<(&mut Text, &PlayerHudText)>,
+        Query<&mut Text, With<WaveText>>,
+        Query<&mut Text, With<EnemyCountText>>,
+    )>,
 ) {
-    let Some((health, stats, jetpack, weapons, special, armor, sabre)) = player_q.iter().next()
-    else {
-        return;
-    };
+    for (index, health, stats, jetpack, weapons, special, armor, sabre) in player_q.iter() {
+        for (mut node, bar) in bar_q
+            .iter_mut()
+            .filter(|(_, bar)| bar.player_index == index.0)
+        {
+            let percent = match bar.kind {
+                PlayerHudBarKind::Health => health.current / health.max,
+                PlayerHudBarKind::Armor => stats.armor / stats.max_armor,
+                PlayerHudBarKind::Stamina => stats.stamina / stats.max_stamina,
+                PlayerHudBarKind::Jetpack => jetpack.fuel / jetpack.max_fuel,
+            };
+            node.width = Val::Percent((percent * 100.0).clamp(0.0, 100.0));
+        }
 
-    if let Ok(mut n) = hp_q.get_single_mut() {
-        n.width = Val::Percent((health.current / health.max * 100.0).clamp(0.0, 100.0));
-    }
-    if let Ok(mut n) = ar_q.get_single_mut() {
-        n.width = Val::Percent((stats.armor / stats.max_armor * 100.0).clamp(0.0, 100.0));
-    }
-    if let Ok(mut n) = st_q.get_single_mut() {
-        n.width = Val::Percent((stats.stamina / stats.max_stamina * 100.0).clamp(0.0, 100.0));
-    }
-    if let Ok(mut n) = jp_q.get_single_mut() {
-        n.width = Val::Percent((jetpack.fuel / jetpack.max_fuel * 100.0).clamp(0.0, 100.0));
+        let weapon = weapons.active();
+        let sabre_str = if sabre.active { " [SABRE]" } else { "" };
+        for (mut text, marker) in text_sets
+            .p0()
+            .iter_mut()
+            .filter(|(_, marker)| marker.player_index == index.0)
+        {
+            *text = Text::new(match marker.kind {
+                PlayerHudTextKind::Header => format!("P{}", index.0 + 1),
+                PlayerHudTextKind::Credits => format!("¢ {}", stats.credits),
+                PlayerHudTextKind::Level => format!(
+                    "LVL {}  XP {}/{}",
+                    stats.level,
+                    stats.experience,
+                    stats.xp_for_next_level()
+                ),
+                PlayerHudTextKind::Element => {
+                    format!("Element: {}", armor.active_element.display_name())
+                }
+                PlayerHudTextKind::WeaponName => {
+                    format!("{}{}", weapon.weapon_type.display_name(), sabre_str)
+                }
+                PlayerHudTextKind::Ammo => format!("{} / {}", weapon.ammo, weapon.max_ammo),
+                PlayerHudTextKind::SpecialAmmo => format!(
+                    "7:{} 8:{} 9:{} 0:{}",
+                    special.slot7.ammo, special.slot8.ammo, special.slot9.ammo, special.slot0.ammo,
+                ),
+            });
+        }
     }
 
-    if let Ok(mut t) = credits_q.get_single_mut() {
-        *t = Text::new(format!("¢ {}", stats.credits));
-    }
-    if let Ok(mut t) = level_q.get_single_mut() {
-        *t = Text::new(format!(
-            "LVL {}  XP {}/{}",
-            stats.level,
-            stats.experience,
-            stats.xp_for_next_level()
-        ));
-    }
-    if let Ok(mut t) = elem_q.get_single_mut() {
-        *t = Text::new(format!("Element: {}", armor.active_element.display_name()));
-    }
-    if let Ok(mut t) = wave_q.get_single_mut() {
+    if let Ok(mut t) = text_sets.p1().get_single_mut() {
         *t = Text::new(format!("Ch.{:02}  Rift {}", current.id.0, wave.wave_number));
     }
-    if let Ok(mut t) = enm_q.get_single_mut() {
+    if let Ok(mut t) = text_sets.p2().get_single_mut() {
         *t = Text::new(format!("Enemies: {}", wave.enemy_count));
-    }
-
-    let weapon = weapons.active();
-    let sabre_str = if sabre.active { " [STAR SABRE]" } else { "" };
-    if let Ok(mut t) = wname_q.get_single_mut() {
-        *t = Text::new(format!(
-            "{}{}",
-            weapon.weapon_type.display_name(),
-            sabre_str
-        ));
-    }
-    if let Ok(mut t) = ammo_q.get_single_mut() {
-        *t = Text::new(format!("{} / {}", weapon.ammo, weapon.max_ammo));
-    }
-
-    if let Ok(mut t) = spammo_q.get_single_mut() {
-        *t = Text::new(format!(
-            "7:Star({})  8:Tri({})  9:Moon({})  0:Sprite({})",
-            special.slot7.ammo, special.slot8.ammo, special.slot9.ammo, special.slot0.ammo,
-        ));
     }
 }
 
@@ -1623,13 +1522,17 @@ fn crafting_panel_system(
     mut panel_state: ResMut<CraftingPanelState>,
     mut panel_q: Query<&mut Node, With<CraftingPanelRoot>>,
     mut text_q: Query<&mut Text, With<CraftingPanelText>>,
-    mut player_q: Query<(&mut Inventory, &PlayerStats), With<Player>>,
+    player_input_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
+    mut player_q: Query<(&PlayerIndex, &mut Inventory, &PlayerStats), With<Player>>,
     mut queue: ResMut<CraftingQueue>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
-    // Toggle panel visibility
-    if keyboard.just_pressed(KeyCode::KeyC) {
-        panel_state.visible = !panel_state.visible;
+    for (idx, input) in player_input_q.iter() {
+        if input.crafting {
+            let closing_same_owner = panel_state.visible && panel_state.owner == Some(idx.0);
+            panel_state.visible = !closing_same_owner;
+            panel_state.owner = panel_state.visible.then_some(idx.0);
+        }
     }
 
     if let Ok(mut node) = panel_q.get_single_mut() {
@@ -1644,7 +1547,15 @@ fn crafting_panel_system(
         return;
     }
 
-    let Ok((mut inventory, stats)) = player_q.get_single_mut() else {
+    let Some(owner) = panel_state.owner else {
+        panel_state.visible = false;
+        return;
+    };
+
+    let Some((_, mut inventory, stats)) = player_q.iter_mut().find(|(idx, _, _)| idx.0 == owner)
+    else {
+        panel_state.visible = false;
+        panel_state.owner = None;
         return;
     };
     let recipes = all_recipes();
@@ -1675,7 +1586,7 @@ fn crafting_panel_system(
     }
 
     if let Ok(mut t) = text_q.get_single_mut() {
-        *t = Text::new(display);
+        *t = Text::new(format!("P{} Crafting\n\n{}", owner + 1, display));
     }
 
     // Handle 1-5 key presses to craft
@@ -1695,16 +1606,21 @@ fn crafting_panel_system(
 
     if let Some(idx) = craft_index {
         if let Some(recipe) = recipes.get(idx) {
-            match start_craft(recipe.id, &mut inventory, stats, &mut queue) {
+            match start_craft(recipe.id, owner, &mut inventory, stats, &mut queue) {
                 Ok(()) => {
                     msg_ev.send(UiMessageEvent {
-                        text: format!("Crafting: {} ({:.0}s)", recipe.name, recipe.craft_time),
+                        text: format!(
+                            "P{} Crafting: {} ({:.0}s)",
+                            owner + 1,
+                            recipe.name,
+                            recipe.craft_time
+                        ),
                         duration: 2.5,
                     });
                 }
                 Err(msg) => {
                     msg_ev.send(UiMessageEvent {
-                        text: format!("Can't craft: {}", msg),
+                        text: format!("P{} Can't craft: {}", owner + 1, msg),
                         duration: 2.0,
                     });
                 }

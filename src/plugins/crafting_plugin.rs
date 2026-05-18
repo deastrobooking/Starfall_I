@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::inventory::Inventory;
-use crate::components::player::{Player, PlayerStats};
+use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::events::InventoryChangedEvent;
 use crate::state::AppState;
 
@@ -158,6 +158,7 @@ pub struct CraftingQueue {
 
 #[derive(Debug)]
 pub struct ActiveCraft {
+    pub owner: u8,
     pub recipe_id: String,
     pub timer: f32,
     pub duration: f32,
@@ -168,32 +169,36 @@ pub struct ActiveCraft {
 fn crafting_queue_system(
     time: Res<Time>,
     mut queue: ResMut<CraftingQueue>,
-    mut player_q: Query<&mut Inventory, With<Player>>,
+    mut player_q: Query<(&PlayerIndex, &mut Inventory), With<Player>>,
     mut inv_ev: EventWriter<InventoryChangedEvent>,
 ) {
     let dt = time.delta_secs();
-    let Ok(mut inventory) = player_q.get_single_mut() else {
-        return;
-    };
-
-    // Max stack default for result items (use 10 if unknown)
     let mut finished = vec![];
     for (i, craft) in queue.items.iter_mut().enumerate() {
         craft.timer -= dt;
         if craft.timer <= 0.0 {
-            inventory.add_item(&craft.result_item, craft.result_qty, 10);
-            inv_ev.send(InventoryChangedEvent);
             finished.push(i);
         }
     }
+
+    let mut completed = Vec::with_capacity(finished.len());
     for i in finished.into_iter().rev() {
-        queue.items.swap_remove(i);
+        completed.push(queue.items.swap_remove(i));
+    }
+
+    for craft in completed {
+        if let Some((_, mut inventory)) = player_q.iter_mut().find(|(idx, _)| idx.0 == craft.owner)
+        {
+            inventory.add_item(&craft.result_item, craft.result_qty, 10);
+            inv_ev.send(InventoryChangedEvent);
+        }
     }
 }
 
 /// Attempt to start crafting a recipe. Returns Ok(()) on success or Err message.
 pub fn start_craft(
     recipe_id: &str,
+    owner: u8,
     inventory: &mut Inventory,
     stats: &PlayerStats,
     queue: &mut CraftingQueue,
@@ -221,6 +226,7 @@ pub fn start_craft(
     }
 
     queue.items.push(ActiveCraft {
+        owner,
         recipe_id: recipe_id.to_string(),
         timer: recipe.craft_time,
         duration: recipe.craft_time,

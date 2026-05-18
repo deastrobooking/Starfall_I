@@ -1,6 +1,9 @@
 use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
 
+use crate::character_blueprint::{
+    BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
+};
 use crate::characters::{
     accent_preset, accent_presets, hair_preset, hair_presets, hero_config,
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
@@ -22,10 +25,12 @@ impl Plugin for CharacterDesignPlugin {
                     rebuild_preview_if_dirty,
                     swatch_interaction,
                     accessory_interaction,
+                    body_stepper_interaction,
                     button_interaction,
                     design_keyboard_input,
                     update_swatch_borders,
                     update_toggle_colors,
+                    update_body_value_text,
                 )
                     .run_if(in_state(AppState::CharacterDesign)),
             );
@@ -72,6 +77,28 @@ enum AccessoryToggle {
     Visor,
 }
 
+#[derive(Component, Clone, Copy)]
+struct BodyStepper {
+    field: BodyField,
+    delta: f32,
+}
+
+#[derive(Component, Clone, Copy)]
+struct BodyValueText(BodyField);
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum BodyField {
+    Height,
+    Shoulders,
+    Chest,
+    Arms,
+    Legs,
+    Hands,
+    Feet,
+    Head,
+    Mass,
+}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 fn setup_character_design(
@@ -94,12 +121,40 @@ fn setup_character_design(
         .map(normalize_color_preset_index)
         .unwrap_or(0);
     design_data.hair_idx = slot.hair_idx.map(normalize_color_preset_index).unwrap_or(0);
-    design_data.has_hood = slot.has_hood.unwrap_or(base.has_hood);
-    design_data.has_cape = slot.has_cape.unwrap_or(base.has_cape);
-    design_data.has_gloves = slot.has_gloves.unwrap_or(base.has_gloves);
-    design_data.has_boots = slot.has_boots.unwrap_or(base.has_boots);
-    design_data.has_shoulder_pads = slot.has_shoulder_pads.unwrap_or(base.has_shoulder_pads);
-    design_data.has_visor = slot.has_visor.unwrap_or(base.has_visor);
+    design_data.body = slot
+        .blueprint
+        .as_ref()
+        .map(|blueprint| blueprint.body)
+        .unwrap_or_else(BodyRecipe::default)
+        .validated();
+    let blueprint_appearance = slot
+        .blueprint
+        .as_ref()
+        .map(|blueprint| blueprint.cartoon_appearance);
+    design_data.has_hood = slot
+        .has_hood
+        .or(blueprint_appearance.map(|appearance| appearance.has_hood))
+        .unwrap_or(base.has_hood);
+    design_data.has_cape = slot
+        .has_cape
+        .or(blueprint_appearance.map(|appearance| appearance.has_cape))
+        .unwrap_or(base.has_cape);
+    design_data.has_gloves = slot
+        .has_gloves
+        .or(blueprint_appearance.map(|appearance| appearance.has_gloves))
+        .unwrap_or(base.has_gloves);
+    design_data.has_boots = slot
+        .has_boots
+        .or(blueprint_appearance.map(|appearance| appearance.has_boots))
+        .unwrap_or(base.has_boots);
+    design_data.has_shoulder_pads = slot
+        .has_shoulder_pads
+        .or(blueprint_appearance.map(|appearance| appearance.has_shoulder_pads))
+        .unwrap_or(base.has_shoulder_pads);
+    design_data.has_visor = slot
+        .has_visor
+        .or(blueprint_appearance.map(|appearance| appearance.has_visor))
+        .unwrap_or(base.has_visor);
     design_data.spin_angle = 0.0;
     design_data.dirty = true;
     design_data.preview_entity = None;
@@ -200,7 +255,8 @@ fn rebuild_preview_if_dirty(
         Some(design_data.has_boots),
         Some(design_data.has_shoulder_pads),
         Some(design_data.has_visor),
-    );
+    )
+    .with_body_recipe(design_data.body);
 
     let entity = spawn_cartoon_character(
         &mut commands,
@@ -252,6 +308,20 @@ fn accessory_interaction(
             }
             design_data.dirty = true;
         }
+    }
+}
+
+fn body_stepper_interaction(
+    interaction_q: Query<(&Interaction, &BodyStepper), Changed<Interaction>>,
+    mut design_data: ResMut<CharacterDesignData>,
+) {
+    for (interaction, stepper) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        adjust_body_field(&mut design_data.body, stepper.field, stepper.delta);
+        design_data.body.validate();
+        design_data.dirty = true;
     }
 }
 
@@ -310,6 +380,30 @@ fn design_keyboard_input(
 }
 
 fn save_design(design_data: &CharacterDesignData, select_state: &mut PlayerSelectState) {
+    let name = select_state.character_name(design_data.player_index);
+    let base = hero_config(name);
+    let mut body = design_data.body;
+    body.validate();
+    let blueprint = CharacterBlueprint::hero(
+        name,
+        body,
+        CharacterPaletteRecipe {
+            skin: base.skin,
+            outfit: outfit_preset(design_data.outfit_idx),
+            accent: accent_preset(design_data.accent_idx),
+            hair: hair_preset(design_data.hair_idx),
+            eye: base.eye_color,
+        },
+        CartoonAppearanceRecipe {
+            has_hood: design_data.has_hood,
+            has_cape: design_data.has_cape,
+            has_gloves: design_data.has_gloves,
+            has_boots: design_data.has_boots,
+            has_shoulder_pads: design_data.has_shoulder_pads,
+            has_visor: design_data.has_visor,
+        },
+    );
+
     let Some(slot) = select_state.slots.get_mut(design_data.player_index) else {
         return;
     };
@@ -322,6 +416,7 @@ fn save_design(design_data: &CharacterDesignData, select_state: &mut PlayerSelec
     slot.has_boots = Some(design_data.has_boots);
     slot.has_shoulder_pads = Some(design_data.has_shoulder_pads);
     slot.has_visor = Some(design_data.has_visor);
+    slot.blueprint = Some(blueprint);
 }
 
 // ── Highlight active swatches ─────────────────────────────────────────────────
@@ -369,6 +464,21 @@ fn update_toggle_colors(
         } else {
             Color::srgb(0.15, 0.15, 0.22)
         });
+    }
+}
+
+fn update_body_value_text(
+    design_data: Res<CharacterDesignData>,
+    mut value_q: Query<(&BodyValueText, &mut Text)>,
+) {
+    if !design_data.is_changed() {
+        return;
+    }
+    for (marker, mut text) in value_q.iter_mut() {
+        *text = Text::new(format!(
+            "{:.2}",
+            body_field_value(&design_data.body, marker.0)
+        ));
     }
 }
 
@@ -490,6 +600,43 @@ fn spawn_design_ui(
                             design_data.has_shoulder_pads,
                         );
                         spawn_toggle(row, "VISOR", AccessoryToggle::Visor, design_data.has_visor);
+                    });
+
+                panel.spawn(Node {
+                    height: Val::Px(6.0),
+                    ..default()
+                });
+
+                panel.spawn((
+                    Text::new("BODY SHAPE"),
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.70, 0.72, 0.92)),
+                ));
+                panel
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(8.0),
+                        row_gap: Val::Px(6.0),
+                        ..default()
+                    })
+                    .with_children(|grid| {
+                        for (label, field) in [
+                            ("HEIGHT", BodyField::Height),
+                            ("SHOULDERS", BodyField::Shoulders),
+                            ("CHEST", BodyField::Chest),
+                            ("ARMS", BodyField::Arms),
+                            ("LEGS", BodyField::Legs),
+                            ("HANDS", BodyField::Hands),
+                            ("FEET", BodyField::Feet),
+                            ("HEAD", BodyField::Head),
+                            ("MASS", BodyField::Mass),
+                        ] {
+                            spawn_body_row(grid, label, field, &design_data.body);
+                        }
                     });
 
                 // Expand to push buttons to bottom
@@ -629,4 +776,98 @@ fn spawn_toggle(parent: &mut ChildBuilder, label: &str, toggle: AccessoryToggle,
                 TextColor(Color::WHITE),
             ));
         });
+}
+
+fn spawn_body_row(parent: &mut ChildBuilder, label: &str, field: BodyField, body: &BodyRecipe) {
+    parent
+        .spawn(Node {
+            width: Val::Px(178.0),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(5.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.62, 0.68, 0.86)),
+                Node {
+                    width: Val::Px(70.0),
+                    ..default()
+                },
+            ));
+            spawn_step_button(row, field, -0.04, "-");
+            row.spawn((
+                Text::new(format!("{:.2}", body_field_value(body, field))),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                Node {
+                    width: Val::Px(38.0),
+                    ..default()
+                },
+                BodyValueText(field),
+            ));
+            spawn_step_button(row, field, 0.04, "+");
+        });
+}
+
+fn spawn_step_button(parent: &mut ChildBuilder, field: BodyField, delta: f32, label: &str) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(26.0),
+                height: Val::Px(24.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.12, 0.14, 0.24)),
+            BodyStepper { field, delta },
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: 16.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+fn adjust_body_field(body: &mut BodyRecipe, field: BodyField, delta: f32) {
+    match field {
+        BodyField::Height => body.height += delta,
+        BodyField::Shoulders => body.shoulder_width += delta,
+        BodyField::Chest => body.chest_size += delta,
+        BodyField::Arms => body.arm_length += delta,
+        BodyField::Legs => body.leg_length += delta,
+        BodyField::Hands => body.hand_size += delta,
+        BodyField::Feet => body.foot_size += delta,
+        BodyField::Head => body.head_size += delta,
+        BodyField::Mass => body.mass += delta,
+    }
+}
+
+fn body_field_value(body: &BodyRecipe, field: BodyField) -> f32 {
+    match field {
+        BodyField::Height => body.height,
+        BodyField::Shoulders => body.shoulder_width,
+        BodyField::Chest => body.chest_size,
+        BodyField::Arms => body.arm_length,
+        BodyField::Legs => body.leg_length,
+        BodyField::Hands => body.hand_size,
+        BodyField::Feet => body.foot_size,
+        BodyField::Head => body.head_size,
+        BodyField::Mass => body.mass,
+    }
 }

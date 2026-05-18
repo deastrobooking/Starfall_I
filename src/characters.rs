@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
+use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
 use crate::components::character::{
     CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonRole,
 };
@@ -19,6 +20,7 @@ pub struct CartoonCharacterConfig {
     pub accent: Color,
     pub hair: Color,
     pub scale: f32,
+    pub body: BodyRecipe,
     /// Multiplies the body (and proportionally arms/legs) in the X axis.
     pub body_width: f32,
     pub has_hat: bool,
@@ -39,6 +41,40 @@ pub struct CartoonCharacterConfig {
     pub emissive_eyes: bool,
 }
 
+impl CartoonCharacterConfig {
+    pub fn with_body_recipe(mut self, body: BodyRecipe) -> Self {
+        self.body = body.validated();
+        self
+    }
+
+    pub fn with_blueprint(mut self, blueprint: &CharacterBlueprint) -> Self {
+        self.body = blueprint.body.validated();
+        if let Some(color) = blueprint.material_color("skin") {
+            self.skin = color;
+        }
+        if let Some(color) = blueprint.material_color("outfit") {
+            self.outfit = color;
+        }
+        if let Some(color) = blueprint.material_color("accent") {
+            self.accent = color;
+        }
+        if let Some(color) = blueprint.material_color("hair") {
+            self.hair = color;
+        }
+        if let Some(color) = blueprint.material_color("eye") {
+            self.eye_color = color;
+        }
+        let appearance = blueprint.cartoon_appearance;
+        self.has_hood = appearance.has_hood;
+        self.has_cape = appearance.has_cape;
+        self.has_gloves = appearance.has_gloves;
+        self.has_boots = appearance.has_boots;
+        self.has_shoulder_pads = appearance.has_shoulder_pads;
+        self.has_visor = appearance.has_visor;
+        self
+    }
+}
+
 // ── Hero configs ──────────────────────────────────────────────────────────────
 
 pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
@@ -51,6 +87,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.95, 0.78, 0.12),
             hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
+            body: BodyRecipe::default(),
             body_width: 1.0,
             has_hat: false,
             has_hood: true,
@@ -77,6 +114,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.10, 0.92, 0.98),
             hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
+            body: BodyRecipe::default(),
             body_width: 0.92,
             has_hat: false,
             has_hood: true,
@@ -103,6 +141,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.78, 0.86, 0.92),
             hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
+            body: BodyRecipe::default(),
             body_width: 0.94,
             has_hat: false,
             has_hood: true,
@@ -129,6 +168,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.92, 0.90, 0.84),
             hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
+            body: BodyRecipe::default(),
             body_width: 1.18,
             has_hat: false,
             has_hood: true,
@@ -155,6 +195,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(1.0, 0.86, 0.2),
             hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 1.0,
+            body: BodyRecipe::default(),
             body_width: 1.0,
             has_hat: false,
             has_hood: true,
@@ -313,6 +354,7 @@ pub fn enemy_config(
         accent,
         hair,
         scale: scale * type_scale,
+        body: BodyRecipe::default(),
         body_width: type_width,
         has_hat: role == CartoonRole::Wizard,
         has_hood: matches!(role, CartoonRole::Hero | CartoonRole::Wizard),
@@ -397,8 +439,18 @@ pub fn attach_cartoon_character(
     let brow_color = darken(config.hair, 0.7);
     let brow = char_mat(materials, brow_color);
 
+    let body = config.body.validated();
     let s = config.scale;
-    let bw = config.body_width;
+    let height = body.height;
+    let bw = config.body_width * (body.shoulder_width * 0.62 + body.chest_size * 0.38);
+    let hip_width = config.body_width * body.hip_width;
+    let head_scale = body.head_size;
+    let arm_length = body.arm_length;
+    let leg_length = body.leg_length;
+    let hand_scale = body.hand_size;
+    let foot_scale = body.foot_size;
+    let posture = body.spine_posture;
+    let head_y = 0.58 * s * height + (body.neck_length - 1.0) * 0.10 * s;
 
     // ── Shadow ────────────────────────────────────────────────────────────────
     spawn_part(
@@ -406,9 +458,9 @@ pub fn attach_cartoon_character(
         meshes,
         root,
         CartoonPartKind::Shadow,
-        Mesh::from(Cylinder::new(0.62 * s, 0.02 * s)),
+        Mesh::from(Cylinder::new(0.62 * s * bw.max(foot_scale), 0.02 * s)),
         shadow,
-        Transform::from_xyz(0.0, -1.30 * s, 0.0),
+        Transform::from_xyz(0.0, -1.30 * s * height.max(leg_length), 0.0),
     );
 
     // ── Body ──────────────────────────────────────────────────────────────────
@@ -417,9 +469,14 @@ pub fn attach_cartoon_character(
         meshes,
         root,
         CartoonPartKind::Body,
-        Mesh::from(Cuboid::new(0.72 * s * bw, 0.86 * s, 0.42 * s)),
+        Mesh::from(Cuboid::new(
+            0.72 * s * bw,
+            0.86 * s * height,
+            0.42 * s * body.chest_size,
+        )),
         outfit.clone(),
-        Transform::from_xyz(0.0, -0.12 * s, 0.0),
+        Transform::from_xyz(0.0, -0.12 * s, 0.0)
+            .with_rotation(Quat::from_rotation_x(-posture * 0.18)),
     );
 
     // ── Belt (waist strap + centre buckle) ────────────────────────────────────
@@ -429,9 +486,9 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             CartoonPartKind::Belt,
-            Mesh::from(Cuboid::new(0.80 * s * bw, 0.11 * s, 0.46 * s)),
+            Mesh::from(Cuboid::new(0.80 * s * hip_width, 0.11 * s, 0.46 * s)),
             accent.clone(),
-            Transform::from_xyz(0.0, -0.38 * s, 0.0),
+            Transform::from_xyz(0.0, -0.38 * s * height, 0.0),
         );
         spawn_part(
             commands,
@@ -440,7 +497,7 @@ pub fn attach_cartoon_character(
             CartoonPartKind::Belt,
             Mesh::from(Cuboid::new(0.19 * s, 0.17 * s, 0.06 * s)),
             emissive_mat(materials, config.accent, 1.6),
-            Transform::from_xyz(0.0, -0.38 * s, -0.24 * s),
+            Transform::from_xyz(0.0, -0.38 * s * height, -0.24 * s),
         );
     }
 
@@ -451,9 +508,9 @@ pub fn attach_cartoon_character(
         meshes,
         root,
         CartoonPartKind::Head,
-        Mesh::from(Sphere::new(0.38 * s)),
+        Mesh::from(Sphere::new(0.38 * s * head_scale)),
         skin.clone(),
-        Transform::from_xyz(0.0, 0.58 * s, 0.0),
+        Transform::from_xyz(0.0, head_y, 0.0),
     );
 
     // ── Hair ──────────────────────────────────────────────────────────────────
@@ -463,9 +520,10 @@ pub fn attach_cartoon_character(
         meshes,
         root,
         CartoonPartKind::Hair,
-        Mesh::from(Sphere::new(0.40 * s)),
+        Mesh::from(Sphere::new(0.40 * s * head_scale)),
         hair.clone(),
-        Transform::from_xyz(0.0, 0.76 * s, -0.02 * s).with_scale(Vec3::new(1.02, 0.52, 0.94)),
+        Transform::from_xyz(0.0, head_y + 0.18 * s * head_scale, -0.02 * s)
+            .with_scale(Vec3::new(1.02, 0.52, 0.94)),
     );
     // Back curtain
     spawn_part(
@@ -646,9 +704,9 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             kind,
-            Mesh::from(Cuboid::new(0.19 * s, 0.62 * s, 0.19 * s)),
+            Mesh::from(Cuboid::new(0.19 * s, 0.62 * s * arm_length, 0.19 * s)),
             outfit.clone(),
-            Transform::from_xyz(x, -0.12 * s, 0.0),
+            Transform::from_xyz(x, -0.12 * s - (arm_length - 1.0) * 0.10 * s, 0.0),
         );
     }
     let hand_mat = if config.has_gloves {
@@ -665,14 +723,15 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             kind,
-            Mesh::from(Sphere::new(0.135 * s)),
+            Mesh::from(Sphere::new(0.135 * s * hand_scale)),
             hand_mat.clone(),
-            Transform::from_xyz(x, -0.50 * s, 0.02 * s).with_scale(Vec3::new(1.05, 1.10, 0.92)),
+            Transform::from_xyz(x, -0.50 * s - (arm_length - 1.0) * 0.28 * s, 0.02 * s)
+                .with_scale(Vec3::new(1.05, 1.10, 0.92)),
         );
     }
 
     // ── Legs + Boots (chunkier, more exaggerated feet) ───────────────────────
-    let leg_x = 0.195 * s * bw;
+    let leg_x = 0.195 * s * hip_width;
     let boot_mat = if config.has_boots {
         accent.clone()
     } else {
@@ -687,9 +746,9 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             leg_k,
-            Mesh::from(Cuboid::new(0.22 * s, 0.68 * s, 0.22 * s)),
+            Mesh::from(Cuboid::new(0.22 * s, 0.68 * s * leg_length, 0.22 * s)),
             outfit.clone(),
-            Transform::from_xyz(x, -0.80 * s, 0.0),
+            Transform::from_xyz(x, -0.80 * s - (leg_length - 1.0) * 0.12 * s, 0.0),
         );
         // Oversized cartoon foot
         spawn_part(
@@ -697,9 +756,13 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             foot_k,
-            Mesh::from(Cuboid::new(0.34 * s, 0.14 * s, 0.50 * s)),
+            Mesh::from(Cuboid::new(
+                0.34 * s * foot_scale,
+                0.14 * s,
+                0.50 * s * foot_scale,
+            )),
             boot_mat.clone(),
-            Transform::from_xyz(x, -1.22 * s, -0.12 * s),
+            Transform::from_xyz(x, -1.22 * s - (leg_length - 1.0) * 0.30 * s, -0.12 * s),
         );
         if config.has_boots {
             let boot_kind = if x < 0.0 {
@@ -712,9 +775,13 @@ pub fn attach_cartoon_character(
                 meshes,
                 root,
                 boot_kind,
-                Mesh::from(Cuboid::new(0.27 * s, 0.27 * s, 0.27 * s)),
+                Mesh::from(Cuboid::new(
+                    0.27 * s * foot_scale,
+                    0.27 * s,
+                    0.27 * s * foot_scale,
+                )),
                 boot_mat.clone(),
-                Transform::from_xyz(x, -1.00 * s, -0.03 * s),
+                Transform::from_xyz(x, -1.00 * s - (leg_length - 1.0) * 0.20 * s, -0.03 * s),
             );
         }
     }

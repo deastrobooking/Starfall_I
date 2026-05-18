@@ -28,9 +28,9 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 
 **Known limitations:**
 - Chapter director spawns use the first active player as the encounter anchor.
-- The primary HUD and save snapshot display/store the first active player's stats.
-- Crafting, chests, companions, and vehicles still need a complete per-player ownership pass.
-- Vehicles are controlled by P1; all players share the speed/force buff.
+- HUD stat/weapon panels, save snapshots, companions, crafting, chests, and vehicle buffs are keyed by `PlayerIndex`.
+- Some reward pickup paths still need a complete per-player ownership pass.
+- Vehicle buffs apply to the activating player, but the party still shares one active vehicle mode at a time.
 - Camera shake is a single global pool - any player being hit shakes all cameras.
 
 ---
@@ -59,6 +59,28 @@ Dodge: invulnerable during the `dodge_duration = 0.3s` window; costs 20 stamina;
 Parry: 0.2s window on press; absorbs the next hit; 1.0s cooldown.
 
 Stamina regens at 10/sec while not dodging.
+
+## Character Authoring
+
+**Files:** `src/character_blueprint.rs`, `src/characters.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
+
+The character designer now stores confirmed edits as `CharacterBlueprint` data rather than only transient UI overrides. A blueprint includes:
+
+- `BodyRecipe` proportions: height, shoulders, chest, arms, legs, hands, feet, head, posture/mass fields.
+- Procedural part, material, socket, rig, animation, movement, equipment, and editor recipe sections.
+- Derived `MovementProfile` and `GameplayStatsRecipe` values.
+
+The current runtime consumes the first practical slice of that model:
+
+| Body value | Runtime effect |
+|---|---|
+| Height / legs | Character proportions, collider height, stride, jump force |
+| Shoulders / chest / hips | Character width, collider radius, armor capacity |
+| Arms / hands | Visual reach proportions and derived melee reach metadata |
+| Feet / mass | Dodge tuning, stamina, armor, health, knockback metadata |
+| Head | Cartoon head and hair scale |
+
+Confirmed blueprints are kept on each player-select slot, saved into `starfall_i_save.json`, and restored on load. The full procedural mesh/rig/timeline editor is still future work; the saved schema is intentionally larger than the current renderer so it can grow without replacing save data.
 
 ---
 
@@ -301,9 +323,20 @@ Save file: `starfall_i_save.json` (written next to the binary).
 - **Manual save**: F5 key.
 - **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
 
-Saved fields: `level`, `experience`, `credits`, `max_health`, `max_stamina`, `max_armor`, `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, and perk ranks.
+Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, and player-slot character blueprints.
 
-Multiplayer note: the current save snapshot stores the first active player's stats plus shared progression/perk data.
+Saved per-player fields live in `players[]` records keyed by `player_index`: level, experience, credits, health, stamina, and armor values. Older top-level stat fields are still accepted for legacy save migration, but new saves use the per-player records as the authoritative source.
+
+## Companions
+
+**Plugin:** `CompanionPlugin` | **Component:** `Companion`
+
+Companions now carry an `owner: u8` matching `PlayerIndex`.
+
+- Default medic drones and pets spawn once per active player when play starts.
+- Follow and heal behavior resolves the owning player instead of using a single-player query.
+- Combat assist targets enemies near the companion and near the owning player.
+- Companion recruit beacons assign the new ally to the player who collected the beacon.
 
 ---
 

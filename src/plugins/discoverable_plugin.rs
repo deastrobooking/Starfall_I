@@ -8,7 +8,7 @@ use crate::components::discoverable::{
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
 use crate::components::mods::{ArmorMod, PlayerLoadout, WeaponMod};
-use crate::components::player::Player;
+use crate::components::player::{Player, PlayerIndex};
 use crate::components::weapon::{BeamSabre, BeamSabreLocked};
 use crate::events::*;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
@@ -470,7 +470,7 @@ fn set_node_material(
 #[allow(clippy::too_many_arguments)]
 fn discoverable_pickup_system(
     mut commands: Commands,
-    player_q: Query<(Entity, &Transform), With<Player>>,
+    player_q: Query<(Entity, &PlayerIndex, &Transform), With<Player>>,
     disc_q: Query<(Entity, &Transform, &Discoverable)>,
     encounter_q: Query<(Entity, &PuzzleRelicEncounter)>,
     fragment_piece_q: Query<(Entity, &RelicFragmentPuzzlePiece)>,
@@ -484,9 +484,11 @@ fn discoverable_pickup_system(
     mut companion_ev: EventWriter<CompanionRecruitedEvent>,
 ) {
     for (e, t, d) in disc_q.iter() {
-        let Some((player_entity, _)) = player_q.iter().find(|(_, player_transform)| {
-            player_transform.translation.distance(t.translation) <= 2.5
-        }) else {
+        let Some((player_entity, player_index, _)) =
+            player_q.iter().find(|(_, _, player_transform)| {
+                player_transform.translation.distance(t.translation) <= 2.5
+            })
+        else {
             continue;
         };
         match &d.kind {
@@ -528,6 +530,7 @@ fn discoverable_pickup_system(
                 progress.recruit(name);
                 companion_ev.send(CompanionRecruitedEvent {
                     name: (*name).into(),
+                    player_index: player_index.0,
                 });
                 radio_ev.send(RadioChatterEvent {
                     speaker: (*name).into(),

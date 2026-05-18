@@ -7,6 +7,7 @@ use bevy::window::WindowResolution;
 use bevy_rapier3d::prelude::*;
 
 mod chapters;
+mod character_blueprint;
 mod characters;
 mod components;
 mod damage;

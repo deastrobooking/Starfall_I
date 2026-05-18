@@ -11,6 +11,7 @@ pub enum CompanionKind {
 // ── Companion Component ───────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct Companion {
+    pub owner: u8,
     pub kind: CompanionKind,
     pub preset_name: String,
     pub health: f32,
@@ -33,6 +34,7 @@ impl Companion {
     pub fn ally(preset_name: impl Into<String>) -> Self {
         Self {
             kind: CompanionKind::Ally,
+            owner: 0,
             preset_name: preset_name.into(),
             health: 150.0,
             max_health: 150.0,
@@ -54,6 +56,7 @@ impl Companion {
     pub fn pet(preset_name: impl Into<String>) -> Self {
         Self {
             kind: CompanionKind::Pet,
+            owner: 0,
             preset_name: preset_name.into(),
             health: 50.0,
             max_health: 50.0,
@@ -75,6 +78,7 @@ impl Companion {
     pub fn medic_drone(preset_name: impl Into<String>) -> Self {
         Self {
             kind: CompanionKind::MedicDrone,
+            owner: 0,
             preset_name: preset_name.into(),
             health: 100.0,
             max_health: 100.0,
@@ -92,11 +96,18 @@ impl Companion {
             is_alive: true,
         }
     }
+
+    pub fn with_owner(mut self, owner: u8) -> Self {
+        self.owner = owner;
+        self.orbit_angle += owner as f32 * 1.7;
+        self
+    }
 }
 
 // ── Companion Projectile ──────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct CompanionProjectile {
+    pub owner: u8,
     pub damage: f32,
     pub speed: f32,
     pub direction: Vec3,

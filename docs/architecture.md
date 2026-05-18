@@ -11,6 +11,7 @@ src/
   events.rs                 All game events + EventsPlugin
   damage.rs                 Health, Damageable, DamageInfo, apply_damage(), area_damage_falloff()
   resources.rs              Shared resources (WaveInfo, GameSettings, CurrentChapter, ...)
+  character_blueprint.rs    Serializable editable character recipes: body, parts, materials, sockets, rig, animation, movement
   perks.rs                  PerkTree, PerkBranch, PerkDef — Heart / Star / Acrobat branches
   characters.rs             Cartoon character construction, hero color configs, designer presets
   chapters/mod.rs           All 14 ChapterDef scripts + Biome palettes
@@ -86,12 +87,13 @@ PlayerInput components on each Player
 EnemyPlugin:  reads Projectile + Player position → updates EnemyStateMachine, drones, bosses
 ChapterPlugin: listens to EnemyKilledEvent / BossDefeatedEvent → advances EncounterStep
 DiscoverablePlugin: handles collectible beacons, secret cave charting, ordered relic-switch puzzles, and relic-fragment assembly
-UiPlugin:     listens to all events → updates HUD, radio chatter, damage numbers
-SavePlugin:   reads PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree → JSON on disk
+UiPlugin:     listens to all events → updates per-player HUD panels, radio chatter, damage numbers
+SavePlugin:   reads PlayerIndex + PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree + CharacterBlueprints → JSON on disk
 ```
 
 ## Key Design Choices
 
+- **Editable character recipes, not baked meshes**: `CharacterBlueprint` stores body sliders, procedural part recipes, materials, sockets, rig metadata, animation profiles, movement profiles, and gameplay stats. The current cartoon renderer consumes the body/material portions, while the data model leaves room for fuller mesh, rig, and editor tooling.
 - **KinematicPositionBased physics**: Player is a Rapier kinematic capsule; movement is computed manually each frame via `KinematicCharacterController.translation`. This gives full control over wall jumps, edge grabs, and jetpack without fighting Rapier's dynamic solver.
 - **State machines on components**: Both `PlayerStateMachine` and `EnemyStateMachine` use allow-list transition tables so illegal state jumps are caught at the call site. `force()` bypasses the table for death/reset paths.
 - **Chapter director replaces wave loop**: `CurrentChapter` + `ChapterPlugin` replaces the old `WaveInfo`-driven loop. `WaveInfo` is kept alive only for legacy loot and save compatibility.
@@ -100,5 +102,6 @@ SavePlugin:   reads PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree
 - **Secret caves are authored world anchors**: `WorldPlugin` spawns one cave system per chapter, while `PlaceSecretCave` drops a save-backed discovery beacon at that cave's inner anchor.
 - **Castle airships are encounter steps**: boss escapes and airship-deck raids are authored as `EncounterStep`s, so castle chapters can add a flying rematch without creating a separate top-level game state.
 - **PlayerInput abstraction**: All gameplay input is written into a `PlayerInput` component per player, keeping keyboard/gamepad mapping in `input_plugin.rs` and player behavior in feature plugins.
+- **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, and companion ownership use `PlayerIndex` as the shared key. Shared campaign systems still intentionally live in resources like `ChapterProgress` and `PerkTree`.
 - **Global perk tree**: `PerkTree` is a shared campaign resource. Level-ups award points, chapter select spends them, combat/movement systems read the resulting multipliers, and save/load persists the ranks.
 - **Damage pipeline**: `DamageInfo → apply_damage() → DamageResult` with resistance multipliers, then callers emit events. Parry and armor are handled in `damage_player()` in player_plugin before the generic pipeline.

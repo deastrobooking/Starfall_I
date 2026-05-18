@@ -94,27 +94,31 @@ fn cleanup_chests(
 
 fn chest_proximity_system(
     mut commands: Commands,
-    mut player_q: Query<(&Transform, &mut PlayerStats), With<Player>>,
+    player_q: Query<(Entity, &Transform), With<Player>>,
+    mut player_stats_q: Query<&mut PlayerStats, With<Player>>,
     mut player_health_q: Query<&mut Health, With<Player>>,
     mut chest_q: Query<(Entity, &Transform, &mut Chest)>,
     mut loot_ev: EventWriter<LootCollectedEvent>,
     mut chest_ev: EventWriter<ChestOpenedEvent>,
     mut score: ResMut<PlayerScore>,
 ) {
-    let Ok((pt, mut stats)) = player_q.get_single_mut() else {
-        return;
-    };
-    let player_pos = pt.translation;
-
     for (entity, chest_transform, mut chest) in chest_q.iter_mut() {
         if chest.is_open {
             continue;
         }
 
-        let dist = player_pos.distance(chest_transform.translation);
-        if dist > 2.0 {
+        let Some((player_entity, _)) = player_q
+            .iter()
+            .filter_map(|(player_entity, player_transform)| {
+                let dist = player_transform
+                    .translation
+                    .distance(chest_transform.translation);
+                (dist <= 2.0).then_some((player_entity, dist))
+            })
+            .min_by(|(_, left_dist), (_, right_dist)| left_dist.total_cmp(right_dist))
+        else {
             continue;
-        }
+        };
 
         // Open the chest
         chest.is_open = true;
@@ -124,15 +128,19 @@ fn chest_proximity_system(
         let amount = chest.loot_amount;
         match chest.loot_type {
             LootType::Credits => {
-                stats.credits += amount;
+                if let Ok(mut stats) = player_stats_q.get_mut(player_entity) {
+                    stats.credits += amount;
+                }
             }
             LootType::Health => {
-                if let Ok(mut h) = player_health_q.get_single_mut() {
+                if let Ok(mut h) = player_health_q.get_mut(player_entity) {
                     h.heal(amount as f32);
                 }
             }
             LootType::Armor => {
-                stats.armor = (stats.armor + amount as f32).min(stats.max_armor);
+                if let Ok(mut stats) = player_stats_q.get_mut(player_entity) {
+                    stats.armor = (stats.armor + amount as f32).min(stats.max_armor);
+                }
             }
             LootType::Ammo | LootType::WeaponUpgrade => {}
         }

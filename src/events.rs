@@ -162,6 +162,7 @@ pub struct DiscoverableCollectedEvent {
 #[derive(Event, Debug)]
 pub struct CompanionRecruitedEvent {
     pub name: String,
+    pub player_index: u8,
 }
 
 #[derive(Event, Debug)]

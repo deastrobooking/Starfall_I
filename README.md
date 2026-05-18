@@ -8,7 +8,8 @@ The current build keeps the existing open 3D world, chapter director, RPG stats,
 
 Implemented:
 
-- Player-select flow for 1-4 local players, split-screen cameras, keyboard/gamepad input, and character customization.
+- Player-select flow for 1-4 local players, split-screen cameras, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
+- Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, in-game body steppers, and gameplay-linked body stats.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, secret cave systems, and dragon-domain spaces.
 - Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
@@ -17,7 +18,7 @@ Implemented:
 
 In progress:
 
-- Local multiplayer is playable at the input/camera/player level, but several supporting systems still use a first-player or shared-state model. Crafting, chests, companions, vehicles, the primary HUD, and save snapshots need a full per-player pass.
+- Local multiplayer is playable at the input/camera/player level, and save snapshots, HUD panels, companions, crafting, chests, and vehicle buffs are now keyed per player. Some reward paths, armor debug cycling, and shared combat feedback still need a full per-player pass.
 - Perks are functional and saved, but the chapter-select perk UI is intentionally lightweight and keyboard-only.
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
 - The robot/chassis editor exists as a simple preset and scale screen; deeper part-by-part design is still future design work.
@@ -48,7 +49,7 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 - Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, hidden cave systems, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
 - Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto their airship, clear the deck, then defeat them again.
 - Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, and shockwave hazards.
-- 4-player local multiplayer remains the design target; the current implementation has the core player split but still needs per-player support in several RPG and interaction systems.
+- 4-player local multiplayer remains the design target; the current implementation has the core player split plus per-player HUD/save/companions/crafting/chests/vehicle buffs, but still needs per-player support in a few reward and feedback systems.
 
 ## Quick Start
 
@@ -74,6 +75,8 @@ cargo run --features dynamic
 8. Game Over
 
 Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume.
+
+Character design supports outfit/accent/hair swatches, accessory toggles, and body-shape steppers for height, shoulders, chest, arms, legs, hands, feet, head, and mass. Confirming stores an editable character blueprint; body proportions feed the visible character, collider size, movement tuning, stamina, armor capacity, and health.
 
 Perk training is also in chapter select. Leveling up grants one perk point; spend points with:
 
@@ -191,6 +194,7 @@ src/
   damage.rs                       Health, resistances, and shared damage helpers
   rendering.rs                    Local Bevy render bundles used by world/entity spawners
   resources.rs                    Shared resources and progression state
+  character_blueprint.rs          Serializable character recipes, procedural parts, sockets, rig, animation, movement data
   perks.rs                        Heart / Star / Acrobat perk tree
   characters.rs                   Retro cartoon character construction, colors, and presets
   chapters/mod.rs                 Starfall I chapter scripts and biomes

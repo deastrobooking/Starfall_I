@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::components::companion::*;
 use crate::components::enemy::Enemy;
-use crate::components::player::Player;
+use crate::components::player::{Player, PlayerIndex};
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::{
     CompanionRecruitedEvent, EnemyDamagedEvent, EnemyKilledEvent, PlayerHealedEvent,
@@ -39,33 +39,32 @@ fn setup_companions(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     transition: Res<PlaySessionTransition>,
-    player_q: Query<&Transform, With<Player>>,
+    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
     existing_companions: Query<Entity, With<Companion>>,
 ) {
     if transition.resuming_from_pause || !existing_companions.is_empty() {
         return;
     }
 
-    let Ok(pt) = player_q.get_single() else {
-        return;
-    };
-    let base = pt.translation;
+    for (index, pt) in player_q.iter() {
+        let base = pt.translation;
+        let owner = index.0;
 
-    // Spawn default companions
-    spawn_companion_entity(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        Companion::medic_drone("MedicDrone"),
-        base + Vec3::new(3.0, 2.0, 0.0),
-    );
-    spawn_companion_entity(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        Companion::pet("SparkPup"),
-        base + Vec3::new(-3.0, 0.0, 0.0),
-    );
+        spawn_companion_entity(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            Companion::medic_drone(format!("P{} MedicDrone", owner + 1)).with_owner(owner),
+            base + Vec3::new(3.0, 2.0, 0.0),
+        );
+        spawn_companion_entity(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            Companion::pet(format!("P{} SparkPup", owner + 1)).with_owner(owner),
+            base + Vec3::new(-3.0, 0.0, 0.0),
+        );
+    }
 }
 
 fn spawn_companion_entity(
@@ -123,18 +122,20 @@ fn cleanup_companions(
 // ── Follow ────────────────────────────────────────────────────────────────────
 fn companion_follow_system(
     time: Res<Time>,
-    player_q: Query<&Transform, With<Player>>,
+    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
     mut companion_q: Query<(&mut Transform, &mut Companion), Without<Player>>,
 ) {
-    let Ok(pt) = player_q.get_single() else {
-        return;
-    };
-    let player_pos = pt.translation;
-
     for (mut transform, mut companion) in companion_q.iter_mut() {
         if !companion.is_alive {
             continue;
         }
+        let Some((_, pt)) = player_q
+            .iter()
+            .find(|(index, _)| index.0 == companion.owner)
+        else {
+            continue;
+        };
+        let player_pos = pt.translation;
 
         companion.orbit_angle += time.delta_secs() * 0.8;
 
@@ -160,6 +161,7 @@ fn companion_combat_system(
     mut commands: Commands,
     proj_assets: Option<Res<ProjectileAssets>>,
     mut companion_q: Query<(&Transform, &mut Companion), Without<Player>>,
+    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
     enemy_q: Query<(Entity, &Transform, &Health), With<Enemy>>,
 ) {
     let dt = time.delta_secs();
@@ -174,6 +176,12 @@ fn companion_combat_system(
         if companion.attack_timer > 0.0 {
             continue;
         }
+        let Some((_, owner_transform)) = player_q
+            .iter()
+            .find(|(index, _)| index.0 == companion.owner)
+        else {
+            continue;
+        };
 
         // Find nearest alive enemy in range
         let mut nearest: Option<(Entity, Vec3, f32)> = None;
@@ -182,7 +190,10 @@ fn companion_combat_system(
                 continue;
             }
             let dist = c_transform.translation.distance(e_transform.translation);
-            if dist <= companion.attack_range {
+            let owner_dist = owner_transform
+                .translation
+                .distance(e_transform.translation);
+            if dist <= companion.attack_range && owner_dist <= companion.attack_range + 10.0 {
                 if nearest.map_or(true, |(_, _, d)| dist < d) {
                     nearest = Some((e_entity, e_transform.translation, dist));
                 }
@@ -199,6 +210,7 @@ fn companion_combat_system(
                     ..default()
                 },
                 CompanionProjectile {
+                    owner: companion.owner,
                     damage: companion.attack_damage,
                     speed: 25.0,
                     direction: dir,
@@ -214,13 +226,10 @@ fn companion_combat_system(
 fn companion_heal_system(
     time: Res<Time>,
     mut companion_q: Query<&mut Companion>,
-    mut player_q: Query<&mut Health, With<Player>>,
+    mut player_q: Query<(&PlayerIndex, &mut Health), With<Player>>,
     mut heal_ev: EventWriter<PlayerHealedEvent>,
 ) {
     let dt = time.delta_secs();
-    let Ok(mut p_health) = player_q.get_single_mut() else {
-        return;
-    };
 
     for mut companion in companion_q.iter_mut() {
         if !companion.can_heal || !companion.is_alive {
@@ -231,6 +240,13 @@ fn companion_heal_system(
         if companion.heal_timer > 0.0 {
             continue;
         }
+
+        let Some((_, mut p_health)) = player_q
+            .iter_mut()
+            .find(|(index, _)| index.0 == companion.owner)
+        else {
+            continue;
+        };
 
         p_health.heal(companion.heal_amount);
         companion.heal_timer = companion.heal_cooldown;
@@ -300,18 +316,21 @@ fn recruit_companion_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    player_q: Query<&Transform, With<Player>>,
+    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
 ) {
-    let Ok(pt) = player_q.get_single() else {
-        return;
-    };
     for ev in events.read() {
+        let Some((_, pt)) = player_q
+            .iter()
+            .find(|(index, _)| index.0 == ev.player_index)
+        else {
+            continue;
+        };
         let pos = pt.translation + Vec3::new(2.0, 0.0, 2.0);
         spawn_companion_entity(
             &mut commands,
             &mut meshes,
             &mut materials,
-            Companion::ally(ev.name.clone()),
+            Companion::ally(ev.name.clone()).with_owner(ev.player_index),
             pos,
         );
     }

@@ -4,6 +4,7 @@ use bevy::transform::TransformSystem;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_rapier3d::prelude::*;
 
+use crate::character_blueprint::CharacterBlueprint;
 use crate::characters::{
     accent_preset, attach_cartoon_character, despawn_cartoon_character_parts, hair_preset,
     hero_config_with_overrides, outfit_preset,
@@ -108,6 +109,47 @@ fn player_viewport(index: u8, active: u8, win_w: u32, win_h: u32) -> Option<View
     })
 }
 
+fn authored_player_defaults(
+    blueprint: Option<&CharacterBlueprint>,
+) -> (PlayerStats, PlayerMovement, DodgeState, Collider) {
+    let mut stats = PlayerStats::default();
+    let mut movement = PlayerMovement::default();
+    let mut dodge = DodgeState::new();
+    let mut half_height = 0.6;
+    let mut radius = 0.35;
+
+    if let Some(blueprint) = blueprint {
+        let body = blueprint.body.validated();
+        let movement_profile = blueprint.movement_profile;
+        let gameplay = blueprint.gameplay_stats;
+
+        movement.walk_speed = movement_profile.walk_speed;
+        movement.sprint_speed = movement_profile.sprint_speed;
+        movement.jump_force = movement_profile.jump_force;
+        movement.air_accel = movement_profile.air_control;
+
+        dodge.dodge_speed = movement_profile.dodge_speed;
+        dodge.dodge_cost = movement_profile.dodge_cost;
+
+        stats.max_health = gameplay.max_health;
+        stats.max_stamina = gameplay.max_stamina;
+        stats.stamina = gameplay.max_stamina;
+        stats.max_armor = gameplay.max_armor;
+        stats.armor = gameplay.max_armor;
+
+        half_height = 0.6 * (body.height * 0.72 + body.leg_length * 0.28);
+        radius =
+            0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20);
+    }
+
+    (
+        stats,
+        movement,
+        dodge,
+        Collider::capsule_y(half_height.clamp(0.44, 0.86), radius.clamp(0.26, 0.50)),
+    )
+}
+
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 fn spawn_players(
     mut commands: Commands,
@@ -132,6 +174,9 @@ fn spawn_players(
 
     for i in 0..active {
         let spawn_pos = player_spawn_position(i);
+        let slot = &select.slots[i as usize];
+        let (player_stats, player_movement, dodge_state, player_collider) =
+            authored_player_defaults(slot.blueprint.as_ref());
 
         let player = commands
             .spawn((
@@ -144,7 +189,7 @@ fn spawn_players(
                 InheritedVisibility::default(),
                 ViewVisibility::default(),
                 RigidBody::KinematicPositionBased,
-                Collider::capsule_y(0.6, 0.35),
+                player_collider,
                 KinematicCharacterController {
                     up: Vec3::Y,
                     offset: CharacterLength::Absolute(0.02),
@@ -158,16 +203,16 @@ fn spawn_players(
                     ..default()
                 },
                 KinematicCharacterControllerOutput::default(),
-                PlayerStats::default(),
-                PlayerMovement::default(),
+                player_stats.clone(),
+                player_movement,
             ))
             .insert((
                 JetpackState::default(),
                 EdgeGrabState::new(),
-                DodgeState::new(),
+                dodge_state,
                 ParryState::new(),
                 PlayerStateMachine::default(),
-                Health::new(100.0),
+                Health::new(player_stats.max_health),
                 Damageable::default(),
             ))
             .insert((
@@ -180,25 +225,28 @@ fn spawn_players(
             ))
             .id();
 
-        let slot = &select.slots[i as usize];
         despawn_cartoon_character_parts(&mut commands, player, &existing_parts);
+        let mut character_config = hero_config_with_overrides(
+            select.character_name(i as usize),
+            slot.outfit_idx.map(outfit_preset),
+            slot.accent_idx.map(accent_preset),
+            slot.hair_idx.map(hair_preset),
+            slot.has_hood,
+            slot.has_cape,
+            slot.has_gloves,
+            slot.has_boots,
+            slot.has_shoulder_pads,
+            slot.has_visor,
+        );
+        if let Some(blueprint) = slot.blueprint.as_ref() {
+            character_config = character_config.with_blueprint(blueprint);
+        }
         attach_cartoon_character(
             &mut commands,
             &mut meshes,
             &mut materials,
             player,
-            hero_config_with_overrides(
-                select.character_name(i as usize),
-                slot.outfit_idx.map(outfit_preset),
-                slot.accent_idx.map(accent_preset),
-                slot.hair_idx.map(hair_preset),
-                slot.has_hood,
-                slot.has_cape,
-                slot.has_gloves,
-                slot.has_boots,
-                slot.has_shoulder_pads,
-                slot.has_visor,
-            ),
+            character_config,
             spawn_pos,
         );
 

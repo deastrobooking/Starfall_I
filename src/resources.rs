@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::chapters::{Biome, ChapterId};
+use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
 use crate::robots::designer::RobotStyle;
 
 // ── Wave State (legacy population counter) ────────────────────────────────────
@@ -269,6 +270,7 @@ pub struct CharacterDesignData {
     pub outfit_idx: usize,
     pub accent_idx: usize,
     pub hair_idx: usize,
+    pub body: BodyRecipe,
     pub has_hood: bool,
     pub has_cape: bool,
     pub has_gloves: bool,
@@ -287,6 +289,7 @@ impl Default for CharacterDesignData {
             outfit_idx: 0,
             accent_idx: 0,
             hair_idx: 0,
+            body: BodyRecipe::default(),
             has_hood: true,
             has_cape: true,
             has_gloves: true,
@@ -320,6 +323,7 @@ pub struct PlayerSlotConfig {
     pub has_boots: Option<bool>,
     pub has_shoulder_pads: Option<bool>,
     pub has_visor: Option<bool>,
+    pub blueprint: Option<CharacterBlueprint>,
 }
 
 impl Default for PlayerSlotConfig {
@@ -338,6 +342,7 @@ impl Default for PlayerSlotConfig {
             has_boots: None,
             has_shoulder_pads: None,
             has_visor: None,
+            blueprint: None,
         }
     }
 }
