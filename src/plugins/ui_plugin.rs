@@ -40,14 +40,7 @@ impl Plugin for UiPlugin {
             .add_systems(OnExit(AppState::PlayerSelect), despawn_player_select)
             .add_systems(OnEnter(AppState::ChapterSelect), setup_chapter_select)
             .add_systems(OnExit(AppState::ChapterSelect), despawn_chapter_select)
-            .add_systems(
-                OnEnter(AppState::Playing),
-                (setup_hud, despawn_menu, despawn_menu_camera),
-            )
-            .add_systems(
-                Update,
-                despawn_menu_camera.run_if(in_state(AppState::Playing)),
-            )
+            .add_systems(OnEnter(AppState::Playing), (setup_hud, despawn_menu))
             .add_systems(
                 OnEnter(AppState::Paused),
                 (setup_pause_menu, freeze_physics_on_pause),
@@ -167,12 +160,14 @@ enum PausePage {
 struct PauseMenuState {
     page: PausePage,
     resume_lockout: f32,
+    resume_armed: bool,
 }
 impl Default for PauseMenuState {
     fn default() -> Self {
         Self {
             page: PausePage::Main,
             resume_lockout: 0.0,
+            resume_armed: true,
         }
     }
 }
@@ -240,8 +235,11 @@ struct CraftingPanelState {
     owner: Option<u8>,
 }
 
-// ── Menu Camera ───────────────────────────────────────────────────────────────
-fn spawn_menu_camera(mut commands: Commands) {
+// ── UI Fallback Camera ────────────────────────────────────────────────────────
+fn spawn_menu_camera(mut commands: Commands, existing: Query<Entity, With<MenuCamera>>) {
+    if !existing.is_empty() {
+        return;
+    }
     commands.spawn((
         Camera3dBundle {
             camera: Camera {
@@ -252,12 +250,6 @@ fn spawn_menu_camera(mut commands: Commands) {
         },
         MenuCamera,
     ));
-}
-
-fn despawn_menu_camera(mut commands: Commands, q: Query<Entity, With<MenuCamera>>) {
-    for e in q.iter() {
-        commands.entity(e).despawn_recursive();
-    }
 }
 
 // ── Menu Setup ────────────────────────────────────────────────────────────────
@@ -315,9 +307,21 @@ fn setup_main_menu(mut commands: Commands) {
 }
 
 fn menu_start_button(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
+    if keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::Space)
+        || gamepads.iter().any(|gamepad| {
+            gamepad.just_pressed(GamepadButton::Start) || gamepad.just_pressed(GamepadButton::South)
+        })
+    {
+        next_state.set(AppState::PlayerSelect);
+        return;
+    }
+
     for interaction in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
             next_state.set(AppState::PlayerSelect);
@@ -328,6 +332,7 @@ fn menu_start_button(
 fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
     menu.page = PausePage::Main;
     menu.resume_lockout = 0.20;
+    menu.resume_armed = false;
     commands
         .spawn((
             Node {
@@ -526,29 +531,36 @@ fn pause_input_system(
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let pause_pressed = keyboard.just_pressed(KeyCode::Escape)
+    let raw_pause_pressed = keyboard.just_pressed(KeyCode::Escape)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::Start))
-        || input_q.iter().any(|input| input.pause);
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::Start));
+    let pause_held = keyboard.pressed(KeyCode::Escape)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.pressed(GamepadButton::Start));
+    let player_pause_pressed = input_q.iter().any(|input| input.pause);
 
     if matches!(state.get(), AppState::Paused) {
         menu.resume_lockout = (menu.resume_lockout - time.delta_secs()).max(0.0);
-    }
-
-    if !pause_pressed {
-        return;
+        if !pause_held && menu.resume_lockout <= 0.0 {
+            menu.resume_armed = true;
+        }
     }
 
     match state.get() {
         AppState::Playing => {
+            if !(raw_pause_pressed || player_pause_pressed) {
+                return;
+            }
             transition.pausing = true;
             transition.resuming_from_pause = false;
             menu.resume_lockout = 0.20;
+            menu.resume_armed = false;
             next_state.set(AppState::Paused);
         }
         AppState::Paused => {
-            if menu.resume_lockout > 0.0 {
+            if !raw_pause_pressed || !menu.resume_armed {
                 return;
             }
             transition.pausing = false;
@@ -968,7 +980,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         ));
 
                         // Controller info (live axes)
-                        let ctrl_text = if i == 0 { "KEYBOARD + MOUSE" } else { "waiting..." };
+                        let ctrl_text = if i == 0 { "KEYBOARD + GAMEPAD 1" } else { "waiting..." };
                         card.spawn((
                             Text::new(ctrl_text),
                             TextFont { font_size: 13.0, ..default() },
@@ -977,7 +989,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         ));
 
                         // Status / instruction
-                        let status = if i == 0 { "[ ENTER ] Ready" } else { "Press any btn to join" };
+                        let status = if i == 0 { "[ ENTER / A ] Ready" } else { "Press any btn to join" };
                         card.spawn((
                             Text::new(status),
                             TextFont { font_size: 15.0, ..default() },
@@ -990,7 +1002,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
 
             // Footer hints
             root.spawn((
-                Text::new("P1: ← → chars  |  Enter = ready  |  C = customize  |  ESC = back\nP2-P4: any button joins  |  D-pad/stick = chars  |  A = ready  |  Y = customize  |  B = leave"),
+                Text::new("P1: ← → / left stick chars  |  Enter/A = ready  |  C/Y = customize  |  ESC = back\nP2-P4: controller 2+ joins  |  D-pad/stick = chars  |  A = ready  |  Y = customize  |  B = leave"),
                 TextFont { font_size: 14.0, ..default() },
                 TextColor(Color::srgb(0.38, 0.38, 0.5)),
             ));
@@ -1055,39 +1067,67 @@ fn player_select_update(
         return;
     }
 
-    // Sorted gamepads for stable P2/P3/P4 assignment
+    // Sorted gamepads for stable assignment. Gameplay maps gamepad 0 to P1,
+    // so the lobby must do the same or the first controller appears dead.
     let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
     gps.sort_by_key(|(e, _)| e.index());
+    let p1_gp = gps.first().map(|(_, gamepad)| *gamepad);
 
-    // ── P1 (always joined, keyboard) ──────────────────────────────────────────
+    // ── P1 (always joined, keyboard + gamepad 0) ─────────────────────────────
     {
         let slot = &mut select.slots[0];
         slot.joined = true;
         slot.stick_cooldown = (slot.stick_cooldown - dt).max(0.0);
 
         if !slot.ready && slot.stick_cooldown <= 0.0 {
-            if keyboard.just_pressed(KeyCode::ArrowLeft) {
+            let lx = p1_gp
+                .and_then(|gamepad| gamepad.get(GamepadAxis::LeftStickX))
+                .unwrap_or(0.0);
+            let left = keyboard.just_pressed(KeyCode::ArrowLeft)
+                || p1_gp
+                    .map(|gamepad| gamepad.just_pressed(GamepadButton::DPadLeft))
+                    .unwrap_or(false)
+                || lx < -0.5;
+            let right = keyboard.just_pressed(KeyCode::ArrowRight)
+                || p1_gp
+                    .map(|gamepad| gamepad.just_pressed(GamepadButton::DPadRight))
+                    .unwrap_or(false)
+                || lx > 0.5;
+            if left {
                 slot.character_index = (slot.character_index + 3) % 4;
                 slot.stick_cooldown = 0.18;
-            } else if keyboard.just_pressed(KeyCode::ArrowRight) {
+            } else if right {
                 slot.character_index = (slot.character_index + 1) % 4;
                 slot.stick_cooldown = 0.18;
             }
         }
-        if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+        if keyboard.just_pressed(KeyCode::Enter)
+            || keyboard.just_pressed(KeyCode::Space)
+            || p1_gp
+                .map(|gamepad| {
+                    gamepad.just_pressed(GamepadButton::South)
+                        || gamepad.just_pressed(GamepadButton::Start)
+                })
+                .unwrap_or(false)
+        {
             slot.ready = !slot.ready;
         }
         // C = open character designer for P1
-        if keyboard.just_pressed(KeyCode::KeyC) && !slot.ready {
+        if (keyboard.just_pressed(KeyCode::KeyC)
+            || p1_gp
+                .map(|gamepad| gamepad.just_pressed(GamepadButton::North))
+                .unwrap_or(false))
+            && !slot.ready
+        {
             design_data.player_index = 0;
             next_state.set(AppState::CharacterDesign);
             return;
         }
     }
 
-    // ── P2-P4 (gamepads) ──────────────────────────────────────────────────────
+    // ── P2-P4 (gamepads 1+) ──────────────────────────────────────────────────
     for i in 1u8..4 {
-        let gp_idx = (i - 1) as usize;
+        let gp_idx = i as usize;
         let slot = &mut select.slots[i as usize];
         slot.stick_cooldown = (slot.stick_cooldown - dt).max(0.0);
 
@@ -1166,7 +1206,7 @@ fn player_select_update(
         let s = &select.slots[i];
         *t = Text::new(if !s.joined {
             if i == 0 {
-                "[ ENTER ] Ready"
+                "[ ENTER / A ] Ready"
             } else {
                 "Press any btn to join"
             }
@@ -1174,7 +1214,7 @@ fn player_select_update(
         } else if s.ready {
             "✓  READY".to_string()
         } else if i == 0 {
-            "[ ENTER ] Ready".to_string()
+            "[ ENTER / A ] Ready".to_string()
         } else {
             "[A] Ready    [B] Leave".to_string()
         });
@@ -1183,15 +1223,21 @@ fn player_select_update(
     for (mut t, marker) in input_q.iter_mut() {
         let i = marker.0 as usize;
         if i == 0 {
-            *t = Text::new("KEYBOARD + MOUSE");
+            if let Some((_, gp)) = gps.first() {
+                let lx = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
+                let ly = gp.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
+                *t = Text::new(format!("KEYBOARD + GAMEPAD 1   X:{:+.2} Y:{:+.2}", lx, ly));
+            } else {
+                *t = Text::new("KEYBOARD + GAMEPAD 1");
+            }
         } else {
-            let gp_idx = i - 1;
+            let gp_idx = i;
             if let Some((_, gp)) = gps.get(gp_idx) {
                 let lx = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
                 let ly = gp.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
-                *t = Text::new(format!("GAMEPAD {}   X:{:+.2} Y:{:+.2}", i, lx, ly));
+                *t = Text::new(format!("GAMEPAD {}   X:{:+.2} Y:{:+.2}", i + 1, lx, ly));
             } else {
-                *t = Text::new(format!("GAMEPAD {} — not found", i));
+                *t = Text::new(format!("GAMEPAD {} — not found", i + 1));
             }
         }
     }

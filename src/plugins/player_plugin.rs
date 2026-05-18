@@ -229,7 +229,13 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
     let palette = CharacterPaletteRecipe {
         skin: base.skin,
         outfit: slot.outfit_idx.map(outfit_preset).unwrap_or(base.outfit),
-        accent: slot.accent_idx.map(accent_preset).unwrap_or(base.accent),
+        accent: slot.accent_idx.map(accent_preset).unwrap_or_else(|| {
+            if matches!(name, "Vincenzo" | "Antonio") {
+                Color::srgb(0.12, 0.88, 1.0)
+            } else {
+                base.accent
+            }
+        }),
         hair: slot.hair_idx.map(hair_preset).unwrap_or(base.hair),
         eye: base.eye_color,
     };
@@ -241,7 +247,9 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
         has_shoulder_pads: slot
             .has_shoulder_pads
             .unwrap_or(matches!(name, "Vincenzo" | "Joseph")),
-        has_visor: slot.has_visor.unwrap_or(false),
+        has_visor: slot
+            .has_visor
+            .unwrap_or(matches!(name, "Vincenzo" | "Antonio")),
     };
 
     CharacterBlueprint::hero(name, body, palette, appearance)
@@ -341,6 +349,7 @@ fn spawn_players(
             slot.has_visor,
         );
         character_config = character_config.with_blueprint(&runtime_blueprint);
+        character_config.emissive_eyes = character_config.has_visor;
         attach_cartoon_character(
             &mut commands,
             &mut meshes,
