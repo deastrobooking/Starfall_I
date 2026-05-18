@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
-use bevy::input::gamepad::{GamepadAxis, GamepadButton};
+use bevy::input::gamepad::{GamepadAxis, GamepadButton, GamepadButtonStateChangedEvent};
+use bevy::input::ButtonState;
 use bevy_rapier3d::prelude::RapierConfiguration;
 
 use crate::chapters::{all_chapters, ChapterId};
@@ -112,7 +113,8 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                menu_start_button.run_if(in_state(AppState::MainMenu)),
+                (menu_start_button, main_menu_controller_status_system)
+                    .run_if(in_state(AppState::MainMenu)),
             )
             .add_systems(
                 Update,
@@ -175,6 +177,8 @@ impl Default for PauseMenuState {
 struct GameOverRoot;
 #[derive(Component)]
 struct StartButton;
+#[derive(Component)]
+struct ControllerStatusText;
 #[derive(Component)]
 struct PlayerHudBar {
     player_index: u8,
@@ -300,7 +304,14 @@ fn setup_main_menu(mut commands: Commands) {
         });
         p.spawn(Node { height: Val::Px(30.0), ..default() });
         p.spawn((
-            Text::new("WASD Move  |  Mouse Look  |  LMB Star Beam  |  V/B Mana Combos  |  T Star Sabre\nSpace Jump/Wall Jump  |  Hold toward ledges to hang  |  E Climb  |  7/8/9/0 Energy Tools  |  F Parry  |  Q Drop/Dodge"),
+            Text::new("Controller: scanning..."),
+            TextFont { font_size: 16.0, ..default() },
+            TextColor(Color::srgb(0.60, 0.82, 1.0)),
+            ControllerStatusText,
+        ));
+        p.spawn(Node { height: Val::Px(16.0), ..default() });
+        p.spawn((
+            Text::new("WASD / Left Stick Move  |  Mouse / Right Stick Look  |  A/Space Jump  |  Start/Esc Pause\nLMB/RT Star Beam  |  V/B Mana Combos  |  T Star Sabre  |  E/DPad Down Interact"),
             TextFont { font_size: 14.0, ..default() }, TextColor(Color::srgb(0.5, 0.5, 0.7)),
         ));
     });
@@ -309,14 +320,16 @@ fn setup_main_menu(mut commands: Commands) {
 fn menu_start_button(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    mut button_events: EventReader<GamepadButtonStateChangedEvent>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     if keyboard.just_pressed(KeyCode::Enter)
         || keyboard.just_pressed(KeyCode::Space)
-        || gamepads.iter().any(|gamepad| {
-            gamepad.just_pressed(GamepadButton::Start) || gamepad.just_pressed(GamepadButton::South)
-        })
+        || gamepads.iter().any(gamepad_start_or_confirm_just_pressed)
+        || button_events
+            .read()
+            .any(gamepad_button_event_is_start_or_confirm)
     {
         next_state.set(AppState::PlayerSelect);
         return;
@@ -327,6 +340,50 @@ fn menu_start_button(
             next_state.set(AppState::PlayerSelect);
         }
     }
+}
+
+fn main_menu_controller_status_system(
+    gamepads: Query<(&Name, &Gamepad)>,
+    mut text_q: Query<&mut Text, With<ControllerStatusText>>,
+) {
+    let Ok(mut text) = text_q.get_single_mut() else {
+        return;
+    };
+    let mut connected = gamepads.iter();
+    if let Some((name, gamepad)) = connected.next() {
+        let lx = gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
+        let ly = gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
+        *text = Text::new(format!(
+            "Controller: {} detected   Left Stick X:{:+.2} Y:{:+.2}   Press A or Start",
+            name.as_str(),
+            lx,
+            ly
+        ));
+    } else {
+        *text = Text::new("Controller: not detected yet. Reconnect/power on the Xbox controller, then press A or Start.");
+    }
+}
+
+fn gamepad_start_or_confirm_just_pressed(gamepad: &Gamepad) -> bool {
+    gamepad.any_just_pressed([
+        GamepadButton::Start,
+        GamepadButton::South,
+        GamepadButton::East,
+        GamepadButton::North,
+        GamepadButton::West,
+    ])
+}
+
+fn gamepad_button_event_is_start_or_confirm(event: &GamepadButtonStateChangedEvent) -> bool {
+    event.state == ButtonState::Pressed
+        && matches!(
+            event.button,
+            GamepadButton::Start
+                | GamepadButton::South
+                | GamepadButton::East
+                | GamepadButton::North
+                | GamepadButton::West
+        )
 }
 
 fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
@@ -525,6 +582,7 @@ fn pause_input_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    mut button_events: EventReader<GamepadButtonStateChangedEvent>,
     input_q: Query<&PlayerInput, With<Player>>,
     state: Res<State<AppState>>,
     mut menu: ResMut<PauseMenuState>,
@@ -534,7 +592,10 @@ fn pause_input_system(
     let raw_pause_pressed = keyboard.just_pressed(KeyCode::Escape)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::Start));
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::Start))
+        || button_events.read().any(|event| {
+            event.state == ButtonState::Pressed && event.button == GamepadButton::Start
+        });
     let pause_held = keyboard.pressed(KeyCode::Escape)
         || gamepads
             .iter()
@@ -1018,6 +1079,7 @@ fn despawn_player_select(mut commands: Commands, q: Query<Entity, With<PlayerSel
 fn player_select_update(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
+    mut button_events: EventReader<GamepadButtonStateChangedEvent>,
     time: Res<Time>,
     mut select: ResMut<PlayerSelectState>,
     mut config: ResMut<LocalPlayerConfig>,
@@ -1072,6 +1134,17 @@ fn player_select_update(
     let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
     gps.sort_by_key(|(e, _)| e.index());
     let p1_gp = gps.first().map(|(_, gamepad)| *gamepad);
+    let p1_entity = gps.first().map(|(entity, _)| *entity);
+    let pressed_buttons: Vec<(Entity, GamepadButton)> = button_events
+        .read()
+        .filter(|event| event.state == ButtonState::Pressed)
+        .map(|event| (event.entity, event.button))
+        .collect();
+    let event_pressed = |entity: Entity, button: GamepadButton| {
+        pressed_buttons
+            .iter()
+            .any(|(event_entity, event_button)| *event_entity == entity && *event_button == button)
+    };
 
     // ── P1 (always joined, keyboard + gamepad 0) ─────────────────────────────
     {
@@ -1087,10 +1160,16 @@ fn player_select_update(
                 || p1_gp
                     .map(|gamepad| gamepad.just_pressed(GamepadButton::DPadLeft))
                     .unwrap_or(false)
+                || p1_entity
+                    .map(|entity| event_pressed(entity, GamepadButton::DPadLeft))
+                    .unwrap_or(false)
                 || lx < -0.5;
             let right = keyboard.just_pressed(KeyCode::ArrowRight)
                 || p1_gp
                     .map(|gamepad| gamepad.just_pressed(GamepadButton::DPadRight))
+                    .unwrap_or(false)
+                || p1_entity
+                    .map(|entity| event_pressed(entity, GamepadButton::DPadRight))
                     .unwrap_or(false)
                 || lx > 0.5;
             if left {
@@ -1109,16 +1188,24 @@ fn player_select_update(
                         || gamepad.just_pressed(GamepadButton::Start)
                 })
                 .unwrap_or(false)
+            || p1_entity
+                .map(|entity| {
+                    event_pressed(entity, GamepadButton::South)
+                        || event_pressed(entity, GamepadButton::Start)
+                })
+                .unwrap_or(false)
         {
             slot.ready = !slot.ready;
         }
-        // C = open character designer for P1
-        if (keyboard.just_pressed(KeyCode::KeyC)
+        // C / Y = open character designer for P1
+        let customize_pressed = keyboard.just_pressed(KeyCode::KeyC)
             || p1_gp
                 .map(|gamepad| gamepad.just_pressed(GamepadButton::North))
-                .unwrap_or(false))
-            && !slot.ready
-        {
+                .unwrap_or(false)
+            || p1_entity
+                .map(|entity| event_pressed(entity, GamepadButton::North))
+                .unwrap_or(false);
+        if customize_pressed && !slot.ready {
             design_data.player_index = 0;
             next_state.set(AppState::CharacterDesign);
             return;
@@ -1131,7 +1218,7 @@ fn player_select_update(
         let slot = &mut select.slots[i as usize];
         slot.stick_cooldown = (slot.stick_cooldown - dt).max(0.0);
 
-        let Some((_, gp)) = gps.get(gp_idx) else {
+        let Some((gp_entity, gp)) = gps.get(gp_idx) else {
             slot.joined = false;
             continue;
         };
@@ -1145,7 +1232,7 @@ fn player_select_update(
             GamepadButton::Select,
         ]
         .iter()
-        .any(|&b| gp.just_pressed(b));
+        .any(|&b| gp.just_pressed(b) || event_pressed(*gp_entity, b));
 
         if !slot.joined {
             if any_just {
@@ -1157,8 +1244,12 @@ fn player_select_update(
             // Navigate character (not while ready)
             if !slot.ready && slot.stick_cooldown <= 0.0 {
                 let lx = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
-                let left = gp.just_pressed(GamepadButton::DPadLeft) || lx < -0.5;
-                let right = gp.just_pressed(GamepadButton::DPadRight) || lx > 0.5;
+                let left = gp.just_pressed(GamepadButton::DPadLeft)
+                    || event_pressed(*gp_entity, GamepadButton::DPadLeft)
+                    || lx < -0.5;
+                let right = gp.just_pressed(GamepadButton::DPadRight)
+                    || event_pressed(*gp_entity, GamepadButton::DPadRight)
+                    || lx > 0.5;
                 if left {
                     slot.character_index = (slot.character_index + 3) % 4;
                     slot.stick_cooldown = 0.25;
@@ -1168,15 +1259,23 @@ fn player_select_update(
                 }
             }
             // A = ready toggle
-            if gp.just_pressed(GamepadButton::South) {
+            if gp.just_pressed(GamepadButton::South)
+                || event_pressed(*gp_entity, GamepadButton::South)
+            {
                 slot.ready = !slot.ready;
             }
             // B = leave (only if not ready)
-            if gp.just_pressed(GamepadButton::East) && !slot.ready {
+            if (gp.just_pressed(GamepadButton::East)
+                || event_pressed(*gp_entity, GamepadButton::East))
+                && !slot.ready
+            {
                 slot.joined = false;
             }
             // Y = open character designer
-            if gp.just_pressed(GamepadButton::North) && !slot.ready {
+            if (gp.just_pressed(GamepadButton::North)
+                || event_pressed(*gp_entity, GamepadButton::North))
+                && !slot.ready
+            {
                 design_data.player_index = i as usize;
                 next_state.set(AppState::CharacterDesign);
                 return;

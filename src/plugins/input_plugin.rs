@@ -33,8 +33,11 @@
 ///  Select + DPad (held Select, then tap DPad):
 ///    Up → special slot 0 | Down → special slot 1
 ///    Left → special slot 2 | Right → special slot 3
-use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton, GamepadEvent};
+use bevy::input::gamepad::{
+    Gamepad, GamepadAxis, GamepadButton, GamepadConnection, GamepadConnectionEvent,
+};
 use bevy::input::mouse::MouseMotion;
+use bevy::input::InputSystem;
 use bevy::prelude::*;
 
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
@@ -45,7 +48,7 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, update_player_inputs)
+        app.add_systems(PreUpdate, update_player_inputs.after(InputSystem))
             .add_systems(Update, log_gamepad_connections);
     }
 }
@@ -71,17 +74,22 @@ fn apply_deadzone(v: Vec2) -> Vec2 {
 }
 
 // ── Connection logging ────────────────────────────────────────────────────────
-fn log_gamepad_connections(mut events: EventReader<GamepadEvent>) {
+fn log_gamepad_connections(mut events: EventReader<GamepadConnectionEvent>) {
     for ev in events.read() {
-        match ev {
-            GamepadEvent::Connection(c) => {
-                if c.connected() {
-                    info!("Gamepad connected: {:?}", c.gamepad);
-                } else {
-                    info!("Gamepad disconnected: {:?}", c.gamepad);
-                }
+        match &ev.connection {
+            GamepadConnection::Connected {
+                name,
+                vendor_id,
+                product_id,
+            } => {
+                info!(
+                    "Gamepad connected: {:?} ({name}, vendor: {:?}, product: {:?})",
+                    ev.gamepad, vendor_id, product_id
+                );
             }
-            _ => {}
+            GamepadConnection::Disconnected => {
+                info!("Gamepad disconnected: {:?}", ev.gamepad);
+            }
         }
     }
 }
