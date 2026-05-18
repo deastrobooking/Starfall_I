@@ -14,6 +14,7 @@ use crate::damage::Health;
 use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
+use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::save_current_session;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
@@ -320,6 +321,7 @@ fn setup_main_menu(mut commands: Commands) {
 fn menu_start_button(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
     mut button_events: EventReader<GamepadButtonStateChangedEvent>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -327,6 +329,7 @@ fn menu_start_button(
     if keyboard.just_pressed(KeyCode::Enter)
         || keyboard.just_pressed(KeyCode::Space)
         || gamepads.iter().any(gamepad_start_or_confirm_just_pressed)
+        || native.start_or_confirm_just_pressed()
         || button_events
             .read()
             .any(gamepad_button_event_is_start_or_confirm)
@@ -344,6 +347,7 @@ fn menu_start_button(
 
 fn main_menu_controller_status_system(
     gamepads: Query<(&Name, &Gamepad)>,
+    native: Res<NativeControllerState>,
     mut text_q: Query<&mut Text, With<ControllerStatusText>>,
 ) {
     let Ok(mut text) = text_q.get_single_mut() else {
@@ -358,6 +362,11 @@ fn main_menu_controller_status_system(
             name.as_str(),
             lx,
             ly
+        ));
+    } else if native.connected {
+        *text = Text::new(format!(
+            "Controller: {} detected via macOS   Left Stick X:{:+.2} Y:{:+.2}   Press A or Start",
+            native.name, native.move_axis.x, native.move_axis.y
         ));
     } else {
         *text = Text::new("Controller: not detected yet. Reconnect/power on the Xbox controller, then press A or Start.");
@@ -582,6 +591,7 @@ fn pause_input_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
     mut button_events: EventReader<GamepadButtonStateChangedEvent>,
     input_q: Query<&PlayerInput, With<Player>>,
     state: Res<State<AppState>>,
@@ -593,13 +603,15 @@ fn pause_input_system(
         || gamepads
             .iter()
             .any(|gamepad| gamepad.just_pressed(GamepadButton::Start))
+        || native.just_pressed(NativeButton::Start)
         || button_events.read().any(|event| {
             event.state == ButtonState::Pressed && event.button == GamepadButton::Start
         });
     let pause_held = keyboard.pressed(KeyCode::Escape)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.pressed(GamepadButton::Start));
+            .any(|gamepad| gamepad.pressed(GamepadButton::Start))
+        || native.pressed(NativeButton::Start);
     let player_pause_pressed = input_q.iter().any(|input| input.pause);
 
     if matches!(state.get(), AppState::Paused) {
