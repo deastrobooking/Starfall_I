@@ -20,18 +20,17 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 **Character assignment per index:**
 - P1: Vincenzo &nbsp; P2: Antonio &nbsp; P3: Angelo &nbsp; P4: Joseph
 
-**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon and movement systems can resolve the correct camera per player.
+**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon, movement, camera shake, damage flash, and interaction systems can resolve the correct player.
 
 **Game over:** triggers only when ALL players are dead simultaneously.
 
-**Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause menu keeps the current HUD/world entities alive, freezes the Rapier physics pipeline, offers save and save-and-title actions, and shows control hints. Returning to title from pause cleans up preserved play-session entities.
+**Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause menu keeps the current HUD/world entities alive, freezes the Rapier physics pipeline, offers party-wide save and save-and-title actions, and includes a controls/tips page. Returning to title from pause cleans up preserved play-session entities.
 
 **Known limitations:**
-- Chapter director spawns use the first active player as the encounter anchor.
-- HUD stat/weapon panels, save snapshots, companions, crafting, chests, and vehicle buffs are keyed by `PlayerIndex`.
-- Some reward pickup paths still need a complete per-player ownership pass.
-- Vehicle buffs apply to the activating player, but the party still shares one active vehicle mode at a time. In Chapter 1, a boardable boat at the north dock uses the same vehicle input and follows the owning player along the visible ocean wake route to the island.
-- Camera shake is a single global pool - any player being hit shakes all cameras.
+- Chapter director spawns use the party center as the encounter anchor; bespoke chapter beats are still campaign-shared.
+- HUD stat/weapon panels, save snapshots, companions, crafting, chests, hidden rewards, enemy loot pickups, damage feedback, and vehicle buffs are keyed by `PlayerIndex`.
+- Vehicle buffs apply to the activating player, but the party still shares one active vehicle mode at a time. In Chapter 1, a boardable boat at the north dock locks one driver, boards nearby players into passenger seats, steers along the visible ocean wake route, and requires docking at the city or island before disembarking.
+- Dev-only armor element cycling applies to P1 from keyboard shortcuts; final equipment UI should expose per-player selection.
 
 ---
 
@@ -45,12 +44,12 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 | Moving | WASD / left stick | Smoothed acceleration toward `walk_speed = 0.38` |
 | Sprinting | Shift / LB + move | Drains stamina 15/sec |
 | Jetpack | Hold Space / South while airborne | Burns `fuel_cost_per_sec = 20`/sec; regens on ground |
-| WallSliding | Pushing into wall while falling | Caps fall speed at 0.35 |
-| Hanging | Falling into wall with forward input | Max hang time 2.5s; drains stamina 12/sec |
+| WallSliding | Pushing into wall while falling | Caps fall speed at `wall_slide_speed = 0.28` |
+| Hanging | Interact while falling into a wall | Max hang time 2.5s; drains stamina 12/sec |
 
 Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity.
 
-Wall jump: triggered from buffered jump input while `wall_contact_timer > 0` and airborne. Pushes away from wall normal + 25% input direction.
+Wall slide is the default wall-contact behavior while falling; hanging is now intentional through `E` / D-pad Down. Wall jump is triggered from buffered jump input while `wall_contact_timer > 0` and airborne. It pushes away from wall normal + 25% input direction, has a short steering lockout for cleaner arcs, and carries two wall-jump charges that refresh on landing or renewed wall slide contact.
 
 Climb-up: `E` / D-pad Down while hanging. Boosts player upward `climb_boost * dt * 60`.
 
@@ -223,11 +222,28 @@ Every chapter now has one optional cave route to discover. `WorldPlugin` spawns 
 
 Chapter scripts use `PlaceSecretCave` to spawn a green discovery beacon at the matching anchor. Collecting it stores the cave id in `ChapterProgress.discoverables`, sends a UI message/radio line, and prevents that chapter's cave beacon from respawning after save/load.
 
+## Traversal Courses
+
+**Files:** `src/components/world.rs`, `src/plugins/world_plugin.rs`, `src/plugins/player_plugin.rs`
+
+The city now has authored optional traversal courses outside the starter zone:
+
+| Course | Mechanics | Reward |
+|---|---|---|
+| Sling Tower | Slingshot launch pad, ramp, wall-jump shaft, moving bricks, rotating elevator | Sling Tower Cache |
+| Ramp Brick Tower | Slingshot launch pad, angled ramps, moving brick chain, rotating elevator | Ramp Brick Tower Cache |
+
+`SlingShotPad` launches a player when jump/interact is pressed near the pad. It writes horizontal velocity into `PlayerMovement.ground_velocity`, vertical launch into `PlayerMovement.velocity.y`, clears coyote/jump buffers, and forces airborne movement state.
+
+`RotatingElevator` is a kinematic platform that orbits an authored center while bobbing vertically. Its system carries grounded or landing players by the platform delta, matching the existing `MovingPlatform` behavior.
+
+Both Level 1 courses now include visible marker posts, recovery platforms, and return slingshots so missed jumps have a readable reset path.
+
 ## Hidden Rewards
 
 **Files:** `src/components/discoverable.rs`, `src/plugins/discoverable_plugin.rs`, `src/plugins/world_plugin.rs`
 
-Hidden reward rooms use `DiscoverableKind::HiddenReward` to grant save-backed optional rewards. A cache can award credits, XP, armor capacity/refill, a power-up unlock id, and a special-ability upgrade/refill.
+Hidden reward rooms use `DiscoverableKind::HiddenReward` to grant save-backed optional rewards. A cache can award credits, XP, armor capacity/refill, a power-up unlock id, and a special-ability upgrade/refill. Current rooms also include authored puzzle dressing, pressure-plate props, visible gates, and reward staging so secrets read as small challenges instead of loose pickups.
 
 The city currently includes three tucked reward rooms near the opening district:
 

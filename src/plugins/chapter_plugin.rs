@@ -14,7 +14,7 @@ use crate::components::discoverable::{
 };
 use crate::components::enemy::BossEnemy;
 use crate::components::faction::{Faction, NamedCharacter};
-use crate::components::player::{Player, PlayerMovement};
+use crate::components::player::{Player, PlayerIndex, PlayerMovement};
 use crate::components::world::{MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry};
 use crate::events::*;
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
@@ -98,7 +98,7 @@ fn chapter_director_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut player_q: Query<(&mut Transform, &mut PlayerMovement), With<Player>>,
+    mut player_q: Query<(&PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
     anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
     mut wave: ResMut<WaveInfo>,
     mut progress: ResMut<ChapterProgress>,
@@ -134,11 +134,7 @@ fn chapter_director_system(
         return;
     }
 
-    let Some(player_pos) = player_q
-        .iter_mut()
-        .next()
-        .map(|(transform, _)| transform.translation)
-    else {
+    let Some(player_pos) = party_anchor_position(&mut player_q) else {
         return;
     };
     let mut rng = rand::thread_rng();
@@ -571,8 +567,20 @@ fn resolve_anchor_positions<AnchorFilter: bevy::ecs::query::QueryFilter>(
     Some(positions)
 }
 
+fn party_anchor_position(
+    player_q: &mut Query<(&PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
+) -> Option<Vec3> {
+    let mut sum = Vec3::ZERO;
+    let mut count = 0.0;
+    for (_, transform, _) in player_q.iter_mut() {
+        sum += transform.translation;
+        count += 1.0;
+    }
+    (count > 0.0).then_some(sum / count)
+}
+
 fn move_players_to_airship_deck(
-    player_q: &mut Query<(&mut Transform, &mut PlayerMovement), With<Player>>,
+    player_q: &mut Query<(&PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
     deck_center: Vec3,
 ) {
     const OFFSETS: [Vec3; 4] = [
@@ -581,8 +589,9 @@ fn move_players_to_airship_deck(
         Vec3::new(-4.0, 6.0, -4.0),
         Vec3::new(4.0, 6.0, -4.0),
     ];
-    for (index, (mut transform, mut movement)) in player_q.iter_mut().enumerate() {
-        transform.translation = deck_center + OFFSETS[index.min(OFFSETS.len() - 1)];
+    for (index, mut transform, mut movement) in player_q.iter_mut() {
+        let slot = usize::from(index.0.min(3));
+        transform.translation = deck_center + OFFSETS[slot];
         movement.velocity = Vec3::ZERO;
         movement.ground_velocity = Vec3::ZERO;
         movement.is_grounded = false;

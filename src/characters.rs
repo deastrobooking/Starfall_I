@@ -1171,7 +1171,7 @@ fn visual_ground_lift(body: &BodyRecipe, scale: f32) -> f32 {
     let foot_center_y = -1.22 * scale - (body.leg_length - 1.0) * 0.30 * scale;
     let foot_bottom = foot_center_y - 0.07 * scale;
 
-    (collider_bottom + 0.03 - foot_bottom).clamp(0.0, 0.45)
+    (collider_bottom + 0.07 - foot_bottom).clamp(0.0, 0.50)
 }
 
 /// Stylised PBR: matte surface with a faint self-emissive so characters read

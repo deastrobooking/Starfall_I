@@ -9,7 +9,7 @@ use crate::components::enemy::{
 };
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
-use crate::components::player::{ParryState, Player, PlayerStats};
+use crate::components::player::{ParryState, Player, PlayerIndex, PlayerStats};
 use crate::components::world::WorldLoot;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
@@ -536,7 +536,7 @@ fn dragon_boss_system(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<EnemyAttackAssets>,
-    player_pos_q: Query<(Entity, &Transform), (With<Player>, Without<BossEnemy>)>,
+    player_pos_q: Query<(Entity, &Transform, &PlayerIndex), (With<Player>, Without<BossEnemy>)>,
     mut player_damage_q: Query<
         (
             &mut Health,
@@ -559,8 +559,8 @@ fn dragon_boss_system(
         if !health.is_alive() {
             continue;
         }
-        let Some((_player_entity, player_pos, distance)) =
-            closest_player(transform.translation, 140.0, &player_pos_q)
+        let Some((_player_entity, player_pos, _player_index, distance)) =
+            closest_indexed_player(transform.translation, 140.0, &player_pos_q)
         else {
             continue;
         };
@@ -665,7 +665,10 @@ fn enemy_projectile_update_system(
     time: Res<Time>,
     assets: Res<EnemyAttackAssets>,
     mut projectile_q: Query<(Entity, &mut Transform, &mut EnemyProjectile)>,
-    player_pos_q: Query<(Entity, &Transform), (With<Player>, Without<EnemyProjectile>)>,
+    player_pos_q: Query<
+        (Entity, &Transform, &PlayerIndex),
+        (With<Player>, Without<EnemyProjectile>),
+    >,
     mut player_damage_q: Query<(
         &mut Health,
         &mut Damageable,
@@ -683,13 +686,13 @@ fn enemy_projectile_update_system(
 
         let mut impact = projectile.lifetime <= 0.0 || transform.translation.y <= 0.2;
         let mut hit_player = None;
-        for (player_entity, player_transform) in player_pos_q.iter() {
+        for (player_entity, player_transform, player_index) in player_pos_q.iter() {
             if transform
                 .translation
                 .distance(player_transform.translation + Vec3::Y * 0.7)
                 <= projectile.hit_radius
             {
-                hit_player = Some(player_entity);
+                hit_player = Some((player_entity, player_index.0));
                 impact = true;
                 break;
             }
@@ -698,11 +701,12 @@ fn enemy_projectile_update_system(
         if impact {
             match projectile.kind {
                 EnemyProjectileKind::Laser => {
-                    if let Some(player_entity) = hit_player {
+                    if let Some((player_entity, player_index)) = hit_player {
                         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
                             player_damage_q.get_mut(player_entity)
                         {
                             crate::plugins::player_plugin::damage_player(
+                                Some(player_index),
                                 &mut health,
                                 &mut damageable,
                                 &mut stats,
@@ -769,6 +773,20 @@ fn closest_player<F: bevy::ecs::query::QueryFilter>(
         .min_by(|a, b| a.2.total_cmp(&b.2))
 }
 
+fn closest_indexed_player<F: bevy::ecs::query::QueryFilter>(
+    origin: Vec3,
+    max_range: f32,
+    player_q: &Query<(Entity, &Transform, &PlayerIndex), F>,
+) -> Option<(Entity, Vec3, u8, f32)> {
+    player_q
+        .iter()
+        .filter_map(|(entity, transform, index)| {
+            let dist = origin.distance(transform.translation);
+            (dist <= max_range).then_some((entity, transform.translation, index.0, dist))
+        })
+        .min_by(|a, b| a.3.total_cmp(&b.3))
+}
+
 fn damage_players_in_radius<
     DamageFilter: bevy::ecs::query::QueryFilter,
     PositionFilter: bevy::ecs::query::QueryFilter,
@@ -787,11 +805,11 @@ fn damage_players_in_radius<
         ),
         DamageFilter,
     >,
-    player_pos_q: &Query<(Entity, &Transform), PositionFilter>,
+    player_pos_q: &Query<(Entity, &Transform, &PlayerIndex), PositionFilter>,
     damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
     parry_ev: &mut EventWriter<PlayerParryEvent>,
 ) {
-    for (player_entity, player_transform) in player_pos_q.iter() {
+    for (player_entity, player_transform, player_index) in player_pos_q.iter() {
         let dist = center.distance(player_transform.translation);
         if dist > radius {
             continue;
@@ -801,6 +819,7 @@ fn damage_players_in_radius<
             player_damage_q.get_mut(player_entity)
         {
             crate::plugins::player_plugin::damage_player(
+                Some(player_index.0),
                 &mut health,
                 &mut damageable,
                 &mut stats,
@@ -834,14 +853,14 @@ fn damage_players_in_cone<
         ),
         DamageFilter,
     >,
-    player_pos_q: &Query<(Entity, &Transform), PositionFilter>,
+    player_pos_q: &Query<(Entity, &Transform, &PlayerIndex), PositionFilter>,
     damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
     parry_ev: &mut EventWriter<PlayerParryEvent>,
 ) {
     if direction.length_squared() <= 0.001 {
         return;
     }
-    for (player_entity, player_transform) in player_pos_q.iter() {
+    for (player_entity, player_transform, player_index) in player_pos_q.iter() {
         let target = player_transform.translation + Vec3::Y * 0.7;
         let to_player = target - origin;
         let dist = to_player.length();
@@ -856,6 +875,7 @@ fn damage_players_in_cone<
             player_damage_q.get_mut(player_entity)
         {
             crate::plugins::player_plugin::damage_player(
+                Some(player_index.0),
                 &mut health,
                 &mut damageable,
                 &mut stats,
@@ -915,7 +935,7 @@ fn spawn_shockwave_vfx(
 
 // ── Attack System ─────────────────────────────────────────────────────────────
 fn enemy_attack_system(
-    player_q: Query<(Entity, &Transform), With<Player>>,
+    player_q: Query<(Entity, &Transform, &PlayerIndex), With<Player>>,
     mut enemy_q: Query<
         (
             &Transform,
@@ -954,7 +974,7 @@ fn enemy_attack_system(
             continue;
         }
 
-        let Some((player_entity, _player_pos, _distance)) = closest_player(
+        let Some((player_entity, _player_pos, player_index, _distance)) = closest_indexed_player(
             e_transform.translation,
             enemy.config.attack_range,
             &player_q,
@@ -966,11 +986,12 @@ fn enemy_attack_system(
             player_damage_q.get_mut(player_entity)
         {
             crate::plugins::player_plugin::damage_player(
+                Some(player_index),
                 &mut health,
                 &mut damageable,
                 &mut stats,
                 &mut parry,
-                &armor,
+                armor,
                 &DamageInfo::new(enemy.scaled_damage(), DamageType::Kinetic),
                 &mut damaged_ev,
                 &mut parry_ev,
@@ -1090,26 +1111,27 @@ fn loot_bob_system(time: Res<Time>, mut loot_q: Query<(&mut Transform, &WorldLoo
 // ── Loot Pickup ───────────────────────────────────────────────────────────────
 fn loot_pickup_system(
     mut commands: Commands,
-    player_q: Query<&Transform, With<Player>>,
+    player_q: Query<(Entity, &PlayerIndex, &Transform), With<Player>>,
     mut inventory_q: Query<&mut Inventory, With<Player>>,
     loot_q: Query<(Entity, &Transform, &WorldLoot)>,
     mut msg_ev: EventWriter<UiMessageEvent>,
     mut loot_ev: EventWriter<LootCollectedEvent>,
 ) {
-    let Ok(player_transform) = player_q.get_single() else {
-        return;
-    };
-    let Ok(mut inventory) = inventory_q.get_single_mut() else {
-        return;
-    };
-    let player_pos = player_transform.translation;
     let item_defs = crate::components::inventory::all_items();
 
     for (entity, loot_transform, loot) in loot_q.iter() {
-        let dist = player_pos.distance(loot_transform.translation);
-        if dist > loot.pickup_radius {
+        let Some((player_entity, player_index, _)) = player_q
+            .iter()
+            .filter_map(|(player_entity, player_index, player_transform)| {
+                let dist = player_transform
+                    .translation
+                    .distance(loot_transform.translation);
+                (dist <= loot.pickup_radius).then_some((player_entity, player_index, dist))
+            })
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+        else {
             continue;
-        }
+        };
 
         let max_stack = item_defs
             .iter()
@@ -1117,11 +1139,19 @@ fn loot_pickup_system(
             .map(|i| i.max_stack)
             .unwrap_or(10);
 
+        let Ok(mut inventory) = inventory_q.get_mut(player_entity) else {
+            continue;
+        };
         let leftover = inventory.add_item(loot.item_id, loot.quantity, max_stack);
         let picked = loot.quantity.saturating_sub(leftover);
         if picked > 0 {
             msg_ev.send(UiMessageEvent {
-                text: format!("Picked up {}x {}", picked, loot.item_id.replace('_', " ")),
+                text: format!(
+                    "P{} picked up {}x {}",
+                    player_index.0 + 1,
+                    picked,
+                    loot.item_id.replace('_', " ")
+                ),
                 duration: 1.8,
             });
             loot_ev.send(LootCollectedEvent {

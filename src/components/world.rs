@@ -77,6 +77,29 @@ pub struct MovingPlatform {
     pub size: Vec3,
 }
 
+/// Kinematic platform that orbits around an authored center while bobbing up and
+/// down, used as a rotating elevator in traversal courses.
+#[derive(Component, Debug, Clone)]
+pub struct RotatingElevator {
+    pub center: Vec3,
+    pub radius: f32,
+    pub angular_speed: f32,
+    pub vertical_amplitude: f32,
+    pub vertical_speed: f32,
+    pub phase: f32,
+    pub size: Vec3,
+}
+
+/// Launch pad that throws players across authored gaps when jump/interact is
+/// pressed near the pad.
+#[derive(Component, Debug, Clone)]
+pub struct SlingShotPad {
+    pub launch_velocity: Vec3,
+    pub radius: f32,
+    pub cooldown: f32,
+    pub cooldown_timer: f32,
+}
+
 /// Defensive world turret that tracks players and fires a hitscan-style beam.
 #[derive(Component, Debug, Clone)]
 pub struct LaserTurret {
@@ -117,6 +140,19 @@ pub struct WorldLoot {
 #[derive(Component, Debug, Clone)]
 pub struct BoatVehicle {
     pub embark_radius: f32,
+    pub passenger_radius: f32,
+    pub dock_radius: f32,
+    pub route_half_width: f32,
+    pub speed: f32,
     pub dock_position: Vec3,
     pub island_position: Vec3,
+}
+
+/// Marks a player currently riding a boat. The vehicle system owns their
+/// transform while this component is present.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BoatPassenger {
+    pub boat: Entity,
+    pub seat: u8,
+    pub is_driver: bool,
 }

@@ -11,6 +11,7 @@ Implemented:
 - Player-select flow for 1-4 local players, split-screen cameras, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
 - Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, upgraded default hero blueprints, in-game body steppers, gameplay-linked body stats, stride-aware animation, and visual foot grounding.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
+- Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
 - Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
@@ -19,7 +20,7 @@ Implemented:
 
 In progress:
 
-- Local multiplayer is playable at the input/camera/player level, and save snapshots, HUD panels, companions, crafting, chests, and vehicle buffs are now keyed per player. Some reward paths, armor debug cycling, and shared combat feedback still need a full per-player pass.
+- Local multiplayer is playable at the input/camera/player level, and save snapshots, HUD panels, companions, crafting, chests, hidden rewards, enemy loot pickups, camera shake, damage flash, and vehicle buffs are now keyed per player. Chapter scripting uses the party center for encounter placement, while some campaign systems remain intentionally shared.
 - Perks are functional and saved, but the chapter-select perk UI is intentionally lightweight and keyboard-only.
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
 - The robot/chassis editor exists as a simple preset and scale screen; deeper part-by-part design is still future design work.
@@ -43,11 +44,11 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 
 ## Gameplay Direction
 
-- Classic action platforming with tuned acceleration, jump buffering, coyote time, wall jumps, edge grabs, ledge hanging, and climb-ups.
+- Classic action platforming with tuned acceleration, jump buffering, coyote time, wall slides, chained wall jumps, edge grabs, ledge hanging, and climb-ups.
 - Simple retro RPG-style cartoon characters with idle, walk, jump, and hanging poses.
 - RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, perks, and chapter progression.
 - Cartoon star beams and energy weapons instead of guns.
-- Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, hidden city reward rooms, hidden cave systems, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
+- Open-world level spaces with puzzle gates, moving platforms, rotating elevators, slingshot launch pads, windup laser turrets, hidden city reward rooms, hidden cave systems, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
 - Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto their airship, clear the deck, then defeat them again.
 - Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, and shockwave hazards.
 - 4-player local multiplayer remains the design target; the current implementation has the core player split plus per-player HUD/save/companions/crafting/chests/vehicle buffs, but still needs per-player support in a few reward and feedback systems.
@@ -75,7 +76,7 @@ cargo run --features dynamic
 7. Paused
 8. Game Over
 
-Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, and can save-and-return to the title.
+Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
 
 Character design supports outfit/accent/hair swatches, accessory toggles, and body-shape steppers for height, shoulders, chest, arms, legs, hands, feet, head, and mass. Confirming stores an editable character blueprint; body proportions feed the visible character, collider size, movement tuning, stamina, armor capacity, and health.
 
@@ -98,10 +99,10 @@ Keyboard and mouse:
 |---|---|
 | `WASD` | Move |
 | Mouse | Look |
-| `Space` | Jump, wall jump, hold for jetpack |
-| Hold toward wall/ledge while falling | Grab and hang |
-| `E` while hanging | Climb up |
-| `E` | Interact |
+| `Space` | Jump, wall jump, hold for jetpack; trigger slingshots when standing on one |
+| Hold toward wall while falling | Wall slide |
+| `E` near wall while falling/hanging | Hang or climb up |
+| `E` | Interact; trigger nearby slingshots |
 | `Q` | Dodge or drop from hang |
 | `LMB` | Fire active star beam / Star Sabre slash |
 | `RMB` | Aim |
@@ -116,9 +117,10 @@ Keyboard and mouse:
 | `9` | Moon Bubble |
 | `0` | Sprite Turret |
 | `C` | Crafting |
-| `J` | Enter vehicle / board nearby boat |
+| `J` | Enter vehicle / board nearby boat; dock before disembarking |
 | `M` | Open map |
 | `Esc` | Back / pause |
+| `F9` | Toggle collider debug overlay during play |
 
 Pause menu shortcuts:
 
@@ -135,7 +137,7 @@ Controller:
 |---|---|
 | Left stick | Move |
 | Right stick | Look |
-| South | Jump, wall jump, hold for jetpack |
+| South | Jump, wall jump, hold for jetpack; trigger slingshots |
 | East | Dodge / drop |
 | West | Reload active star beam |
 | North | Parry |
@@ -144,7 +146,7 @@ Controller:
 | LB | Sprint |
 | RB | Next beam |
 | D-Pad Left | Previous beam |
-| D-Pad Down | Interact / climb |
+| D-Pad Down | Interact / hang / climb / trigger slingshots |
 | D-Pad Up | Enter vehicle |
 | D-Pad Right | Open map |
 | Select | Crafting |

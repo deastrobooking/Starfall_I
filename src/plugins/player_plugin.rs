@@ -16,6 +16,7 @@ use crate::components::character::CartoonPart;
 use crate::components::inventory::Inventory;
 use crate::components::player::*;
 use crate::components::weapon::*;
+use crate::components::world::BoatPassenger;
 use crate::damage::{apply_damage, DamageInfo, Damageable, Health};
 use crate::events::*;
 use crate::perks::PerkTree;
@@ -293,14 +294,14 @@ fn spawn_players(
                 player_collider,
                 KinematicCharacterController {
                     up: Vec3::Y,
-                    offset: CharacterLength::Absolute(0.02),
+                    offset: CharacterLength::Absolute(0.04),
                     slide: true,
                     autostep: Some(CharacterAutostep {
-                        max_height: CharacterLength::Absolute(0.5),
-                        min_width: CharacterLength::Absolute(0.2),
+                        max_height: CharacterLength::Absolute(0.42),
+                        min_width: CharacterLength::Absolute(0.28),
                         include_dynamic_bodies: false,
                     }),
-                    snap_to_ground: Some(CharacterLength::Absolute(0.2)),
+                    snap_to_ground: Some(CharacterLength::Absolute(0.32)),
                     ..default()
                 },
                 KinematicCharacterControllerOutput::default(),
@@ -496,23 +497,30 @@ fn camera_shake_system(
 ) {
     for ev in damage_ev.read() {
         let trauma = (ev.amount / 25.0).clamp(0.12, 0.65);
-        shake.add_trauma(trauma);
+        if let Some(player_index) = ev.player_index {
+            shake.add_player_trauma(player_index, trauma);
+        } else {
+            shake.add_trauma(trauma);
+        }
     }
 
-    shake.trauma = (shake.trauma - time.delta_secs() * 2.0).max(0.0);
+    shake.decay(time.delta_secs() * 2.0);
 }
 
 fn player_camera_follow_system(
     mut commands: Commands,
     shake: Res<CameraShake>,
-    player_q: Query<(&Transform, &PlayerCameraRef), (With<Player>, Without<PlayerCamera>)>,
+    player_q: Query<
+        (&PlayerIndex, &Transform, &PlayerCameraRef),
+        (With<Player>, Without<PlayerCamera>),
+    >,
     mut cam_q: Query<(Entity, &mut Transform, &CameraPitch), (With<PlayerCamera>, Without<Player>)>,
 ) {
     let mut referenced = Vec::new();
 
-    let shake_offset = camera_shake_offset(shake.trauma);
-    for (player_transform, camera_ref) in player_q.iter() {
+    for (index, player_transform, camera_ref) in player_q.iter() {
         referenced.push(camera_ref.0);
+        let shake_offset = camera_shake_offset(shake.trauma_for(index.0));
         if let Ok((_, mut camera_transform, pitch)) = cam_q.get_mut(camera_ref.0) {
             *camera_transform = player_camera_transform(player_transform, pitch.0, shake_offset);
         }
@@ -569,6 +577,7 @@ fn player_movement(
             &Transform,
             &mut PlayerStateMachine,
             &PlayerInput,
+            Option<&BoatPassenger>,
         ),
         With<Player>,
     >,
@@ -585,13 +594,30 @@ fn player_movement(
         transform,
         mut state,
         pi,
+        boat_passenger,
     ) in player_q.iter_mut()
     {
+        if boat_passenger.is_some() {
+            movement.velocity = Vec3::ZERO;
+            movement.ground_velocity = Vec3::ZERO;
+            movement.is_grounded = true;
+            movement.coyote_timer = movement.coyote_time;
+            movement.jump_buffer_timer = 0.0;
+            movement.wall_jump_lock_timer = 0.0;
+            movement.wall_jump_charges = movement.max_wall_jump_charges;
+            jetpack.is_active = false;
+            edge_grab.is_hanging = false;
+            controller.translation = Some(Vec3::ZERO);
+            state.force(PlayerState::Idle);
+            continue;
+        }
+
         if pi.jump {
             movement.jump_buffer_timer = movement.jump_buffer_time;
         } else {
             movement.jump_buffer_timer = (movement.jump_buffer_timer - dt).max(0.0);
         }
+        movement.wall_jump_lock_timer = (movement.wall_jump_lock_timer - dt).max(0.0);
 
         movement.is_grounded = output.grounded;
         edge_grab.cooldown_timer = (edge_grab.cooldown_timer - dt).max(0.0);
@@ -599,6 +625,8 @@ fn player_movement(
 
         if movement.is_grounded {
             movement.coyote_timer = movement.coyote_time;
+            movement.wall_jump_charges = movement.max_wall_jump_charges;
+            movement.wall_jump_lock_timer = 0.0;
             jetpack.fuel = (jetpack.fuel + jetpack.regen_rate * dt).min(jetpack.max_fuel);
             movement.velocity.y = movement.velocity.y.max(0.0);
             edge_grab.is_hanging = false;
@@ -635,6 +663,14 @@ fn player_movement(
         let has_wall_contact =
             edge_grab.wall_contact_timer > 0.0 && edge_grab.wall_normal.length_squared() > 0.25;
         let pushing_into_wall = has_wall_contact && input.dot(-edge_grab.wall_normal) > 0.15;
+        let wall_sliding = !movement.is_grounded
+            && !edge_grab.is_hanging
+            && !dodge.is_dodging
+            && pushing_into_wall
+            && movement.velocity.y <= 0.03;
+        if wall_sliding {
+            movement.wall_jump_charges = movement.max_wall_jump_charges;
+        }
 
         let mut started_jump = false;
 
@@ -651,6 +687,8 @@ fn player_movement(
                     .normalize_or_zero();
                 movement.velocity.y = edge_grab.wall_jump_vertical;
                 movement.ground_velocity = jump_dir * edge_grab.wall_jump_push;
+                movement.wall_jump_charges = movement.wall_jump_charges.saturating_sub(1);
+                movement.wall_jump_lock_timer = movement.wall_jump_lock_time;
                 movement.jump_buffer_timer = 0.0;
                 movement.coyote_timer = 0.0;
                 edge_grab.is_hanging = false;
@@ -686,12 +724,15 @@ fn player_movement(
             && !movement.is_grounded
             && has_wall_contact
             && edge_grab.cooldown_timer <= 0.0
+            && movement.wall_jump_charges > 0
         {
             let jump_dir = (edge_grab.wall_normal + input * 0.25)
                 .with_y(0.0)
                 .normalize_or_zero();
             movement.velocity.y = edge_grab.wall_jump_vertical;
             movement.ground_velocity = jump_dir * edge_grab.wall_jump_push;
+            movement.wall_jump_charges = movement.wall_jump_charges.saturating_sub(1);
+            movement.wall_jump_lock_timer = movement.wall_jump_lock_time;
             movement.jump_buffer_timer = 0.0;
             movement.coyote_timer = 0.0;
             edge_grab.cooldown_timer = edge_grab.grab_cooldown;
@@ -701,6 +742,7 @@ fn player_movement(
             movement.velocity.y = movement.jump_force;
             movement.jump_buffer_timer = 0.0;
             movement.coyote_timer = 0.0;
+            movement.wall_jump_lock_timer = 0.0;
             movement.is_grounded = false;
             started_jump = true;
             state.transition(PlayerState::Jetpack);
@@ -711,6 +753,7 @@ fn player_movement(
             && edge_grab.cooldown_timer <= 0.0
             && movement.velocity.y <= -0.02
             && pushing_into_wall
+            && pi.interact
             && stats.stamina > 5.0;
 
         if can_grab_edge {
@@ -749,8 +792,8 @@ fn player_movement(
             }
             movement.velocity.y -= gravity;
             movement.velocity.y = movement.velocity.y.max(-movement.max_fall_speed);
-            if pushing_into_wall && movement.velocity.y < -0.35 {
-                movement.velocity.y = -0.35;
+            if wall_sliding && movement.velocity.y < -movement.wall_slide_speed {
+                movement.velocity.y = -movement.wall_slide_speed;
                 state.transition(PlayerState::WallSliding);
             }
         }
@@ -768,6 +811,8 @@ fn player_movement(
         } else {
             let air_accel = if edge_grab.cooldown_timer > 0.0 {
                 movement.air_accel * 0.35
+            } else if movement.wall_jump_lock_timer > 0.0 {
+                movement.air_accel * 0.22
             } else {
                 movement.air_accel
             };
@@ -1033,6 +1078,7 @@ fn player_died_check(
 
 /// Apply damage to a player, respecting parry and armor.
 pub fn damage_player(
+    player_index: Option<u8>,
     health: &mut Health,
     damageable: &mut Damageable,
     stats: &mut PlayerStats,
@@ -1071,6 +1117,7 @@ pub fn damage_player(
     damageable.invulnerability_timer = 0.2;
 
     damaged_ev.send(PlayerDamagedEvent {
+        player_index,
         amount: result.damage_amount,
         remaining: health.current,
     });

@@ -8,15 +8,33 @@ use bevy::render::render_resource::{
 
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::DiscoverableKind;
-use crate::components::player::{ParryState, Player, PlayerMovement, PlayerStats};
+use crate::components::player::{
+    ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement, PlayerStateMachine, PlayerStats,
+};
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
-use crate::events::{PlayerDamagedEvent, PlayerParryEvent};
+use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
 use crate::resources::{CurrentChapter, GameSettings, PlaySessionTransition};
 use crate::state::AppState;
+
+#[derive(Resource, Default)]
+struct ColliderDebugState {
+    enabled: bool,
+}
+
+#[derive(Component)]
+struct ColliderDebugSource;
+
+#[derive(Component)]
+struct ColliderDebugVisual;
+
+#[derive(Component, Debug, Clone, Copy)]
+struct DebugColliderBox {
+    size: Vec3,
+}
 
 // ── Grass wind material ───────────────────────────────────────────────────────
 
@@ -76,7 +94,8 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
+        app.init_resource::<ColliderDebugState>()
+            .add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
             .add_systems(
@@ -84,8 +103,11 @@ impl Plugin for WorldPlugin {
                 (
                     animate_nature,
                     moving_platform_system,
+                    rotating_elevator_system,
+                    sling_shot_system,
                     laser_turret_system,
                     laser_beam_cleanup_system,
+                    collider_debug_toggle_system,
                 )
                     .run_if(in_state(AppState::Playing)),
             )
@@ -109,6 +131,101 @@ fn animate_nature(time: Res<Time>, mut q: Query<(&NatureSway, &mut Transform)>) 
                 1.0 - cross * sway.pulse * 0.25,
             );
     }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn collider_debug_toggle_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<ColliderDebugState>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mesh_collider_q: Query<
+        (Entity, &Mesh3d),
+        (
+            With<bevy_rapier3d::prelude::Collider>,
+            With<WorldGeometry>,
+            Without<ColliderDebugSource>,
+            Without<ColliderDebugVisual>,
+        ),
+    >,
+    box_collider_q: Query<
+        (Entity, &DebugColliderBox),
+        (
+            With<bevy_rapier3d::prelude::Collider>,
+            With<WorldGeometry>,
+            Without<Mesh3d>,
+            Without<ColliderDebugSource>,
+        ),
+    >,
+    source_q: Query<Entity, With<ColliderDebugSource>>,
+    visual_q: Query<Entity, With<ColliderDebugVisual>>,
+    mut msg_ev: EventWriter<UiMessageEvent>,
+) {
+    if !keyboard.just_pressed(KeyCode::F9) {
+        return;
+    }
+
+    state.enabled = !state.enabled;
+    if !state.enabled {
+        for entity in visual_q.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+        for entity in source_q.iter() {
+            commands.entity(entity).remove::<ColliderDebugSource>();
+        }
+        msg_ev.send(UiMessageEvent {
+            text: "Collider debug: OFF".into(),
+            duration: 1.5,
+        });
+        return;
+    }
+
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.15, 1.0, 0.42, 0.24),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+
+    for (entity, mesh) in mesh_collider_q.iter() {
+        commands.entity(entity).insert(ColliderDebugSource);
+        commands.entity(entity).with_children(|parent| {
+            parent.spawn((
+                PbrBundle {
+                    mesh: mesh.clone(),
+                    material: MeshMaterial3d(material.clone()),
+                    transform: Transform::from_scale(Vec3::splat(1.018)),
+                    ..default()
+                },
+                ColliderDebugVisual,
+            ));
+        });
+    }
+
+    for (entity, debug_box) in box_collider_q.iter() {
+        commands.entity(entity).insert(ColliderDebugSource);
+        commands.entity(entity).with_children(|parent| {
+            parent.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(
+                        debug_box.size.x,
+                        debug_box.size.y,
+                        debug_box.size.z,
+                    ))),
+                    material: MeshMaterial3d(material.clone()),
+                    transform: Transform::from_scale(Vec3::splat(1.006)),
+                    ..default()
+                },
+                ColliderDebugVisual,
+            ));
+        });
+    }
+
+    msg_ev.send(UiMessageEvent {
+        text: "Collider debug: ON (F9 toggles)".into(),
+        duration: 2.0,
+    });
 }
 
 fn moving_platform_system(
@@ -151,12 +268,95 @@ fn moving_platform_system(
     }
 }
 
+fn rotating_elevator_system(
+    time: Res<Time>,
+    mut elevator_q: Query<(&mut Transform, &RotatingElevator)>,
+    mut player_q: Query<
+        (&mut Transform, &PlayerMovement),
+        (With<Player>, Without<RotatingElevator>),
+    >,
+) {
+    let t = time.elapsed_secs();
+    for (mut transform, elevator) in elevator_q.iter_mut() {
+        let previous = transform.translation;
+        let angle = t * elevator.angular_speed + elevator.phase;
+        let vertical =
+            (t * elevator.vertical_speed + elevator.phase).sin() * elevator.vertical_amplitude;
+        let target = elevator.center
+            + Vec3::new(
+                angle.cos() * elevator.radius,
+                vertical,
+                angle.sin() * elevator.radius,
+            );
+        let delta = target - previous;
+        transform.translation = target;
+        transform.rotation = Quat::from_rotation_y(angle);
+
+        if delta.length_squared() <= 0.000001 {
+            continue;
+        }
+
+        let half = elevator.size * 0.5;
+        let top = target.y + half.y;
+        for (mut player_transform, movement) in player_q.iter_mut() {
+            let rel = player_transform.translation - target;
+            let horizontally_on_platform =
+                rel.x.abs() <= half.x + 0.75 && rel.z.abs() <= half.z + 0.75;
+            let feet_y = player_transform.translation.y - 0.95;
+            let vertically_supported =
+                movement.is_grounded && feet_y >= top - 0.42 && feet_y <= top + 0.70;
+            let landing_on_platform = !movement.is_grounded
+                && movement.velocity.y <= 0.0
+                && feet_y >= top - 0.16
+                && feet_y <= top + 0.34;
+            if horizontally_on_platform && (vertically_supported || landing_on_platform) {
+                player_transform.translation += delta;
+            }
+        }
+    }
+}
+
+fn sling_shot_system(
+    time: Res<Time>,
+    mut pad_q: Query<(&Transform, &mut SlingShotPad)>,
+    mut player_q: Query<(
+        &Transform,
+        &PlayerInput,
+        &mut PlayerMovement,
+        &mut PlayerStateMachine,
+    )>,
+) {
+    let dt = time.delta_secs();
+    for (pad_transform, mut pad) in pad_q.iter_mut() {
+        pad.cooldown_timer = (pad.cooldown_timer - dt).max(0.0);
+        if pad.cooldown_timer > 0.0 {
+            continue;
+        }
+
+        for (player_transform, input, mut movement, mut state) in player_q.iter_mut() {
+            let offset = player_transform.translation - pad_transform.translation;
+            let close = offset.with_y(0.0).length() <= pad.radius && offset.y.abs() <= 3.2;
+            if close && (input.jump || input.interact) {
+                movement.velocity.y = pad.launch_velocity.y.max(movement.jump_force);
+                movement.ground_velocity = pad.launch_velocity.with_y(0.0);
+                movement.is_grounded = false;
+                movement.coyote_timer = 0.0;
+                movement.jump_buffer_timer = 0.0;
+                movement.wall_jump_lock_timer = movement.wall_jump_lock_time;
+                state.force(crate::components::player::PlayerState::Jetpack);
+                pad.cooldown_timer = pad.cooldown;
+                break;
+            }
+        }
+    }
+}
+
 fn laser_turret_system(
     mut commands: Commands,
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut turret_q: Query<(&mut Transform, &mut LaserTurret)>,
-    player_pos_q: Query<(Entity, &Transform), (With<Player>, Without<LaserTurret>)>,
+    player_pos_q: Query<(Entity, &Transform, &PlayerIndex), (With<Player>, Without<LaserTurret>)>,
     mut player_damage_q: Query<(
         &mut Health,
         &mut Damageable,
@@ -174,13 +374,16 @@ fn laser_turret_system(
 
         let origin = transform.translation + Vec3::Y * 0.55;
         let locked_target = turret.locked_target.and_then(|entity| {
-            player_pos_q.get(entity).ok().and_then(|(_, transform)| {
-                let dist = origin.distance(transform.translation);
-                (dist <= turret.range).then_some((entity, transform.translation, dist))
-            })
+            player_pos_q
+                .get(entity)
+                .ok()
+                .and_then(|(_, transform, index)| {
+                    let dist = origin.distance(transform.translation);
+                    (dist <= turret.range).then_some((entity, transform.translation, index.0, dist))
+                })
         });
         let target = locked_target.or_else(|| closest_player(origin, turret.range, &player_pos_q));
-        let Some((target_entity, target_pos, target_distance)) = target else {
+        let Some((target_entity, target_pos, target_index, target_distance)) = target else {
             turret.locked_target = None;
             turret.windup_timer = 0.0;
             continue;
@@ -230,6 +433,7 @@ fn laser_turret_system(
                 player_damage_q.get_mut(target_entity)
             {
                 crate::plugins::player_plugin::damage_player(
+                    Some(target_index),
                     &mut health,
                     &mut damageable,
                     &mut stats,
@@ -261,15 +465,15 @@ fn laser_beam_cleanup_system(
 fn closest_player<F: bevy::ecs::query::QueryFilter>(
     origin: Vec3,
     max_range: f32,
-    player_q: &Query<(Entity, &Transform), F>,
-) -> Option<(Entity, Vec3, f32)> {
+    player_q: &Query<(Entity, &Transform, &PlayerIndex), F>,
+) -> Option<(Entity, Vec3, u8, f32)> {
     player_q
         .iter()
-        .filter_map(|(entity, transform)| {
+        .filter_map(|(entity, transform, index)| {
             let dist = origin.distance(transform.translation);
-            (dist <= max_range).then_some((entity, transform.translation, dist))
+            (dist <= max_range).then_some((entity, transform.translation, index.0, dist))
         })
-        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .min_by(|a, b| a.3.total_cmp(&b.3))
 }
 
 fn spawn_beam_vfx(
@@ -359,6 +563,7 @@ fn generate_city(
     spawn_highways(&mut commands, &mut meshes, &pal);
     spawn_city_streets(&mut commands, &mut meshes, &pal);
     spawn_city_hidden_rooms(&mut commands, &mut meshes, m, &pal);
+    spawn_traversal_courses(&mut commands, &mut meshes, m, &pal);
     spawn_sky_platforms(&mut commands, &mut meshes, &pal, seed + 3);
     spawn_sky_bridges(&mut commands, &mut meshes, &pal, seed + 4);
     spawn_moving_platforms(&mut commands, &mut meshes, &pal, seed + 15, seed);
@@ -886,13 +1091,15 @@ fn spawn_lighting(commands: &mut Commands) {
 /// entire city area. The terrain trimesh sits on top of it for the outer hills,
 /// but the flat city core (where players spawn) needs a reliable floor.
 fn spawn_ground_plane(commands: &mut Commands) {
+    let size = Vec3::new(1200.0, 1.0, 1200.0);
     commands.spawn((
         Transform::from_xyz(0.0, -0.5, 0.0),
         GlobalTransform::default(),
         WorldGeometry,
         WalkableSurface,
+        DebugColliderBox { size },
         bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(600.0, 0.5, 600.0),
+        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
     ));
 }
 
@@ -1703,6 +1910,8 @@ fn spawn_hidden_reward_room(
         ));
     }
 
+    spawn_hidden_room_puzzle_dressing(commands, meshes, pal, center, yaw);
+
     commands.spawn((
         PointLightBundle {
             point_light: PointLight {
@@ -1713,6 +1922,72 @@ fn spawn_hidden_reward_room(
                 ..default()
             },
             transform: Transform::from_translation(center + Vec3::Y * 3.2),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_hidden_room_puzzle_dressing(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    yaw: f32,
+) {
+    let rotation = Quat::from_rotation_y(yaw);
+    for (i, local) in [
+        Vec3::new(-4.8, 0.42, -2.6),
+        Vec3::new(0.0, 0.42, -3.6),
+        Vec3::new(4.8, 0.42, -2.6),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(1.15, 0.12))),
+                material: MeshMaterial3d(if i == 1 {
+                    pal.crystal_aurora.clone()
+                } else {
+                    pal.window_cool.clone()
+                }),
+                transform: Transform::from_translation(center + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    for (local, size) in [
+        (Vec3::new(-6.2, 0.7, 3.4), Vec3::new(1.1, 1.0, 2.2)),
+        (Vec3::new(6.2, 0.7, 3.4), Vec3::new(1.1, 1.0, 2.2)),
+        (Vec3::new(0.0, 1.15, 4.9), Vec3::new(4.2, 1.2, 0.5)),
+    ] {
+        spawn_hidden_room_piece(
+            commands,
+            meshes,
+            pal.downtown_facade.clone(),
+            center,
+            yaw,
+            local,
+            size,
+            true,
+            false,
+        );
+    }
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.45, 0.9, 1.0),
+                intensity: 6_500.0,
+                range: 12.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(center + rotation * Vec3::new(0.0, 1.8, -3.2)),
             ..default()
         },
         WorldGeometry,
@@ -1739,6 +2014,440 @@ fn spawn_hidden_room_piece(
                 material: MeshMaterial3d(material),
                 transform: Transform::from_translation(center + rotation * local)
                     .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ))
+        .id();
+
+    if collider {
+        commands.entity(entity).insert((
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        ));
+    }
+    if walkable {
+        commands.entity(entity).insert(WalkableSurface);
+    }
+}
+
+fn spawn_traversal_courses(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+) {
+    spawn_sling_tower_course(
+        commands,
+        meshes,
+        materials,
+        pal,
+        Vec3::new(132.0, 0.0, 72.0),
+    );
+    spawn_ramp_brick_tower_course(
+        commands,
+        meshes,
+        materials,
+        pal,
+        Vec3::new(-132.0, 0.0, 86.0),
+    );
+}
+
+fn spawn_sling_tower_course(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    base: Vec3,
+) {
+    spawn_course_block(
+        commands,
+        meshes,
+        pal.sky_platform.clone(),
+        base + Vec3::new(0.0, 0.22, 0.0),
+        Vec3::new(28.0, 0.44, 26.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+    spawn_sling_pad(
+        commands,
+        meshes,
+        pal.crystal_aurora.clone(),
+        base + Vec3::new(-10.5, 0.38, -11.5),
+        Vec3::new(1.35, 1.22, 1.25),
+        4.8,
+    );
+    spawn_course_marker_pair(commands, meshes, pal, base + Vec3::new(-10.5, 0.9, -17.0));
+
+    spawn_course_block(
+        commands,
+        meshes,
+        pal.street_paint.clone(),
+        base + Vec3::new(-0.4, 2.35, -10.0),
+        Vec3::new(7.0, 0.55, 18.0),
+        Quat::from_rotation_x(-0.32),
+        true,
+        true,
+    );
+    spawn_course_block(
+        commands,
+        meshes,
+        pal.brushed_metal.clone(),
+        base + Vec3::new(0.0, 0.18, 31.0),
+        Vec3::new(34.0, 0.36, 8.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+    spawn_sling_pad(
+        commands,
+        meshes,
+        pal.window_warm.clone(),
+        base + Vec3::new(0.0, 0.38, 30.5),
+        Vec3::new(0.0, 1.05, -1.48),
+        3.2,
+    );
+
+    for x in [-4.1, 4.1] {
+        spawn_course_block(
+            commands,
+            meshes,
+            pal.stone_brick.clone(),
+            base + Vec3::new(x, 5.4, -0.8),
+            Vec3::new(0.72, 10.6, 7.6),
+            Quat::IDENTITY,
+            true,
+            false,
+        );
+    }
+
+    for i in 0..5 {
+        let i_f = i as f32;
+        let start = base + Vec3::new(-8.0 + i_f * 4.0, 4.0 + i_f * 1.15, 5.0 + i_f * 1.7);
+        let end = start + Vec3::new(0.0, 0.0, if i % 2 == 0 { 7.0 } else { -7.0 });
+        spawn_moving_brick(
+            commands,
+            meshes,
+            pal.window_cool.clone(),
+            Vec3::new(3.4, 0.42, 3.4),
+            start,
+            end,
+            3.2 + i_f * 0.28,
+            0.2 + i_f * 0.6,
+        );
+    }
+
+    spawn_rotating_elevator(
+        commands,
+        meshes,
+        pal.window_warm.clone(),
+        base + Vec3::new(0.0, 9.4, 13.0),
+        7.5,
+        Vec3::new(4.6, 0.48, 4.6),
+        0.75,
+        1.65,
+        0.0,
+    );
+    spawn_course_block(
+        commands,
+        meshes,
+        pal.downtown_facade.clone(),
+        base + Vec3::new(0.0, 13.8, 17.0),
+        Vec3::new(15.0, 0.6, 15.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+    spawn_course_marker_pair(commands, meshes, pal, base + Vec3::new(0.0, 14.2, 24.8));
+
+    spawn_discoverable_beacon(
+        commands,
+        meshes,
+        materials,
+        DiscoverableKind::HiddenReward {
+            reward_id: "hidden_course_sling_tower_cache",
+            credits: 180,
+            experience: 120,
+            armor: 14,
+            power_up: Some("sling_tower_star_dash"),
+            special_ability: Some("tri_star_splitter"),
+        },
+        "Sling Tower Cache",
+        base + Vec3::new(0.0, 14.1, 17.0),
+    );
+}
+
+fn spawn_ramp_brick_tower_course(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    base: Vec3,
+) {
+    spawn_course_block(
+        commands,
+        meshes,
+        pal.stone_block.clone(),
+        base + Vec3::new(0.0, 0.24, 0.0),
+        Vec3::new(30.0, 0.48, 24.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+    spawn_sling_pad(
+        commands,
+        meshes,
+        pal.crystal_dragon.clone(),
+        base + Vec3::new(10.0, 0.4, -9.5),
+        Vec3::new(-1.15, 1.08, 1.42),
+        4.4,
+    );
+    spawn_course_marker_pair(commands, meshes, pal, base + Vec3::new(10.0, 0.9, -15.0));
+    spawn_course_block(
+        commands,
+        meshes,
+        pal.brushed_metal.clone(),
+        base + Vec3::new(-18.0, 0.18, 12.0),
+        Vec3::new(8.0, 0.36, 34.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+    spawn_sling_pad(
+        commands,
+        meshes,
+        pal.window_cool.clone(),
+        base + Vec3::new(-18.0, 0.38, 23.0),
+        Vec3::new(1.28, 1.0, -0.82),
+        3.0,
+    );
+
+    for (i, z) in [-8.0_f32, -1.0, 6.0, 13.0].into_iter().enumerate() {
+        let x = if i % 2 == 0 { -5.0 } else { 5.0 };
+        let rot_z = if i % 2 == 0 { 0.18 } else { -0.18 };
+        spawn_course_block(
+            commands,
+            meshes,
+            if i % 2 == 0 {
+                pal.highway.clone()
+            } else {
+                pal.brushed_metal.clone()
+            },
+            base + Vec3::new(x, 1.4 + i as f32 * 1.25, z),
+            Vec3::new(9.0, 0.48, 9.5),
+            Quat::from_rotation_z(rot_z) * Quat::from_rotation_x(-0.28),
+            true,
+            true,
+        );
+    }
+
+    for (x, z) in [(-7.6, 7.8), (7.6, 7.8), (-7.6, 15.8), (7.6, 15.8)] {
+        spawn_course_block(
+            commands,
+            meshes,
+            pal.industrial_metal.clone(),
+            base + Vec3::new(x, 5.5, z),
+            Vec3::new(0.75, 10.5, 0.75),
+            Quat::IDENTITY,
+            true,
+            false,
+        );
+    }
+
+    for i in 0..6 {
+        let i_f = i as f32;
+        let start = base + Vec3::new(-9.0 + i_f * 3.6, 5.0 + (i_f * 0.85), 17.0);
+        let end = start + Vec3::new(if i % 2 == 0 { 5.5 } else { -5.5 }, 0.0, 0.0);
+        spawn_moving_brick(
+            commands,
+            meshes,
+            pal.glass_panel.clone(),
+            Vec3::new(3.0, 0.42, 3.0),
+            start,
+            end,
+            2.8 + i_f * 0.20,
+            0.4 + i_f * 0.43,
+        );
+    }
+
+    spawn_rotating_elevator(
+        commands,
+        meshes,
+        pal.window_warm.clone(),
+        base + Vec3::new(0.0, 10.6, 20.0),
+        6.0,
+        Vec3::new(4.0, 0.48, 4.0),
+        -0.82,
+        1.35,
+        1.7,
+    );
+    spawn_course_block(
+        commands,
+        meshes,
+        pal.sky_platform.clone(),
+        base + Vec3::new(0.0, 14.4, 24.5),
+        Vec3::new(14.0, 0.6, 14.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+    spawn_course_marker_pair(commands, meshes, pal, base + Vec3::new(0.0, 14.8, 31.8));
+
+    spawn_discoverable_beacon(
+        commands,
+        meshes,
+        materials,
+        DiscoverableKind::HiddenReward {
+            reward_id: "hidden_course_ramp_brick_tower_cache",
+            credits: 160,
+            experience: 135,
+            armor: 16,
+            power_up: Some("ramp_brick_wall_dancer"),
+            special_ability: Some("sprite_turret_pack"),
+        },
+        "Ramp Brick Tower Cache",
+        base + Vec3::new(0.0, 14.7, 24.5),
+    );
+}
+
+fn spawn_course_marker_pair(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+) {
+    for x in [-3.2_f32, 3.2] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(0.28, 2.2))),
+                material: MeshMaterial3d(pal.window_warm.clone()),
+                transform: Transform::from_translation(position + Vec3::new(x, 0.85, 0.0)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+                material: MeshMaterial3d(pal.crystal_aurora.clone()),
+                transform: Transform::from_translation(position + Vec3::new(x, 2.05, 0.0)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_moving_brick(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    size: Vec3,
+    start: Vec3,
+    end: Vec3,
+    speed: f32,
+    phase: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(start),
+            ..default()
+        },
+        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+        WorldGeometry,
+        WalkableSurface,
+        MovingPlatform {
+            start,
+            end,
+            speed,
+            phase,
+            size,
+        },
+    ));
+}
+
+fn spawn_rotating_elevator(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    center: Vec3,
+    radius: f32,
+    size: Vec3,
+    angular_speed: f32,
+    vertical_amplitude: f32,
+    phase: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(center + Vec3::X * radius),
+            ..default()
+        },
+        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+        WorldGeometry,
+        WalkableSurface,
+        RotatingElevator {
+            center,
+            radius,
+            angular_speed,
+            vertical_amplitude,
+            vertical_speed: angular_speed.abs().max(0.35) * 1.35,
+            phase,
+            size,
+        },
+    ));
+}
+
+fn spawn_sling_pad(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    position: Vec3,
+    launch_velocity: Vec3,
+    radius: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(radius, 0.22))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(position),
+            ..default()
+        },
+        bevy_rapier3d::prelude::Collider::cylinder(0.11, radius),
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        WorldGeometry,
+        WalkableSurface,
+        SlingShotPad {
+            launch_velocity,
+            radius: radius + 0.7,
+            cooldown: 0.55,
+            cooldown_timer: 0.0,
+        },
+    ));
+}
+
+fn spawn_course_block(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    position: Vec3,
+    size: Vec3,
+    rotation: Quat,
+    collider: bool,
+    walkable: bool,
+) {
+    let entity = commands
+        .spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(position).with_rotation(rotation),
                 ..default()
             },
             WorldGeometry,
@@ -3205,6 +3914,10 @@ fn spawn_chapter_one_ocean_island(
             WorldGeometry,
             BoatVehicle {
                 embark_radius: 9.0,
+                passenger_radius: 15.0,
+                dock_radius: 18.0,
+                route_half_width: 22.0,
+                speed: 26.0,
                 dock_position: Vec3::new(0.0, 0.52, 604.0),
                 island_position: Vec3::new(0.0, 0.52, 826.0),
             },

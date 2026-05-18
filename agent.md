@@ -50,15 +50,33 @@ The AAA target is not just more features. It means:
 - Chapter scripting is data-oriented through `EncounterStep` definitions.
 - Hidden reward rooms and companion rescue rewards now have a save-backed
   reward path for credits, XP, armor, power-up ids, and special ability upgrades.
+- First-pass traversal toy courses now exist with slingshot launch pads,
+  rotating elevators, ramp towers, moving brick chains, wall-jump shafts, and
+  optional reward caches, plus visible marker posts, recovery platforms, and
+  return slingshots.
+- Wall slide is the default wall-contact behavior while falling; hang/climb is
+  intentional through interact, and wall jumps support stronger chained climbs.
+- Level 1 playability now has a temporary F9 collider debug overlay, stronger
+  character grounding tolerance, a two-page pause menu with control tips, and a
+  dock-aware boat that boards passengers instead of only following the driver.
+- Hidden rooms have first-pass puzzle dressing, pressure-plate props, visible
+  gates, and clearer reward staging.
+- Damage events carry player ownership, so split-screen camera shake and damage
+  vignettes target the damaged player instead of the whole party.
+- Enemy world loot pickup now selects the nearest eligible player inventory,
+  chapter encounter placement uses the party center, and airship deck placement
+  uses `PlayerIndex` slots.
 - Save data preserves newer per-player records while keeping old-save fields.
 - The project already has useful design documentation and improvement notes.
 
 ### Prototype Risks Blocking AAA Quality
 
-- Multiplayer ownership is not complete. `enemy_plugin.rs` still has a loot
-  pickup path that uses `get_single()` for player transform and inventory,
-  `armor_plugin.rs` debug element cycling assumes one player, chapter encounter
-  anchoring uses the first active player, and camera shake is global.
+- Multiplayer ownership is much stronger than the original prototype, but final
+  ownership policy is still design work. Core runtime paths now key saves, HUD,
+  companions, crafting, chests, hidden rewards, enemy loot pickups, damage
+  feedback, camera shake, and vehicle buffs by `PlayerIndex`; campaign
+  progression, chapter objectives, kill gates, boss phases, pause/save menu
+  authority, and party-shared vehicle mode still need explicit final rules.
 - Presentation is still prototype-heavy. Much of the world, characters, VFX,
   and encounters are procedural primitives or simple spawned shapes rather than
   production assets, animation, audio, authored lighting, cinematics, and tuned
@@ -112,8 +130,8 @@ ready, or AAA-ready.
 ### Movement And Camera
 
 - Platforming supports coyote time, jump buffering, wall interaction, ledges,
-  dodge, parry, jetpack, moving platforms, and camera framing without surprising
-  the player.
+  dodge, parry, jetpack, slingshot pads, rotating elevators, moving platforms,
+  and camera framing without surprising the player.
 - Each traversal action has animation, VFX/audio cues, controller rumble, and
   readable failure states.
 - Split-screen cameras do not fight over global effects and remain playable in
@@ -184,13 +202,15 @@ Goal: one polished, replayable chapter that defines the final game feel.
 
 Recommended slice: Chapter 1, Starfall Lab.
 
-- Lock final movement numbers for running, jumping, wall jumps, ledges, dodge,
-  parry, jetpack, and moving-platform behavior.
+- Lock final movement numbers for running, jumping, wall slides, wall jumps,
+  ledges, dodge, parry, jetpack, slingshots, rotating elevators, and
+  moving-platform behavior.
 - Replace placeholder combat presentation with final-style star-beam VFX, hit
   sparks, impact pause, camera/rumble feedback, audio cues, and enemy reactions.
 - Turn the chapter into a 10-15 minute authored mission with a readable opening,
-  traversal tutorial, secret cave, hidden reward rooms, relic puzzle, enemy
-  escalation, mini climax, rewards, and chapter-complete beat.
+  traversal tutorial, slingshot/ramp obstacle course, secret cave, hidden reward
+  rooms, relic puzzle, enemy escalation, mini climax, rewards, and
+  chapter-complete beat.
 - Build final-style UI for HUD, objective tracker, pause, chapter rewards, and
   perk training.
 - Establish art direction with production character proportions, material

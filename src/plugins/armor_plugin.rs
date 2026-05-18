@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::armor::*;
-use crate::components::player::{Player, PlayerStats};
+use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::perks::PerkTree;
 use crate::state::AppState;
 
@@ -51,17 +51,30 @@ fn apply_armor_health_bonus(
 /// In production this would be driven by a crafting/equipment UI.
 fn element_switch_system(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut player_q: Query<&mut ArmorSet, With<Player>>,
+    mut player_q: Query<(&PlayerIndex, &mut ArmorSet), With<Player>>,
 ) {
-    if keyboard.just_pressed(KeyCode::BracketLeft) {
-        if let Ok(mut armor) = player_q.get_single_mut() {
-            armor.active_element = cycle_element_prev(armor.active_element);
+    let direction = if keyboard.just_pressed(KeyCode::BracketLeft) {
+        Some(-1)
+    } else if keyboard.just_pressed(KeyCode::BracketRight) {
+        Some(1)
+    } else {
+        None
+    };
+
+    let Some(direction) = direction else {
+        return;
+    };
+
+    for (index, mut armor) in player_q.iter_mut() {
+        if index.0 != 0 {
+            continue;
         }
-    }
-    if keyboard.just_pressed(KeyCode::BracketRight) {
-        if let Ok(mut armor) = player_q.get_single_mut() {
-            armor.active_element = cycle_element_next(armor.active_element);
-        }
+        armor.active_element = if direction < 0 {
+            cycle_element_prev(armor.active_element)
+        } else {
+            cycle_element_next(armor.active_element)
+        };
+        break;
     }
 }
 

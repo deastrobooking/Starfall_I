@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::components::mods::PlayerLoadout;
 use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerInput, PlayerMovement};
-use crate::components::world::BoatVehicle;
+use crate::components::world::{BoatPassenger, BoatVehicle};
 use crate::events::UiMessageEvent;
 use crate::resources::PlaySessionTransition;
 use crate::state::AppState;
@@ -19,7 +19,7 @@ impl Plugin for VehiclePlugin {
             .add_systems(OnEnter(AppState::Playing), reset_vehicle_state_on_enter)
             .add_systems(
                 Update,
-                (vehicle_input, apply_vehicle_buffs, boat_follow_system)
+                (vehicle_input, apply_vehicle_buffs, boat_drive_system)
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -32,6 +32,7 @@ pub struct VehicleState {
     pub boat_active: bool,
     pub active_owner: Option<u8>,
     pub active_boat: Option<Entity>,
+    pub boat_heading: f32,
 }
 
 fn reset_vehicle_state_on_enter(
@@ -43,14 +44,25 @@ fn reset_vehicle_state_on_enter(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn vehicle_input(
-    player_q: Query<(&PlayerIndex, &Transform, &PlayerInput), With<Player>>,
+    mut commands: Commands,
+    player_q: Query<
+        (
+            Entity,
+            &PlayerIndex,
+            &Transform,
+            &PlayerInput,
+            Option<&BoatPassenger>,
+        ),
+        With<Player>,
+    >,
     boat_q: Query<(Entity, &Transform, &BoatVehicle)>,
     loadout: Res<PlayerLoadout>,
     mut state: ResMut<VehicleState>,
     mut msg_ev: EventWriter<UiMessageEvent>,
 ) {
-    for (idx, player_transform, pi) in player_q.iter() {
+    for (entity, idx, player_transform, pi, passenger) in player_q.iter() {
         if pi.open_map {
             if loadout.has_blueprint("motorcycle_blueprint") {
                 let toggled_on = !(state.motorcycle_active && state.active_owner == Some(idx.0));
@@ -58,6 +70,7 @@ fn vehicle_input(
                 state.jet_active = false;
                 state.boat_active = false;
                 state.active_boat = None;
+                remove_boat_passengers(&mut commands, &player_q, None);
                 state.active_owner = toggled_on.then_some(idx.0);
                 msg_ev.send(UiMessageEvent {
                     text: if toggled_on {
@@ -76,10 +89,28 @@ fn vehicle_input(
         }
 
         if pi.enter_vehicle {
-            if state.boat_active && state.active_owner == Some(idx.0) {
-                state.boat_active = false;
-                state.active_boat = None;
-                state.active_owner = None;
+            if let Some(passenger) = passenger {
+                let Ok((_, boat_transform, boat)) = boat_q.get(passenger.boat) else {
+                    commands.entity(entity).remove::<BoatPassenger>();
+                    continue;
+                };
+
+                if !boat_is_at_dock(boat_transform.translation, boat) {
+                    msg_ev.send(UiMessageEvent {
+                        text: "Dock at the city or island before disembarking.".into(),
+                        duration: 2.0,
+                    });
+                    continue;
+                }
+
+                if passenger.is_driver {
+                    state.boat_active = false;
+                    state.active_boat = None;
+                    state.active_owner = None;
+                    remove_boat_passengers(&mut commands, &player_q, Some(passenger.boat));
+                } else {
+                    commands.entity(entity).remove::<BoatPassenger>();
+                }
                 msg_ev.send(UiMessageEvent {
                     text: format!("P{} Boat: docked", idx.0 + 1),
                     duration: 1.8,
@@ -87,7 +118,7 @@ fn vehicle_input(
                 continue;
             }
 
-            if let Some((boat_entity, _, boat)) = boat_q
+            if let Some((boat_entity, boat_transform, boat)) = boat_q
                 .iter()
                 .filter(|(_, boat_transform, boat)| {
                     player_transform
@@ -107,10 +138,19 @@ fn vehicle_input(
                 state.jet_active = false;
                 state.active_owner = Some(idx.0);
                 state.active_boat = Some(boat_entity);
+                state.boat_heading = yaw_from_rotation(boat_transform.rotation);
                 let trip_distance = boat.dock_position.distance(boat.island_position);
+                board_nearby_players(
+                    &mut commands,
+                    &player_q,
+                    boat_entity,
+                    boat_transform,
+                    boat,
+                    entity,
+                );
                 msg_ev.send(UiMessageEvent {
                     text: format!(
-                        "P{} Boat: ON - follow the wake toward the island ({:.0}m)",
+                        "P{} Boat: ON - steer along the wake ({:.0}m)",
                         idx.0 + 1,
                         trip_distance
                     ),
@@ -125,6 +165,7 @@ fn vehicle_input(
                 state.motorcycle_active = false;
                 state.boat_active = false;
                 state.active_boat = None;
+                remove_boat_passengers(&mut commands, &player_q, None);
                 state.active_owner = toggled_on.then_some(idx.0);
                 msg_ev.send(UiMessageEvent {
                     text: if toggled_on {
@@ -142,6 +183,81 @@ fn vehicle_input(
             }
         }
     }
+}
+
+#[allow(clippy::type_complexity)]
+fn board_nearby_players(
+    commands: &mut Commands,
+    player_q: &Query<
+        (
+            Entity,
+            &PlayerIndex,
+            &Transform,
+            &PlayerInput,
+            Option<&BoatPassenger>,
+        ),
+        With<Player>,
+    >,
+    boat_entity: Entity,
+    boat_transform: &Transform,
+    boat: &BoatVehicle,
+    driver_entity: Entity,
+) {
+    let mut riders: Vec<(Entity, u8, bool)> = player_q
+        .iter()
+        .filter(|(_, _, player_transform, _, passenger)| {
+            passenger.is_none()
+                && player_transform
+                    .translation
+                    .distance(boat_transform.translation)
+                    <= boat.passenger_radius
+        })
+        .map(|(entity, idx, _, _, _)| (entity, idx.0, entity == driver_entity))
+        .collect();
+
+    riders.sort_by_key(|(_, index, is_driver)| (!*is_driver, *index));
+    for (seat, (entity, _, is_driver)) in riders.into_iter().take(4).enumerate() {
+        commands.entity(entity).insert(BoatPassenger {
+            boat: boat_entity,
+            seat: seat as u8,
+            is_driver,
+        });
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn remove_boat_passengers(
+    commands: &mut Commands,
+    player_q: &Query<
+        (
+            Entity,
+            &PlayerIndex,
+            &Transform,
+            &PlayerInput,
+            Option<&BoatPassenger>,
+        ),
+        With<Player>,
+    >,
+    boat_filter: Option<Entity>,
+) {
+    for (entity, _, _, _, passenger) in player_q.iter() {
+        let Some(passenger) = passenger else {
+            continue;
+        };
+        if boat_filter.is_none_or(|boat| passenger.boat == boat) {
+            commands.entity(entity).remove::<BoatPassenger>();
+        }
+    }
+}
+
+fn boat_is_at_dock(position: Vec3, boat: &BoatVehicle) -> bool {
+    position.distance(boat.dock_position) <= boat.dock_radius
+        || position.distance(boat.island_position) <= boat.dock_radius
+}
+
+fn yaw_from_rotation(rotation: Quat) -> f32 {
+    let (yaw, _, _) = rotation.to_euler(EulerRot::YXZ);
+    yaw
 }
 
 /// Apply vehicle speed/force buffs only to the player who activated the vehicle.
@@ -174,11 +290,17 @@ fn apply_vehicle_buffs(
     }
 }
 
-fn boat_follow_system(
+fn boat_drive_system(
     time: Res<Time>,
-    state: Res<VehicleState>,
-    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
-    mut boat_q: Query<&mut Transform, With<BoatVehicle>>,
+    mut state: ResMut<VehicleState>,
+    mut boat_q: Query<(&mut Transform, &BoatVehicle)>,
+    mut passenger_q: Query<(
+        &PlayerIndex,
+        &mut Transform,
+        &mut PlayerMovement,
+        &PlayerInput,
+        &BoatPassenger,
+    )>,
 ) {
     if !state.boat_active {
         return;
@@ -186,18 +308,58 @@ fn boat_follow_system(
     let (Some(owner), Some(boat_entity)) = (state.active_owner, state.active_boat) else {
         return;
     };
-    let Some((_, player_transform)) = player_q.iter().find(|(idx, _)| idx.0 == owner) else {
-        return;
-    };
-    let Ok(mut boat_transform) = boat_q.get_mut(boat_entity) else {
+    let Ok((mut boat_transform, boat)) = boat_q.get_mut(boat_entity) else {
         return;
     };
 
-    let bob = (time.elapsed_secs() * 2.8).sin() * 0.10;
-    boat_transform.translation = Vec3::new(
-        player_transform.translation.x,
-        0.42 + bob,
-        player_transform.translation.z,
+    let mut driver_axis = Vec2::ZERO;
+    for (idx, _, _, input, passenger) in passenger_q.iter_mut() {
+        if passenger.boat == boat_entity && passenger.is_driver && idx.0 == owner {
+            driver_axis = input.move_axis;
+            break;
+        }
+    }
+
+    let dt = time.delta_secs();
+    let mut horizontal = Vec3::new(driver_axis.x, 0.0, driver_axis.y);
+    if horizontal.length_squared() > 0.01 {
+        horizontal = horizontal.normalize();
+        boat_transform.translation += horizontal * boat.speed * dt;
+        state.boat_heading = horizontal.x.atan2(horizontal.z);
+    }
+
+    let min_z = boat.dock_position.z.min(boat.island_position.z) - boat.dock_radius;
+    let max_z = boat.dock_position.z.max(boat.island_position.z) + boat.dock_radius;
+    let route_center_x = (boat.dock_position.x + boat.island_position.x) * 0.5;
+    boat_transform.translation.x = boat_transform.translation.x.clamp(
+        route_center_x - boat.route_half_width,
+        route_center_x + boat.route_half_width,
     );
-    boat_transform.rotation = player_transform.rotation;
+    boat_transform.translation.z = boat_transform.translation.z.clamp(min_z, max_z);
+
+    let bob = (time.elapsed_secs() * 2.8).sin() * 0.10;
+    boat_transform.translation.y = boat.dock_position.y + bob;
+    boat_transform.rotation = Quat::from_rotation_y(state.boat_heading);
+
+    for (_, mut player_transform, mut movement, _, passenger) in passenger_q.iter_mut() {
+        if passenger.boat != boat_entity {
+            continue;
+        }
+        movement.velocity = Vec3::ZERO;
+        movement.ground_velocity = Vec3::ZERO;
+        movement.is_grounded = true;
+
+        let seat = boat_seat_offset(passenger.seat);
+        player_transform.translation = boat_transform.translation + boat_transform.rotation * seat;
+        player_transform.rotation = boat_transform.rotation;
+    }
+}
+
+fn boat_seat_offset(seat: u8) -> Vec3 {
+    match seat {
+        0 => Vec3::new(0.0, 1.08, 1.35),
+        1 => Vec3::new(-1.35, 1.02, -0.55),
+        2 => Vec3::new(1.35, 1.02, -0.55),
+        _ => Vec3::new(0.0, 1.02, -2.25),
+    }
 }

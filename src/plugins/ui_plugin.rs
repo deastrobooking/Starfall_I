@@ -27,6 +27,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiMessage>()
             .init_resource::<CraftingPanelState>()
+            .init_resource::<PauseMenuState>()
             .add_systems(Startup, spawn_menu_camera)
             .add_systems(
                 OnEnter(AppState::MainMenu),
@@ -63,7 +64,8 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                pause_menu_action_system.run_if(in_state(AppState::Paused)),
+                (pause_menu_action_system, update_pause_menu_page_visibility)
+                    .run_if(in_state(AppState::Paused)),
             )
             .add_systems(
                 Update,
@@ -151,6 +153,26 @@ enum PauseAction {
     Resume,
     Save,
     Title,
+    Controls,
+    Back,
+}
+#[derive(Component, Clone, Copy)]
+struct PausePagePanel(PausePage);
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PausePage {
+    Main,
+    Controls,
+}
+#[derive(Resource)]
+struct PauseMenuState {
+    page: PausePage,
+}
+impl Default for PauseMenuState {
+    fn default() -> Self {
+        Self {
+            page: PausePage::Main,
+        }
+    }
 }
 #[derive(Component)]
 struct GameOverRoot;
@@ -199,6 +221,7 @@ struct ObjectiveStatusText;
 struct MessageText;
 #[derive(Component)]
 struct DamageVignette {
+    player_index: u8,
     alpha: f32,
 }
 #[derive(Component)]
@@ -300,7 +323,8 @@ fn menu_start_button(
     }
 }
 
-fn setup_pause_menu(mut commands: Commands) {
+fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
+    menu.page = PausePage::Main;
     commands
         .spawn((
             Node {
@@ -327,7 +351,7 @@ fn setup_pause_menu(mut commands: Commands) {
                 TextColor(Color::srgb(0.9, 0.95, 1.0)),
             ));
             root.spawn((
-                Text::new("Esc / Start resumes. Physics and gameplay are frozen."),
+                Text::new("Any active player can pause. Save and title actions affect the party."),
                 TextFont {
                     font_size: 19.0,
                     ..default()
@@ -339,60 +363,135 @@ fn setup_pause_menu(mut commands: Commands) {
                 ..default()
             });
 
-            for (label, action, color) in [
-                ("RESUME", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
-                ("SAVE GAME", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
-                ("SAVE & TITLE", PauseAction::Title, Color::srgb(0.48, 0.18, 0.18)),
-            ] {
-                root.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(280.0),
-                        height: Val::Px(44.0),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
+            root.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(10.0),
+                    ..default()
+                },
+                Visibility::Visible,
+                PausePagePanel(PausePage::Main),
+            ))
+            .with_children(|page| {
+                for (label, action, color) in [
+                    ("RESUME", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
+                    ("SAVE GAME", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
+                    (
+                        "SAVE & RETURN TO TITLE",
+                        PauseAction::Title,
+                        Color::srgb(0.48, 0.18, 0.18),
+                    ),
+                    (
+                        "CONTROLS / TIPS",
+                        PauseAction::Controls,
+                        Color::srgb(0.22, 0.24, 0.52),
+                    ),
+                ] {
+                    spawn_pause_button(page, label, action, color);
+                }
+                page.spawn((
+                    Text::new(
+                        "Quick keys: [S/F5] Save   [T] Save & Title   [F9] Collider Debug",
+                    ),
+                    TextFont {
+                        font_size: 15.0,
                         ..default()
                     },
-                    BackgroundColor(color),
-                    PauseMenuButton(action),
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        Text::new(label),
-                        TextFont {
-                            font_size: 22.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
-            }
-
-            root.spawn(Node {
-                height: Val::Px(8.0),
-                ..default()
+                    TextColor(Color::srgb(0.86, 0.90, 1.0)),
+                ));
             });
+
             root.spawn((
-                Text::new(
-                    "Quick keys: [S/F5] Save   [T] Save & Title   [C] Crafting   [M] Map   [J] Vehicle/Boat",
-                ),
-                TextFont {
-                    font_size: 15.0,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(10.0),
+                    max_width: Val::Px(760.0),
                     ..default()
                 },
-                TextColor(Color::srgb(0.86, 0.90, 1.0)),
-            ));
-            root.spawn((
-                Text::new(
-                    "Controls: WASD/Left Stick move | Mouse/Right Stick look | Space/South jump | Q/East dodge | F/North parry\nLMB/RT star beam | RMB/LT aim | 1-6 or RB/DPad Left beams | 7-0 or Select+DPad special tools | E/DPad Down interact",
-                ),
+                Visibility::Hidden,
+                PausePagePanel(PausePage::Controls),
+            ))
+            .with_children(|page| {
+                page.spawn((
+                    Text::new("CONTROLS / TIPS"),
+                    TextFont {
+                        font_size: 30.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.9, 0.95, 1.0)),
+                ));
+                page.spawn((
+                    Text::new(
+                        "Move: WASD / Left Stick     Look: Mouse / Right Stick     Jump: Space / South\nDodge: Q / East     Parry: F / North     Interact: E / DPad Down     Boat/Vehicle: J / DPad Up\nFire: LMB / RT     Aim: RMB / LT     Weapons: 1-6 / RB     Special Tools: 7-0 or Select + DPad\nTraversal: hold into a wall while falling to slide, then jump to wall-jump. Use slingshot pads with Jump or Interact.",
+                    ),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                ));
+                page.spawn((
+                    Text::new(
+                        "Boat: board near a dock, steer along the wake, and dock at the city or island before disembarking. Hidden rooms can contain puzzle props, rewards, armor, XP, and special ability upgrades.",
+                    ),
+                    TextFont {
+                        font_size: 15.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.86, 0.90, 1.0)),
+                ));
+                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+            });
+        });
+}
+
+fn spawn_pause_button(
+    parent: &mut ChildBuilder,
+    label: &'static str,
+    action: PauseAction,
+    color: Color,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(320.0),
+                height: Val::Px(44.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(color),
+            PauseMenuButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: 21.0,
                     ..default()
                 },
-                TextColor(Color::srgb(0.66, 0.76, 0.95)),
+                TextColor(Color::WHITE),
             ));
         });
+}
+
+fn update_pause_menu_page_visibility(
+    menu: Res<PauseMenuState>,
+    mut page_q: Query<(&PausePagePanel, &mut Visibility)>,
+) {
+    if !menu.is_changed() {
+        return;
+    }
+    for (panel, mut visibility) in page_q.iter_mut() {
+        *visibility = if panel.0 == menu.page {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
 }
 
 fn despawn_pause_menu(mut commands: Commands, q: Query<Entity, With<PauseRoot>>) {
@@ -456,6 +555,7 @@ fn pause_menu_action_system(
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
     select: Res<PlayerSelectState>,
+    mut menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
     mut msg_ev: EventWriter<UiMessageEvent>,
@@ -502,6 +602,12 @@ fn pause_menu_action_system(
             transition.pausing = false;
             transition.resuming_from_pause = false;
             next_state.set(AppState::MainMenu);
+        }
+        PauseAction::Controls => {
+            menu.page = PausePage::Controls;
+        }
+        PauseAction::Back => {
+            menu.page = PausePage::Main;
         }
     }
 }
@@ -1126,20 +1232,17 @@ fn setup_hud(
             HudRoot,
         ))
         .with_children(|root| {
-            // ── Damage vignette (full-screen red overlay) ─────────────────────────
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.8, 0.0, 0.0, 0.0)),
-                DamageVignette { alpha: 0.0 },
-            ));
-
             // ── Per-player stat panels ───────────────────────────────────────────
-            for player_index in 0..config.active.clamp(1, 4) {
+            let active = config.active.clamp(1, 4);
+            for player_index in 0..active {
+                root.spawn((
+                    damage_vignette_node(player_index, active),
+                    BackgroundColor(Color::srgba(0.8, 0.0, 0.0, 0.0)),
+                    DamageVignette {
+                        player_index,
+                        alpha: 0.0,
+                    },
+                ));
                 spawn_player_hud_panel(root, player_index);
             }
 
@@ -1343,6 +1446,61 @@ fn setup_hud(
                 ));
             });
         });
+}
+
+fn damage_vignette_node(player_index: u8, active: u8) -> Node {
+    let mut node = Node {
+        position_type: PositionType::Absolute,
+        width: Val::Percent(100.0),
+        height: Val::Percent(100.0),
+        ..default()
+    };
+
+    match active {
+        2 => {
+            node.height = Val::Percent(50.0);
+            if player_index == 0 {
+                node.top = Val::Percent(0.0);
+            } else {
+                node.bottom = Val::Percent(0.0);
+            }
+        }
+        3 => match player_index {
+            0 => {
+                node.width = Val::Percent(50.0);
+                node.height = Val::Percent(50.0);
+                node.top = Val::Percent(0.0);
+                node.left = Val::Percent(0.0);
+            }
+            1 => {
+                node.width = Val::Percent(50.0);
+                node.height = Val::Percent(50.0);
+                node.top = Val::Percent(0.0);
+                node.right = Val::Percent(0.0);
+            }
+            _ => {
+                node.height = Val::Percent(50.0);
+                node.bottom = Val::Percent(0.0);
+            }
+        },
+        4 => {
+            node.width = Val::Percent(50.0);
+            node.height = Val::Percent(50.0);
+            if player_index == 0 || player_index == 2 {
+                node.left = Val::Percent(0.0);
+            } else {
+                node.right = Val::Percent(0.0);
+            }
+            if player_index < 2 {
+                node.top = Val::Percent(0.0);
+            } else {
+                node.bottom = Val::Percent(0.0);
+            }
+        }
+        _ => {}
+    }
+
+    node
 }
 
 fn spawn_player_hud_panel(parent: &mut ChildBuilder, player_index: u8) {
@@ -1681,9 +1839,15 @@ fn damage_vignette_system(
     mut damage_ev: EventReader<PlayerDamagedEvent>,
     mut vignette_q: Query<(&mut BackgroundColor, &mut DamageVignette)>,
 ) {
-    for _ in damage_ev.read() {
+    for ev in damage_ev.read() {
         for (_, mut v) in vignette_q.iter_mut() {
-            v.alpha = 0.45;
+            if ev
+                .player_index
+                .map(|player_index| player_index == v.player_index)
+                .unwrap_or(true)
+            {
+                v.alpha = 0.45;
+            }
         }
     }
     for (mut bg, mut v) in vignette_q.iter_mut() {

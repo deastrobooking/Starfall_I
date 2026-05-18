@@ -26,24 +26,35 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Chapter 1 now has a north-coast ocean route, an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat vehicle.
 - The Chapter 1 starter/lab area now reserves a clearer ground zone so opaque or translucent world props are less likely to block early walking routes.
 - Default heroes now spawn through upgraded runtime blueprints, body-derived stride/agility animation tuning, and a visual foot-grounding lift so the live player path matches the newer character design system more closely.
+- Player grounding now uses a slightly larger controller skin/snap tolerance and higher visual foot lift to reduce terrain lips and feet sinking.
+- F9 toggles a temporary collider debug overlay during play, including the invisible ground safety plane, to help track bad blockers in Level 1 playtests.
+- The pause menu now has a main page and a controls/tips page, with party-wide save/title actions labeled clearly.
+- The Chapter 1 boat now boards nearby passengers, locks one driver, steers along the wake lane, clamps to the water route, and requires docking before disembark.
 - Hidden city reward rooms now exist as visible walkable spaces, and `HiddenReward` caches can grant credits, XP, armor, power-up ids, and special-ability upgrades/refills.
 - Freeing companions now grants first-time rescue supplies to the collecting player.
+- Wall slide is now the default when pushing into walls while falling, hanging is intentional through interact, and wall jumps have stronger launch, short steering lockout, and two refreshed wall-jump charges for chained climbs.
+- The city now includes Sling Tower and Ramp Brick Tower traversal courses with slingshot pads, ramp obstacles, moving brick chains, rotating elevators, wall-jump shafts, reset platforms, return slingshots, marker posts, and reward caches.
+- Hidden rooms now have pressure-plate puzzle dressing, visible gate pieces, and clearer reward staging.
+- Enemy world loot now goes to the nearest eligible player instead of assuming one player/inventory.
+- Damage events now carry player ownership, so split-screen camera shake and damage vignette feedback target the damaged player.
+- Chapter encounter placement now uses the party center, and airship deck placement uses `PlayerIndex` slots instead of query order.
+- Dev armor element cycling no longer calls `get_single_mut`; keyboard cycling targets P1 only.
 
 ## High Priority
 
 ### 1. Finish per-player multiplayer ownership
 **Files:** `src/plugins/*`
 
-The player-select, input, movement, camera, combat, save, HUD, companion, crafting, chest, vehicle-buff, and death paths support multiple players, but a few support systems are still first-player or shared-state oriented.
+The player-select, input, movement, camera, combat, save, HUD, companion, crafting, chest, hidden reward, enemy loot, damage feedback, vehicle-buff, and death paths support multiple players. Remaining work is now mostly design-level ownership rather than obvious `get_single()` blockers.
 
 Known remaining areas:
 
-- Some enemy/world reward pickup paths still assume a single nearby player or shared reward target.
-- `armor_plugin.rs` still has single-player debug element cycling.
 - Vehicle mode is owner-keyed, but only one active vehicle mode exists at a time for the party.
-- Camera shake and damage vignette are still global feedback pools.
+- Chapter progression, objective state, kill gates, and boss phases remain campaign-shared.
+- Pause/save menu authority still needs final local-multiplayer UX decisions.
+- Dev armor element cycling targets P1 until a real per-player equipment UI exists.
 
-**Design direction:** add explicit owner/player index fields to interaction systems, then decide which resources are campaign-shared and which are per-player.
+**Design direction:** decide which resources are campaign-shared and which are per-player, then expose final per-player inventory/equipment/menu flows through controller-friendly UI.
 
 ### 2. Add a real perk training screen
 **Files:** `src/plugins/ui_plugin.rs`, `src/perks.rs`
@@ -73,23 +84,30 @@ Fragment puzzles now prove the five-pieces-make-a-relic loop with moving bars, l
 
 **Design direction:** add hazard damage, timed doors, rotating platform chains, airship-style variants, and optional bonus fragments that reward careful platforming without blocking chapter completion.
 
+### 6. Tune traversal toys and obstacle courses
+**Files:** `src/components/world.rs`, `src/plugins/world_plugin.rs`, `src/plugins/player_plugin.rs`
+
+Slingshot pads, rotating elevators, ramp towers, and moving brick chains now exist as first-pass traversal toys. They need hands-on tuning for trajectory, camera readability, multiplayer crowding, reset paths, and reward pacing.
+
+**Design direction:** add route signage, checkpoint/return pads, course timers, optional medal rewards, camera assists during large launches, and course variants in caves, airships, islands, and castles.
+
 ## Medium Priority
 
-### 6. Deepen hidden rewards, cave rewards, and secrets
+### 7. Deepen hidden rewards, cave rewards, and secrets
 **Files:** `src/plugins/world_plugin.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
 
 Secret caves now exist as discoverable places, and the city has first-pass hidden reward rooms. These prove the reward-cache path, but caves and later levels need more authored secret content.
 
 **Design direction:** add cave-only chests, lore tablets, biome hazards, puzzle-gated doors, hidden relic-fragment shortcuts, unique armor/power-up pools, secret-room completion counts on the map/HUD, and clearer authored clues that lead players to hidden spaces.
 
-### 7. Dual armor tracking can drift
+### 8. Dual armor tracking can drift
 **Files:** `src/components/player.rs`, `src/components/armor.rs`, `src/plugins/armor_plugin.rs`
 
 `PlayerStats` tracks numeric `armor` / `max_armor`, while `ArmorSet` tracks equipped armor pieces and damage reduction. Incoming damage uses both concepts. This should be named and documented as two distinct mechanics, or consolidated.
 
 **Design direction:** either rename `PlayerStats.armor` to `current_armor_points`, or move armor durability into `ArmorSet`.
 
-### 8. Health maximum has multiple writers
+### 9. Health maximum has multiple writers
 **Files:** `src/plugins/player_plugin.rs`, `src/plugins/armor_plugin.rs`, `src/plugins/save_plugin.rs`
 
 Level-up, armor bonuses, perk bonuses, and loading all write max health. The armor/perk sync now recalculates from stable sources, but the data model would be cleaner with one source of truth.
@@ -98,21 +116,21 @@ Level-up, armor bonuses, perk bonuses, and loading all write max health. The arm
 
 ## Lower Priority
 
-### 8. Move away from deprecated Bevy bundle APIs
+### 10. Move away from deprecated Bevy bundle APIs
 **Files:** many rendering systems
 
 `cargo check` succeeds, but Bevy emits many deprecation warnings for `PbrBundle`, `Camera3dBundle`, `PointLightBundle`, and related APIs.
 
 **Fix:** migrate gradually to direct `Mesh3d`, `MeshMaterial3d`, `Camera3d`, `PointLight`, and related component insertion.
 
-### 9. Second Wind needs an out-of-combat timer
+### 11. Second Wind needs an out-of-combat timer
 **Files:** `src/plugins/player_plugin.rs`, `src/perks.rs`
 
 `Second Wind` currently regenerates HP while the player is alive and below max health. The design text says "out of combat," but there is no combat timer yet.
 
 **Fix:** track recent damage/dealt-damage timestamps and enable regen only after a short quiet window.
 
-### 10. Input conflicts need a final control pass
+### 12. Input conflicts need a final control pass
 **Files:** `src/plugins/input_plugin.rs`, `src/plugins/armor_plugin.rs`
 
 Bracket keys currently overlap weapon cycling and developer elemental armor cycling. This is fine for a prototype, but final controls should separate player-facing actions from debug actions.

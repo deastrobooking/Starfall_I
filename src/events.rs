@@ -3,6 +3,7 @@ use bevy::prelude::*;
 // ── Player ────────────────────────────────────────────────────────────────────
 #[derive(Event, Debug)]
 pub struct PlayerDamagedEvent {
+    pub player_index: Option<u8>,
     pub amount: f32,
     pub remaining: f32,
 }

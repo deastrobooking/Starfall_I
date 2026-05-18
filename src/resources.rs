@@ -79,15 +79,41 @@ pub struct PlayerScore {
 
 // ── Camera Shake ──────────────────────────────────────────────────────────────
 // Trauma model: trauma decays over time, shake magnitude = trauma^2.
-// Global resource; all player cameras share the same shake pool.
-#[derive(Resource, Debug, Default)]
+// `trauma` is a global fallback, while `per_player` drives split-screen cameras.
+#[derive(Resource, Debug)]
 pub struct CameraShake {
     pub trauma: f32,
+    pub per_player: [f32; 4],
+}
+
+impl Default for CameraShake {
+    fn default() -> Self {
+        Self {
+            trauma: 0.0,
+            per_player: [0.0; 4],
+        }
+    }
 }
 
 impl CameraShake {
     pub fn add_trauma(&mut self, amount: f32) {
         self.trauma = (self.trauma + amount).min(1.0);
+    }
+
+    pub fn add_player_trauma(&mut self, player_index: u8, amount: f32) {
+        let slot = usize::from(player_index.min(3));
+        self.per_player[slot] = (self.per_player[slot] + amount).min(1.0);
+    }
+
+    pub fn trauma_for(&self, player_index: u8) -> f32 {
+        self.per_player[usize::from(player_index.min(3))].max(self.trauma)
+    }
+
+    pub fn decay(&mut self, amount: f32) {
+        self.trauma = (self.trauma - amount).max(0.0);
+        for trauma in &mut self.per_player {
+            *trauma = (*trauma - amount).max(0.0);
+        }
     }
 }
 
