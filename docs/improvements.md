@@ -25,6 +25,9 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Pause now freezes Rapier physics, exposes save and save-and-title actions, shows control hints, and cleans up preserved play-session entities when returning to the title.
 - Chapter 1 now has a north-coast ocean route, an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat vehicle.
 - The Chapter 1 starter/lab area now reserves a clearer ground zone so opaque or translucent world props are less likely to block early walking routes.
+- Default heroes now spawn through upgraded runtime blueprints, body-derived stride/agility animation tuning, and a visual foot-grounding lift so the live player path matches the newer character design system more closely.
+- Hidden city reward rooms now exist as visible walkable spaces, and `HiddenReward` caches can grant credits, XP, armor, power-up ids, and special-ability upgrades/refills.
+- Freeing companions now grants first-time rescue supplies to the collecting player.
 
 ## High Priority
 
@@ -72,12 +75,12 @@ Fragment puzzles now prove the five-pieces-make-a-relic loop with moving bars, l
 
 ## Medium Priority
 
-### 6. Add cave-specific rewards and secrets
+### 6. Deepen hidden rewards, cave rewards, and secrets
 **Files:** `src/plugins/world_plugin.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
 
-Secret caves now exist as discoverable places, but they currently reward charting/progression rather than unique cave loot.
+Secret caves now exist as discoverable places, and the city has first-pass hidden reward rooms. These prove the reward-cache path, but caves and later levels need more authored secret content.
 
-**Design direction:** add cave-only chests, lore tablets, biome hazards, hidden relic-fragment shortcuts, and a cave completion count on the map/HUD.
+**Design direction:** add cave-only chests, lore tablets, biome hazards, puzzle-gated doors, hidden relic-fragment shortcuts, unique armor/power-up pools, secret-room completion counts on the map/HUD, and clearer authored clues that lead players to hidden spaces.
 
 ### 7. Dual armor tracking can drift
 **Files:** `src/components/player.rs`, `src/components/armor.rs`, `src/plugins/armor_plugin.rs`

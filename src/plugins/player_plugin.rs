@@ -4,10 +4,12 @@ use bevy::transform::TransformSystem;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_rapier3d::prelude::*;
 
-use crate::character_blueprint::CharacterBlueprint;
+use crate::character_blueprint::{
+    BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
+};
 use crate::characters::{
     accent_preset, attach_cartoon_character, despawn_cartoon_character_parts, hair_preset,
-    hero_config_with_overrides, outfit_preset,
+    hero_config, hero_config_with_overrides, outfit_preset,
 };
 use crate::components::armor::ArmorSet;
 use crate::components::character::CartoonPart;
@@ -18,7 +20,9 @@ use crate::damage::{apply_damage, DamageInfo, Damageable, Health};
 use crate::events::*;
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
-use crate::resources::{CameraShake, LocalPlayerConfig, PlaySessionTransition, PlayerSelectState};
+use crate::resources::{
+    CameraShake, LocalPlayerConfig, PlaySessionTransition, PlayerSelectState, PlayerSlotConfig,
+};
 use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -150,6 +154,98 @@ fn authored_player_defaults(
     )
 }
 
+fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> CharacterBlueprint {
+    let base = hero_config(name);
+    let body = match name {
+        "Vincenzo" => BodyRecipe {
+            height: 1.06,
+            shoulder_width: 1.10,
+            chest_size: 1.06,
+            arm_length: 1.04,
+            leg_length: 1.08,
+            hand_size: 1.06,
+            foot_size: 1.08,
+            head_size: 1.03,
+            mass: 1.08,
+            muscle: 1.10,
+            spine_posture: 0.06,
+            ..BodyRecipe::default()
+        },
+        "Antonio" => BodyRecipe {
+            height: 1.02,
+            shoulder_width: 0.98,
+            chest_size: 0.98,
+            arm_length: 1.03,
+            leg_length: 1.12,
+            hand_size: 1.02,
+            foot_size: 1.07,
+            head_size: 1.02,
+            mass: 0.95,
+            muscle: 1.02,
+            spine_posture: 0.03,
+            ..BodyRecipe::default()
+        },
+        "Angelo" => BodyRecipe {
+            height: 1.01,
+            shoulder_width: 1.00,
+            chest_size: 1.02,
+            arm_length: 1.07,
+            leg_length: 1.06,
+            hand_size: 1.07,
+            foot_size: 1.06,
+            head_size: 1.04,
+            mass: 0.98,
+            muscle: 1.04,
+            spine_posture: -0.02,
+            ..BodyRecipe::default()
+        },
+        "Joseph" => BodyRecipe {
+            height: 0.99,
+            shoulder_width: 1.17,
+            chest_size: 1.12,
+            arm_length: 1.02,
+            leg_length: 1.03,
+            hand_size: 1.10,
+            foot_size: 1.12,
+            head_size: 1.05,
+            mass: 1.16,
+            muscle: 1.18,
+            spine_posture: 0.08,
+            ..BodyRecipe::default()
+        },
+        _ => BodyRecipe {
+            height: 1.04,
+            shoulder_width: 1.06,
+            chest_size: 1.04,
+            leg_length: 1.08,
+            foot_size: 1.08,
+            head_size: 1.03,
+            mass: 1.04,
+            muscle: 1.06,
+            ..BodyRecipe::default()
+        },
+    };
+    let palette = CharacterPaletteRecipe {
+        skin: base.skin,
+        outfit: slot.outfit_idx.map(outfit_preset).unwrap_or(base.outfit),
+        accent: slot.accent_idx.map(accent_preset).unwrap_or(base.accent),
+        hair: slot.hair_idx.map(hair_preset).unwrap_or(base.hair),
+        eye: base.eye_color,
+    };
+    let appearance = CartoonAppearanceRecipe {
+        has_hood: slot.has_hood.unwrap_or(true),
+        has_cape: slot.has_cape.unwrap_or(true),
+        has_gloves: slot.has_gloves.unwrap_or(true),
+        has_boots: slot.has_boots.unwrap_or(true),
+        has_shoulder_pads: slot
+            .has_shoulder_pads
+            .unwrap_or(matches!(name, "Vincenzo" | "Joseph")),
+        has_visor: slot.has_visor.unwrap_or(false),
+    };
+
+    CharacterBlueprint::hero(name, body, palette, appearance)
+}
+
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 fn spawn_players(
     mut commands: Commands,
@@ -175,8 +271,13 @@ fn spawn_players(
     for i in 0..active {
         let spawn_pos = player_spawn_position(i);
         let slot = &select.slots[i as usize];
+        let character_name = select.character_name(i as usize);
+        let runtime_blueprint = slot
+            .blueprint
+            .clone()
+            .unwrap_or_else(|| upgraded_player_blueprint(character_name, slot));
         let (player_stats, player_movement, dodge_state, player_collider) =
-            authored_player_defaults(slot.blueprint.as_ref());
+            authored_player_defaults(Some(&runtime_blueprint));
 
         let player = commands
             .spawn((
@@ -227,7 +328,7 @@ fn spawn_players(
 
         despawn_cartoon_character_parts(&mut commands, player, &existing_parts);
         let mut character_config = hero_config_with_overrides(
-            select.character_name(i as usize),
+            character_name,
             slot.outfit_idx.map(outfit_preset),
             slot.accent_idx.map(accent_preset),
             slot.hair_idx.map(hair_preset),
@@ -238,9 +339,7 @@ fn spawn_players(
             slot.has_shoulder_pads,
             slot.has_visor,
         );
-        if let Some(blueprint) = slot.blueprint.as_ref() {
-            character_config = character_config.with_blueprint(blueprint);
-        }
+        character_config = character_config.with_blueprint(&runtime_blueprint);
         attach_cartoon_character(
             &mut commands,
             &mut meshes,

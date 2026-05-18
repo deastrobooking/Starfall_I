@@ -408,11 +408,16 @@ pub fn attach_cartoon_character(
     config: CartoonCharacterConfig,
     root_position: Vec3,
 ) {
+    let body = config.body.validated();
+    let visual_ground_lift = visual_ground_lift(&body, config.scale);
     commands.entity(root).insert((
         CartoonCharacter {
             name: config.name.to_string(),
             role: config.role,
             scale: config.scale,
+            stride: body.stride_multiplier(),
+            agility: body.agility_multiplier(),
+            visual_ground_lift,
         },
         CartoonAnimator::new(root_position),
         Visibility::Visible,
@@ -439,7 +444,6 @@ pub fn attach_cartoon_character(
     let brow_color = darken(config.hair, 0.7);
     let brow = char_mat(materials, brow_color);
 
-    let body = config.body.validated();
     let s = config.scale;
     let height = body.height;
     let bw = config.body_width * (body.shoulder_width * 0.62 + body.chest_size * 0.38);
@@ -1004,6 +1008,18 @@ pub fn attach_cartoon_character(
                 .with_rotation(Quat::from_rotation_x(0.55)),
         );
     }
+
+    if visual_ground_lift > 0.001 {
+        commands.queue(move |world: &mut World| {
+            let mut parts = world.query::<(&mut Transform, &mut CartoonPart)>();
+            for (mut transform, mut part) in parts.iter_mut(world) {
+                if part.root == root {
+                    transform.translation.y += visual_ground_lift;
+                    part.base_translation.y += visual_ground_lift;
+                }
+            }
+        });
+    }
 }
 
 pub fn despawn_cartoon_character_parts(
@@ -1145,6 +1161,17 @@ fn spawn_part(
         ))
         .id();
     commands.entity(root).add_child(entity);
+}
+
+fn visual_ground_lift(body: &BodyRecipe, scale: f32) -> f32 {
+    let half_height = 0.6 * (body.height * 0.72 + body.leg_length * 0.28);
+    let radius =
+        0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20);
+    let collider_bottom = -(half_height.clamp(0.44, 0.86) + radius.clamp(0.26, 0.50));
+    let foot_center_y = -1.22 * scale - (body.leg_length - 1.0) * 0.30 * scale;
+    let foot_bottom = foot_center_y - 0.07 * scale;
+
+    (collider_bottom + 0.03 - foot_bottom).clamp(0.0, 0.45)
 }
 
 /// Stylised PBR: matte surface with a faint self-emissive so characters read

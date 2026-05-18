@@ -80,7 +80,11 @@ The current runtime consumes the first practical slice of that model:
 | Feet / mass | Dodge tuning, stamina, armor, health, knockback metadata |
 | Head | Cartoon head and hair scale |
 
-Confirmed blueprints are kept on each player-select slot, saved into `starfall_i_save.json`, and restored on load. The full procedural mesh/rig/timeline editor is still future work; the saved schema is intentionally larger than the current renderer so it can grow without replacing save data.
+Confirmed blueprints are kept on each player-select slot, saved into `starfall_i_save.json`, and restored on load. When a player has not authored a custom body yet, the runtime now creates an upgraded default hero blueprint so movement stats, collider proportions, visible body shape, and animation stride all use the same data path.
+
+`CartoonCharacter` carries stride/agility metadata derived from `BodyRecipe`, and `CharacterPlugin` uses it to tune walk/run phase speed and limb swing. The character renderer also applies a visual ground lift so oversized cartoon feet sit on the terrain instead of dipping below the player capsule.
+
+The full procedural mesh/rig/timeline editor is still future work; the saved schema is intentionally larger than the current renderer so it can grow without replacing save data.
 
 ---
 
@@ -218,6 +222,22 @@ Every chapter now has one optional cave route to discover. `WorldPlugin` spawns 
 - A `WorldAnchor` named `secret_cave_ch01` through `secret_cave_ch14` at each cave's inner discovery point.
 
 Chapter scripts use `PlaceSecretCave` to spawn a green discovery beacon at the matching anchor. Collecting it stores the cave id in `ChapterProgress.discoverables`, sends a UI message/radio line, and prevents that chapter's cave beacon from respawning after save/load.
+
+## Hidden Rewards
+
+**Files:** `src/components/discoverable.rs`, `src/plugins/discoverable_plugin.rs`, `src/plugins/world_plugin.rs`
+
+Hidden reward rooms use `DiscoverableKind::HiddenReward` to grant save-backed optional rewards. A cache can award credits, XP, armor capacity/refill, a power-up unlock id, and a special-ability upgrade/refill.
+
+The city currently includes three tucked reward rooms near the opening district:
+
+| Room | Reward |
+|---|---|
+| Aurora Guard Cache | Credits, XP, armor, `aurora_guard_core` |
+| Transit Gold Vault | Credits, XP, armor, Homing Star Overdrive |
+| Moon Bubble Workshop | Credits, XP, armor, `moon_bubble_capacitor`, Moon Bubble Overcharge |
+
+Companion recruit beacons now also grant rescue supplies to the collecting player the first time that friend is freed: credits, XP, and armor. The amount varies by story role.
 
 Current cave routes:
 

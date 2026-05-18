@@ -8,8 +8,9 @@ use crate::components::discoverable::{
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
 use crate::components::mods::{ArmorMod, PlayerLoadout, WeaponMod};
-use crate::components::player::{Player, PlayerIndex};
-use crate::components::weapon::{BeamSabre, BeamSabreLocked};
+use crate::components::player::{Player, PlayerIndex, PlayerStats};
+use crate::components::weapon::{BeamSabre, BeamSabreLocked, SpecialWeaponInventory};
+use crate::damage::Health;
 use crate::events::*;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::resources::{ChapterProgress, CurrentChapter};
@@ -488,6 +489,61 @@ fn set_node_material(
     }
 }
 
+fn grant_reward_stats(
+    stats: &mut PlayerStats,
+    health: &mut Health,
+    special_weapons: &mut SpecialWeaponInventory,
+    credits: u32,
+    experience: u32,
+    armor: u32,
+    special_ability: Option<&str>,
+) -> Option<&'static str> {
+    stats.credits = stats.credits.saturating_add(credits);
+    stats.experience = stats.experience.saturating_add(experience);
+    if armor > 0 {
+        stats.max_armor += armor as f32 * 0.5;
+        stats.armor = (stats.armor + armor as f32).min(stats.max_armor);
+        health.heal((armor as f32 * 0.25).max(2.0));
+    }
+
+    match special_ability {
+        Some("homing_star_overdrive") => {
+            special_weapons.slot7.level = special_weapons.slot7.level.max(2);
+            special_weapons.slot7.max_ammo = special_weapons.slot7.max_ammo.max(12);
+            special_weapons.slot7.ammo = special_weapons.slot7.max_ammo;
+            Some("Homing Star Overdrive")
+        }
+        Some("tri_star_splitter") => {
+            special_weapons.slot8.level = special_weapons.slot8.level.max(2);
+            special_weapons.slot8.max_ammo = special_weapons.slot8.max_ammo.max(18);
+            special_weapons.slot8.ammo = special_weapons.slot8.max_ammo;
+            Some("Tri-Star Splitter")
+        }
+        Some("moon_bubble_overcharge") => {
+            special_weapons.slot9.level = special_weapons.slot9.level.max(2);
+            special_weapons.slot9.max_ammo = special_weapons.slot9.max_ammo.max(7);
+            special_weapons.slot9.ammo = special_weapons.slot9.max_ammo;
+            Some("Moon Bubble Overcharge")
+        }
+        Some("sprite_turret_pack") => {
+            special_weapons.slot0.level = special_weapons.slot0.level.max(2);
+            special_weapons.slot0.max_ammo = special_weapons.slot0.max_ammo.max(4);
+            special_weapons.slot0.ammo = special_weapons.slot0.max_ammo;
+            Some("Sprite Turret Pack")
+        }
+        Some(_) | None => None,
+    }
+}
+
+fn friend_rescue_reward(name: &str) -> (u32, u32, u32) {
+    match name {
+        "Vincenzo" | "Antonio" | "Angelo" | "Joseph" => (120, 60, 8),
+        "Gabriella" | "Nova" | "Aurora" | "Fortuna" => (90, 45, 6),
+        "Pink Flame" => (160, 80, 10),
+        _ => (70, 35, 5),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn discoverable_pickup_system(
     mut commands: Commands,
@@ -496,6 +552,10 @@ fn discoverable_pickup_system(
     encounter_q: Query<(Entity, &PuzzleRelicEncounter)>,
     fragment_piece_q: Query<(Entity, &RelicFragmentPuzzlePiece)>,
     mut beam_q: Query<&mut BeamSabre>,
+    mut reward_player_q: Query<
+        (&mut PlayerStats, &mut Health, &mut SpecialWeaponInventory),
+        With<Player>,
+    >,
     mut progress: ResMut<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
     mut loadout: ResMut<PlayerLoadout>,
@@ -548,14 +608,52 @@ fn discoverable_pickup_system(
                 });
             }
             DiscoverableKind::CompanionRecruit(name) => {
+                let was_new = !progress
+                    .companions_recruited
+                    .iter()
+                    .any(|recruited| recruited.as_str() == *name);
                 progress.recruit(name);
+                let (credits, experience, armor) = friend_rescue_reward(name);
+                if was_new {
+                    if let Ok((mut stats, mut health, mut special_weapons)) =
+                        reward_player_q.get_mut(player_entity)
+                    {
+                        grant_reward_stats(
+                            &mut stats,
+                            &mut health,
+                            &mut special_weapons,
+                            credits,
+                            experience,
+                            armor,
+                            None,
+                        );
+                    }
+                }
                 companion_ev.send(CompanionRecruitedEvent {
                     name: (*name).into(),
                     player_index: player_index.0,
                 });
+                msg_ev.send(UiMessageEvent {
+                    text: if was_new {
+                        format!(
+                            "Friend rescued: {} (+{} credits, +{} XP, +{} armor)",
+                            name, credits, experience, armor
+                        )
+                    } else {
+                        format!("Friend already rescued: {}", name)
+                    },
+                    duration: 3.5,
+                });
                 radio_ev.send(RadioChatterEvent {
                     speaker: (*name).into(),
-                    text: format!("{} stands with you.", name),
+                    text: if was_new {
+                        format!(
+                            "{} stands with you. I found supplies in the enemy zone.",
+                            name
+                        )
+                    } else {
+                        format!("{} is already with the team.", name)
+                    },
                     faction: crate::components::faction::Faction::HeroBrother,
                     duration: 3.0,
                 });
@@ -662,6 +760,75 @@ fn discoverable_pickup_system(
                     msg_ev.send(UiMessageEvent {
                         text: format!("Secret cave already charted: {}", d.label),
                         duration: 2.5,
+                    });
+                }
+            }
+            DiscoverableKind::HiddenReward {
+                reward_id,
+                credits,
+                experience,
+                armor,
+                power_up,
+                special_ability,
+            } => {
+                let was_new = !progress.has_discoverable(reward_id);
+                progress.unlock(reward_id);
+                let power_up = *power_up;
+                let special_ability = *special_ability;
+                let mut special_label = None;
+                if was_new {
+                    if let Some(power_up_id) = power_up {
+                        progress.unlock(power_up_id);
+                        loadout.add_blueprint(power_up_id);
+                    }
+                    if let Ok((mut stats, mut health, mut special_weapons)) =
+                        reward_player_q.get_mut(player_entity)
+                    {
+                        special_label = grant_reward_stats(
+                            &mut stats,
+                            &mut health,
+                            &mut special_weapons,
+                            *credits,
+                            *experience,
+                            *armor,
+                            special_ability,
+                        );
+                    }
+                    if let Some(ability_id) = special_ability {
+                        progress.unlock(ability_id);
+                    }
+                }
+
+                let mut gains = Vec::new();
+                if *credits > 0 {
+                    gains.push(format!("+{} credits", credits));
+                }
+                if *experience > 0 {
+                    gains.push(format!("+{} XP", experience));
+                }
+                if *armor > 0 {
+                    gains.push(format!("+{} armor", armor));
+                }
+                if let Some(power_up_id) = power_up {
+                    gains.push(format!("power-up {}", power_up_id.replace('_', " ")));
+                }
+                if let Some(label) = special_label {
+                    gains.push(format!("ability {}", label));
+                }
+                msg_ev.send(UiMessageEvent {
+                    text: if was_new {
+                        format!("Hidden cache: {} ({})", d.label, gains.join(", "))
+                    } else {
+                        format!("Hidden cache already opened: {}", d.label)
+                    },
+                    duration: 4.0,
+                });
+                if was_new {
+                    radio_ev.send(RadioChatterEvent {
+                        speaker: "Giacoma".into(),
+                        text: format!("Secret room cleared. Logged reward cache {}.", d.label),
+                        faction: crate::components::faction::Faction::WizardScientist,
+                        duration: 3.5,
                     });
                 }
             }

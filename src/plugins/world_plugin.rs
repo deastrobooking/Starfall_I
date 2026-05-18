@@ -7,11 +7,13 @@ use bevy::render::render_resource::{
 };
 
 use crate::components::armor::ArmorSet;
+use crate::components::discoverable::DiscoverableKind;
 use crate::components::player::{ParryState, Player, PlayerMovement, PlayerStats};
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
+use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
 use crate::resources::{CurrentChapter, GameSettings, PlaySessionTransition};
 use crate::state::AppState;
@@ -356,6 +358,7 @@ fn generate_city(
     spawn_residential(&mut commands, &mut meshes, &pal, seed + 2, seed);
     spawn_highways(&mut commands, &mut meshes, &pal);
     spawn_city_streets(&mut commands, &mut meshes, &pal);
+    spawn_city_hidden_rooms(&mut commands, &mut meshes, m, &pal);
     spawn_sky_platforms(&mut commands, &mut meshes, &pal, seed + 3);
     spawn_sky_bridges(&mut commands, &mut meshes, &pal, seed + 4);
     spawn_moving_platforms(&mut commands, &mut meshes, &pal, seed + 15, seed);
@@ -1562,6 +1565,194 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         if h > 50.0 {
             spawn_rooftop_details(commands, meshes, pal, x, z, h, w, d, seed + i);
         }
+    }
+}
+
+fn spawn_city_hidden_rooms(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+) {
+    let rooms = [
+        (
+            Vec3::new(46.0, 0.22, 44.0),
+            0.38,
+            "Aurora Guard Cache",
+            DiscoverableKind::HiddenReward {
+                reward_id: "hidden_city_aurora_guard_cache",
+                credits: 125,
+                experience: 70,
+                armor: 15,
+                power_up: Some("aurora_guard_core"),
+                special_ability: None,
+            },
+        ),
+        (
+            Vec3::new(-30.0, 0.22, 42.0),
+            -0.55,
+            "Transit Gold Vault",
+            DiscoverableKind::HiddenReward {
+                reward_id: "hidden_city_transit_gold_vault",
+                credits: 220,
+                experience: 45,
+                armor: 5,
+                power_up: None,
+                special_ability: Some("homing_star_overdrive"),
+            },
+        ),
+        (
+            Vec3::new(14.0, 0.22, -38.0),
+            1.05,
+            "Moon Bubble Workshop",
+            DiscoverableKind::HiddenReward {
+                reward_id: "hidden_city_moon_bubble_workshop",
+                credits: 90,
+                experience: 95,
+                armor: 8,
+                power_up: Some("moon_bubble_capacitor"),
+                special_ability: Some("moon_bubble_overcharge"),
+            },
+        ),
+    ];
+
+    for (center, yaw, label, reward) in rooms {
+        spawn_hidden_reward_room(commands, meshes, pal, center, yaw);
+        spawn_discoverable_beacon(commands, meshes, materials, reward, label, center);
+    }
+}
+
+fn spawn_hidden_reward_room(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    yaw: f32,
+) {
+    let floor = Vec3::new(17.0, 0.34, 12.0);
+    spawn_hidden_room_piece(
+        commands,
+        meshes,
+        pal.stone_block.clone(),
+        center + Vec3::Y * 0.02,
+        yaw,
+        Vec3::ZERO,
+        floor,
+        true,
+        true,
+    );
+
+    for (local, size, material) in [
+        (
+            Vec3::new(0.0, 1.55, 6.2),
+            Vec3::new(17.0, 3.0, 0.45),
+            pal.stone_brick.clone(),
+        ),
+        (
+            Vec3::new(-8.7, 1.55, 0.0),
+            Vec3::new(0.45, 3.0, 12.0),
+            pal.stone_brick.clone(),
+        ),
+        (
+            Vec3::new(8.7, 1.55, 0.0),
+            Vec3::new(0.45, 3.0, 12.0),
+            pal.stone_brick.clone(),
+        ),
+        (
+            Vec3::new(-5.9, 1.55, -6.2),
+            Vec3::new(5.0, 3.0, 0.45),
+            pal.downtown_facade.clone(),
+        ),
+        (
+            Vec3::new(5.9, 1.55, -6.2),
+            Vec3::new(5.0, 3.0, 0.45),
+            pal.downtown_facade.clone(),
+        ),
+    ] {
+        spawn_hidden_room_piece(
+            commands, meshes, material, center, yaw, local, size, true, false,
+        );
+    }
+
+    let rot = Quat::from_rotation_y(yaw);
+    for (local, size, material) in [
+        (
+            Vec3::new(-3.0, 0.55, 1.8),
+            Vec3::new(1.2, 0.8, 1.2),
+            pal.window_warm.clone(),
+        ),
+        (
+            Vec3::new(3.0, 0.55, 1.8),
+            Vec3::new(1.2, 0.8, 1.2),
+            pal.window_warm.clone(),
+        ),
+        (
+            Vec3::new(0.0, 0.85, -1.8),
+            Vec3::new(1.7, 1.1, 1.7),
+            pal.window_cool.clone(),
+        ),
+    ] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(center + rot * local).with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(1.0, 0.76, 0.36),
+                intensity: 18_000.0,
+                range: 24.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(center + Vec3::Y * 3.2),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_hidden_room_piece(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    center: Vec3,
+    yaw: f32,
+    local: Vec3,
+    size: Vec3,
+    collider: bool,
+    walkable: bool,
+) {
+    let rotation = Quat::from_rotation_y(yaw);
+    let entity = commands
+        .spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(center + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ))
+        .id();
+
+    if collider {
+        commands.entity(entity).insert((
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        ));
+    }
+    if walkable {
+        commands.entity(entity).insert(WalkableSurface);
     }
 }
 

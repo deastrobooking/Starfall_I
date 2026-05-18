@@ -14,6 +14,9 @@ pub struct CartoonCharacter {
     pub name: String,
     pub role: CartoonRole,
     pub scale: f32,
+    pub stride: f32,
+    pub agility: f32,
+    pub visual_ground_lift: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

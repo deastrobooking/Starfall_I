@@ -9,13 +9,13 @@ The current build keeps the existing open 3D world, chapter director, RPG stats,
 Implemented:
 
 - Player-select flow for 1-4 local players, split-screen cameras, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
-- Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, in-game body steppers, and gameplay-linked body stats.
-- Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, secret cave systems, and dragon-domain spaces.
+- Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, upgraded default hero blueprints, in-game body steppers, gameplay-linked body stats, stride-aware animation, and visual foot grounding.
+- Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
 - Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
-- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, armor elements, XP, perks, crafting, chests, companions, and save/load.
+- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
 
 In progress:
 
@@ -47,7 +47,7 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 - Simple retro RPG-style cartoon characters with idle, walk, jump, and hanging poses.
 - RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, perks, and chapter progression.
 - Cartoon star beams and energy weapons instead of guns.
-- Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, hidden cave systems, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
+- Open-world level spaces with puzzle gates, moving platforms, windup laser turrets, hidden city reward rooms, hidden cave systems, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
 - Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto their airship, clear the deck, then defeat them again.
 - Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, and shockwave hazards.
 - 4-player local multiplayer remains the design target; the current implementation has the core player split plus per-player HUD/save/companions/crafting/chests/vehicle buffs, but still needs per-player support in a few reward and feedback systems.

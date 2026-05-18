@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::components::character::{CartoonAnimator, CartoonPart, CartoonPartKind, CartoonPose};
+use crate::components::character::{
+    CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonPose,
+};
 use crate::components::player::{EdgeGrabState, PlayerMovement};
 use crate::state::AppState;
 
@@ -22,6 +24,8 @@ struct PoseSample {
     pose: CartoonPose,
     phase: f32,
     speed: f32,
+    stride: f32,
+    agility: f32,
 }
 
 fn cartoon_animation_system(
@@ -31,6 +35,7 @@ fn cartoon_animation_system(
             Entity,
             &Transform,
             &mut CartoonAnimator,
+            Option<&CartoonCharacter>,
             Option<&PlayerMovement>,
             Option<&EdgeGrabState>,
         ),
@@ -41,7 +46,7 @@ fn cartoon_animation_system(
     let dt = time.delta_secs();
     let mut samples = HashMap::new();
 
-    for (entity, transform, mut animator, movement, edge_grab) in roots.iter_mut() {
+    for (entity, transform, mut animator, character, movement, edge_grab) in roots.iter_mut() {
         let delta = transform.translation - animator.last_position;
         let raw_speed = delta.with_y(0.0).length() / dt.max(0.001);
         let blend = 1.0 - (-dt * 14.0).exp();
@@ -63,13 +68,15 @@ fn cartoon_animation_system(
             CartoonPose::Idle
         };
 
+        let stride = character.map(|c| c.stride).unwrap_or(1.0).max(0.45);
+        let agility = character.map(|c| c.agility).unwrap_or(1.0).max(0.45);
         let phase_rate = match animator.pose {
             CartoonPose::Idle => 2.0,
-            CartoonPose::Walk => (5.0 + animator.speed * 8.0).clamp(5.0, 13.0),
-            CartoonPose::Run => (10.0 + animator.speed * 5.0).clamp(10.0, 18.0),
+            CartoonPose::Walk => (5.0 + animator.speed * 8.0 / stride).clamp(5.0, 13.0),
+            CartoonPose::Run => (10.0 + animator.speed * 5.0 / stride).clamp(10.0, 18.0),
             CartoonPose::Jump => 2.5,
             CartoonPose::Hang => 1.4,
-        };
+        } * (0.88 + agility * 0.12);
         animator.phase += dt * phase_rate;
 
         samples.insert(
@@ -78,6 +85,8 @@ fn cartoon_animation_system(
                 pose: animator.pose,
                 phase: animator.phase,
                 speed: animator.speed,
+                stride,
+                agility,
             },
         );
     }
@@ -97,7 +106,8 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
 
     let wave = sample.phase.sin();
     let step = (sample.phase * 1.1).sin();
-    let walk_amount = (sample.speed * 2.8).clamp(0.0, 1.0);
+    let walk_amount = (sample.speed * (2.8 / sample.stride)).clamp(0.0, 1.0);
+    let swing = sample.agility.clamp(0.72, 1.28);
 
     // Face parts follow the Head's animation deltas exactly.
     let is_face = matches!(
@@ -191,20 +201,20 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                     transform.rotation *= Quat::from_rotation_y(step * 0.06);
                 }
                 CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
-                    transform.rotation *= Quat::from_rotation_x(step * 0.85 * walk_amount);
+                    transform.rotation *= Quat::from_rotation_x(step * 0.85 * walk_amount * swing);
                 }
                 CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
-                    transform.rotation *= Quat::from_rotation_x(-step * 0.85 * walk_amount);
+                    transform.rotation *= Quat::from_rotation_x(-step * 0.85 * walk_amount * swing);
                 }
                 CartoonPartKind::LeftLeg
                 | CartoonPartKind::LeftFoot
                 | CartoonPartKind::LeftBoot => {
-                    transform.rotation *= Quat::from_rotation_x(-step * 0.65 * walk_amount);
+                    transform.rotation *= Quat::from_rotation_x(-step * 0.65 * walk_amount * swing);
                 }
                 CartoonPartKind::RightLeg
                 | CartoonPartKind::RightFoot
                 | CartoonPartKind::RightBoot => {
-                    transform.rotation *= Quat::from_rotation_x(step * 0.65 * walk_amount);
+                    transform.rotation *= Quat::from_rotation_x(step * 0.65 * walk_amount * swing);
                 }
                 CartoonPartKind::Tail => {
                     transform.rotation *= Quat::from_rotation_y(step * 0.25);
@@ -248,20 +258,20 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                         Quat::from_rotation_y(step * 0.10) * Quat::from_rotation_x(-0.08);
                 }
                 CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
-                    transform.rotation *= Quat::from_rotation_x(step * 1.35);
+                    transform.rotation *= Quat::from_rotation_x(step * 1.35 * swing);
                 }
                 CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
-                    transform.rotation *= Quat::from_rotation_x(-step * 1.35);
+                    transform.rotation *= Quat::from_rotation_x(-step * 1.35 * swing);
                 }
                 CartoonPartKind::LeftLeg
                 | CartoonPartKind::LeftFoot
                 | CartoonPartKind::LeftBoot => {
-                    transform.rotation *= Quat::from_rotation_x(-step * 0.95);
+                    transform.rotation *= Quat::from_rotation_x(-step * 0.95 * swing);
                 }
                 CartoonPartKind::RightLeg
                 | CartoonPartKind::RightFoot
                 | CartoonPartKind::RightBoot => {
-                    transform.rotation *= Quat::from_rotation_x(step * 0.95);
+                    transform.rotation *= Quat::from_rotation_x(step * 0.95 * swing);
                 }
                 CartoonPartKind::Tail => {
                     transform.rotation *= Quat::from_rotation_y(step * 0.42);

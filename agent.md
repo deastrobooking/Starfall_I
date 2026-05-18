@@ -44,7 +44,12 @@ The AAA target is not just more features. It means:
 - `PlayerIndex` is already the intended owner key for local multiplayer state.
 - `CharacterBlueprint` preserves editable character recipes rather than baking
   customization into one-off meshes.
+- Default heroes now spawn through the same upgraded blueprint path as custom
+  characters, including body-linked movement, collider proportions, animation
+  stride/agility, and visual foot grounding.
 - Chapter scripting is data-oriented through `EncounterStep` definitions.
+- Hidden reward rooms and companion rescue rewards now have a save-backed
+  reward path for credits, XP, armor, power-up ids, and special ability upgrades.
 - Save data preserves newer per-player records while keeping old-save fields.
 - The project already has useful design documentation and improvement notes.
 
@@ -169,8 +174,8 @@ Goal: make the current game safe to iterate on every day.
   - `cargo clippy --all-targets --all-features`
   - `cargo check`
   - save/load compatibility smoke test
-- Rename or retire the old `aget.md` scratchpad once the team confirms this
-  `agent.md` is the canonical handoff file.
+- Keep `agent.md` as the canonical handoff file and update it whenever current
+  gameplay systems or production priorities change.
 - Document campaign-shared versus per-player data in `docs/architecture.md`.
 
 ### Phase 1: Build A True Vertical Slice
@@ -184,8 +189,8 @@ Recommended slice: Chapter 1, Starfall Lab.
 - Replace placeholder combat presentation with final-style star-beam VFX, hit
   sparks, impact pause, camera/rumble feedback, audio cues, and enemy reactions.
 - Turn the chapter into a 10-15 minute authored mission with a readable opening,
-  traversal tutorial, secret cave, relic puzzle, enemy escalation, mini climax,
-  rewards, and chapter-complete beat.
+  traversal tutorial, secret cave, hidden reward rooms, relic puzzle, enemy
+  escalation, mini climax, rewards, and chapter-complete beat.
 - Build final-style UI for HUD, objective tracker, pause, chapter rewards, and
   perk training.
 - Establish art direction with production character proportions, material

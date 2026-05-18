@@ -771,6 +771,7 @@ pub(crate) fn spawn_discoverable_beacon(
         DiscoverableKind::ScientistRelic { .. } => Color::srgb(1.0, 0.95, 0.45),
         DiscoverableKind::RelicFragment { .. } => Color::srgb(0.45, 1.0, 0.95),
         DiscoverableKind::SecretCave { .. } => Color::srgb(0.35, 0.95, 0.65),
+        DiscoverableKind::HiddenReward { .. } => Color::srgb(1.0, 0.70, 0.25),
         DiscoverableKind::LoreFragment(_) => Color::srgb(0.7, 0.7, 0.9),
     };
     let mat = materials.add(StandardMaterial {

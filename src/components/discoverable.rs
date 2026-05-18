@@ -28,6 +28,15 @@ pub enum DiscoverableKind {
     },
     /// Optional cave route found inside a chapter's level space.
     SecretCave { chapter: u8, cave_id: &'static str },
+    /// Hidden room or optional objective reward cache.
+    HiddenReward {
+        reward_id: &'static str,
+        credits: u32,
+        experience: u32,
+        armor: u32,
+        power_up: Option<&'static str>,
+        special_ability: Option<&'static str>,
+    },
     /// Lore log; no mechanical effect, just radio chatter.
     LoreFragment(&'static str),
 }
