@@ -19,10 +19,24 @@ impl Plugin for VehiclePlugin {
             .add_systems(OnEnter(AppState::Playing), reset_vehicle_state_on_enter)
             .add_systems(
                 Update,
-                (vehicle_input, apply_vehicle_buffs, boat_drive_system)
+                (
+                    vehicle_input,
+                    clear_stale_boat_passengers_system,
+                    apply_vehicle_buffs,
+                    boat_drive_system,
+                )
                     .run_if(in_state(AppState::Playing)),
             );
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VehicleBaseline {
+    walk_speed: f32,
+    sprint_speed: f32,
+    jet_force: f32,
+    jet_regen_rate: f32,
+    jet_max_vertical_vel: f32,
 }
 
 #[derive(Resource, Debug, Default)]
@@ -33,6 +47,7 @@ pub struct VehicleState {
     pub active_owner: Option<u8>,
     pub active_boat: Option<Entity>,
     pub boat_heading: f32,
+    baselines: [Option<VehicleBaseline>; 4],
 }
 
 fn reset_vehicle_state_on_enter(
@@ -260,32 +275,55 @@ fn yaw_from_rotation(rotation: Quat) -> f32 {
     yaw
 }
 
+fn clear_stale_boat_passengers_system(
+    state: Res<VehicleState>,
+    mut commands: Commands,
+    passenger_q: Query<(Entity, &BoatPassenger)>,
+) {
+    for (entity, passenger) in passenger_q.iter() {
+        let passenger_stale = !state.boat_active || state.active_boat != Some(passenger.boat);
+        if passenger_stale {
+            commands.entity(entity).remove::<BoatPassenger>();
+        }
+    }
+}
+
 /// Apply vehicle speed/force buffs only to the player who activated the vehicle.
 fn apply_vehicle_buffs(
-    state: Res<VehicleState>,
+    mut state: ResMut<VehicleState>,
     mut q: Query<(&PlayerIndex, &mut PlayerMovement, &mut JetpackState), With<Player>>,
 ) {
-    let base = PlayerMovement::default();
     for (idx, mut mv, mut jet) in q.iter_mut() {
+        let Some(slot) = state.baselines.get_mut(idx.0 as usize) else {
+            continue;
+        };
+        let baseline = *slot.get_or_insert(VehicleBaseline {
+            walk_speed: mv.walk_speed,
+            sprint_speed: mv.sprint_speed,
+            jet_force: jet.force,
+            jet_regen_rate: jet.regen_rate,
+            jet_max_vertical_vel: jet.max_vertical_vel,
+        });
+
         let is_active_owner = state.active_owner == Some(idx.0);
         if state.boat_active && is_active_owner {
-            mv.walk_speed = 0.58;
-            mv.sprint_speed = 0.82;
+            mv.walk_speed = baseline.walk_speed.max(0.58);
+            mv.sprint_speed = baseline.sprint_speed.max(0.82);
         } else if state.motorcycle_active && is_active_owner {
-            mv.walk_speed = 0.7;
-            mv.sprint_speed = 1.1;
+            mv.walk_speed = baseline.walk_speed.max(0.7);
+            mv.sprint_speed = baseline.sprint_speed.max(1.1);
         } else {
-            mv.walk_speed = base.walk_speed;
-            mv.sprint_speed = base.sprint_speed;
+            mv.walk_speed = baseline.walk_speed;
+            mv.sprint_speed = baseline.sprint_speed;
         }
         if state.jet_active && is_active_owner {
-            jet.force = 0.12;
-            jet.regen_rate = 80.0;
-            jet.max_vertical_vel = 0.7;
+            jet.force = baseline.jet_force.max(0.12);
+            jet.regen_rate = baseline.jet_regen_rate.max(80.0);
+            jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(0.7);
         } else {
-            jet.force = 0.06;
-            jet.regen_rate = 30.0;
-            jet.max_vertical_vel = 0.35;
+            jet.force = baseline.jet_force;
+            jet.regen_rate = baseline.jet_regen_rate;
+            jet.max_vertical_vel = baseline.jet_max_vertical_vel;
         }
     }
 }

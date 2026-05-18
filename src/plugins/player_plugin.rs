@@ -294,14 +294,14 @@ fn spawn_players(
                 player_collider,
                 KinematicCharacterController {
                     up: Vec3::Y,
-                    offset: CharacterLength::Absolute(0.04),
+                    offset: CharacterLength::Absolute(0.02),
                     slide: true,
                     autostep: Some(CharacterAutostep {
-                        max_height: CharacterLength::Absolute(0.42),
-                        min_width: CharacterLength::Absolute(0.28),
+                        max_height: CharacterLength::Absolute(0.5),
+                        min_width: CharacterLength::Absolute(0.2),
                         include_dynamic_bodies: false,
                     }),
-                    snap_to_ground: Some(CharacterLength::Absolute(0.32)),
+                    snap_to_ground: Some(CharacterLength::Absolute(0.2)),
                     ..default()
                 },
                 KinematicCharacterControllerOutput::default(),

@@ -166,11 +166,13 @@ enum PausePage {
 #[derive(Resource)]
 struct PauseMenuState {
     page: PausePage,
+    resume_lockout: f32,
 }
 impl Default for PauseMenuState {
     fn default() -> Self {
         Self {
             page: PausePage::Main,
+            resume_lockout: 0.0,
         }
     }
 }
@@ -325,6 +327,7 @@ fn menu_start_button(
 
 fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
     menu.page = PausePage::Main;
+    menu.resume_lockout = 0.20;
     commands
         .spawn((
             Node {
@@ -512,11 +515,14 @@ fn resume_physics_after_pause(mut rapier_q: Query<&mut RapierConfiguration>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pause_input_system(
+    time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     input_q: Query<&PlayerInput, With<Player>>,
     state: Res<State<AppState>>,
+    mut menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
@@ -526,6 +532,10 @@ fn pause_input_system(
             .any(|gamepad| gamepad.just_pressed(GamepadButton::Start))
         || input_q.iter().any(|input| input.pause);
 
+    if matches!(state.get(), AppState::Paused) {
+        menu.resume_lockout = (menu.resume_lockout - time.delta_secs()).max(0.0);
+    }
+
     if !pause_pressed {
         return;
     }
@@ -534,9 +544,13 @@ fn pause_input_system(
         AppState::Playing => {
             transition.pausing = true;
             transition.resuming_from_pause = false;
+            menu.resume_lockout = 0.20;
             next_state.set(AppState::Paused);
         }
         AppState::Paused => {
+            if menu.resume_lockout > 0.0 {
+                return;
+            }
             transition.pausing = false;
             transition.resuming_from_pause = true;
             next_state.set(AppState::Playing);
