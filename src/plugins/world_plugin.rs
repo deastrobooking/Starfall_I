@@ -4610,6 +4610,434 @@ fn spawn_tower(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
+fn spawn_castle_block(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    position: Vec3,
+    size: Vec3,
+    rotation: Quat,
+    collider: bool,
+    walkable: bool,
+) {
+    let entity = commands
+        .spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(position).with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ))
+        .id();
+
+    if collider {
+        commands.entity(entity).insert((
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        ));
+    }
+    if walkable {
+        commands.entity(entity).insert(WalkableSurface);
+    }
+}
+
+fn spawn_castle_window_frame(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    yaw: f32,
+    width: f32,
+    height: f32,
+) {
+    let rot = Quat::from_rotation_y(yaw);
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.castle_window.clone(),
+        center,
+        Vec3::new(width, height, 0.45),
+        rot,
+        false,
+        false,
+    );
+
+    let trim_specs = [
+        (
+            Vec3::new(0.0, height * 0.5 + 0.34, 0.05),
+            Vec3::new(width + 1.1, 0.42, 0.72),
+        ),
+        (
+            Vec3::new(0.0, -height * 0.5 - 0.34, 0.05),
+            Vec3::new(width + 1.1, 0.42, 0.72),
+        ),
+        (
+            Vec3::new(-width * 0.5 - 0.34, 0.0, 0.05),
+            Vec3::new(0.42, height + 1.0, 0.72),
+        ),
+        (
+            Vec3::new(width * 0.5 + 0.34, 0.0, 0.05),
+            Vec3::new(0.42, height + 1.0, 0.72),
+        ),
+    ];
+    for (local, size) in trim_specs {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.castle_trim.clone(),
+            center + rot * local,
+            size,
+            rot,
+            false,
+            false,
+        );
+    }
+
+    for i in -2..=2 {
+        let x = i as f32 * (width + 1.2) / 4.0;
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.mortar_line.clone(),
+            center + rot * Vec3::new(x, height * 0.5 + 0.92, 0.08),
+            Vec3::new(0.58, 0.52, 0.76),
+            rot,
+            false,
+            false,
+        );
+    }
+}
+
+fn spawn_wind_banner(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+    height: f32,
+    phase: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(0.30, height))),
+            material: MeshMaterial3d(pal.castle_trim.clone()),
+            transform: Transform::from_xyz(position.x, position.y + height * 0.5, position.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    let flag_transform =
+        Transform::from_xyz(position.x + 3.2, position.y + height - 2.2, position.z)
+            .with_scale(Vec3::new(1.0, 1.0, 1.0));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(6.4, 4.2, 0.20))),
+            material: MeshMaterial3d(pal.aurora_banner.clone()),
+            transform: flag_transform,
+            ..default()
+        },
+        NatureSway::new(&flag_transform, phase, 2.4, 0.055, 0.05, 0.075),
+        WorldGeometry,
+    ));
+}
+
+fn spawn_castle_bridge_and_gate(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    cx: f32,
+    floor: f32,
+    gate_z: f32,
+) {
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.stone_brick.clone(),
+        Vec3::new(cx, floor + 0.28, gate_z + 43.0),
+        Vec3::new(18.0, 0.56, 82.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+    for x in [-10.2_f32, 10.2] {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.castle_trim.clone(),
+            Vec3::new(cx + x, floor + 1.2, gate_z + 43.0),
+            Vec3::new(0.7, 2.0, 82.0),
+            Quat::IDENTITY,
+            true,
+            false,
+        );
+    }
+
+    for x in [-5.2_f32, 5.2] {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.rooftop.clone(),
+            Vec3::new(cx + x, floor + 6.5, gate_z + 1.9),
+            Vec3::new(4.9, 13.0, 0.75),
+            Quat::from_rotation_y(if x < 0.0 { -0.58 } else { 0.58 }),
+            true,
+            false,
+        );
+    }
+
+    for x in [-3.6_f32, -1.8, 0.0, 1.8, 3.6] {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.brushed_metal.clone(),
+            Vec3::new(cx + x, floor + 17.2, gate_z + 0.7),
+            Vec3::new(0.28, 9.5, 0.32),
+            Quat::IDENTITY,
+            false,
+            false,
+        );
+    }
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.castle_trim.clone(),
+        Vec3::new(cx, floor + 22.6, gate_z + 0.7),
+        Vec3::new(13.0, 0.75, 0.45),
+        Quat::IDENTITY,
+        false,
+        false,
+    );
+}
+
+fn spawn_aurora_keep_rooms(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    cx: f32,
+    cz: f32,
+    floor: f32,
+) {
+    let width = 54.0_f32;
+    let depth = 42.0_f32;
+    let wall_h = 18.0_f32;
+    let wt = 2.2_f32;
+    let roof_y = floor + wall_h + 1.0;
+
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.stone_brick.clone(),
+        Vec3::new(cx, floor + 0.26, cz),
+        Vec3::new(width + 2.0, 0.52, depth + 2.0),
+        Quat::IDENTITY,
+        true,
+        true,
+    );
+
+    let north_z = cz - depth * 0.5;
+    let south_z = cz + depth * 0.5;
+    let west_x = cx - width * 0.5;
+    let east_x = cx + width * 0.5;
+
+    for (pos, size) in [
+        (
+            Vec3::new(cx, floor + wall_h * 0.5, north_z),
+            Vec3::new(width, wall_h, wt),
+        ),
+        (
+            Vec3::new(west_x, floor + wall_h * 0.5, cz),
+            Vec3::new(wt, wall_h, depth),
+        ),
+        (
+            Vec3::new(east_x, floor + wall_h * 0.5, cz),
+            Vec3::new(wt, wall_h, depth),
+        ),
+        (
+            Vec3::new(cx - 17.0, floor + wall_h * 0.5, south_z),
+            Vec3::new(20.0, wall_h, wt),
+        ),
+        (
+            Vec3::new(cx + 17.0, floor + wall_h * 0.5, south_z),
+            Vec3::new(20.0, wall_h, wt),
+        ),
+    ] {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.stone_brick.clone(),
+            pos,
+            size,
+            Quat::IDENTITY,
+            true,
+            false,
+        );
+    }
+
+    for (pos, size) in [
+        (
+            Vec3::new(cx - 12.0, floor + 3.5, cz - 5.8),
+            Vec3::new(1.2, 7.0, 21.0),
+        ),
+        (
+            Vec3::new(cx + 12.0, floor + 3.5, cz - 5.8),
+            Vec3::new(1.2, 7.0, 21.0),
+        ),
+        (
+            Vec3::new(cx - 19.5, floor + 3.5, cz + 6.5),
+            Vec3::new(13.0, 7.0, 1.1),
+        ),
+        (
+            Vec3::new(cx + 19.5, floor + 3.5, cz + 6.5),
+            Vec3::new(13.0, 7.0, 1.1),
+        ),
+        (
+            Vec3::new(cx, floor + 3.5, cz + 11.8),
+            Vec3::new(14.0, 7.0, 1.1),
+        ),
+    ] {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.downtown_facade.clone(),
+            pos,
+            size,
+            Quat::IDENTITY,
+            true,
+            false,
+        );
+    }
+
+    for (pos, size) in [
+        (
+            Vec3::new(cx - 18.0, floor + 8.2, cz - 10.0),
+            Vec3::new(15.0, 0.55, 12.0),
+        ),
+        (
+            Vec3::new(cx + 18.0, floor + 8.2, cz - 10.0),
+            Vec3::new(15.0, 0.55, 12.0),
+        ),
+        (
+            Vec3::new(cx, floor + 8.2, cz + 10.0),
+            Vec3::new(18.0, 0.55, 10.0),
+        ),
+    ] {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.castle_stone.clone(),
+            pos,
+            size,
+            Quat::IDENTITY,
+            true,
+            true,
+        );
+    }
+
+    for (x, z, yaw) in [
+        (cx - 17.0, south_z + 1.18, 0.0),
+        (cx + 17.0, south_z + 1.18, 0.0),
+        (cx - 16.0, north_z - 1.18, std::f32::consts::PI),
+        (cx + 16.0, north_z - 1.18, std::f32::consts::PI),
+        (west_x - 1.18, cz - 7.0, std::f32::consts::FRAC_PI_2),
+        (east_x + 1.18, cz - 7.0, std::f32::consts::FRAC_PI_2),
+    ] {
+        spawn_castle_window_frame(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, floor + 11.0, z),
+            yaw,
+            3.0,
+            4.8,
+        );
+    }
+
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.castle_trim.clone(),
+        Vec3::new(cx, roof_y, north_z),
+        Vec3::new(width + 1.6, 2.0, wt + 0.9),
+        Quat::IDENTITY,
+        false,
+        false,
+    );
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.castle_trim.clone(),
+        Vec3::new(cx, roof_y, south_z),
+        Vec3::new(width + 1.6, 2.0, wt + 0.9),
+        Quat::IDENTITY,
+        false,
+        false,
+    );
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.castle_trim.clone(),
+        Vec3::new(west_x, roof_y, cz),
+        Vec3::new(wt + 0.9, 2.0, depth + 1.6),
+        Quat::IDENTITY,
+        false,
+        false,
+    );
+    spawn_castle_block(
+        commands,
+        meshes,
+        pal.castle_trim.clone(),
+        Vec3::new(east_x, roof_y, cz),
+        Vec3::new(wt + 0.9, 2.0, depth + 1.6),
+        Quat::IDENTITY,
+        false,
+        false,
+    );
+
+    for (x, z) in [
+        (cx - 18.0, cz - 12.0),
+        (cx + 18.0, cz - 12.0),
+        (cx - 18.0, cz + 9.0),
+        (cx + 18.0, cz + 9.0),
+        (cx, cz + 10.0),
+    ] {
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: Color::srgb(0.55, 0.85, 1.0),
+                    intensity: 9_000.0,
+                    range: 18.0,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_xyz(x, floor + 4.8, z),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    for (x, z) in [
+        (cx - 19.0, cz - 14.0),
+        (cx + 19.0, cz - 14.0),
+        (cx - 19.0, cz + 13.0),
+        (cx + 19.0, cz + 13.0),
+    ] {
+        spawn_castle_block(
+            commands,
+            meshes,
+            pal.window_warm.clone(),
+            Vec3::new(x, floor + 0.95, z),
+            Vec3::new(2.2, 1.4, 2.2),
+            Quat::IDENTITY,
+            false,
+            false,
+        );
+    }
+}
+
 // ── Aurora Castle ─────────────────────────────────────────────────────────────
 fn spawn_aurora_castle(
     commands: &mut Commands,
@@ -4652,15 +5080,16 @@ fn spawn_aurora_castle(
     let wall_h = 15.0_f32;
     let wall_specs: &[(f32, f32, f32, f32)] = &[
         (cx, cz - hw, hw * 2.0 + wt * 2.0, wt), // north
-        (cx, cz + hw, hw * 2.0 + wt * 2.0, wt), // south
         (cx - hw, cz, wt, hw * 2.0),            // west
         (cx + hw, cz, wt, hw * 2.0),            // east
+        (cx - 25.0, cz + hw, 34.0, wt),         // south-left gate wall
+        (cx + 25.0, cz + hw, 34.0, wt),         // south-right gate wall
     ];
     for &(wx, wz, ww, wd) in wall_specs {
         commands.spawn((
             PbrBundle {
                 mesh: Mesh3d(meshes.add(Cuboid::new(ww, wall_h, wd))),
-                material: MeshMaterial3d(pal.castle_stone.clone()),
+                material: MeshMaterial3d(pal.stone_brick.clone()),
                 transform: Transform::from_xyz(wx, floor + wall_h * 0.5, wz),
                 ..default()
             },
@@ -4680,6 +5109,27 @@ fn spawn_aurora_castle(
             WorldGeometry,
         ));
     }
+    for (x, z, yaw) in [
+        (cx - 24.0, cz - hw - 2.4, std::f32::consts::PI),
+        (cx, cz - hw - 2.4, std::f32::consts::PI),
+        (cx + 24.0, cz - hw - 2.4, std::f32::consts::PI),
+        (cx - hw - 2.4, cz - 18.0, std::f32::consts::FRAC_PI_2),
+        (cx - hw - 2.4, cz + 18.0, std::f32::consts::FRAC_PI_2),
+        (cx + hw + 2.4, cz - 18.0, std::f32::consts::FRAC_PI_2),
+        (cx + hw + 2.4, cz + 18.0, std::f32::consts::FRAC_PI_2),
+        (cx - 25.0, cz + hw + 2.4, 0.0),
+        (cx + 25.0, cz + hw + 2.4, 0.0),
+    ] {
+        spawn_castle_window_frame(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, floor + 8.2, z),
+            yaw,
+            3.2,
+            4.2,
+        );
+    }
 
     // ── Corner towers ──────────────────────────────────────────────────────
     for &(tx, tz) in &[
@@ -4691,7 +5141,7 @@ fn spawn_aurora_castle(
         spawn_tower(
             commands,
             meshes,
-            pal.castle_stone.clone(),
+            pal.stone_brick.clone(),
             pal.castle_roof.clone(),
             Vec3::new(tx, floor, tz),
             7.0,
@@ -4726,7 +5176,7 @@ fn spawn_aurora_castle(
         spawn_tower(
             commands,
             meshes,
-            pal.castle_stone.clone(),
+            pal.stone_brick.clone(),
             pal.castle_roof.clone(),
             Vec3::new(gx, floor, gate_z),
             4.5,
@@ -4744,12 +5194,13 @@ fn spawn_aurora_castle(
         },
         WorldGeometry,
     ));
+    spawn_castle_bridge_and_gate(commands, meshes, pal, cx, floor, gate_z);
 
     // ── Great central tower ────────────────────────────────────────────────
     spawn_tower(
         commands,
         meshes,
-        pal.castle_stone.clone(),
+        pal.stone_brick.clone(),
         pal.castle_roof.clone(),
         Vec3::new(cx, floor, cz),
         13.0,
@@ -4787,30 +5238,8 @@ fn spawn_aurora_castle(
         ));
     }
 
-    // ── Keep / Great Hall ──────────────────────────────────────────────────
-    let keep_h = 22.0_f32;
-    commands.spawn((
-        PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(42.0, keep_h, 32.0))),
-            material: MeshMaterial3d(pal.castle_stone.clone()),
-            transform: Transform::from_xyz(cx, floor + keep_h * 0.5, cz),
-            ..default()
-        },
-        WorldGeometry,
-        WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(21.0, keep_h * 0.5, 16.0),
-    ));
-    // Keep roof trim
-    commands.spawn((
-        PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(44.0, 2.0, 34.0))),
-            material: MeshMaterial3d(pal.castle_trim.clone()),
-            transform: Transform::from_xyz(cx, floor + keep_h + 1.0, cz),
-            ..default()
-        },
-        WorldGeometry,
-    ));
+    // ── Hollow Keep / Great Hall Rooms ─────────────────────────────────────
+    spawn_aurora_keep_rooms(commands, meshes, pal, cx, cz, floor);
 
     // ── Moat ring (magical cyan water) ────────────────────────────────────
     for i in 0..18u32 {
@@ -4879,25 +5308,15 @@ fn spawn_aurora_castle(
         (cx - hw, floor + 55.0, cz + hw), // SW corner tower
         (cx, floor + 22.0, gate_z + 2.0), // above gatehouse
     ];
-    for &(bx, by, bz) in banner_positions {
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Cylinder::new(0.30, 9.0))),
-                material: MeshMaterial3d(pal.castle_trim.clone()),
-                transform: Transform::from_xyz(bx, by + 4.5, bz),
-                ..default()
-            },
-            WorldGeometry,
-        ));
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(6.0, 4.0, 0.22))),
-                material: MeshMaterial3d(pal.aurora_banner.clone()),
-                transform: Transform::from_xyz(bx + 3.0, by + 8.5, bz),
-                ..default()
-            },
-            WorldGeometry,
-        ));
+    for (i, &(bx, by, bz)) in banner_positions.iter().enumerate() {
+        spawn_wind_banner(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(bx, by, bz),
+            9.0,
+            i as f32 * 0.77,
+        );
     }
 
     // ── Crystal spires ringing the mesa ───────────────────────────────────

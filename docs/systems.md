@@ -389,6 +389,7 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 - Downtown towers mix transparent glass panels, glowing window facades, metal mullion grids, brushed-metal skins, and occasional stone-brick bodies for the ancient/new skyline style.
 - Industrial buildings can receive ribbed metal cladding and factory ribbon windows.
 - Smaller residential and outer-district buildings receive stone-brick variants, mortar courses, stone plinths, corner blocks, roof caps, moss, and warm/cool/dark window panels.
+- Aurora Castle now uses brick/mortar castle materials, framed glowing windows, animated wind banners, a real front bridge and open gate, and a hollow keep built from room walls, balconies, lights, and explorable interior spaces.
 - Secret caves are spawned from authored chapter specs and combine stone tunnels, metal ribs, glass panels, glowing crystals, small moving platforms, and save-backed discovery anchors.
 - Moving platforms bridge rooftops, castles, and high paths; the platform system carries grounded or landing players while avoiding midair drag.
 - Laser turrets track nearby players, show a brief beam windup, then apply laser damage through the same player damage/parry path.

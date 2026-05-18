@@ -10,6 +10,7 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Castle/domain bosses in chapters 6, 7, 8, 10, and 11 now escape to faction-colored airship decks before their rematch.
 - Relic-fragment sub puzzles now support five collectible pieces that assemble into one scientist relic, save partial progress, and spawn moving obstacle courses around the fragments.
 - City generation now mixes glass panels, glowing window grids, brushed-metal cladding, factory ribbon windows, and stone-brick/mortar facade variants.
+- Aurora Castle now has brick/mortar materials, ornate framed glowing windows, wind-animated flags, an open giant gate, a front bridge, and a hollow keep with explorable room geometry.
 - Each chapter now has a secret cave system with walkable tunnel geometry, ancient/new cave dressing, moving platforms, and a save-backed discovery beacon.
 - Chapter director no longer fails outright when multiple players exist; it still uses the first active player as the shared encounter anchor.
 - Save/load now stores `players[]` records keyed by `PlayerIndex`, while legacy top-level stat fields remain only for old-save compatibility.

@@ -61,6 +61,9 @@ The AAA target is not just more features. It means:
   dock-aware boat that boards passengers instead of only following the driver.
 - Hidden rooms have first-pass puzzle dressing, pressure-plate props, visible
   gates, and clearer reward staging.
+- Aurora Castle has moved beyond a solid landmark pass: it now has brick/mortar
+  materials, framed glowing windows, animated wind banners, a bridge and open
+  gate, and a hollow keep with room geometry to explore.
 - Damage events carry player ownership, so split-screen camera shake and damage
   vignettes target the damaged player instead of the whole party.
 - Enemy world loot pickup now selects the nearest eligible player inventory,
