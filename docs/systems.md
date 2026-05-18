@@ -24,13 +24,13 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 
 **Game over:** triggers only when ALL players are dead simultaneously.
 
-**Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause overlay keeps the current HUD/world entities alive, while gameplay systems that are gated to `Playing` stop updating until resume.
+**Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause menu keeps the current HUD/world entities alive, freezes the Rapier physics pipeline, offers save and save-and-title actions, and shows control hints. Returning to title from pause cleans up preserved play-session entities.
 
 **Known limitations:**
 - Chapter director spawns use the first active player as the encounter anchor.
 - HUD stat/weapon panels, save snapshots, companions, crafting, chests, and vehicle buffs are keyed by `PlayerIndex`.
 - Some reward pickup paths still need a complete per-player ownership pass.
-- Vehicle buffs apply to the activating player, but the party still shares one active vehicle mode at a time.
+- Vehicle buffs apply to the activating player, but the party still shares one active vehicle mode at a time. In Chapter 1, a boardable boat at the north dock uses the same vehicle input and follows the owning player along the visible ocean wake route to the island.
 - Camera shake is a single global pool - any player being hit shakes all cameras.
 
 ---

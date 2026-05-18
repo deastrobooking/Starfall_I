@@ -111,3 +111,12 @@ pub struct WorldLoot {
     pub pickup_radius: f32,
     pub base_y: f32,
 }
+
+/// Usable boat placed at an authored dock. Press the vehicle input near it to
+/// ride across water routes.
+#[derive(Component, Debug, Clone)]
+pub struct BoatVehicle {
+    pub embark_radius: f32,
+    pub dock_position: Vec3,
+    pub island_position: Vec3,
+}

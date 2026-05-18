@@ -22,6 +22,9 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Chapter definitions are cached through a `OnceLock` catalog, so chapter lookup no longer rebuilds the 14-chapter vector every time the director or UI asks for data.
 - `Esc` / controller Start now transitions between `Playing` and `Paused` with a lightweight overlay, and HUD setup is idempotent when resuming.
 - Character customization now writes editable `CharacterBlueprint` data with body proportions, procedural part/material/socket/rig/animation/movement recipe sections, body-shape steppers in the designer, save/load support, and gameplay-linked movement/stat tuning.
+- Pause now freezes Rapier physics, exposes save and save-and-title actions, shows control hints, and cleans up preserved play-session entities when returning to the title.
+- Chapter 1 now has a north-coast ocean route, an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat vehicle.
+- The Chapter 1 starter/lab area now reserves a clearer ground zone so opaque or translucent world props are less likely to block early walking routes.
 
 ## High Priority
 

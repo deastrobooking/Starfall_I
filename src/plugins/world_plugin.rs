@@ -13,7 +13,7 @@ use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
-use crate::resources::{GameSettings, PlaySessionTransition};
+use crate::resources::{CurrentChapter, GameSettings, PlaySessionTransition};
 use crate::state::AppState;
 
 // ── Grass wind material ───────────────────────────────────────────────────────
@@ -76,6 +76,7 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
             .add_systems(
                 Update,
                 (
@@ -314,6 +315,19 @@ fn cleanup_world(
     }
 }
 
+fn cleanup_world_for_menu(
+    mut commands: Commands,
+    world_q: Query<Entity, (With<WorldGeometry>, Without<Parent>)>,
+    tree_q: Query<Entity, (With<TreeRoot>, Without<Parent>, Without<WorldGeometry>)>,
+) {
+    for e in world_q.iter() {
+        commands.entity(e).despawn_recursive();
+    }
+    for e in tree_q.iter() {
+        commands.entity(e).despawn_recursive();
+    }
+}
+
 // ── World generation entry point ──────────────────────────────────────────────
 fn generate_city(
     mut commands: Commands,
@@ -322,6 +336,7 @@ fn generate_city(
     mut grass_mats: ResMut<Assets<GrassMaterial>>,
     transition: Res<PlaySessionTransition>,
     settings: Res<GameSettings>,
+    current: Res<CurrentChapter>,
     existing_world: Query<Entity, With<WorldGeometry>>,
 ) {
     if transition.resuming_from_pause || !existing_world.is_empty() {
@@ -347,6 +362,9 @@ fn generate_city(
     spawn_spaceports(&mut commands, &mut meshes, &pal, seed);
     spawn_laser_turrets(&mut commands, &mut meshes, &pal, seed + 16, seed);
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
+    if current.id.0 == 1 {
+        spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal);
+    }
     spawn_grasslands(&mut commands, &mut meshes, &mut *grass_mats, seed + 10);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
@@ -368,6 +386,12 @@ fn seeded(seed: u64, index: u64) -> f32 {
     let x = ((seed.wrapping_mul(127) + index.wrapping_mul(311)).wrapping_mul(43758)) as f64;
     let frac = (x * 0.0000001) - (x * 0.0000001).floor();
     frac as f32
+}
+
+fn starter_clear_zone(x: f32, z: f32, padding: f32) -> bool {
+    let origin_clear = Vec2::new(x - 10.0, z - 10.0).length() <= 52.0 + padding;
+    let ch1_lab_clear = Vec2::new(x - 26.0, z - 28.0).length() <= 34.0 + padding;
+    origin_clear || ch1_lab_clear
 }
 
 // ── Shared material palette ───────────────────────────────────────────────────
@@ -1462,6 +1486,9 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         let h = 30.0 + seeded(seed, i * 3 + 2) * 120.0;
         let w = 12.0 + seeded(seed, i * 5 + 3) * 18.0;
         let d = 12.0 + seeded(seed, i * 5 + 4) * 18.0;
+        if starter_clear_zone(x, z, w.max(d) * 0.5) {
+            continue;
+        }
 
         let mat = if i % 13 == 0 {
             pal.stone_brick.clone()
@@ -2877,6 +2904,148 @@ fn spawn_river(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette
     }
 }
 
+fn spawn_chapter_one_ocean_island(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+) {
+    let ocean_transform = Transform::from_xyz(0.0, 0.18, 760.0);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(840.0, 0.08, 430.0))),
+            material: MeshMaterial3d(pal.water.clone()),
+            transform: ocean_transform,
+            ..default()
+        },
+        WorldGeometry,
+        NatureSway::new(&ocean_transform, 1.7, 0.7, 0.001, 0.035, 0.004),
+    ));
+
+    // A visible moon-glass wake doubles as the boat route collider, so the
+    // player never feels blocked by an invisible bridge across the ocean.
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(30.0, 0.14, 314.0))),
+            material: MeshMaterial3d(pal.glass_panel.clone()),
+            transform: Transform::from_xyz(0.0, 0.09, 725.0),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(15.0, 0.07, 157.0),
+    ));
+
+    for (z, label_offset) in [(574.0_f32, -18.0_f32), (826.0, 18.0)] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(24.0, 0.42, 38.0))),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_xyz(0.0, 0.31, z),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(12.0, 0.21, 19.0),
+        ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(3.0, 2.2, 3.0))),
+                material: MeshMaterial3d(pal.window_warm.clone()),
+                transform: Transform::from_xyz(-13.0, 1.32, z + label_offset),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let island_center = Vec3::new(0.0, 0.32, 890.0);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(74.0, 0.72))),
+            material: MeshMaterial3d(pal.moss.clone()),
+            transform: Transform::from_translation(island_center),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(0.36, 74.0),
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cone {
+                radius: 46.0,
+                height: 18.0,
+            })),
+            material: MeshMaterial3d(pal.rock.clone()),
+            transform: Transform::from_xyz(0.0, 9.0, 905.0),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+    for i in 0..8u64 {
+        let angle = i as f32 * std::f32::consts::TAU / 8.0;
+        let radius = 30.0 + seeded(91_000, i) * 26.0;
+        let x = angle.cos() * radius;
+        let z = 890.0 + angle.sin() * radius;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(1.2 + seeded(91_000, i + 20) * 1.6))),
+                material: MeshMaterial3d(pal.rock_dark.clone()),
+                transform: Transform::from_xyz(x, 0.84, z)
+                    .with_scale(Vec3::new(1.8, 0.35, 1.2))
+                    .with_rotation(Quat::from_rotation_y(angle)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let boat_entity = commands
+        .spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(5.4, 0.7, 9.5))),
+                material: MeshMaterial3d(pal.rooftop.clone()),
+                transform: Transform::from_xyz(0.0, 0.52, 604.0),
+                ..default()
+            },
+            WorldGeometry,
+            BoatVehicle {
+                embark_radius: 9.0,
+                dock_position: Vec3::new(0.0, 0.52, 604.0),
+                island_position: Vec3::new(0.0, 0.52, 826.0),
+            },
+        ))
+        .id();
+
+    commands.entity(boat_entity).with_children(|boat| {
+        boat.spawn(PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(6.4, 0.32, 1.1))),
+            material: MeshMaterial3d(pal.window_cool.clone()),
+            transform: Transform::from_xyz(0.0, 0.48, -3.0),
+            ..default()
+        });
+        boat.spawn(PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(0.12, 4.0))),
+            material: MeshMaterial3d(pal.brushed_metal.clone()),
+            transform: Transform::from_xyz(0.0, 2.2, 0.4),
+            ..default()
+        });
+        boat.spawn(PbrBundle {
+            mesh: Mesh3d(meshes.add(Rectangle::new(3.4, 3.0))),
+            material: MeshMaterial3d(pal.window_warm.clone()),
+            transform: Transform::from_xyz(0.0, 2.5, 0.9)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            ..default()
+        });
+    });
+
+    spawn_world_anchor(commands, "ch01_ocean_dock", Vec3::new(0.0, 0.6, 574.0));
+    spawn_world_anchor(commands, "ch01_island_landing", Vec3::new(0.0, 0.9, 826.0));
+}
+
 fn spawn_water_gardens(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -2909,7 +3078,7 @@ fn spawn_water_gardens(
             WorldGeometry,
             NatureSway::new(
                 &transform,
-                seeded(seed, i as u64 + 10) * 6.28,
+                seeded(seed, i as u64 + 10) * std::f32::consts::TAU,
                 0.9,
                 0.002,
                 0.025,
@@ -2988,7 +3157,7 @@ fn spawn_reed_ring(
             WorldGeometry,
             NatureSway::new(
                 &transform,
-                seeded(seed, i + 80) * 6.28,
+                seeded(seed, i + 80) * std::f32::consts::TAU,
                 2.0,
                 0.08,
                 0.02,
@@ -3011,6 +3180,9 @@ fn spawn_rock_fields(
         let z = seeded(seed, i * 4 + 1) * 1100.0 - 550.0;
         let dist = (x * x + z * z).sqrt();
         if dist < 135.0 && seeded(seed, i * 4 + 2) < 0.72 {
+            continue;
+        }
+        if starter_clear_zone(x, z, 8.0) {
             continue;
         }
         let y = terrain_surface_y(x, z, terrain_seed);
@@ -3057,7 +3229,7 @@ fn spawn_rock_fields(
                         0.08,
                         sz * 0.40,
                     )),
-                    seeded(seed, i + 500) * 6.28,
+                    seeded(seed, i + 500) * std::f32::consts::TAU,
                     1.4,
                     0.003,
                     0.010,
@@ -3084,6 +3256,9 @@ fn spawn_understory(
         let z = seeded(seed, i * 5 + 1) * 1040.0 - 520.0;
         let dist = (x * x + z * z).sqrt();
         if dist < 75.0 && seeded(seed, i * 5 + 2) < 0.55 {
+            continue;
+        }
+        if starter_clear_zone(x, z, 6.0) {
             continue;
         }
         let y = terrain_surface_y(x, z, terrain_seed);

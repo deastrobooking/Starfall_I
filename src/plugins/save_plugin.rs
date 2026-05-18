@@ -236,6 +236,20 @@ fn collect_player_saves(
     players
 }
 
+pub fn save_current_session(
+    player_q: &Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
+    wave: &WaveInfo,
+    progress: &ChapterProgress,
+    perks: &PerkTree,
+    select: &PlayerSelectState,
+) -> Result<(), String> {
+    let players = collect_player_saves(player_q);
+    if players.is_empty() {
+        return Err("No active players to save".to_string());
+    }
+    save_game(players, wave, progress, perks, select)
+}
+
 // ── Systems ───────────────────────────────────────────────────────────────────
 fn hydrate_progress_from_disk(
     mut progress: ResMut<ChapterProgress>,
@@ -313,11 +327,7 @@ fn autosave_system(
     }
     save_state.last_save_timer = 0.0;
 
-    let players = collect_player_saves(&player_q);
-    if players.is_empty() {
-        return;
-    };
-    match save_game(players, &wave, &progress, &perks, &select) {
+    match save_current_session(&player_q, &wave, &progress, &perks, &select) {
         Ok(()) => {
             msg_ev.send(UiMessageEvent {
                 text: "Game autosaved.".to_string(),
@@ -342,11 +352,7 @@ fn manual_save_system(
     if !keyboard.just_pressed(KeyCode::F5) {
         return;
     }
-    let players = collect_player_saves(&player_q);
-    if players.is_empty() {
-        return;
-    };
-    match save_game(players, &wave, &progress, &perks, &select) {
+    match save_current_session(&player_q, &wave, &progress, &perks, &select) {
         Ok(()) => {
             msg_ev.send(UiMessageEvent {
                 text: "Game saved! [F5]".to_string(),

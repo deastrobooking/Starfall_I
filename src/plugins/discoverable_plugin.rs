@@ -19,17 +19,38 @@ pub struct DiscoverablePlugin;
 
 impl Plugin for DiscoverablePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PlayerLoadout>().add_systems(
-            Update,
-            (
-                beacon_bob_system,
-                puzzle_switch_bob_system,
-                fragment_obstacle_system,
-                relic_puzzle_system,
-                discoverable_pickup_system,
-            )
-                .run_if(in_state(AppState::Playing)),
-        );
+        app.init_resource::<PlayerLoadout>()
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_discoverables_for_menu)
+            .add_systems(
+                Update,
+                (
+                    beacon_bob_system,
+                    puzzle_switch_bob_system,
+                    fragment_obstacle_system,
+                    relic_puzzle_system,
+                    discoverable_pickup_system,
+                )
+                    .run_if(in_state(AppState::Playing)),
+            );
+    }
+}
+
+fn cleanup_discoverables_for_menu(
+    mut commands: Commands,
+    discoverable_q: Query<Entity, With<Discoverable>>,
+    node_q: Query<Entity, With<PuzzleNode>>,
+    encounter_q: Query<Entity, With<PuzzleRelicEncounter>>,
+    obstacle_q: Query<Entity, With<RelicFragmentObstacle>>,
+    fragment_q: Query<Entity, With<RelicFragmentPuzzlePiece>>,
+) {
+    for entity in discoverable_q
+        .iter()
+        .chain(node_q.iter())
+        .chain(encounter_q.iter())
+        .chain(obstacle_q.iter())
+        .chain(fragment_q.iter())
+    {
+        commands.entity(entity).despawn_recursive();
     }
 }
 

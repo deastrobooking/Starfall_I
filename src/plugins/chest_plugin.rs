@@ -15,6 +15,7 @@ pub struct ChestPlugin;
 impl Plugin for ChestPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Playing), spawn_chests)
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_chests_for_menu)
             .add_systems(OnExit(AppState::Playing), cleanup_chests)
             .add_systems(
                 Update,
@@ -87,6 +88,12 @@ fn cleanup_chests(
         return;
     }
 
+    for entity in chest_q.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+fn cleanup_chests_for_menu(mut commands: Commands, chest_q: Query<Entity, With<Chest>>) {
     for entity in chest_q.iter() {
         commands.entity(entity).despawn_recursive();
     }

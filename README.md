@@ -11,6 +11,7 @@ Implemented:
 - Player-select flow for 1-4 local players, split-screen cameras, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
 - Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, in-game body steppers, and gameplay-linked body stats.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, secret cave systems, and dragon-domain spaces.
+- Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
 - Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
@@ -74,7 +75,7 @@ cargo run --features dynamic
 7. Paused
 8. Game Over
 
-Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume.
+Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, and can save-and-return to the title.
 
 Character design supports outfit/accent/hair swatches, accessory toggles, and body-shape steppers for height, shoulders, chest, arms, legs, hands, feet, head, and mass. Confirming stores an editable character blueprint; body proportions feed the visible character, collider size, movement tuning, stamina, armor capacity, and health.
 
@@ -115,9 +116,17 @@ Keyboard and mouse:
 | `9` | Moon Bubble |
 | `0` | Sprite Turret |
 | `C` | Crafting |
-| `J` | Enter vehicle |
+| `J` | Enter vehicle / board nearby boat |
 | `M` | Open map |
 | `Esc` | Back / pause |
+
+Pause menu shortcuts:
+
+| Input | Action |
+|---|---|
+| `Esc` / Start | Resume |
+| `S` / `F5` / Select | Save |
+| `T` | Save and return to title |
 | `F5` | Save |
 
 Controller:

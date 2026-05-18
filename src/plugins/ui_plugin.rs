@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use bevy::input::gamepad::{GamepadAxis, GamepadButton};
+use bevy_rapier3d::prelude::RapierConfiguration;
 
 use crate::chapters::{all_chapters, ChapterId};
 use crate::components::armor::ArmorSet;
@@ -12,6 +13,7 @@ use crate::damage::Health;
 use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
+use crate::plugins::save_plugin::save_current_session;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
@@ -26,7 +28,10 @@ impl Plugin for UiPlugin {
         app.init_resource::<UiMessage>()
             .init_resource::<CraftingPanelState>()
             .add_systems(Startup, spawn_menu_camera)
-            .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
+            .add_systems(
+                OnEnter(AppState::MainMenu),
+                (cleanup_play_ui_for_menu, setup_main_menu),
+            )
             .add_systems(
                 OnEnter(AppState::PlayerSelect),
                 (despawn_menu, setup_player_select),
@@ -42,13 +47,23 @@ impl Plugin for UiPlugin {
                 Update,
                 despawn_menu_camera.run_if(in_state(AppState::Playing)),
             )
-            .add_systems(OnEnter(AppState::Paused), setup_pause_menu)
-            .add_systems(OnExit(AppState::Paused), despawn_pause_menu)
+            .add_systems(
+                OnEnter(AppState::Paused),
+                (setup_pause_menu, freeze_physics_on_pause),
+            )
+            .add_systems(
+                OnExit(AppState::Paused),
+                (despawn_pause_menu, resume_physics_after_pause),
+            )
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
             .add_systems(
                 Update,
                 pause_input_system
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
+            )
+            .add_systems(
+                Update,
+                pause_menu_action_system.run_if(in_state(AppState::Paused)),
             )
             .add_systems(
                 Update,
@@ -66,13 +81,19 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                message_timer_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                message_timer_system.run_if(
+                    in_state(AppState::Playing)
+                        .or(in_state(AppState::Paused))
+                        .or(in_state(AppState::GameOver)),
+                ),
             )
             .add_systems(
                 Update,
-                ui_message_listener
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                ui_message_listener.run_if(
+                    in_state(AppState::Playing)
+                        .or(in_state(AppState::Paused))
+                        .or(in_state(AppState::GameOver)),
+                ),
             )
             .add_systems(
                 Update,
@@ -123,6 +144,14 @@ struct MainMenuRoot;
 struct HudRoot;
 #[derive(Component)]
 struct PauseRoot;
+#[derive(Component, Clone, Copy)]
+struct PauseMenuButton(PauseAction);
+#[derive(Clone, Copy)]
+enum PauseAction {
+    Resume,
+    Save,
+    Title,
+}
 #[derive(Component)]
 struct GameOverRoot;
 #[derive(Component)]
@@ -213,6 +242,23 @@ fn despawn_menu(mut commands: Commands, q: Query<Entity, With<MainMenuRoot>>) {
     }
 }
 
+fn cleanup_play_ui_for_menu(
+    mut commands: Commands,
+    hud_q: Query<Entity, With<HudRoot>>,
+    pause_q: Query<Entity, With<PauseRoot>>,
+    game_over_q: Query<Entity, With<GameOverRoot>>,
+    crafting_q: Query<Entity, With<CraftingPanelRoot>>,
+) {
+    for entity in hud_q
+        .iter()
+        .chain(pause_q.iter())
+        .chain(game_over_q.iter())
+        .chain(crafting_q.iter())
+    {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
 fn setup_main_menu(mut commands: Commands) {
     commands.spawn((
         Node {
@@ -264,10 +310,11 @@ fn setup_pause_menu(mut commands: Commands) {
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(14.0),
+                row_gap: Val::Px(12.0),
+                padding: UiRect::all(Val::Px(34.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.58)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
             PauseRoot,
         ))
         .with_children(|root| {
@@ -280,12 +327,70 @@ fn setup_pause_menu(mut commands: Commands) {
                 TextColor(Color::srgb(0.9, 0.95, 1.0)),
             ));
             root.spawn((
-                Text::new("Esc / Start to resume"),
+                Text::new("Esc / Start resumes. Physics and gameplay are frozen."),
                 TextFont {
-                    font_size: 22.0,
+                    font_size: 19.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.85, 1.0)),
+            ));
+            root.spawn(Node {
+                height: Val::Px(8.0),
+                ..default()
+            });
+
+            for (label, action, color) in [
+                ("RESUME", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
+                ("SAVE GAME", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
+                ("SAVE & TITLE", PauseAction::Title, Color::srgb(0.48, 0.18, 0.18)),
+            ] {
+                root.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(280.0),
+                        height: Val::Px(44.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(color),
+                    PauseMenuButton(action),
+                ))
+                .with_children(|button| {
+                    button.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font_size: 22.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+            }
+
+            root.spawn(Node {
+                height: Val::Px(8.0),
+                ..default()
+            });
+            root.spawn((
+                Text::new(
+                    "Quick keys: [S/F5] Save   [T] Save & Title   [C] Crafting   [M] Map   [J] Vehicle/Boat",
+                ),
+                TextFont {
+                    font_size: 15.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.86, 0.90, 1.0)),
+            ));
+            root.spawn((
+                Text::new(
+                    "Controls: WASD/Left Stick move | Mouse/Right Stick look | Space/South jump | Q/East dodge | F/North parry\nLMB/RT star beam | RMB/LT aim | 1-6 or RB/DPad Left beams | 7-0 or Select+DPad special tools | E/DPad Down interact",
+                ),
+                TextFont {
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.66, 0.76, 0.95)),
             ));
         });
 }
@@ -293,6 +398,18 @@ fn setup_pause_menu(mut commands: Commands) {
 fn despawn_pause_menu(mut commands: Commands, q: Query<Entity, With<PauseRoot>>) {
     for entity in q.iter() {
         commands.entity(entity).despawn_recursive();
+    }
+}
+
+fn freeze_physics_on_pause(mut rapier_q: Query<&mut RapierConfiguration>) {
+    for mut rapier in rapier_q.iter_mut() {
+        rapier.physics_pipeline_active = false;
+    }
+}
+
+fn resume_physics_after_pause(mut rapier_q: Query<&mut RapierConfiguration>) {
+    for mut rapier in rapier_q.iter_mut() {
+        rapier.physics_pipeline_active = true;
     }
 }
 
@@ -326,6 +443,83 @@ fn pause_input_system(
             next_state.set(AppState::Playing);
         }
         _ => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pause_menu_action_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    button_q: Query<(&Interaction, &PauseMenuButton), (Changed<Interaction>, With<Button>)>,
+    player_q: Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
+    wave: Res<WaveInfo>,
+    progress: Res<ChapterProgress>,
+    perks: Res<PerkTree>,
+    select: Res<PlayerSelectState>,
+    mut transition: ResMut<PlaySessionTransition>,
+    mut next_state: ResMut<NextState<AppState>>,
+    mut msg_ev: EventWriter<UiMessageEvent>,
+) {
+    let mut action = None;
+    if keyboard.just_pressed(KeyCode::KeyS)
+        || keyboard.just_pressed(KeyCode::F5)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::Select))
+    {
+        action = Some(PauseAction::Save);
+    }
+    if keyboard.just_pressed(KeyCode::KeyT) {
+        action = Some(PauseAction::Title);
+    }
+    for (interaction, button) in button_q.iter() {
+        if *interaction == Interaction::Pressed {
+            action = Some(button.0);
+        }
+    }
+
+    let Some(action) = action else {
+        return;
+    };
+
+    match action {
+        PauseAction::Resume => {
+            transition.pausing = false;
+            transition.resuming_from_pause = true;
+            next_state.set(AppState::Playing);
+        }
+        PauseAction::Save => {
+            send_pause_save_result(
+                save_current_session(&player_q, &wave, &progress, &perks, &select),
+                &mut msg_ev,
+            );
+        }
+        PauseAction::Title => {
+            send_pause_save_result(
+                save_current_session(&player_q, &wave, &progress, &perks, &select),
+                &mut msg_ev,
+            );
+            transition.pausing = false;
+            transition.resuming_from_pause = false;
+            next_state.set(AppState::MainMenu);
+        }
+    }
+}
+
+fn send_pause_save_result(result: Result<(), String>, msg_ev: &mut EventWriter<UiMessageEvent>) {
+    match result {
+        Ok(()) => {
+            msg_ev.send(UiMessageEvent {
+                text: "Game saved.".to_string(),
+                duration: 2.0,
+            });
+        }
+        Err(e) => {
+            msg_ev.send(UiMessageEvent {
+                text: format!("Save failed: {}", e),
+                duration: 2.4,
+            });
+        }
     }
 }
 

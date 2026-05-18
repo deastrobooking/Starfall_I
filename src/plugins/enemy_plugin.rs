@@ -38,6 +38,7 @@ impl Plugin for EnemyPlugin {
                 OnEnter(AppState::Playing),
                 (setup_enemies, setup_enemy_attack_assets),
             )
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_enemies_for_menu)
             .add_systems(OnExit(AppState::Playing), cleanup_enemies)
             .add_systems(
                 Update,
@@ -122,6 +123,23 @@ fn cleanup_enemies(
         return;
     }
 
+    for entity in enemy_q
+        .iter()
+        .chain(projectile_q.iter())
+        .chain(vfx_q.iter())
+        .chain(loot_q.iter())
+    {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+fn cleanup_enemies_for_menu(
+    mut commands: Commands,
+    enemy_q: Query<Entity, With<Enemy>>,
+    projectile_q: Query<Entity, With<EnemyProjectile>>,
+    vfx_q: Query<Entity, With<EnemyAttackVfx>>,
+    loot_q: Query<Entity, With<WorldLoot>>,
+) {
     for entity in enemy_q
         .iter()
         .chain(projectile_q.iter())

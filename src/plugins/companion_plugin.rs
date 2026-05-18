@@ -18,6 +18,7 @@ pub struct CompanionPlugin;
 impl Plugin for CompanionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Playing), setup_companions)
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_companions_for_menu)
             .add_systems(OnExit(AppState::Playing), cleanup_companions)
             .add_systems(
                 Update,
@@ -114,6 +115,16 @@ fn cleanup_companions(
         return;
     }
 
+    for entity in companion_q.iter().chain(projectile_q.iter()) {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+fn cleanup_companions_for_menu(
+    mut commands: Commands,
+    companion_q: Query<Entity, With<Companion>>,
+    projectile_q: Query<Entity, With<CompanionProjectile>>,
+) {
     for entity in companion_q.iter().chain(projectile_q.iter()) {
         commands.entity(entity).despawn_recursive();
     }
