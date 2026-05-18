@@ -328,16 +328,14 @@ fn apply_vehicle_buffs(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn boat_drive_system(
     time: Res<Time>,
     mut state: ResMut<VehicleState>,
-    mut boat_q: Query<(&mut Transform, &BoatVehicle)>,
-    mut passenger_q: Query<(
-        &PlayerIndex,
-        &mut Transform,
-        &mut PlayerMovement,
-        &PlayerInput,
-        &BoatPassenger,
+    mut queries: ParamSet<(
+        Query<(&mut Transform, &BoatVehicle)>,
+        Query<(&PlayerIndex, &PlayerInput, &BoatPassenger), With<Player>>,
+        Query<(&mut Transform, &mut PlayerMovement, &BoatPassenger), With<Player>>,
     )>,
 ) {
     if !state.boat_active {
@@ -346,12 +344,9 @@ fn boat_drive_system(
     let (Some(owner), Some(boat_entity)) = (state.active_owner, state.active_boat) else {
         return;
     };
-    let Ok((mut boat_transform, boat)) = boat_q.get_mut(boat_entity) else {
-        return;
-    };
 
     let mut driver_axis = Vec2::ZERO;
-    for (idx, _, _, input, passenger) in passenger_q.iter_mut() {
+    for (idx, input, passenger) in queries.p1().iter() {
         if passenger.boat == boat_entity && passenger.is_driver && idx.0 == owner {
             driver_axis = input.move_axis;
             break;
@@ -359,27 +354,36 @@ fn boat_drive_system(
     }
 
     let dt = time.delta_secs();
-    let mut horizontal = Vec3::new(driver_axis.x, 0.0, driver_axis.y);
-    if horizontal.length_squared() > 0.01 {
-        horizontal = horizontal.normalize();
-        boat_transform.translation += horizontal * boat.speed * dt;
-        state.boat_heading = horizontal.x.atan2(horizontal.z);
-    }
+    let (boat_translation, boat_rotation) = {
+        let mut boat_q = queries.p0();
+        let Ok((mut boat_transform, boat)) = boat_q.get_mut(boat_entity) else {
+            return;
+        };
 
-    let min_z = boat.dock_position.z.min(boat.island_position.z) - boat.dock_radius;
-    let max_z = boat.dock_position.z.max(boat.island_position.z) + boat.dock_radius;
-    let route_center_x = (boat.dock_position.x + boat.island_position.x) * 0.5;
-    boat_transform.translation.x = boat_transform.translation.x.clamp(
-        route_center_x - boat.route_half_width,
-        route_center_x + boat.route_half_width,
-    );
-    boat_transform.translation.z = boat_transform.translation.z.clamp(min_z, max_z);
+        let mut horizontal = Vec3::new(driver_axis.x, 0.0, driver_axis.y);
+        if horizontal.length_squared() > 0.01 {
+            horizontal = horizontal.normalize();
+            boat_transform.translation += horizontal * boat.speed * dt;
+            state.boat_heading = horizontal.x.atan2(horizontal.z);
+        }
 
-    let bob = (time.elapsed_secs() * 2.8).sin() * 0.10;
-    boat_transform.translation.y = boat.dock_position.y + bob;
-    boat_transform.rotation = Quat::from_rotation_y(state.boat_heading);
+        let min_z = boat.dock_position.z.min(boat.island_position.z) - boat.dock_radius;
+        let max_z = boat.dock_position.z.max(boat.island_position.z) + boat.dock_radius;
+        let route_center_x = (boat.dock_position.x + boat.island_position.x) * 0.5;
+        boat_transform.translation.x = boat_transform.translation.x.clamp(
+            route_center_x - boat.route_half_width,
+            route_center_x + boat.route_half_width,
+        );
+        boat_transform.translation.z = boat_transform.translation.z.clamp(min_z, max_z);
 
-    for (_, mut player_transform, mut movement, _, passenger) in passenger_q.iter_mut() {
+        let bob = (time.elapsed_secs() * 2.8).sin() * 0.10;
+        boat_transform.translation.y = boat.dock_position.y + bob;
+        boat_transform.rotation = Quat::from_rotation_y(state.boat_heading);
+
+        (boat_transform.translation, boat_transform.rotation)
+    };
+
+    for (mut player_transform, mut movement, passenger) in queries.p2().iter_mut() {
         if passenger.boat != boat_entity {
             continue;
         }
@@ -388,8 +392,8 @@ fn boat_drive_system(
         movement.is_grounded = true;
 
         let seat = boat_seat_offset(passenger.seat);
-        player_transform.translation = boat_transform.translation + boat_transform.rotation * seat;
-        player_transform.rotation = boat_transform.rotation;
+        player_transform.translation = boat_translation + boat_rotation * seat;
+        player_transform.rotation = boat_rotation;
     }
 }
 
