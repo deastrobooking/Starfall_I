@@ -4289,6 +4289,7 @@ dependencies = [
  "bevy",
  "bevy_rapier3d",
  "noise",
+ "objc2 0.6.4",
  "rand 0.8.6",
  "serde",
  "serde_json",

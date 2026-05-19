@@ -50,7 +50,10 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NativeControllerState>()
             .add_systems(PreUpdate, poll_native_controllers.after(InputSystem))
-            .add_systems(PreUpdate, update_player_inputs.after(poll_native_controllers))
+            .add_systems(
+                PreUpdate,
+                update_player_inputs.after(poll_native_controllers),
+            )
             .add_systems(Update, log_gamepad_connections);
     }
 }
@@ -127,7 +130,16 @@ impl NativeControllerState {
             || self.just_pressed(NativeButton::North)
     }
 
-    fn finish_poll(&mut self, connected: bool, name: String, move_axis: Vec2, look_axis: Vec2, pressed_mask: u32) {
+    fn finish_poll(
+        &mut self,
+        connected: bool,
+        name: String,
+        move_axis: Vec2,
+        look_axis: Vec2,
+        pressed_mask: u32,
+    ) {
+        let previous_connected = self.connected;
+        let previous_name = self.name.clone();
         let previous = self.pressed_mask;
         self.connected = connected;
         self.name = name;
@@ -135,6 +147,12 @@ impl NativeControllerState {
         self.look_axis = look_axis;
         self.pressed_mask = pressed_mask;
         self.just_pressed_mask = pressed_mask & !previous;
+
+        if connected && (!previous_connected || previous_name != self.name) {
+            info!("Native macOS controller connected: {}", self.name);
+        } else if previous_connected && !connected {
+            info!("Native macOS controller disconnected");
+        }
     }
 
     fn clear_poll(&mut self) {
@@ -182,6 +200,7 @@ fn log_gamepad_connections(mut events: EventReader<GamepadConnectionEvent>) {
 }
 
 // ── Main input system ─────────────────────────────────────────────────────────
+#[allow(clippy::too_many_arguments)]
 fn update_player_inputs(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_btn: Res<ButtonInput<MouseButton>>,
@@ -222,10 +241,8 @@ fn update_player_inputs(
         let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(b)).unwrap_or(false);
         let btn_just = |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false);
         let axis_val = |a: GamepadAxis| -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
-        let native_held =
-            |b: NativeButton| -> bool { use_native && native.pressed(b) };
-        let native_just =
-            |b: NativeButton| -> bool { use_native && native.just_pressed(b) };
+        let native_held = |b: NativeButton| -> bool { use_native && native.pressed(b) };
+        let native_just = |b: NativeButton| -> bool { use_native && native.just_pressed(b) };
 
         // ── Movement ──────────────────────────────────────────────────────────
         let raw_move = Vec2::new(
@@ -296,8 +313,9 @@ fn update_player_inputs(
             || native_held(NativeButton::LeftShoulder);
 
         // ── Jump / Jetpack ────────────────────────────────────────────────────
-        pi.jump =
-            (is_p1 && keyboard.just_pressed(KeyCode::Space)) || btn_just(GamepadButton::South) || native_just(NativeButton::South);
+        pi.jump = (is_p1 && keyboard.just_pressed(KeyCode::Space))
+            || btn_just(GamepadButton::South)
+            || native_just(NativeButton::South);
         pi.jetpack = (is_p1 && keyboard.pressed(KeyCode::Space))
             || btn_held(GamepadButton::South)
             || native_held(NativeButton::South);
@@ -308,22 +326,22 @@ fn update_player_inputs(
             || native_just(NativeButton::East);
 
         // ── Reload ────────────────────────────────────────────────────────────
-        pi.reload =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyR)) || btn_just(GamepadButton::West) || native_just(NativeButton::West);
+        pi.reload = (is_p1 && keyboard.just_pressed(KeyCode::KeyR))
+            || btn_just(GamepadButton::West)
+            || native_just(NativeButton::West);
 
         // ── Parry ─────────────────────────────────────────────────────────────
-        pi.parry =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyF)) || btn_just(GamepadButton::North) || native_just(NativeButton::North);
+        pi.parry = (is_p1 && keyboard.just_pressed(KeyCode::KeyF))
+            || btn_just(GamepadButton::North)
+            || native_just(NativeButton::North);
 
         // ── Melee ─────────────────────────────────────────────────────────────
-        pi.melee_light =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyV))
-                || btn_just(GamepadButton::RightThumb)
-                || native_just(NativeButton::RightThumb);
-        pi.melee_heavy =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyB))
-                || btn_just(GamepadButton::LeftThumb)
-                || native_just(NativeButton::LeftThumb);
+        pi.melee_light = (is_p1 && keyboard.just_pressed(KeyCode::KeyV))
+            || btn_just(GamepadButton::RightThumb)
+            || native_just(NativeButton::RightThumb);
+        pi.melee_heavy = (is_p1 && keyboard.just_pressed(KeyCode::KeyB))
+            || btn_just(GamepadButton::LeftThumb)
+            || native_just(NativeButton::LeftThumb);
 
         // ── Weapon cycle ──────────────────────────────────────────────────────
         pi.weapon_next = (is_p1 && keyboard.just_pressed(KeyCode::BracketRight))
@@ -413,8 +431,7 @@ fn update_player_inputs(
 
         pi.interact = (is_p1 && keyboard.just_pressed(KeyCode::KeyE))
             || (dpad_free
-                && (btn_just(GamepadButton::DPadDown)
-                    || native_just(NativeButton::DPadDown)));
+                && (btn_just(GamepadButton::DPadDown) || native_just(NativeButton::DPadDown)));
 
         pi.enter_vehicle = (is_p1 && keyboard.just_pressed(KeyCode::KeyJ))
             || (dpad_free
@@ -422,15 +439,13 @@ fn update_player_inputs(
 
         pi.weapon_prev = pi.weapon_prev
             || (dpad_free
-                && (btn_just(GamepadButton::DPadLeft)
-                    || native_just(NativeButton::DPadLeft)));
+                && (btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft)));
 
         // ── Open map ──────────────────────────────────────────────────────────
         // DPadRight freed from weapon_next (RB covers that); assigned to map.
         pi.open_map = (is_p1 && keyboard.just_pressed(KeyCode::KeyM))
             || (dpad_free
-                && (btn_just(GamepadButton::DPadRight)
-                    || native_just(NativeButton::DPadRight)));
+                && (btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight)));
 
         // ── Crafting ──────────────────────────────────────────────────────────
         // Select alone fires crafting; Select+DPad is the special-slot modifier.
@@ -439,10 +454,9 @@ fn update_player_inputs(
                 && !dpad_any_just);
 
         // ── Pause ─────────────────────────────────────────────────────────────
-        pi.pause =
-            (is_p1 && keyboard.just_pressed(KeyCode::Escape))
-                || btn_just(GamepadButton::Start)
-                || native_just(NativeButton::Start);
+        pi.pause = (is_p1 && keyboard.just_pressed(KeyCode::Escape))
+            || btn_just(GamepadButton::Start)
+            || native_just(NativeButton::Start);
 
         // ── Star Sabre toggle ─────────────────────────────────────────────────
         // Primary:  Guide/Home button (Xbox/PS/Switch).
@@ -462,12 +476,13 @@ fn update_player_inputs(
 #[cfg(target_os = "macos")]
 mod native_controller_backend {
     use super::{NativeButton, NativeControllerState};
-    use bevy::prelude::Vec2;
+    use bevy::prelude::{info, Vec2};
     use objc2::runtime::{AnyClass, AnyObject, Sel};
     use objc2::{msg_send, sel};
     use std::ffi::CStr;
     use std::os::raw::c_char;
     use std::ptr;
+    use std::sync::Once;
 
     #[link(name = "GameController", kind = "framework")]
     extern "C" {}
@@ -483,6 +498,9 @@ mod native_controller_backend {
             state.clear_poll();
             return;
         };
+        unsafe {
+            start_controller_discovery(controller_class);
+        }
 
         let controllers: *mut AnyObject = unsafe { msg_send![controller_class, controllers] };
         if controllers.is_null() {
@@ -504,7 +522,8 @@ mod native_controller_backend {
 
             let name = unsafe { nsstring_to_string(object_property(controller, sel!(vendorName))) }
                 .unwrap_or_else(|| "macOS GameController".to_string());
-            let left = unsafe { direction_pad_axes(object_property(extended, sel!(leftThumbstick))) };
+            let left =
+                unsafe { direction_pad_axes(object_property(extended, sel!(leftThumbstick))) };
             let right =
                 unsafe { direction_pad_axes(object_property(extended, sel!(rightThumbstick))) };
             let dpad = unsafe { direction_pad_axes(object_property(extended, sel!(dpad))) };
@@ -583,6 +602,27 @@ mod native_controller_backend {
         }
 
         state.clear_poll();
+    }
+
+    unsafe fn start_controller_discovery(controller_class: &AnyClass) {
+        static START_DISCOVERY: Once = Once::new();
+        START_DISCOVERY.call_once(|| {
+            let can_start: bool = unsafe {
+                msg_send![
+                    controller_class,
+                    respondsToSelector: sel!(startWirelessControllerDiscoveryWithCompletionHandler:)
+                ]
+            };
+            if can_start {
+                let _: () = unsafe {
+                    msg_send![
+                        controller_class,
+                        startWirelessControllerDiscoveryWithCompletionHandler: ptr::null_mut::<AnyObject>()
+                    ]
+                };
+                info!("Started macOS wireless controller discovery.");
+            }
+        });
     }
 
     fn set_button(mask: &mut u32, button: NativeButton, pressed: bool) {

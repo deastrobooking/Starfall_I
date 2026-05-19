@@ -380,7 +380,7 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 
 **Module:** `src/lsystem/` | **Plugin:** `WorldPlugin`
 
-- Terrain heightmap via deterministic layered waves/ridges; seed from `GameSettings.world_seed`.
+- Terrain heightmap via deterministic layered waves/ridges plus a sampled Everest PNG patch in the southwest dragon domain; seed from `GameSettings.world_seed`.
 - Outer districts, spaceports, trees, crystals, mountains, and authored anchors sample the terrain surface so upgraded props sit on the generated ground rather than the old flat plane.
 - Decorative trees via L-system string rewriting (`lsystem/mod.rs`) + 3-D turtle interpreter (`lsystem/turtle.rs`).
 - City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.

@@ -1,10 +1,12 @@
+use bevy::image::{CompressedImageFormats, Image, ImageSampler, ImageType};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError, TextureFormat,
 };
+use std::sync::OnceLock;
 
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::DiscoverableKind;
@@ -1526,10 +1528,164 @@ fn spawn_secret_cave_system(
 
 // ── Terrain ───────────────────────────────────────────────────────────────────
 
+const TERRAIN_WORLD_SIZE: f32 = 1200.0;
+const EVEREST_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/everest.png");
+static EVEREST_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
+
+struct EverestHeightmap {
+    width: usize,
+    height: usize,
+    values: Vec<f32>,
+}
+
+impl EverestHeightmap {
+    fn sample(&self, u: f32, v: f32) -> f32 {
+        let x = u.clamp(0.0, 1.0) * (self.width.saturating_sub(1)) as f32;
+        let y = v.clamp(0.0, 1.0) * (self.height.saturating_sub(1)) as f32;
+        let x0 = x.floor() as usize;
+        let y0 = y.floor() as usize;
+        let x1 = (x0 + 1).min(self.width - 1);
+        let y1 = (y0 + 1).min(self.height - 1);
+        let tx = x - x0 as f32;
+        let ty = y - y0 as f32;
+
+        let a = self.values[y0 * self.width + x0];
+        let b = self.values[y0 * self.width + x1];
+        let c = self.values[y1 * self.width + x0];
+        let d = self.values[y1 * self.width + x1];
+        let top = a + (b - a) * tx;
+        let bottom = c + (d - c) * tx;
+        top + (bottom - top) * ty
+    }
+}
+
+fn everest_heightmap() -> Option<&'static EverestHeightmap> {
+    EVEREST_HEIGHTMAP
+        .get_or_init(load_everest_heightmap)
+        .as_ref()
+}
+
+fn load_everest_heightmap() -> Option<EverestHeightmap> {
+    let image = Image::from_buffer(
+        EVEREST_HEIGHTMAP_BYTES,
+        ImageType::Extension("png"),
+        CompressedImageFormats::NONE,
+        true,
+        ImageSampler::nearest(),
+        RenderAssetUsages::default(),
+    )
+    .ok()?;
+
+    heightmap_from_image(&image)
+}
+
+fn heightmap_from_image(image: &Image) -> Option<EverestHeightmap> {
+    let width = image.width() as usize;
+    let height = image.height() as usize;
+    if width < 2 || height < 2 {
+        return None;
+    }
+
+    let mut min_value = f32::MAX;
+    let mut max_value = f32::MIN;
+    let mut values = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            let value = heightmap_luminance(image, y * width + x)?;
+            min_value = min_value.min(value);
+            max_value = max_value.max(value);
+            values.push(value);
+        }
+    }
+
+    let range = max_value - min_value;
+    if range > f32::EPSILON {
+        for value in values.iter_mut() {
+            *value = (*value - min_value) / range;
+        }
+    }
+
+    Some(EverestHeightmap {
+        width,
+        height,
+        values,
+    })
+}
+
+fn heightmap_luminance(image: &Image, pixel_index: usize) -> Option<f32> {
+    let data = &image.data;
+    match image.texture_descriptor.format {
+        TextureFormat::R8Unorm | TextureFormat::R8Uint => {
+            data.get(pixel_index).map(|v| *v as f32 / u8::MAX as f32)
+        }
+        TextureFormat::Rg8Unorm | TextureFormat::Rg8Uint => data
+            .get(pixel_index * 2)
+            .map(|v| *v as f32 / u8::MAX as f32),
+        TextureFormat::R16Unorm | TextureFormat::R16Uint => {
+            let offset = pixel_index * 2;
+            let bytes = data.get(offset..offset + 2)?;
+            Some(u16::from_le_bytes([bytes[0], bytes[1]]) as f32 / u16::MAX as f32)
+        }
+        TextureFormat::Rg16Unorm | TextureFormat::Rg16Uint => {
+            let offset = pixel_index * 4;
+            let bytes = data.get(offset..offset + 2)?;
+            Some(u16::from_le_bytes([bytes[0], bytes[1]]) as f32 / u16::MAX as f32)
+        }
+        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8Uint | TextureFormat::Rgba8UnormSrgb => {
+            let offset = pixel_index * 4;
+            let bytes = data.get(offset..offset + 3)?;
+            Some(luminance(bytes[0], bytes[1], bytes[2]))
+        }
+        TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb => {
+            let offset = pixel_index * 4;
+            let bytes = data.get(offset..offset + 3)?;
+            Some(luminance(bytes[2], bytes[1], bytes[0]))
+        }
+        _ => None,
+    }
+}
+
+fn luminance(r: u8, g: u8, b: u8) -> f32 {
+    (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / u8::MAX as f32
+}
+
 /// Smooth hermite interpolation.
 fn smoothstep(lo: f32, hi: f32, x: f32) -> f32 {
     let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn edge_fade01(t: f32, feather: f32) -> f32 {
+    smoothstep(0.0, feather, t) * (1.0 - smoothstep(1.0 - feather, 1.0, t))
+}
+
+fn everest_heightmap_relief(x: f32, z: f32) -> f32 {
+    let Some(heightmap) = everest_heightmap() else {
+        return 0.0;
+    };
+
+    // The PNG is a local mountain patch for the southwest dragon/Everest biome.
+    // It is centered over the existing authored peak and faded at the edges so
+    // the rest of the deterministic terrain remains stable.
+    const PATCH_CENTER_X: f32 = -500.0;
+    const PATCH_CENTER_Z: f32 = -420.0;
+    const PATCH_WORLD_SIZE: f32 = 480.0;
+
+    let u = (x - PATCH_CENTER_X) / PATCH_WORLD_SIZE + 0.5;
+    let v = 0.5 - (z - PATCH_CENTER_Z) / PATCH_WORLD_SIZE;
+    if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+        return 0.0;
+    }
+
+    let edge = edge_fade01(u, 0.08) * edge_fade01(v, 0.08);
+    let raw = heightmap.sample(u, v);
+    let ridge = smoothstep(0.18, 0.90, raw);
+    let high_ridge = smoothstep(0.62, 0.96, raw);
+    let valley_cut = (1.0 - smoothstep(0.14, 0.52, raw)) * 12.0;
+    let peak_distance = ((x + 550.0).powi(2) + (z + 480.0).powi(2)).sqrt();
+    let authored_peak_lift = smoothstep(190.0, 0.0, peak_distance) * 72.0;
+
+    edge * (ridge * 90.0 + high_ridge * 58.0 - valley_cut) + authored_peak_lift
 }
 
 /// Layered sine-wave height at world position (x, z).
@@ -1585,9 +1741,8 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     let plat_z = smoothstep(-150.0, -400.0, z); // 0 at z>=-150, rises toward -400
     let plateau = plat_x * plat_z * 65.0;
 
-    // Mt. Everest mega-peak centred at (-550, -480)
-    let ed = ((x + 550.0).powi(2) + (z + 480.0).powi(2)).sqrt();
-    let everest = smoothstep(160.0, 0.0, ed) * 230.0;
+    // Mt. Everest terrain patch centred around the southwest dragon domain.
+    let everest = everest_heightmap_relief(x, z);
 
     // Flatten the city zone; outer areas get full amplitude. Keep the terrain
     // on or above the invisible gameplay floor so collision and visuals agree.
@@ -1600,7 +1755,7 @@ fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
 
 fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
     const RES: usize = 160; // quads per side — ~7.5 m per cell
-    const WORLD: f32 = 1200.0;
+    const WORLD: f32 = TERRAIN_WORLD_SIZE;
     const CELL: f32 = WORLD / RES as f32;
 
     // ── Height grid ─────────────────────────────────────────────────────────

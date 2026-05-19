@@ -1093,6 +1093,7 @@ fn despawn_player_select(mut commands: Commands, q: Query<Entity, With<PlayerSel
 fn player_select_update(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
+    native: Res<NativeControllerState>,
     mut button_events: EventReader<GamepadButtonStateChangedEvent>,
     time: Res<Time>,
     mut select: ResMut<PlayerSelectState>,
@@ -1149,6 +1150,7 @@ fn player_select_update(
     gps.sort_by_key(|(e, _)| e.index());
     let p1_gp = gps.first().map(|(_, gamepad)| *gamepad);
     let p1_entity = gps.first().map(|(entity, _)| *entity);
+    let native_for_p1 = p1_gp.is_none() && native.connected;
     let pressed_buttons: Vec<(Entity, GamepadButton)> = button_events
         .read()
         .filter(|event| event.state == ButtonState::Pressed)
@@ -1170,6 +1172,11 @@ fn player_select_update(
             let lx = p1_gp
                 .and_then(|gamepad| gamepad.get(GamepadAxis::LeftStickX))
                 .unwrap_or(0.0);
+            let native_lx = if native_for_p1 {
+                native.move_axis.x
+            } else {
+                0.0
+            };
             let left = keyboard.just_pressed(KeyCode::ArrowLeft)
                 || p1_gp
                     .map(|gamepad| gamepad.just_pressed(GamepadButton::DPadLeft))
@@ -1177,6 +1184,8 @@ fn player_select_update(
                 || p1_entity
                     .map(|entity| event_pressed(entity, GamepadButton::DPadLeft))
                     .unwrap_or(false)
+                || (native_for_p1 && native.just_pressed(NativeButton::DPadLeft))
+                || native_lx < -0.5
                 || lx < -0.5;
             let right = keyboard.just_pressed(KeyCode::ArrowRight)
                 || p1_gp
@@ -1185,6 +1194,8 @@ fn player_select_update(
                 || p1_entity
                     .map(|entity| event_pressed(entity, GamepadButton::DPadRight))
                     .unwrap_or(false)
+                || (native_for_p1 && native.just_pressed(NativeButton::DPadRight))
+                || native_lx > 0.5
                 || lx > 0.5;
             if left {
                 slot.character_index = (slot.character_index + 3) % 4;
@@ -1208,6 +1219,9 @@ fn player_select_update(
                         || event_pressed(entity, GamepadButton::Start)
                 })
                 .unwrap_or(false)
+            || (native_for_p1
+                && (native.just_pressed(NativeButton::South)
+                    || native.just_pressed(NativeButton::Start)))
         {
             slot.ready = !slot.ready;
         }
@@ -1218,7 +1232,8 @@ fn player_select_update(
                 .unwrap_or(false)
             || p1_entity
                 .map(|entity| event_pressed(entity, GamepadButton::North))
-                .unwrap_or(false);
+                .unwrap_or(false)
+            || (native_for_p1 && native.just_pressed(NativeButton::North));
         if customize_pressed && !slot.ready {
             design_data.player_index = 0;
             next_state.set(AppState::CharacterDesign);
@@ -1340,6 +1355,11 @@ fn player_select_update(
                 let lx = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
                 let ly = gp.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
                 *t = Text::new(format!("KEYBOARD + GAMEPAD 1   X:{:+.2} Y:{:+.2}", lx, ly));
+            } else if native.connected {
+                *t = Text::new(format!(
+                    "KEYBOARD + MACOS CONTROLLER   X:{:+.2} Y:{:+.2}",
+                    native.move_axis.x, native.move_axis.y
+                ));
             } else {
                 *t = Text::new("KEYBOARD + GAMEPAD 1");
             }
