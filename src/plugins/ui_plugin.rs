@@ -648,6 +648,7 @@ fn pause_input_system(
 fn pause_menu_action_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
     button_q: Query<(&Interaction, &PauseMenuButton), (Changed<Interaction>, With<Button>)>,
     player_q: Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
     wave: Res<WaveInfo>,
@@ -665,6 +666,7 @@ fn pause_menu_action_system(
         || gamepads
             .iter()
             .any(|gamepad| gamepad.just_pressed(GamepadButton::Select))
+        || native.just_pressed(NativeButton::Select)
     {
         action = Some(PauseAction::Save);
     }
