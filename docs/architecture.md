@@ -1,6 +1,6 @@
 # Starfall I — Architecture Overview
 
-Bevy 0.15 + Rapier 3D. Plugin-per-feature structure; all game logic lives in `src/plugins/`.
+Bevy 0.18 + Rapier 3D. Plugin-per-feature structure; all game logic lives in `src/plugins/`.
 
 ## Module Map
 

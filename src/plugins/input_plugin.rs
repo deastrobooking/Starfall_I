@@ -37,7 +37,7 @@ use bevy::input::gamepad::{
     Gamepad, GamepadAxis, GamepadButton, GamepadConnection, GamepadConnectionEvent,
 };
 use bevy::input::mouse::MouseMotion;
-use bevy::input::InputSystem;
+use bevy::input::InputSystems;
 use bevy::prelude::*;
 
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
@@ -49,7 +49,7 @@ pub struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NativeControllerState>()
-            .add_systems(PreUpdate, poll_native_controllers.after(InputSystem))
+            .add_systems(PreUpdate, poll_native_controllers.after(InputSystems))
             .add_systems(
                 PreUpdate,
                 update_player_inputs.after(poll_native_controllers),
@@ -179,7 +179,7 @@ fn apply_deadzone(v: Vec2) -> Vec2 {
 }
 
 // ── Connection logging ────────────────────────────────────────────────────────
-fn log_gamepad_connections(mut events: EventReader<GamepadConnectionEvent>) {
+fn log_gamepad_connections(mut events: MessageReader<GamepadConnectionEvent>) {
     for ev in events.read() {
         match &ev.connection {
             GamepadConnection::Connected {
@@ -204,7 +204,7 @@ fn log_gamepad_connections(mut events: EventReader<GamepadConnectionEvent>) {
 fn update_player_inputs(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_btn: Res<ButtonInput<MouseButton>>,
-    mut mouse_ev: EventReader<MouseMotion>,
+    mut mouse_ev: MessageReader<MouseMotion>,
     gamepads: Query<(Entity, &Gamepad)>,
     time: Res<Time>,
     settings: Res<GameSettings>,

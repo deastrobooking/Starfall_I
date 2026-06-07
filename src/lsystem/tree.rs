@@ -170,7 +170,7 @@ pub struct TreeRoot;
 
 /// Instantiate a tree from a pre-built `TreeTemplate` at `position` with the
 /// given Y-axis `rotation_y` (radians).  All branch/leaf entities are spawned
-/// as children of the root so `despawn_recursive` removes the whole tree.
+/// as children of the root so despawning the root removes the whole tree.
 pub fn spawn_tree(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,

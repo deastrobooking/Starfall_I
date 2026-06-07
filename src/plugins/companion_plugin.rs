@@ -116,7 +116,7 @@ fn cleanup_companions(
     }
 
     for entity in companion_q.iter().chain(projectile_q.iter()) {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -126,7 +126,7 @@ fn cleanup_companions_for_menu(
     projectile_q: Query<Entity, With<CompanionProjectile>>,
 ) {
     for entity in companion_q.iter().chain(projectile_q.iter()) {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -238,7 +238,7 @@ fn companion_heal_system(
     time: Res<Time>,
     mut companion_q: Query<&mut Companion>,
     mut player_q: Query<(&PlayerIndex, &mut Health), With<Player>>,
-    mut heal_ev: EventWriter<PlayerHealedEvent>,
+    mut heal_ev: MessageWriter<PlayerHealedEvent>,
 ) {
     let dt = time.delta_secs();
 
@@ -261,7 +261,7 @@ fn companion_heal_system(
 
         p_health.heal(companion.heal_amount);
         companion.heal_timer = companion.heal_cooldown;
-        heal_ev.send(PlayerHealedEvent {
+        heal_ev.write(PlayerHealedEvent {
             amount: companion.heal_amount,
             health: p_health.current,
         });
@@ -277,8 +277,8 @@ fn companion_projectile_system(
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         Without<CompanionProjectile>,
     >,
-    mut damaged_ev: EventWriter<EnemyDamagedEvent>,
-    mut killed_ev: EventWriter<EnemyKilledEvent>,
+    mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
+    mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut transform, mut proj) in proj_q.iter_mut() {
@@ -286,7 +286,7 @@ fn companion_projectile_system(
         proj.lifetime -= dt;
 
         if proj.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         }
 
@@ -298,13 +298,13 @@ fn companion_projectile_system(
             if transform.translation.distance(e_transform.translation) < 1.5 {
                 let info = DamageInfo::new(proj.damage, DamageType::Plasma);
                 let result = apply_damage(&mut health, &mut damageable, &info);
-                damaged_ev.send(EnemyDamagedEvent {
+                damaged_ev.write(EnemyDamagedEvent {
                     entity: e_entity,
                     damage: result.damage_amount,
                     position: e_transform.translation,
                 });
                 if result.was_killed {
-                    killed_ev.send(EnemyKilledEvent {
+                    killed_ev.write(EnemyKilledEvent {
                         enemy_type: enemy.enemy_type.as_str().to_string(),
                         credits: enemy.config.credits,
                         experience: enemy.config.experience_value,
@@ -316,14 +316,14 @@ fn companion_projectile_system(
             }
         }
         if hit {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
 
 // ── Recruit Listener ──────────────────────────────────────────────────────────
 fn recruit_companion_system(
-    mut events: EventReader<CompanionRecruitedEvent>,
+    mut events: MessageReader<CompanionRecruitedEvent>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,

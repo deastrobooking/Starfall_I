@@ -45,7 +45,7 @@ fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Starfall I".to_string(),
-                        resolution: WindowResolution::new(1280.0, 720.0),
+                        resolution: WindowResolution::new(1280, 720),
                         ..default()
                     }),
                     ..default()

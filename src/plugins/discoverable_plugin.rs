@@ -51,7 +51,7 @@ fn cleanup_discoverables_for_menu(
         .chain(obstacle_q.iter())
         .chain(fragment_q.iter())
     {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -112,10 +112,10 @@ fn relic_puzzle_system(
     mut encounter_q: Query<&mut PuzzleRelicEncounter>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
-    mut radio_ev: EventWriter<RadioChatterEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+    mut radio_ev: MessageWriter<RadioChatterEvent>,
 ) {
-    let Ok(mut encounter) = encounter_q.get_single_mut() else {
+    let Ok(mut encounter) = encounter_q.single_mut() else {
         return;
     };
     let player_positions: Vec<Vec3> = player_q.iter().map(|t| t.translation).collect();
@@ -134,7 +134,7 @@ fn relic_puzzle_system(
                 encounter.reward_position,
             );
             encounter.reward_spawned = true;
-            radio_ev.send(RadioChatterEvent {
+            radio_ev.write(RadioChatterEvent {
                 speaker: encounter.scientist.into(),
                 text: format!(
                     "You restored my relic. Grab {} before the thieves regroup.",
@@ -195,11 +195,11 @@ fn relic_puzzle_system(
     }
 
     if encounter.solved {
-        msg_ev.send(UiMessageEvent {
+        msg_ev.write(UiMessageEvent {
             text: format!("Puzzle solved: {}", encounter.label),
             duration: 4.0,
         });
-        radio_ev.send(RadioChatterEvent {
+        radio_ev.write(RadioChatterEvent {
             speaker: encounter.scientist.into(),
             text: format!("Excellent. The path to {} is open.", encounter.label),
             faction: crate::components::faction::Faction::WizardScientist,
@@ -207,7 +207,7 @@ fn relic_puzzle_system(
         });
         for (entity, _, node, _) in node_q.iter_mut() {
             if node.relic_id == encounter.relic_id && node.scientist == encounter.scientist {
-                commands.entity(entity).despawn_recursive();
+                commands.entity(entity).despawn();
             }
         }
     }
@@ -223,7 +223,7 @@ fn update_ordered_switches(
     )>,
     encounter: &mut PuzzleRelicEncounter,
     materials: &mut Assets<StandardMaterial>,
-    msg_ev: &mut EventWriter<UiMessageEvent>,
+    msg_ev: &mut MessageWriter<UiMessageEvent>,
 ) {
     let mut expected_node: Option<Entity> = None;
     let mut wrong_node_hit = false;
@@ -244,7 +244,7 @@ fn update_ordered_switches(
 
     if wrong_node_hit && encounter.next_switch_index > 0 {
         reset_nodes(node_q, materials, encounter, false);
-        msg_ev.send(UiMessageEvent {
+        msg_ev.write(UiMessageEvent {
             text: format!("{} reset. {}", encounter.label, encounter.hint),
             duration: 3.5,
         });
@@ -257,7 +257,7 @@ fn update_ordered_switches(
             set_node_material(materials, material, node.kind, true);
             encounter.next_switch_index += 1;
             encounter.active_nodes = encounter.next_switch_index;
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!(
                     "{} switch {}/{} aligned",
                     encounter.scientist, encounter.active_nodes, encounter.total_nodes
@@ -278,7 +278,7 @@ fn update_timed_chain(
     )>,
     encounter: &mut PuzzleRelicEncounter,
     materials: &mut Assets<StandardMaterial>,
-    msg_ev: &mut EventWriter<UiMessageEvent>,
+    msg_ev: &mut MessageWriter<UiMessageEvent>,
     dt: f32,
     window_secs: f32,
 ) {
@@ -287,7 +287,7 @@ fn update_timed_chain(
         if encounter.timer_remaining <= 0.0 {
             reset_nodes(node_q, materials, encounter, false);
             encounter.timer_remaining = window_secs;
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!("{} faded out. Restart the crystal chain.", encounter.label),
                 duration: 3.0,
             });
@@ -369,7 +369,7 @@ fn update_beam_routing(
     )>,
     encounter: &mut PuzzleRelicEncounter,
     materials: &mut Assets<StandardMaterial>,
-    msg_ev: &mut EventWriter<UiMessageEvent>,
+    msg_ev: &mut MessageWriter<UiMessageEvent>,
 ) {
     let mut next_node: Option<Entity> = None;
     let mut wrong_node_hit = false;
@@ -390,7 +390,7 @@ fn update_beam_routing(
 
     if wrong_node_hit && encounter.next_switch_index > 1 {
         reset_nodes(node_q, materials, encounter, true);
-        msg_ev.send(UiMessageEvent {
+        msg_ev.write(UiMessageEvent {
             text: format!(
                 "Beam route collapsed. Re-align the relays for {}.",
                 encounter.label
@@ -559,10 +559,10 @@ fn discoverable_pickup_system(
     mut progress: ResMut<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
     mut loadout: ResMut<PlayerLoadout>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
-    mut radio_ev: EventWriter<RadioChatterEvent>,
-    mut disc_ev: EventWriter<DiscoverableCollectedEvent>,
-    mut companion_ev: EventWriter<CompanionRecruitedEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+    mut radio_ev: MessageWriter<RadioChatterEvent>,
+    mut disc_ev: MessageWriter<DiscoverableCollectedEvent>,
+    mut companion_ev: MessageWriter<CompanionRecruitedEvent>,
 ) {
     for (e, t, d) in disc_q.iter() {
         let Some((player_entity, player_index, _)) =
@@ -576,7 +576,7 @@ fn discoverable_pickup_system(
             DiscoverableKind::Blueprint(id) => {
                 loadout.add_blueprint(*id);
                 progress.unlock(id);
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Blueprint acquired: {}", d.label),
                     duration: 3.0,
                 });
@@ -589,7 +589,7 @@ fn discoverable_pickup_system(
                 };
                 loadout.equip_weapon_mod(crate::components::weapon::WeaponType::Rifle, m);
                 progress.unlock(id);
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Weapon mod: {}", d.label),
                     duration: 3.0,
                 });
@@ -602,7 +602,7 @@ fn discoverable_pickup_system(
                 };
                 loadout.add_armor_mod(m);
                 progress.unlock(id);
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Armor mod: {}", d.label),
                     duration: 3.0,
                 });
@@ -629,11 +629,11 @@ fn discoverable_pickup_system(
                         );
                     }
                 }
-                companion_ev.send(CompanionRecruitedEvent {
+                companion_ev.write(CompanionRecruitedEvent {
                     name: (*name).into(),
                     player_index: player_index.0,
                 });
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: if was_new {
                         format!(
                             "Friend rescued: {} (+{} credits, +{} XP, +{} armor)",
@@ -644,7 +644,7 @@ fn discoverable_pickup_system(
                     },
                     duration: 3.5,
                 });
-                radio_ev.send(RadioChatterEvent {
+                radio_ev.write(RadioChatterEvent {
                     speaker: (*name).into(),
                     text: if was_new {
                         format!(
@@ -659,12 +659,12 @@ fn discoverable_pickup_system(
                 });
             }
             DiscoverableKind::BeamSabreUnlock => {
-                if let Ok(mut beam) = beam_q.get_single_mut() {
+                if let Ok(mut beam) = beam_q.single_mut() {
                     beam.unlocked = true;
                 }
                 commands.entity(player_entity).remove::<BeamSabreLocked>();
                 progress.unlock("star_sabre");
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: "Star Sabre online - press T".into(),
                     duration: 4.0,
                 });
@@ -676,11 +676,11 @@ fn discoverable_pickup_system(
                 progress.recover_relic(scientist, relic_id);
                 progress.unlock(relic_id);
                 current.awaiting_puzzle = false;
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Recovered relic: {}", d.label),
                     duration: 4.0,
                 });
-                radio_ev.send(RadioChatterEvent {
+                radio_ev.write(RadioChatterEvent {
                     speaker: (*scientist).into(),
                     text: format!(
                         "The {} is back in our hands. One more stolen treasure reclaimed.",
@@ -691,7 +691,7 @@ fn discoverable_pickup_system(
                 });
                 for (encounter_entity, encounter) in encounter_q.iter() {
                     if encounter.scientist == *scientist && encounter.relic_id == *relic_id {
-                        commands.entity(encounter_entity).despawn_recursive();
+                        commands.entity(encounter_entity).despawn();
                     }
                 }
             }
@@ -707,11 +707,11 @@ fn discoverable_pickup_system(
                     progress.recover_relic(scientist, relic_id);
                     progress.unlock(relic_id);
                     current.awaiting_puzzle = false;
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Assembled relic: {} ({}/{})", d.label, total, total),
                         duration: 4.5,
                     });
-                    radio_ev.send(RadioChatterEvent {
+                    radio_ev.write(RadioChatterEvent {
                         speaker: (*scientist).into(),
                         text: format!(
                             "All five fragments of {} are back together. Bring it home.",
@@ -724,16 +724,16 @@ fn discoverable_pickup_system(
                         if puzzle_piece.scientist == *scientist
                             && puzzle_piece.relic_id == *relic_id
                         {
-                            commands.entity(piece_entity).despawn_recursive();
+                            commands.entity(piece_entity).despawn();
                         }
                     }
                 } else if was_new {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Relic fragment {}/{}: {}", recovered, total, d.label),
                         duration: 3.0,
                     });
                 } else {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Relic fragment already recovered: {}", d.label),
                         duration: 2.5,
                     });
@@ -743,11 +743,11 @@ fn discoverable_pickup_system(
                 let was_new = !progress.has_discoverable(cave_id);
                 progress.unlock(cave_id);
                 if was_new {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Secret cave discovered: {}", d.label),
                         duration: 4.0,
                     });
-                    radio_ev.send(RadioChatterEvent {
+                    radio_ev.write(RadioChatterEvent {
                         speaker: "Giacoma".into(),
                         text: format!(
                             "Chapter {} cave charted. Marking {} on the family map.",
@@ -757,7 +757,7 @@ fn discoverable_pickup_system(
                         duration: 4.0,
                     });
                 } else {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Secret cave already charted: {}", d.label),
                         duration: 2.5,
                     });
@@ -815,7 +815,7 @@ fn discoverable_pickup_system(
                 if let Some(label) = special_label {
                     gains.push(format!("ability {}", label));
                 }
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: if was_new {
                         format!("Hidden cache: {} ({})", d.label, gains.join(", "))
                     } else {
@@ -824,7 +824,7 @@ fn discoverable_pickup_system(
                     duration: 4.0,
                 });
                 if was_new {
-                    radio_ev.send(RadioChatterEvent {
+                    radio_ev.write(RadioChatterEvent {
                         speaker: "Giacoma".into(),
                         text: format!("Secret room cleared. Logged reward cache {}.", d.label),
                         faction: crate::components::faction::Faction::WizardScientist,
@@ -833,16 +833,16 @@ fn discoverable_pickup_system(
                 }
             }
             DiscoverableKind::LoreFragment(text) => {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("LORE: {}", text),
                     duration: 5.0,
                 });
             }
         }
-        disc_ev.send(DiscoverableCollectedEvent {
+        disc_ev.write(DiscoverableCollectedEvent {
             kind_label: d.label.into(),
             raw_id: format!("{:?}", d.kind),
         });
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }

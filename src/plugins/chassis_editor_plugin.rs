@@ -82,7 +82,7 @@ fn setup_editor(mut commands: Commands, chassis: Res<PlayerChassis>) {
 
 fn teardown_editor(mut commands: Commands, q: Query<Entity, With<ChassisEditorRoot>>) {
     for e in q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
@@ -116,7 +116,7 @@ fn editor_input(
     if keyboard.just_pressed(KeyCode::Escape) {
         next_state.set(AppState::ChapterSelect);
     }
-    if let Ok(mut text) = text_q.get_single_mut() {
+    if let Ok(mut text) = text_q.single_mut() {
         text.0 = format!("Current: scale={:.2}", chassis.0.scale);
     }
 }

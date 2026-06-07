@@ -56,7 +56,7 @@ fn setup_radio_panel(mut commands: Commands) {
 }
 
 fn ingest_radio_events(
-    mut events: EventReader<RadioChatterEvent>,
+    mut events: MessageReader<RadioChatterEvent>,
     mut chatter: ResMut<RadioChatter>,
 ) {
     for ev in events.read() {

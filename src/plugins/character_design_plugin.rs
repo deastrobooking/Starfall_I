@@ -160,7 +160,7 @@ fn setup_character_design(
     design_data.preview_entity = None;
 
     // Reposition the menu camera for a character preview angle
-    if let Ok(mut t) = cam_q.get_single_mut() {
+    if let Ok(mut t) = cam_q.single_mut() {
         *t = Transform::from_xyz(0.0, 0.5, -3.2).looking_at(Vec3::new(0.0, -0.1, 0.0), Vec3::Y);
     }
 
@@ -199,13 +199,13 @@ fn cleanup_character_design(
     mut design_data: ResMut<CharacterDesignData>,
 ) {
     for e in ui_q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
     for e in lights_q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
     if let Some(e) = design_data.preview_entity.take() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
@@ -217,7 +217,7 @@ fn spin_preview(
     mut preview_q: Query<&mut Transform, With<PreviewRoot>>,
 ) {
     design_data.spin_angle += time.delta_secs() * 0.7;
-    if let Ok(mut t) = preview_q.get_single_mut() {
+    if let Ok(mut t) = preview_q.single_mut() {
         t.rotation = Quat::from_rotation_y(design_data.spin_angle);
     }
 }
@@ -235,7 +235,7 @@ fn rebuild_preview_if_dirty(
         return;
     }
     if let Some(e) = design_data.preview_entity.take() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 
     design_data.player_index = design_data.player_index.min(select_state.slots.len() - 1);
@@ -435,7 +435,7 @@ fn update_swatch_borders(
             SwatchCategory::Hair => design_data.hair_idx == swatch.index,
         };
         node.border = UiRect::all(Val::Px(if selected { 3.0 } else { 1.0 }));
-        *border = BorderColor(if selected {
+        *border = BorderColor::all(if selected {
             Color::WHITE
         } else {
             Color::srgba(0.0, 0.0, 0.0, 0.0)
@@ -707,7 +707,7 @@ fn spawn_design_ui(
 }
 
 fn spawn_swatch_row(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     label: &str,
     category: SwatchCategory,
     colors: &[Color; 8],
@@ -740,7 +740,7 @@ fn spawn_swatch_row(
                         ..default()
                     },
                     BackgroundColor(color),
-                    BorderColor(if is_sel {
+                    BorderColor::all(if is_sel {
                         Color::WHITE
                     } else {
                         Color::srgba(0.0, 0.0, 0.0, 0.0)
@@ -751,7 +751,12 @@ fn spawn_swatch_row(
         });
 }
 
-fn spawn_toggle(parent: &mut ChildBuilder, label: &str, toggle: AccessoryToggle, active: bool) {
+fn spawn_toggle(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    toggle: AccessoryToggle,
+    active: bool,
+) {
     parent
         .spawn((
             Button,
@@ -778,7 +783,12 @@ fn spawn_toggle(parent: &mut ChildBuilder, label: &str, toggle: AccessoryToggle,
         });
 }
 
-fn spawn_body_row(parent: &mut ChildBuilder, label: &str, field: BodyField, body: &BodyRecipe) {
+fn spawn_body_row(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    field: BodyField,
+    body: &BodyRecipe,
+) {
     parent
         .spawn(Node {
             width: Val::Px(178.0),
@@ -818,7 +828,7 @@ fn spawn_body_row(parent: &mut ChildBuilder, label: &str, field: BodyField, body
         });
 }
 
-fn spawn_step_button(parent: &mut ChildBuilder, field: BodyField, delta: f32, label: &str) {
+fn spawn_step_button(parent: &mut ChildSpawnerCommands, field: BodyField, delta: f32, label: &str) {
     parent
         .spawn((
             Button,

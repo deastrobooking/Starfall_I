@@ -9,9 +9,9 @@ name = "starfall-i"
 path = "src/main.rs"
 
 [dependencies]
-bevy = "0.15"
-# bevy_rapier3d 0.28 is pinned for the current Bevy 0.15 prototype.
-bevy_rapier3d = { version = "0.28", features = ["dim3"] }
+bevy = "0.18.1"
+# bevy_rapier3d 0.34 tracks the current Bevy 0.18 line.
+bevy_rapier3d = { version = "0.34", features = ["dim3"] }
 rand = "0.8"
 noise = "0.8"
 serde = { version = "1", features = ["derive"] }

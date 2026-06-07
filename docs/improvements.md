@@ -40,6 +40,7 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Damage events now carry player ownership, so split-screen camera shake and damage vignette feedback target the damaged player.
 - Chapter encounter placement now uses the party center, and airship deck placement uses `PlayerIndex` slots instead of query order.
 - Dev armor element cycling no longer calls `get_single_mut`; keyboard cycling targets P1 only.
+- Engine dependencies are upgraded to Bevy 0.18.1 and bevy_rapier3d 0.34.0, with buffered gameplay events migrated to Bevy messages and the changed 0.18 hierarchy, camera, cursor, render-import, ambient-light, and Rapier trimesh APIs handled.
 
 ## High Priority
 
@@ -117,21 +118,14 @@ Level-up, armor bonuses, perk bonuses, and loading all write max health. The arm
 
 ## Lower Priority
 
-### 10. Move away from deprecated Bevy bundle APIs
-**Files:** many rendering systems
-
-`cargo check` succeeds, but Bevy emits many deprecation warnings for `PbrBundle`, `Camera3dBundle`, `PointLightBundle`, and related APIs.
-
-**Fix:** migrate gradually to direct `Mesh3d`, `MeshMaterial3d`, `Camera3d`, `PointLight`, and related component insertion.
-
-### 11. Second Wind needs an out-of-combat timer
+### 10. Second Wind needs an out-of-combat timer
 **Files:** `src/plugins/player_plugin.rs`, `src/perks.rs`
 
 `Second Wind` currently regenerates HP while the player is alive and below max health. The design text says "out of combat," but there is no combat timer yet.
 
 **Fix:** track recent damage/dealt-damage timestamps and enable regen only after a short quiet window.
 
-### 12. Input conflicts need a final control pass
+### 11. Input conflicts need a final control pass
 **Files:** `src/plugins/input_plugin.rs`, `src/plugins/armor_plugin.rs`
 
 Bracket keys currently overlap weapon cycling and developer elemental armor cycling. This is fine for a prototype, but final controls should separate player-facing actions from debug actions.

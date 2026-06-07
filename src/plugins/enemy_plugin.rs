@@ -129,7 +129,7 @@ fn cleanup_enemies(
         .chain(vfx_q.iter())
         .chain(loot_q.iter())
     {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -146,7 +146,7 @@ fn cleanup_enemies_for_menu(
         .chain(vfx_q.iter())
         .chain(loot_q.iter())
     {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -551,8 +551,8 @@ fn dragon_boss_system(
         (&mut Transform, &mut Enemy, &mut DragonBoss, &Health),
         (With<BossEnemy>, Without<Player>),
     >,
-    mut damaged_ev: EventWriter<PlayerDamagedEvent>,
-    mut parry_ev: EventWriter<PlayerParryEvent>,
+    mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
+    mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
     let dt = time.delta_secs();
     for (mut transform, enemy, mut boss, health) in boss_q.iter_mut() {
@@ -676,8 +676,8 @@ fn enemy_projectile_update_system(
         &mut ParryState,
         &ArmorSet,
     )>,
-    mut damaged_ev: EventWriter<PlayerDamagedEvent>,
-    mut parry_ev: EventWriter<PlayerParryEvent>,
+    mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
+    mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut transform, mut projectile) in projectile_q.iter_mut() {
@@ -740,7 +740,7 @@ fn enemy_projectile_update_system(
                     );
                 }
             }
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -754,7 +754,7 @@ fn enemy_attack_vfx_cleanup(
     for (entity, mut vfx) in vfx_q.iter_mut() {
         vfx.timer -= dt;
         if vfx.timer <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -806,8 +806,8 @@ fn damage_players_in_radius<
         DamageFilter,
     >,
     player_pos_q: &Query<(Entity, &Transform, &PlayerIndex), PositionFilter>,
-    damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
-    parry_ev: &mut EventWriter<PlayerParryEvent>,
+    damaged_ev: &mut MessageWriter<PlayerDamagedEvent>,
+    parry_ev: &mut MessageWriter<PlayerParryEvent>,
 ) {
     for (player_entity, player_transform, player_index) in player_pos_q.iter() {
         let dist = center.distance(player_transform.translation);
@@ -854,8 +854,8 @@ fn damage_players_in_cone<
         DamageFilter,
     >,
     player_pos_q: &Query<(Entity, &Transform, &PlayerIndex), PositionFilter>,
-    damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
-    parry_ev: &mut EventWriter<PlayerParryEvent>,
+    damaged_ev: &mut MessageWriter<PlayerDamagedEvent>,
+    parry_ev: &mut MessageWriter<PlayerParryEvent>,
 ) {
     if direction.length_squared() <= 0.001 {
         return;
@@ -957,8 +957,8 @@ fn enemy_attack_system(
         ),
         With<Player>,
     >,
-    mut damaged_ev: EventWriter<PlayerDamagedEvent>,
-    mut parry_ev: EventWriter<PlayerParryEvent>,
+    mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
+    mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
     for (e_transform, mut enemy, sm, health, drone, dragon_boss) in enemy_q.iter_mut() {
         if !health.is_alive() {
@@ -1012,7 +1012,7 @@ fn enemy_dead_cleanup(
     for (entity, mut dead) in dead_q.iter_mut() {
         dead.despawn_timer -= dt;
         if dead.despawn_timer <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             wave.enemy_count = wave.enemy_count.saturating_sub(1);
         }
     }
@@ -1020,7 +1020,7 @@ fn enemy_dead_cleanup(
 
 // ── Rewards on Kill ───────────────────────────────────────────────────────────
 fn enemy_killed_reward(
-    mut killed_ev: EventReader<EnemyKilledEvent>,
+    mut killed_ev: MessageReader<EnemyKilledEvent>,
     mut player_q: Query<&mut PlayerStats, With<Player>>,
     mut enemy_q: Query<(Entity, &mut EnemyStateMachine, &Health), Without<Player>>,
     mut commands: Commands,
@@ -1046,7 +1046,7 @@ fn enemy_loot_drop_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut killed_ev: EventReader<EnemyKilledEvent>,
+    mut killed_ev: MessageReader<EnemyKilledEvent>,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -1114,8 +1114,8 @@ fn loot_pickup_system(
     player_q: Query<(Entity, &PlayerIndex, &Transform), With<Player>>,
     mut inventory_q: Query<&mut Inventory, With<Player>>,
     loot_q: Query<(Entity, &Transform, &WorldLoot)>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
-    mut loot_ev: EventWriter<LootCollectedEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+    mut loot_ev: MessageWriter<LootCollectedEvent>,
 ) {
     let item_defs = crate::components::inventory::all_items();
 
@@ -1145,7 +1145,7 @@ fn loot_pickup_system(
         let leftover = inventory.add_item(loot.item_id, loot.quantity, max_stack);
         let picked = loot.quantity.saturating_sub(leftover);
         if picked > 0 {
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!(
                     "P{} picked up {}x {}",
                     player_index.0 + 1,
@@ -1154,11 +1154,11 @@ fn loot_pickup_system(
                 ),
                 duration: 1.8,
             });
-            loot_ev.send(LootCollectedEvent {
+            loot_ev.write(LootCollectedEvent {
                 loot_type: loot.item_id.to_string(),
                 amount: picked,
             });
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }

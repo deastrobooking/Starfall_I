@@ -1,11 +1,12 @@
+use bevy::asset::RenderAssetUsages;
 use bevy::image::{CompressedImageFormats, Image, ImageSampler, ImageType};
+use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
-use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError, TextureFormat,
+    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureFormat,
 };
+use bevy::shader::ShaderRef;
 use std::sync::OnceLock;
 
 use crate::components::armor::ArmorSet;
@@ -54,7 +55,7 @@ impl Material for GrassMaterial {
         "shaders/grass.wgsl".into()
     }
     fn specialize(
-        _pipeline: &MaterialPipeline<Self>,
+        _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         _layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
@@ -162,7 +163,7 @@ fn collider_debug_toggle_system(
     >,
     source_q: Query<Entity, With<ColliderDebugSource>>,
     visual_q: Query<Entity, With<ColliderDebugVisual>>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if !keyboard.just_pressed(KeyCode::F9) {
         return;
@@ -171,12 +172,12 @@ fn collider_debug_toggle_system(
     state.enabled = !state.enabled;
     if !state.enabled {
         for entity in visual_q.iter() {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
         for entity in source_q.iter() {
             commands.entity(entity).remove::<ColliderDebugSource>();
         }
-        msg_ev.send(UiMessageEvent {
+        msg_ev.write(UiMessageEvent {
             text: "Collider debug: OFF".into(),
             duration: 1.5,
         });
@@ -224,7 +225,7 @@ fn collider_debug_toggle_system(
         });
     }
 
-    msg_ev.send(UiMessageEvent {
+    msg_ev.write(UiMessageEvent {
         text: "Collider debug: ON (F9 toggles)".into(),
         duration: 2.0,
     });
@@ -366,8 +367,8 @@ fn laser_turret_system(
         &mut ParryState,
         &ArmorSet,
     )>,
-    mut damaged_ev: EventWriter<PlayerDamagedEvent>,
-    mut parry_ev: EventWriter<PlayerParryEvent>,
+    mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
+    mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
     let dt = time.delta_secs();
     for (mut transform, mut turret) in turret_q.iter_mut() {
@@ -459,7 +460,7 @@ fn laser_beam_cleanup_system(
     for (entity, mut beam) in beam_q.iter_mut() {
         beam.timer -= dt;
         if beam.timer <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -508,31 +509,31 @@ fn spawn_beam_vfx(
 fn cleanup_world(
     mut commands: Commands,
     transition: Res<PlaySessionTransition>,
-    world_q: Query<Entity, (With<WorldGeometry>, Without<Parent>)>,
-    tree_q: Query<Entity, (With<TreeRoot>, Without<Parent>, Without<WorldGeometry>)>,
+    world_q: Query<Entity, (With<WorldGeometry>, Without<ChildOf>)>,
+    tree_q: Query<Entity, (With<TreeRoot>, Without<ChildOf>, Without<WorldGeometry>)>,
 ) {
     if transition.pausing {
         return;
     }
 
     for e in world_q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
     for e in tree_q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
 fn cleanup_world_for_menu(
     mut commands: Commands,
-    world_q: Query<Entity, (With<WorldGeometry>, Without<Parent>)>,
-    tree_q: Query<Entity, (With<TreeRoot>, Without<Parent>, Without<WorldGeometry>)>,
+    world_q: Query<Entity, (With<WorldGeometry>, Without<ChildOf>)>,
+    tree_q: Query<Entity, (With<TreeRoot>, Without<ChildOf>, Without<WorldGeometry>)>,
 ) {
     for e in world_q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
     for e in tree_q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
@@ -1044,9 +1045,10 @@ impl Palette {
 fn spawn_lighting(commands: &mut Commands) {
     // Ambient — fills dark faces so characters and geometry are always readable.
     // A cool deep blue matches the neon-city night setting.
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.28, 0.32, 0.48),
         brightness: 180.0,
+        affects_lightmapped_meshes: true,
     });
 
     // Main directional key-light — warm moonlight-ish coming from upper-right.
@@ -1613,7 +1615,7 @@ fn heightmap_from_image(image: &Image) -> Option<EverestHeightmap> {
 }
 
 fn heightmap_luminance(image: &Image, pixel_index: usize) -> Option<f32> {
-    let data = &image.data;
+    let data = image.data.as_ref()?;
     match image.texture_descriptor.format {
         TextureFormat::R8Unorm | TextureFormat::R8Uint => {
             data.get(pixel_index).map(|v| *v as f32 / u8::MAX as f32)
@@ -1822,6 +1824,9 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(tri_idx));
 
+    let terrain_collider = bevy_rapier3d::prelude::Collider::trimesh(col_verts, col_tris)
+        .expect("generated terrain mesh must produce a valid trimesh collider");
+
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(mesh)),
@@ -1832,7 +1837,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
         WorldGeometry,
         WalkableSurface,
         bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::trimesh(col_verts, col_tris),
+        terrain_collider,
     ));
 }
 

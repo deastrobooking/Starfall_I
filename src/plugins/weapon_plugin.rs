@@ -127,7 +127,7 @@ fn star_muzzle_origin(player_transform: &GlobalTransform, aim_forward: Vec3) -> 
 // ── Weapon Select ─────────────────────────────────────────────────────────────
 fn weapon_select_system(
     mut player_q: Query<(&PlayerInput, &mut WeaponInventory), With<Player>>,
-    mut switched_ev: EventWriter<WeaponSwitchedEvent>,
+    mut switched_ev: MessageWriter<WeaponSwitchedEvent>,
 ) {
     for (pi, mut inv) in player_q.iter_mut() {
         let prev = inv.active_slot;
@@ -147,7 +147,7 @@ fn weapon_select_system(
             if s < count {
                 inv.active_slot = s;
                 if s != prev {
-                    switched_ev.send(WeaponSwitchedEvent {
+                    switched_ev.write(WeaponSwitchedEvent {
                         weapon_name: inv.active().weapon_type.display_name().to_string(),
                     });
                 }
@@ -174,7 +174,7 @@ fn weapon_fire_system(
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut fired_ev: EventWriter<WeaponFiredEvent>,
+    mut fired_ev: MessageWriter<WeaponFiredEvent>,
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
@@ -269,19 +269,19 @@ fn weapon_fire_system(
         }
 
         sm.transition(PlayerState::Attacking);
-        fired_ev.send(WeaponFiredEvent);
+        fired_ev.write(WeaponFiredEvent);
     }
 }
 
 // ── Reload ────────────────────────────────────────────────────────────────────
 fn weapon_reload_system(
     mut player_q: Query<(&PlayerInput, &mut WeaponInventory), With<Player>>,
-    mut reload_ev: EventWriter<WeaponReloadedEvent>,
+    mut reload_ev: MessageWriter<WeaponReloadedEvent>,
 ) {
     for (pi, mut inv) in player_q.iter_mut() {
         if pi.reload {
             inv.active_mut().reload();
-            reload_ev.send(WeaponReloadedEvent);
+            reload_ev.write(WeaponReloadedEvent);
         }
     }
 }
@@ -339,8 +339,8 @@ fn special_weapon_system(
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut fired_ev: EventWriter<WeaponFiredEvent>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut fired_ev: MessageWriter<WeaponFiredEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
@@ -390,13 +390,13 @@ fn special_weapon_system(
                             vertical_velocity: 0.0,
                         },
                     ));
-                    fired_ev.send(WeaponFiredEvent);
-                    msg_ev.send(UiMessageEvent {
+                    fired_ev.write(WeaponFiredEvent);
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Homing Star! [{} charges]", inv.slot7.ammo),
                         duration: 1.5,
                     });
                 } else {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: "Homing Star recharging!".to_string(),
                         duration: 1.0,
                     });
@@ -438,13 +438,13 @@ fn special_weapon_system(
                             },
                         ));
                     }
-                    fired_ev.send(WeaponFiredEvent);
-                    msg_ev.send(UiMessageEvent {
+                    fired_ev.write(WeaponFiredEvent);
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Tri-Star Burst! [{} charges]", inv.slot8.ammo),
                         duration: 1.5,
                     });
                 } else {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: "Tri-Star Burst recharging!".to_string(),
                         duration: 1.0,
                     });
@@ -477,13 +477,13 @@ fn special_weapon_system(
                             vertical_velocity: 0.1,
                         },
                     ));
-                    fired_ev.send(WeaponFiredEvent);
-                    msg_ev.send(UiMessageEvent {
+                    fired_ev.write(WeaponFiredEvent);
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Moon Bubble! [{} charges]", inv.slot9.ammo),
                         duration: 1.5,
                     });
                 } else {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: "Moon Bubble recharging!".to_string(),
                         duration: 1.0,
                     });
@@ -525,13 +525,13 @@ fn special_weapon_system(
                             },
                         ));
                     }
-                    fired_ev.send(WeaponFiredEvent);
-                    msg_ev.send(UiMessageEvent {
+                    fired_ev.write(WeaponFiredEvent);
+                    msg_ev.write(UiMessageEvent {
                         text: format!("Sprite Turret! [{} charges]", inv.slot0.ammo),
                         duration: 1.5,
                     });
                 } else {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: "Sprite Turret recharging!".to_string(),
                         duration: 1.0,
                     });
@@ -551,8 +551,8 @@ fn projectile_update_system(
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         Without<Projectile>,
     >,
-    mut enemy_damaged_ev: EventWriter<EnemyDamagedEvent>,
-    mut enemy_killed_ev: EventWriter<EnemyKilledEvent>,
+    mut enemy_damaged_ev: MessageWriter<EnemyDamagedEvent>,
+    mut enemy_killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
 
@@ -576,7 +576,7 @@ fn projectile_update_system(
                     &mut enemy_killed_ev,
                 );
             }
-            commands.entity(proj_entity).despawn_recursive();
+            commands.entity(proj_entity).despawn();
             continue;
         }
 
@@ -591,7 +591,7 @@ fn projectile_update_system(
                     &mut enemy_killed_ev,
                 );
             }
-            commands.entity(proj_entity).despawn_recursive();
+            commands.entity(proj_entity).despawn();
             continue;
         }
 
@@ -615,13 +615,13 @@ fn projectile_update_system(
                 } else {
                     let info = DamageInfo::new(proj.damage, DamageType::Plasma);
                     let result = apply_damage(&mut e_health, &mut e_damageable, &info);
-                    enemy_damaged_ev.send(EnemyDamagedEvent {
+                    enemy_damaged_ev.write(EnemyDamagedEvent {
                         entity: e_entity,
                         damage: result.damage_amount,
                         position: e_transform.translation,
                     });
                     if result.was_killed {
-                        enemy_killed_ev.send(EnemyKilledEvent {
+                        enemy_killed_ev.write(EnemyKilledEvent {
                             enemy_type: enemy.enemy_type.as_str().to_string(),
                             credits: enemy.config.credits,
                             experience: enemy.config.experience_value,
@@ -647,7 +647,7 @@ fn projectile_update_system(
             );
         }
         if hit {
-            commands.entity(proj_entity).despawn_recursive();
+            commands.entity(proj_entity).despawn();
         }
     }
 }
@@ -660,8 +660,8 @@ fn explode(
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         Without<Projectile>,
     >,
-    damaged_ev: &mut EventWriter<EnemyDamagedEvent>,
-    killed_ev: &mut EventWriter<EnemyKilledEvent>,
+    damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
+    killed_ev: &mut MessageWriter<EnemyKilledEvent>,
 ) {
     for (e_entity, e_transform, mut e_health, mut e_damageable, enemy) in enemy_q.iter_mut() {
         if !e_health.is_alive() {
@@ -672,13 +672,13 @@ fn explode(
             let damage = area_damage_falloff(base_damage, dist, radius).max(1.0);
             let info = DamageInfo::new(damage, DamageType::Explosive);
             let result = apply_damage(&mut e_health, &mut e_damageable, &info);
-            damaged_ev.send(EnemyDamagedEvent {
+            damaged_ev.write(EnemyDamagedEvent {
                 entity: e_entity,
                 damage: result.damage_amount,
                 position: e_transform.translation,
             });
             if result.was_killed {
-                killed_ev.send(EnemyKilledEvent {
+                killed_ev.write(EnemyKilledEvent {
                     enemy_type: enemy.enemy_type.as_str().to_string(),
                     credits: enemy.config.credits,
                     experience: enemy.config.experience_value,
@@ -718,10 +718,10 @@ fn melee_combo_system(
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
     mut enemy_q: Query<(Entity, &Transform, &mut Health, &mut Damageable, &Enemy)>,
-    mut combo_ev: EventWriter<ComboHitEvent>,
-    mut finished_ev: EventWriter<ComboFinishedEvent>,
-    mut damaged_ev: EventWriter<EnemyDamagedEvent>,
-    mut killed_ev: EventWriter<EnemyKilledEvent>,
+    mut combo_ev: MessageWriter<ComboHitEvent>,
+    mut finished_ev: MessageWriter<ComboFinishedEvent>,
+    mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
+    mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
     for (player_transform, mut combo, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
@@ -781,7 +781,7 @@ fn melee_combo_system(
             );
             spawn_melee_flash(&mut commands, &proj_assets, cam_pos + cam_fwd * 2.5);
 
-            combo_ev.send(ComboHitEvent {
+            combo_ev.write(ComboHitEvent {
                 combo_name: "Light".to_string(),
                 attack_name: name.to_string(),
                 combo_index: combo.light_index,
@@ -793,7 +793,7 @@ fn melee_combo_system(
             sm.force(PlayerState::Attacking);
 
             if combo.light_index == 0 {
-                finished_ev.send(ComboFinishedEvent {
+                finished_ev.write(ComboFinishedEvent {
                     combo_name: "Light".to_string(),
                 });
             }
@@ -814,7 +814,7 @@ fn melee_combo_system(
             );
             spawn_melee_flash(&mut commands, &proj_assets, cam_pos + cam_fwd * 2.0);
 
-            combo_ev.send(ComboHitEvent {
+            combo_ev.write(ComboHitEvent {
                 combo_name: "Heavy".to_string(),
                 attack_name: name.to_string(),
                 combo_index: combo.heavy_index,
@@ -826,7 +826,7 @@ fn melee_combo_system(
             sm.force(PlayerState::Attacking);
 
             if combo.heavy_index == 0 {
-                finished_ev.send(ComboFinishedEvent {
+                finished_ev.write(ComboFinishedEvent {
                     combo_name: "Heavy".to_string(),
                 });
             }
@@ -858,8 +858,8 @@ fn execute_melee_hit(
     damage: f32,
     damage_type: DamageType,
     enemy_q: &mut Query<(Entity, &Transform, &mut Health, &mut Damageable, &Enemy)>,
-    damaged_ev: &mut EventWriter<EnemyDamagedEvent>,
-    killed_ev: &mut EventWriter<EnemyKilledEvent>,
+    damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
+    killed_ev: &mut MessageWriter<EnemyKilledEvent>,
 ) {
     let hit_center = origin + forward * offset;
     for (e_entity, e_transform, mut health, mut damageable, enemy) in enemy_q.iter_mut() {
@@ -869,13 +869,13 @@ fn execute_melee_hit(
         if hit_center.distance(e_transform.translation) <= radius {
             let info = DamageInfo::new(damage, damage_type);
             let result = apply_damage(&mut health, &mut damageable, &info);
-            damaged_ev.send(EnemyDamagedEvent {
+            damaged_ev.write(EnemyDamagedEvent {
                 entity: e_entity,
                 damage: result.damage_amount,
                 position: e_transform.translation,
             });
             if result.was_killed {
-                killed_ev.send(EnemyKilledEvent {
+                killed_ev.write(EnemyKilledEvent {
                     enemy_type: enemy.enemy_type.as_str().to_string(),
                     credits: enemy.config.credits,
                     experience: enemy.config.experience_value,
@@ -905,8 +905,8 @@ fn beam_sabre_update_system(
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
     mut enemy_q: Query<(Entity, &Transform, &mut Health, &mut Damageable, &Enemy)>,
-    mut damaged_ev: EventWriter<EnemyDamagedEvent>,
-    mut killed_ev: EventWriter<EnemyKilledEvent>,
+    mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
+    mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
@@ -1013,7 +1013,7 @@ fn beam_sabre_update_system(
 fn hit_particle_spawn_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
-    mut damaged_ev: EventReader<EnemyDamagedEvent>,
+    mut damaged_ev: MessageReader<EnemyDamagedEvent>,
 ) {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -1052,7 +1052,7 @@ fn particle_update_system(
     for (entity, mut transform, mut particle) in q.iter_mut() {
         particle.lifetime -= dt;
         if particle.lifetime <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             continue;
         }
         transform.translation += particle.velocity * dt;

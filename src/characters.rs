@@ -1029,7 +1029,7 @@ pub fn despawn_cartoon_character_parts(
 ) {
     for (entity, part) in parts.iter() {
         if part.root == root {
-            commands.entity(entity).try_despawn_recursive();
+            commands.entity(entity).try_despawn();
         }
     }
 }

@@ -53,7 +53,7 @@ fn start_chapter(
     mut current: ResMut<CurrentChapter>,
     mut palette: ResMut<BiomePalette>,
     transition: Res<PlaySessionTransition>,
-    mut started_ev: EventWriter<ChapterStartedEvent>,
+    mut started_ev: MessageWriter<ChapterStartedEvent>,
     mut wave: ResMut<WaveInfo>,
     airship_q: Query<Entity, With<AirshipLevelPiece>>,
 ) {
@@ -62,7 +62,7 @@ fn start_chapter(
     }
 
     for entity in airship_q.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
     let Some(def) = get_chapter(current.id) else {
@@ -85,7 +85,7 @@ fn start_chapter(
     };
     *wave = WaveInfo::new();
     wave.wave_number = current.id.0 as u32;
-    started_ev.send(ChapterStartedEvent {
+    started_ev.write(ChapterStartedEvent {
         chapter: current.id.0,
     });
 }
@@ -102,11 +102,11 @@ fn chapter_director_system(
     anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
     mut wave: ResMut<WaveInfo>,
     mut progress: ResMut<ChapterProgress>,
-    mut radio_ev: EventWriter<RadioChatterEvent>,
-    mut step_ev: EventWriter<EncounterStepAdvancedEvent>,
-    mut completed_ev: EventWriter<ChapterCompletedEvent>,
-    mut boss_spawned_ev: EventWriter<BossSpawnedEvent>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut radio_ev: MessageWriter<RadioChatterEvent>,
+    mut step_ev: MessageWriter<EncounterStepAdvancedEvent>,
+    mut completed_ev: MessageWriter<ChapterCompletedEvent>,
+    mut boss_spawned_ev: MessageWriter<BossSpawnedEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if !current.started || current.completed {
         return;
@@ -116,10 +116,10 @@ fn chapter_director_system(
     };
     if current.step_index >= def.script.len() {
         current.completed = true;
-        completed_ev.send(ChapterCompletedEvent {
+        completed_ev.write(ChapterCompletedEvent {
             chapter: current.id.0,
         });
-        msg_ev.send(UiMessageEvent {
+        msg_ev.write(UiMessageEvent {
             text: format!("CHAPTER {} COMPLETE — {}", current.id.0, def.title),
             duration: 6.0,
         });
@@ -149,7 +149,7 @@ fn chapter_director_system(
             hold,
         } => {
             if current.step_timer < 0.05 {
-                radio_ev.send(RadioChatterEvent {
+                radio_ev.write(RadioChatterEvent {
                     speaker: speaker.into(),
                     text: line.into(),
                     faction,
@@ -202,11 +202,11 @@ fn chapter_director_system(
             );
             wave.enemy_count += 1;
             current.awaiting_kills = 1;
-            boss_spawned_ev.send(BossSpawnedEvent {
+            boss_spawned_ev.write(BossSpawnedEvent {
                 wave: wave.wave_number,
                 position: pos,
             });
-            radio_ev.send(RadioChatterEvent {
+            radio_ev.write(RadioChatterEvent {
                 speaker: name.into(),
                 text: format!("{} approaches.", name),
                 faction,
@@ -235,13 +235,13 @@ fn chapter_director_system(
             );
             wave.enemy_count += 1;
             current.awaiting_kills = 1;
-            radio_ev.send(RadioChatterEvent {
+            radio_ev.write(RadioChatterEvent {
                 speaker: name.into(),
                 text: intro_line.into(),
                 faction,
                 duration: 5.0,
             });
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!("!! BOSS — {} !!", name),
                 duration: 4.0,
             });
@@ -263,13 +263,13 @@ fn chapter_director_system(
                     airship_pos,
                     faction,
                 );
-                radio_ev.send(RadioChatterEvent {
+                radio_ev.write(RadioChatterEvent {
                     speaker: boss_name.into(),
                     text: line.into(),
                     faction,
                     duration: hold + 1.0,
                 });
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!(
                         "{} appears. Board it before {} escapes!",
                         airship_label, boss_name
@@ -314,13 +314,13 @@ fn chapter_director_system(
                 wave.enemy_count += 1;
             }
             current.awaiting_kills = count;
-            radio_ev.send(RadioChatterEvent {
+            radio_ev.write(RadioChatterEvent {
                 speaker: "Airship".into(),
                 text: "Clear the deck, then force the boss back out.".into(),
                 faction,
                 duration: 4.0,
             });
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: "AIRSHIP LEVEL - clear the deck guards".into(),
                 duration: 4.0,
             });
@@ -352,14 +352,14 @@ fn chapter_director_system(
                 if advance {
                     current.step_index += 1;
                     current.step_timer = 0.0;
-                    step_ev.send(EncounterStepAdvancedEvent {
+                    step_ev.write(EncounterStepAdvancedEvent {
                         step_index: current.step_index,
                     });
                 }
                 return;
             }
             let Some(position) = resolve_anchor_position(&anchor_q, anchor) else {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Missing secret cave anchor: {}", anchor),
                     duration: 4.0,
                 });
@@ -367,7 +367,7 @@ fn chapter_director_system(
                 if advance {
                     current.step_index += 1;
                     current.step_timer = 0.0;
-                    step_ev.send(EncounterStepAdvancedEvent {
+                    step_ev.write(EncounterStepAdvancedEvent {
                         step_index: current.step_index,
                     });
                 }
@@ -393,7 +393,7 @@ fn chapter_director_system(
             node_anchors,
         } => {
             if progress.has_relic(scientist, relic_id) {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Recovered relic already secured: {}", label),
                     duration: 4.0,
                 });
@@ -401,14 +401,14 @@ fn chapter_director_system(
                 if advance {
                     current.step_index += 1;
                     current.step_timer = 0.0;
-                    step_ev.send(EncounterStepAdvancedEvent {
+                    step_ev.write(EncounterStepAdvancedEvent {
                         step_index: current.step_index,
                     });
                 }
                 return;
             }
             let Some(reward_position) = resolve_anchor_position(&anchor_q, reward_anchor) else {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Missing puzzle reward anchor: {}", reward_anchor),
                     duration: 4.0,
                 });
@@ -416,14 +416,14 @@ fn chapter_director_system(
                 if advance {
                     current.step_index += 1;
                     current.step_timer = 0.0;
-                    step_ev.send(EncounterStepAdvancedEvent {
+                    step_ev.write(EncounterStepAdvancedEvent {
                         step_index: current.step_index,
                     });
                 }
                 return;
             };
             let Some(node_positions) = resolve_anchor_positions(&anchor_q, &node_anchors) else {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Missing puzzle node anchors for {}", label),
                     duration: 4.0,
                 });
@@ -431,7 +431,7 @@ fn chapter_director_system(
                 if advance {
                     current.step_index += 1;
                     current.step_timer = 0.0;
-                    step_ev.send(EncounterStepAdvancedEvent {
+                    step_ev.write(EncounterStepAdvancedEvent {
                         step_index: current.step_index,
                     });
                 }
@@ -450,7 +450,7 @@ fn chapter_director_system(
                 &node_positions,
             );
             current.awaiting_puzzle = true;
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!("Puzzle unlocked: {}", hint),
                 duration: 5.0,
             });
@@ -465,7 +465,7 @@ fn chapter_director_system(
             center_offset,
         } => {
             if progress.has_relic(scientist, relic_id) {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Fragment relic already assembled: {}", label),
                     duration: 4.0,
                 });
@@ -473,7 +473,7 @@ fn chapter_director_system(
                 if advance {
                     current.step_index += 1;
                     current.step_timer = 0.0;
-                    step_ev.send(EncounterStepAdvancedEvent {
+                    step_ev.write(EncounterStepAdvancedEvent {
                         step_index: current.step_index,
                     });
                 }
@@ -482,7 +482,7 @@ fn chapter_director_system(
             if progress.relic_fragment_count(scientist, relic_id) >= total as usize {
                 progress.recover_relic(scientist, relic_id);
                 progress.unlock(relic_id);
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("Fragment relic assembled from saved pieces: {}", label),
                     duration: 4.0,
                 });
@@ -490,7 +490,7 @@ fn chapter_director_system(
                 if advance {
                     current.step_index += 1;
                     current.step_timer = 0.0;
-                    step_ev.send(EncounterStepAdvancedEvent {
+                    step_ev.write(EncounterStepAdvancedEvent {
                         step_index: current.step_index,
                     });
                 }
@@ -509,11 +509,11 @@ fn chapter_director_system(
                 center,
             );
             current.awaiting_puzzle = true;
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!("Fragment puzzle: {}", hint),
                 duration: 5.0,
             });
-            radio_ev.send(RadioChatterEvent {
+            radio_ev.write(RadioChatterEvent {
                 speaker: scientist.into(),
                 text: format!("That relic broke into {} pieces. Find them all.", total),
                 faction: Faction::WizardScientist,
@@ -523,7 +523,7 @@ fn chapter_director_system(
         }
         EncounterStep::Outro { line } => {
             if current.step_timer < 0.05 {
-                radio_ev.send(RadioChatterEvent {
+                radio_ev.write(RadioChatterEvent {
                     speaker: "—".into(),
                     text: line.into(),
                     faction: Faction::HeroBrother,
@@ -540,7 +540,7 @@ fn chapter_director_system(
     if advance {
         current.step_index += 1;
         current.step_timer = 0.0;
-        step_ev.send(EncounterStepAdvancedEvent {
+        step_ev.write(EncounterStepAdvancedEvent {
             step_index: current.step_index,
         });
     }
@@ -1076,9 +1076,9 @@ fn puzzle_node_material(node_kind: PuzzleNodeKind, active: bool) -> StandardMate
 
 // ── Track Kills (decrements awaiting_kills) ───────────────────────────────────
 fn track_kills_system(
-    mut killed_ev: EventReader<EnemyKilledEvent>,
+    mut killed_ev: MessageReader<EnemyKilledEvent>,
     mut current: ResMut<CurrentChapter>,
-    mut boss_def_ev: EventWriter<BossDefeatedEvent>,
+    mut boss_def_ev: MessageWriter<BossDefeatedEvent>,
     boss_q: Query<&NamedCharacter, With<BossEnemy>>,
 ) {
     for ev in killed_ev.read() {
@@ -1090,7 +1090,7 @@ fn track_kills_system(
         // count goes to zero on a boss step.)
         if current.awaiting_kills == 0 && !boss_q.is_empty() {
             for nc in boss_q.iter() {
-                boss_def_ev.send(BossDefeatedEvent {
+                boss_def_ev.write(BossDefeatedEvent {
                     name: nc.display_name.into(),
                     chapter: current.id.0,
                 });
@@ -1102,7 +1102,7 @@ fn track_kills_system(
 
 // ── Chapter complete → mark progress ──────────────────────────────────────────
 fn chapter_complete_check(
-    mut completed_ev: EventReader<ChapterCompletedEvent>,
+    mut completed_ev: MessageReader<ChapterCompletedEvent>,
     mut progress: ResMut<ChapterProgress>,
 ) {
     for ev in completed_ev.read() {

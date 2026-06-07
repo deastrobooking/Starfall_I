@@ -75,7 +75,7 @@ fn vehicle_input(
     boat_q: Query<(Entity, &Transform, &BoatVehicle)>,
     loadout: Res<PlayerLoadout>,
     mut state: ResMut<VehicleState>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     for (entity, idx, player_transform, pi, passenger) in player_q.iter() {
         if pi.open_map {
@@ -87,7 +87,7 @@ fn vehicle_input(
                 state.active_boat = None;
                 remove_boat_passengers(&mut commands, &player_q, None);
                 state.active_owner = toggled_on.then_some(idx.0);
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: if toggled_on {
                         format!("P{} Motorcycle: ON", idx.0 + 1)
                     } else {
@@ -96,7 +96,7 @@ fn vehicle_input(
                     duration: 1.5,
                 });
             } else {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: "Motorcycle blueprint required.".into(),
                     duration: 2.0,
                 });
@@ -111,7 +111,7 @@ fn vehicle_input(
                 };
 
                 if !boat_is_at_dock(boat_transform.translation, boat) {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: "Dock at the city or island before disembarking.".into(),
                         duration: 2.0,
                     });
@@ -126,7 +126,7 @@ fn vehicle_input(
                 } else {
                     commands.entity(entity).remove::<BoatPassenger>();
                 }
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!("P{} Boat: docked", idx.0 + 1),
                     duration: 1.8,
                 });
@@ -163,7 +163,7 @@ fn vehicle_input(
                     boat,
                     entity,
                 );
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: format!(
                         "P{} Boat: ON - steer along the wake ({:.0}m)",
                         idx.0 + 1,
@@ -182,7 +182,7 @@ fn vehicle_input(
                 state.active_boat = None;
                 remove_boat_passengers(&mut commands, &player_q, None);
                 state.active_owner = toggled_on.then_some(idx.0);
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: if toggled_on {
                         format!("P{} Jet: ON", idx.0 + 1)
                     } else {
@@ -191,7 +191,7 @@ fn vehicle_input(
                     duration: 1.5,
                 });
             } else {
-                msg_ev.send(UiMessageEvent {
+                msg_ev.write(UiMessageEvent {
                     text: "Jet blueprint required.".into(),
                     duration: 2.0,
                 });

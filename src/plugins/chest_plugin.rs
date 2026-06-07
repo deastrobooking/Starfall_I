@@ -89,13 +89,13 @@ fn cleanup_chests(
     }
 
     for entity in chest_q.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
 fn cleanup_chests_for_menu(mut commands: Commands, chest_q: Query<Entity, With<Chest>>) {
     for entity in chest_q.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -105,8 +105,8 @@ fn chest_proximity_system(
     mut player_stats_q: Query<&mut PlayerStats, With<Player>>,
     mut player_health_q: Query<&mut Health, With<Player>>,
     mut chest_q: Query<(Entity, &Transform, &mut Chest)>,
-    mut loot_ev: EventWriter<LootCollectedEvent>,
-    mut chest_ev: EventWriter<ChestOpenedEvent>,
+    mut loot_ev: MessageWriter<LootCollectedEvent>,
+    mut chest_ev: MessageWriter<ChestOpenedEvent>,
     mut score: ResMut<PlayerScore>,
 ) {
     for (entity, chest_transform, mut chest) in chest_q.iter_mut() {
@@ -130,7 +130,7 @@ fn chest_proximity_system(
         // Open the chest
         chest.is_open = true;
         score.chests_opened += 1;
-        chest_ev.send(ChestOpenedEvent);
+        chest_ev.write(ChestOpenedEvent);
 
         let amount = chest.loot_amount;
         match chest.loot_type {
@@ -152,12 +152,12 @@ fn chest_proximity_system(
             LootType::Ammo | LootType::WeaponUpgrade => {}
         }
 
-        loot_ev.send(LootCollectedEvent {
+        loot_ev.write(LootCollectedEvent {
             loot_type: format!("{:?}", chest.loot_type),
             amount,
         });
 
         // Despawn after short delay (simplified: despawn immediately)
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }

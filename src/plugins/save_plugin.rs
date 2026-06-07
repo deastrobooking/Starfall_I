@@ -275,7 +275,7 @@ fn load_save_on_enter(
     mut perks: ResMut<PerkTree>,
     mut select: ResMut<PlayerSelectState>,
     transition: Res<PlaySessionTransition>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if transition.resuming_from_pause {
         return;
@@ -299,7 +299,7 @@ fn load_save_on_enter(
         perks.ranks = data.perk_ranks;
         hydrate_character_blueprints(&mut select, data.character_blueprints);
         let loaded_players = data.players.len().max(active_players);
-        msg_ev.send(UiMessageEvent {
+        msg_ev.write(UiMessageEvent {
             text: format!(
                 "Save loaded — {} player{} Rift {}",
                 loaded_players,
@@ -319,7 +319,7 @@ fn autosave_system(
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
     select: Res<PlayerSelectState>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     save_state.last_save_timer += time.delta_secs();
     if save_state.last_save_timer < save_state.autosave_interval {
@@ -329,7 +329,7 @@ fn autosave_system(
 
     match save_current_session(&player_q, &wave, &progress, &perks, &select) {
         Ok(()) => {
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: "Game autosaved.".to_string(),
                 duration: 1.5,
             });
@@ -347,20 +347,20 @@ fn manual_save_system(
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
     select: Res<PlayerSelectState>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if !keyboard.just_pressed(KeyCode::F5) {
         return;
     }
     match save_current_session(&player_q, &wave, &progress, &perks, &select) {
         Ok(()) => {
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: "Game saved! [F5]".to_string(),
                 duration: 2.0,
             });
         }
         Err(e) => {
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!("Save failed: {}", e),
                 duration: 2.0,
             });

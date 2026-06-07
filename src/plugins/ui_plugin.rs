@@ -260,7 +260,7 @@ fn spawn_menu_camera(mut commands: Commands, existing: Query<Entity, With<MenuCa
 // ── Menu Setup ────────────────────────────────────────────────────────────────
 fn despawn_menu(mut commands: Commands, q: Query<Entity, With<MainMenuRoot>>) {
     for e in q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
@@ -277,7 +277,7 @@ fn cleanup_play_ui_for_menu(
         .chain(game_over_q.iter())
         .chain(crafting_q.iter())
     {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -322,7 +322,7 @@ fn menu_start_button(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
-    mut button_events: EventReader<GamepadButtonStateChangedEvent>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
@@ -350,7 +350,7 @@ fn main_menu_controller_status_system(
     native: Res<NativeControllerState>,
     mut text_q: Query<&mut Text, With<ControllerStatusText>>,
 ) {
-    let Ok(mut text) = text_q.get_single_mut() else {
+    let Ok(mut text) = text_q.single_mut() else {
         return;
     };
     let mut connected = gamepads.iter();
@@ -522,7 +522,7 @@ fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
 }
 
 fn spawn_pause_button(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     label: &'static str,
     action: PauseAction,
     color: Color,
@@ -570,7 +570,7 @@ fn update_pause_menu_page_visibility(
 
 fn despawn_pause_menu(mut commands: Commands, q: Query<Entity, With<PauseRoot>>) {
     for entity in q.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -592,7 +592,7 @@ fn pause_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
-    mut button_events: EventReader<GamepadButtonStateChangedEvent>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     input_q: Query<&PlayerInput, With<Player>>,
     state: Res<State<AppState>>,
     mut menu: ResMut<PauseMenuState>,
@@ -658,7 +658,7 @@ fn pause_menu_action_system(
     mut menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let mut action = None;
     if keyboard.just_pressed(KeyCode::KeyS)
@@ -713,16 +713,16 @@ fn pause_menu_action_system(
     }
 }
 
-fn send_pause_save_result(result: Result<(), String>, msg_ev: &mut EventWriter<UiMessageEvent>) {
+fn send_pause_save_result(result: Result<(), String>, msg_ev: &mut MessageWriter<UiMessageEvent>) {
     match result {
         Ok(()) => {
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: "Game saved.".to_string(),
                 duration: 2.0,
             });
         }
         Err(e) => {
-            msg_ev.send(UiMessageEvent {
+            msg_ev.write(UiMessageEvent {
                 text: format!("Save failed: {}", e),
                 duration: 2.4,
             });
@@ -830,7 +830,7 @@ fn setup_chapter_select(
 
 fn despawn_chapter_select(mut commands: Commands, q: Query<Entity, With<ChapterSelectRoot>>) {
     for e in q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
@@ -1086,7 +1086,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
 
 fn despawn_player_select(mut commands: Commands, q: Query<Entity, With<PlayerSelectRoot>>) {
     for e in q.iter() {
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
@@ -1094,7 +1094,7 @@ fn player_select_update(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<(Entity, &Gamepad)>,
     native: Res<NativeControllerState>,
-    mut button_events: EventReader<GamepadButtonStateChangedEvent>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     time: Res<Time>,
     mut select: ResMut<PlayerSelectState>,
     mut config: ResMut<LocalPlayerConfig>,
@@ -1390,7 +1390,7 @@ fn player_select_update(
     // Update top prompt
     let joined = select.active_count();
     let ready = select.slots.iter().filter(|s| s.joined && s.ready).count() as u8;
-    if let Ok(mut t) = prompt_q.get_single_mut() {
+    if let Ok(mut t) = prompt_q.single_mut() {
         *t = Text::new(format!(
             "{}/{} players ready  —  {}",
             ready,
@@ -1696,7 +1696,7 @@ fn damage_vignette_node(player_index: u8, active: u8) -> Node {
     node
 }
 
-fn spawn_player_hud_panel(parent: &mut ChildBuilder, player_index: u8) {
+fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8) {
     parent
         .spawn((
             Node {
@@ -1786,7 +1786,7 @@ fn spawn_player_hud_panel(parent: &mut ChildBuilder, player_index: u8) {
 }
 
 fn spawn_player_hud_text(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     player_index: u8,
     kind: PlayerHudTextKind,
     text: &str,
@@ -1804,7 +1804,7 @@ fn spawn_player_hud_text(
 }
 
 fn spawn_bar(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     player_index: u8,
     label: &str,
     kind: PlayerHudBarKind,
@@ -1917,10 +1917,10 @@ fn hud_update_system(
         }
     }
 
-    if let Ok(mut t) = text_sets.p1().get_single_mut() {
+    if let Ok(mut t) = text_sets.p1().single_mut() {
         *t = Text::new(format!("Ch.{:02}  Rift {}", current.id.0, wave.wave_number));
     }
-    if let Ok(mut t) = text_sets.p2().get_single_mut() {
+    if let Ok(mut t) = text_sets.p2().single_mut() {
         *t = Text::new(format!("Enemies: {}", wave.enemy_count));
     }
 }
@@ -1947,13 +1947,13 @@ fn puzzle_objective_hud_system(
     >,
 ) {
     let objective = encounter_q.iter().next();
-    if let Ok(mut t) = objective_title_q.get_single_mut() {
+    if let Ok(mut t) = objective_title_q.single_mut() {
         *t = Text::new(match objective {
             Some(encounter) => format!("OBJECTIVE: Recover {}", encounter.label),
             None => String::new(),
         });
     }
-    if let Ok(mut t) = objective_status_q.get_single_mut() {
+    if let Ok(mut t) = objective_status_q.single_mut() {
         *t = Text::new(match objective {
             Some(encounter) => puzzle_status_text(encounter),
             None => String::new(),
@@ -2005,7 +2005,7 @@ fn message_timer_system(
         msg.timer -= time.delta_secs();
         if msg.timer <= 0.0 {
             msg.text.clear();
-            if let Ok(mut t) = text_q.get_single_mut() {
+            if let Ok(mut t) = text_q.single_mut() {
                 *t = Text::new("");
             }
         }
@@ -2013,14 +2013,14 @@ fn message_timer_system(
 }
 
 fn ui_message_listener(
-    mut ev: EventReader<UiMessageEvent>,
+    mut ev: MessageReader<UiMessageEvent>,
     mut msg: ResMut<UiMessage>,
     mut text_q: Query<&mut Text, With<MessageText>>,
 ) {
     for e in ev.read() {
         msg.text = e.text.clone();
         msg.timer = e.duration;
-        if let Ok(mut t) = text_q.get_single_mut() {
+        if let Ok(mut t) = text_q.single_mut() {
             *t = Text::new(e.text.clone());
         }
     }
@@ -2029,7 +2029,7 @@ fn ui_message_listener(
 // ── Damage Vignette ───────────────────────────────────────────────────────────
 fn damage_vignette_system(
     time: Res<Time>,
-    mut damage_ev: EventReader<PlayerDamagedEvent>,
+    mut damage_ev: MessageReader<PlayerDamagedEvent>,
     mut vignette_q: Query<(&mut BackgroundColor, &mut DamageVignette)>,
 ) {
     for ev in damage_ev.read() {
@@ -2052,11 +2052,11 @@ fn damage_vignette_system(
 // ── Boss Alert ────────────────────────────────────────────────────────────────
 fn boss_alert_system(
     time: Res<Time>,
-    mut boss_ev: EventReader<BossSpawnedEvent>,
+    mut boss_ev: MessageReader<BossSpawnedEvent>,
     mut alert_q: Query<(&mut Text, &mut TextColor), With<BossAlertText>>,
 ) {
     for ev in boss_ev.read() {
-        if let Ok((mut t, _)) = alert_q.get_single_mut() {
+        if let Ok((mut t, _)) = alert_q.single_mut() {
             *t = Text::new(format!("!! BOSS WAVE {} !!", ev.wave));
         }
     }
@@ -2076,7 +2076,7 @@ fn crafting_panel_system(
     player_input_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
     mut player_q: Query<(&PlayerIndex, &mut Inventory, &PlayerStats), With<Player>>,
     mut queue: ResMut<CraftingQueue>,
-    mut msg_ev: EventWriter<UiMessageEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     for (idx, input) in player_input_q.iter() {
         if input.crafting {
@@ -2086,7 +2086,7 @@ fn crafting_panel_system(
         }
     }
 
-    if let Ok(mut node) = panel_q.get_single_mut() {
+    if let Ok(mut node) = panel_q.single_mut() {
         node.display = if panel_state.visible {
             Display::Flex
         } else {
@@ -2136,7 +2136,7 @@ fn crafting_panel_system(
         ));
     }
 
-    if let Ok(mut t) = text_q.get_single_mut() {
+    if let Ok(mut t) = text_q.single_mut() {
         *t = Text::new(format!("P{} Crafting\n\n{}", owner + 1, display));
     }
 
@@ -2159,7 +2159,7 @@ fn crafting_panel_system(
         if let Some(recipe) = recipes.get(idx) {
             match start_craft(recipe.id, owner, &mut inventory, stats, &mut queue) {
                 Ok(()) => {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: format!(
                             "P{} Crafting: {} ({:.0}s)",
                             owner + 1,
@@ -2170,7 +2170,7 @@ fn crafting_panel_system(
                     });
                 }
                 Err(msg) => {
-                    msg_ev.send(UiMessageEvent {
+                    msg_ev.write(UiMessageEvent {
                         text: format!("P{} Can't craft: {}", owner + 1, msg),
                         duration: 2.0,
                     });
@@ -2224,10 +2224,10 @@ fn game_over_input(
 ) {
     if keyboard.just_pressed(KeyCode::KeyR) {
         for e in go_root.iter() {
-            commands.entity(e).despawn_recursive();
+            commands.entity(e).despawn();
         }
         for e in hud_root.iter() {
-            commands.entity(e).despawn_recursive();
+            commands.entity(e).despawn();
         }
         next_state.set(AppState::MainMenu);
     }

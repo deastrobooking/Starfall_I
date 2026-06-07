@@ -1,7 +1,8 @@
+use bevy::camera::Viewport;
 use bevy::prelude::*;
-use bevy::render::camera::Viewport;
-use bevy::transform::TransformSystem;
-use bevy::window::{CursorGrabMode, PrimaryWindow};
+use bevy::render::view::Hdr;
+use bevy::transform::TransformSystems;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_rapier3d::prelude::*;
 
 use crate::character_blueprint::{
@@ -61,7 +62,7 @@ impl Plugin for PlayerPlugin {
                 PostUpdate,
                 player_camera_follow_system
                     .after(PhysicsSet::Writeback)
-                    .before(TransformSystem::TransformPropagate)
+                    .before(TransformSystems::Propagate)
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -273,7 +274,7 @@ fn spawn_players(
 
     let active = config.active.clamp(1, 4);
     let (win_w, win_h) = window_q
-        .get_single()
+        .single()
         .map(|w| (w.physical_width(), w.physical_height()))
         .unwrap_or((1280, 720));
 
@@ -370,7 +371,6 @@ fn spawn_players(
                         Vec3::ZERO,
                     ),
                     camera: Camera {
-                        hdr: true,
                         order: i as isize,
                         viewport,
                         ..default()
@@ -379,7 +379,8 @@ fn spawn_players(
                 },
                 PlayerCamera,
                 CameraPitch::default(),
-                bevy::core_pipeline::bloom::Bloom {
+                Hdr,
+                bevy::post_process::bloom::Bloom {
                     intensity: 0.25,
                     ..default()
                 },
@@ -404,7 +405,7 @@ fn cleanup_players_for_menu(
         despawn_player_with_camera(&mut commands, entity, camera_ref);
     }
     for camera in cameras.iter() {
-        commands.entity(camera).try_despawn_recursive();
+        commands.entity(camera).try_despawn();
     }
 }
 
@@ -430,7 +431,7 @@ fn dedupe_player_entities(
                     kept,
                     entity
                 );
-                commands.entity(kept).try_despawn_recursive();
+                commands.entity(kept).try_despawn();
                 seen[slot] = Some((entity, true));
             }
             Some((kept, _)) => {
@@ -441,9 +442,9 @@ fn dedupe_player_entities(
                     kept
                 );
                 if let Some(camera_ref) = camera_ref {
-                    commands.entity(camera_ref.0).try_despawn_recursive();
+                    commands.entity(camera_ref.0).try_despawn();
                 }
-                commands.entity(entity).try_despawn_recursive();
+                commands.entity(entity).try_despawn();
             }
         }
     }
@@ -455,22 +456,22 @@ fn despawn_player_with_camera(
     camera_ref: Option<&PlayerCameraRef>,
 ) {
     if let Some(camera_ref) = camera_ref {
-        commands.entity(camera_ref.0).try_despawn_recursive();
+        commands.entity(camera_ref.0).try_despawn();
     }
-    commands.entity(player).try_despawn_recursive();
+    commands.entity(player).try_despawn();
 }
 
-fn grab_cursor(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
-    if let Ok(mut window) = windows.get_single_mut() {
-        window.cursor_options.grab_mode = CursorGrabMode::Locked;
-        window.cursor_options.visible = false;
+fn grab_cursor(mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>) {
+    if let Ok(mut cursor) = cursors.single_mut() {
+        cursor.grab_mode = CursorGrabMode::Locked;
+        cursor.visible = false;
     }
 }
 
-fn release_cursor(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
-    if let Ok(mut window) = windows.get_single_mut() {
-        window.cursor_options.grab_mode = CursorGrabMode::None;
-        window.cursor_options.visible = true;
+fn release_cursor(mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>) {
+    if let Ok(mut cursor) = cursors.single_mut() {
+        cursor.grab_mode = CursorGrabMode::None;
+        cursor.visible = true;
     }
 }
 
@@ -502,7 +503,7 @@ fn player_look(
 fn camera_shake_system(
     time: Res<Time>,
     mut shake: ResMut<CameraShake>,
-    mut damage_ev: EventReader<PlayerDamagedEvent>,
+    mut damage_ev: MessageReader<PlayerDamagedEvent>,
 ) {
     for ev in damage_ev.read() {
         let trauma = (ev.amount / 25.0).clamp(0.12, 0.65);
@@ -538,7 +539,7 @@ fn player_camera_follow_system(
     for (camera, mut camera_transform, _) in cam_q.iter_mut() {
         if !referenced.contains(&camera) {
             camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
-            commands.entity(camera).try_despawn_recursive();
+            commands.entity(camera).try_despawn();
         }
     }
 }
@@ -903,7 +904,7 @@ fn player_dodge_update(
         ),
         With<Player>,
     >,
-    mut dodge_ev: EventWriter<PlayerDodgeEvent>,
+    mut dodge_ev: MessageWriter<PlayerDodgeEvent>,
 ) {
     let dt = time.delta_secs();
     let dodge_cost_mult = perks.dodge_cost_mult();
@@ -945,7 +946,7 @@ fn player_dodge_update(
             dodge.cooldown_timer = dodge.dodge_cooldown;
             stats.stamina -= dodge_cost;
             state.force(PlayerState::Dodging);
-            dodge_ev.send(PlayerDodgeEvent);
+            dodge_ev.write(PlayerDodgeEvent);
         }
     }
 }
@@ -992,13 +993,13 @@ fn player_state_update(time: Res<Time>, mut q: Query<&mut PlayerStateMachine, Wi
 fn player_stamina_regen(
     time: Res<Time>,
     mut q: Query<(&mut PlayerStats, &DodgeState), With<Player>>,
-    mut ev: EventWriter<PlayerStaminaChangedEvent>,
+    mut ev: MessageWriter<PlayerStaminaChangedEvent>,
 ) {
     let dt = time.delta_secs();
     for (mut stats, dodge) in q.iter_mut() {
         if !dodge.is_dodging && stats.stamina < stats.max_stamina {
             stats.stamina = (stats.stamina + 10.0 * dt).min(stats.max_stamina);
-            ev.send(PlayerStaminaChangedEvent {
+            ev.write(PlayerStaminaChangedEvent {
                 stamina: stats.stamina,
             });
         }
@@ -1040,7 +1041,7 @@ fn player_invulnerability_update(time: Res<Time>, mut q: Query<&mut Damageable, 
 fn player_level_up(
     mut q: Query<(&mut PlayerStats, &mut Health), With<Player>>,
     mut perks: ResMut<PerkTree>,
-    mut level_ev: EventWriter<PlayerLevelUpEvent>,
+    mut level_ev: MessageWriter<PlayerLevelUpEvent>,
 ) {
     for (mut stats, mut health) in q.iter_mut() {
         let xp_needed = stats.xp_for_next_level();
@@ -1053,7 +1054,7 @@ fn player_level_up(
             health.current = health.max;
             stats.stamina = stats.max_stamina;
             perks.award(1);
-            level_ev.send(PlayerLevelUpEvent { level: stats.level });
+            level_ev.write(PlayerLevelUpEvent { level: stats.level });
         }
     }
 }
@@ -1062,7 +1063,7 @@ fn player_level_up(
 // Game over when ALL players are dead.
 fn player_died_check(
     mut q: Query<(&Health, &mut PlayerStateMachine), With<Player>>,
-    mut died_ev: EventWriter<PlayerDiedEvent>,
+    mut died_ev: MessageWriter<PlayerDiedEvent>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let mut any_alive = false;
@@ -1078,7 +1079,7 @@ fn player_died_check(
     }
 
     if any_newly_dead && !any_alive {
-        died_ev.send(PlayerDiedEvent);
+        died_ev.write(PlayerDiedEvent);
         next_state.set(AppState::GameOver);
     }
 }
@@ -1094,8 +1095,8 @@ pub fn damage_player(
     parry: &mut ParryState,
     armor_set: &ArmorSet,
     info: &DamageInfo,
-    damaged_ev: &mut EventWriter<PlayerDamagedEvent>,
-    parry_ev: &mut EventWriter<PlayerParryEvent>,
+    damaged_ev: &mut MessageWriter<PlayerDamagedEvent>,
+    parry_ev: &mut MessageWriter<PlayerParryEvent>,
 ) {
     if !health.is_alive() || damageable.is_invulnerable {
         return;
@@ -1103,7 +1104,7 @@ pub fn damage_player(
 
     if parry.is_parrying {
         parry.is_parrying = false;
-        parry_ev.send(PlayerParryEvent { success: true });
+        parry_ev.write(PlayerParryEvent { success: true });
         return;
     }
 
@@ -1125,7 +1126,7 @@ pub fn damage_player(
     damageable.is_invulnerable = true;
     damageable.invulnerability_timer = 0.2;
 
-    damaged_ev.send(PlayerDamagedEvent {
+    damaged_ev.write(PlayerDamagedEvent {
         player_index,
         amount: result.damage_amount,
         remaining: health.current,

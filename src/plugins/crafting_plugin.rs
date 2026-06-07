@@ -170,7 +170,7 @@ fn crafting_queue_system(
     time: Res<Time>,
     mut queue: ResMut<CraftingQueue>,
     mut player_q: Query<(&PlayerIndex, &mut Inventory), With<Player>>,
-    mut inv_ev: EventWriter<InventoryChangedEvent>,
+    mut inv_ev: MessageWriter<InventoryChangedEvent>,
 ) {
     let dt = time.delta_secs();
     let mut finished = vec![];
@@ -190,7 +190,7 @@ fn crafting_queue_system(
         if let Some((_, mut inventory)) = player_q.iter_mut().find(|(idx, _)| idx.0 == craft.owner)
         {
             inventory.add_item(&craft.result_item, craft.result_qty, 10);
-            inv_ev.send(InventoryChangedEvent);
+            inv_ev.write(InventoryChangedEvent);
         }
     }
 }
