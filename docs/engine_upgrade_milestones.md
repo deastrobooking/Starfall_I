@@ -187,3 +187,11 @@ Acceptance:
   colors, and fallible Rapier trimesh creation.
 - Added `.DS_Store` ignore/removal while publishing the baseline.
 - Verified with `cargo fmt`, `cargo check`, and `cargo test`.
+
+### 2026-06-07: M1 Ownership/Save Foundation
+
+- Documented the default shared-vs-per-player ownership policy in architecture
+  and systems docs.
+- Added pure save tests for per-player record round-trips, legacy save
+  hydration, `player_index` matching independent of record order, sorted save
+  data output, and clamped runtime application.

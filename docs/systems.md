@@ -26,6 +26,8 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 
 **Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause menu keeps the current HUD/world entities alive, freezes the Rapier physics pipeline, offers party-wide save and save-and-title actions, and includes a controls/tips page. Returning to title from pause cleans up preserved play-session entities.
 
+**Ownership policy:** `PlayerIndex` is the stable owner key. Campaign progress, chapter objectives, kill gates, boss phases, unlocks, and `PerkTree` are shared. Inventories, rewards, HUD panels, camera/damage feedback, companions, crafting ownership, runtime stats, character blueprints, and save `players[]` records are per-player. Vehicles remain party-shared for now: one driver/vehicle mode, with passengers keyed by `PlayerIndex`.
+
 **Known limitations:**
 - Chapter director spawns use the party center as the encounter anchor; bespoke chapter beats are still campaign-shared.
 - HUD stat/weapon panels, save snapshots, companions, crafting, chests, hidden rewards, enemy loot pickups, damage feedback, and vehicle buffs are keyed by `PlayerIndex`.
@@ -362,6 +364,8 @@ Save file: `starfall_i_save.json` (written next to the binary).
 Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, and player-slot character blueprints.
 
 Saved per-player fields live in `players[]` records keyed by `player_index`: level, experience, credits, health, stamina, and armor values. Older top-level stat fields are still accepted for legacy save migration, but new saves use the per-player records as the authoritative source.
+
+Save ownership tests cover per-player record round-trips, legacy top-level stat hydration, matching by `player_index` instead of record order, and clamping loaded runtime values into valid health/stamina/armor ranges.
 
 ## Companions
 

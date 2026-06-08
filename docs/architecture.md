@@ -91,6 +91,29 @@ UiPlugin:     listens to all events → updates per-player HUD panels, radio cha
 SavePlugin:   reads PlayerIndex + PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree + CharacterBlueprints → JSON on disk
 ```
 
+## Ownership Policy
+
+Starfall treats `PlayerIndex` as the stable identity for local multiplayer
+runtime state. Query order is not an ownership signal.
+
+Campaign-shared resources:
+
+- `ChapterProgress`, chapter objectives, kill gates, boss phases, unlock
+  progression, and `PerkTree`.
+
+Per-player state:
+
+- Player inventory/rewards, HUD, camera feedback, damage feedback, companions,
+  crafting ownership, runtime stats, character blueprints, and save `players[]`
+  records.
+
+Party-shared exceptions:
+
+- Vehicle mode remains party-shared for now: one active driver/vehicle mode,
+  with passengers keyed by `PlayerIndex`.
+- Pause/resume may be requested by any active player. Save actions remain
+  party-wide.
+
 ## Key Design Choices
 
 - **Editable character recipes, not baked meshes**: `CharacterBlueprint` stores body sliders, procedural part recipes, materials, sockets, rig metadata, animation profiles, movement profiles, and gameplay stats. The current cartoon renderer consumes the body/material portions, while the data model leaves room for fuller mesh, rig, and editor tooling.
@@ -102,6 +125,6 @@ SavePlugin:   reads PlayerIndex + PlayerStats + Health + WaveInfo + ChapterProgr
 - **Secret caves are authored world anchors**: `WorldPlugin` spawns one cave system per chapter, while `PlaceSecretCave` drops a save-backed discovery beacon at that cave's inner anchor.
 - **Castle airships are encounter steps**: boss escapes and airship-deck raids are authored as `EncounterStep`s, so castle chapters can add a flying rematch without creating a separate top-level game state.
 - **PlayerInput abstraction**: All gameplay input is written into a `PlayerInput` component per player, keeping keyboard/gamepad mapping in `input_plugin.rs` and player behavior in feature plugins.
-- **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, and companion ownership use `PlayerIndex` as the shared key. Shared campaign systems still intentionally live in resources like `ChapterProgress` and `PerkTree`.
+- **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, companion ownership, rewards, and feedback use `PlayerIndex` as the shared key. Shared campaign systems intentionally live in resources like `ChapterProgress` and `PerkTree`.
 - **Global perk tree**: `PerkTree` is a shared campaign resource. Level-ups award points, chapter select spends them, combat/movement systems read the resulting multipliers, and save/load persists the ranks.
 - **Damage pipeline**: `DamageInfo → apply_damage() → DamageResult` with resistance multipliers, then callers emit events. Parry and armor are handled in `damage_player()` in player_plugin before the generic pipeline.

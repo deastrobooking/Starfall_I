@@ -175,7 +175,20 @@ pub fn save_game(
     perks: &PerkTree,
     select: &PlayerSelectState,
 ) -> Result<(), String> {
-    let data = SaveData {
+    let data = build_save_data(players, wave, progress, perks, select);
+    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+    fs::write(save_path(), json).map_err(|e| e.to_string())
+}
+
+fn build_save_data(
+    mut players: Vec<PlayerSaveData>,
+    wave: &WaveInfo,
+    progress: &ChapterProgress,
+    perks: &PerkTree,
+    select: &PlayerSelectState,
+) -> SaveData {
+    players.sort_by_key(|player| player.player_index);
+    SaveData {
         wave_number: wave.wave_number,
         completed_chapters: progress.completed.clone(),
         discoverables: progress.discoverables.clone(),
@@ -191,9 +204,7 @@ pub fn save_game(
             .collect(),
         players,
         ..SaveData::default()
-    };
-    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    fs::write(save_path(), json).map_err(|e| e.to_string())
+    }
 }
 
 pub fn load_save() -> Option<SaveData> {
@@ -365,5 +376,215 @@ fn manual_save_system(
                 duration: 2.0,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe};
+
+    fn player_save(
+        player_index: u8,
+        level: u32,
+        experience: u32,
+        credits: u32,
+        health_current: f32,
+        health_max: f32,
+    ) -> PlayerSaveData {
+        PlayerSaveData {
+            player_index,
+            level,
+            experience,
+            credits,
+            health_current,
+            health_max,
+            stamina: 40.0 + f32::from(player_index),
+            max_stamina: 120.0 + f32::from(player_index),
+            armor: 10.0 + f32::from(player_index),
+            max_armor: 90.0 + f32::from(player_index),
+        }
+    }
+
+    fn test_blueprint(name: &str, height: f32) -> CharacterBlueprint {
+        let body = BodyRecipe {
+            height,
+            ..BodyRecipe::default()
+        };
+        CharacterBlueprint::hero(
+            name,
+            body,
+            CharacterPaletteRecipe {
+                skin: Color::srgb(0.95, 0.72, 0.55),
+                outfit: Color::srgb(0.09, 0.28, 0.80),
+                accent: Color::srgb(1.0, 0.86, 0.20),
+                hair: Color::srgb(0.12, 0.08, 0.05),
+                eye: Color::srgb(0.25, 0.95, 1.0),
+            },
+            CartoonAppearanceRecipe::default(),
+        )
+    }
+
+    #[test]
+    fn build_save_data_sorts_players_and_preserves_shared_state() {
+        let wave = WaveInfo {
+            wave_number: 7,
+            ..WaveInfo::default()
+        };
+        let progress = ChapterProgress {
+            completed: vec![1, 2, 3],
+            discoverables: vec!["cave:starfall_lab".to_string()],
+            companions_recruited: vec!["Nova".to_string()],
+            scientist_relics: vec!["Giacoma:focus_lens".to_string()],
+            relic_fragments: vec!["Giovanni:caliper:3".to_string()],
+        };
+        let perks = PerkTree {
+            points_unspent: 2,
+            ranks: vec![("star_focus".to_string(), 3)],
+        };
+        let mut select = PlayerSelectState::default();
+        select.slots[0].blueprint = Some(test_blueprint("P1", 1.0));
+        select.slots[2].blueprint = Some(test_blueprint("P3", 1.12));
+
+        let data = build_save_data(
+            vec![
+                player_save(2, 8, 700, 90, 44.0, 150.0),
+                player_save(0, 4, 300, 20, 88.0, 110.0),
+            ],
+            &wave,
+            &progress,
+            &perks,
+            &select,
+        );
+
+        assert_eq!(data.wave_number, 7);
+        assert_eq!(data.completed_chapters, vec![1, 2, 3]);
+        assert_eq!(data.discoverables, vec!["cave:starfall_lab"]);
+        assert_eq!(data.perk_points_unspent, 2);
+        assert_eq!(data.perk_ranks, vec![("star_focus".to_string(), 3)]);
+        assert_eq!(data.players[0].player_index, 0);
+        assert_eq!(data.players[1].player_index, 2);
+        assert_eq!(
+            data.character_blueprints[0]
+                .as_ref()
+                .map(|blueprint| blueprint.name.as_str()),
+            Some("P1")
+        );
+        assert_eq!(
+            data.character_blueprints[2]
+                .as_ref()
+                .map(|blueprint| blueprint.name.as_str()),
+            Some("P3")
+        );
+    }
+
+    #[test]
+    fn save_data_round_trip_preserves_per_player_records() {
+        let data = SaveData {
+            players: vec![
+                player_save(0, 2, 125, 10, 80.0, 100.0),
+                player_save(1, 5, 500, 60, 45.0, 130.0),
+            ],
+            character_blueprints: vec![
+                Some(test_blueprint("Vincenzo", 1.0)),
+                Some(test_blueprint("Antonio", 1.08)),
+                None,
+                None,
+            ],
+            completed_chapters: vec![1],
+            perk_ranks: vec![("heart_vitality".to_string(), 2)],
+            ..SaveData::default()
+        };
+
+        let json = serde_json::to_string(&data).expect("save data should serialize");
+        let loaded: SaveData = serde_json::from_str(&json).expect("save data should deserialize");
+
+        assert_eq!(loaded.players.len(), 2);
+        assert_eq!(loaded.players[0].player_index, 0);
+        assert_eq!(loaded.players[1].player_index, 1);
+        assert_eq!(loaded.players[1].level, 5);
+        assert_eq!(loaded.players[1].health_current, 45.0);
+        assert_eq!(
+            loaded.character_blueprints[0].as_ref().unwrap().name,
+            "Vincenzo"
+        );
+        assert_eq!(loaded.completed_chapters, vec![1]);
+        assert_eq!(loaded.perk_ranks, vec![("heart_vitality".to_string(), 2)]);
+    }
+
+    #[test]
+    fn current_saves_select_matching_player_index_not_record_order() {
+        let data = SaveData {
+            players: vec![
+                player_save(3, 9, 900, 99, 30.0, 160.0),
+                player_save(1, 4, 250, 44, 70.0, 120.0),
+            ],
+            ..SaveData::default()
+        };
+
+        let p1 = player_save_for(&data, 1).expect("P2 record should exist");
+        let p3 = player_save_for(&data, 3).expect("P4 record should exist");
+
+        assert_eq!(p1.level, 4);
+        assert_eq!(p1.credits, 44);
+        assert_eq!(p3.level, 9);
+        assert_eq!(p3.credits, 99);
+        assert!(player_save_for(&data, 0).is_none());
+    }
+
+    #[test]
+    fn legacy_saves_hydrate_any_active_player_slot() {
+        let data = SaveData {
+            level: 6,
+            experience: 555,
+            credits: 42,
+            max_health: 140.0,
+            max_stamina: 115.0,
+            max_armor: 75.0,
+            players: Vec::new(),
+            ..SaveData::default()
+        };
+
+        let p0 = player_save_for(&data, 0).expect("legacy P1 should hydrate");
+        let p2 = player_save_for(&data, 2).expect("legacy P3 should hydrate");
+
+        assert_eq!(p0.player_index, 0);
+        assert_eq!(p2.player_index, 2);
+        assert_eq!(p2.level, 6);
+        assert_eq!(p2.experience, 555);
+        assert_eq!(p2.health_current, 140.0);
+        assert_eq!(p2.max_stamina, 115.0);
+        assert_eq!(p2.max_armor, 75.0);
+    }
+
+    #[test]
+    fn applying_player_save_clamps_loaded_runtime_values() {
+        let saved = PlayerSaveData {
+            player_index: 0,
+            level: 0,
+            experience: 50,
+            credits: 25,
+            health_current: 500.0,
+            health_max: 125.0,
+            stamina: 999.0,
+            max_stamina: 80.0,
+            armor: -10.0,
+            max_armor: 60.0,
+        };
+        let mut stats = PlayerStats::default();
+        let mut health = Health::new(100.0);
+
+        saved.apply_to(&mut stats, &mut health);
+
+        assert_eq!(stats.level, 1);
+        assert_eq!(stats.experience, 50);
+        assert_eq!(stats.credits, 25);
+        assert_eq!(stats.max_health, 125.0);
+        assert_eq!(health.max, 125.0);
+        assert_eq!(health.current, 125.0);
+        assert_eq!(stats.max_stamina, 80.0);
+        assert_eq!(stats.stamina, 80.0);
+        assert_eq!(stats.max_armor, 60.0);
+        assert_eq!(stats.armor, 0.0);
     }
 }

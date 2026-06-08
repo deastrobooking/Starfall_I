@@ -42,6 +42,7 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Dev armor element cycling no longer calls `get_single_mut`; keyboard cycling targets P1 only.
 - Engine dependencies are upgraded to Bevy 0.18.1 and bevy_rapier3d 0.34.0, with buffered gameplay events migrated to Bevy messages and the changed 0.18 hierarchy, camera, cursor, render-import, ambient-light, and Rapier trimesh APIs handled.
 - Engine milestone guidance now lives in `docs/engine_upgrade_milestones.md`, `agent.md` points future agents there, and GitHub Actions mirrors the local format/check/clippy/test gates.
+- The multiplayer ownership policy is now documented in architecture/systems docs, and the first save tests cover per-player records, legacy hydration, `player_index` lookup, sorted save output, and clamped runtime application.
 
 ## High Priority
 
@@ -57,7 +58,7 @@ Known remaining areas:
 - Pause/save menu authority still needs final local-multiplayer UX decisions.
 - Dev armor element cycling targets P1 until a real per-player equipment UI exists.
 
-**Design direction:** decide which resources are campaign-shared and which are per-player, then expose final per-player inventory/equipment/menu flows through controller-friendly UI.
+**Design direction:** the default ownership policy is now documented. Next, expose the remaining per-player inventory/equipment/menu flows through controller-friendly UI and remove the P1-only debug equipment path.
 
 ### 2. Add a real perk training screen
 **Files:** `src/plugins/ui_plugin.rs`, `src/perks.rs`
