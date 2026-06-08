@@ -871,7 +871,7 @@ fn wall_normal_from_controller_output(output: &KinematicCharacterControllerOutpu
             normal = -normal;
         }
 
-        if best.map_or(true, |(_, s)| s < strength) {
+        if best.is_none_or(|(_, s)| s < strength) {
             best = Some((normal, strength));
         }
     }

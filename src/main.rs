@@ -1,6 +1,9 @@
 // Starfall intentionally carries design data, future robot presets, and event
 // fields before every gameplay path consumes them.
 #![allow(dead_code)]
+// Bevy systems naturally use broad query/resource signatures. Keep clippy strict
+// for correctness-oriented lints while allowing those ECS-heavy shapes.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;

@@ -204,10 +204,11 @@ fn companion_combat_system(
             let owner_dist = owner_transform
                 .translation
                 .distance(e_transform.translation);
-            if dist <= companion.attack_range && owner_dist <= companion.attack_range + 10.0 {
-                if nearest.map_or(true, |(_, _, d)| dist < d) {
-                    nearest = Some((e_entity, e_transform.translation, dist));
-                }
+            if dist <= companion.attack_range
+                && owner_dist <= companion.attack_range + 10.0
+                && nearest.is_none_or(|(_, _, d)| dist < d)
+            {
+                nearest = Some((e_entity, e_transform.translation, dist));
             }
         }
 

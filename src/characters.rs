@@ -785,7 +785,7 @@ pub fn attach_cartoon_character(
                     0.27 * s * foot_scale,
                 )),
                 boot_mat.clone(),
-                Transform::from_xyz(x, -1.00 * s - (leg_length - 1.0) * 0.20 * s, -0.03 * s),
+                Transform::from_xyz(x, -s - (leg_length - 1.0) * 0.20 * s, -0.03 * s),
             );
         }
     }

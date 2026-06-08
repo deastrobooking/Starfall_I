@@ -125,7 +125,7 @@ fn setup_character_design(
         .blueprint
         .as_ref()
         .map(|blueprint| blueprint.body)
-        .unwrap_or_else(BodyRecipe::default)
+        .unwrap_or_default()
         .validated();
     let blueprint_appearance = slot
         .blueprint

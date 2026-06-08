@@ -173,8 +173,10 @@ impl Default for RobotStyle {
 impl RobotStyle {
     /// Build archetype-specific defaults.
     pub fn for_archetype(archetype: RobotArchetype) -> Self {
-        let mut s = Self::default();
-        s.archetype = archetype;
+        let mut s = Self {
+            archetype,
+            ..Self::default()
+        };
         match archetype {
             RobotArchetype::Scout => {}
             RobotArchetype::Brute => {

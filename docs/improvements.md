@@ -41,6 +41,7 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Chapter encounter placement now uses the party center, and airship deck placement uses `PlayerIndex` slots instead of query order.
 - Dev armor element cycling no longer calls `get_single_mut`; keyboard cycling targets P1 only.
 - Engine dependencies are upgraded to Bevy 0.18.1 and bevy_rapier3d 0.34.0, with buffered gameplay events migrated to Bevy messages and the changed 0.18 hierarchy, camera, cursor, render-import, ambient-light, and Rapier trimesh APIs handled.
+- Engine milestone guidance now lives in `docs/engine_upgrade_milestones.md`, `agent.md` points future agents there, and GitHub Actions mirrors the local format/check/clippy/test gates.
 
 ## High Priority
 

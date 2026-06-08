@@ -975,7 +975,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
             .map(|slot| slot.blueprint.clone())
             .collect();
         *select = PlayerSelectState::default();
-        for (slot, blueprint) in select.slots.iter_mut().zip(blueprints.into_iter()) {
+        for (slot, blueprint) in select.slots.iter_mut().zip(blueprints) {
             slot.blueprint = blueprint;
         }
         select.slots[0].joined = true;

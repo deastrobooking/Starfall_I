@@ -194,6 +194,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 - [Architecture Overview](docs/architecture.md)
 - [Gameplay Systems Reference](docs/systems.md)
 - [Improvement Notes](docs/improvements.md)
+- [Engine Upgrade Milestones](docs/engine_upgrade_milestones.md)
 
 ## Project Structure
 

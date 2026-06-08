@@ -209,7 +209,7 @@ fn hydrate_character_blueprints(
     select: &mut PlayerSelectState,
     blueprints: Vec<Option<CharacterBlueprint>>,
 ) {
-    for (slot, blueprint) in select.slots.iter_mut().zip(blueprints.into_iter()) {
+    for (slot, blueprint) in select.slots.iter_mut().zip(blueprints) {
         slot.blueprint = blueprint;
     }
 }

@@ -576,7 +576,7 @@ fn generate_city(
     if current.id.0 == 1 {
         spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal);
     }
-    spawn_grasslands(&mut commands, &mut meshes, &mut *grass_mats, seed + 10);
+    spawn_grasslands(&mut commands, &mut meshes, &mut grass_mats, seed + 10);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8, seed);
@@ -3910,10 +3910,10 @@ fn spawn_outer_districts(
             let x = offset.x + ox;
             let z = offset.z + oz;
             let ground_y = terrain_surface_y(x, z, terrain_seed);
-            let stone_variant = (di + i as usize) % 2 == 0;
+            let stone_variant = (di + i as usize).is_multiple_of(2);
             let mat = if stone_variant {
                 pal.stone_brick.clone()
-            } else if idx % 7 == 0 {
+            } else if idx.is_multiple_of(7) {
                 pal.brushed_metal.clone()
             } else if di % 2 == 0 {
                 pal.residential_a.clone()
@@ -4334,7 +4334,7 @@ fn spawn_understory(
             let s = 0.45 + seeded(seed, i * 5 + 3) * 1.15;
             let mat = match i % 9 {
                 0 | 1 => pal.foliage_a.clone(),
-                2 | 3 | 4 => pal.foliage_b.clone(),
+                2..=4 => pal.foliage_b.clone(),
                 _ => pal.foliage_c.clone(),
             };
             for lobe in 0..3u64 {
