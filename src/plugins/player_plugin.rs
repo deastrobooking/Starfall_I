@@ -1133,6 +1133,7 @@ fn player_movement(
             movement.velocity.y = movement.velocity.y.max(0.0);
             edge_grab.is_hanging = false;
             edge_grab.hang_timer = 0.0;
+            edge_grab.wall_clasp_timer = 0.0;
             edge_grab.wall_contact_timer = 0.0;
         } else {
             movement.coyote_timer = (movement.coyote_timer - dt).max(0.0);
@@ -1179,6 +1180,11 @@ fn player_movement(
             && movement.velocity.y <= 0.03;
         if wall_sliding {
             movement.wall_jump_charges = movement.max_wall_jump_charges;
+            edge_grab.wall_clasp_timer += dt;
+            stats.stamina =
+                (stats.stamina - edge_grab.wall_slide_stamina_drain_per_sec * dt).max(0.0);
+        } else if !edge_grab.is_hanging {
+            edge_grab.wall_clasp_timer = 0.0;
         }
 
         let mut started_jump = false;
@@ -1301,8 +1307,13 @@ fn player_movement(
             }
             movement.velocity.y -= gravity;
             movement.velocity.y = movement.velocity.y.max(-movement.max_fall_speed);
-            if wall_sliding && movement.velocity.y < -movement.wall_slide_speed {
-                movement.velocity.y = -movement.wall_slide_speed;
+            let wall_slide_speed = if stats.stamina > 0.0 {
+                movement.wall_slide_speed
+            } else {
+                movement.wall_slide_speed * edge_grab.exhausted_wall_slide_mult
+            };
+            if wall_sliding && movement.velocity.y < -wall_slide_speed {
+                movement.velocity.y = -wall_slide_speed;
                 state.transition(PlayerState::WallSliding);
             }
         }
@@ -1499,12 +1510,25 @@ fn player_state_update(time: Res<Time>, mut q: Query<&mut PlayerStateMachine, Wi
 // ── Stamina Regen ─────────────────────────────────────────────────────────────
 fn player_stamina_regen(
     time: Res<Time>,
-    mut q: Query<(&mut PlayerStats, &DodgeState), With<Player>>,
+    mut q: Query<
+        (
+            &mut PlayerStats,
+            &DodgeState,
+            &PlayerStateMachine,
+            &EdgeGrabState,
+        ),
+        With<Player>,
+    >,
     mut ev: MessageWriter<PlayerStaminaChangedEvent>,
 ) {
     let dt = time.delta_secs();
-    for (mut stats, dodge) in q.iter_mut() {
-        if !dodge.is_dodging && stats.stamina < stats.max_stamina {
+    for (mut stats, dodge, state, edge_grab) in q.iter_mut() {
+        let traversal_hold = edge_grab.is_hanging
+            || matches!(
+                state.current,
+                PlayerState::Hanging | PlayerState::WallSliding
+            );
+        if !dodge.is_dodging && !traversal_hold && stats.stamina < stats.max_stamina {
             stats.stamina = (stats.stamina + 10.0 * dt).min(stats.max_stamina);
             ev.write(PlayerStaminaChangedEvent {
                 stamina: stats.stamina,

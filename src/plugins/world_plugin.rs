@@ -850,6 +850,8 @@ struct Palette {
     street_asphalt: Handle<StandardMaterial>,
     street_paint: Handle<StandardMaterial>,
 
+    terrain_surface: Handle<StandardMaterial>,
+    mountain_path: Handle<StandardMaterial>,
     highway: Handle<StandardMaterial>,
     sky_platform: Handle<StandardMaterial>,
     water: Handle<StandardMaterial>,
@@ -881,6 +883,7 @@ struct Palette {
     dragon_window: Handle<StandardMaterial>, // Red fire glow windows
     crystal_aurora: Handle<StandardMaterial>, // Glowing purple-blue crystals (alpha blend)
     crystal_dragon: Handle<StandardMaterial>, // Glowing orange-red crystals (alpha blend)
+    guide_glow: Handle<StandardMaterial>,   // Cyan route studs for bridges and mountain paths
     aurora_banner: Handle<StandardMaterial>, // Violet banner
     dragon_banner: Handle<StandardMaterial>, // Dark crimson banner
 }
@@ -1067,6 +1070,21 @@ impl Palette {
                 reflectance: 0.28,
                 ..default()
             }),
+            terrain_surface: m.add(StandardMaterial {
+                base_color: Color::WHITE,
+                metallic: 0.0,
+                perceptual_roughness: 0.96,
+                reflectance: 0.18,
+                ..default()
+            }),
+            mountain_path: m.add(StandardMaterial {
+                base_color: Color::srgb(0.34, 0.31, 0.27),
+                emissive: LinearRgba::new(0.035, 0.030, 0.020, 1.0),
+                metallic: 0.01,
+                perceptual_roughness: 0.98,
+                reflectance: 0.12,
+                ..default()
+            }),
             highway: m.add(StandardMaterial {
                 base_color: Color::srgb(0.10, 0.10, 0.13),
                 metallic: 0.20,
@@ -1240,6 +1258,15 @@ impl Palette {
                 emissive: LinearRgba::new(4.5, 0.9, 0.0, 1.0),
                 perceptual_roughness: 0.05,
                 metallic: 0.25,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            guide_glow: m.add(StandardMaterial {
+                base_color: Color::srgba(0.38, 0.96, 1.0, 0.82),
+                emissive: LinearRgba::new(0.30, 2.4, 3.6, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.10,
+                reflectance: 0.85,
                 alpha_mode: AlphaMode::Blend,
                 ..default()
             }),
@@ -2838,6 +2865,66 @@ const TERRAIN_WORLD_SIZE: f32 = EVEREST_RANGE_WORLD_SIZE;
 const EVEREST_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/everest.png");
 static EVEREST_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
 
+const ROUTE_CORE_AURORA: &[(f32, f32)] = &[
+    (22.0, 28.0),
+    (1300.0, 540.0),
+    (3200.0, 920.0),
+    (5400.0, 1220.0),
+    (6600.0, 700.0),
+    (8500.0, 4800.0),
+];
+const ROUTE_CORE_EVEREST: &[(f32, f32)] = &[
+    (22.0, 28.0),
+    (-1250.0, -840.0),
+    (-3300.0, -2750.0),
+    (-5750.0, -5150.0),
+    (-8200.0, -7550.0),
+];
+const ROUTE_SOUTH_GLACIER: &[(f32, f32)] = &[
+    (980.0, -660.0),
+    (520.0, -2300.0),
+    (1600.0, -4700.0),
+    (300.0, -7800.0),
+    (3300.0, -8400.0),
+];
+const ROUTE_NORTHWEST_GLACIER: &[(f32, f32)] = &[
+    (22.0, 28.0),
+    (-900.0, 2700.0),
+    (-3300.0, 4300.0),
+    (-5700.0, 5000.0),
+    (-7800.0, 4200.0),
+];
+const ROUTE_NORTH_HIGH_PASS: &[(f32, f32)] = &[
+    (2200.0, 1600.0),
+    (5000.0, 3000.0),
+    (7600.0, 3800.0),
+    (9000.0, 6200.0),
+];
+const ROUTE_WEST_TEMPLE_PASS: &[(f32, f32)] = &[
+    (-900.0, 2700.0),
+    (-2800.0, 3300.0),
+    (-6200.0, 6500.0),
+    (-9000.0, 8000.0),
+];
+const ROUTE_EAST_ROCKIES_PASS: &[(f32, f32)] = &[
+    (3000.0, -500.0),
+    (5200.0, -1400.0),
+    (6500.0, -3000.0),
+    (8500.0, -5200.0),
+];
+const ROUTE_CROWN_UNDERPASS: &[(f32, f32)] =
+    &[(-2500.0, -2300.0), (-4300.0, -6100.0), (-6500.0, -8600.0)];
+const MOUNTAIN_ROUTES: &[&[(f32, f32)]] = &[
+    ROUTE_CORE_AURORA,
+    ROUTE_CORE_EVEREST,
+    ROUTE_SOUTH_GLACIER,
+    ROUTE_NORTHWEST_GLACIER,
+    ROUTE_NORTH_HIGH_PASS,
+    ROUTE_WEST_TEMPLE_PASS,
+    ROUTE_EAST_ROCKIES_PASS,
+    ROUTE_CROWN_UNDERPASS,
+];
+
 struct EverestHeightmap {
     width: usize,
     height: usize,
@@ -2863,6 +2950,31 @@ impl EverestHeightmap {
         let bottom = c + (d - c) * tx;
         top + (bottom - top) * ty
     }
+
+    fn smooth_sample(&self, u: f32, v: f32) -> f32 {
+        let du = 1.0 / self.width.max(2) as f32;
+        let dv = 1.0 / self.height.max(2) as f32;
+        let mut sum = self.sample(u, v) * 4.0;
+        let mut weight = 4.0;
+        for &(ox, oy, w) in &[
+            (-1.0_f32, 0.0_f32, 2.0_f32),
+            (1.0, 0.0, 2.0),
+            (0.0, -1.0, 2.0),
+            (0.0, 1.0, 2.0),
+            (-1.0, -1.0, 1.0),
+            (1.0, -1.0, 1.0),
+            (-1.0, 1.0, 1.0),
+            (1.0, 1.0, 1.0),
+        ] {
+            sum += self.sample(u + ox * du, v + oy * dv) * w;
+            weight += w;
+        }
+        sum / weight
+    }
+}
+
+fn mountain_routes() -> &'static [&'static [(f32, f32)]] {
+    MOUNTAIN_ROUTES
 }
 
 fn everest_heightmap() -> Option<&'static EverestHeightmap> {
@@ -2965,6 +3077,33 @@ fn edge_fade01(t: f32, feather: f32) -> f32 {
     smoothstep(0.0, feather, t) * (1.0 - smoothstep(1.0 - feather, 1.0, t))
 }
 
+fn distance_to_segment_xz(px: f32, pz: f32, ax: f32, az: f32, bx: f32, bz: f32) -> f32 {
+    let vx = bx - ax;
+    let vz = bz - az;
+    let len_sq = vx * vx + vz * vz;
+    if len_sq <= f32::EPSILON {
+        return ((px - ax).powi(2) + (pz - az).powi(2)).sqrt();
+    }
+
+    let t = (((px - ax) * vx + (pz - az) * vz) / len_sq).clamp(0.0, 1.0);
+    let sx = ax + vx * t;
+    let sz = az + vz * t;
+    ((px - sx).powi(2) + (pz - sz).powi(2)).sqrt()
+}
+
+fn mountain_route_influence(x: f32, z: f32) -> f32 {
+    let mut influence: f32 = 0.0;
+    for route in mountain_routes() {
+        for pair in route.windows(2) {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let distance = distance_to_segment_xz(x, z, ax, az, bx, bz);
+            influence = influence.max(1.0 - smoothstep(62.0, 280.0, distance));
+        }
+    }
+    influence
+}
+
 fn everest_heightmap_relief(x: f32, z: f32) -> f32 {
     let Some(heightmap) = everest_heightmap() else {
         return 0.0;
@@ -2980,7 +3119,7 @@ fn everest_heightmap_relief(x: f32, z: f32) -> f32 {
     }
 
     let edge = edge_fade01(u, 0.025) * edge_fade01(v, 0.025);
-    let raw = heightmap.sample(u, v);
+    let raw = heightmap.sample(u, v) * 0.38 + heightmap.smooth_sample(u, v) * 0.62;
     let foothill = smoothstep(0.06, 0.48, raw);
     let ridge = smoothstep(0.22, 0.86, raw);
     let high_ridge = smoothstep(0.56, 0.96, raw);
@@ -3050,13 +3189,73 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     // Full-range Everest heightmap relief, with an authored summit boost near Collosar.
     let everest = everest_heightmap_relief(x, z);
 
+    let raw_height = base + edge_lift + peak_boost + qilian + plateau + everest;
+    let route_cut = mountain_route_influence(x, z)
+        * smoothstep(700.0, 6200.0, dist)
+        * (28.0 + raw_height.max(0.0) * 0.06);
+    let shaped_height = (raw_height - route_cut).max(0.0);
+
     // Flatten the city zone; outer areas get full amplitude. Keep the terrain
     // on or above the invisible gameplay floor so collision and visuals agree.
-    ((base + edge_lift + peak_boost + qilian + plateau + everest) * (1.0 - city_flat)).max(0.0)
+    (shaped_height * (1.0 - city_flat)).max(0.0)
 }
 
 fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
     terrain_height(x, z, seed)
+}
+
+fn mix_rgba(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t,
+    ]
+}
+
+fn scale_rgba(a: [f32; 4], scale: f32) -> [f32; 4] {
+    [
+        (a[0] * scale).clamp(0.0, 1.0),
+        (a[1] * scale).clamp(0.0, 1.0),
+        (a[2] * scale).clamp(0.0, 1.0),
+        a[3],
+    ]
+}
+
+fn terrain_detail_noise(x: f32, z: f32, y: f32, seed: u64) -> f32 {
+    let phase = seeded(seed, 313) * std::f32::consts::TAU;
+    let broad = (x * 0.0017 + z * 0.0011 + phase).sin();
+    let speckle = (x * 0.015 - z * 0.012 + phase * 0.37).sin();
+    let strata = (y * 0.055 + x * 0.0025 - z * 0.0017).sin();
+    ((broad * 0.45 + speckle * 0.35 + strata * 0.20) * 0.5 + 0.5).clamp(0.0, 1.0)
+}
+
+fn terrain_vertex_color(x: f32, z: f32, y: f32, normal: Vec3, seed: u64) -> [f32; 4] {
+    let grass = [0.16, 0.34, 0.15, 1.0];
+    let alpine_meadow = [0.34, 0.45, 0.26, 1.0];
+    let exposed_rock = [0.34, 0.32, 0.29, 1.0];
+    let dark_rock = [0.20, 0.19, 0.18, 1.0];
+    let snow = [0.86, 0.91, 0.96, 1.0];
+    let blue_ice = [0.62, 0.78, 0.88, 1.0];
+    let trail = [0.38, 0.34, 0.27, 1.0];
+
+    let slope = (1.0 - normal.y.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    let detail = terrain_detail_noise(x, z, y, seed);
+    let altitude = smoothstep(100.0, 520.0, y);
+    let rockline = smoothstep(0.10, 0.42, slope).max(smoothstep(360.0, 650.0, y) * 0.72);
+    let snowline = smoothstep(470.0, 760.0, y) * (1.0 - smoothstep(0.44, 0.74, slope) * 0.45);
+    let ice_line = smoothstep(620.0, 820.0, y) * smoothstep(0.18, 0.56, slope);
+    let striation = smoothstep(0.63, 1.0, detail) * smoothstep(250.0, 760.0, y);
+
+    let mut color = mix_rgba(grass, alpine_meadow, altitude * 0.82);
+    color = mix_rgba(color, exposed_rock, rockline);
+    color = mix_rgba(color, dark_rock, striation * 0.36);
+    color = mix_rgba(color, snow, snowline);
+    color = mix_rgba(color, blue_ice, ice_line * 0.28);
+    color = mix_rgba(color, trail, mountain_route_influence(x, z) * 0.72);
+
+    scale_rgba(color, 0.90 + detail * 0.18)
 }
 
 fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
@@ -3079,6 +3278,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
     let mut positions = Vec::with_capacity(vcount);
     let mut normals = Vec::with_capacity(vcount);
     let mut uvs = Vec::with_capacity(vcount);
+    let mut colors = Vec::with_capacity(vcount);
 
     for zi in 0..=RES {
         for xi in 0..=RES {
@@ -3097,6 +3297,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
             let dz = Vec3::new(0.0, hz1 - hz0, 2.0 * CELL);
             let n = dz.cross(dx).normalize();
             normals.push([n.x, n.y, n.z]);
+            colors.push(terrain_vertex_color(wx, wz, wy, n, seed));
         }
     }
 
@@ -3126,6 +3327,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(tri_idx));
 
     let terrain_collider = bevy_rapier3d::prelude::Collider::trimesh(col_verts, col_tris)
@@ -3134,7 +3336,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(mesh)),
-            material: MeshMaterial3d(pal.ground.clone()),
+            material: MeshMaterial3d(pal.terrain_surface.clone()),
             transform: Transform::IDENTITY,
             ..default()
         },
@@ -3155,6 +3357,7 @@ fn spawn_everest_range_biomes(
     spawn_glacial_streams(commands, meshes, pal, seed);
     spawn_range_forests(commands, meshes, pal, seed);
     spawn_range_waylines(commands, meshes, pal, seed);
+    spawn_mountain_path_network(commands, meshes, pal, seed);
     spawn_range_outposts(commands, meshes, pal, seed);
     spawn_dragon_lair_silhouettes(commands, meshes, pal, seed);
 }
@@ -3412,32 +3615,135 @@ fn spawn_range_waylines(
     pal: &Palette,
     seed: u64,
 ) {
-    let routes = [
-        ((22.0_f32, 28.0_f32), (2200.0_f32, 1600.0_f32), 7_u64),
-        ((22.0, 28.0), (-8500.0, -7800.0), 11),
-        ((2200.0, 1600.0), (6600.0, 700.0), 8),
-        ((6600.0, 700.0), (8500.0, 4800.0), 6),
-        ((5400.0, -3100.0), (300.0, -7800.0), 8),
-        ((-8500.0, -7800.0), (-4300.0, -6100.0), 6),
-    ];
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        for (si, pair) in route.windows(2).enumerate() {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let dx = bx - ax;
+            let dz = bz - az;
+            let len = (dx * dx + dz * dz).sqrt();
+            let count = (len / 1350.0).ceil().max(2.0) as u32;
+            for i in 1..count {
+                let t = i as f32 / count as f32;
+                let wobble =
+                    (seeded(seed, ri as u64 * 103 + si as u64 * 19 + i as u64) - 0.5) * 180.0;
+                let x = ax + (bx - ax) * t + wobble;
+                let z = az + (bz - az) * t - wobble * 0.55;
+                let y = terrain_surface_y(x, z, seed) + 2.0;
+                let height = 8.0 + seeded(seed, i as u64 + ri as u64 * 17 + si as u64 * 31) * 9.0;
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cylinder::new(1.1, height))),
+                        material: MeshMaterial3d(pal.crystal_aurora.clone()),
+                        transform: Transform::from_xyz(x, y + height * 0.5, z),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
+    }
+}
 
-    for (ri, &((ax, az), (bx, bz), count)) in routes.iter().enumerate() {
-        for i in 1..=count {
-            let t = i as f32 / (count as f32 + 1.0);
-            let wobble = (seeded(seed, ri as u64 * 41 + i) - 0.5) * 180.0;
-            let x = ax + (bx - ax) * t + wobble;
-            let z = az + (bz - az) * t - wobble * 0.55;
-            let y = terrain_surface_y(x, z, seed) + 2.0;
-            let height = 8.0 + seeded(seed, i + ri as u64 * 17) * 9.0;
-            commands.spawn((
-                PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cylinder::new(1.1, height))),
-                    material: MeshMaterial3d(pal.crystal_aurora.clone()),
-                    transform: Transform::from_xyz(x, y + height * 0.5, z),
-                    ..default()
-                },
-                WorldGeometry,
-            ));
+fn spawn_mountain_path_network(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let slab_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let stud_mesh = meshes.add(Sphere::new(1.0));
+
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        for (si, pair) in route.windows(2).enumerate() {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let dx = bx - ax;
+            let dz = bz - az;
+            let len = (dx * dx + dz * dz).sqrt();
+            if len <= 10.0 {
+                continue;
+            }
+
+            let steps = (len / 360.0).ceil().max(1.0) as usize;
+            let dir_x = dx / len;
+            let dir_z = dz / len;
+            let perp_x = dir_z;
+            let perp_z = -dir_x;
+            let yaw = dx.atan2(dz);
+            let width = 18.0 + (ri % 3) as f32 * 3.0;
+
+            for step in 0..steps {
+                let t0 = step as f32 / steps as f32;
+                let t1 = (step + 1) as f32 / steps as f32;
+                let x0 = ax + dx * t0;
+                let z0 = az + dz * t0;
+                let x1 = ax + dx * t1;
+                let z1 = az + dz * t1;
+                let mx = (x0 + x1) * 0.5;
+                let mz = (z0 + z1) * 0.5;
+                if Vec2::new(mx, mz).length() < 520.0 {
+                    continue;
+                }
+
+                let slab_len = ((x1 - x0).powi(2) + (z1 - z0).powi(2)).sqrt() * 0.94;
+                let y0 = terrain_surface_y(x0, z0, seed);
+                let y1 = terrain_surface_y(x1, z1, seed);
+                let ym = terrain_surface_y(mx, mz, seed);
+                let y = y0.max(y1).max(ym) + 0.26;
+                let lift = ((seeded(seed, ri as u64 * 701 + si as u64 * 53 + step as u64) - 0.5)
+                    * 0.08)
+                    .clamp(-0.04, 0.04);
+
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(slab_mesh.clone()),
+                        material: MeshMaterial3d(pal.mountain_path.clone()),
+                        transform: Transform::from_xyz(mx, y + lift, mz)
+                            .with_rotation(Quat::from_rotation_y(yaw))
+                            .with_scale(Vec3::new(width, 0.34, slab_len)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                    WalkableSurface,
+                ));
+
+                if step % 3 == 1 {
+                    let glow_radius = 1.05
+                        + seeded(seed, 90_000 + ri as u64 * 79 + si as u64 * 11 + step as u64)
+                            * 0.42;
+                    let side_offset = width * 0.72;
+                    for side in [-1.0_f32, 1.0] {
+                        let sx = mx + perp_x * side_offset * side;
+                        let sz = mz + perp_z * side_offset * side;
+                        let sy = terrain_surface_y(sx, sz, seed) + 1.35;
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: Mesh3d(stud_mesh.clone()),
+                                material: MeshMaterial3d(pal.guide_glow.clone()),
+                                transform: Transform::from_xyz(sx, sy, sz)
+                                    .with_scale(Vec3::splat(glow_radius)),
+                                ..default()
+                            },
+                            WorldGeometry,
+                        ));
+                    }
+                }
+
+                if step % 8 == 3 {
+                    commands.spawn(PointLightBundle {
+                        point_light: PointLight {
+                            color: Color::srgb(0.38, 0.96, 1.0),
+                            intensity: 14_000.0,
+                            range: 72.0,
+                            shadows_enabled: false,
+                            ..default()
+                        },
+                        transform: Transform::from_xyz(mx, y + 7.5, mz),
+                        ..default()
+                    });
+                }
+            }
         }
     }
 }
@@ -7482,6 +7788,34 @@ fn spawn_castle_bridge_and_gate(
         );
     }
 
+    for i in 0..8 {
+        let z = gate_z + 9.0 + i as f32 * 9.6;
+        for x in [-7.7_f32, 7.7] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Sphere::new(0.72))),
+                    material: MeshMaterial3d(pal.guide_glow.clone()),
+                    transform: Transform::from_xyz(cx + x, floor + 2.55, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        if i % 2 == 0 {
+            commands.spawn(PointLightBundle {
+                point_light: PointLight {
+                    color: Color::srgb(0.38, 0.96, 1.0),
+                    intensity: 12_000.0,
+                    range: 54.0,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_xyz(cx, floor + 6.6, z),
+                ..default()
+            });
+        }
+    }
+
     for x in [-5.2_f32, 5.2] {
         spawn_castle_block(
             commands,
@@ -8534,6 +8868,27 @@ mod tests {
     #[test]
     fn outer_world_terrain_keeps_relief() {
         assert!(terrain_height(-8500.0, -7800.0, 42) > 220.0);
+    }
+
+    #[test]
+    fn mountain_routes_cover_multiple_passes() {
+        assert!(mountain_routes().len() >= 8);
+        assert!(mountain_routes().iter().all(|route| route.len() >= 2));
+    }
+
+    #[test]
+    fn mountain_route_influence_marks_path_corridors() {
+        assert!(mountain_route_influence(3200.0, 920.0) > 0.85);
+        assert!(mountain_route_influence(9900.0, -1000.0) < 0.20);
+    }
+
+    #[test]
+    fn terrain_vertex_color_adds_high_snowline() {
+        let low = terrain_vertex_color(900.0, 1400.0, 40.0, Vec3::Y, 42);
+        let high = terrain_vertex_color(-8400.0, -7800.0, 780.0, Vec3::Y, 42);
+
+        assert!(high[0] > low[0]);
+        assert!(high[2] > low[2]);
     }
 
     #[test]

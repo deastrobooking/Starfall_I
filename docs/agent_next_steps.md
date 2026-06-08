@@ -180,6 +180,9 @@ Goal: make the core hero feel reliable before adding many more levels.
 - Tune acceleration, step/snap, wall slide, wall jump, climb, dodge, parry,
   jetpack, beam saber, and hand-combat values through `PlayerMovement` and
   combat data.
+- Use `docs/motion_mechanics_roadmap.md` as the milestone guide for humanoid
+  traversal upgrades: wall/ledge/mantle suite, grounded athletic movement,
+  flight kit, combat traversal, environment physics, and boss/world integration.
 - Add controller diagnostics overlay showing player assignment, stick values,
   trigger source, and last fired action.
 - Add manual smoke notes for at least two Xbox-style controllers and one

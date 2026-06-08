@@ -11,7 +11,7 @@ Backtrace:
    2: <std::backtrace::Backtrace>::create
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/backtrace.rs:331:13
    3: starfall_i::install_crash_logger::{{closure}}
-             at ./src/main.rs:119:25
+             at ./Desktop/Games/Starfall_I/src/main.rs:120:25
    4: <alloc::boxed::Box<dyn for<'a, 'b> core::ops::function::Fn<(&'a std::panic::PanicHookInfo<'b>,), Output = ()> + core::marker::Sync + core::marker::Send> as core::ops::function::Fn<(&std::panic::PanicHookInfo,)>>::call
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/alloc/src/boxed.rs:2254:9
    5: std::panicking::panic_with_hook
@@ -25,52 +25,51 @@ Backtrace:
    9: core::panicking::panic_fmt
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
   10: bevy_ecs::system::system_param::assert_component_access_compatibility
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system_param.rs:387:5
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system_param.rs:387:5
   11: <bevy_ecs::system::query::Query<D,F> as bevy_ecs::system::system_param::SystemParam>::init_access
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system_param.rs:344:9
-  12: <(P0,P1,P2,P3) as bevy_ecs::system::system_param::SystemParam>::init_access
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system_param.rs:2177:19
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system_param.rs:344:9
+  12: <(P0,P1,P2,P3,P4,P5,P6,P7,P8,P9,P10,P11) as bevy_ecs::system::system_param::SystemParam>::init_access
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system_param.rs:2177:19
   13: <bevy_ecs::system::function_system::FunctionSystem<Marker,In,Out,F> as bevy_ecs::system::system::System>::initialize
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/function_system.rs:743:9
   14: bevy_ecs::schedule::node::Systems::initialize
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/node.rs:591:43
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/node.rs:591:43
   15: bevy_ecs::schedule::schedule::ScheduleGraph::initialize
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:1107:22
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:1107:22
   16: bevy_ecs::schedule::schedule::Schedule::initialize
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:571:24
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:571:24
   17: bevy_ecs::schedule::schedule::Schedule::run
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:535:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:535:14
   18: bevy_ecs::world::World::try_schedule_scope
   19: bevy_ecs::world::World::try_run_schedule
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3730:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3730:14
   20: bevy_app::main_schedule::Main::run_main::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/main_schedule.rs:293:31
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/main_schedule.rs:293:31
   21: bevy_ecs::world::World::try_resource_scope
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:2824:13
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:2824:13
   22: bevy_ecs::world::World::resource_scope
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:2703:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:2703:14
   23: bevy_app::main_schedule::Main::run_main
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/main_schedule.rs:291:15
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/main_schedule.rs:291:15
   24: core::ops::function::FnMut::call_mut
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:166:5
   25: core::ops::function::impls::<impl core::ops::function::FnMut<A> for &mut F>::call_mut
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:298:21
   26: <Func as bevy_ecs::system::exclusive_function_system::ExclusiveSystemParamFunction<fn(F0) .> Out>>::run::call_inner
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:270:21
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:270:21
   27: <Func as bevy_ecs::system::exclusive_function_system::ExclusiveSystemParamFunction<fn(F0) .> Out>>::run
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:273:17
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:273:17
   28: <bevy_ecs::system::exclusive_function_system::ExclusiveFunctionSystem<Marker,Out,F> as bevy_ecs::system::system::System>::run_unsafe::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:135:33
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:135:33
   29: bevy_ecs::world::World::last_change_tick_scope
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3142:9
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3142:9
   30: <bevy_ecs::system::exclusive_function_system::ExclusiveFunctionSystem<Marker,Out,F> as bevy_ecs::system::system::System>::run_unsafe
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:113:15
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/exclusive_function_system.rs:113:15
   31: bevy_ecs::system::system::System::run_without_applying_deferred
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system.rs:138:23
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/system/system.rs:138:23
   32: bevy_ecs::schedule::executor::__rust_begin_short_backtrace::run_without_applying_deferred
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/executor/mod.rs:301:29
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/executor/mod.rs:301:29
   33: <bevy_ecs::schedule::executor::single_threaded::SingleThreadedExecutor as bevy_ecs::schedule::executor::SystemExecutor>::run::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/executor/single_threaded.rs:142:21
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/executor/single_threaded.rs:142:21
   34: core::ops::function::FnOnce::call_once
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
   35: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
@@ -82,43 +81,43 @@ Backtrace:
   38: std::panic::catch_unwind
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panic.rs:359:14
   39: <bevy_ecs::schedule::executor::single_threaded::SingleThreadedExecutor as bevy_ecs::schedule::executor::SystemExecutor>::run
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/executor/single_threaded.rs:157:39
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/executor/single_threaded.rs:157:39
   40: bevy_ecs::schedule::schedule::Schedule::run
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:547:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/schedule/schedule.rs:547:14
   41: bevy_ecs::world::World::run_schedule::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3745:57
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3745:57
   42: bevy_ecs::world::World::try_schedule_scope
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3663:21
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3663:21
   43: bevy_ecs::world::World::schedule_scope
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3715:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3715:14
   44: bevy_ecs::world::World::run_schedule
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3745:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_ecs-0.18.1/src/world/mod.rs:3745:14
   45: bevy_app::sub_app::SubApp::run_default_schedule
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/sub_app.rs:141:24
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/sub_app.rs:141:24
   46: bevy_app::sub_app::SubApps::update
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/sub_app.rs:517:23
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/sub_app.rs:517:23
   47: bevy_app::app::App::update
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/app.rs:164:23
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/app.rs:164:23
   48: bevy_winit::state::WinitAppRunnerState::run_app_update
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:770:22
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:770:22
   49: bevy_winit::state::WinitAppRunnerState::redraw_requested
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:618:22
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:618:22
   50: <bevy_winit::state::WinitAppRunnerState as winit::application::ApplicationHandler<bevy_winit::WinitUserEvent>>::about_to_wait
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:469:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:469:14
   51: winit::platform_impl::macos::event_loop::map_user_event::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:174:22
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:174:22
   52: <alloc::boxed::Box<F,A> as core::ops::function::FnMut<Args>>::call_mut
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/alloc/src/boxed.rs:2247:9
   53: winit::platform_impl::macos::event_handler::EventHandler::handle_event
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_handler.rs:125:17
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_handler.rs:125:17
   54: winit::platform_impl::macos::app_state::ApplicationDelegate::handle_event
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/app_state.rs:324:36
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/app_state.rs:324:36
   55: winit::platform_impl::macos::app_state::ApplicationDelegate::cleared
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/app_state.rs:392:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/app_state.rs:392:14
   56: winit::platform_impl::macos::observer::control_flow_end_handler::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:84:80
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:84:80
   57: winit::platform_impl::macos::observer::control_flow_handler::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:46:9
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:46:9
   58: std::panicking::catch_unwind::do_call
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:581:40
   59: std::panicking::catch_unwind
@@ -126,11 +125,11 @@ Backtrace:
   60: std::panic::catch_unwind
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panic.rs:359:14
   61: winit::platform_impl::macos::event_loop::stop_app_on_panic
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:444:11
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:444:11
   62: winit::platform_impl::macos::observer::control_flow_handler
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:44:5
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:44:5
   63: winit::platform_impl::macos::observer::control_flow_end_handler
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:79:9
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/observer.rs:79:9
   64: <unknown>
   65: <unknown>
   66: <unknown>
@@ -144,28 +143,28 @@ Backtrace:
   74: <unknown>
   75: <unknown>
   76: winit::platform_impl::macos::event_loop::EventLoop<T>::run_on_demand::{{closure}}::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:299:35
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:299:35
   77: objc2::rc::autorelease::autoreleasepool
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-0.5.2/src/rc/autorelease.rs:438:15
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-0.5.2/src/rc/autorelease.rs:438:15
   78: winit::platform_impl::macos::event_loop::EventLoop<T>::run_on_demand::{{closure}}
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:285:13
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:285:13
   79: winit::platform_impl::macos::event_handler::EventHandler::set
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_handler.rs:98:9
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_handler.rs:98:9
   80: winit::platform_impl::macos::event_loop::EventLoop<T>::run_on_demand
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:284:23
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:284:23
   81: winit::platform_impl::macos::event_loop::EventLoop<T>::run
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:271:14
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/macos/event_loop.rs:271:14
   82: winit::event_loop::EventLoop<T>::run_app
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
   83: bevy_winit::state::winit_runner
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:900:42
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_winit-0.18.1/src/state.rs:900:42
   84: core::ops::function::FnOnce::call_once{{vtable.shim}}
   85: <alloc::boxed::Box<F,A> as core::ops::function::FnOnce<Args>>::call_once
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/alloc/src/boxed.rs:2240:9
   86: bevy_app::app::App::run
-             at /Users/home/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/app.rs:195:9
+             at ./.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bevy_app-0.18.1/src/app.rs:195:9
   87: starfall_i::main
-             at ./src/main.rs:113:9
+             at ./Desktop/Games/Starfall_I/src/main.rs:114:9
   88: core::ops::function::FnOnce::call_once
              at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/ops/function.rs:250:5
   89: std::sys::backtrace::__rust_begin_short_backtrace

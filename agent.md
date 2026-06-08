@@ -58,10 +58,12 @@ together.
   is the campaign fast-travel source of truth, and `map_settlements()` owns
   optional cities/villages/harbors/outposts for side-quest staging.
   `WorldPlugin` spawns matching heightmap beacons/anchors, settlements, range
-  biomes, glacier streams, snowfields, outposts, and lair silhouettes, and
-  chapter/player startup uses chapter anchors for fast travel. Keep heightmap
-  changes tied to the shared height function so visuals, anchors, and
-  collision agree.
+  biomes, glacier streams, snowfields, outposts, mountain-route path slabs,
+  cyan guide studs, and lair silhouettes, and chapter/player startup uses
+  chapter anchors for fast travel. The terrain mesh uses height/slope/route
+  vertex colors for grass, alpine rock, ice, snow, and trails. Keep heightmap
+  changes tied to the shared height function and `mountain_routes()` so
+  visuals, anchors, route markers, and collision agree.
 - Settlement conversations are data-driven in `src/discussion.rs`.
   `DiscussionNpc` entities open the HUD discussion panel from `E` / D-pad
   Down, and each line can spawn an MP3 voice file from `assets/voice/...`.
@@ -72,6 +74,12 @@ together.
 - Player input is controller-first local multiplayer: preserve analog movement
   magnitude, keep circular deadzone remapping, support LT/RT button and axis
   paths, and treat controller smoke testing as required for movement changes.
+- Humanoid traversal planning lives in `docs/motion_mechanics_roadmap.md`.
+  Current first slice: `CartoonPose` distinguishes jump, fall, flight,
+  one-hand wall slide, and hang, and wall sliding is a stamina-backed clasp.
+  Keep future parkour/flight/combat traversal work routed through
+  `PlayerMovement`, `EdgeGrabState`, and `PlayerStateMachine` before adding
+  new standalone movement state.
 - Runtime player guidance uses the `PlayerGuidance` resource and HUD panel in
   `src/plugins/ui_plugin.rs`. Feed new interactables into that panel when they
   need immediate player-facing prompts.
@@ -79,7 +87,8 @@ together.
   `ChapterSelect`, `ChassisEditor`, `Playing`, `Paused`, and `GameOver`.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
   `docs/improvements.md`, `docs/naming.md`, and
-  `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md`.
+  `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md` and
+  `docs/motion_mechanics_roadmap.md`.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
 

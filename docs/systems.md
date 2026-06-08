@@ -71,14 +71,16 @@ The panel hides while a discussion is active so the dialogue UI can own the bott
 | Moving | WASD / left stick | Smoothed acceleration toward `walk_speed = 0.38` |
 | Sprinting | Shift / LB + move | Drains stamina 15/sec |
 | Jetpack | Hold Space / South while airborne | Burns `fuel_cost_per_sec = 20`/sec; regens on ground |
-| WallSliding | Pushing into wall while falling | Caps fall speed at `wall_slide_speed = 0.28` |
+| WallSliding | Pushing into wall while falling | One-hand wall clasp; drains light stamina and caps fall speed at `wall_slide_speed = 0.28` |
 | Hanging | Interact while falling into a wall | Max hang time 2.5s; drains stamina 12/sec |
 
 Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity. The Rapier `KinematicCharacterController` uses explicit movement-profile fields for offset, step height/width, and snap-to-ground distance so small lips and authored traversal props are easier to tune consistently.
 
 Analog movement preserves stick strength. Sprint requires the sprint input plus near-full stick deflection (`analog_sprint_threshold`) so light controller movement does not unexpectedly drain stamina or snap into sprint.
 
-Wall slide is the default wall-contact behavior while falling; hanging is now intentional through `E` / D-pad Down. Wall jump is triggered from buffered jump input while `wall_contact_timer > 0` and airborne. It pushes away from wall normal + 25% input direction, has a short steering lockout for cleaner arcs, and carries two wall-jump charges that refresh on landing or renewed wall slide contact.
+Wall slide is the default wall-contact behavior while falling; it now behaves as a stamina-backed one-hand wall clasp, drains a small amount of stamina, refreshes wall-jump charges, slows descent, and falls back to a faster tired slide when stamina is gone. Hanging is intentional through `E` / D-pad Down. Wall jump is triggered from buffered jump input while `wall_contact_timer > 0` and airborne. It pushes away from wall normal + 25% input direction, has a short steering lockout for cleaner arcs, and carries two wall-jump charges that refresh on landing or renewed wall slide contact.
+
+Procedural character poses now distinguish idle, walk, run, jump, fall, flight, one-hand wall slide, and hang. The long-form roadmap for turning this into a full humanoid traversal/combat system lives in `docs/motion_mechanics_roadmap.md`.
 
 Climb-up: `E` / D-pad Down while hanging. Boosts player upward `climb_boost * dt * 60`.
 
@@ -566,7 +568,9 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 **Module:** `src/lsystem/` | **Plugin:** `WorldPlugin`
 
 - Terrain heightmap via deterministic layered waves/ridges plus `assets/terrain/everest.png` mapped across the full 200 x 200 mile range; seed from `GameSettings.world_seed`.
-- Current heightmap import is full-map scoped: `assets/terrain/everest.png` is loaded once through Bevy image decoding, sampled bilinearly, faded at its outer edges, and blended into the deterministic terrain so collision and visuals share the same height function.
+- Current heightmap import is full-map scoped: `assets/terrain/everest.png` is loaded once through Bevy image decoding, sampled bilinearly with a smoothing transform, faded at its outer edges, and blended into the deterministic terrain so collision and visuals share the same height function.
+- Terrain visuals use Bevy mesh vertex colors as the current texture layer: low grass, alpine meadow, exposed rock, darker strata, blue ice, high snow, and shared mountain-route trail tint are derived from height, slope, seeded detail noise, and route influence.
+- `mountain_routes()` is the shared source for path color corridors, light guide waylines, carved pass relief, and spawned slab/stud path pieces. Keep future chapter routes on this helper so map art, terrain shaping, and navigation markers stay aligned.
 - Outer districts, spaceports, trees, crystals, mountains, and authored anchors sample the terrain surface so upgraded props sit on the generated ground rather than the old flat plane.
 - Decorative trees via L-system string rewriting (`lsystem/mod.rs`) + 3-D turtle interpreter (`lsystem/turtle.rs`).
 - City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.

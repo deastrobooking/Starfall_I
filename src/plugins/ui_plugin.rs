@@ -2703,9 +2703,11 @@ fn player_guidance_system(
     loot_q: Query<(&Transform, &WorldLoot)>,
     spy_q: Query<(&Transform, &CitySpyDrone, &Health)>,
     mut panel_q: Query<&mut Node, With<GuidancePanelRoot>>,
-    mut title_q: Query<&mut Text, With<GuidanceTitleText>>,
-    mut body_q: Query<&mut Text, With<GuidanceBodyText>>,
-    mut action_q: Query<&mut Text, With<GuidanceActionText>>,
+    mut text_sets: ParamSet<(
+        Query<&mut Text, With<GuidanceTitleText>>,
+        Query<&mut Text, With<GuidanceBodyText>>,
+        Query<&mut Text, With<GuidanceActionText>>,
+    )>,
 ) {
     let mut best: Option<GuidanceCandidate> = None;
 
@@ -2840,13 +2842,13 @@ fn player_guidance_system(
             Display::None
         };
     }
-    if let Ok(mut text) = title_q.single_mut() {
+    if let Ok(mut text) = text_sets.p0().single_mut() {
         *text = Text::new(guidance.title.clone());
     }
-    if let Ok(mut text) = body_q.single_mut() {
+    if let Ok(mut text) = text_sets.p1().single_mut() {
         *text = Text::new(guidance.body.clone());
     }
-    if let Ok(mut text) = action_q.single_mut() {
+    if let Ok(mut text) = text_sets.p2().single_mut() {
         *text = Text::new(guidance.action.clone());
     }
 }
@@ -2912,10 +2914,12 @@ fn discussion_panel_system(
     mut discussion: ResMut<DiscussionState>,
     mut last_voice_token: Local<u64>,
     mut panel_q: Query<&mut Node, With<DiscussionPanelRoot>>,
-    mut title_q: Query<&mut Text, With<DiscussionTitleText>>,
-    mut speaker_q: Query<&mut Text, With<DiscussionSpeakerText>>,
-    mut body_q: Query<&mut Text, With<DiscussionBodyText>>,
-    mut hint_q: Query<&mut Text, With<DiscussionHintText>>,
+    mut text_sets: ParamSet<(
+        Query<&mut Text, With<DiscussionTitleText>>,
+        Query<&mut Text, With<DiscussionSpeakerText>>,
+        Query<&mut Text, With<DiscussionBodyText>>,
+        Query<&mut Text, With<DiscussionHintText>>,
+    )>,
     player_input_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
 ) {
     if discussion.input_cooldown > 0.0 {
@@ -2953,20 +2957,20 @@ fn discussion_panel_system(
         *last_voice_token = discussion.voice_token;
     }
 
-    if let Ok(mut text) = title_q.single_mut() {
+    if let Ok(mut text) = text_sets.p0().single_mut() {
         *text = Text::new(format!("{} - {}", script.title, script.role));
     }
-    if let Ok(mut text) = speaker_q.single_mut() {
+    if let Ok(mut text) = text_sets.p1().single_mut() {
         *text = Text::new(format!(
             "{}  P{}",
             line.speaker,
             discussion.player_index + 1
         ));
     }
-    if let Ok(mut text) = body_q.single_mut() {
+    if let Ok(mut text) = text_sets.p2().single_mut() {
         *text = Text::new(line.text);
     }
-    if let Ok(mut text) = hint_q.single_mut() {
+    if let Ok(mut text) = text_sets.p3().single_mut() {
         *text = Text::new(format!(
             "Interact / Enter / Space: next   Line {}/{}   Voice: {}",
             discussion.line_index + 1,
