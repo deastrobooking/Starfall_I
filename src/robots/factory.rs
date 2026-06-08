@@ -6,10 +6,8 @@ use crate::rendering::{PbrBundle, SpatialBundle};
 /// Procedurally generate a robot mesh hierarchy at the given world position.
 /// Returns the root `Entity`. All sub-parts are children of the root.
 ///
-/// The robot is built out of PBR box / sphere / cylinder meshes combined into
-/// a parent `TransformNode` (a `SpatialBundle`).  Parts are scaled by
-/// `style.scale / 100.0` so that the raw sizes (given in designer-units) map
-/// to reasonable Bevy world units.
+/// Parts use smooth Capsule3d/Sphere/Cylinder primitives so every robot reads
+/// as a rounded, mechanical silhouette rather than a hard-edged box stack.
 pub fn spawn_robot(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -21,14 +19,14 @@ pub fn spawn_robot(
 
     let primary_mat = materials.add(StandardMaterial {
         base_color: style.primary,
-        metallic: 0.4,
-        perceptual_roughness: 0.6,
+        metallic: 0.55,
+        perceptual_roughness: 0.45,
         ..default()
     });
     let secondary_mat = materials.add(StandardMaterial {
         base_color: style.secondary,
-        metallic: 0.3,
-        perceptual_roughness: 0.7,
+        metallic: 0.40,
+        perceptual_roughness: 0.55,
         ..default()
     });
     let emissive_mat = materials.add(StandardMaterial {
@@ -37,7 +35,7 @@ pub fn spawn_robot(
         ..default()
     });
 
-    // Root entity (physics, position)
+    // Root entity
     let root = commands
         .spawn((SpatialBundle::from_transform(Transform::from_translation(
             position,
@@ -48,45 +46,65 @@ pub fn spawn_robot(
     let th = style.torso_height * s;
     let td = style.torso_depth * s;
 
-    // ── Torso ─────────────────────────────────────────────────────────────────
+    // ── Torso: Capsule3d main body ─────────────────────────────────────────────
     let torso = commands
         .spawn(PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(tw, th, td))),
+            mesh: Mesh3d(meshes.add(Capsule3d::new(tw * 0.46, th * 0.55))),
             material: MeshMaterial3d(primary_mat.clone()),
-            transform: Transform::from_xyz(0.0, th * 0.5, 0.0),
+            transform: Transform::from_xyz(0.0, th * 0.5, 0.0)
+                .with_scale(Vec3::new(1.0, 1.0, td / (tw * 0.92))),
             ..default()
         })
         .id();
     commands.entity(root).add_child(torso);
 
-    // ── Chest plate ───────────────────────────────────────────────────────────
+    // ── Chest plate: protruding ellipsoid ─────────────────────────────────────
     let cp = commands
         .spawn(PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(tw * 0.7, th * 0.5, td * 0.2))),
+            mesh: Mesh3d(meshes.add(Sphere::new(0.5))),
             material: MeshMaterial3d(secondary_mat.clone()),
-            transform: Transform::from_xyz(0.0, th * 0.6, td * 0.55),
+            transform: Transform::from_xyz(0.0, th * 0.60, td * 0.52)
+                .with_scale(Vec3::new(tw * 0.68, th * 0.42, td * 0.22)),
             ..default()
         })
         .id();
     commands.entity(root).add_child(cp);
 
+    // Core glow reactor
+    let core = commands
+        .spawn(PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(tw * 0.10))),
+            material: MeshMaterial3d(emissive_mat.clone()),
+            transform: Transform::from_xyz(0.0, th * 0.55, td * 0.55),
+            ..default()
+        })
+        .id();
+    commands.entity(root).add_child(core);
+
     // ── Head ──────────────────────────────────────────────────────────────────
     let hs = style.head_size * s;
-    let head_mesh: Mesh = match style.head_shape {
-        HeadShape::Sphere => Sphere::new(hs * 0.55).into(),
-        HeadShape::Cylinder => Cylinder::new(hs * 0.5, hs).into(),
-        HeadShape::Cone => Cone {
-            radius: hs * 0.5,
-            height: hs * 1.3,
-        }
-        .into(),
-        HeadShape::Box => Cuboid::new(hs, hs, hs).into(),
+    let (head_mesh, head_scale): (Mesh, Vec3) = match style.head_shape {
+        HeadShape::Sphere => (Sphere::new(hs * 0.55).into(), Vec3::ONE),
+        HeadShape::Cylinder => (Cylinder::new(hs * 0.48, hs).into(), Vec3::ONE),
+        HeadShape::Cone => (
+            Cone {
+                radius: hs * 0.48,
+                height: hs * 1.25,
+            }
+            .into(),
+            Vec3::ONE,
+        ),
+        // Round "Box" head into a squashed sphere
+        HeadShape::Box => (
+            Sphere::new(hs * 0.52).into(),
+            Vec3::new(1.0, 0.88, 0.90),
+        ),
     };
     let head = commands
         .spawn(PbrBundle {
             mesh: Mesh3d(meshes.add(head_mesh)),
             material: MeshMaterial3d(primary_mat.clone()),
-            transform: Transform::from_xyz(0.0, th + hs * 0.5, 0.0),
+            transform: Transform::from_xyz(0.0, th + hs * 0.5, 0.0).with_scale(head_scale),
             ..default()
         })
         .id();
@@ -94,61 +112,106 @@ pub fn spawn_robot(
 
     // ── Visor ─────────────────────────────────────────────────────────────────
     if style.has_visor {
-        let (vw, vh, vd) = match style.visor_style {
-            VisorStyle::Slit => (hs * 0.7, hs * 0.15, hs * 0.15),
-            VisorStyle::Round => (hs * 0.5, hs * 0.35, hs * 0.15),
-            VisorStyle::Full => (hs * 0.75, hs * 0.5, hs * 0.15),
+        let (visor_mesh, visor_tf): (Mesh, Transform) = match style.visor_style {
+            VisorStyle::Slit => (
+                Cylinder::new(hs * 0.38, hs * 0.12).into(),
+                Transform::from_xyz(0.0, th + hs * 0.5, hs * 0.52)
+                    .with_scale(Vec3::new(1.55, 1.0, 1.0))
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            ),
+            VisorStyle::Round => (
+                Sphere::new(hs * 0.30).into(),
+                Transform::from_xyz(0.0, th + hs * 0.5, hs * 0.52),
+            ),
+            VisorStyle::Full => (
+                Sphere::new(0.5).into(),
+                Transform::from_xyz(0.0, th + hs * 0.5, hs * 0.52)
+                    .with_scale(Vec3::new(hs * 0.72, hs * 0.48, hs * 0.18)),
+            ),
         };
         let visor = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(vw, vh, vd))),
+                mesh: Mesh3d(meshes.add(visor_mesh)),
                 material: MeshMaterial3d(emissive_mat.clone()),
-                transform: Transform::from_xyz(0.0, th + hs * 0.5, hs * 0.55),
+                transform: visor_tf,
                 ..default()
             })
             .id();
         commands.entity(root).add_child(visor);
     }
 
-    // ── Arms ──────────────────────────────────────────────────────────────────
+    // ── Arms: Capsule3d segments + Sphere joints ───────────────────────────────
     let al = style.arm_length * s;
     let at = style.arm_thickness * s;
     for side in [-1.0_f32, 1.0] {
+        let arm_x = side * (tw * 0.5 + at * 0.5);
+
+        // Shoulder ball joint
+        let sball = commands
+            .spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(at * 0.65))),
+                material: MeshMaterial3d(secondary_mat.clone()),
+                transform: Transform::from_xyz(arm_x, th * 0.90, 0.0),
+                ..default()
+            })
+            .id();
+        commands.entity(root).add_child(sball);
+
+        // Upper arm capsule
         let arm = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(at, al, at))),
+                mesh: Mesh3d(meshes.add(Capsule3d::new(at * 0.46, al * 0.44))),
                 material: MeshMaterial3d(primary_mat.clone()),
-                transform: Transform::from_xyz(side * (tw * 0.5 + at * 0.5), th * 0.65, 0.0),
+                transform: Transform::from_xyz(arm_x, th * 0.65, 0.0),
                 ..default()
             })
             .id();
         commands.entity(root).add_child(arm);
 
-        // Shoulder pad
+        // Elbow joint sphere
+        let elbow = commands
+            .spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(at * 0.52))),
+                material: MeshMaterial3d(secondary_mat.clone()),
+                transform: Transform::from_xyz(arm_x, th * 0.65 - al * 0.24, 0.0),
+                ..default()
+            })
+            .id();
+        commands.entity(root).add_child(elbow);
+
+        // Forearm capsule
+        let forearm = commands
+            .spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Capsule3d::new(at * 0.40, al * 0.44))),
+                material: MeshMaterial3d(primary_mat.clone()),
+                transform: Transform::from_xyz(arm_x, th * 0.65 - al * 0.48, 0.0),
+                ..default()
+            })
+            .id();
+        commands.entity(root).add_child(forearm);
+
+        // Shoulder pad: dome sphere
         let sp = style.shoulder_pad_size * s;
         let spad = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(sp * 1.4, sp * 0.6, sp * 1.1))),
+                mesh: Mesh3d(meshes.add(Sphere::new(sp * 0.62))),
                 material: MeshMaterial3d(secondary_mat.clone()),
-                transform: Transform::from_xyz(side * (tw * 0.5 + at * 0.5), th * 0.9, 0.0),
+                transform: Transform::from_xyz(arm_x, th * 0.92, 0.0)
+                    .with_scale(Vec3::new(1.0, 0.60, 0.95)),
                 ..default()
             })
             .id();
         commands.entity(root).add_child(spad);
 
-        // Cannon (if enabled)
+        // Cannon (forward-pointing cylinder)
         if style.has_cannons {
             let cs = style.cannon_size * s;
             let cannon = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cylinder::new(cs * 0.3, cs * 2.0))),
+                    mesh: Mesh3d(meshes.add(Cylinder::new(cs * 0.30, cs * 2.0))),
                     material: MeshMaterial3d(emissive_mat.clone()),
-                    transform: Transform::from_xyz(
-                        side * (tw * 0.5 + at * 0.5),
-                        th * 0.5,
-                        td * 0.6,
-                    )
-                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    transform: Transform::from_xyz(arm_x, th * 0.5, td * 0.6)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                     ..default()
                 })
                 .id();
@@ -165,43 +228,53 @@ pub fn spawn_robot(
                 // Floating disc
                 let pad = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cylinder::new(lt * 0.8, lt * 0.3))),
+                        mesh: Mesh3d(meshes.add(Cylinder::new(lt * 0.80, lt * 0.28))),
                         material: MeshMaterial3d(secondary_mat.clone()),
-                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.4, 0.0),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.42, 0.0),
                         ..default()
                     })
                     .id();
                 commands.entity(root).add_child(pad);
-                // Strut
+                // Strut: thin Capsule3d
                 let strut = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(lt * 0.25, ll * 0.5, lt * 0.25))),
+                        mesh: Mesh3d(meshes.add(Capsule3d::new(lt * 0.12, ll * 0.44))),
                         material: MeshMaterial3d(primary_mat.clone()),
-                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.15, 0.0),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.18, 0.0),
                         ..default()
                     })
                     .id();
                 commands.entity(root).add_child(strut);
             }
             LegStyle::Digitigrade => {
-                // Upper leg (thigh)
+                // Thigh
                 let thigh = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(lt, ll * 0.45, lt))),
+                        mesh: Mesh3d(meshes.add(Capsule3d::new(lt * 0.46, ll * 0.42))),
                         material: MeshMaterial3d(primary_mat.clone()),
-                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.2, 0.0)
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.20, 0.0)
                             .with_rotation(Quat::from_rotation_z(side * 0.15)),
                         ..default()
                     })
                     .id();
                 commands.entity(root).add_child(thigh);
-                // Shin (angled forward)
+                // Knee sphere
+                let knee = commands
+                    .spawn(PbrBundle {
+                        mesh: Mesh3d(meshes.add(Sphere::new(lt * 0.52))),
+                        material: MeshMaterial3d(secondary_mat.clone()),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.46, lt * 0.08),
+                        ..default()
+                    })
+                    .id();
+                commands.entity(root).add_child(knee);
+                // Shin angled forward
                 let shin = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(lt * 0.8, ll * 0.45, lt * 0.8))),
+                        mesh: Mesh3d(meshes.add(Capsule3d::new(lt * 0.38, ll * 0.42))),
                         material: MeshMaterial3d(primary_mat.clone()),
-                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.65, lt * 0.3)
-                            .with_rotation(Quat::from_rotation_x(-0.4)),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.68, lt * 0.24)
+                            .with_rotation(Quat::from_rotation_x(-0.38)),
                         ..default()
                     })
                     .id();
@@ -211,29 +284,40 @@ pub fn spawn_robot(
                 // Thigh
                 let thigh = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(lt, ll * 0.45, lt))),
+                        mesh: Mesh3d(meshes.add(Capsule3d::new(lt * 0.46, ll * 0.42))),
                         material: MeshMaterial3d(primary_mat.clone()),
-                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.2, 0.0),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.20, 0.0),
                         ..default()
                     })
                     .id();
                 commands.entity(root).add_child(thigh);
+                // Knee sphere
+                let knee = commands
+                    .spawn(PbrBundle {
+                        mesh: Mesh3d(meshes.add(Sphere::new(lt * 0.52))),
+                        material: MeshMaterial3d(secondary_mat.clone()),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.46, 0.0),
+                        ..default()
+                    })
+                    .id();
+                commands.entity(root).add_child(knee);
                 // Shin
                 let shin = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(lt * 0.8, ll * 0.45, lt * 0.8))),
+                        mesh: Mesh3d(meshes.add(Capsule3d::new(lt * 0.38, ll * 0.42))),
                         material: MeshMaterial3d(primary_mat.clone()),
-                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.65, 0.0),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.68, 0.0),
                         ..default()
                     })
                     .id();
                 commands.entity(root).add_child(shin);
-                // Foot
+                // Foot: horizontal Capsule3d
                 let foot = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(lt * 1.1, lt * 0.4, lt * 1.5))),
+                        mesh: Mesh3d(meshes.add(Capsule3d::new(lt * 0.40, lt * 1.30))),
                         material: MeshMaterial3d(secondary_mat.clone()),
-                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.9, lt * 0.2),
+                        transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.92, lt * 0.18)
+                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                         ..default()
                     })
                     .id();
@@ -242,25 +326,28 @@ pub fn spawn_robot(
         }
     }
 
-    // ── Wings ─────────────────────────────────────────────────────────────────
+    // ── Wings: thin Capsule3d panels ──────────────────────────────────────────
     if style.has_wings {
         let ws = style.wing_span * s;
         let wa = style.wing_angle.to_radians();
         for side in [-1.0_f32, 1.0] {
             let wing = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(ws * 0.5, ws * 0.06, ws * 0.18))),
+                    mesh: Mesh3d(meshes.add(Capsule3d::new(ws * 0.04, ws * 0.46))),
                     material: MeshMaterial3d(secondary_mat.clone()),
                     transform: Transform::from_xyz(side * (tw * 0.5 + ws * 0.25), th * 0.75, 0.0)
-                        .with_rotation(Quat::from_rotation_z(side * wa)),
+                        .with_rotation(
+                            Quat::from_rotation_z(side * wa)
+                                * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                        ),
                     ..default()
                 })
                 .id();
             commands.entity(root).add_child(wing);
-            // Wing tip (emissive)
+            // Wing-tip glow
             let tip = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(ws * 0.08, ws * 0.04, ws * 0.08))),
+                    mesh: Mesh3d(meshes.add(Sphere::new(ws * 0.055))),
                     material: MeshMaterial3d(emissive_mat.clone()),
                     transform: Transform::from_xyz(
                         side * (tw * 0.5 + ws * 0.5),
@@ -274,16 +361,17 @@ pub fn spawn_robot(
         }
     }
 
-    // ── Horns ─────────────────────────────────────────────────────────────────
+    // ── Horns: Capsule3d pillars ───────────────────────────────────────────────
     if style.has_horns {
         let hl = style.horn_length * s;
         for side in [-1.0_f32, 1.0] {
             let horn = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(hl * 0.2, hl, hl * 0.2))),
+                    mesh: Mesh3d(meshes.add(Capsule3d::new(hl * 0.08, hl * 0.78))),
                     material: MeshMaterial3d(secondary_mat.clone()),
-                    transform: Transform::from_xyz(side * hs * 0.35, th + hs + hl * 0.5, 0.0)
-                        .with_rotation(Quat::from_rotation_z(side * 0.3)),
+                    transform: Transform::from_xyz(side * hs * 0.36, th + hs + hl * 0.5, 0.0)
+                        .with_rotation(Quat::from_rotation_z(side * 0.30))
+                        .with_scale(Vec3::new(1.0, 1.0, 0.55)),
                     ..default()
                 })
                 .id();
@@ -291,7 +379,7 @@ pub fn spawn_robot(
         }
     }
 
-    // ── Tail ──────────────────────────────────────────────────────────────────
+    // ── Tail: Capsule3d segments tapering toward tip ───────────────────────────
     if style.has_tail {
         let tl = style.tail_length * s;
         let seg = style.tail_segments;
@@ -299,16 +387,13 @@ pub fn spawn_robot(
         let mut tail_z = -td * 0.5;
         for i in 0..seg {
             let t = i as f32 / seg as f32;
-            let thickness = (0.08 - t * 0.05).max(0.02) * tl;
+            let radius = ((0.07 - t * 0.05) * tl).max(0.012 * tl);
             let segment = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(thickness, thickness, seg_len))),
+                    mesh: Mesh3d(meshes.add(Capsule3d::new(radius, seg_len * 0.82))),
                     material: MeshMaterial3d(secondary_mat.clone()),
-                    transform: Transform::from_xyz(
-                        0.0,
-                        th * 0.3 - t * th * 0.4,
-                        tail_z - seg_len * 0.5,
-                    ),
+                    transform: Transform::from_xyz(0.0, th * 0.3 - t * th * 0.4, tail_z - seg_len * 0.5)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                     ..default()
                 })
                 .id();
@@ -317,28 +402,27 @@ pub fn spawn_robot(
         }
     }
 
-    // ── Antennae ──────────────────────────────────────────────────────────────
+    // ── Antennae: thin Capsule3d + Sphere glow tip ────────────────────────────
     if style.has_antennae {
-        let al = style.antenna_length * s;
+        let ant_l = style.antenna_length * s;
         for side in [-1.0_f32, 1.0] {
             let ant = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(al * 0.06, al, al * 0.06))),
+                    mesh: Mesh3d(meshes.add(Capsule3d::new(ant_l * 0.032, ant_l * 0.88))),
                     material: MeshMaterial3d(primary_mat.clone()),
-                    transform: Transform::from_xyz(side * hs * 0.3, th + hs * 1.2, 0.0)
-                        .with_rotation(Quat::from_rotation_z(side * 0.2)),
+                    transform: Transform::from_xyz(side * hs * 0.30, th + hs * 1.22, 0.0)
+                        .with_rotation(Quat::from_rotation_z(side * 0.20)),
                     ..default()
                 })
                 .id();
             commands.entity(root).add_child(ant);
-            // Tip glow
             let tip = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Sphere::new(al * 0.08))),
+                    mesh: Mesh3d(meshes.add(Sphere::new(ant_l * 0.09))),
                     material: MeshMaterial3d(emissive_mat.clone()),
                     transform: Transform::from_xyz(
-                        side * hs * 0.3 + side * al * 0.2 * 0.2,
-                        th + hs * 1.2 + al * 0.5,
+                        side * hs * 0.30 + side * ant_l * 0.20 * 0.20,
+                        th + hs * 1.22 + ant_l * 0.50,
                         0.0,
                     ),
                     ..default()
@@ -348,59 +432,51 @@ pub fn spawn_robot(
         }
     }
 
-    // ── Backpack ──────────────────────────────────────────────────────────────
+    // ── Backpack: rounded Capsule3d ───────────────────────────────────────────
     if style.has_backpack {
         let bp = style.backpack_size * s;
         let pack = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(bp * 1.2, bp * 1.5, bp * 0.8))),
+                mesh: Mesh3d(meshes.add(Capsule3d::new(bp * 0.52, bp * 1.20))),
                 material: MeshMaterial3d(secondary_mat.clone()),
-                transform: Transform::from_xyz(0.0, th * 0.65, -td * 0.55 - bp * 0.4),
+                transform: Transform::from_xyz(0.0, th * 0.65, -td * 0.55 - bp * 0.4)
+                    .with_scale(Vec3::new(1.15, 1.0, 0.72)),
                 ..default()
             })
             .id();
         commands.entity(root).add_child(pack);
     }
 
-    // ── Shield ────────────────────────────────────────────────────────────────
+    // ── Shield: ellipsoid disc ────────────────────────────────────────────────
     if style.has_shield {
         let ss = style.shield_size * s;
         let shield = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(ss, ss * 1.2, ss * 0.08))),
+                mesh: Mesh3d(meshes.add(Sphere::new(0.5))),
                 material: MeshMaterial3d(emissive_mat.clone()),
-                transform: Transform::from_xyz(-tw * 0.5 - ss * 0.5, th * 0.5, 0.0),
+                transform: Transform::from_xyz(-tw * 0.5 - ss * 0.5, th * 0.5, 0.0)
+                    .with_scale(Vec3::new(ss, ss * 1.18, ss * 0.10)),
                 ..default()
             })
             .id();
         commands.entity(root).add_child(shield);
     }
 
-    // ── Extra Plating ─────────────────────────────────────────────────────────
+    // ── Extra Plating: curved Sphere panels ───────────────────────────────────
     for i in 0..style.extra_plating {
         let side = if i % 2 == 0 { 1.0 } else { -1.0 };
-        let y_offset = th * (0.4 + i as f32 * 0.15);
+        let y_offset = th * (0.40 + i as f32 * 0.15);
         let plate = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(tw * 0.3, th * 0.12, td * 0.25))),
+                mesh: Mesh3d(meshes.add(Sphere::new(0.5))),
                 material: MeshMaterial3d(secondary_mat.clone()),
-                transform: Transform::from_xyz(side * tw * 0.3, y_offset, td * 0.55),
+                transform: Transform::from_xyz(side * tw * 0.28, y_offset, td * 0.52)
+                    .with_scale(Vec3::new(tw * 0.30, th * 0.10, td * 0.22)),
                 ..default()
             })
             .id();
         commands.entity(root).add_child(plate);
     }
-
-    // ── Core Glow ─────────────────────────────────────────────────────────────
-    let core = commands
-        .spawn(PbrBundle {
-            mesh: Mesh3d(meshes.add(Sphere::new(tw * 0.08))),
-            material: MeshMaterial3d(emissive_mat.clone()),
-            transform: Transform::from_xyz(0.0, th * 0.55, td * 0.5),
-            ..default()
-        })
-        .id();
-    commands.entity(root).add_child(core);
 
     root
 }

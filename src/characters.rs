@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use std::f32::consts::PI;
 
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
+use crate::character_parts::{CharacterLoadout, CharacterVisualConfig, PartSlotTag};
 use crate::components::character::{
     CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonRole,
 };
@@ -596,70 +597,92 @@ pub fn attach_cartoon_character(
             .with_scale(Vec3::new(1.12 * bw, 1.0, 0.72 * body.chest_size))
             .with_rotation(Quat::from_rotation_x(-posture * 0.18)),
     );
+    // Chest plate: ellipsoid (same bounds as old Cuboid, smooth rounded edges)
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Body,
-        Mesh::from(Cuboid::new(0.58 * s * bw, 0.36 * s, 0.055 * s)),
+        Mesh::from(Sphere::new(0.5)),
         armor.clone(),
         Transform::from_xyz(0.0, 0.06 * s, -0.265 * s)
+            .with_scale(Vec3::new(0.58 * s * bw, 0.36 * s, 0.080 * s))
             .with_rotation(Quat::from_rotation_x(-0.08 - posture * 0.12)),
     );
+    // Lower torso plate: ellipsoid
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Body,
-        Mesh::from(Cuboid::new(0.40 * s * bw, 0.25 * s, 0.045 * s)),
+        Mesh::from(Sphere::new(0.5)),
         suit_shadow.clone(),
         Transform::from_xyz(0.0, -0.29 * s, -0.245 * s)
+            .with_scale(Vec3::new(0.40 * s * bw, 0.25 * s, 0.055 * s))
             .with_rotation(Quat::from_rotation_x(-0.02 - posture * 0.10)),
     );
+    // Side accent tubes: Capsule3d (smooth cylindrical glow strips)
     for (x, rot_z) in [(-0.23_f32, -0.18_f32), (0.23_f32, 0.18_f32)] {
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Body,
-            Mesh::from(Cuboid::new(0.045 * s, 0.44 * s, 0.035 * s)),
+            Mesh::from(Capsule3d::new(0.022 * s, 0.20 * s)),
             accent_glow.clone(),
             Transform::from_xyz(x * s * bw, -0.10 * s, -0.292 * s)
                 .with_rotation(Quat::from_rotation_z(rot_z)),
         );
     }
+    // Hip guards: ellipsoid (smooth rounded)
     for (x, rot_z) in [(-0.26_f32, -0.25_f32), (0.26_f32, 0.25_f32)] {
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Body,
-            Mesh::from(Cuboid::new(0.22 * s, 0.12 * s, 0.30 * s)),
+            Mesh::from(Sphere::new(0.5)),
             armor.clone(),
             Transform::from_xyz(x * s * hip_width, -0.48 * s * height, -0.02 * s)
+                .with_scale(Vec3::new(0.22 * s, 0.12 * s, 0.30 * s))
                 .with_rotation(Quat::from_rotation_z(rot_z)),
         );
     }
+    // ── Neck ─────────────────────────────────────────────────────────────────
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Head,
+        Mesh::from(Capsule3d::new(0.10 * s, 0.08 * s)),
+        skin.clone(),
+        Transform::from_xyz(0.0, 0.40 * s, -0.010 * s)
+            .with_scale(Vec3::new(0.72, 1.0, 0.65)),
+    );
 
     // ── Belt (waist strap + centre buckle) ────────────────────────────────────
     if config.has_belt {
+        // Strap: ellipsoid band (smooth cross-section)
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Belt,
-            Mesh::from(Cuboid::new(0.80 * s * hip_width, 0.11 * s, 0.46 * s)),
+            Mesh::from(Sphere::new(0.5)),
             suit_shadow.clone(),
-            Transform::from_xyz(0.0, -0.38 * s * height, 0.0),
+            Transform::from_xyz(0.0, -0.38 * s * height, 0.0)
+                .with_scale(Vec3::new(0.80 * s * hip_width, 0.11 * s, 0.44 * s)),
         );
+        // Buckle: rounded ellipsoid
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Belt,
-            Mesh::from(Cuboid::new(0.19 * s, 0.17 * s, 0.06 * s)),
+            Mesh::from(Sphere::new(0.5)),
             accent_glow.clone(),
-            Transform::from_xyz(0.0, -0.38 * s * height, -0.24 * s),
+            Transform::from_xyz(0.0, -0.38 * s * height, -0.24 * s)
+                .with_scale(Vec3::new(0.19 * s, 0.17 * s, 0.07 * s)),
         );
     }
 
@@ -827,6 +850,7 @@ pub fn attach_cartoon_character(
 
     // ── Hood (default hero silhouette, sized for bigger head) ────────────────
     if config.has_hood {
+        // Main hood shell
         spawn_part(
             commands,
             meshes,
@@ -837,27 +861,17 @@ pub fn attach_cartoon_character(
             Transform::from_xyz(0.0, head_y + 0.15 * s, 0.01 * s)
                 .with_scale(Vec3::new(1.02, 0.82, 0.96)),
         );
-        // Face-opening accent trim
+        // Face-frame: soft Capsule3d arc (rounded instead of hard Cuboid edge)
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Hood,
-            Mesh::from(Cuboid::new(0.46 * s, 0.22 * s, 0.12 * s)),
+            Mesh::from(Capsule3d::new(0.10 * s, 0.12 * s)),
             armor.clone(),
-            Transform::from_xyz(0.0, head_y + 0.03 * s, -0.245 * s)
-                .with_rotation(Quat::from_rotation_x(-0.20)),
-        );
-        // Lower drape onto shoulders
-        spawn_part(
-            commands,
-            meshes,
-            root,
-            CartoonPartKind::Hood,
-            Mesh::from(Cuboid::new(0.42 * s, 0.20 * s, 0.16 * s)),
-            outfit.clone(),
-            Transform::from_xyz(0.0, head_y - 0.30 * s, 0.18 * s)
-                .with_rotation(Quat::from_rotation_x(0.30)),
+            Transform::from_xyz(0.0, head_y - 0.04 * s, -0.30 * s)
+                .with_scale(Vec3::new(1.55, 0.50, 0.38))
+                .with_rotation(Quat::from_rotation_x(-0.18)),
         );
     }
 
@@ -886,12 +900,13 @@ pub fn attach_cartoon_character(
         );
     }
 
-    // ── Arms + Hands: capsule limbs with armored gloves ──────────────────────
+    // ── Arms + Hands: capsule limbs with elbow joints ────────────────────────
     let arm_x = (0.34 + 0.075) * s * bw;
     for (kind, x) in [
         (CartoonPartKind::LeftArm, -arm_x),
         (CartoonPartKind::RightArm, arm_x),
     ] {
+        // Upper arm
         spawn_part(
             commands,
             meshes,
@@ -902,6 +917,7 @@ pub fn attach_cartoon_character(
             Transform::from_xyz(x, 0.02 * s - (arm_length - 1.0) * 0.07 * s, 0.0)
                 .with_scale(Vec3::new(0.92, 1.0, 0.82)),
         );
+        // Forearm
         spawn_part(
             commands,
             meshes,
@@ -912,14 +928,15 @@ pub fn attach_cartoon_character(
             Transform::from_xyz(x, -0.31 * s - (arm_length - 1.0) * 0.17 * s, -0.005 * s)
                 .with_scale(Vec3::new(0.88, 1.0, 0.80)),
         );
+        // Elbow joint: Sphere (replaces flat Cuboid band)
         spawn_part(
             commands,
             meshes,
             root,
             kind,
-            Mesh::from(Cuboid::new(0.19 * s, 0.055 * s, 0.18 * s)),
-            accent_glow.clone(),
-            Transform::from_xyz(x, -0.12 * s - (arm_length - 1.0) * 0.10 * s, -0.080 * s),
+            Mesh::from(Sphere::new(0.090 * s)),
+            armor.clone(),
+            Transform::from_xyz(x, -0.14 * s - (arm_length - 1.0) * 0.12 * s, -0.010 * s),
         );
     }
     let hand_mat = if config.has_gloves {
@@ -943,7 +960,7 @@ pub fn attach_cartoon_character(
         );
     }
 
-    // ── Legs + Boots: long anime legs, armored shins, readable boots ─────────
+    // ── Legs + Boots: anime legs, knee joints, rounded boots ─────────────────
     let leg_x = 0.165 * s * hip_width;
     let boot_mat = if config.has_boots {
         armor.clone()
@@ -954,6 +971,7 @@ pub fn attach_cartoon_character(
         (CartoonPartKind::LeftLeg, CartoonPartKind::LeftFoot, -leg_x),
         (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot, leg_x),
     ] {
+        // Thigh
         spawn_part(
             commands,
             meshes,
@@ -964,29 +982,38 @@ pub fn attach_cartoon_character(
             Transform::from_xyz(x, -0.67 * s - (leg_length - 1.0) * 0.13 * s, 0.0)
                 .with_scale(Vec3::new(0.86, 1.0, 0.78)),
         );
+        // Shin
         spawn_part(
             commands,
             meshes,
             root,
             leg_k,
             Mesh::from(Capsule3d::new(0.086 * s, 0.38 * s * leg_length)),
-            suit_shadow.clone(),
+            armor.clone(),
             Transform::from_xyz(x, -1.02 * s - (leg_length - 1.0) * 0.26 * s, -0.010 * s)
                 .with_scale(Vec3::new(0.82, 1.0, 0.72)),
         );
+        // Knee joint: Sphere
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Sphere::new(0.100 * s)),
+            armor.clone(),
+            Transform::from_xyz(x, -0.86 * s - (leg_length - 1.0) * 0.20 * s, -0.015 * s),
+        );
+        // Foot: horizontal Capsule3d (rounded shoe shape)
         spawn_part(
             commands,
             meshes,
             root,
             foot_k,
-            Mesh::from(Cuboid::new(
-                0.30 * s * foot_scale,
-                0.12 * s,
-                0.46 * s * foot_scale,
-            )),
+            Mesh::from(Capsule3d::new(0.095 * s, 0.14 * s * foot_scale)),
             boot_mat.clone(),
-            Transform::from_xyz(x, -1.25 * s - (leg_length - 1.0) * 0.31 * s, -0.14 * s)
-                .with_rotation(Quat::from_rotation_x(-0.05)),
+            Transform::from_xyz(x, -1.24 * s - (leg_length - 1.0) * 0.31 * s, -0.10 * s)
+                .with_rotation(Quat::from_rotation_x(PI * 0.5))
+                .with_scale(Vec3::new(0.86 * foot_scale, 1.0, 1.14)),
         );
         if config.has_boots {
             let boot_kind = if x < 0.0 {
@@ -994,31 +1021,26 @@ pub fn attach_cartoon_character(
             } else {
                 CartoonPartKind::RightBoot
             };
+            // Boot shaft: rounded Capsule3d ankle
             spawn_part(
                 commands,
                 meshes,
                 root,
                 boot_kind,
-                Mesh::from(Cuboid::new(
-                    0.22 * s * foot_scale,
-                    0.25 * s,
-                    0.23 * s * foot_scale,
-                )),
+                Mesh::from(Capsule3d::new(0.098 * s * foot_scale, 0.065 * s)),
                 boot_mat.clone(),
-                Transform::from_xyz(x, -1.08 * s - (leg_length - 1.0) * 0.22 * s, -0.03 * s),
+                Transform::from_xyz(x, -1.07 * s - (leg_length - 1.0) * 0.22 * s, -0.025 * s)
+                    .with_scale(Vec3::new(0.88, 1.0, 0.78)),
             );
+            // Boot accent: Cylinder ring
             spawn_part(
                 commands,
                 meshes,
                 root,
                 boot_kind,
-                Mesh::from(Cuboid::new(
-                    0.24 * s * foot_scale,
-                    0.045 * s,
-                    0.26 * s * foot_scale,
-                )),
+                Mesh::from(Cylinder::new(0.106 * s * foot_scale, 0.040 * s)),
                 accent_glow.clone(),
-                Transform::from_xyz(x, -1.03 * s - (leg_length - 1.0) * 0.22 * s, -0.155 * s),
+                Transform::from_xyz(x, -1.02 * s - (leg_length - 1.0) * 0.22 * s, -0.025 * s),
             );
         }
     }
@@ -1165,43 +1187,33 @@ pub fn attach_cartoon_character(
         );
     }
 
-    // ── Shoulder pads (layered fantasy sci-fi pauldrons) ─────────────────────
+    // ── Shoulder pads (dome pauldrons) ───────────────────────────────────────
     if config.has_shoulder_pads {
         for (kind, x, rot_z) in [
             (CartoonPartKind::ShoulderPadLeft, -arm_x, -0.18_f32),
             (CartoonPartKind::ShoulderPadRight, arm_x, 0.18_f32),
         ] {
+            // Dome: squashed Sphere pauldron (no more flat Cuboid or pointy Cone)
             spawn_part(
                 commands,
                 meshes,
                 root,
                 kind,
-                Mesh::from(Cuboid::new(0.30 * s, 0.095 * s, 0.30 * s)),
+                Mesh::from(Sphere::new(0.20 * s)),
                 armor.clone(),
-                Transform::from_xyz(x, 0.23 * s, -0.01 * s)
+                Transform::from_xyz(x, 0.24 * s, -0.015 * s)
+                    .with_scale(Vec3::new(1.0, 0.58, 0.92))
                     .with_rotation(Quat::from_rotation_z(rot_z)),
             );
+            // Accent ring at dome base
             spawn_part(
                 commands,
                 meshes,
                 root,
                 kind,
-                Mesh::from(Cone {
-                    radius: 0.14 * s,
-                    height: 0.20 * s,
-                }),
-                accent.clone(),
-                Transform::from_xyz(x, 0.32 * s, -0.02 * s)
-                    .with_rotation(Quat::from_rotation_z(rot_z) * Quat::from_rotation_x(0.10)),
-            );
-            spawn_part(
-                commands,
-                meshes,
-                root,
-                kind,
-                Mesh::from(Cuboid::new(0.31 * s, 0.035 * s, 0.31 * s)),
+                Mesh::from(Cylinder::new(0.185 * s, 0.038 * s)),
                 accent_glow.clone(),
-                Transform::from_xyz(x, 0.165 * s, -0.035 * s)
+                Transform::from_xyz(x, 0.162 * s, -0.022 * s)
                     .with_rotation(Quat::from_rotation_z(rot_z)),
             );
         }
@@ -1249,6 +1261,25 @@ pub fn attach_cartoon_character(
                 .with_rotation(Quat::from_rotation_x(0.55)),
         );
     }
+
+    // Store visual config for runtime part swaps, then lift all spawned parts.
+    let visual_cfg = CharacterVisualConfig {
+        scale: s,
+        body_width: bw,
+        hip_width,
+        arm_length,
+        leg_length,
+        hand_scale,
+        foot_scale,
+        outfit: config.outfit,
+        accent: config.accent,
+        has_gloves: config.has_gloves,
+        has_boots: config.has_boots,
+        visual_ground_lift,
+    };
+    commands
+        .entity(root)
+        .insert((CharacterLoadout::default(), visual_cfg));
 
     if visual_ground_lift > 0.001 {
         commands.queue(move |world: &mut World| {
@@ -1389,6 +1420,7 @@ fn spawn_part(
     material: Handle<StandardMaterial>,
     transform: Transform,
 ) {
+    let slot = PartSlotTag::from_kind(kind);
     let part = CartoonPart::new(root, kind, &transform);
     let entity = commands
         .spawn((
@@ -1399,6 +1431,7 @@ fn spawn_part(
                 ..default()
             },
             part,
+            slot,
         ))
         .id();
     commands.entity(root).add_child(entity);

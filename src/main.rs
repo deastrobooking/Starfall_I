@@ -11,6 +11,7 @@ use bevy_rapier3d::prelude::*;
 
 mod chapters;
 mod character_blueprint;
+mod character_parts;
 mod characters;
 mod components;
 mod damage;

@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::character_parts::{
+    spawn_robot_arms, spawn_robot_body, spawn_robot_legs, spawn_robot_shoulders,
+    CharacterLoadout, CharacterPartStyle, CharacterVisualConfig, PartSlotTag,
+};
 use crate::components::character::{
     CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonPose,
 };
@@ -15,9 +19,70 @@ impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            cartoon_animation_system
-                .run_if(in_state(AppState::Playing).or(in_state(AppState::CharacterDesign))),
+            (
+                cartoon_animation_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::CharacterDesign))),
+                swap_character_parts,
+            ),
         );
+    }
+}
+
+/// Watches for `CharacterLoadout` changes and swaps visual parts for any slot
+/// whose style changed to `RobotMechanical` (or back to `HumanoidClothing` is
+/// handled by despawn only — a full humanoid re-spawn is a future extension).
+fn swap_character_parts(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    changed: Query<
+        (Entity, &CharacterLoadout, &CharacterVisualConfig),
+        Changed<CharacterLoadout>,
+    >,
+    parts: Query<(Entity, &CartoonPart, &PartSlotTag)>,
+) {
+    for (root, loadout, visual_cfg) in &changed {
+        let lift = visual_cfg.visual_ground_lift;
+
+        let slots = [
+            (PartSlotTag::Body, loadout.body),
+            (PartSlotTag::Arms, loadout.arms),
+            (PartSlotTag::Legs, loadout.legs),
+            (PartSlotTag::Shoulders, loadout.shoulders),
+        ];
+
+        for (slot_tag, style) in slots {
+            // Despawn all existing parts for this slot on this root.
+            for (entity, part, tag) in &parts {
+                if part.root == root && *tag == slot_tag {
+                    commands.entity(entity).try_despawn();
+                }
+            }
+
+            // Spawn the new style.
+            match style {
+                CharacterPartStyle::RobotMechanical => match slot_tag {
+                    PartSlotTag::Body => {
+                        spawn_robot_body(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                    }
+                    PartSlotTag::Arms => {
+                        spawn_robot_arms(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                    }
+                    PartSlotTag::Legs => {
+                        spawn_robot_legs(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                    }
+                    PartSlotTag::Shoulders => {
+                        spawn_robot_shoulders(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                    }
+                    _ => {}
+                },
+                CharacterPartStyle::HumanoidClothing => {
+                    // Humanoid parts were just despawned; full re-spawn requires
+                    // calling attach_cartoon_character again from outside this system.
+                    // The caller (e.g. chassis editor) is responsible for that.
+                }
+            }
+        }
     }
 }
 
