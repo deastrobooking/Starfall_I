@@ -9,6 +9,7 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use std::sync::OnceLock;
 
+use crate::chapters::chapter_map_locations;
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::DiscoverableKind;
 use crate::components::player::{
@@ -20,7 +21,7 @@ use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
-use crate::resources::{CurrentChapter, GameSettings, PlaySessionTransition};
+use crate::resources::{CurrentChapter, DungeonCrawlState, GameSettings, PlaySessionTransition};
 use crate::state::AppState;
 
 #[derive(Resource, Default)]
@@ -98,6 +99,7 @@ pub struct WorldPlugin;
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ColliderDebugState>()
+            .init_resource::<DungeonCrawlState>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
@@ -105,6 +107,7 @@ impl Plugin for WorldPlugin {
                 Update,
                 (
                     animate_nature,
+                    dungeon_crawl_gate_system,
                     moving_platform_system,
                     rotating_elevator_system,
                     sling_shot_system,
@@ -133,6 +136,72 @@ fn animate_nature(time: Res<Time>, mut q: Query<(&NatureSway, &mut Transform)>) 
                 1.0 + wave * sway.pulse,
                 1.0 - cross * sway.pulse * 0.25,
             );
+    }
+}
+
+fn dungeon_crawl_gate_system(
+    time: Res<Time>,
+    mut dungeon: ResMut<DungeonCrawlState>,
+    mut gate_q: Query<&mut DungeonCrawlGate>,
+    mut door_q: Query<(&mut Transform, &DungeonGateDoor), Without<Player>>,
+    player_q: Query<(&Transform, &PlayerInput), With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let dt = time.delta_secs();
+    let mut opened_chapters = Vec::new();
+
+    for mut gate in gate_q.iter_mut() {
+        let party_near_gate = player_q.iter().any(|(transform, _)| {
+            transform.translation.distance(gate.entry) <= gate.interact_radius
+        });
+        let should_open = party_near_gate
+            && player_q.iter().any(|(transform, input)| {
+                input.interact && transform.translation.distance(gate.entry) <= gate.interact_radius
+            });
+
+        if should_open {
+            if !gate.opened {
+                msg_ev.write(UiMessageEvent {
+                    text: format!("{} opened - top-down dungeon crawl linked.", gate.label),
+                    duration: 3.0,
+                });
+            }
+            gate.opened = true;
+            dungeon.activate(
+                crate::chapters::ChapterId(gate.chapter),
+                gate.label,
+                gate.focus,
+                gate.entry,
+                gate.radius,
+            );
+        }
+
+        if gate.opened {
+            opened_chapters.push(gate.chapter);
+        }
+    }
+
+    if dungeon.active {
+        let keep_active = player_q.iter().any(|(transform, _)| {
+            transform.translation.distance(dungeon.focus) <= dungeon.radius + 70.0
+        });
+        if !keep_active {
+            dungeon.clear();
+            msg_ev.write(UiMessageEvent {
+                text: "Dungeon camera released.".to_string(),
+                duration: 1.6,
+            });
+        }
+    }
+
+    for (mut transform, door) in door_q.iter_mut() {
+        let target = if opened_chapters.contains(&door.chapter) {
+            door.open
+        } else {
+            door.closed
+        };
+        let blend = 1.0 - (-dt * 5.5).exp();
+        transform.translation = transform.translation.lerp(target, blend);
     }
 }
 
@@ -590,6 +659,7 @@ fn generate_city(
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
     spawn_secret_cave_systems(&mut commands, &mut meshes, &pal, seed);
     spawn_dragon_lair_dungeons(&mut commands, &mut meshes, m, &pal, seed);
+    spawn_chapter_map_locations(&mut commands, &mut meshes, &pal, seed);
     spawn_puzzle_anchors(&mut commands, seed);
 }
 
@@ -1117,6 +1187,117 @@ fn spawn_world_anchor(commands: &mut Commands, id: &'static str, position: Vec3)
     ));
 }
 
+fn spawn_chapter_map_locations(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    for location in chapter_map_locations() {
+        let ground_y = terrain_surface_y(location.x, location.z, seed);
+        let anchor = Vec3::new(location.x, ground_y + 0.35, location.z);
+        spawn_world_anchor(commands, location.anchor_id, anchor);
+
+        let marker_material = chapter_map_marker_material(pal, location.id.0);
+        let marker_height = if location.id.0 == 6 { 13.0 } else { 8.0 };
+        let marker_radius = if location.id.0 == 6 { 1.05 } else { 0.72 };
+
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(5.2, 0.32))),
+                material: MeshMaterial3d(pal.street_paint.clone()),
+                transform: Transform::from_xyz(location.x, ground_y + 0.16, location.z),
+                ..default()
+            },
+            WorldGeometry,
+            ChapterMapMarker {
+                chapter: location.id.0,
+                region: location.region,
+            },
+        ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(marker_radius, marker_height))),
+                material: MeshMaterial3d(marker_material.clone()),
+                transform: Transform::from_xyz(
+                    location.x,
+                    ground_y + marker_height * 0.5 + 0.35,
+                    location.z,
+                ),
+                ..default()
+            },
+            WorldGeometry,
+            ChapterMapMarker {
+                chapter: location.id.0,
+                region: location.region,
+            },
+        ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(marker_radius * 2.4))),
+                material: MeshMaterial3d(marker_material),
+                transform: Transform::from_xyz(
+                    location.x,
+                    ground_y + marker_height + 1.45,
+                    location.z,
+                ),
+                ..default()
+            },
+            WorldGeometry,
+            ChapterMapMarker {
+                chapter: location.id.0,
+                region: location.region,
+            },
+        ));
+
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: chapter_map_marker_light(location.id.0),
+                    intensity: if location.id.0 == 6 {
+                        90_000.0
+                    } else {
+                        38_000.0
+                    },
+                    range: if location.id.0 == 6 { 110.0 } else { 62.0 },
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_xyz(
+                    location.x,
+                    ground_y + marker_height + 2.0,
+                    location.z,
+                ),
+                ..default()
+            },
+            WorldGeometry,
+            ChapterMapMarker {
+                chapter: location.id.0,
+                region: location.region,
+            },
+        ));
+    }
+}
+
+fn chapter_map_marker_material(pal: &Palette, chapter: u8) -> Handle<StandardMaterial> {
+    match chapter {
+        6 | 7 | 8 | 10 | 11 => pal.crystal_dragon.clone(),
+        3 | 9 | 12 | 14 => pal.crystal_aurora.clone(),
+        13 => pal.castle_trim.clone(),
+        _ => pal.window_cool.clone(),
+    }
+}
+
+fn chapter_map_marker_light(chapter: u8) -> Color {
+    match chapter {
+        6 => Color::srgb(0.70, 0.90, 1.0),
+        7 | 8 | 10 | 11 => Color::srgb(1.0, 0.40, 0.18),
+        3 | 9 | 12 | 14 => Color::srgb(0.52, 0.75, 1.0),
+        13 => Color::srgb(1.0, 0.86, 0.34),
+        _ => Color::srgb(0.55, 0.92, 1.0),
+    }
+}
+
 fn spawn_puzzle_anchors(commands: &mut Commands, seed: u64) {
     let anchors: &[(&str, f32, f32, f32)] = &[
         // Chapter 1: downtown lab promenade
@@ -1543,6 +1724,7 @@ enum DragonDungeonTheme {
 struct DragonDungeonSpec {
     chapter: u8,
     anchor_id: &'static str,
+    gate_label: &'static str,
     reward_id: &'static str,
     reward_label: &'static str,
     x: f32,
@@ -1556,6 +1738,7 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
         DragonDungeonSpec {
             chapter: 6,
             anchor_id: "dragon_dungeon_ch06",
+            gate_label: "Collosar's Crown Gate",
             reward_id: "dragon_dungeon_ch06_cache",
             reward_label: "Crown Dungeon Hoard",
             x: -505.0,
@@ -1566,6 +1749,7 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
         DragonDungeonSpec {
             chapter: 7,
             anchor_id: "dragon_dungeon_ch07",
+            gate_label: "Tarack's Ember Gate",
             reward_id: "dragon_dungeon_ch07_cache",
             reward_label: "Ember Dungeon Hoard",
             x: -446.0,
@@ -1576,6 +1760,7 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
         DragonDungeonSpec {
             chapter: 8,
             anchor_id: "dragon_dungeon_ch08",
+            gate_label: "Shread's Fangroot Gate",
             reward_id: "dragon_dungeon_ch08_cache",
             reward_label: "Fangroot Dungeon Hoard",
             x: -330.0,
@@ -1586,6 +1771,7 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
         DragonDungeonSpec {
             chapter: 9,
             anchor_id: "dragon_dungeon_ch09",
+            gate_label: "Pink Flame Garden Gate",
             reward_id: "dragon_dungeon_ch09_cache",
             reward_label: "Pink Flame Garden Hoard",
             x: 430.0,
@@ -1596,6 +1782,7 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
         DragonDungeonSpec {
             chapter: 10,
             anchor_id: "dragon_dungeon_ch10",
+            gate_label: "Ragar's Granite Gate",
             reward_id: "dragon_dungeon_ch10_cache",
             reward_label: "Granite Dungeon Hoard",
             x: 520.0,
@@ -1606,6 +1793,7 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
         DragonDungeonSpec {
             chapter: 11,
             anchor_id: "dragon_dungeon_ch11",
+            gate_label: "Blackskull Ice Gate",
             reward_id: "dragon_dungeon_ch11_cache",
             reward_label: "Icebreaker Dungeon Hoard",
             x: 236.0,
@@ -1758,6 +1946,15 @@ fn spawn_dragon_lair_dungeon(
             false,
         );
     }
+    spawn_dungeon_crawl_gate(
+        commands,
+        meshes,
+        wall_mat.clone(),
+        accent_mat.clone(),
+        origin,
+        rot,
+        spec,
+    );
 
     for (index, local) in [
         Vec3::new(-7.0, 1.2, -28.0),
@@ -1852,6 +2049,65 @@ fn spawn_dragon_lair_dungeon(
         spec.anchor_id,
         origin + rot * Vec3::new(0.0, 3.0, 48.0),
     );
+}
+
+fn spawn_dungeon_crawl_gate(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    door_mat: Handle<StandardMaterial>,
+    trim_mat: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    spec: DragonDungeonSpec,
+) {
+    let entry = origin + rot * Vec3::new(0.0, 2.4, -56.0);
+    let focus = origin + rot * Vec3::new(0.0, 2.6, 0.0);
+
+    commands.spawn((
+        Transform::from_translation(entry),
+        GlobalTransform::default(),
+        WorldGeometry,
+        DungeonCrawlGate {
+            chapter: spec.chapter,
+            label: spec.gate_label,
+            entry,
+            focus,
+            radius: 66.0,
+            interact_radius: 17.0,
+            opened: false,
+        },
+    ));
+
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 2.75, 3.7, -62.7);
+        let open = origin + rot * Vec3::new(side * 8.4, 3.7, -62.7);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(5.1, 7.4, 1.0))),
+                material: MeshMaterial3d(door_mat.clone()),
+                transform: Transform::from_translation(closed).with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+            DungeonGateDoor {
+                chapter: spec.chapter,
+                closed,
+                open,
+            },
+            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+            bevy_rapier3d::prelude::Collider::cuboid(2.55, 3.7, 0.5),
+        ));
+    }
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(1.25, 3.2))),
+            material: MeshMaterial3d(trim_mat),
+            transform: Transform::from_translation(entry + Vec3::Y * 1.4),
+            ..default()
+        },
+        WorldGeometry,
+    ));
 }
 
 fn spawn_dungeon_block(

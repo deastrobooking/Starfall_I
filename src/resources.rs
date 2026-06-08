@@ -173,6 +173,57 @@ impl Default for CurrentChapter {
     }
 }
 
+// ── Dungeon Crawl Mode ───────────────────────────────────────────────────────
+#[derive(Resource, Debug, Clone)]
+pub struct DungeonCrawlState {
+    pub active: bool,
+    pub chapter: Option<ChapterId>,
+    pub label: String,
+    pub focus: Vec3,
+    pub anchor: Vec3,
+    pub radius: f32,
+}
+
+impl Default for DungeonCrawlState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            chapter: None,
+            label: String::new(),
+            focus: Vec3::ZERO,
+            anchor: Vec3::ZERO,
+            radius: 54.0,
+        }
+    }
+}
+
+impl DungeonCrawlState {
+    pub fn activate(
+        &mut self,
+        chapter: ChapterId,
+        label: impl Into<String>,
+        focus: Vec3,
+        anchor: Vec3,
+        radius: f32,
+    ) {
+        self.active = true;
+        self.chapter = Some(chapter);
+        self.label = label.into();
+        self.focus = focus;
+        self.anchor = anchor;
+        self.radius = radius.max(28.0);
+    }
+
+    pub fn clear(&mut self) {
+        self.active = false;
+        self.chapter = None;
+        self.label.clear();
+        self.focus = Vec3::ZERO;
+        self.anchor = Vec3::ZERO;
+        self.radius = 54.0;
+    }
+}
+
 // ── Biome Palette ─────────────────────────────────────────────────────────────
 #[derive(Resource, Debug, Clone)]
 pub struct BiomePalette {
@@ -396,5 +447,33 @@ impl PlayerSelectState {
             .map(|s| s.character_index)
             .unwrap_or(slot % HERO_ROSTER.len());
         HERO_ROSTER[idx % HERO_ROSTER.len()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dungeon_crawl_state_activates_and_clears() {
+        let mut dungeon = DungeonCrawlState::default();
+        dungeon.activate(
+            ChapterId(6),
+            "Collosar's Crown Gate",
+            Vec3::new(-500.0, 4.0, -330.0),
+            Vec3::new(-500.0, 2.0, -386.0),
+            66.0,
+        );
+
+        assert!(dungeon.active);
+        assert_eq!(dungeon.chapter, Some(ChapterId(6)));
+        assert_eq!(dungeon.label, "Collosar's Crown Gate");
+        assert_eq!(dungeon.radius, 66.0);
+
+        dungeon.clear();
+
+        assert!(!dungeon.active);
+        assert!(dungeon.chapter.is_none());
+        assert!(dungeon.label.is_empty());
     }
 }

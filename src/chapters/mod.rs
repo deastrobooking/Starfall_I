@@ -36,6 +36,169 @@ impl ChapterId {
     }
 }
 
+// ── World Map / Fast Travel Locations ────────────────────────────────────────
+#[derive(Debug, Clone, Copy)]
+pub struct ChapterMapLocation {
+    pub id: ChapterId,
+    pub anchor_id: &'static str,
+    pub region: &'static str,
+    pub landmark: &'static str,
+    pub x: f32,
+    pub z: f32,
+    pub facing_yaw: f32,
+}
+
+impl ChapterMapLocation {
+    pub fn spawn_position(&self, anchor: Vec3, player_index: u8) -> Vec3 {
+        const OFFSETS: [Vec3; 4] = [
+            Vec3::new(0.0, 2.4, 0.0),
+            Vec3::new(3.2, 2.4, 0.0),
+            Vec3::new(0.0, 2.4, 3.2),
+            Vec3::new(3.2, 2.4, 3.2),
+        ];
+        let offset = OFFSETS[player_index.min(3) as usize];
+        anchor + Quat::from_rotation_y(self.facing_yaw) * offset
+    }
+}
+
+pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
+    &[
+        ChapterMapLocation {
+            id: ChapterId(1),
+            anchor_id: "chapter_map_ch01",
+            region: "Starfall Lab",
+            landmark: "Invasion Gate",
+            x: 22.0,
+            z: 28.0,
+            facing_yaw: -0.25,
+        },
+        ChapterMapLocation {
+            id: ChapterId(2),
+            anchor_id: "chapter_map_ch02",
+            region: "Rift City",
+            landmark: "Tony's Shortcut",
+            x: 96.0,
+            z: 82.0,
+            facing_yaw: -0.80,
+        },
+        ChapterMapLocation {
+            id: ChapterId(3),
+            anchor_id: "chapter_map_ch03",
+            region: "Sister Starwell",
+            landmark: "Sanctum Rise",
+            x: -78.0,
+            z: 98.0,
+            facing_yaw: 0.70,
+        },
+        ChapterMapLocation {
+            id: ChapterId(4),
+            anchor_id: "chapter_map_ch04",
+            region: "Brother Trials",
+            landmark: "Training Court",
+            x: 112.0,
+            z: -34.0,
+            facing_yaw: 0.35,
+        },
+        ChapterMapLocation {
+            id: ChapterId(5),
+            anchor_id: "chapter_map_ch05",
+            region: "Bile Lab",
+            landmark: "Mirror Sludge",
+            x: -102.0,
+            z: 38.0,
+            facing_yaw: 1.15,
+        },
+        ChapterMapLocation {
+            id: ChapterId(6),
+            anchor_id: "chapter_map_ch06",
+            region: "Everest Crown Range",
+            landmark: "Collosar's Lair",
+            x: -505.0,
+            z: -332.0,
+            facing_yaw: 0.12,
+        },
+        ChapterMapLocation {
+            id: ChapterId(7),
+            anchor_id: "chapter_map_ch07",
+            region: "Ember Nest",
+            landmark: "Tarack's Furnace",
+            x: -446.0,
+            z: 132.0,
+            facing_yaw: -0.52,
+        },
+        ChapterMapLocation {
+            id: ChapterId(8),
+            anchor_id: "chapter_map_ch08",
+            region: "Fangroot Wildland",
+            landmark: "Shread's Scrapwing",
+            x: -330.0,
+            z: 300.0,
+            facing_yaw: -1.05,
+        },
+        ChapterMapLocation {
+            id: ChapterId(9),
+            anchor_id: "chapter_map_ch09",
+            region: "Pink Flame Garden",
+            landmark: "Rift Bloom Walk",
+            x: 430.0,
+            z: 26.0,
+            facing_yaw: 0.84,
+        },
+        ChapterMapLocation {
+            id: ChapterId(10),
+            anchor_id: "chapter_map_ch10",
+            region: "Colorado Rockies",
+            landmark: "Ragar's Granite Gate",
+            x: 520.0,
+            z: 230.0,
+            facing_yaw: -1.28,
+        },
+        ChapterMapLocation {
+            id: ChapterId(11),
+            anchor_id: "chapter_map_ch11",
+            region: "Antarctica Outpost",
+            landmark: "Blackskull Icebreaker",
+            x: 236.0,
+            z: -360.0,
+            facing_yaw: 0.42,
+        },
+        ChapterMapLocation {
+            id: ChapterId(12),
+            anchor_id: "chapter_map_ch12",
+            region: "Mana Switchworks",
+            landmark: "Gear Relay Lane",
+            x: 340.0,
+            z: -96.0,
+            facing_yaw: 0.35,
+        },
+        ChapterMapLocation {
+            id: ChapterId(13),
+            anchor_id: "chapter_map_ch13",
+            region: "Crown Gate",
+            landmark: "Scallarian Front",
+            x: -164.0,
+            z: -254.0,
+            facing_yaw: -0.20,
+        },
+        ChapterMapLocation {
+            id: ChapterId(14),
+            anchor_id: "chapter_map_ch14",
+            region: "Starfall Core",
+            landmark: "Sky Closure",
+            x: 22.0,
+            z: -246.0,
+            facing_yaw: 0.0,
+        },
+    ]
+}
+
+pub fn chapter_map_location(id: ChapterId) -> Option<ChapterMapLocation> {
+    chapter_map_locations()
+        .iter()
+        .copied()
+        .find(|location| location.id == id)
+}
+
 // ── Biome ─────────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Biome {
@@ -917,4 +1080,31 @@ pub fn get_chapter(id: ChapterId) -> Option<ChapterDef> {
         .iter()
         .find(|chapter| chapter.id == id)
         .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chapter_map_locations_cover_every_chapter() {
+        let ids: Vec<u8> = chapter_map_locations()
+            .iter()
+            .map(|location| location.id.0)
+            .collect();
+        let expected: Vec<u8> = (ChapterId::FIRST.0..=ChapterId::LAST.0).collect();
+
+        assert_eq!(ids, expected);
+        for chapter in chapter_catalog() {
+            assert!(chapter_map_location(chapter.id).is_some());
+        }
+    }
+
+    #[test]
+    fn chapter_map_locations_stay_inside_heightmap_world() {
+        for location in chapter_map_locations() {
+            assert!(location.x.abs() <= 560.0);
+            assert!(location.z.abs() <= 560.0);
+        }
+    }
 }

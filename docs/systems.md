@@ -210,6 +210,8 @@ Incoming DamageInfo
 
 **Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T`. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash.
 
+In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires a short ground wave even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
+
 Special tools fire from keyboard `7`, `8`, `9`, `0`, or from controller Select + D-pad Up/Down/Left/Right.
 
 ---
@@ -310,6 +312,16 @@ Every chapter now has one optional cave route to discover. `WorldPlugin` spawns 
 - A `WorldAnchor` named `secret_cave_ch01` through `secret_cave_ch14` at each cave's inner discovery point.
 
 Chapter scripts use `PlaceSecretCave` to spawn a green discovery beacon at the matching anchor. Collecting it stores the cave id in `ChapterProgress.discoverables`, sends a UI message/radio line, and prevents that chapter's cave beacon from respawning after save/load.
+
+## Everest Range Fast Travel
+
+**Files:** `src/chapters/mod.rs`, `src/plugins/world_plugin.rs`, `src/plugins/player_plugin.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/ui_plugin.rs`
+
+The campaign map is now the larger Everest-range heightmap world. `chapter_map_locations()` defines one named map location per chapter, including the `WorldAnchor` id, region label, landmark, X/Z position, and party-facing yaw.
+
+`WorldPlugin` turns those records into visible in-world chapter beacons and matching `WorldAnchor`s after terrain generation. The anchor Y value is sampled with the same `terrain_surface_y()` path used by the terrain mesh/collider, so fast travel, visuals, and collision agree.
+
+Chapter select renders those locations as the Everest Range fast-travel map. Keyboard chapter picks and clickable unlocked map markers both set `CurrentChapter.id`; entering `Playing` spawns or moves players to the matching heightmap beacon and clears travel momentum/boat passenger state.
 
 ## Traversal Courses
 
@@ -504,6 +516,7 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 - Smaller residential and outer-district buildings receive stone-brick variants, mortar courses, stone plinths, corner blocks, roof caps, moss, and warm/cool/dark window panels.
 - Aurora Castle now uses brick/mortar castle materials, framed glowing windows, animated wind banners, a real front bridge and open gate, and a hollow keep built from room walls, balconies, lights, and explorable interior spaces.
 - Dragon lair dungeons are spawned for Chapters 6-11. Each dungeon uses an old-school RPG room-and-corridor layout with an entrance arch, branching side rooms, hazard strips, moving bridge platforms, turret guards, a raised lair dais, a save-backed hoard beacon, and a `WorldAnchor` named `dragon_dungeon_ch06` through `dragon_dungeon_ch11`.
+- Each dragon lair entrance now has a `DungeonCrawlGate` and sliding `DungeonGateDoor` panels. Interacting near the big gate activates `DungeonCrawlState`, opens the door, switches to a single shared top-down camera, pulls the party toward the dungeon focus, and remaps movement to fixed top-down axes until the party leaves the dungeon radius.
 - Secret caves are spawned from authored chapter specs and combine stone tunnels, metal ribs, glass panels, glowing crystals, small moving platforms, and save-backed discovery anchors.
 - Moving platforms bridge rooftops, castles, and high paths; the platform system carries grounded or landing players while avoiding midair drag.
 - Laser turrets track nearby players, show a brief beam windup, then apply laser damage through the same player damage/parry path.

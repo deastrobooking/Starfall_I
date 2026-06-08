@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::{Collider, RigidBody};
 
-use crate::chapters::{get_chapter, ChapterId, EncounterStep};
+use crate::chapters::{chapter_map_location, get_chapter, ChapterId, EncounterStep};
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
@@ -16,13 +16,14 @@ use crate::components::enemy::BossEnemy;
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::player::{Player, PlayerIndex, PlayerMovement};
 use crate::components::world::{
-    LaserTurret, MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry,
+    BoatPassenger, LaserTurret, MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry,
 };
 use crate::events::*;
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
 use crate::rendering::PbrBundle;
 use crate::resources::{
-    BiomePalette, ChapterProgress, CurrentChapter, PlaySessionTransition, WaveInfo,
+    BiomePalette, ChapterProgress, CurrentChapter, DungeonCrawlState, PlaySessionTransition,
+    WaveInfo,
 };
 use crate::state::AppState;
 
@@ -31,19 +32,27 @@ pub struct ChapterPlugin;
 #[derive(Component)]
 struct AirshipLevelPiece;
 
+#[derive(Resource, Default)]
+struct PendingChapterTravel {
+    chapter: Option<ChapterId>,
+}
+
 impl Plugin for ChapterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CurrentChapter>()
             .init_resource::<BiomePalette>()
             .init_resource::<ChapterProgress>()
+            .init_resource::<PendingChapterTravel>()
             .add_systems(OnEnter(AppState::Playing), start_chapter)
             .add_systems(
                 Update,
                 (
+                    apply_pending_chapter_travel,
                     chapter_director_system,
                     track_kills_system,
                     chapter_complete_check,
                 )
+                    .chain()
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -57,6 +66,8 @@ fn start_chapter(
     transition: Res<PlaySessionTransition>,
     mut started_ev: MessageWriter<ChapterStartedEvent>,
     mut wave: ResMut<WaveInfo>,
+    mut pending_travel: ResMut<PendingChapterTravel>,
+    mut dungeon: ResMut<DungeonCrawlState>,
     airship_q: Query<Entity, With<AirshipLevelPiece>>,
 ) {
     if transition.resuming_from_pause {
@@ -87,9 +98,25 @@ fn start_chapter(
     };
     *wave = WaveInfo::new();
     wave.wave_number = current.id.0 as u32;
+    dungeon.clear();
+    pending_travel.chapter = Some(current.id);
     started_ev.write(ChapterStartedEvent {
         chapter: current.id.0,
     });
+}
+
+fn apply_pending_chapter_travel(
+    mut commands: Commands,
+    mut pending_travel: ResMut<PendingChapterTravel>,
+    mut player_q: Query<(Entity, &PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
+    anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
+) {
+    let Some(chapter_id) = pending_travel.chapter else {
+        return;
+    };
+    if move_players_to_chapter_location(&mut commands, &mut player_q, &anchor_q, chapter_id) {
+        pending_travel.chapter = None;
+    }
 }
 
 // ── Director ──────────────────────────────────────────────────────────────────
@@ -579,6 +606,34 @@ fn party_anchor_position(
         count += 1.0;
     }
     (count > 0.0).then_some(sum / count)
+}
+
+fn move_players_to_chapter_location(
+    commands: &mut Commands,
+    player_q: &mut Query<(Entity, &PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
+    anchor_q: &Query<(&WorldAnchor, &Transform), Without<Player>>,
+    chapter_id: ChapterId,
+) -> bool {
+    let Some(location) = chapter_map_location(chapter_id) else {
+        return false;
+    };
+    let Some(anchor) = resolve_anchor_position(anchor_q, location.anchor_id) else {
+        return false;
+    };
+
+    let mut moved = false;
+    for (entity, index, mut transform, mut movement) in player_q.iter_mut() {
+        transform.translation = location.spawn_position(anchor, index.0);
+        movement.velocity = Vec3::ZERO;
+        movement.ground_velocity = Vec3::ZERO;
+        movement.coyote_timer = 0.0;
+        movement.jump_buffer_timer = 0.0;
+        movement.wall_jump_lock_timer = 0.0;
+        movement.is_grounded = false;
+        commands.entity(entity).remove::<BoatPassenger>();
+        moved = true;
+    }
+    moved
 }
 
 fn move_players_to_airship_deck(

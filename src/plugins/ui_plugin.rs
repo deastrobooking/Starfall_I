@@ -4,7 +4,7 @@ use bevy::input::gamepad::{GamepadAxis, GamepadButton, GamepadButtonStateChanged
 use bevy::input::ButtonState;
 use bevy_rapier3d::prelude::RapierConfiguration;
 
-use crate::chapters::{all_chapters, ChapterId};
+use crate::chapters::{all_chapters, chapter_map_locations, ChapterId};
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::{PuzzleArchetype, PuzzleRelicEncounter};
 use crate::components::inventory::Inventory;
@@ -127,6 +127,7 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     chapter_select_input,
+                    chapter_select_fast_travel_buttons,
                     chapter_select_perk_input,
                     chapter_select_upgrade_input,
                     chapter_select_perk_panel_update,
@@ -761,6 +762,8 @@ fn clear_play_session_transition_flags(mut transition: ResMut<PlaySessionTransit
 #[derive(Component)]
 struct ChapterSelectRoot;
 #[derive(Component)]
+struct ChapterFastTravelButton(ChapterId);
+#[derive(Component)]
 struct PerkPanelText;
 #[derive(Component)]
 struct TechUpgradePanelText;
@@ -781,8 +784,8 @@ fn setup_chapter_select(
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::FlexStart,
-                padding: UiRect::all(Val::Px(40.0)),
-                row_gap: Val::Px(6.0),
+                padding: UiRect::all(Val::Px(26.0)),
+                row_gap: Val::Px(8.0),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.02, 0.02, 0.06, 1.0)),
@@ -790,56 +793,88 @@ fn setup_chapter_select(
         ))
         .with_children(|p| {
             p.spawn((
-                Text::new("SELECT CHAPTER"),
+                Text::new("EVEREST RANGE FAST TRAVEL"),
                 TextFont {
-                    font_size: 48.0,
+                    font_size: 40.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
             p.spawn((
-                Text::new("Press 1-9 / 0 / Q W R T for chapters 1-14   |   [E]ditor   [Esc] Back"),
+                Text::new("Press 1-9 / 0 / Q W R T or click a marker   |   [E]ditor   [Esc] Back"),
                 TextFont {
-                    font_size: 18.0,
+                    font_size: 16.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.85)),
             ));
             p.spawn(Node {
-                height: Val::Px(20.0),
+                width: Val::Percent(100.0),
+                max_width: Val::Px(1160.0),
+                height: Val::Px(330.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(16.0),
                 ..default()
-            });
-            for ch in &chapters {
-                let unlocked = progress.is_unlocked(ch.id);
-                let done = progress.completed.contains(&ch.id.0);
-                let prefix = if done {
-                    "[✓]"
-                } else if unlocked {
-                    "[ ]"
-                } else {
-                    "[X]"
-                };
-                let color = if done {
-                    Color::srgb(0.4, 1.0, 0.4)
-                } else if unlocked {
-                    Color::WHITE
-                } else {
-                    Color::srgb(0.4, 0.4, 0.4)
-                };
-                p.spawn((
-                    Text::new(format!(
-                        "{} Ch.{:02} — {}    ({})",
-                        prefix, ch.id.0, ch.title, ch.subtitle
-                    )),
-                    TextFont {
-                        font_size: 18.0,
+            })
+            .with_children(|row| {
+                spawn_fast_travel_map(row, &chapters, &progress);
+                row.spawn((
+                    Node {
+                        width: Val::Px(430.0),
+                        height: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(2.0),
+                        padding: UiRect::all(Val::Px(8.0)),
+                        border: UiRect::all(Val::Px(1.0)),
                         ..default()
                     },
-                    TextColor(color),
-                ));
-            }
+                    BackgroundColor(Color::srgba(0.035, 0.045, 0.08, 0.92)),
+                    BorderColor::all(Color::srgba(0.25, 0.42, 0.62, 0.75)),
+                ))
+                .with_children(|list| {
+                    for ch in &chapters {
+                        let location = chapter_map_locations()
+                            .iter()
+                            .find(|location| location.id == ch.id);
+                        let unlocked = progress.is_unlocked(ch.id);
+                        let done = progress.completed.contains(&ch.id.0);
+                        let prefix = if done {
+                            "[✓]"
+                        } else if unlocked {
+                            "[ ]"
+                        } else {
+                            "[X]"
+                        };
+                        let color = if done {
+                            Color::srgb(0.4, 1.0, 0.4)
+                        } else if unlocked {
+                            Color::WHITE
+                        } else {
+                            Color::srgb(0.4, 0.4, 0.4)
+                        };
+                        let region = location
+                            .map(|location| location.region)
+                            .unwrap_or(ch.subtitle);
+                        list.spawn((
+                            Text::new(format!(
+                                "{} {} Ch.{:02} — {} / {}",
+                                prefix,
+                                chapter_key_hint(ch.id.0),
+                                ch.id.0,
+                                ch.title,
+                                region
+                            )),
+                            TextFont {
+                                font_size: 13.5,
+                                ..default()
+                            },
+                            TextColor(color),
+                        ));
+                    }
+                });
+            });
             p.spawn(Node {
-                height: Val::Px(10.0),
+                height: Val::Px(4.0),
                 ..default()
             });
             p.spawn((
@@ -854,7 +889,7 @@ fn setup_chapter_select(
             p.spawn((
                 Text::new(format_upgrade_panel(&upgrades, &robot_pets)),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: 12.0,
                     ..default()
                 },
                 TextColor(Color::srgb(0.78, 1.0, 0.88)),
@@ -866,6 +901,188 @@ fn setup_chapter_select(
 fn despawn_chapter_select(mut commands: Commands, q: Query<Entity, With<ChapterSelectRoot>>) {
     for e in q.iter() {
         commands.entity(e).despawn();
+    }
+}
+
+fn spawn_fast_travel_map(
+    parent: &mut ChildSpawnerCommands,
+    chapters: &[crate::chapters::ChapterDef],
+    progress: &ChapterProgress,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Px(700.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Relative,
+                overflow: Overflow::clip(),
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.025, 0.035, 0.055, 0.98)),
+            BorderColor::all(Color::srgb(0.16, 0.32, 0.48)),
+        ))
+        .with_children(|map| {
+            spawn_map_region_band(
+                map,
+                2.0,
+                62.0,
+                41.0,
+                36.0,
+                Color::srgba(0.35, 0.48, 0.62, 0.26),
+            );
+            spawn_map_region_band(
+                map,
+                4.0,
+                64.0,
+                25.0,
+                20.0,
+                Color::srgba(0.72, 0.82, 0.94, 0.32),
+            );
+            spawn_map_region_band(
+                map,
+                72.0,
+                20.0,
+                22.0,
+                58.0,
+                Color::srgba(0.45, 0.62, 0.36, 0.22),
+            );
+            spawn_map_region_band(
+                map,
+                0.0,
+                0.0,
+                100.0,
+                8.0,
+                Color::srgba(0.08, 0.28, 0.44, 0.42),
+            );
+
+            for location in chapter_map_locations() {
+                let Some(chapter) = chapters.iter().find(|chapter| chapter.id == location.id)
+                else {
+                    continue;
+                };
+                let unlocked = progress.is_unlocked(location.id);
+                let done = progress.completed.contains(&location.id.0);
+                let marker_color = if done {
+                    Color::srgb(0.22, 0.85, 0.34)
+                } else if unlocked {
+                    Color::srgb(0.32, 0.72, 1.0)
+                } else {
+                    Color::srgb(0.16, 0.18, 0.25)
+                };
+                let border = if location.id.0 == 6 {
+                    Color::srgb(0.96, 0.98, 1.0)
+                } else if unlocked {
+                    Color::srgb(0.70, 0.92, 1.0)
+                } else {
+                    Color::srgb(0.30, 0.32, 0.40)
+                };
+
+                map.spawn((
+                    Button,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(location.x)),
+                        top: Val::Percent(world_to_map_top(location.z)),
+                        width: Val::Px(26.0),
+                        height: Val::Px(26.0),
+                        margin: UiRect {
+                            left: Val::Px(-13.0),
+                            top: Val::Px(-13.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(2.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(marker_color),
+                    BorderColor::all(border),
+                    ChapterFastTravelButton(location.id),
+                ))
+                .with_children(|marker| {
+                    marker.spawn((
+                        Text::new(chapter_key_hint(location.id.0)),
+                        TextFont {
+                            font_size: 10.5,
+                            ..default()
+                        },
+                        TextColor(if unlocked {
+                            Color::WHITE
+                        } else {
+                            Color::srgb(0.55, 0.58, 0.64)
+                        }),
+                    ));
+                });
+
+                map.spawn((
+                    Text::new(format!("{} {}", location.id.0, chapter.title)),
+                    TextFont {
+                        font_size: 10.0,
+                        ..default()
+                    },
+                    TextColor(if unlocked {
+                        Color::srgb(0.80, 0.90, 1.0)
+                    } else {
+                        Color::srgb(0.36, 0.38, 0.46)
+                    }),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent((world_to_map_left(location.x) + 1.7).min(88.0)),
+                        top: Val::Percent((world_to_map_top(location.z) - 1.0).clamp(2.0, 94.0)),
+                        ..default()
+                    },
+                ));
+            }
+        });
+}
+
+fn spawn_map_region_band(
+    parent: &mut ChildSpawnerCommands,
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+    color: Color,
+) {
+    parent.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(left),
+            top: Val::Percent(top),
+            width: Val::Percent(width),
+            height: Val::Percent(height),
+            ..default()
+        },
+        BackgroundColor(color),
+    ));
+}
+
+fn world_to_map_left(x: f32) -> f32 {
+    ((x + 600.0) / 1200.0 * 100.0).clamp(2.0, 98.0)
+}
+
+fn world_to_map_top(z: f32) -> f32 {
+    ((600.0 - z) / 1200.0 * 100.0).clamp(2.0, 98.0)
+}
+
+fn chapter_key_hint(chapter: u8) -> &'static str {
+    match chapter {
+        1 => "1",
+        2 => "2",
+        3 => "3",
+        4 => "4",
+        5 => "5",
+        6 => "6",
+        7 => "7",
+        8 => "8",
+        9 => "9",
+        10 => "0",
+        11 => "Q",
+        12 => "W",
+        13 => "R",
+        14 => "T",
+        _ => "?",
     }
 }
 
@@ -908,6 +1125,24 @@ fn chapter_select_input(
     }
     if keyboard.just_pressed(KeyCode::Escape) {
         next_state.set(AppState::MainMenu);
+    }
+}
+
+fn chapter_select_fast_travel_buttons(
+    progress: Res<ChapterProgress>,
+    mut current: ResMut<CurrentChapter>,
+    mut next_state: ResMut<NextState<AppState>>,
+    interaction_q: Query<
+        (&Interaction, &ChapterFastTravelButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction == Interaction::Pressed && progress.is_unlocked(button.0) {
+            current.id = button.0;
+            current.started = false;
+            next_state.set(AppState::Playing);
+        }
     }
 }
 

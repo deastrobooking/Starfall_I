@@ -15,14 +15,16 @@ Implemented:
 - Chapter-select tech-upgrade foundation: spend robot salvage on beam, missile, Sprite Turret, armor health, rejuvenation, and mech command ranks; upgrades save/load and already affect weapon damage, turret damage, max health, and paid rejuvenation reserve.
 - Authored level rewards now introduce robot rescue pods and tech caches across the campaign, feeding robot parts, upgrade-route hints, rejuvenation reserve, and small robot-pet power amplification into chapter progression.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
+- Everest-range world-map foundation: all 14 chapters now have named heightmap locations, visible in-world fast-travel beacons, and clickable chapter-select map markers that drop the party at those locations.
 - Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
 - Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
+- Castle/dungeon crawl foundation: dragon lair gates now open into single-screen top-down hack-and-slash mode, pulling the party together and switching movement/combat to dungeon-friendly axes.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
-- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
+- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
 
 In progress:
 
@@ -84,7 +86,7 @@ cargo run --features dynamic
 7. Paused
 8. Game Over
 
-Chapter select uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
+Chapter select is now the Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
 
 Character design supports outfit/accent/hair swatches, accessory toggles, and body-shape steppers for height, shoulders, chest, arms, legs, hands, feet, head, and mass. Confirming stores an editable character blueprint; body proportions feed the visible character, collider size, movement tuning, stamina, armor capacity, and health.
 

@@ -5,6 +5,7 @@ use bevy::transform::TransformSystems;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy_rapier3d::prelude::*;
 
+use crate::chapters::chapter_map_location;
 use crate::character_blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
@@ -18,14 +19,15 @@ use crate::components::enemy::{BossEnemy, DeadEnemy, FlyingDrone};
 use crate::components::inventory::Inventory;
 use crate::components::player::*;
 use crate::components::weapon::*;
-use crate::components::world::BoatPassenger;
+use crate::components::world::{BoatPassenger, WorldAnchor};
 use crate::damage::{apply_damage, DamageInfo, Damageable, Health};
 use crate::events::*;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile};
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
-    CameraShake, LocalPlayerConfig, PlaySessionTransition, PlayerSelectState, PlayerSlotConfig,
+    CameraShake, CurrentChapter, DungeonCrawlState, LocalPlayerConfig, PlaySessionTransition,
+    PlayerSelectState, PlayerSlotConfig,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -69,6 +71,7 @@ fn third_person_camera_offset() -> Vec3 {
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SharedEncounterCamera>()
+            .init_resource::<DungeonCrawlState>()
             .add_systems(OnEnter(AppState::Playing), (spawn_players, grab_cursor))
             .add_systems(OnEnter(AppState::MainMenu), cleanup_players_for_menu)
             .add_systems(OnExit(AppState::Playing), release_cursor)
@@ -81,6 +84,7 @@ impl Plugin for PlayerPlugin {
                     player_movement,
                     shared_encounter_camera_mode_system,
                     shared_encounter_party_pull_system,
+                    dungeon_crawl_party_pull_system,
                     player_dodge_update,
                     player_parry_update,
                     player_state_update,
@@ -105,7 +109,20 @@ impl Plugin for PlayerPlugin {
 
 // ── Spawn helpers ─────────────────────────────────────────────────────────────
 
-fn player_spawn_position(index: u8) -> Vec3 {
+fn player_spawn_position(
+    index: u8,
+    current: &CurrentChapter,
+    anchor_q: &Query<(&WorldAnchor, &Transform)>,
+) -> Vec3 {
+    if let Some(location) = chapter_map_location(current.id) {
+        if let Some((_, anchor_transform)) = anchor_q
+            .iter()
+            .find(|(anchor, _)| anchor.id == location.anchor_id)
+        {
+            return location.spawn_position(anchor_transform.translation, index);
+        }
+    }
+
     // City centre: terrain is flat at Y = 0, so spawn just above the ground
     // instead of dropping the controller through a long startup fall.
     let base = Vec3::new(10.0, 1.2, 10.0);
@@ -357,8 +374,10 @@ fn spawn_players(
     transition: Res<PlaySessionTransition>,
     config: Res<LocalPlayerConfig>,
     select: Res<PlayerSelectState>,
+    current: Res<CurrentChapter>,
     robot_pets: Res<RobotPetCollection>,
     window_q: Query<&Window, With<PrimaryWindow>>,
+    chapter_anchor_q: Query<(&WorldAnchor, &Transform)>,
     existing_players: Query<Entity, With<Player>>,
     existing_parts: Query<(Entity, &CartoonPart)>,
 ) {
@@ -373,7 +392,7 @@ fn spawn_players(
         .unwrap_or((1280, 720));
 
     for i in 0..active {
-        let spawn_pos = player_spawn_position(i);
+        let spawn_pos = player_spawn_position(i, &current, &chapter_anchor_q);
         let slot = &select.slots[i as usize];
         let character_name = select.character_name(i as usize);
         let runtime_blueprint = slot
@@ -635,6 +654,7 @@ fn camera_shake_system(
 fn player_camera_follow_system(
     mut commands: Commands,
     shake: Res<CameraShake>,
+    dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
     window_q: Query<&Window, With<PrimaryWindow>>,
     player_q: Query<
@@ -652,6 +672,47 @@ fn player_camera_follow_system(
         .single()
         .map(|w| (w.physical_width(), w.physical_height()))
         .unwrap_or((1280, 720));
+
+    if dungeon.active {
+        let lead_camera = player_q
+            .iter()
+            .min_by_key(|(index, _, _)| index.0)
+            .map(|(_, _, camera_ref)| camera_ref.0);
+        let max_trauma = player_q
+            .iter()
+            .map(|(index, _, _)| shake.trauma_for(index.0))
+            .fold(0.0_f32, f32::max);
+        let shake_offset = camera_shake_offset(max_trauma);
+        let party_focus = average_positions(
+            &player_q
+                .iter()
+                .map(|(_, transform, _)| transform.translation)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or(dungeon.focus);
+        let focus = clamp_to_dungeon_focus(party_focus, dungeon.focus, dungeon.radius * 0.62);
+
+        for (_, _, camera_ref) in player_q.iter() {
+            referenced.push(camera_ref.0);
+            if let Ok((_, mut camera_transform, _, mut camera)) = cam_q.get_mut(camera_ref.0) {
+                camera.is_active = Some(camera_ref.0) == lead_camera;
+                camera.viewport = None;
+                if camera.is_active {
+                    *camera_transform =
+                        dungeon_crawl_camera_transform(focus, dungeon.radius, shake_offset);
+                }
+            }
+        }
+
+        for (camera, mut camera_transform, _, mut camera_component) in cam_q.iter_mut() {
+            if !referenced.contains(&camera) {
+                camera_component.is_active = false;
+                camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
+                commands.entity(camera).try_despawn();
+            }
+        }
+        return;
+    }
 
     if shared_camera.active && active_players > 1 {
         let lead_camera = player_q
@@ -741,6 +802,22 @@ fn shared_boss_camera_transform(focus: Vec3, radius: f32, shake_offset: Vec3) ->
     let height = (radius * 0.72 + 14.0).clamp(24.0, 72.0);
     let translation = focus + Vec3::new(0.0, height, distance) + shake_offset;
     Transform::from_translation(translation).looking_at(focus + Vec3::Y * 2.2, Vec3::Y)
+}
+
+fn dungeon_crawl_camera_transform(focus: Vec3, radius: f32, shake_offset: Vec3) -> Transform {
+    let height = (radius * 1.12).clamp(46.0, 92.0);
+    let z_offset = (radius * 0.22).clamp(10.0, 22.0);
+    let translation = focus + Vec3::new(0.0, height, z_offset) + shake_offset;
+    Transform::from_translation(translation).looking_at(focus + Vec3::Y * 1.0, Vec3::Y)
+}
+
+fn clamp_to_dungeon_focus(position: Vec3, center: Vec3, radius: f32) -> Vec3 {
+    let offset = (position - center).with_y(0.0);
+    if offset.length() <= radius {
+        position
+    } else {
+        center + offset.normalize_or_zero() * radius + Vec3::Y * (position.y - center.y)
+    }
 }
 
 fn shared_encounter_camera_mode_system(
@@ -885,6 +962,45 @@ fn shared_encounter_party_pull_system(
     }
 }
 
+fn dungeon_crawl_party_pull_system(
+    time: Res<Time>,
+    dungeon: Res<DungeonCrawlState>,
+    mut player_q: Query<(&PlayerIndex, &mut Transform, Option<&BoatPassenger>), With<Player>>,
+) {
+    if !dungeon.active {
+        return;
+    }
+
+    let dt = time.delta_secs();
+    let soft_radius = dungeon.radius * 0.52;
+    let hard_radius = dungeon.radius * 0.92;
+    for (index, mut transform, boat_passenger) in player_q.iter_mut() {
+        if boat_passenger.is_some() {
+            continue;
+        }
+
+        let to_focus = (dungeon.focus - transform.translation).with_y(0.0);
+        let distance = to_focus.length();
+        if distance <= soft_radius {
+            continue;
+        }
+
+        let offset = boss_mode_player_slot_offset(index.0);
+        if distance >= hard_radius {
+            transform.translation = Vec3::new(
+                dungeon.focus.x + offset.x,
+                dungeon.focus.y.max(transform.translation.y) + 1.2,
+                dungeon.focus.z + offset.z,
+            );
+            continue;
+        }
+
+        let direction = to_focus.normalize_or_zero();
+        let pull = ((distance - soft_radius) * 0.70).min(34.0) * dt;
+        transform.translation += direction * pull;
+    }
+}
+
 fn boss_mode_player_slot_offset(index: u8) -> Vec3 {
     let angle = index as f32 * std::f32::consts::TAU / 4.0 + std::f32::consts::FRAC_PI_4;
     Vec3::new(angle.cos() * 8.0, 0.0, angle.sin() * 8.0)
@@ -893,6 +1009,7 @@ fn boss_mode_player_slot_offset(index: u8) -> Vec3 {
 // ── Movement & Physics ────────────────────────────────────────────────────────
 fn player_movement(
     time: Res<Time>,
+    dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
             &mut KinematicCharacterController,
@@ -964,12 +1081,18 @@ fn player_movement(
             movement.coyote_timer = (movement.coyote_timer - dt).max(0.0);
         }
 
-        let fwd = transform
-            .forward()
-            .as_vec3()
-            .with_y(0.0)
-            .normalize_or_zero();
-        let right = transform.right().as_vec3().with_y(0.0).normalize_or_zero();
+        let (fwd, right) = if dungeon.active {
+            (Vec3::NEG_Z, Vec3::X)
+        } else {
+            (
+                transform
+                    .forward()
+                    .as_vec3()
+                    .with_y(0.0)
+                    .normalize_or_zero(),
+                transform.right().as_vec3().with_y(0.0).normalize_or_zero(),
+            )
+        };
         let (input, input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
 
         let sprinting =

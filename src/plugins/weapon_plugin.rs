@@ -10,6 +10,7 @@ use crate::damage::{
 use crate::events::*;
 use crate::perks::PerkTree;
 use crate::rendering::PbrBundle;
+use crate::resources::DungeonCrawlState;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 
@@ -123,6 +124,39 @@ fn star_muzzle_origin(player_transform: &GlobalTransform, aim_forward: Vec3) -> 
             .normalize_or_zero()
     };
     player_transform.translation() + Vec3::Y * 0.75 + facing * 0.75
+}
+
+fn combat_forward(
+    player_transform: &GlobalTransform,
+    camera_transform: &GlobalTransform,
+    input: &PlayerInput,
+    dungeon_active: bool,
+) -> Vec3 {
+    let player_forward = player_transform
+        .forward()
+        .as_vec3()
+        .with_y(0.0)
+        .normalize_or_zero();
+    if dungeon_active {
+        let input_dir = Vec3::new(input.move_axis.x, 0.0, -input.move_axis.y).normalize_or_zero();
+        if input_dir.length_squared() > 0.01 {
+            return input_dir;
+        }
+        if player_forward.length_squared() > 0.01 {
+            return player_forward;
+        }
+    }
+
+    let camera_forward = camera_transform
+        .forward()
+        .as_vec3()
+        .with_y(0.0)
+        .normalize_or_zero();
+    if camera_forward.length_squared() > 0.01 {
+        camera_forward
+    } else {
+        player_forward
+    }
 }
 
 // ── Weapon Select ─────────────────────────────────────────────────────────────
@@ -722,6 +756,7 @@ fn melee_combo_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
+    dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -777,19 +812,23 @@ fn melee_combo_system(
         combo.buffered_light = false;
         combo.buffered_heavy = false;
 
-        let cam_fwd = cam.forward().as_vec3();
+        let cam_fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let cam_pos = star_muzzle_origin(player_transform, cam_fwd);
         let armor_damage_mult = armor.modified_outgoing_damage(1.0);
 
         if do_light && combo.light_index < LIGHT_COMBO.len() {
             let (name, base_damage, _knockback, duration) = LIGHT_COMBO[combo.light_index];
             let damage = base_damage * combo.damage_multiplier * armor_damage_mult;
+            let radius = if dungeon.active { 4.1 } else { 3.0 };
+            let offset = if dungeon.active { 2.1 } else { 2.5 };
+            let arc_cos = if dungeon.active { -0.20 } else { 0.15 };
 
             execute_melee_hit(
                 cam_pos,
                 cam_fwd,
-                3.0,
-                2.5,
+                radius,
+                offset,
+                arc_cos,
                 damage,
                 DamageType::Melee,
                 &mut enemy_q,
@@ -817,12 +856,16 @@ fn melee_combo_system(
         } else if do_heavy && combo.heavy_index < HEAVY_COMBO.len() {
             let (name, base_damage, _knockback, duration) = HEAVY_COMBO[combo.heavy_index];
             let damage = base_damage * combo.damage_multiplier * armor_damage_mult;
+            let radius = if dungeon.active { 5.7 } else { 4.5 };
+            let offset = if dungeon.active { 2.2 } else { 2.0 };
+            let arc_cos = if dungeon.active { -0.35 } else { 0.05 };
 
             execute_melee_hit(
                 cam_pos,
                 cam_fwd,
-                4.5,
-                2.0,
+                radius,
+                offset,
+                arc_cos,
                 damage,
                 DamageType::Melee,
                 &mut enemy_q,
@@ -872,18 +915,23 @@ fn execute_melee_hit(
     forward: Vec3,
     radius: f32,
     offset: f32,
+    arc_cos: f32,
     damage: f32,
     damage_type: DamageType,
     enemy_q: &mut Query<(Entity, &Transform, &mut Health, &mut Damageable, &Enemy)>,
     damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
     killed_ev: &mut MessageWriter<EnemyKilledEvent>,
 ) {
+    let forward = forward.with_y(0.0).normalize_or_zero();
     let hit_center = origin + forward * offset;
     for (e_entity, e_transform, mut health, mut damageable, enemy) in enemy_q.iter_mut() {
         if !health.is_alive() {
             continue;
         }
-        if hit_center.distance(e_transform.translation) <= radius {
+        let to_enemy = (e_transform.translation - origin).with_y(0.0);
+        let in_arc = to_enemy.length() <= radius + offset
+            && to_enemy.normalize_or_zero().dot(forward) >= arc_cos;
+        if in_arc || hit_center.distance(e_transform.translation) <= radius {
             let info = DamageInfo::new(damage, damage_type);
             let result = apply_damage(&mut health, &mut damageable, &info);
             damaged_ev.write(EnemyDamagedEvent {
@@ -910,6 +958,7 @@ fn beam_sabre_update_system(
     proj_assets: Res<ProjectileAssets>,
     perks: Res<PerkTree>,
     upgrades: Res<UpgradeLedger>,
+    dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -932,7 +981,7 @@ fn beam_sabre_update_system(
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
         };
-        let fwd = cam.forward().as_vec3();
+        let fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let origin = star_muzzle_origin(player_transform, fwd);
         let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
 
@@ -954,11 +1003,15 @@ fn beam_sabre_update_system(
             if sabre.slash_timer <= 0.0 {
                 sabre.slash_index += 1;
                 if sabre.slash_index < sabre.slash_count {
+                    let radius = if dungeon.active { 5.2 } else { 3.5 };
+                    let offset = if dungeon.active { 2.0 } else { 2.5 };
+                    let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
                     execute_melee_hit(
                         origin,
                         fwd,
-                        3.5,
-                        2.5,
+                        radius,
+                        offset,
+                        arc_cos,
                         sabre.slash_damage * armor_damage_mult,
                         DamageType::Melee,
                         &mut enemy_q,
@@ -983,11 +1036,15 @@ fn beam_sabre_update_system(
             sabre.slash_timer = 0.25;
             sm.force(PlayerState::Attacking);
 
+            let radius = if dungeon.active { 5.2 } else { 3.5 };
+            let offset = if dungeon.active { 2.0 } else { 2.5 };
+            let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
             execute_melee_hit(
                 origin,
                 fwd,
-                3.5,
-                2.5,
+                radius,
+                offset,
+                arc_cos,
                 sabre.slash_damage * armor_damage_mult,
                 DamageType::Melee,
                 &mut enemy_q,
@@ -996,10 +1053,17 @@ fn beam_sabre_update_system(
             );
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
 
-            if sabre.fires_dual_wave() {
+            if sabre.fires_dual_wave() || dungeon.active {
                 let right = cam.right().as_vec3();
-                for offset in [-0.4f32, 0.4] {
-                    let dir = (fwd + right * offset).normalize();
+                let wave_offsets: &[f32] = if sabre.fires_dual_wave() {
+                    &[-0.4, 0.4]
+                } else {
+                    &[0.0]
+                };
+                for offset in wave_offsets {
+                    let dir = (fwd + right.with_y(0.0).normalize_or_zero() * *offset)
+                        .with_y(0.0)
+                        .normalize_or_zero();
                     commands.spawn((
                         PbrBundle {
                             mesh: Mesh3d(proj_assets.sphere_sm.clone()),
@@ -1008,7 +1072,9 @@ fn beam_sabre_update_system(
                             ..default()
                         },
                         Projectile {
-                            damage: sabre.wave_damage * armor_damage_mult,
+                            damage: sabre.wave_damage
+                                * armor_damage_mult
+                                * if dungeon.active { 0.72 } else { 1.0 },
                             speed: 20.0,
                             direction: dir,
                             lifetime: 1.5,

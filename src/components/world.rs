@@ -125,6 +125,33 @@ pub struct WorldAnchor {
     pub id: &'static str,
 }
 
+/// Visible world-map marker for a chapter fast-travel destination.
+#[derive(Component, Debug, Clone)]
+pub struct ChapterMapMarker {
+    pub chapter: u8,
+    pub region: &'static str,
+}
+
+/// Interactable entrance to a single-screen top-down castle/dungeon crawl.
+#[derive(Component, Debug, Clone)]
+pub struct DungeonCrawlGate {
+    pub chapter: u8,
+    pub label: &'static str,
+    pub entry: Vec3,
+    pub focus: Vec3,
+    pub radius: f32,
+    pub interact_radius: f32,
+    pub opened: bool,
+}
+
+/// Visual door slab that slides away once its matching dungeon gate opens.
+#[derive(Component, Debug, Clone)]
+pub struct DungeonGateDoor {
+    pub chapter: u8,
+    pub closed: Vec3,
+    pub open: Vec3,
+}
+
 /// A world-space loot pickup spawned when enemies die.
 #[derive(Component, Debug, Clone)]
 pub struct WorldLoot {

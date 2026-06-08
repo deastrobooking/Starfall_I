@@ -15,7 +15,7 @@ const WIND_STRENGTH:  f32 = 0.13;   // world-unit sway amplitude at the tip
 const WIND_FREQUENCY: f32 = 0.60;   // spatial variation (world-X phase)
 
 // Material uniform: one RGBA colour per blade variant.
-@group(2) @binding(0) var<uniform> color: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> color: vec4<f32>;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,

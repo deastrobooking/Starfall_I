@@ -50,7 +50,9 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Chapter scripts now use robot rescue pods and tech caches as authored level rewards, feeding rescued robot pets, robot parts, upgrade-route hints, and rejuvenation reserve into the campaign.
 - Airship raid arenas now add four windup laser turrets and two moving cover platforms, making castle boss rematches use the newer armor/rejuvenation/controller movement loop.
 - Terrain tests now guard the current heightmap baseline: the Everest PNG patch must load, the city core remains flat, and outer terrain keeps meaningful relief.
+- Chapter select now acts as an Everest Range fast-travel map. `src/chapters/mod.rs` owns all 14 named chapter locations, `WorldPlugin` spawns matching heightmap beacons/anchors, and chapter start moves existing players to the selected location.
 - Dragon lair dungeons now exist for chapters 6-11, with SNES-RPG-style room/corridor layouts, moving bridge platforms, turret guards, raised lair dais anchors, and save-backed hoard beacons.
+- Dragon lair entrances now have interactable big gates that activate single-screen top-down dungeon crawl mode, open sliding door panels, pull the party together, remap movement to top-down axes, and widen hand/Star Sabre attack arcs for hack-and-slash rooms.
 - All eight human siblings now have hero combat profiles with unique signature weapon/special names, shared speed/strength/flight/magic axes, and robot-pet amplification at spawn.
 - Boss mode now links 2-4 local players into one full-screen party camera for boss-tier enemies and nearby flying-drone wings, then restores split-screen after the threat clears.
 - Naming canon now lives in `docs/naming.md`; Chapter 1 is `Invasion of the Scallarians`, and player-facing alien labels use Scallarian/Scallarians.
@@ -130,7 +132,7 @@ Slingshot pads, rotating elevators, ramp towers, and moving brick chains now exi
 ### 10. Deepen dragon lair dungeons
 **Files:** `src/plugins/world_plugin.rs`, `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
 
-Dragon lairs now have physical dungeon layouts and hoard rewards. They still need chapter-specific enemy placement, locked doors, keys/switches, minimap labels, camera assists, boss staging inside the `dragon_dungeon_chXX` anchors, and unique tile/hazard variants for each villain.
+Dragon lairs now have physical dungeon layouts, hoard rewards, interactable big gates, and the first shared-screen top-down dungeon camera/combat mode. They still need chapter-specific enemy placement, locked doors, keys/switches, minimap labels, boss staging inside the `dragon_dungeon_chXX` anchors, and unique tile/hazard variants for each villain.
 
 **Design direction:** make each lair a compact but readable SNES-inspired dungeon: one clear villain objective, one optional side hoard, one traversal trick, one robot-pet shortcut, and one boss-room staging beat.
 

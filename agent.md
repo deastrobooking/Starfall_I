@@ -38,14 +38,20 @@ together.
   or nearby flying-drone wings, with distant players pulled toward the battle
   anchor and split-screen restored afterward.
 - Dragon lair dungeons live in `src/plugins/world_plugin.rs` for Chapters
-  6-11. They are physical room/corridor layouts with hoard beacons and
-  `dragon_dungeon_chXX` anchors for future boss/key/switch staging.
+  6-11. They are physical room/corridor layouts with hoard beacons,
+  interactable `DungeonCrawlGate`s, sliding `DungeonGateDoor`s, and
+  `dragon_dungeon_chXX` anchors for future boss/key/switch staging. Dungeon
+  gates activate `DungeonCrawlState`, which switches players to one top-down
+  screen and makes melee/Star Sabre use wider dungeon arcs.
 - Human hero combat identity lives in `src/hero_roster.rs`: all eight siblings
   have unique signature weapons/specials plus shared speed, strength, flight,
   and magic axes. Rescued robot pets amplify those axes by role.
 - Terrain uses deterministic waves plus an imported Everest PNG patch in the
-  southwest dragon domain. Keep heightmap changes tied to the shared height
-  function so visuals, anchors, and collision agree.
+  southwest dragon domain. `chapter_map_locations()` in `src/chapters/mod.rs`
+  is the campaign map source of truth; `WorldPlugin` spawns matching
+  heightmap beacons/anchors, and chapter/player startup uses those anchors for
+  fast travel. Keep heightmap changes tied to the shared height function so
+  visuals, anchors, and collision agree.
 - Player input is controller-first local multiplayer: preserve analog movement
   magnitude, keep circular deadzone remapping, support LT/RT button and axis
   paths, and treat controller smoke testing as required for movement changes.
