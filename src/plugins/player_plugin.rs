@@ -25,9 +25,10 @@ use crate::events::*;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile};
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
+use crate::character_parts::CharacterLoadout;
 use crate::resources::{
     CameraShake, ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig,
-    PlaySessionTransition, PlayerSelectState, PlayerSlotConfig,
+    PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -387,6 +388,7 @@ fn spawn_players(
     current: Res<CurrentChapter>,
     progress: Res<ChapterProgress>,
     robot_pets: Res<RobotPetCollection>,
+    part_loadout: Res<PlayerPartLoadout>,
     window_q: Query<&Window, With<PrimaryWindow>>,
     chapter_anchor_q: Query<(&WorldAnchor, &Transform)>,
     existing_players: Query<Entity, With<Player>>,
@@ -513,6 +515,13 @@ fn spawn_players(
             character_config,
             spawn_pos,
         );
+        // Apply chassis-editor slot choices — overrides the default humanoid loadout.
+        commands.entity(player).insert(CharacterLoadout {
+            body: part_loadout.body,
+            arms: part_loadout.arms,
+            legs: part_loadout.legs,
+            shoulders: part_loadout.shoulders,
+        });
 
         let viewport = player_viewport(i, active, win_w, win_h);
 

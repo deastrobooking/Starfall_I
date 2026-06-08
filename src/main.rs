@@ -37,7 +37,7 @@ use plugins::{
 };
 use resources::{
     CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlaySessionTransition,
-    PlayerScore, PlayerSelectState, WaveInfo,
+    PlayerPartLoadout, PlayerScore, PlayerSelectState, WaveInfo,
 };
 use robot_pets::RobotPetCollection;
 use state::AppState;
@@ -82,6 +82,7 @@ fn main() {
         .init_resource::<PerkTree>()
         .init_resource::<RobotPetCollection>()
         .init_resource::<UpgradeLedger>()
+        .init_resource::<PlayerPartLoadout>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
         // Game plugins

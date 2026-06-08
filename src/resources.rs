@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::chapters::{Biome, ChapterId};
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
+use crate::character_parts::CharacterPartStyle;
 use crate::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
@@ -283,6 +284,16 @@ impl Default for PlayerChassis {
     fn default() -> Self {
         Self(crate::robots::presets::amp())
     }
+}
+
+/// Per-slot part style choices, persisted between the chassis editor and gameplay.
+/// Applied to `CharacterLoadout` when the player character spawns.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PlayerPartLoadout {
+    pub body: CharacterPartStyle,
+    pub arms: CharacterPartStyle,
+    pub legs: CharacterPartStyle,
+    pub shoulders: CharacterPartStyle,
 }
 
 // ── Chapter Progress (saveable) ───────────────────────────────────────────────

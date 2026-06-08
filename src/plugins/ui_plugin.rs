@@ -809,10 +809,20 @@ fn clear_play_session_transition_flags(mut transition: ResMut<PlaySessionTransit
 struct ChapterSelectRoot;
 #[derive(Component)]
 struct ChapterFastTravelButton(ChapterId);
+// Legacy single-block text — kept so old queries don't break; no longer spawned.
 #[derive(Component)]
 struct PerkPanelText;
 #[derive(Component)]
 struct TechUpgradePanelText;
+// New per-row markers for the structured panels.
+#[derive(Component)]
+struct PerkPointsHeader;
+#[derive(Component)]
+struct PerkRowText(pub &'static str); // perk_id
+#[derive(Component)]
+struct UpgradeReserveHeader;
+#[derive(Component)]
+struct UpgradeRowText(pub TechUpgradeId);
 
 fn setup_chapter_select(
     mut commands: Commands,
@@ -919,28 +929,82 @@ fn setup_chapter_select(
                     }
                 });
             });
-            p.spawn(Node {
-                height: Val::Px(4.0),
-                ..default()
+            p.spawn(Node { height: Val::Px(4.0), ..default() });
+
+            // ── Perk Training panel ───────────────────────────────────────────
+            p.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(3.0),
+                    padding: UiRect::all(Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.04, 0.06, 0.14, 0.90)),
+                BorderColor::all(Color::srgba(0.3, 0.5, 0.8, 0.5)),
+            ))
+            .with_children(|pp| {
+                // Header
+                pp.spawn((
+                    Text::new(format_perk_header(&perks)),
+                    TextFont { font_size: 13.5, ..default() },
+                    TextColor(Color::srgb(0.6, 0.82, 1.0)),
+                    PerkPointsHeader,
+                ));
+                // One row per perk
+                let key_map = [
+                    ("A", "heart_vitality"),
+                    ("S", "heart_regen"),
+                    ("D", "star_focus"),
+                    ("F", "star_charges"),
+                    ("G", "acro_evasion"),
+                    ("H", "acro_parry"),
+                ];
+                let defs = all_perks();
+                for (key, perk_id) in key_map {
+                    if let Some(def) = defs.iter().find(|d| d.id == perk_id) {
+                        let branch_color = branch_color(def.branch);
+                        pp.spawn((
+                            Text::new(format_perk_row(key, def, &perks)),
+                            TextFont { font_size: 12.5, ..default() },
+                            TextColor(branch_color),
+                            PerkRowText(perk_id),
+                        ));
+                    }
+                }
             });
+
+            // ── Tech Upgrades panel ───────────────────────────────────────────
             p.spawn((
-                Text::new(format_perk_panel(&perks)),
-                TextFont {
-                    font_size: 14.0,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(3.0),
+                    padding: UiRect::all(Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(1.0)),
                     ..default()
                 },
-                TextColor(Color::srgb(0.8, 0.9, 1.0)),
-                PerkPanelText,
-            ));
-            p.spawn((
-                Text::new(format_upgrade_panel(&upgrades, &robot_pets)),
-                TextFont {
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.78, 1.0, 0.88)),
-                TechUpgradePanelText,
-            ));
+                BackgroundColor(Color::srgba(0.04, 0.10, 0.06, 0.90)),
+                BorderColor::all(Color::srgba(0.3, 0.75, 0.45, 0.5)),
+            ))
+            .with_children(|up| {
+                // Header
+                up.spawn((
+                    Text::new(format_upgrade_header(&upgrades)),
+                    TextFont { font_size: 13.5, ..default() },
+                    TextColor(Color::srgb(0.5, 1.0, 0.65)),
+                    UpgradeReserveHeader,
+                ));
+                // One row per upgrade
+                for def in all_tech_upgrades() {
+                    let track_color = track_color(def.track);
+                    up.spawn((
+                        Text::new(format_upgrade_row(&def, &upgrades, &robot_pets)),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(track_color),
+                        UpgradeRowText(def.id),
+                    ));
+                }
+            });
         });
 }
 
@@ -1382,13 +1446,30 @@ fn chapter_select_perk_input(keyboard: Res<ButtonInput<KeyCode>>, mut perks: Res
 
 fn chapter_select_perk_panel_update(
     perks: Res<PerkTree>,
-    mut text_q: Query<&mut Text, With<PerkPanelText>>,
+    mut header_q: Query<&mut Text, (With<PerkPointsHeader>, Without<PerkRowText>)>,
+    mut row_q: Query<(&PerkRowText, &mut Text), Without<PerkPointsHeader>>,
 ) {
     if !perks.is_changed() {
         return;
     }
-    for mut text in text_q.iter_mut() {
-        *text = Text::new(format_perk_panel(&perks));
+    for mut text in header_q.iter_mut() {
+        *text = Text::new(format_perk_header(&perks));
+    }
+    let defs = all_perks();
+    let key_map = [
+        ("A", "heart_vitality"),
+        ("S", "heart_regen"),
+        ("D", "star_focus"),
+        ("F", "star_charges"),
+        ("G", "acro_evasion"),
+        ("H", "acro_parry"),
+    ];
+    for (row, mut text) in row_q.iter_mut() {
+        if let Some((key, _)) = key_map.iter().find(|(_, id)| *id == row.0) {
+            if let Some(def) = defs.iter().find(|d| d.id == row.0) {
+                *text = Text::new(format_perk_row(key, def, &perks));
+            }
+        }
     }
 }
 
@@ -1416,70 +1497,96 @@ fn chapter_select_upgrade_input(
 fn chapter_select_upgrade_panel_update(
     upgrades: Res<UpgradeLedger>,
     robot_pets: Res<RobotPetCollection>,
-    mut text_q: Query<&mut Text, With<TechUpgradePanelText>>,
+    mut header_q: Query<&mut Text, (With<UpgradeReserveHeader>, Without<UpgradeRowText>)>,
+    mut row_q: Query<(&UpgradeRowText, &mut Text), Without<UpgradeReserveHeader>>,
 ) {
     if !(upgrades.is_changed() || robot_pets.is_changed()) {
         return;
     }
-    for mut text in text_q.iter_mut() {
-        *text = Text::new(format_upgrade_panel(&upgrades, &robot_pets));
+    for mut text in header_q.iter_mut() {
+        *text = Text::new(format_upgrade_header(&upgrades));
     }
-}
-
-fn format_perk_panel(perks: &PerkTree) -> String {
-    let keys = [
-        ("A", "heart_vitality"),
-        ("S", "heart_regen"),
-        ("D", "star_focus"),
-        ("F", "star_charges"),
-        ("G", "acro_evasion"),
-        ("H", "acro_parry"),
-    ];
-    let defs = all_perks();
-    let mut lines = vec![format!("PERK TRAINING  Points: {}", perks.points_unspent)];
-    for (key, perk_id) in keys {
-        if let Some(def) = defs.iter().find(|def| def.id == perk_id) {
-            lines.push(format!(
-                "[{}] {} {}/{} - {}",
-                key,
-                def.name,
-                perks.rank(def.id),
-                def.max_rank,
-                def.description
-            ));
+    let defs = all_tech_upgrades();
+    for (row, mut text) in row_q.iter_mut() {
+        if let Some(def) = defs.iter().find(|d| d.id == row.0) {
+            *text = Text::new(format_upgrade_row(def, &upgrades, &robot_pets));
         }
     }
-    lines.join("\n")
 }
 
-fn format_upgrade_panel(upgrades: &UpgradeLedger, robot_pets: &RobotPetCollection) -> String {
-    let mut lines = vec![format!(
-        "TECH UPGRADES  Rejuvenation reserve: {:.0} charge",
-        upgrades.rejuvenation_charge
-    )];
-    for def in all_tech_upgrades() {
-        let rank = upgrades.rank(def.id);
-        let cost = def.id.next_rank_cost(rank + 1);
-        let cost_text = if rank >= def.max_rank {
-            "MAX".to_string()
-        } else {
-            let afford = if robot_pets.can_afford(&cost) {
-                "READY"
-            } else {
-                "NEED"
-            };
-            format!("{} [{}]", format_part_costs(&cost), afford)
-        };
-        lines.push(format!(
-            "[{}] {} {}/{} - {} | {}",
-            def.key_hint, def.name, rank, def.max_rank, def.description, cost_text
-        ));
+fn rank_bar(rank: u32, max: u32) -> String {
+    let filled = "■".repeat(rank as usize);
+    let empty = "□".repeat((max - rank) as usize);
+    format!("{filled}{empty}")
+}
+
+fn format_perk_header(perks: &PerkTree) -> String {
+    format!("PERK TRAINING   unspent points: {}", perks.points_unspent)
+}
+
+fn format_perk_row(key: &str, def: &crate::perks::PerkDef, perks: &PerkTree) -> String {
+    let rank = perks.rank(def.id);
+    let bar = rank_bar(rank, def.max_rank);
+    let status = if rank >= def.max_rank {
+        "MAX".to_string()
+    } else if perks.points_unspent > 0 {
+        format!("+{} to next", def.max_rank - rank)
+    } else {
+        "—".to_string()
+    };
+    format!(
+        "[{key}] {:<24} {bar}  {}/{max}  {status}",
+        def.name,
+        rank,
+        max = def.max_rank,
+    )
+}
+
+fn branch_color(branch: crate::perks::PerkBranch) -> Color {
+    match branch {
+        crate::perks::PerkBranch::Heart => Color::srgb(1.0, 0.55, 0.60),
+        crate::perks::PerkBranch::Star => Color::srgb(1.0, 0.92, 0.42),
+        crate::perks::PerkBranch::Acrobat => Color::srgb(0.42, 0.88, 1.0),
     }
-    lines.push(
-        "Rejuvenation healing spends reserve; buy Matrix ranks to refill and improve efficiency."
-            .to_string(),
-    );
-    lines.join("\n")
+}
+
+fn format_upgrade_header(upgrades: &UpgradeLedger) -> String {
+    format!(
+        "TECH UPGRADES   rejuvenation reserve: {:.0}",
+        upgrades.rejuvenation_charge
+    )
+}
+
+fn format_upgrade_row(
+    def: &crate::upgrades::TechUpgradeDef,
+    upgrades: &UpgradeLedger,
+    robot_pets: &RobotPetCollection,
+) -> String {
+    let rank = upgrades.rank(def.id);
+    let bar = rank_bar(rank, def.max_rank);
+    let status = if rank >= def.max_rank {
+        "MAX".to_string()
+    } else {
+        let cost = def.id.next_rank_cost(rank + 1);
+        let afford = if robot_pets.can_afford(&cost) { "READY" } else { "NEED PARTS" };
+        format!("{}  {}", format_part_costs(&cost), afford)
+    };
+    format!(
+        "[{key}] {:<26} {bar}  {rank}/{max}  {status}",
+        def.name,
+        key = def.key_hint,
+        max = def.max_rank,
+    )
+}
+
+fn track_color(track: crate::upgrades::TechUpgradeTrack) -> Color {
+    match track {
+        crate::upgrades::TechUpgradeTrack::Weapons => Color::srgb(1.0, 0.65, 0.35),
+        crate::upgrades::TechUpgradeTrack::Missiles => Color::srgb(1.0, 0.45, 0.45),
+        crate::upgrades::TechUpgradeTrack::Turrets => Color::srgb(0.80, 0.55, 1.0),
+        crate::upgrades::TechUpgradeTrack::Health => Color::srgb(0.42, 1.0, 0.55),
+        crate::upgrades::TechUpgradeTrack::Mechs => Color::srgb(0.42, 0.88, 1.0),
+    }
 }
 
 // ── Player Select ─────────────────────────────────────────────────────────────
