@@ -10,7 +10,7 @@ pub enum Faction {
     HeroBrother,
     /// Gabriella, Nova, Aurora, and Fortuna.
     HeroSister,
-    /// Space aliens invading Earth through another dimension.
+    /// The Scallarians: space aliens invading Earth through another dimension.
     DimensionalAlien,
     /// Collosar's dragon royal family.
     DragonRoyalty,
@@ -31,7 +31,7 @@ impl Faction {
             Faction::WizardScientist => "Wizard Scientist",
             Faction::HeroBrother => "Hero Brother",
             Faction::HeroSister => "Hero Sister",
-            Faction::DimensionalAlien => "Dimensional Alien",
+            Faction::DimensionalAlien => "Scallarian",
             Faction::DragonRoyalty => "Dragon Royalty",
             Faction::DragonExile => "Dragon Exile",
             Faction::CorruptedHuman => "Corrupted Human",
@@ -53,6 +53,16 @@ impl Faction {
             Faction::Civilian => Color::srgb(0.85, 0.85, 0.85),
             Faction::Neutral => Color::srgb(0.7, 0.7, 0.8),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dimensional_alien_faction_uses_scallarian_player_label() {
+        assert_eq!(Faction::DimensionalAlien.as_str(), "Scallarian");
     }
 }
 

@@ -15,7 +15,9 @@ use crate::components::discoverable::{
 use crate::components::enemy::BossEnemy;
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::player::{Player, PlayerIndex, PlayerMovement};
-use crate::components::world::{MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry};
+use crate::components::world::{
+    LaserTurret, MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry,
+};
 use crate::events::*;
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
 use crate::rendering::PbrBundle;
@@ -759,6 +761,103 @@ fn spawn_airship_arena(
             ));
         }
     }
+
+    spawn_airship_hazards(commands, meshes, center, trim_mat, glow_mat);
+}
+
+fn spawn_airship_hazards(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    center: Vec3,
+    trim_mat: Handle<StandardMaterial>,
+    glow_mat: Handle<StandardMaterial>,
+) {
+    let turret_offsets = [
+        Vec3::new(-34.0, 5.0, -16.0),
+        Vec3::new(34.0, 5.0, -16.0),
+        Vec3::new(-34.0, 5.0, 16.0),
+        Vec3::new(34.0, 5.0, 16.0),
+    ];
+    for (i, offset) in turret_offsets.into_iter().enumerate() {
+        let turret = commands
+            .spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cylinder::new(0.9, 1.35))),
+                    material: MeshMaterial3d(trim_mat.clone()),
+                    transform: Transform::from_translation(center + offset),
+                    ..default()
+                },
+                Collider::cylinder(0.68, 0.9),
+                RigidBody::Fixed,
+                WorldGeometry,
+                AirshipLevelPiece,
+                LaserTurret {
+                    range: 58.0,
+                    cooldown: 2.25 + i as f32 * 0.12,
+                    cooldown_timer: i as f32 * 0.35,
+                    windup: 0.48,
+                    windup_timer: 0.0,
+                    locked_target: None,
+                    damage: 9.0 + i as f32,
+                    beam_material: glow_mat.clone(),
+                },
+            ))
+            .id();
+
+        commands.entity(turret).with_children(|parent| {
+            parent.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.32, 0.28, 2.3))),
+                material: MeshMaterial3d(glow_mat.clone()),
+                transform: Transform::from_xyz(0.0, 0.34, -1.05),
+                ..default()
+            });
+            parent.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(0.24))),
+                material: MeshMaterial3d(glow_mat.clone()),
+                transform: Transform::from_xyz(0.0, 0.66, -0.86),
+                ..default()
+            });
+        });
+    }
+
+    let platform_runs = [
+        (
+            center + Vec3::new(-18.0, 5.8, 0.0),
+            center + Vec3::new(18.0, 5.8, 0.0),
+            3.2,
+            0.0,
+            Vec3::new(9.0, 1.0, 5.0),
+        ),
+        (
+            center + Vec3::new(0.0, 7.0, -14.0),
+            center + Vec3::new(0.0, 7.0, 14.0),
+            2.7,
+            1.4,
+            Vec3::new(7.5, 1.0, 4.5),
+        ),
+    ];
+    for (start, end, speed, phase, size) in platform_runs {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(trim_mat.clone()),
+                transform: Transform::from_translation(start),
+                ..default()
+            },
+            Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            RigidBody::KinematicPositionBased,
+            WorldGeometry,
+            WalkableSurface,
+            AirshipLevelPiece,
+            MovingPlatform {
+                start,
+                end,
+                speed,
+                phase,
+                size,
+            },
+        ));
+    }
 }
 
 // ── Discoverable beacon spawn ─────────────────────────────────────────────────
@@ -776,11 +875,13 @@ pub(crate) fn spawn_discoverable_beacon(
         DiscoverableKind::WeaponMod(_) => Color::srgb(1.0, 0.5, 0.0),
         DiscoverableKind::ArmorMod(_) => Color::srgb(0.3, 1.0, 0.5),
         DiscoverableKind::CompanionRecruit(_) => Color::srgb(1.0, 0.85, 0.3),
+        DiscoverableKind::RobotPetRescue { .. } => Color::srgb(0.35, 1.0, 0.95),
         DiscoverableKind::BeamSabreUnlock => Color::srgb(0.8, 0.1, 1.0),
         DiscoverableKind::ScientistRelic { .. } => Color::srgb(1.0, 0.95, 0.45),
         DiscoverableKind::RelicFragment { .. } => Color::srgb(0.45, 1.0, 0.95),
         DiscoverableKind::SecretCave { .. } => Color::srgb(0.35, 0.95, 0.65),
         DiscoverableKind::HiddenReward { .. } => Color::srgb(1.0, 0.70, 0.25),
+        DiscoverableKind::TechCache { .. } => Color::srgb(0.9, 0.95, 1.0),
         DiscoverableKind::LoreFragment(_) => Color::srgb(0.7, 0.7, 0.9),
     };
     let mat = materials.add(StandardMaterial {

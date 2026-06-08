@@ -1,5 +1,8 @@
 use bevy::prelude::*;
 
+use crate::robot_pets::{RobotPartKind, RobotPetRole};
+use crate::upgrades::TechUpgradeId;
+
 /// Things that can be picked up to permanently unlock something for the player.
 /// Spawned by the chapter director at script-defined positions; collected on overlap.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +15,12 @@ pub enum DiscoverableKind {
     ArmorMod(&'static str),
     /// Spawns the named companion as a permanent ally.
     CompanionRecruit(&'static str),
+    /// Rescues a robot pet and adds it to the campaign-shared pet roster.
+    RobotPetRescue {
+        pet_id: &'static str,
+        name: &'static str,
+        role: RobotPetRole,
+    },
     /// Unlocks the Star Sabre (locked by default in Starfall I).
     BeamSabreUnlock,
     /// A stolen relic shard recovered for one of the Starfall scientists.
@@ -36,6 +45,13 @@ pub enum DiscoverableKind {
         armor: u32,
         power_up: Option<&'static str>,
         special_ability: Option<&'static str>,
+    },
+    /// Campaign-shared cache for robot parts, upgrade direction, and heal reserve.
+    TechCache {
+        cache_id: &'static str,
+        parts: Vec<(RobotPartKind, u32)>,
+        upgrade_hint: Option<TechUpgradeId>,
+        rejuvenation_charge: u32,
     },
     /// Lore log; no mechanical effect, just radio chatter.
     LoreFragment(&'static str),

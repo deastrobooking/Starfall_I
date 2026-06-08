@@ -25,14 +25,35 @@ together.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
 - Robot pet foundation lives in `src/robot_pets.rs`: shared saved pet records,
   enemy salvage parts, store-build recipes, and combined vehicle/mech/ship form
-  gates. The garage UI and runtime mech/ship controllers are future work.
+  gates. Chapter scripts already use robot rescue pods; the garage UI and
+  runtime mech/ship controllers are future work.
 - Tech upgrade foundation lives in `src/upgrades.rs`: shared saved beam,
   missile, turret, health, rejuvenation, and mech-link ranks. Chapter select
-  spends robot salvage on ranks; rejuvenation healing consumes saved reserve.
+  spends robot salvage on ranks; chapter tech caches grant parts/route hints;
+  rejuvenation healing consumes saved reserve.
+- Airship boss rematches now spawn turret-guarded decks with moving cover.
+  Keep airship additions temporary and chapter-owned so cleanup stays simple.
+- Boss mode lives in `src/plugins/player_plugin.rs`: 2-4 local players switch
+  from split-screen to one full-screen party camera during `BossEnemy` fights
+  or nearby flying-drone wings, with distant players pulled toward the battle
+  anchor and split-screen restored afterward.
+- Dragon lair dungeons live in `src/plugins/world_plugin.rs` for Chapters
+  6-11. They are physical room/corridor layouts with hoard beacons and
+  `dragon_dungeon_chXX` anchors for future boss/key/switch staging.
+- Human hero combat identity lives in `src/hero_roster.rs`: all eight siblings
+  have unique signature weapons/specials plus shared speed, strength, flight,
+  and magic axes. Rescued robot pets amplify those axes by role.
+- Terrain uses deterministic waves plus an imported Everest PNG patch in the
+  southwest dragon domain. Keep heightmap changes tied to the shared height
+  function so visuals, anchors, and collision agree.
+- Player input is controller-first local multiplayer: preserve analog movement
+  magnitude, keep circular deadzone remapping, support LT/RT button and axis
+  paths, and treat controller smoke testing as required for movement changes.
 - Core app states are `MainMenu`, `PlayerSelect`, `CharacterDesign`,
   `ChapterSelect`, `ChassisEditor`, `Playing`, `Paused`, and `GameOver`.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
-  `docs/improvements.md`, and `docs/engine_upgrade_milestones.md`.
+  `docs/improvements.md`, `docs/naming.md`, and
+  `docs/engine_upgrade_milestones.md`.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
 
@@ -59,13 +80,20 @@ together.
 7. Keep `CharacterBlueprint` as editable recipe data. Do not collapse it into
    baked-only meshes or remove unused recipe fields just because the current
    renderer does not consume them yet.
-8. Prefer data-driven chapter, item, enemy, and encounter definitions over
+8. For player mechanics, keep `PlayerMovement` as the explicit home for
+   movement/physics tuning. Prefer small tested changes to acceleration,
+   step/snap, analog strength, wall interaction, and controller mapping over
+   hidden constants in systems.
+9. Prefer data-driven chapter, item, enemy, and encounter definitions over
    hard-coded one-off branches.
-9. Keep feature work scoped to the relevant plugin/module. Avoid broad rewrites
+10. Keep feature work scoped to the relevant plugin/module. Avoid broad rewrites
    unless they remove a known production blocker.
-10. Preserve the family-friendly star-beam tone. Starfall uses cartoon energy
+11. Preserve the family-friendly star-beam tone. Starfall uses cartoon energy
     tools and magical sci-fi beams, not realistic firearms.
-11. Update docs when changing architecture, controls, content flow, save scope,
+12. Keep player-facing names aligned with `docs/naming.md`. The alien invaders
+    are Scallarians, even though the stable internal faction enum is still
+    `DimensionalAlien`.
+13. Update docs when changing architecture, controls, content flow, save scope,
     engine policy, or production priorities.
 
 ## Milestone Priority

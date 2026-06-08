@@ -589,6 +589,7 @@ fn generate_city(
     spawn_collosar_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
     spawn_secret_cave_systems(&mut commands, &mut meshes, &pal, seed);
+    spawn_dragon_lair_dungeons(&mut commands, &mut meshes, m, &pal, seed);
     spawn_puzzle_anchors(&mut commands, seed);
 }
 
@@ -1526,6 +1527,484 @@ fn spawn_secret_cave_system(
     ));
 
     spawn_world_anchor(commands, spec.anchor_id, chamber + Vec3::Y * 1.4);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DragonDungeonTheme {
+    CrownIce,
+    Ember,
+    Fangroot,
+    Garden,
+    Granite,
+    Icebreaker,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DragonDungeonSpec {
+    chapter: u8,
+    anchor_id: &'static str,
+    reward_id: &'static str,
+    reward_label: &'static str,
+    x: f32,
+    z: f32,
+    yaw: f32,
+    theme: DragonDungeonTheme,
+}
+
+fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
+    &[
+        DragonDungeonSpec {
+            chapter: 6,
+            anchor_id: "dragon_dungeon_ch06",
+            reward_id: "dragon_dungeon_ch06_cache",
+            reward_label: "Crown Dungeon Hoard",
+            x: -505.0,
+            z: -332.0,
+            yaw: 0.12,
+            theme: DragonDungeonTheme::CrownIce,
+        },
+        DragonDungeonSpec {
+            chapter: 7,
+            anchor_id: "dragon_dungeon_ch07",
+            reward_id: "dragon_dungeon_ch07_cache",
+            reward_label: "Ember Dungeon Hoard",
+            x: -446.0,
+            z: 132.0,
+            yaw: -0.52,
+            theme: DragonDungeonTheme::Ember,
+        },
+        DragonDungeonSpec {
+            chapter: 8,
+            anchor_id: "dragon_dungeon_ch08",
+            reward_id: "dragon_dungeon_ch08_cache",
+            reward_label: "Fangroot Dungeon Hoard",
+            x: -330.0,
+            z: 300.0,
+            yaw: -1.05,
+            theme: DragonDungeonTheme::Fangroot,
+        },
+        DragonDungeonSpec {
+            chapter: 9,
+            anchor_id: "dragon_dungeon_ch09",
+            reward_id: "dragon_dungeon_ch09_cache",
+            reward_label: "Pink Flame Garden Hoard",
+            x: 430.0,
+            z: 26.0,
+            yaw: 0.84,
+            theme: DragonDungeonTheme::Garden,
+        },
+        DragonDungeonSpec {
+            chapter: 10,
+            anchor_id: "dragon_dungeon_ch10",
+            reward_id: "dragon_dungeon_ch10_cache",
+            reward_label: "Granite Dungeon Hoard",
+            x: 520.0,
+            z: 230.0,
+            yaw: -1.28,
+            theme: DragonDungeonTheme::Granite,
+        },
+        DragonDungeonSpec {
+            chapter: 11,
+            anchor_id: "dragon_dungeon_ch11",
+            reward_id: "dragon_dungeon_ch11_cache",
+            reward_label: "Icebreaker Dungeon Hoard",
+            x: 236.0,
+            z: -360.0,
+            yaw: 0.42,
+            theme: DragonDungeonTheme::Icebreaker,
+        },
+    ]
+}
+
+fn spawn_dragon_lair_dungeons(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    seed: u64,
+) {
+    for spec in dragon_dungeon_specs() {
+        spawn_dragon_lair_dungeon(commands, meshes, materials, pal, seed, *spec);
+    }
+}
+
+fn dragon_dungeon_materials(
+    pal: &Palette,
+    theme: DragonDungeonTheme,
+) -> (
+    Handle<StandardMaterial>,
+    Handle<StandardMaterial>,
+    Handle<StandardMaterial>,
+    Handle<StandardMaterial>,
+) {
+    match theme {
+        DragonDungeonTheme::CrownIce | DragonDungeonTheme::Icebreaker => (
+            pal.dragon_stone.clone(),
+            pal.snow.clone(),
+            pal.crystal_dragon.clone(),
+            pal.window_cool.clone(),
+        ),
+        DragonDungeonTheme::Ember => (
+            pal.dragon_stone.clone(),
+            pal.rock_dark.clone(),
+            pal.dragon_lava.clone(),
+            pal.dragon_window.clone(),
+        ),
+        DragonDungeonTheme::Fangroot => (
+            pal.rock_dark.clone(),
+            pal.stone_brick.clone(),
+            pal.crystal_dragon.clone(),
+            pal.dragon_window.clone(),
+        ),
+        DragonDungeonTheme::Garden => (
+            pal.stone_brick.clone(),
+            pal.castle_stone.clone(),
+            pal.crystal_aurora.clone(),
+            pal.window_warm.clone(),
+        ),
+        DragonDungeonTheme::Granite => (
+            pal.rock.clone(),
+            pal.stone_brick.clone(),
+            pal.dragon_lava.clone(),
+            pal.dragon_window.clone(),
+        ),
+    }
+}
+
+fn dragon_dungeon_light_color(theme: DragonDungeonTheme) -> Color {
+    match theme {
+        DragonDungeonTheme::CrownIce | DragonDungeonTheme::Icebreaker => {
+            Color::srgb(0.60, 0.78, 1.0)
+        }
+        DragonDungeonTheme::Garden => Color::srgb(1.0, 0.58, 0.88),
+        DragonDungeonTheme::Granite => Color::srgb(1.0, 0.64, 0.22),
+        DragonDungeonTheme::Ember | DragonDungeonTheme::Fangroot => Color::srgb(1.0, 0.32, 0.08),
+    }
+}
+
+fn spawn_dragon_lair_dungeon(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    seed: u64,
+    spec: DragonDungeonSpec,
+) {
+    let floor_y = terrain_surface_y(spec.x, spec.z, seed) + 1.0;
+    let origin = Vec3::new(spec.x, floor_y, spec.z);
+    let rot = Quat::from_rotation_y(spec.yaw);
+    let (wall_mat, floor_mat, accent_mat, beam_mat) = dragon_dungeon_materials(pal, spec.theme);
+    let light_color = dragon_dungeon_light_color(spec.theme);
+
+    for (local, size) in [
+        (Vec3::new(0.0, 0.0, -54.0), Vec3::new(18.0, 0.7, 22.0)),
+        (Vec3::new(0.0, 0.0, -28.0), Vec3::new(18.0, 0.7, 34.0)),
+        (Vec3::new(-24.0, 0.0, -8.0), Vec3::new(28.0, 0.7, 24.0)),
+        (Vec3::new(24.0, 0.0, -8.0), Vec3::new(28.0, 0.7, 24.0)),
+        (Vec3::new(0.0, 0.0, 16.0), Vec3::new(20.0, 0.7, 36.0)),
+        (Vec3::new(0.0, 1.6, 48.0), Vec3::new(34.0, 0.8, 26.0)),
+    ] {
+        spawn_dungeon_block(
+            commands,
+            meshes,
+            floor_mat.clone(),
+            origin,
+            rot,
+            local,
+            size,
+            true,
+        );
+    }
+
+    let wall_specs = [
+        (Vec3::new(-10.2, 3.0, -41.0), Vec3::new(1.2, 6.0, 54.0)),
+        (Vec3::new(10.2, 3.0, -41.0), Vec3::new(1.2, 6.0, 54.0)),
+        (Vec3::new(-39.0, 3.0, -8.0), Vec3::new(1.2, 6.0, 24.0)),
+        (Vec3::new(-9.5, 3.0, -8.0), Vec3::new(1.2, 6.0, 24.0)),
+        (Vec3::new(9.5, 3.0, -8.0), Vec3::new(1.2, 6.0, 24.0)),
+        (Vec3::new(39.0, 3.0, -8.0), Vec3::new(1.2, 6.0, 24.0)),
+        (Vec3::new(-10.6, 3.0, 16.0), Vec3::new(1.2, 6.0, 36.0)),
+        (Vec3::new(10.6, 3.0, 16.0), Vec3::new(1.2, 6.0, 36.0)),
+        (Vec3::new(0.0, 3.0, 65.0), Vec3::new(38.0, 6.0, 1.2)),
+        (Vec3::new(-18.5, 4.4, 48.0), Vec3::new(1.2, 8.8, 28.0)),
+        (Vec3::new(18.5, 4.4, 48.0), Vec3::new(1.2, 8.8, 28.0)),
+    ];
+    for (local, size) in wall_specs {
+        spawn_dungeon_block(
+            commands,
+            meshes,
+            wall_mat.clone(),
+            origin,
+            rot,
+            local,
+            size,
+            false,
+        );
+    }
+
+    for local in [
+        Vec3::new(-5.0, 4.0, -64.0),
+        Vec3::new(5.0, 4.0, -64.0),
+        Vec3::new(0.0, 7.0, -63.4),
+    ] {
+        spawn_dungeon_block(
+            commands,
+            meshes,
+            wall_mat.clone(),
+            origin,
+            rot,
+            local,
+            Vec3::new(5.0, 8.0, 2.2),
+            false,
+        );
+    }
+
+    for (index, local) in [
+        Vec3::new(-7.0, 1.2, -28.0),
+        Vec3::new(7.0, 1.2, -16.0),
+        Vec3::new(-30.0, 1.2, -8.0),
+        Vec3::new(30.0, 1.2, -8.0),
+        Vec3::new(-6.0, 1.2, 18.0),
+        Vec3::new(6.0, 1.2, 30.0),
+        Vec3::new(-13.0, 2.8, 49.0),
+        Vec3::new(13.0, 2.8, 49.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        spawn_dungeon_pillar(
+            commands,
+            meshes,
+            accent_mat.clone(),
+            origin,
+            rot,
+            local,
+            index as f32,
+        );
+    }
+
+    spawn_dungeon_hazard_strips(
+        commands,
+        meshes,
+        accent_mat.clone(),
+        origin,
+        rot,
+        spec.theme,
+    );
+    spawn_dungeon_moving_bridge(
+        commands,
+        meshes,
+        accent_mat.clone(),
+        origin,
+        rot,
+        spec.chapter,
+    );
+    spawn_dungeon_turrets(
+        commands,
+        meshes,
+        wall_mat.clone(),
+        beam_mat.clone(),
+        origin,
+        rot,
+        spec.chapter,
+    );
+
+    for local in [
+        Vec3::new(-24.0, 6.0, -8.0),
+        Vec3::new(24.0, 6.0, -8.0),
+        Vec3::new(0.0, 6.0, 18.0),
+        Vec3::new(0.0, 9.0, 50.0),
+    ] {
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: light_color,
+                    intensity: 18_000.0,
+                    range: 38.0,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_translation(origin + rot * local),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let reward = DiscoverableKind::HiddenReward {
+        reward_id: spec.reward_id,
+        credits: 120 + spec.chapter as u32 * 15,
+        experience: 70 + spec.chapter as u32 * 10,
+        armor: 8 + spec.chapter as u32,
+        power_up: None,
+        special_ability: None,
+    };
+    spawn_discoverable_beacon(
+        commands,
+        meshes,
+        materials,
+        reward,
+        spec.reward_label,
+        origin + rot * Vec3::new(0.0, 2.8, 54.0),
+    );
+    spawn_world_anchor(
+        commands,
+        spec.anchor_id,
+        origin + rot * Vec3::new(0.0, 3.0, 48.0),
+    );
+}
+
+fn spawn_dungeon_block(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    local: Vec3,
+    size: Vec3,
+    walkable: bool,
+) {
+    spawn_castle_block(
+        commands,
+        meshes,
+        material,
+        origin + rot * local,
+        size,
+        rot,
+        true,
+        walkable,
+    );
+}
+
+fn spawn_dungeon_pillar(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    local: Vec3,
+    phase: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(1.4, 4.8))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(origin + rot * local)
+                .with_rotation(rot * Quat::from_rotation_y(phase * 0.4)),
+            ..default()
+        },
+        WorldGeometry,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(2.4, 1.4),
+    ));
+}
+
+fn spawn_dungeon_hazard_strips(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    theme: DragonDungeonTheme,
+) {
+    let z_offsets: &[f32] = match theme {
+        DragonDungeonTheme::Garden => &[-20.0, 4.0, 27.0],
+        DragonDungeonTheme::CrownIce | DragonDungeonTheme::Icebreaker => &[-34.0, -2.0, 36.0],
+        _ => &[-24.0, 8.0, 34.0],
+    };
+    for (i, z) in z_offsets.iter().enumerate() {
+        spawn_castle_block(
+            commands,
+            meshes,
+            material.clone(),
+            origin + rot * Vec3::new(if i % 2 == 0 { -2.0 } else { 2.0 }, 0.5, *z),
+            Vec3::new(12.0, 0.24, 2.2),
+            rot,
+            false,
+            false,
+        );
+    }
+}
+
+fn spawn_dungeon_moving_bridge(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    chapter: u8,
+) {
+    let size = Vec3::new(5.4, 0.55, 5.4);
+    for (i, x) in [-6.0_f32, 0.0, 6.0].into_iter().enumerate() {
+        let start = origin + rot * Vec3::new(x, 2.1, 3.0);
+        let end = origin + rot * Vec3::new(x, 4.2, 3.0 + if i % 2 == 0 { 8.0 } else { -8.0 });
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(material.clone()),
+                transform: Transform::from_translation(start).with_rotation(rot),
+                ..default()
+            },
+            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+            WorldGeometry,
+            WalkableSurface,
+            MovingPlatform {
+                start,
+                end,
+                speed: 2.2 + i as f32 * 0.35,
+                phase: chapter as f32 * 0.4 + i as f32,
+                size,
+            },
+        ));
+    }
+}
+
+fn spawn_dungeon_turrets(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    body_mat: Handle<StandardMaterial>,
+    beam_mat: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    chapter: u8,
+) {
+    for (i, local) in [Vec3::new(-15.0, 2.7, 34.0), Vec3::new(15.0, 2.7, 34.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let turret = commands
+            .spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cylinder::new(0.8, 1.4))),
+                    material: MeshMaterial3d(body_mat.clone()),
+                    transform: Transform::from_translation(origin + rot * local).with_rotation(rot),
+                    ..default()
+                },
+                WorldGeometry,
+                LaserTurret {
+                    range: 48.0,
+                    cooldown: 2.1 + i as f32 * 0.25,
+                    cooldown_timer: chapter as f32 * 0.12 + i as f32 * 0.4,
+                    windup: 0.50,
+                    windup_timer: 0.0,
+                    locked_target: None,
+                    damage: 7.0 + chapter as f32 * 0.35,
+                    beam_material: beam_mat.clone(),
+                },
+                bevy_rapier3d::prelude::RigidBody::Fixed,
+                bevy_rapier3d::prelude::Collider::cylinder(0.7, 0.8),
+            ))
+            .id();
+        commands.entity(turret).with_children(|parent| {
+            parent.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.25, 0.24, 1.8))),
+                material: MeshMaterial3d(beam_mat.clone()),
+                transform: Transform::from_xyz(0.0, 0.32, -0.85),
+                ..default()
+            });
+        });
+    }
 }
 
 // ── Terrain ───────────────────────────────────────────────────────────────────
@@ -5967,5 +6446,35 @@ fn spawn_magic_crystals(
                 ));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn everest_heightmap_asset_loads() {
+        assert!(everest_heightmap().is_some());
+    }
+
+    #[test]
+    fn city_core_terrain_stays_flat() {
+        assert_eq!(terrain_height(0.0, 0.0, 42), 0.0);
+    }
+
+    #[test]
+    fn outer_world_terrain_keeps_relief() {
+        assert!(terrain_height(480.0, 480.0, 42) > 40.0);
+    }
+
+    #[test]
+    fn dragon_lair_dungeons_cover_dragon_chapters() {
+        let chapters: Vec<u8> = dragon_dungeon_specs()
+            .iter()
+            .map(|spec| spec.chapter)
+            .collect();
+
+        assert_eq!(chapters, vec![6, 7, 8, 9, 10, 11]);
     }
 }

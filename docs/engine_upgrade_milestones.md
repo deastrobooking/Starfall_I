@@ -36,7 +36,9 @@ is for local incremental development only.
 Manual macOS smoke validation is required for engine bumps:
 
 - Launch with keyboard/mouse.
-- Validate at least two Xbox-style controllers.
+- Validate at least two Xbox-style controllers, including reconnect order,
+  analog left-stick tilt for walk speed, right-stick look, LT/RT aim/fire,
+  RB/LB shoulder actions, Select+D-pad special tools, and Start pause.
 - Join players through player select and enter `Playing`.
 - Confirm split-screen cameras spawn for local players.
 - Pause/resume, manual save, and save-and-title from pause.

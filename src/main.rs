@@ -15,6 +15,7 @@ mod characters;
 mod components;
 mod damage;
 mod events;
+mod hero_roster;
 mod lsystem;
 mod perks;
 mod plugins;

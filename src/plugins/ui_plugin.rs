@@ -297,7 +297,7 @@ fn setup_main_menu(mut commands: Commands) {
         MainMenuRoot,
     )).with_children(|p| {
         p.spawn((Text::new("STARFALL I"), TextFont { font_size: 72.0, ..default() }, TextColor(Color::srgb(1.0, 0.9, 0.25))));
-        p.spawn((Text::new("Four siblings, rift aliens, dragon royalty, and star-powered science."), TextFont { font_size: 24.0, ..default() }, TextColor(Color::srgb(0.65, 0.8, 1.0))));
+        p.spawn((Text::new("Eight siblings, Scallarians, dragon royalty, and star-powered science."), TextFont { font_size: 24.0, ..default() }, TextColor(Color::srgb(0.65, 0.8, 1.0))));
         p.spawn(Node { height: Val::Px(40.0), ..default() });
         p.spawn((
             Button,
@@ -1236,6 +1236,7 @@ fn player_select_update(
     mut card_q: Query<(&mut BackgroundColor, &PlayerSlotCard)>,
 ) {
     let dt = time.delta_secs();
+    let roster_len = HERO_ROSTER.len();
 
     // ESC → back to main menu
     if keyboard.just_pressed(KeyCode::Escape) {
@@ -1297,10 +1298,10 @@ fn player_select_update(
                 || native_lx > 0.5
                 || lx > 0.5;
             if left {
-                slot.character_index = (slot.character_index + 3) % 4;
+                slot.character_index = (slot.character_index + roster_len - 1) % roster_len;
                 slot.stick_cooldown = 0.18;
             } else if right {
-                slot.character_index = (slot.character_index + 1) % 4;
+                slot.character_index = (slot.character_index + 1) % roster_len;
                 slot.stick_cooldown = 0.18;
             }
         }
@@ -1365,7 +1366,7 @@ fn player_select_update(
         if !slot.joined {
             if any_just {
                 slot.joined = true;
-                slot.character_index = i as usize % 4;
+                slot.character_index = i as usize % roster_len;
                 slot.ready = false;
             }
         } else {
@@ -1379,10 +1380,10 @@ fn player_select_update(
                     || event_pressed(*gp_entity, GamepadButton::DPadRight)
                     || lx > 0.5;
                 if left {
-                    slot.character_index = (slot.character_index + 3) % 4;
+                    slot.character_index = (slot.character_index + roster_len - 1) % roster_len;
                     slot.stick_cooldown = 0.25;
                 } else if right {
-                    slot.character_index = (slot.character_index + 1) % 4;
+                    slot.character_index = (slot.character_index + 1) % roster_len;
                     slot.stick_cooldown = 0.25;
                 }
             }
@@ -1422,7 +1423,7 @@ fn player_select_update(
     for (mut t, marker) in char_q.iter_mut() {
         let s = &select.slots[marker.0 as usize];
         *t = Text::new(if s.joined {
-            format!("< {} >", HERO_ROSTER[s.character_index])
+            format!("< {} >", HERO_ROSTER[s.character_index % roster_len])
         } else {
             "- - - - -".to_string()
         });

@@ -46,6 +46,14 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Default player visuals now move away from tiny voxel/chibi blocks toward taller Dreamcast-anime sci-fantasy heroes with capsule limbs, layered armor, expressive eyes/hair, and glow accents.
 - Robot pets now have a campaign-shared saved data model, enemy-salvage part rewards, named robot-part materials, store-build recipes, and combination gates for cars, motorcycles, tanks, boats, submarines, space jets, giant mechs, spaceships, and megaships.
 - Tech upgrades now have a saved campaign ledger, chapter-select UI, robot-salvage costs, beam/missile/Sprite Turret damage multipliers, armor health bonuses, and paid rejuvenation reserve consumption.
+- Player/controller feel now preserves analog stick movement strength, supports LT/RT analog trigger-axis fallback, gates controller sprint behind near-full stick tilt, and exposes kinematic controller step/snap tuning through `PlayerMovement`.
+- Chapter scripts now use robot rescue pods and tech caches as authored level rewards, feeding rescued robot pets, robot parts, upgrade-route hints, and rejuvenation reserve into the campaign.
+- Airship raid arenas now add four windup laser turrets and two moving cover platforms, making castle boss rematches use the newer armor/rejuvenation/controller movement loop.
+- Terrain tests now guard the current heightmap baseline: the Everest PNG patch must load, the city core remains flat, and outer terrain keeps meaningful relief.
+- Dragon lair dungeons now exist for chapters 6-11, with SNES-RPG-style room/corridor layouts, moving bridge platforms, turret guards, raised lair dais anchors, and save-backed hoard beacons.
+- All eight human siblings now have hero combat profiles with unique signature weapon/special names, shared speed/strength/flight/magic axes, and robot-pet amplification at spawn.
+- Boss mode now links 2-4 local players into one full-screen party camera for boss-tier enemies and nearby flying-drone wings, then restores split-screen after the threat clears.
+- Naming canon now lives in `docs/naming.md`; Chapter 1 is `Invasion of the Scallarians`, and player-facing alien labels use Scallarian/Scallarians.
 
 ## High Priority
 
@@ -80,55 +88,69 @@ The current tech-upgrade panel proves saved ranks, robot-salvage costs, and runt
 ### 4. Deepen airship levels
 **Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
 
-Airship levels currently spawn a solid deck, rail blockers, engine visuals, a guard wave, and a boss rematch. That supports the requested chapter loop, but the levels could become richer platforming spaces.
+Airship levels now spawn a solid deck, rail blockers, engine visuals, four windup laser turrets, two moving cover platforms, a guard wave, and a boss rematch. That supports the requested chapter loop, but the levels could become richer platforming spaces.
 
-**Design direction:** add moving deck hazards, side-scrolling sky debris, engine weak points, airship-specific loot, and boarding/extraction transitions.
+**Design direction:** add side-scrolling sky debris, engine weak points, airship-specific loot, turret-disabling objectives, and boarding/extraction transitions.
 
-### 5. Build the robot pet garage loop
+### 5. Add more shared-screen boss opportunities
+**Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/enemy_plugin.rs`, `src/plugins/player_plugin.rs`
+
+Boss mode now proves the camera and party-gathering rule, but the campaign needs more deliberate encounter hooks that trigger it: drone ships, lair alarm rooms, castle miniboss doors, airship engine rooms, and optional hoard guardians.
+
+**Design direction:** author short shared-screen fights around `BossEnemy` or flying-drone wings, add clear entry/exit beats, and avoid pulling players during vehicle-only sequences until vehicle boss rules are defined.
+
+### 6. Build the robot pet garage loop
 **Files:** `src/robot_pets.rs`, `src/plugins/ui_plugin.rs`, `src/plugins/vehicle_plugin.rs`, future rescue/store plugins
 
-Robot pets now have durable data, save support, salvage, store-build costs, and combined-form recipes. They still need a playable garage/store screen, authored rescue beacons, actual vehicle/mech spawning, upgrade slots, and per-player passenger/driver UX.
+Robot pets now have durable data, save support, salvage, store-build costs, authored rescue beacons, and combined-form recipes. They still need a playable garage/store screen, actual vehicle/mech spawning, upgrade slots, and per-player passenger/driver UX.
 
-**Design direction:** add robot rescue discoverables, a controller-friendly garage UI, store-built pet purchasing from salvage, pet assignment per player, combined-form previews, and runtime adapters that connect robot forms to existing vehicle mode, boat boarding, and future mech/ship controllers.
+**Design direction:** add a controller-friendly garage UI, store-built pet purchasing from salvage, pet assignment per player, combined-form previews, and runtime adapters that connect robot forms to existing vehicle mode, boat boarding, and future mech/ship controllers.
 
-### 6. Clarify save-game scope
+### 7. Clarify save-game scope
 **File:** `src/plugins/save_plugin.rs`
 
 Save data now persists chapter progress, perks, robot pets, tech upgrades, player-slot character blueprints, and per-player runtime stats. The schema still carries legacy top-level stat fields for old-save compatibility and still mixes shared `wave_number` with newer campaign/chapter data.
 
 **Design direction:** split shared campaign data from per-player character data into separate schema sections or files. Treat max health/stamina as derived values when possible.
 
-### 7. Deepen relic-fragment challenge design
+### 8. Deepen relic-fragment challenge design
 **Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
 
 Fragment puzzles now prove the five-pieces-make-a-relic loop with moving bars, lift platforms, saving, and auto-assembly. The next design step is making each fragment course feel more authored and biome-specific.
 
 **Design direction:** add hazard damage, timed doors, rotating platform chains, airship-style variants, and optional bonus fragments that reward careful platforming without blocking chapter completion.
 
-### 8. Tune traversal toys and obstacle courses
+### 9. Tune traversal toys and obstacle courses
 **Files:** `src/components/world.rs`, `src/plugins/world_plugin.rs`, `src/plugins/player_plugin.rs`
 
 Slingshot pads, rotating elevators, ramp towers, and moving brick chains now exist as first-pass traversal toys. They need hands-on tuning for trajectory, camera readability, multiplayer crowding, reset paths, and reward pacing.
 
 **Design direction:** add route signage, checkpoint/return pads, course timers, optional medal rewards, camera assists during large launches, and course variants in caves, airships, islands, and castles.
 
+### 10. Deepen dragon lair dungeons
+**Files:** `src/plugins/world_plugin.rs`, `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
+
+Dragon lairs now have physical dungeon layouts and hoard rewards. They still need chapter-specific enemy placement, locked doors, keys/switches, minimap labels, camera assists, boss staging inside the `dragon_dungeon_chXX` anchors, and unique tile/hazard variants for each villain.
+
+**Design direction:** make each lair a compact but readable SNES-inspired dungeon: one clear villain objective, one optional side hoard, one traversal trick, one robot-pet shortcut, and one boss-room staging beat.
+
 ## Medium Priority
 
-### 9. Deepen hidden rewards, cave rewards, and secrets
+### 11. Deepen hidden rewards, cave rewards, and secrets
 **Files:** `src/plugins/world_plugin.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
 
 Secret caves now exist as discoverable places, and the city has first-pass hidden reward rooms. These prove the reward-cache path, but caves and later levels need more authored secret content.
 
 **Design direction:** add cave-only chests, lore tablets, biome hazards, puzzle-gated doors, hidden relic-fragment shortcuts, unique armor/power-up pools, secret-room completion counts on the map/HUD, and clearer authored clues that lead players to hidden spaces.
 
-### 10. Dual armor tracking can drift
+### 12. Dual armor tracking can drift
 **Files:** `src/components/player.rs`, `src/components/armor.rs`, `src/plugins/armor_plugin.rs`
 
 `PlayerStats` tracks numeric `armor` / `max_armor`, while `ArmorSet` tracks equipped armor pieces and damage reduction. Incoming damage uses both concepts. This should be named and documented as two distinct mechanics, or consolidated.
 
 **Design direction:** either rename `PlayerStats.armor` to `current_armor_points`, or move armor durability into `ArmorSet`.
 
-### 11. Health maximum has multiple writers
+### 13. Health maximum has multiple writers
 **Files:** `src/plugins/player_plugin.rs`, `src/plugins/armor_plugin.rs`, `src/plugins/save_plugin.rs`
 
 Level-up, armor bonuses, perk bonuses, tech upgrades, and loading all write or influence max health. The armor/perk/upgrade sync now recalculates from stable sources, but the data model would be cleaner with one source of truth.
@@ -137,16 +159,23 @@ Level-up, armor bonuses, perk bonuses, tech upgrades, and loading all write or i
 
 ## Lower Priority
 
-### 12. Second Wind needs an out-of-combat timer
+### 14. Second Wind needs an out-of-combat timer
 **Files:** `src/plugins/player_plugin.rs`, `src/perks.rs`
 
 `Second Wind` now consumes paid rejuvenation reserve, but it still lacks a real out-of-combat timer.
 
 **Fix:** track recent damage/dealt-damage timestamps and enable regen only after a short quiet window.
 
-### 13. Input conflicts need a final control pass
+### 15. Input conflicts need a final control pass
 **Files:** `src/plugins/input_plugin.rs`, `src/plugins/armor_plugin.rs`
 
 Bracket keys currently overlap weapon cycling and developer elemental armor cycling. This is fine for a prototype, but final controls should separate player-facing actions from debug actions.
 
 **Fix:** move element cycling behind a debug flag, menu, or dedicated dev-only chord.
+
+### 16. Controller support still needs hardware smoke passes
+**Files:** `src/plugins/input_plugin.rs`, `src/plugins/player_plugin.rs`
+
+The input path now supports Bevy gamepads plus the macOS native fallback, analog move magnitude, trigger-axis fallback, and Select+D-pad specials. It still needs repeated hands-on validation across at least two Xbox-style controllers, DualSense/DualShock, and reconnect ordering.
+
+**Fix:** add an in-game controller diagnostics overlay showing per-player assignment, left/right stick values, LT/RT source, active button states, and last action fired.

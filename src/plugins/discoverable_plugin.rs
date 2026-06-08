@@ -14,7 +14,9 @@ use crate::damage::Health;
 use crate::events::*;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::resources::{ChapterProgress, CurrentChapter};
+use crate::robot_pets::{RobotPetBlueprint, RobotPetCollection};
 use crate::state::AppState;
+use crate::upgrades::UpgradeLedger;
 
 pub struct DiscoverablePlugin;
 
@@ -559,6 +561,8 @@ fn discoverable_pickup_system(
     mut progress: ResMut<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
     mut loadout: ResMut<PlayerLoadout>,
+    mut robot_pets: ResMut<RobotPetCollection>,
+    mut upgrades: ResMut<UpgradeLedger>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
     mut radio_ev: MessageWriter<RadioChatterEvent>,
     mut disc_ev: MessageWriter<DiscoverableCollectedEvent>,
@@ -656,6 +660,32 @@ fn discoverable_pickup_system(
                     },
                     faction: crate::components::faction::Faction::HeroBrother,
                     duration: 3.0,
+                });
+            }
+            DiscoverableKind::RobotPetRescue { pet_id, name, role } => {
+                let was_new =
+                    robot_pets.rescue_pet(RobotPetBlueprint::rescued(*pet_id, *name, *role));
+                progress.unlock(pet_id);
+                msg_ev.write(UiMessageEvent {
+                    text: if was_new {
+                        format!("Robot pet rescued: {} ({:?})", name, role)
+                    } else {
+                        format!("Robot pet already rescued: {}", name)
+                    },
+                    duration: 3.5,
+                });
+                radio_ev.write(RadioChatterEvent {
+                    speaker: "Giacoma".into(),
+                    text: if was_new {
+                        format!(
+                            "{} is synced to the garage. Its chassis can help with vehicle and mech assemblies.",
+                            name
+                        )
+                    } else {
+                        format!("{} is already in the robot pet roster.", name)
+                    },
+                    faction: crate::components::faction::Faction::WizardScientist,
+                    duration: 4.0,
                 });
             }
             DiscoverableKind::BeamSabreUnlock => {
@@ -831,6 +861,54 @@ fn discoverable_pickup_system(
                         duration: 3.5,
                     });
                 }
+            }
+            DiscoverableKind::TechCache {
+                cache_id,
+                parts,
+                upgrade_hint,
+                rejuvenation_charge,
+            } => {
+                let was_new = !progress.has_discoverable(cache_id);
+                progress.unlock(cache_id);
+
+                let mut gains = Vec::new();
+                if was_new {
+                    for (kind, quantity) in parts {
+                        robot_pets.add_part(*kind, *quantity);
+                        if *quantity > 0 {
+                            gains.push(format!("+{} {}", quantity, kind.label()));
+                        }
+                    }
+                    if *rejuvenation_charge > 0 {
+                        upgrades.rejuvenation_charge += *rejuvenation_charge as f32;
+                        gains.push(format!("+{} rejuvenation reserve", rejuvenation_charge));
+                    }
+                }
+                if let Some(upgrade_id) = *upgrade_hint {
+                    gains.push(format!("{} route", upgrade_id.def().name));
+                }
+
+                msg_ev.write(UiMessageEvent {
+                    text: if was_new {
+                        format!("Tech cache: {} ({})", d.label, gains.join(", "))
+                    } else {
+                        format!("Tech cache already opened: {}", d.label)
+                    },
+                    duration: 4.0,
+                });
+                radio_ev.write(RadioChatterEvent {
+                    speaker: "Gabrio".into(),
+                    text: if was_new {
+                        format!(
+                            "{} is logged for the upgrade bench. Spend the parts when the team is ready.",
+                            d.label
+                        )
+                    } else {
+                        format!("{} was already stripped for parts.", d.label)
+                    },
+                    faction: crate::components::faction::Faction::WizardScientist,
+                    duration: 4.0,
+                });
             }
             DiscoverableKind::LoreFragment(text) => {
                 msg_ev.write(UiMessageEvent {

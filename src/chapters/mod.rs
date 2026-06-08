@@ -14,6 +14,8 @@ use std::sync::OnceLock;
 use crate::components::discoverable::{DiscoverableKind, PuzzleArchetype};
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
+use crate::robot_pets::{RobotPartKind, RobotPetRole};
+use crate::upgrades::TechUpgradeId;
 
 // ── Chapter ID ────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -324,6 +326,38 @@ fn place(kind: DiscoverableKind, label: &'static str, offset: Vec3) -> Encounter
         offset,
     }
 }
+fn robot_pet(
+    pet_id: &'static str,
+    name: &'static str,
+    role: RobotPetRole,
+    label: &'static str,
+    offset: Vec3,
+) -> EncounterStep {
+    place(
+        DiscoverableKind::RobotPetRescue { pet_id, name, role },
+        label,
+        offset,
+    )
+}
+fn tech_cache(
+    cache_id: &'static str,
+    label: &'static str,
+    parts: &[(RobotPartKind, u32)],
+    upgrade_hint: Option<TechUpgradeId>,
+    rejuvenation_charge: u32,
+    offset: Vec3,
+) -> EncounterStep {
+    place(
+        DiscoverableKind::TechCache {
+            cache_id,
+            parts: parts.to_vec(),
+            upgrade_hint,
+            rejuvenation_charge,
+        },
+        label,
+        offset,
+    )
+}
 fn secret_cave(chapter: u8, cave_id: &'static str, label: &'static str) -> EncounterStep {
     EncounterStep::PlaceSecretCave {
         chapter,
@@ -381,17 +415,36 @@ fn build_chapters() -> Vec<ChapterDef> {
     vec![
         ChapterDef {
             id: ChapterId(1),
-            title: "Starfall Lab",
-            subtitle: "Giacoma opens the sky",
+            title: "Invasion of the Scallarians",
+            subtitle: "The Starfall Lab opens under attack",
             biome: Biome::StarfallLab,
             difficulty_scale: 1.0,
             script: vec![
                 dialogue("Giacoma", WizardScientist, "The star engine is awake. Nobody sneeze near the dimension dial.", 3.5),
                 secret_cave(1, "secret_cave_ch01", "Star Engine Grotto"),
-                dialogue("Giovanni", WizardScientist, "Too late. Something green just waved back.", 3.0),
+                dialogue("Giovanni", WizardScientist, "Too late. A Scallarian scout just waved back.", 3.0),
                 spawn(DimensionalAlien, Drone, 5, 1.0),
                 dialogue("Gabrio", WizardScientist, "Give the brothers the beam gloves. Cartoon settings only.", 3.0),
                 place(DiscoverableKind::BeamSabreUnlock, "Star Sabre Core", Vec3::new(8.0, 0.5, 0.0)),
+                robot_pet(
+                    "spark_pup",
+                    "Spark Pup",
+                    RobotPetRole::Scout,
+                    "Spark Pup Rescue Pod",
+                    Vec3::new(-7.0, 0.5, 5.0),
+                ),
+                tech_cache(
+                    "tech_cache_ch01_beam",
+                    "Starter Beam Cache",
+                    &[
+                        (RobotPartKind::CircuitBoard, 3),
+                        (RobotPartKind::EnergyCore, 1),
+                        (RobotPartKind::ServoMotor, 1),
+                    ],
+                    Some(TechUpgradeId::BeamCapacitors),
+                    45,
+                    Vec3::new(10.0, 0.5, 4.0),
+                ),
                 relic_puzzle(
                     "Giacoma",
                     "star_engine_focus",
@@ -406,7 +459,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                     ],
                 ),
                 spawn(DimensionalAlien, EnemyType::SpikeAlien, 5, 1.0),
-                mid_boss("JetWarden", "Rift Skipper", DimensionalAlien, 1.25),
+                mid_boss("JetWarden", "Scallarian Rift Skipper", DimensionalAlien, 1.25),
                 place(DiscoverableKind::CompanionRecruit("Vincenzo"), "Vincenzo - Oldest Brother", Vec3::new(0.0, 0.5, -8.0)),
                 outro("Vincenzo: Family first. Then we close the sky."),
             ],
@@ -424,7 +477,19 @@ fn build_chapters() -> Vec<ChapterDef> {
                 spawn(DimensionalAlien, Drone, 6, 1.2),
                 spawn(DimensionalAlien, Soldier, 5, 1.2),
                 place(DiscoverableKind::WeaponMod("homing_star"), "Homing Star Focus", Vec3::new(6.0, 0.5, 6.0)),
-                mid_boss("Nero", "Rift Cartographer", DimensionalAlien, 1.4),
+                tech_cache(
+                    "tech_cache_ch02_missile",
+                    "Rift Missile Cache",
+                    &[
+                        (RobotPartKind::ScrapFrame, 6),
+                        (RobotPartKind::EnergyCore, 2),
+                        (RobotPartKind::HoverJet, 1),
+                    ],
+                    Some(TechUpgradeId::NovaMissileForge),
+                    35,
+                    Vec3::new(-8.0, 0.5, 7.0),
+                ),
+                mid_boss("Nero", "Scallarian Rift Cartographer", DimensionalAlien, 1.4),
                 place(DiscoverableKind::CompanionRecruit("Antonio"), "Antonio aka Tony", Vec3::new(0.0, 0.5, -6.0)),
                 place(DiscoverableKind::Blueprint("jump_gate_blueprint"), "Jump Gate Sketches", Vec3::new(-8.0, 0.5, 4.0)),
                 relic_fragment_puzzle(
@@ -450,7 +515,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                 spawn(DimensionalAlien, Soldier, 5, 1.3),
                 dialogue("Nova", HeroSister, "Rainbow Ray is warmed up.", 2.5),
                 spawn(DimensionalAlien, EnemyType::SpikeAlien, 6, 1.3),
-                mid_boss("HybridOmega", "Dimension Bruiser", DimensionalAlien, 1.45),
+                mid_boss("HybridOmega", "Scallarian Dimension Bruiser", DimensionalAlien, 1.45),
                 place(DiscoverableKind::CompanionRecruit("Gabriella"), "Gabriella", Vec3::new(0.0, 0.5, -6.0)),
                 place(DiscoverableKind::CompanionRecruit("Nova"), "Nova", Vec3::new(4.0, 0.5, -6.0)),
                 place(DiscoverableKind::CompanionRecruit("Aurora"), "Aurora", Vec3::new(8.0, 0.5, -6.0)),
@@ -472,7 +537,26 @@ fn build_chapters() -> Vec<ChapterDef> {
                 spawn(DimensionalAlien, Heavy, 3, 1.4),
                 mid_boss("Brutus", "Portal Bouncer", DimensionalAlien, 1.45),
                 place(DiscoverableKind::WeaponMod("piercing_rounds"), "Star Pierce Mod", Vec3::new(8.0, 0.5, 0.0)),
-                boss("HybridOmega", "Rift Gatekeeper", DimensionalAlien,
+                robot_pet(
+                    "bolt_mason",
+                    "Bolt Mason",
+                    RobotPetRole::Builder,
+                    "Bolt Mason Rescue Pod",
+                    Vec3::new(-7.0, 0.5, 7.0),
+                ),
+                tech_cache(
+                    "tech_cache_ch04_turret",
+                    "Sprite Turret Cache",
+                    &[
+                        (RobotPartKind::CircuitBoard, 4),
+                        (RobotPartKind::ServoMotor, 5),
+                        (RobotPartKind::ScrapFrame, 4),
+                    ],
+                    Some(TechUpgradeId::SpriteTurretLattice),
+                    55,
+                    Vec3::new(12.0, 0.5, -4.0),
+                ),
+                boss("HybridOmega", "Scallarian Rift Gatekeeper", DimensionalAlien,
                      "GATEKEEPER: Your family makes too much light.", 1.8),
                 relic_puzzle(
                     "Giacoma",
@@ -534,6 +618,18 @@ fn build_chapters() -> Vec<ChapterDef> {
                 spawn(DragonRoyalty, Drone, 6, 1.6),
                 spawn(DragonRoyalty, Heavy, 4, 1.6),
                 place(DiscoverableKind::ArmorMod("coolant_weave"), "Dragon Chill Weave", Vec3::new(6.0, 0.5, 6.0)),
+                tech_cache(
+                    "tech_cache_ch06_chill_armor",
+                    "Crownship Armor Cache",
+                    &[
+                        (RobotPartKind::HullPlate, 5),
+                        (RobotPartKind::PressureSeal, 3),
+                        (RobotPartKind::EnergyCore, 2),
+                    ],
+                    Some(TechUpgradeId::ArmorPlating),
+                    65,
+                    Vec3::new(-10.0, 0.5, 8.0),
+                ),
                 boss("BruteForge", "Collosar - King of the Dragons", DragonRoyalty,
                      "COLLOSAR: Prove your light protects Earth.", 2.4),
                 airship_escape(
@@ -590,6 +686,25 @@ fn build_chapters() -> Vec<ChapterDef> {
                 mid_boss("Nero", "Spikey - Youngest Son", DragonRoyalty, 1.7),
                 dialogue("Shread", DragonRoyalty, "Little brother, stop chasing portals with your face.", 2.5),
                 spawn(DimensionalAlien, EnemyType::SpikeAlien, 7, 1.9),
+                robot_pet(
+                    "rivet_guard",
+                    "Rivet Guard",
+                    RobotPetRole::Defender,
+                    "Rivet Guard Rescue Pod",
+                    Vec3::new(-8.0, 0.5, 8.0),
+                ),
+                tech_cache(
+                    "tech_cache_ch08_mech_link",
+                    "Scrapwing Mech-Link Cache",
+                    &[
+                        (RobotPartKind::ServoMotor, 6),
+                        (RobotPartKind::StarDrive, 2),
+                        (RobotPartKind::CommandDeck, 1),
+                    ],
+                    Some(TechUpgradeId::MechCommandLink),
+                    80,
+                    Vec3::new(9.0, 0.5, -9.0),
+                ),
                 boss("TankTitan", "Shread - Oldest Son", DragonRoyalty,
                      "SHREAD: Show me your best team combo.", 2.2),
                 airship_escape(
@@ -683,6 +798,25 @@ fn build_chapters() -> Vec<ChapterDef> {
                 spawn(DragonExile, Soldier, 8, 2.0),
                 mid_boss("ScoutPrime", "Sharp", CorruptedHuman, 1.9),
                 spawn(DimensionalAlien, Heavy, 4, 2.0),
+                robot_pet(
+                    "tide_mender",
+                    "Tide Mender",
+                    RobotPetRole::Healer,
+                    "Tide Mender Rescue Pod",
+                    Vec3::new(-9.0, 0.5, 6.0),
+                ),
+                tech_cache(
+                    "tech_cache_ch11_rejuvenation",
+                    "Icebreaker Rejuvenation Cache",
+                    &[
+                        (RobotPartKind::EnergyCore, 5),
+                        (RobotPartKind::CircuitBoard, 4),
+                        (RobotPartKind::PressureSeal, 4),
+                    ],
+                    Some(TechUpgradeId::RejuvenationMatrix),
+                    120,
+                    Vec3::new(8.0, 0.5, -8.0),
+                ),
                 boss("HybridOmega", "Blackskull - Antarctica Domain", DragonExile,
                      "BLACKSKULL: Your bright little family cracks the ice.", 2.0),
                 airship_escape(
@@ -732,7 +866,7 @@ fn build_chapters() -> Vec<ChapterDef> {
 
         ChapterDef {
             id: ChapterId(13),
-            title: "Dimension Front",
+            title: "Scallarian Front",
             subtitle: "The invaders reveal the crown gate",
             biome: Biome::CrownGate,
             difficulty_scale: 1.8,
@@ -741,8 +875,8 @@ fn build_chapters() -> Vec<ChapterDef> {
                 secret_cave(13, "secret_cave_ch13", "Crown Gate Underpath"),
                 dialogue("Fortuna", HeroSister, "Then we make it bite a star.", 2.5),
                 spawn(DimensionalAlien, Drone, 8, 1.8),
-                mid_boss("Selene", "Rift Herald", DimensionalAlien, 1.8),
-                boss("HybridOmega", "Crown Gate Avatar", DimensionalAlien,
+                mid_boss("Selene", "Scallarian Rift Herald", DimensionalAlien, 1.8),
+                boss("HybridOmega", "Scallarian Crown Gate Avatar", DimensionalAlien,
                      "AVATAR: Earth belongs to the between-place.", 1.9),
                 outro("Nova: Tomorrow we paint over the between-place."),
             ],

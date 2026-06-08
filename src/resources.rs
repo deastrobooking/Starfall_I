@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::chapters::{Biome, ChapterId};
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
+use crate::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
 // ── Wave State (legacy population counter) ────────────────────────────────────
@@ -330,7 +331,7 @@ impl Default for CharacterDesignData {
 }
 
 // ── Hero Roster ───────────────────────────────────────────────────────────────
-pub const HERO_ROSTER: [&str; 4] = ["Vincenzo", "Antonio", "Angelo", "Joseph"];
+pub const HERO_ROSTER: [&str; 8] = HERO_NAMES;
 
 // ── Player Select Lobby ───────────────────────────────────────────────────────
 #[derive(Clone)]
@@ -393,7 +394,7 @@ impl PlayerSelectState {
             .slots
             .get(slot)
             .map(|s| s.character_index)
-            .unwrap_or(slot % 4);
+            .unwrap_or(slot % HERO_ROSTER.len());
         HERO_ROSTER[idx % HERO_ROSTER.len()]
     }
 }

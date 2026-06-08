@@ -13,11 +13,11 @@ pub enum EnemyType {
 impl EnemyType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            EnemyType::Drone => "rift scout",
-            EnemyType::Soldier => "dimension invader",
+            EnemyType::Drone => "Scallarian scout",
+            EnemyType::Soldier => "Scallarian invader",
             EnemyType::Heavy => "dragon brute",
-            EnemyType::SpikeAlien => "spike alien",
-            EnemyType::Hybrid => "rift champion",
+            EnemyType::SpikeAlien => "Scallarian spike alien",
+            EnemyType::Hybrid => "Scallarian rift champion",
         }
     }
 }

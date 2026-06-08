@@ -1,6 +1,6 @@
 # Starfall I
 
-A Bevy 0.18 action platformer RPG prototype about a family of star-powered heroes defending Earth from dimension-hopping aliens, dragon royalty, and Dr. Bile's mirror humans.
+A Bevy 0.18 action platformer RPG prototype about a family of star-powered heroes defending Earth from the dimension-hopping Scallarians, dragon royalty, and Dr. Bile's mirror humans.
 
 The current build keeps the existing open 3D world, chapter director, RPG stats, loot, crafting, armor, companions, and Bevy/Rapier physics stack, then rethemes the game around cartoon star beams, energy tools, wall jumps, ledge hanging, and Mario-style platforming layered over Secret of Mana-style combat pacing.
 
@@ -8,16 +8,20 @@ The current build keeps the existing open 3D world, chapter director, RPG stats,
 
 Implemented:
 
-- Player-select flow for 1-4 local players, split-screen cameras, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
+- Player-select flow for 1-4 local players, split-screen cameras, shared boss-mode camera, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
 - Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, taller Dreamcast-anime sci-fantasy default heroes, in-game body steppers, gameplay-linked body stats, stride-aware animation, and visual foot grounding.
+- Eight-sibling hero roster foundation: Vincenzo, Antonio, Angelo, Joseph, Gabriella, Nova, Aurora, and Fortuna have distinct default looks, signature weapon/special identities, and shared speed/strength/flight/magic power axes.
 - Campaign-shared robot pet foundation: rescued/store-built pet records, robot salvage from defeated enemies, named robot-part materials, save/load persistence, and combination recipes for cars, motorcycles, tanks, boats, submarines, space jets, giant mechs, spaceships, and megaships.
 - Chapter-select tech-upgrade foundation: spend robot salvage on beam, missile, Sprite Turret, armor health, rejuvenation, and mech command ranks; upgrades save/load and already affect weapon damage, turret damage, max health, and paid rejuvenation reserve.
+- Authored level rewards now introduce robot rescue pods and tech caches across the campaign, feeding robot parts, upgrade-route hints, rejuvenation reserve, and small robot-pet power amplification into chapter progression.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
 - Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
 - Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
+- Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
+- Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
 - RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
 
 In progress:
@@ -42,7 +46,7 @@ Dragon Royalty and Domains:
 Collosar, King of the Dragons in Tibet; Tarack, his wife; Spikey, their youngest son; Shread, their oldest son; Pink Flame, their daughter; Ragar, uncle to the king in the Colorado Rockies; Blackskull, uncle to the king in Antarctica.
 
 Rivals and Villains:
-Space aliens invading Earth from another dimension, Dr. Bile, and the four mirror humans Zark, Crush, Fang, and Sharp.
+The Scallarians invading Earth from another dimension, Dr. Bile, and the four mirror humans Zark, Crush, Fang, and Sharp.
 
 ## Gameplay Direction
 
@@ -50,10 +54,11 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 - Simple retro RPG-style cartoon characters with idle, walk, jump, and hanging poses.
 - RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, perks, and chapter progression.
 - Robot pets are the long-term vehicle/mech spine: rescue pets during the campaign or build them from enemy salvage, then combine them into ground, water, air, space, mech, and megaship forms as production systems come online.
+- All human heroes share star-powered speed, strength, flight, and magic, but each sibling starts with a different signature weapon/special profile; rescued robot pets amplify those shared power axes by role.
 - Cartoon star beams and energy weapons instead of guns.
-- Open-world level spaces with puzzle gates, moving platforms, rotating elevators, slingshot launch pads, windup laser turrets, hidden city reward rooms, hidden cave systems, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
-- Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto their airship, clear the deck, then defeat them again.
-- Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, and shockwave hazards.
+- Open-world level spaces with puzzle gates, moving platforms, rotating elevators, slingshot launch pads, windup laser turrets, hidden city reward rooms, hidden cave systems, sprawling dragon lair dungeons, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
+- Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto a turret-guarded airship deck with moving cover, clear the guards, then defeat them again.
+- Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, shockwave hazards, and shared-screen party battle moments.
 - 4-player local multiplayer remains the design target; the current implementation has the core player split plus per-player HUD/save/companions/crafting/chests/vehicle buffs, but still needs per-player support in a few reward and feedback systems.
 
 ## Quick Start
@@ -149,7 +154,7 @@ Controller:
 
 | Input | Action |
 |---|---|
-| Left stick | Move |
+| Left stick | Analog move |
 | Right stick | Look |
 | South | Jump, wall jump, hold for jetpack; trigger slingshots |
 | East | Dodge / drop |
@@ -188,7 +193,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 
 ## Chapters
 
-1. Starfall Lab - Giacoma opens the sky; Star Engine Grotto is hidden nearby.
+1. Invasion of the Scallarians - the Starfall Lab opens under attack, and Star Engine Grotto is hidden nearby.
 2. Tony's Shortcut - wall jumps across the rift city, Giovanni's scattered rift-caliper fragments, and the Rift-Glass Underpass.
 3. Sisters Of The Star - Gabriella, Nova, Aurora, and Fortuna join near the Sister Starwell Cave.
 4. Four Brothers - Angelo and Little Joe complete the team around the Brother Trial Burrow.
@@ -200,7 +205,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 10. Rockies Domain - Ragar's Colorado mountain domain, Giovanni's granite-sextant fragments, Granite Echo Cave, and Granite Airship.
 11. Blackskull Ice - Antarctica opens below with Icebreaker Under-Cave, then the Icebreaker Airship hunts overhead.
 12. Mana Switchworks - open-world puzzle battle through Mana Gear Grotto.
-13. Dimension Front - the crown gate appears above the Crown Gate Underpath.
+13. Scallarian Front - the crown gate appears above the Crown Gate Underpath.
 14. Starfall - the family closes the sky inside the Starfall Core Hollow.
 
 ## Documentation
@@ -208,6 +213,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 - [Architecture Overview](docs/architecture.md)
 - [Gameplay Systems Reference](docs/systems.md)
 - [Improvement Notes](docs/improvements.md)
+- [Naming Guide](docs/naming.md)
 - [Engine Upgrade Milestones](docs/engine_upgrade_milestones.md)
 
 ## Project Structure

@@ -17,14 +17,20 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 - P1 (`PlayerIndex(0)`) — keyboard + mouse + gamepad 0
 - P2–P4 (`PlayerIndex(1-3)`) — gamepad 1–3
 
-**Character assignment per index:**
-- P1: Vincenzo &nbsp; P2: Antonio &nbsp; P3: Angelo &nbsp; P4: Joseph
+**Character assignment:** each joined slot can cycle through Vincenzo, Antonio,
+Angelo, Joseph, Gabriella, Nova, Aurora, and Fortuna. The default join order
+still starts on the brothers for P1-P4, but the selectable roster is now all
+eight siblings.
 
 **Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon, movement, camera shake, damage flash, and interaction systems can resolve the correct player.
+
+**Controller feel:** gamepad movement uses circular deadzone remapping and preserves analog stick magnitude in `PlayerMovement`, so partial tilt produces partial travel speed. Right-stick look uses a quadratic curve for low-deflection precision. LT/RT aim/fire supports both Bevy digital trigger buttons and `LeftZ` / `RightZ` analog trigger axes, with frame-local just-press tracking for single-shot weapons.
 
 **Game over:** triggers only when ALL players are dead simultaneously.
 
 **Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause menu keeps the current HUD/world entities alive, freezes the Rapier physics pipeline, offers party-wide save and save-and-title actions, and includes a controls/tips page. Returning to title from pause cleans up preserved play-session entities.
+
+**Shared boss camera:** when 2-4 players are active, `PlayerPlugin` switches from split-screen to one full-screen party camera during boss-tier enemies or nearby flying-drone wings. P1's camera becomes the shared view, the other cameras are temporarily disabled, and viewports are restored when the threat clears. Distant players are softly pulled toward the encounter anchor, with a hard catch-up if they are far outside the battle space.
 
 **Ownership policy:** `PlayerIndex` is the stable owner key. Campaign progress, chapter objectives, kill gates, boss phases, unlocks, and `PerkTree` are shared. Inventories, rewards, HUD panels, camera/damage feedback, companions, crafting ownership, runtime stats, character blueprints, and save `players[]` records are per-player. Vehicles remain party-shared for now: one driver/vehicle mode, with passengers keyed by `PlayerIndex`.
 
@@ -49,7 +55,9 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 | WallSliding | Pushing into wall while falling | Caps fall speed at `wall_slide_speed = 0.28` |
 | Hanging | Interact while falling into a wall | Max hang time 2.5s; drains stamina 12/sec |
 
-Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity.
+Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity. The Rapier `KinematicCharacterController` uses explicit movement-profile fields for offset, step height/width, and snap-to-ground distance so small lips and authored traversal props are easier to tune consistently.
+
+Analog movement preserves stick strength. Sprint requires the sprint input plus near-full stick deflection (`analog_sprint_threshold`) so light controller movement does not unexpectedly drain stamina or snap into sprint.
 
 Wall slide is the default wall-contact behavior while falling; hanging is now intentional through `E` / D-pad Down. Wall jump is triggered from buffered jump input while `wall_contact_timer > 0` and airborne. It pushes away from wall normal + 25% input direction, has a short steering lockout for cleaner arcs, and carries two wall-jump charges that refresh on landing or renewed wall slide contact.
 
@@ -89,6 +97,35 @@ The full procedural mesh/rig/timeline editor is still future work; the saved sch
 
 ---
 
+## Hero Combat Identity
+
+**Files:** `src/hero_roster.rs`, `src/plugins/player_plugin.rs`, `src/components/weapon.rs`
+
+All eight human siblings share the same core power categories: speed, strength,
+flight, and magic. Each hero has a distinct signature weapon/special profile
+that currently drives starting active weapon slot, special name/tuning, movement
+and stamina multipliers, jetpack/flight tuning, melee strength, primary weapon
+damage, and special damage.
+
+| Hero | Signature weapon | Signature special | Bias |
+|---|---|---|---|
+| Vincenzo | Guardian Comet Lance | Family Aegis Moon | strength / guard magic |
+| Antonio | Rift Skater Star Fans | Shortcut Homing Star | speed / flight |
+| Angelo | Harmonic Star Hammer | Bridge Sprite Turret | magic / support strength |
+| Joseph | Little Joe Nova Gauntlets | Pocket Tri-Star Burst | strength / burst |
+| Gabriella | Prism Crown Staff | Prism Moon Bloom | magic / flight |
+| Nova | Nova Rainbow Ray | Spectrum Tri-Star | magic / speed |
+| Aurora | Aurora Halo Guard | Halo Sprite Bastion | strength / magic guard |
+| Fortuna | Fortune Star Cards | Lucky Homing Draw | speed / magic |
+
+Robot pets amplify these shared power categories at spawn. Scout pets favor
+speed, healer pets favor magic, defender pets favor strength, builder pets split
+strength/magic, and pilot pets favor flight. Active combined forms add a larger
+future-facing bonus, so the garage/mech/ship runtime can grow without replacing
+the hero identity data.
+
+---
+
 ## Robot Pets And Combined Forms
 
 **File:** `src/robot_pets.rs` | **Runtime hooks:** `src/plugins/enemy_plugin.rs`, `src/plugins/save_plugin.rs`
@@ -109,7 +146,7 @@ Defeated enemies now grant robot salvage directly to the shared collection. Gene
 | SpikeAlien | Servo Motor |
 | Hybrid | Energy Core |
 
-The collection supports store-built pets through `store_pet_recipe()` and campaign rescues through `rescue_pet()`. Combined-form recipes are milestone gates, not final balance:
+The collection supports store-built pets through `store_pet_recipe()` and campaign rescues through `rescue_pet()`. Chapter scripts now place save-backed robot rescue pods with `DiscoverableKind::RobotPetRescue`; current authored rescues include Spark Pup, Bolt Mason, Rivet Guard, and Tide Mender. Combined-form recipes are milestone gates, not final balance:
 
 | Form | Pet count | Role |
 |---|---:|---|
@@ -121,7 +158,7 @@ The collection supports store-built pets through `store_pet_recipe()` and campai
 
 Save/load persists the whole `robot_pets` section with `serde(default)`, so older saves without robot data continue to load as an empty collection.
 
-Future runtime work should connect this foundation to authored robot rescue beacons, a store/garage UI, vehicle spawning, mech combat stats, and split-screen passenger/ownership rules.
+Future runtime work should connect this foundation to a store/garage UI, vehicle spawning, mech combat stats, and split-screen passenger/ownership rules.
 
 ---
 
@@ -192,13 +229,15 @@ Detection / chase / attack ranges are per-type. `difficulty_scale` (from wave or
 
 | Type | HP | Dmg | Speed | Notes |
 |---|---|---|---|---|
-| Drone | 50 | 8 | Fast | Flying orbit scout with laser shots, 15 XP |
-| Soldier | 100 | 15 | Med | Standard invader, 25 XP |
+| Drone | 50 | 8 | Fast | Flying Scallarian scout with laser shots, 15 XP |
+| Soldier | 100 | 15 | Med | Standard Scallarian invader, 25 XP |
 | Heavy | 300 | 25 | Slow | Dragon brute, 50 XP |
-| SpikeAlien | 80 | 20 | Fast | Aggressive, 20 XP |
-| Hybrid | 1000 | 40 | Med | Boss-tier, 200 XP |
+| SpikeAlien | 80 | 20 | Fast | Aggressive Scallarian spike alien, 20 XP |
+| Hybrid | 1000 | 40 | Med | Boss-tier Scallarian rift champion, 200 XP |
 
 Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit above the closest player while leashed to their arena, advance through health phases, fire volleys, breathe cone fire, and create slam shockwaves.
+
+Flying-drone wings can also trigger the shared boss camera when at least three nearby drones are active. This is the lightweight "ship/drone encounter" hook for future aerial mini-bosses, boarding fights, and dragon-lair alarm rooms.
 
 ---
 
@@ -226,6 +265,18 @@ Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit abov
 
 Chapter unlock: `ChapterProgress.is_unlocked(id)` returns true if the previous chapter is in `completed`. Chapter 1 is always unlocked.
 
+## Level Rewards
+
+**Files:** `src/chapters/mod.rs`, `src/components/discoverable.rs`, `src/plugins/discoverable_plugin.rs`
+
+Chapter-authored discoverables now bridge story progression into the robot and tech systems:
+
+- `RobotPetRescue` adds a named rescued robot pet to the campaign-shared `RobotPetCollection`, with duplicate-safe save behavior.
+- `TechCache` grants robot parts, an optional `TechUpgradeId` route hint, and a fixed amount of paid rejuvenation reserve once per save.
+- Existing companion, weapon, armor, secret-cave, hidden-reward, relic, and lore beacons still use the same pickup/event path.
+
+Current campaign placement introduces starter beam materials and Spark Pup in Chapter 1, missile materials in Chapter 2, turret materials and Bolt Mason in Chapter 4, armor materials in Chapter 6, mech-link materials and Rivet Guard in Chapter 8, and rejuvenation materials plus Tide Mender in Chapter 11.
+
 ## Castle Airship Escalation
 
 **Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
@@ -244,7 +295,7 @@ Current chapters using this loop:
 - Chapter 10: Ragar's Granite Airship
 - Chapter 11: Blackskull's Icebreaker Airship
 
-The airship deck is a temporary chapter-spawned platform with colliders, rail blockers, engine visuals, and faction-colored materials. It is cleaned up when the next chapter starts.
+The airship deck is a temporary chapter-spawned platform with colliders, rail blockers, engine visuals, faction-colored materials, four windup laser turrets, and two moving cover platforms. It is cleaned up when the next chapter starts.
 
 ## Secret Caves
 
@@ -442,6 +493,7 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 **Module:** `src/lsystem/` | **Plugin:** `WorldPlugin`
 
 - Terrain heightmap via deterministic layered waves/ridges plus a sampled Everest PNG patch in the southwest dragon domain; seed from `GameSettings.world_seed`.
+- Current heightmap import is intentionally scoped: `assets/terrain/everest.png` is loaded once through Bevy image decoding, sampled bilinearly, faded at its edges, and blended into the deterministic terrain so collision and visuals share the same height function.
 - Outer districts, spaceports, trees, crystals, mountains, and authored anchors sample the terrain surface so upgraded props sit on the generated ground rather than the old flat plane.
 - Decorative trees via L-system string rewriting (`lsystem/mod.rs`) + 3-D turtle interpreter (`lsystem/turtle.rs`).
 - City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.
@@ -451,6 +503,7 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 - Industrial buildings can receive ribbed metal cladding and factory ribbon windows.
 - Smaller residential and outer-district buildings receive stone-brick variants, mortar courses, stone plinths, corner blocks, roof caps, moss, and warm/cool/dark window panels.
 - Aurora Castle now uses brick/mortar castle materials, framed glowing windows, animated wind banners, a real front bridge and open gate, and a hollow keep built from room walls, balconies, lights, and explorable interior spaces.
+- Dragon lair dungeons are spawned for Chapters 6-11. Each dungeon uses an old-school RPG room-and-corridor layout with an entrance arch, branching side rooms, hazard strips, moving bridge platforms, turret guards, a raised lair dais, a save-backed hoard beacon, and a `WorldAnchor` named `dragon_dungeon_ch06` through `dragon_dungeon_ch11`.
 - Secret caves are spawned from authored chapter specs and combine stone tunnels, metal ribs, glass panels, glowing crystals, small moving platforms, and save-backed discovery anchors.
 - Moving platforms bridge rooftops, castles, and high paths; the platform system carries grounded or landing players while avoiding midair drag.
 - Laser turrets track nearby players, show a brief beam windup, then apply laser damage through the same player damage/parry path.
