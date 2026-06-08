@@ -15,7 +15,9 @@ Implemented:
 - Chapter-select tech-upgrade foundation: spend robot salvage on beam, missile, Sprite Turret, armor health, rejuvenation, and mech command ranks; upgrades save/load and already affect weapon damage, turret damage, max health, and paid rejuvenation reserve.
 - Authored level rewards now introduce robot rescue pods and tech caches across the campaign, feeding robot parts, upgrade-route hints, rejuvenation reserve, and small robot-pet power amplification into chapter progression.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
-- Everest-range world-map foundation: all 14 chapters now have named heightmap locations, visible in-world fast-travel beacons, and clickable chapter-select map markers that drop the party at those locations.
+- Everest-range world-map foundation: the imported Everest heightmap now spans a 200 x 200 mile `20_000`-unit range, with snowfields, glacier streams, alpine forests, sci-fantasy outposts, dragon-lair silhouettes, visible fast-travel beacons, and clickable chapter-select map markers for all 14 chapters.
+- Exploration settlement foundation: eight additional cities, villages, harbors, and outposts now appear physically in the range, show as map markers, expose `WorldAnchor`s for future subquests, and hold saved exploration caches.
+- Great Scientist temple subquests now fill the wider map with optional dungeon-like labs and chapter-select map hints that grant full mechanics upgrades: Ancient Flight Core, Solar Sabre Glyph, Nova Missile Matrix, and Aegis Armor Frame.
 - Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
 - Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
@@ -58,7 +60,7 @@ The Scallarians invading Earth from another dimension, Dr. Bile, and the four mi
 - Robot pets are the long-term vehicle/mech spine: rescue pets during the campaign or build them from enemy salvage, then combine them into ground, water, air, space, mech, and megaship forms as production systems come online.
 - All human heroes share star-powered speed, strength, flight, and magic, but each sibling starts with a different signature weapon/special profile; rescued robot pets amplify those shared power axes by role.
 - Cartoon star beams and energy weapons instead of guns.
-- Open-world level spaces with puzzle gates, moving platforms, rotating elevators, slingshot launch pads, windup laser turrets, hidden city reward rooms, hidden cave systems, sprawling dragon lair dungeons, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
+- Open-world level spaces with puzzle gates, cities, villages, harbors, outposts, moving platforms, rotating elevators, slingshot launch pads, windup laser turrets, hidden city reward rooms, hidden cave systems, Great Scientist temple labs, sprawling dragon lair dungeons, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
 - Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto a turret-guarded airship deck with moving cover, clear the guards, then defeat them again.
 - Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, shockwave hazards, and shared-screen party battle moments.
 - 4-player local multiplayer remains the design target; the current implementation has the core player split plus per-player HUD/save/companions/crafting/chests/vehicle buffs, but still needs per-player support in a few reward and feedback systems.
@@ -86,7 +88,7 @@ cargo run --features dynamic
 7. Paused
 8. Game Over
 
-Chapter select is now the Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
+Chapter select is now the 200 x 200 mile Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
 
 Character design supports outfit/accent/hair swatches, accessory toggles, and body-shape steppers for height, shoulders, chest, arms, legs, hands, feet, head, and mass. Confirming stores an editable character blueprint; body proportions feed the visible character, collider size, movement tuning, stamina, armor capacity, and health.
 
@@ -216,6 +218,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 - [Gameplay Systems Reference](docs/systems.md)
 - [Improvement Notes](docs/improvements.md)
 - [Naming Guide](docs/naming.md)
+- [Agent Next Steps](docs/agent_next_steps.md)
 - [Engine Upgrade Milestones](docs/engine_upgrade_milestones.md)
 
 ## Project Structure
@@ -229,6 +232,7 @@ src/
   rendering.rs                    Local Bevy render bundles used by world/entity spawners
   resources.rs                    Shared resources and progression state
   character_blueprint.rs          Serializable character recipes, procedural parts, sockets, rig, animation, movement data
+  discussion.rs                   Settlement dialogue scripts and MP3 voice hooks
   perks.rs                        Heart / Star / Acrobat perk tree
   characters.rs                   Retro cartoon character construction, colors, and presets
   chapters/mod.rs                 Starfall I chapter scripts and biomes
@@ -241,7 +245,7 @@ src/
   components/companion.rs         Companion identity and assist behavior data
   components/inventory.rs         Inventory item stacks
   components/mods.rs              Weapon and armor mod definitions
-  components/world.rs             Buildings, chests, moving platforms, turrets, anchors, loot
+  components/world.rs             Buildings, chests, moving platforms, turrets, anchors, NPCs, loot
   plugins/input_plugin.rs         Keyboard/gamepad input mapping
   plugins/player_plugin.rs        Movement feel, ledge hang, wall jump, stamina, perks, damage
   plugins/character_plugin.rs     Simple idle/walk/jump/hang animation poses
@@ -249,7 +253,7 @@ src/
   plugins/chapter_plugin.rs       Chapter director and encounter progression
   plugins/weapon_plugin.rs        Star beam firing, specials, melee, Star Sabre, VFX
   plugins/enemy_plugin.rs         Enemy spawning, AI, drones, bosses, rewards, loot
-  plugins/world_plugin.rs         Terrain, mixed ancient/new city facades, secret caves, props, platforms, turrets
+  plugins/world_plugin.rs         Terrain, settlements, dialogue NPCs, guardian ships, caves, props, turrets
   plugins/discoverable_plugin.rs  Discoverable pickups, secret caves, relic puzzles, and fragment assembly
   plugins/armor_plugin.rs         Armor repair, elemental cycling, and perk max-health sync
   plugins/chest_plugin.rs         Chest spawn, interaction, and loot rolls
@@ -257,7 +261,7 @@ src/
   plugins/companion_plugin.rs     Companion follow, healing, and assist attacks
   plugins/radio_plugin.rs         Radio chatter queue to UI messages
   plugins/vehicle_plugin.rs       Vehicle enter/exit and driving physics
-  plugins/ui_plugin.rs            Menus, HUD, crafting panel, chapter/perk UI
+  plugins/ui_plugin.rs            Menus, HUD, discussion GUI, crafting panel, chapter/perk UI
   plugins/save_plugin.rs          Save/load and autosave
   plugins/chassis_editor_plugin.rs Robot chassis editor flow
   robots/                         Chassis editor data, robot presets, and factory

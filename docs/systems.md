@@ -42,6 +42,25 @@ eight siblings.
 
 ---
 
+## Player Guidance HUD
+
+**Resource:** `PlayerGuidance` | **File:** `src/plugins/ui_plugin.rs`
+
+The HUD now has a small bottom-right contextual guidance panel. It is intentionally separate from the larger objective and message systems: objectives explain campaign intent, messages report one-shot events, and guidance tells the nearest active player what action is available right now.
+
+Current guidance sources:
+
+| Source | Prompt |
+|---|---|
+| `DiscussionNpc` | `E` / D-pad Down to talk |
+| `DungeonCrawlGate` | `E` / D-pad Down to open the gate and gather the party |
+| `BoatVehicle` | `J` / D-pad Up to board |
+| `Discoverable` / `SpyData` | walk into the beacon/core to collect or recover |
+| `WorldLoot` | walk over the pickup |
+| live `CitySpyDrone` | aim and fire to shoot down the spy, then recover its data |
+
+The panel hides while a discussion is active so the dialogue UI can own the bottom-center guidance.
+
 ## Player Movement
 
 **Plugin:** `PlayerPlugin` | **Component:** `PlayerMovement`, `EdgeGrabState`, `JetpackState`
@@ -317,11 +336,53 @@ Chapter scripts use `PlaceSecretCave` to spawn a green discovery beacon at the m
 
 **Files:** `src/chapters/mod.rs`, `src/plugins/world_plugin.rs`, `src/plugins/player_plugin.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/ui_plugin.rs`
 
-The campaign map is now the larger Everest-range heightmap world. `chapter_map_locations()` defines one named map location per chapter, including the `WorldAnchor` id, region label, landmark, X/Z position, and party-facing yaw.
+The campaign map is now the 200 x 200 mile Everest-range heightmap world. `EVEREST_RANGE_MILES` and `EVEREST_RANGE_WORLD_SIZE` define the shared scale (`20_000` world units at `100` units per mile), and `chapter_map_locations()` defines one named map location per chapter, including the `WorldAnchor` id, region label, landmark, X/Z position, and party-facing yaw.
 
-`WorldPlugin` turns those records into visible in-world chapter beacons and matching `WorldAnchor`s after terrain generation. The anchor Y value is sampled with the same `terrain_surface_y()` path used by the terrain mesh/collider, so fast travel, visuals, and collision agree.
+`WorldPlugin` turns those records into visible in-world chapter beacons and matching `WorldAnchor`s after terrain generation. It also adds range-scale snowfields, glacier streams, alpine forest pockets, sci-fantasy outposts, waypoint crystal lines, and dragon-lair silhouettes. All anchors and large props sample the same `terrain_surface_y()` path used by the terrain mesh/collider, so fast travel, visuals, and collision agree.
 
 Chapter select renders those locations as the Everest Range fast-travel map. Keyboard chapter picks and clickable unlocked map markers both set `CurrentChapter.id`; entering `Playing` spawns or moves players to the matching heightmap beacon and clears travel momentum/boat passenger state.
+
+## Exploration Settlements
+
+**Files:** `src/chapters/mod.rs`, `src/discussion.rs`, `src/plugins/world_plugin.rs`, `src/plugins/ui_plugin.rs`
+
+`map_settlements()` defines optional cities, villages, harbors, and outposts that fill the 200-mile map between chapter anchors. `WorldPlugin` spawns each settlement as a grounded physical cluster with a plaza, roads, buildings, a landmark light, a `WorldAnchor`, and one saved `HiddenReward` exploration cache. Chapter select renders matching non-clickable map markers: `C` city, `V` village, `H` harbor, and `O` outpost. Markers turn green after their cache reward id is collected.
+
+Each settlement also has one `DiscussionNpc` near its plaza. Press `E` / D-pad Down near that NPC to open the discussion panel. Dialogue scripts live in `src/discussion.rs`; each line may reference an MP3 under `assets/voice/...`, and the HUD spawns that clip once when the line appears. Missing voice files are acceptable during prototyping, but final recorded lines should keep the documented paths or update the script.
+
+City settlements are peaceful mega-city hubs protected by orbiting `FreePeopleGuardianShip` patrols from the Free Peoples of Earth. They also hide a small counter-spy activity: Cloudrail City and Switchwork Borough each spawn two non-combat `CitySpyDrone`s. Shoot them down with normal player weapons, then collect the spawned `SpyData` beacon to earn save-backed credits, XP, and armor rewards.
+
+Current settlements:
+
+| Settlement | Kind | Region | Reward id |
+|---|---|---|---|
+| Riftglass Village | Village | Rift Foothills | `settlement_riftglass_cache` |
+| Cloudrail City | City | High Sky Rail | `settlement_cloudrail_cache` |
+| Lantern Hamlet | Village | Tibet Snow Road | `settlement_lantern_cache` |
+| Star Orchard | Village | Fangroot Meadow | `settlement_star_orchard_cache` |
+| Frost Harbor | Harbor | Antarctic Range | `settlement_frost_harbor_cache` |
+| Granite Market | Village | Rockies Gate | `settlement_granite_market_cache` |
+| Switchwork Borough | City | Mana Switchworks | `settlement_switchwork_cache` |
+| Starfell Outpost | Outpost | Crown Road | `settlement_starfell_cache` |
+
+## Great Scientist Temple Subquests
+
+**Files:** `src/plugins/world_plugin.rs`, `src/plugins/player_plugin.rs`, `src/plugins/discoverable_plugin.rs`, `src/resources.rs`
+
+Great Scientist temples are optional dungeon-like labs placed across the wider Everest Range. They reuse `DungeonCrawlGate`, `DungeonGateDoor`, `DungeonCrawlState`, and `HiddenReward`, so interacting with a temple gate switches the party into one shared top-down dungeon camera and collecting the inner cache saves through `ChapterProgress.discoverables`.
+
+Chapter select also renders non-clickable temple hint markers. They are purple while undiscovered and gold after the matching reward id is collected.
+
+Current temple rewards:
+
+| Temple | Reward | Runtime effect |
+|---|---|---|
+| Temple of the Sky Equation | Ancient Flight Core | Improves air control and jetpack/flight fuel, force, regen, and vertical velocity |
+| Solar Sabre Observatory | Solar Sabre Glyph | Boosts hand/sabre-style melee pressure, Rainbow Ray damage/ammo, and Tri-Star Burst capacity |
+| Nova Missile Foundry | Nova Missile Matrix | Boosts Nova Orb missile damage, explosion radius, ammo, and Homing Star capacity |
+| Aegis Frame Archive | Aegis Armor Frame | Grants armor rewards and improves traversal reliability through stronger snap/step and extra wall-jump charge |
+
+Temple reward IDs are reapplied to newly spawned players by `apply_scientist_temple_progress()`, so movement and weapon upgrades persist through save/load without adding a new save section.
 
 ## Traversal Courses
 
@@ -504,8 +565,8 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 
 **Module:** `src/lsystem/` | **Plugin:** `WorldPlugin`
 
-- Terrain heightmap via deterministic layered waves/ridges plus a sampled Everest PNG patch in the southwest dragon domain; seed from `GameSettings.world_seed`.
-- Current heightmap import is intentionally scoped: `assets/terrain/everest.png` is loaded once through Bevy image decoding, sampled bilinearly, faded at its edges, and blended into the deterministic terrain so collision and visuals share the same height function.
+- Terrain heightmap via deterministic layered waves/ridges plus `assets/terrain/everest.png` mapped across the full 200 x 200 mile range; seed from `GameSettings.world_seed`.
+- Current heightmap import is full-map scoped: `assets/terrain/everest.png` is loaded once through Bevy image decoding, sampled bilinearly, faded at its outer edges, and blended into the deterministic terrain so collision and visuals share the same height function.
 - Outer districts, spaceports, trees, crystals, mountains, and authored anchors sample the terrain surface so upgraded props sit on the generated ground rather than the old flat plane.
 - Decorative trees via L-system string rewriting (`lsystem/mod.rs`) + 3-D turtle interpreter (`lsystem/turtle.rs`).
 - City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.

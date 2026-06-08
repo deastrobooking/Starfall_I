@@ -4,8 +4,8 @@ use rand::Rng;
 use crate::characters::{enemy_config, spawn_cartoon_character};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
-    BossEnemy, DeadEnemy, DragonBoss, Enemy, EnemyAIState, EnemyAttackVfx, EnemyProjectile,
-    EnemyProjectileKind, EnemyStateMachine, EnemyType, FlyingDrone,
+    BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, Enemy, EnemyAIState, EnemyAttackVfx,
+    EnemyProjectile, EnemyProjectileKind, EnemyStateMachine, EnemyType, FlyingDrone,
 };
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
@@ -168,6 +168,7 @@ fn preset_for_type(enemy_type: EnemyType, faction: Option<Faction>) -> &'static 
     if let Some(f) = faction {
         match (f, enemy_type) {
             (Faction::DimensionalAlien, EnemyType::Drone) => return "JetWarden",
+            (Faction::DimensionalAlien, EnemyType::SpyDrone) => return "JetWarden",
             (Faction::DimensionalAlien, EnemyType::SpikeAlien) => return "InsectoidStalker",
             (Faction::DimensionalAlien, _) => return "HybridOmega",
             (Faction::DragonRoyalty, EnemyType::Drone) => return "WolfAnimaton",
@@ -185,6 +186,7 @@ fn preset_for_type(enemy_type: EnemyType, faction: Option<Faction>) -> &'static 
     }
     match enemy_type {
         EnemyType::Drone => "JetWarden",
+        EnemyType::SpyDrone => "JetWarden",
         EnemyType::Soldier => "ScoutPrime",
         EnemyType::Heavy => "TankTitan",
         EnemyType::SpikeAlien => "InsectoidStalker",
@@ -306,6 +308,7 @@ fn enemy_ai_system(
             &mut EnemyStateMachine,
             &Health,
             Option<&mut FlyingDrone>,
+            Option<&CitySpyDrone>,
             Option<&DragonBoss>,
         ),
         Without<Player>,
@@ -314,7 +317,9 @@ fn enemy_ai_system(
     let dt = time.delta_secs();
     let mut rng = rand::thread_rng();
 
-    for (mut transform, mut enemy, mut sm, health, drone, dragon_boss) in enemy_q.iter_mut() {
+    for (mut transform, mut enemy, mut sm, health, drone, city_spy, dragon_boss) in
+        enemy_q.iter_mut()
+    {
         if !health.is_alive() {
             continue;
         }
@@ -322,7 +327,7 @@ fn enemy_ai_system(
         sm.timer += dt;
         enemy.attack_cooldown_timer = (enemy.attack_cooldown_timer - dt).max(0.0);
 
-        if dragon_boss.is_some() {
+        if dragon_boss.is_some() || city_spy.is_some() {
             continue;
         }
 

@@ -69,6 +69,36 @@ pub struct UiMessage {
     pub timer: f32,
 }
 
+// ── Player Guidance Prompt ───────────────────────────────────────────────────
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PlayerGuidance {
+    pub visible: bool,
+    pub title: String,
+    pub body: String,
+    pub action: String,
+}
+
+impl PlayerGuidance {
+    pub fn set(
+        &mut self,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        action: impl Into<String>,
+    ) {
+        self.visible = true;
+        self.title = title.into();
+        self.body = body.into();
+        self.action = action.into();
+    }
+
+    pub fn clear(&mut self) {
+        self.visible = false;
+        self.title.clear();
+        self.body.clear();
+        self.action.clear();
+    }
+}
+
 // ── Player Score ──────────────────────────────────────────────────────────────
 #[derive(Resource, Debug, Default)]
 pub struct PlayerScore {
@@ -475,5 +505,22 @@ mod tests {
         assert!(!dungeon.active);
         assert!(dungeon.chapter.is_none());
         assert!(dungeon.label.is_empty());
+    }
+
+    #[test]
+    fn player_guidance_sets_and_clears_prompt() {
+        let mut guidance = PlayerGuidance::default();
+
+        guidance.set("Talk", "P1 is near Captain Mira.", "E: Talk");
+        assert!(guidance.visible);
+        assert_eq!(guidance.title, "Talk");
+        assert_eq!(guidance.body, "P1 is near Captain Mira.");
+        assert_eq!(guidance.action, "E: Talk");
+
+        guidance.clear();
+        assert!(!guidance.visible);
+        assert!(guidance.title.is_empty());
+        assert!(guidance.body.is_empty());
+        assert!(guidance.action.is_empty());
     }
 }

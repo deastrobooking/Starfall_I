@@ -4,6 +4,7 @@ use bevy::prelude::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum EnemyType {
     Drone,
+    SpyDrone,
     Soldier,
     Heavy,
     SpikeAlien,
@@ -14,6 +15,7 @@ impl EnemyType {
     pub fn as_str(&self) -> &'static str {
         match self {
             EnemyType::Drone => "Scallarian scout",
+            EnemyType::SpyDrone => "Scallarian spy drone",
             EnemyType::Soldier => "Scallarian invader",
             EnemyType::Heavy => "dragon brute",
             EnemyType::SpikeAlien => "Scallarian spike alien",
@@ -57,6 +59,21 @@ impl EnemyConfig {
                 patrol_speed: 0.06,
                 chase_speed: 0.12,
                 credits: 10,
+            },
+            EnemyType::SpyDrone => Self {
+                max_health: 65.0,
+                attack_damage: 0.0,
+                defense: 2.0,
+                movement_speed: 10.0,
+                attack_cooldown: 99.0,
+                knockback_force: 120.0,
+                experience_value: 35,
+                detection_range: 0.0,
+                chase_range: 0.0,
+                attack_range: 0.0,
+                patrol_speed: 0.0,
+                chase_speed: 0.0,
+                credits: 25,
             },
             EnemyType::Soldier => Self {
                 max_health: 100.0,
@@ -233,6 +250,25 @@ impl FlyingDrone {
             fire_timer: 0.8,
         }
     }
+}
+
+/// A non-combat Scallarian surveillance drone hiding above peaceful cities.
+/// It is damageable like an enemy, but city-spy systems own its patrol/reward.
+#[derive(Component, Debug, Clone)]
+pub struct CitySpyDrone {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub reward_id: &'static str,
+    pub home: Vec3,
+    pub radius: f32,
+    pub altitude: f32,
+    pub angular_speed: f32,
+    pub phase: f32,
+    pub bob: f32,
+    pub credits: u32,
+    pub experience: u32,
+    pub armor: u32,
+    pub data_spawned: bool,
 }
 
 /// Boss controller for dragon-domain bosses.

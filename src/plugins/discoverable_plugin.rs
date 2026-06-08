@@ -8,11 +8,14 @@ use crate::components::discoverable::{
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
 use crate::components::mods::{ArmorMod, PlayerLoadout, WeaponMod};
-use crate::components::player::{Player, PlayerIndex, PlayerStats};
-use crate::components::weapon::{BeamSabre, BeamSabreLocked, SpecialWeaponInventory};
+use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerMovement, PlayerStats};
+use crate::components::weapon::{
+    BeamSabre, BeamSabreLocked, MeleeCombo, SpecialWeaponInventory, WeaponInventory,
+};
 use crate::damage::Health;
 use crate::events::*;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
+use crate::plugins::player_plugin::apply_ancient_flight_core;
 use crate::resources::{ChapterProgress, CurrentChapter};
 use crate::robot_pets::{RobotPetBlueprint, RobotPetCollection};
 use crate::state::AppState;
@@ -533,7 +536,53 @@ fn grant_reward_stats(
             special_weapons.slot0.ammo = special_weapons.slot0.max_ammo;
             Some("Sprite Turret Pack")
         }
+        Some("ancient_flight_core") => Some("Ancient Flight Core"),
+        Some("solar_sabre_glyph") => Some("Solar Sabre Glyph"),
+        Some("nova_missile_matrix") => Some("Nova Missile Matrix"),
+        Some("aegis_armor_frame") => Some("Aegis Armor Frame"),
         Some(_) | None => None,
+    }
+}
+
+fn grant_scientist_temple_ability(
+    ability_id: Option<&str>,
+    movement: &mut PlayerMovement,
+    jetpack: &mut JetpackState,
+    weapons: &mut WeaponInventory,
+    specials: &mut SpecialWeaponInventory,
+    melee: &mut MeleeCombo,
+) {
+    match ability_id {
+        Some("ancient_flight_core") => {
+            apply_ancient_flight_core(movement, jetpack);
+        }
+        Some("solar_sabre_glyph") => {
+            melee.damage_multiplier = melee.damage_multiplier.max(1.18);
+            weapons.slots[4].damage = weapons.slots[4].damage.max(34.0);
+            weapons.slots[4].max_ammo = weapons.slots[4].max_ammo.max(260);
+            weapons.slots[4].ammo = weapons.slots[4].max_ammo;
+            specials.slot8.level = specials.slot8.level.max(2);
+            specials.slot8.max_ammo = specials.slot8.max_ammo.max(20);
+            specials.slot8.ammo = specials.slot8.max_ammo;
+        }
+        Some("nova_missile_matrix") => {
+            weapons.slots[3].damage = weapons.slots[3].damage.max(116.0);
+            weapons.slots[3].explosion_radius = weapons.slots[3].explosion_radius.max(8.8);
+            weapons.slots[3].max_ammo = weapons.slots[3].max_ammo.max(14);
+            weapons.slots[3].ammo = weapons.slots[3].max_ammo;
+            specials.slot7.level = specials.slot7.level.max(2);
+            specials.slot7.max_ammo = specials.slot7.max_ammo.max(12);
+            specials.slot7.ammo = specials.slot7.max_ammo;
+        }
+        Some("aegis_armor_frame") => {
+            movement.ground_snap_distance = movement.ground_snap_distance.max(0.34);
+            movement.autostep_height = movement.autostep_height.max(0.52);
+            movement.max_wall_jump_charges = movement.max_wall_jump_charges.max(3);
+            movement.wall_jump_charges = movement
+                .wall_jump_charges
+                .max(movement.max_wall_jump_charges);
+        }
+        Some(_) | None => {}
     }
 }
 
@@ -555,7 +604,15 @@ fn discoverable_pickup_system(
     fragment_piece_q: Query<(Entity, &RelicFragmentPuzzlePiece)>,
     mut beam_q: Query<&mut BeamSabre>,
     mut reward_player_q: Query<
-        (&mut PlayerStats, &mut Health, &mut SpecialWeaponInventory),
+        (
+            &mut PlayerStats,
+            &mut Health,
+            &mut SpecialWeaponInventory,
+            &mut PlayerMovement,
+            &mut JetpackState,
+            &mut WeaponInventory,
+            &mut MeleeCombo,
+        ),
         With<Player>,
     >,
     mut progress: ResMut<ChapterProgress>,
@@ -619,7 +676,7 @@ fn discoverable_pickup_system(
                 progress.recruit(name);
                 let (credits, experience, armor) = friend_rescue_reward(name);
                 if was_new {
-                    if let Ok((mut stats, mut health, mut special_weapons)) =
+                    if let Ok((mut stats, mut health, mut special_weapons, ..)) =
                         reward_player_q.get_mut(player_entity)
                     {
                         grant_reward_stats(
@@ -811,8 +868,15 @@ fn discoverable_pickup_system(
                         progress.unlock(power_up_id);
                         loadout.add_blueprint(power_up_id);
                     }
-                    if let Ok((mut stats, mut health, mut special_weapons)) =
-                        reward_player_q.get_mut(player_entity)
+                    if let Ok((
+                        mut stats,
+                        mut health,
+                        mut special_weapons,
+                        mut movement,
+                        mut jetpack,
+                        mut weapons,
+                        mut melee,
+                    )) = reward_player_q.get_mut(player_entity)
                     {
                         special_label = grant_reward_stats(
                             &mut stats,
@@ -822,6 +886,14 @@ fn discoverable_pickup_system(
                             *experience,
                             *armor,
                             special_ability,
+                        );
+                        grant_scientist_temple_ability(
+                            special_ability,
+                            &mut movement,
+                            &mut jetpack,
+                            &mut weapons,
+                            &mut special_weapons,
+                            &mut melee,
                         );
                     }
                     if let Some(ability_id) = special_ability {
@@ -861,6 +933,55 @@ fn discoverable_pickup_system(
                         duration: 3.5,
                     });
                 }
+            }
+            DiscoverableKind::SpyData {
+                data_id,
+                credits,
+                experience,
+                armor,
+            } => {
+                let was_new = !progress.has_discoverable(data_id);
+                progress.unlock(data_id);
+                if was_new {
+                    if let Ok((mut stats, mut health, mut special_weapons, ..)) =
+                        reward_player_q.get_mut(player_entity)
+                    {
+                        grant_reward_stats(
+                            &mut stats,
+                            &mut health,
+                            &mut special_weapons,
+                            *credits,
+                            *experience,
+                            *armor,
+                            None,
+                        );
+                    }
+                }
+
+                msg_ev.write(UiMessageEvent {
+                    text: if was_new {
+                        format!(
+                            "Spy data recovered: {} (+{} credits, +{} XP, +{} armor)",
+                            d.label, credits, experience, armor
+                        )
+                    } else {
+                        format!("Spy data already recovered: {}", d.label)
+                    },
+                    duration: 4.0,
+                });
+                radio_ev.write(RadioChatterEvent {
+                    speaker: "Giacoma".into(),
+                    text: if was_new {
+                        format!(
+                            "{} decoded. The Free Peoples can trace this Scallarian signal now.",
+                            d.label
+                        )
+                    } else {
+                        format!("{} was already sent to the city watch.", d.label)
+                    },
+                    faction: crate::components::faction::Faction::WizardScientist,
+                    duration: 4.0,
+                });
             }
             DiscoverableKind::TechCache {
                 cache_id,

@@ -1,7 +1,8 @@
 # Starfall I Agent Guide
 
 This file is the concise handoff for future Codex/agent work on Starfall I.
-For the detailed engine upgrade and milestone process, use
+For the production next-steps guide, use `docs/agent_next_steps.md`. For the
+detailed engine upgrade and milestone process, use
 `docs/engine_upgrade_milestones.md`.
 
 ## Project North Star
@@ -43,23 +44,42 @@ together.
   `dragon_dungeon_chXX` anchors for future boss/key/switch staging. Dungeon
   gates activate `DungeonCrawlState`, which switches players to one top-down
   screen and makes melee/Star Sabre use wider dungeon arcs.
+- Great Scientist temple subquests also live in `src/plugins/world_plugin.rs`.
+  They reuse dungeon gates/top-down mode and `HiddenReward` caches to grant
+  persistent mechanics upgrades: flight core, solar sabre/laser, nova missile,
+  and Aegis armor traversal. `player_plugin::apply_scientist_temple_progress`
+  reapplies these unlocks from `ChapterProgress` whenever players spawn.
 - Human hero combat identity lives in `src/hero_roster.rs`: all eight siblings
   have unique signature weapons/specials plus shared speed, strength, flight,
   and magic axes. Rescued robot pets amplify those axes by role.
-- Terrain uses deterministic waves plus an imported Everest PNG patch in the
-  southwest dragon domain. `chapter_map_locations()` in `src/chapters/mod.rs`
-  is the campaign map source of truth; `WorldPlugin` spawns matching
-  heightmap beacons/anchors, and chapter/player startup uses those anchors for
-  fast travel. Keep heightmap changes tied to the shared height function so
-  visuals, anchors, and collision agree.
+- Terrain uses deterministic waves plus `assets/terrain/everest.png` mapped
+  across the full 200 x 200 mile Everest Range (`20_000` world units at
+  `100` units per mile). `chapter_map_locations()` in `src/chapters/mod.rs`
+  is the campaign fast-travel source of truth, and `map_settlements()` owns
+  optional cities/villages/harbors/outposts for side-quest staging.
+  `WorldPlugin` spawns matching heightmap beacons/anchors, settlements, range
+  biomes, glacier streams, snowfields, outposts, and lair silhouettes, and
+  chapter/player startup uses chapter anchors for fast travel. Keep heightmap
+  changes tied to the shared height function so visuals, anchors, and
+  collision agree.
+- Settlement conversations are data-driven in `src/discussion.rs`.
+  `DiscussionNpc` entities open the HUD discussion panel from `E` / D-pad
+  Down, and each line can spawn an MP3 voice file from `assets/voice/...`.
+  Cloudrail City and Switchwork Borough are peaceful mega-city hubs with
+  Free Peoples guardian ship patrols. They also spawn non-combat
+  `CitySpyDrone`s that players can shoot down; each drops a save-backed
+  `SpyData` beacon reward.
 - Player input is controller-first local multiplayer: preserve analog movement
   magnitude, keep circular deadzone remapping, support LT/RT button and axis
   paths, and treat controller smoke testing as required for movement changes.
+- Runtime player guidance uses the `PlayerGuidance` resource and HUD panel in
+  `src/plugins/ui_plugin.rs`. Feed new interactables into that panel when they
+  need immediate player-facing prompts.
 - Core app states are `MainMenu`, `PlayerSelect`, `CharacterDesign`,
   `ChapterSelect`, `ChassisEditor`, `Playing`, `Paused`, and `GameOver`.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
   `docs/improvements.md`, `docs/naming.md`, and
-  `docs/engine_upgrade_milestones.md`.
+  `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md`.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
 
@@ -104,17 +124,18 @@ together.
 
 ## Milestone Priority
 
-1. Finish multiplayer ownership and save foundation.
-2. Keep local and CI quality gates green.
-3. Pay down engine migration debt while using Bevy 0.18-native APIs for new
-   work.
-4. Build the Chapter 1 vertical slice after ownership/save gates are reliable.
-5. Build the robot pet garage loop: rescue/store UI, pet assignment, and runtime
-   adapters for vehicles, mechs, ships, and megaships.
-6. Build the full tech upgrade screen: weapons, missiles, turrets, health,
-   rejuvenation reserve, robot mechs, vehicles, ships, and megaships.
-7. Then proceed through production systems, core game depth, presentation, and
-   ship readiness.
+1. Stabilize the 200-mile Everest Range: marker readability, route signs,
+   settlements, grounded anchors, and far-zone smoke tests.
+2. Build controller-first upgrade and robot garage screens.
+3. Finish multiplayer ownership UI and save reliability.
+4. Deepen dragon lairs and Great Scientist temples with keys, locks, room
+   objectives, miniboss staging, mechanics trials, and unique hazards.
+5. Tune player movement, physics, hand combat, beam saber, and controller
+   diagnostics.
+6. Add app/plugin smoke tests, debug overlays, profiling notes, and repeatable
+   manual macOS validation.
+7. Then proceed through Chapter 1 vertical slice polish, full production
+   systems, presentation, accessibility, and ship readiness.
 
 ## Definition Of Done
 

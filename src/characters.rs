@@ -443,6 +443,7 @@ pub fn enemy_config(
 
     let type_scale = match enemy_type {
         EnemyType::Drone => 0.82,
+        EnemyType::SpyDrone => 0.64,
         EnemyType::Soldier => 1.0,
         EnemyType::Heavy => 1.22,
         EnemyType::SpikeAlien => 1.05,

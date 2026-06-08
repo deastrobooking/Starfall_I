@@ -132,6 +132,27 @@ pub struct ChapterMapMarker {
     pub region: &'static str,
 }
 
+/// Peaceful NPC that can open a discussion script and optional voice acting.
+#[derive(Component, Debug, Clone)]
+pub struct DiscussionNpc {
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub role: &'static str,
+    pub script_id: &'static str,
+    pub interact_radius: f32,
+}
+
+/// Flying Free Peoples ship that patrols above protected cities.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct FreePeopleGuardianShip {
+    pub center: Vec3,
+    pub radius: f32,
+    pub altitude: f32,
+    pub angular_speed: f32,
+    pub phase: f32,
+    pub bob: f32,
+}
+
 /// Interactable entrance to a single-screen top-down castle/dungeon crawl.
 #[derive(Component, Debug, Clone)]
 pub struct DungeonCrawlGate {

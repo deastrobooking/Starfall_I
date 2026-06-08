@@ -1,6 +1,7 @@
 # Starfall I - Improvement Notes
 
 Open issues and design follow-ups found during the May 2026 documentation/code review.
+For the current agent-facing execution order, use `docs/agent_next_steps.md`.
 
 ## Fixed In This Pass
 
@@ -49,13 +50,19 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Player/controller feel now preserves analog stick movement strength, supports LT/RT analog trigger-axis fallback, gates controller sprint behind near-full stick tilt, and exposes kinematic controller step/snap tuning through `PlayerMovement`.
 - Chapter scripts now use robot rescue pods and tech caches as authored level rewards, feeding rescued robot pets, robot parts, upgrade-route hints, and rejuvenation reserve into the campaign.
 - Airship raid arenas now add four windup laser turrets and two moving cover platforms, making castle boss rematches use the newer armor/rejuvenation/controller movement loop.
-- Terrain tests now guard the current heightmap baseline: the Everest PNG patch must load, the city core remains flat, and outer terrain keeps meaningful relief.
-- Chapter select now acts as an Everest Range fast-travel map. `src/chapters/mod.rs` owns all 14 named chapter locations, `WorldPlugin` spawns matching heightmap beacons/anchors, and chapter start moves existing players to the selected location.
+- Terrain tests now guard the current heightmap baseline: the Everest PNG must load, the city core remains flat, the world scale stays at 200 miles / `20_000` units, and the Everest domain keeps meaningful relief.
+- Chapter select now acts as a 200 x 200 mile Everest Range fast-travel map. `src/chapters/mod.rs` owns all 14 named chapter locations, `WorldPlugin` spawns matching heightmap beacons/anchors, and chapter start moves existing players to the selected location.
+- The open world now has a first full-range art pass: the imported Everest heightmap covers the entire range, the camera/fog settings support distant terrain, and `WorldPlugin` adds snowfields, glacier streams, alpine forest pockets, sci-fantasy outposts, waypoint crystals, and dragon-lair silhouettes around the larger map.
+- Exploration settlements now add eight cities, villages, harbors, and outposts to the 200-mile range, with physical building clusters, `WorldAnchor`s, map markers, and saved exploration caches for future subquests.
+- Settlement NPCs now open a discussion GUI from `E` / D-pad Down, with data-driven MP3 voice hooks per line in `src/discussion.rs`; Cloudrail City and Switchwork Borough also have Free Peoples guardian ships patrolling above the peaceful mega-city hubs.
+- Peaceful mega cities now hide Scallarian spy drones: each city has two non-combat `CitySpyDrone`s that can be shot down, dropping save-backed `SpyData` rewards for credits, XP, and armor.
+- Great Scientist temple subquests now fill more of the 200-mile map with optional dungeon-like labs. Their hidden cores grant persistent mechanics upgrades for flight, laser/sabre pressure, nova missiles, and armor traversal.
 - Dragon lair dungeons now exist for chapters 6-11, with SNES-RPG-style room/corridor layouts, moving bridge platforms, turret guards, raised lair dais anchors, and save-backed hoard beacons.
 - Dragon lair entrances now have interactable big gates that activate single-screen top-down dungeon crawl mode, open sliding door panels, pull the party together, remap movement to top-down axes, and widen hand/Star Sabre attack arcs for hack-and-slash rooms.
 - All eight human siblings now have hero combat profiles with unique signature weapon/special names, shared speed/strength/flight/magic axes, and robot-pet amplification at spawn.
 - Boss mode now links 2-4 local players into one full-screen party camera for boss-tier enemies and nearby flying-drone wings, then restores split-screen after the threat clears.
 - Naming canon now lives in `docs/naming.md`; Chapter 1 is `Invasion of the Scallarians`, and player-facing alien labels use Scallarian/Scallarians.
+- The HUD now has a contextual `PlayerGuidance` panel for nearby talk, gate, boat, pickup, spy data, loot, and live city-spy-drone prompts.
 
 ## High Priority
 

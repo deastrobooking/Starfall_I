@@ -1,4 +1,4 @@
-use bevy::camera::Viewport;
+use bevy::camera::{PerspectiveProjection, Projection, Viewport};
 use bevy::prelude::*;
 use bevy::render::view::Hdr;
 use bevy::transform::TransformSystems;
@@ -26,8 +26,8 @@ use crate::hero_roster::{apply_hero_runtime, hero_power_profile};
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
-    CameraShake, CurrentChapter, DungeonCrawlState, LocalPlayerConfig, PlaySessionTransition,
-    PlayerSelectState, PlayerSlotConfig,
+    CameraShake, ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig,
+    PlaySessionTransition, PlayerSelectState, PlayerSlotConfig,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -375,6 +375,7 @@ fn spawn_players(
     config: Res<LocalPlayerConfig>,
     select: Res<PlayerSelectState>,
     current: Res<CurrentChapter>,
+    progress: Res<ChapterProgress>,
     robot_pets: Res<RobotPetCollection>,
     window_q: Query<&Window, With<PrimaryWindow>>,
     chapter_anchor_q: Query<(&WorldAnchor, &Transform)>,
@@ -414,6 +415,14 @@ fn spawn_players(
             &mut player_movement,
             &mut jetpack,
             &mut dodge_state,
+            &mut weapon_inventory,
+            &mut special_inventory,
+            &mut melee_combo,
+        );
+        apply_scientist_temple_progress(
+            &progress,
+            &mut player_movement,
+            &mut jetpack,
             &mut weapon_inventory,
             &mut special_inventory,
             &mut melee_combo,
@@ -513,6 +522,10 @@ fn spawn_players(
                 },
                 PlayerCamera,
                 CameraPitch::default(),
+                Projection::Perspective(PerspectiveProjection {
+                    far: 30_000.0,
+                    ..default()
+                }),
                 Hdr,
                 bevy::post_process::bloom::Bloom {
                     intensity: 0.25,
@@ -520,7 +533,7 @@ fn spawn_players(
                 },
                 DistanceFog {
                     color: Color::srgba(0.02, 0.02, 0.08, 1.0),
-                    falloff: FogFalloff::ExponentialSquared { density: 0.0015 },
+                    falloff: FogFalloff::ExponentialSquared { density: 0.00018 },
                     ..default()
                 },
             ))
@@ -528,6 +541,50 @@ fn spawn_players(
 
         commands.entity(player).insert(PlayerCameraRef(cam_entity));
     }
+}
+
+pub fn apply_scientist_temple_progress(
+    progress: &ChapterProgress,
+    movement: &mut PlayerMovement,
+    jetpack: &mut JetpackState,
+    weapons: &mut WeaponInventory,
+    specials: &mut SpecialWeaponInventory,
+    melee: &mut MeleeCombo,
+) {
+    if progress.has_discoverable("ancient_flight_core") {
+        apply_ancient_flight_core(movement, jetpack);
+    }
+    if progress.has_discoverable("solar_sabre_glyph") {
+        melee.damage_multiplier = melee.damage_multiplier.max(1.18);
+        weapons.slots[4].damage = weapons.slots[4].damage.max(34.0);
+        weapons.slots[4].max_ammo = weapons.slots[4].max_ammo.max(260);
+        weapons.slots[4].ammo = weapons.slots[4].max_ammo;
+    }
+    if progress.has_discoverable("nova_missile_matrix") {
+        weapons.slots[3].damage = weapons.slots[3].damage.max(116.0);
+        weapons.slots[3].explosion_radius = weapons.slots[3].explosion_radius.max(8.8);
+        weapons.slots[3].max_ammo = weapons.slots[3].max_ammo.max(14);
+        weapons.slots[3].ammo = weapons.slots[3].max_ammo;
+        specials.slot7.level = specials.slot7.level.max(2);
+    }
+    if progress.has_discoverable("aegis_armor_frame") {
+        movement.ground_snap_distance = movement.ground_snap_distance.max(0.34);
+        movement.autostep_height = movement.autostep_height.max(0.52);
+        movement.max_wall_jump_charges = movement.max_wall_jump_charges.max(3);
+        movement.wall_jump_charges = movement
+            .wall_jump_charges
+            .max(movement.max_wall_jump_charges);
+    }
+}
+
+pub fn apply_ancient_flight_core(movement: &mut PlayerMovement, jetpack: &mut JetpackState) {
+    movement.air_accel = movement.air_accel.max(1.92);
+    movement.max_fall_speed = movement.max_fall_speed.max(2.55);
+    jetpack.max_fuel = jetpack.max_fuel.max(360.0);
+    jetpack.fuel = jetpack.max_fuel;
+    jetpack.force = jetpack.force.max(0.085);
+    jetpack.regen_rate = jetpack.regen_rate.max(46.0);
+    jetpack.max_vertical_vel = jetpack.max_vertical_vel.max(0.52);
 }
 
 fn cleanup_players_for_menu(
@@ -1630,5 +1687,29 @@ mod tests {
 
         assert!(a.distance(b) > 8.0);
         assert_eq!(a.y, 0.0);
+    }
+
+    #[test]
+    fn ancient_flight_core_progress_improves_jetpack() {
+        let mut progress = ChapterProgress::default();
+        progress.unlock("ancient_flight_core");
+        let mut movement = PlayerMovement::default();
+        let mut jetpack = JetpackState::default();
+        let mut weapons = WeaponInventory::default();
+        let mut specials = SpecialWeaponInventory::default();
+        let mut melee = MeleeCombo::new();
+
+        apply_scientist_temple_progress(
+            &progress,
+            &mut movement,
+            &mut jetpack,
+            &mut weapons,
+            &mut specials,
+            &mut melee,
+        );
+
+        assert!(movement.air_accel > PlayerMovement::default().air_accel);
+        assert!(jetpack.max_fuel > JetpackState::default().max_fuel);
+        assert_eq!(jetpack.fuel, jetpack.max_fuel);
     }
 }

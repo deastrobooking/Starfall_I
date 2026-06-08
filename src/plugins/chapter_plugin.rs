@@ -936,6 +936,7 @@ pub(crate) fn spawn_discoverable_beacon(
         DiscoverableKind::RelicFragment { .. } => Color::srgb(0.45, 1.0, 0.95),
         DiscoverableKind::SecretCave { .. } => Color::srgb(0.35, 0.95, 0.65),
         DiscoverableKind::HiddenReward { .. } => Color::srgb(1.0, 0.70, 0.25),
+        DiscoverableKind::SpyData { .. } => Color::srgb(0.25, 1.0, 0.78),
         DiscoverableKind::TechCache { .. } => Color::srgb(0.9, 0.95, 1.0),
         DiscoverableKind::LoreFragment(_) => Color::srgb(0.7, 0.7, 0.9),
     };

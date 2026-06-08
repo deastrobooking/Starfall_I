@@ -14,6 +14,7 @@ mod character_blueprint;
 mod characters;
 mod components;
 mod damage;
+mod discussion;
 mod events;
 mod hero_roster;
 mod lsystem;

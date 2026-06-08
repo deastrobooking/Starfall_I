@@ -1,16 +1,25 @@
+use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 use bevy::prelude::*;
 
 use bevy::input::gamepad::{GamepadAxis, GamepadButton, GamepadButtonStateChangedEvent};
 use bevy::input::ButtonState;
 use bevy_rapier3d::prelude::RapierConfiguration;
 
-use crate::chapters::{all_chapters, chapter_map_locations, ChapterId};
+use crate::chapters::{
+    all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
+    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE,
+};
 use crate::components::armor::ArmorSet;
-use crate::components::discoverable::{PuzzleArchetype, PuzzleRelicEncounter};
+use crate::components::discoverable::{
+    Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleRelicEncounter,
+};
+use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::Inventory;
 use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats};
 use crate::components::weapon::{BeamSabre, SpecialWeaponInventory, WeaponInventory};
+use crate::components::world::{BoatVehicle, DiscussionNpc, DungeonCrawlGate, WorldLoot};
 use crate::damage::Health;
+use crate::discussion::DiscussionState;
 use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
@@ -19,7 +28,7 @@ use crate::plugins::save_plugin::save_current_session;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
-    PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
+    PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -30,7 +39,9 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiMessage>()
+            .init_resource::<PlayerGuidance>()
             .init_resource::<CraftingPanelState>()
+            .init_resource::<DiscussionState>()
             .init_resource::<PauseMenuState>()
             .add_systems(Startup, spawn_menu_camera)
             .add_systems(
@@ -103,6 +114,15 @@ impl Plugin for UiPlugin {
                 Update,
                 crafting_panel_system
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                discussion_panel_system
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                player_guidance_system.run_if(in_state(AppState::Playing)),
             )
             .add_systems(
                 Update,
@@ -237,6 +257,24 @@ struct BossAlertText;
 struct CraftingPanelRoot;
 #[derive(Component)]
 struct CraftingPanelText;
+#[derive(Component)]
+struct DiscussionPanelRoot;
+#[derive(Component)]
+struct DiscussionTitleText;
+#[derive(Component)]
+struct DiscussionSpeakerText;
+#[derive(Component)]
+struct DiscussionBodyText;
+#[derive(Component)]
+struct DiscussionHintText;
+#[derive(Component)]
+struct GuidancePanelRoot;
+#[derive(Component)]
+struct GuidanceTitleText;
+#[derive(Component)]
+struct GuidanceBodyText;
+#[derive(Component)]
+struct GuidanceActionText;
 
 // ── Crafting Panel State ──────────────────────────────────────────────────────
 #[derive(Resource, Default)]
@@ -793,7 +831,7 @@ fn setup_chapter_select(
         ))
         .with_children(|p| {
             p.spawn((
-                Text::new("EVEREST RANGE FAST TRAVEL"),
+                Text::new("EVEREST RANGE - 200 MILE FAST TRAVEL"),
                 TextFont {
                     font_size: 40.0,
                     ..default()
@@ -801,7 +839,7 @@ fn setup_chapter_select(
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
             p.spawn((
-                Text::new("Press 1-9 / 0 / Q W R T or click a marker   |   [E]ditor   [Esc] Back"),
+                Text::new("200 x 200 mile heightmap range   |   1-9 0 Q W R T / click marker   |   E Editor   |   Esc Back"),
                 TextFont {
                     font_size: 16.0,
                     ..default()
@@ -1034,7 +1072,178 @@ fn spawn_fast_travel_map(
                     },
                 ));
             }
+
+            for temple in great_scientist_map_markers() {
+                let collected = progress.has_discoverable(temple.reward_id);
+                let marker_color = if collected {
+                    Color::srgb(0.95, 0.82, 0.28)
+                } else {
+                    Color::srgb(0.62, 0.36, 0.94)
+                };
+                map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(temple.x)),
+                        top: Val::Percent(world_to_map_top(temple.z)),
+                        width: Val::Px(18.0),
+                        height: Val::Px(18.0),
+                        margin: UiRect {
+                            left: Val::Px(-9.0),
+                            top: Val::Px(-9.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(2.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(marker_color),
+                    BorderColor::all(if collected {
+                        Color::srgb(1.0, 0.92, 0.45)
+                    } else {
+                        Color::srgb(0.86, 0.70, 1.0)
+                    }),
+                ))
+                .with_children(|marker| {
+                    marker.spawn((
+                        Text::new("T"),
+                        TextFont {
+                            font_size: 10.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+                map.spawn((
+                    Text::new(temple.label),
+                    TextFont {
+                        font_size: 8.6,
+                        ..default()
+                    },
+                    TextColor(if collected {
+                        Color::srgb(1.0, 0.92, 0.56)
+                    } else {
+                        Color::srgb(0.90, 0.78, 1.0)
+                    }),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent((world_to_map_left(temple.x) + 1.3).min(90.0)),
+                        top: Val::Percent((world_to_map_top(temple.z) + 0.9).clamp(3.0, 94.0)),
+                        ..default()
+                    },
+                ));
+            }
+
+            for settlement in map_settlements() {
+                let visited = progress.has_discoverable(settlement.reward_id);
+                let marker_color = if visited {
+                    Color::srgb(0.34, 0.92, 0.52)
+                } else {
+                    match settlement.kind {
+                        MapSettlementKind::City => Color::srgb(0.28, 0.70, 1.0),
+                        MapSettlementKind::Village => Color::srgb(0.36, 0.74, 0.38),
+                        MapSettlementKind::Harbor => Color::srgb(0.26, 0.88, 0.92),
+                        MapSettlementKind::Outpost => Color::srgb(1.0, 0.52, 0.24),
+                    }
+                };
+                map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(settlement.x)),
+                        top: Val::Percent(world_to_map_top(settlement.z)),
+                        width: Val::Px(16.0),
+                        height: Val::Px(16.0),
+                        margin: UiRect {
+                            left: Val::Px(-8.0),
+                            top: Val::Px(-8.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(1.5)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(marker_color),
+                    BorderColor::all(if visited {
+                        Color::srgb(0.76, 1.0, 0.74)
+                    } else {
+                        Color::srgb(0.86, 0.94, 1.0)
+                    }),
+                ))
+                .with_children(|marker| {
+                    marker.spawn((
+                        Text::new(match settlement.kind {
+                            MapSettlementKind::City => "C",
+                            MapSettlementKind::Village => "V",
+                            MapSettlementKind::Harbor => "H",
+                            MapSettlementKind::Outpost => "O",
+                        }),
+                        TextFont {
+                            font_size: 9.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+                map.spawn((
+                    Text::new(settlement.name),
+                    TextFont {
+                        font_size: 8.2,
+                        ..default()
+                    },
+                    TextColor(if visited {
+                        Color::srgb(0.72, 1.0, 0.78)
+                    } else {
+                        Color::srgb(0.74, 0.90, 0.92)
+                    }),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent((world_to_map_left(settlement.x) + 1.2).min(90.0)),
+                        top: Val::Percent((world_to_map_top(settlement.z) - 1.8).clamp(3.0, 94.0)),
+                        ..default()
+                    },
+                ));
+            }
         });
+}
+
+#[derive(Clone, Copy)]
+struct GreatScientistMapMarker {
+    label: &'static str,
+    reward_id: &'static str,
+    x: f32,
+    z: f32,
+}
+
+fn great_scientist_map_markers() -> &'static [GreatScientistMapMarker] {
+    &[
+        GreatScientistMapMarker {
+            label: "Flight Temple",
+            reward_id: "ancient_flight_core",
+            x: -6400.0,
+            z: -1800.0,
+        },
+        GreatScientistMapMarker {
+            label: "Solar Temple",
+            reward_id: "solar_sabre_glyph",
+            x: -2100.0,
+            z: 6400.0,
+        },
+        GreatScientistMapMarker {
+            label: "Nova Foundry",
+            reward_id: "nova_missile_matrix",
+            x: 7200.0,
+            z: -5200.0,
+        },
+        GreatScientistMapMarker {
+            label: "Aegis Archive",
+            reward_id: "aegis_armor_frame",
+            x: 1200.0,
+            z: -6100.0,
+        },
+    ]
 }
 
 fn spawn_map_region_band(
@@ -1059,11 +1268,11 @@ fn spawn_map_region_band(
 }
 
 fn world_to_map_left(x: f32) -> f32 {
-    ((x + 600.0) / 1200.0 * 100.0).clamp(2.0, 98.0)
+    ((x + EVEREST_RANGE_HALF_EXTENT) / EVEREST_RANGE_WORLD_SIZE * 100.0).clamp(2.0, 98.0)
 }
 
 fn world_to_map_top(z: f32) -> f32 {
-    ((600.0 - z) / 1200.0 * 100.0).clamp(2.0, 98.0)
+    ((EVEREST_RANGE_HALF_EXTENT - z) / EVEREST_RANGE_WORLD_SIZE * 100.0).clamp(2.0, 98.0)
 }
 
 fn chapter_key_hint(chapter: u8) -> &'static str {
@@ -1870,6 +2079,119 @@ fn setup_hud(
                 ));
             });
 
+            // ── Context guidance (nearby actions / city spy hints) ─────────────
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(18.0),
+                    bottom: Val::Px(76.0),
+                    width: Val::Px(390.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(10.0)),
+                    row_gap: Val::Px(4.0),
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.025, 0.035, 0.060, 0.88)),
+                GuidancePanelRoot,
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 15.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.95, 0.82, 0.36)),
+                    GuidanceTitleText,
+                ));
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.86, 0.92, 1.0)),
+                    GuidanceBodyText,
+                ));
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.52, 0.94, 1.0)),
+                    GuidanceActionText,
+                ));
+            });
+
+            // ── Discussion panel (talking to settlement NPCs) ───────────────────
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(17.0),
+                    bottom: Val::Px(74.0),
+                    width: Val::Percent(66.0),
+                    min_height: Val::Px(126.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(14.0)),
+                    row_gap: Val::Px(7.0),
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.025, 0.035, 0.060, 0.94)),
+                DiscussionPanelRoot,
+            ))
+            .with_children(|panel| {
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn((
+                            Text::new(""),
+                            TextFont {
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.52, 0.94, 1.0)),
+                            DiscussionTitleText,
+                        ));
+                        row.spawn((
+                            Text::new(""),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.95, 0.78, 0.38)),
+                            DiscussionSpeakerText,
+                        ));
+                    });
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.93, 0.96, 1.0)),
+                    DiscussionBodyText,
+                ));
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.58, 0.70, 0.84)),
+                    DiscussionHintText,
+                ));
+            });
+
             // ── Active puzzle objective (upper center-left) ─────────────────────
             root.spawn((
                 Node {
@@ -2358,6 +2680,311 @@ fn ui_message_listener(
         if let Ok(mut t) = text_q.single_mut() {
             *t = Text::new(e.text.clone());
         }
+    }
+}
+
+// ── Player Guidance ──────────────────────────────────────────────────────────
+#[derive(Debug)]
+struct GuidanceCandidate {
+    score: f32,
+    title: String,
+    body: String,
+    action: String,
+}
+
+fn player_guidance_system(
+    mut guidance: ResMut<PlayerGuidance>,
+    discussion: Res<DiscussionState>,
+    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
+    npc_q: Query<(&Transform, &DiscussionNpc)>,
+    gate_q: Query<&DungeonCrawlGate>,
+    boat_q: Query<(&Transform, &BoatVehicle)>,
+    disc_q: Query<(&Transform, &Discoverable)>,
+    loot_q: Query<(&Transform, &WorldLoot)>,
+    spy_q: Query<(&Transform, &CitySpyDrone, &Health)>,
+    mut panel_q: Query<&mut Node, With<GuidancePanelRoot>>,
+    mut title_q: Query<&mut Text, With<GuidanceTitleText>>,
+    mut body_q: Query<&mut Text, With<GuidanceBodyText>>,
+    mut action_q: Query<&mut Text, With<GuidanceActionText>>,
+) {
+    let mut best: Option<GuidanceCandidate> = None;
+
+    if !discussion.active {
+        for (npc_transform, npc) in npc_q.iter() {
+            if let Some((player_index, distance)) =
+                nearest_player_to(&player_q, npc_transform.translation)
+            {
+                if distance <= npc.interact_radius + 3.0 {
+                    offer_guidance(
+                        &mut best,
+                        0.0,
+                        distance,
+                        format!("Talk to {}", npc.display_name),
+                        format!("P{} is near a {}.", player_index + 1, npc.role),
+                        "E / D-pad Down: Talk",
+                    );
+                }
+            }
+        }
+
+        for gate in gate_q.iter() {
+            if let Some((player_index, distance)) = nearest_player_to(&player_q, gate.entry) {
+                if distance <= gate.interact_radius + 4.0 {
+                    offer_guidance(
+                        &mut best,
+                        1.0,
+                        distance,
+                        format!("Open {}", gate.label),
+                        format!(
+                            "P{} can gather the party for a top-down dungeon.",
+                            player_index + 1
+                        ),
+                        "E / D-pad Down: Open gate",
+                    );
+                }
+            }
+        }
+
+        for (boat_transform, boat) in boat_q.iter() {
+            if let Some((player_index, distance)) =
+                nearest_player_to(&player_q, boat_transform.translation)
+            {
+                if distance <= boat.embark_radius + 5.0 {
+                    offer_guidance(
+                        &mut best,
+                        2.0,
+                        distance,
+                        "Board Boat",
+                        format!("P{} can pilot or ride with the party.", player_index + 1),
+                        "J / D-pad Up: Board",
+                    );
+                }
+            }
+        }
+
+        for (disc_transform, discoverable) in disc_q.iter() {
+            if let Some((player_index, distance)) =
+                nearest_player_to(&player_q, disc_transform.translation)
+            {
+                if distance <= 6.0 {
+                    let (title, action) = discoverable_guidance(&discoverable.kind);
+                    offer_guidance(
+                        &mut best,
+                        3.0,
+                        distance,
+                        title,
+                        format!("P{} can collect {}.", player_index + 1, discoverable.label),
+                        action,
+                    );
+                }
+            }
+        }
+
+        for (loot_transform, loot) in loot_q.iter() {
+            if let Some((player_index, distance)) =
+                nearest_player_to(&player_q, loot_transform.translation)
+            {
+                if distance <= loot.pickup_radius + 3.0 {
+                    offer_guidance(
+                        &mut best,
+                        4.0,
+                        distance,
+                        "Collect Loot",
+                        format!(
+                            "P{} can pick up {}x {}.",
+                            player_index + 1,
+                            loot.quantity,
+                            loot.item_id.replace('_', " ")
+                        ),
+                        "Walk over pickup: Collect",
+                    );
+                }
+            }
+        }
+
+        for (spy_transform, spy, health) in spy_q.iter() {
+            if !health.is_alive() {
+                continue;
+            }
+            if let Some((player_index, distance)) =
+                nearest_player_to(&player_q, spy_transform.translation)
+            {
+                if distance <= 180.0 {
+                    offer_guidance(
+                        &mut best,
+                        7.0,
+                        distance,
+                        "City Watch: Spy Drone",
+                        format!(
+                            "P{} spotted {} above the peaceful city.",
+                            player_index + 1,
+                            spy.label
+                        ),
+                        "Aim + Fire: Shoot it down, then recover data",
+                    );
+                }
+            }
+        }
+    }
+
+    if let Some(candidate) = best {
+        guidance.set(candidate.title, candidate.body, candidate.action);
+    } else {
+        guidance.clear();
+    }
+
+    if let Ok(mut panel) = panel_q.single_mut() {
+        panel.display = if guidance.visible {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    if let Ok(mut text) = title_q.single_mut() {
+        *text = Text::new(guidance.title.clone());
+    }
+    if let Ok(mut text) = body_q.single_mut() {
+        *text = Text::new(guidance.body.clone());
+    }
+    if let Ok(mut text) = action_q.single_mut() {
+        *text = Text::new(guidance.action.clone());
+    }
+}
+
+fn nearest_player_to(
+    player_q: &Query<(&PlayerIndex, &Transform), With<Player>>,
+    position: Vec3,
+) -> Option<(u8, f32)> {
+    player_q
+        .iter()
+        .map(|(index, transform)| (index.0, transform.translation.distance(position)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+fn offer_guidance(
+    best: &mut Option<GuidanceCandidate>,
+    priority: f32,
+    distance: f32,
+    title: impl Into<String>,
+    body: impl Into<String>,
+    action: impl Into<String>,
+) {
+    let score = priority * 10_000.0 + distance;
+    if best
+        .as_ref()
+        .map(|candidate| score < candidate.score)
+        .unwrap_or(true)
+    {
+        *best = Some(GuidanceCandidate {
+            score,
+            title: title.into(),
+            body: body.into(),
+            action: action.into(),
+        });
+    }
+}
+
+fn discoverable_guidance(kind: &DiscoverableKind) -> (&'static str, &'static str) {
+    match kind {
+        DiscoverableKind::SpyData { .. } => ("Recover Spy Data", "Walk into data core: Recover"),
+        DiscoverableKind::RobotPetRescue { .. } => ("Rescue Robot Pet", "Walk into beacon: Rescue"),
+        DiscoverableKind::TechCache { .. } => ("Open Tech Cache", "Walk into cache: Collect"),
+        DiscoverableKind::CompanionRecruit(_) => ("Rescue Friend", "Walk into beacon: Rescue"),
+        DiscoverableKind::SecretCave { .. } => ("Chart Secret Cave", "Walk into marker: Chart"),
+        DiscoverableKind::ScientistRelic { .. } | DiscoverableKind::RelicFragment { .. } => {
+            ("Recover Relic", "Walk into relic: Recover")
+        }
+        DiscoverableKind::BeamSabreUnlock => ("Unlock Star Sabre", "Walk into core: Unlock"),
+        DiscoverableKind::HiddenReward { .. } => ("Open Reward Cache", "Walk into cache: Collect"),
+        DiscoverableKind::Blueprint(_) => ("Collect Blueprint", "Walk into blueprint: Collect"),
+        DiscoverableKind::WeaponMod(_) => ("Collect Weapon Mod", "Walk into mod: Collect"),
+        DiscoverableKind::ArmorMod(_) => ("Collect Armor Mod", "Walk into mod: Collect"),
+        DiscoverableKind::LoreFragment(_) => ("Read Lore", "Walk into fragment: Read"),
+    }
+}
+
+// ── Discussion Panel ─────────────────────────────────────────────────────────
+fn discussion_panel_system(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+    mut discussion: ResMut<DiscussionState>,
+    mut last_voice_token: Local<u64>,
+    mut panel_q: Query<&mut Node, With<DiscussionPanelRoot>>,
+    mut title_q: Query<&mut Text, With<DiscussionTitleText>>,
+    mut speaker_q: Query<&mut Text, With<DiscussionSpeakerText>>,
+    mut body_q: Query<&mut Text, With<DiscussionBodyText>>,
+    mut hint_q: Query<&mut Text, With<DiscussionHintText>>,
+    player_input_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
+) {
+    if discussion.input_cooldown > 0.0 {
+        discussion.input_cooldown = (discussion.input_cooldown - time.delta_secs()).max(0.0);
+    }
+
+    if let Ok(mut panel) = panel_q.single_mut() {
+        panel.display = if discussion.active {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    if !discussion.active {
+        return;
+    }
+
+    let Some(script) = discussion.script() else {
+        discussion.close();
+        return;
+    };
+    let Some(line) = discussion.line() else {
+        discussion.close();
+        return;
+    };
+
+    if *last_voice_token != discussion.voice_token {
+        if let Some(path) = line.voice_mp3 {
+            commands.spawn((
+                AudioPlayer::new(asset_server.load(path)),
+                PlaybackSettings::DESPAWN.with_volume(Volume::Linear(0.86)),
+            ));
+        }
+        *last_voice_token = discussion.voice_token;
+    }
+
+    if let Ok(mut text) = title_q.single_mut() {
+        *text = Text::new(format!("{} - {}", script.title, script.role));
+    }
+    if let Ok(mut text) = speaker_q.single_mut() {
+        *text = Text::new(format!(
+            "{}  P{}",
+            line.speaker,
+            discussion.player_index + 1
+        ));
+    }
+    if let Ok(mut text) = body_q.single_mut() {
+        *text = Text::new(line.text);
+    }
+    if let Ok(mut text) = hint_q.single_mut() {
+        *text = Text::new(format!(
+            "Interact / Enter / Space: next   Line {}/{}   Voice: {}",
+            discussion.line_index + 1,
+            script.lines.len(),
+            line.voice_mp3.unwrap_or("none")
+        ));
+    }
+
+    let owner_interact = player_input_q
+        .iter()
+        .any(|(idx, input)| idx.0 == discussion.player_index && input.interact);
+    let keyboard_next = keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::NumpadEnter)
+        || keyboard.just_pressed(KeyCode::Space)
+        || keyboard.just_pressed(KeyCode::KeyE);
+
+    if discussion.input_cooldown <= 0.0 && (owner_interact || keyboard_next) {
+        discussion.advance();
     }
 }
 

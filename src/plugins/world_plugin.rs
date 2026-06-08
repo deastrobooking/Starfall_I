@@ -9,14 +9,22 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use std::sync::OnceLock;
 
-use crate::chapters::chapter_map_locations;
+use crate::chapters::{
+    chapter_map_locations, map_settlements, MapSettlement, MapSettlementKind,
+    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE,
+};
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::DiscoverableKind;
+use crate::components::enemy::{CitySpyDrone, Enemy, EnemyStateMachine, EnemyType};
+use crate::components::faction::Faction;
 use crate::components::player::{
     ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement, PlayerStateMachine, PlayerStats,
 };
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
+use crate::discussion::{
+    discussion_script, settlement_discussion_id, settlement_guardian_role, DiscussionState,
+};
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
@@ -100,6 +108,7 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ColliderDebugState>()
             .init_resource::<DungeonCrawlState>()
+            .init_resource::<DiscussionState>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
@@ -107,6 +116,10 @@ impl Plugin for WorldPlugin {
                 Update,
                 (
                     animate_nature,
+                    guardian_ship_patrol_system,
+                    city_spy_drone_patrol_system,
+                    city_spy_drone_data_drop_system,
+                    discussion_interaction_system,
                     dungeon_crawl_gate_system,
                     moving_platform_system,
                     rotating_elevator_system,
@@ -136,6 +149,137 @@ fn animate_nature(time: Res<Time>, mut q: Query<(&NatureSway, &mut Transform)>) 
                 1.0 + wave * sway.pulse,
                 1.0 - cross * sway.pulse * 0.25,
             );
+    }
+}
+
+fn guardian_ship_patrol_system(
+    time: Res<Time>,
+    mut ship_q: Query<(&FreePeopleGuardianShip, &mut Transform)>,
+) {
+    let t = time.elapsed_secs();
+    for (ship, mut transform) in ship_q.iter_mut() {
+        let angle = ship.phase + t * ship.angular_speed;
+        let bob = (t * 0.85 + ship.phase).sin() * ship.bob;
+        transform.translation = Vec3::new(
+            ship.center.x + angle.cos() * ship.radius,
+            ship.center.y + ship.altitude + bob,
+            ship.center.z + angle.sin() * ship.radius,
+        );
+        transform.rotation = Quat::from_rotation_y(-angle + std::f32::consts::FRAC_PI_2)
+            * Quat::from_rotation_z((t * 1.4 + ship.phase).sin() * 0.04);
+    }
+}
+
+fn city_spy_drone_patrol_system(
+    time: Res<Time>,
+    mut spy_q: Query<(&CitySpyDrone, &Health, &mut Transform)>,
+) {
+    let t = time.elapsed_secs();
+    for (spy, health, mut transform) in spy_q.iter_mut() {
+        if !health.is_alive() {
+            continue;
+        }
+        let angle = spy.phase + t * spy.angular_speed;
+        let jitter = (t * 1.7 + spy.phase * 3.1).sin() * 0.16;
+        transform.translation = Vec3::new(
+            spy.home.x + angle.cos() * spy.radius,
+            spy.home.y + spy.altitude + (t * 2.1 + spy.phase).sin() * spy.bob,
+            spy.home.z + angle.sin() * spy.radius,
+        );
+        transform.rotation = Quat::from_rotation_y(-angle + std::f32::consts::FRAC_PI_2 + jitter)
+            * Quat::from_rotation_x((t * 2.4 + spy.phase).cos() * 0.06);
+    }
+}
+
+fn city_spy_drone_data_drop_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    settings: Res<GameSettings>,
+    mut spy_q: Query<(&Transform, &mut CitySpyDrone, &Health)>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (transform, mut spy, health) in spy_q.iter_mut() {
+        if health.is_alive() || spy.data_spawned {
+            continue;
+        }
+
+        spy.data_spawned = true;
+        let ground_y = terrain_surface_y(
+            transform.translation.x,
+            transform.translation.z,
+            settings.world_seed,
+        );
+        let drop_pos = transform.translation.with_y(ground_y + 2.5);
+        spawn_discoverable_beacon(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            DiscoverableKind::SpyData {
+                data_id: spy.reward_id,
+                credits: spy.credits,
+                experience: spy.experience,
+                armor: spy.armor,
+            },
+            spy.label,
+            drop_pos,
+        );
+        msg_ev.write(UiMessageEvent {
+            text: format!("Spy drone down: retrieve {}", spy.label),
+            duration: 3.0,
+        });
+    }
+}
+
+fn discussion_interaction_system(
+    mut discussion: ResMut<DiscussionState>,
+    player_q: Query<(&PlayerIndex, &Transform, &PlayerInput), With<Player>>,
+    npc_q: Query<(&Transform, &DiscussionNpc)>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    if discussion.active {
+        return;
+    }
+
+    for (player_index, player_transform, input) in player_q.iter() {
+        if !input.interact {
+            continue;
+        }
+
+        let mut nearest: Option<(f32, &DiscussionNpc)> = None;
+        for (npc_transform, npc) in npc_q.iter() {
+            let distance = player_transform
+                .translation
+                .distance(npc_transform.translation);
+            if distance <= npc.interact_radius
+                && nearest
+                    .map(|(nearest_distance, _)| distance < nearest_distance)
+                    .unwrap_or(true)
+            {
+                nearest = Some((distance, npc));
+            }
+        }
+
+        let Some((_, npc)) = nearest else {
+            continue;
+        };
+
+        if discussion.start(npc.script_id, player_index.0) {
+            let title = discussion
+                .script()
+                .map(|script| script.title)
+                .unwrap_or(npc.role);
+            msg_ev.write(UiMessageEvent {
+                text: format!(
+                    "P{} talking with {} - {}",
+                    player_index.0 + 1,
+                    npc.display_name,
+                    title
+                ),
+                duration: 2.0,
+            });
+        }
+        return;
     }
 }
 
@@ -642,6 +786,7 @@ fn generate_city(
     spawn_spaceports(&mut commands, &mut meshes, &pal, seed);
     spawn_laser_turrets(&mut commands, &mut meshes, &pal, seed + 16, seed);
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
+    spawn_everest_range_biomes(&mut commands, &mut meshes, &pal, seed);
     if current.id.0 == 1 {
         spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal);
     }
@@ -659,6 +804,8 @@ fn generate_city(
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
     spawn_secret_cave_systems(&mut commands, &mut meshes, &pal, seed);
     spawn_dragon_lair_dungeons(&mut commands, &mut meshes, m, &pal, seed);
+    spawn_great_scientist_temples(&mut commands, &mut meshes, m, &pal, seed);
+    spawn_exploration_settlements(&mut commands, &mut meshes, m, &pal, seed);
     spawn_chapter_map_locations(&mut commands, &mut meshes, &pal, seed);
     spawn_puzzle_anchors(&mut commands, seed);
 }
@@ -1166,7 +1313,7 @@ fn spawn_lighting(commands: &mut Commands) {
 /// entire city area. The terrain trimesh sits on top of it for the outer hills,
 /// but the flat city core (where players spawn) needs a reliable floor.
 fn spawn_ground_plane(commands: &mut Commands) {
-    let size = Vec3::new(1200.0, 1.0, 1200.0);
+    let size = Vec3::new(TERRAIN_WORLD_SIZE, 1.0, TERRAIN_WORLD_SIZE);
     commands.spawn((
         Transform::from_xyz(0.0, -0.5, 0.0),
         GlobalTransform::default(),
@@ -1306,22 +1453,22 @@ fn spawn_puzzle_anchors(commands: &mut Commands, seed: u64) {
         ("ch01_giacoma_node_2", 14.0, 0.0, 24.0),
         ("ch01_giacoma_node_3", 22.0, 0.0, 18.0),
         // Chapter 4: training court plates
-        ("ch04_giacoma_reward", 104.0, 0.2, -18.0),
-        ("ch04_giacoma_plate_1", 88.0, 0.0, -12.0),
-        ("ch04_giacoma_plate_2", 96.0, 0.0, -22.0),
-        ("ch04_giacoma_plate_3", 104.0, 0.0, -12.0),
+        ("ch04_giacoma_reward", 3070.0, 0.2, -1620.0),
+        ("ch04_giacoma_plate_1", 2920.0, 0.0, -1580.0),
+        ("ch04_giacoma_plate_2", 3000.0, 0.0, -1680.0),
+        ("ch04_giacoma_plate_3", 3090.0, 0.0, -1575.0),
         // Chapter 9: aurora garden crystal run
-        ("ch09_giovanni_reward", 454.0, 0.8, -8.0),
-        ("ch09_giovanni_node_1", 420.0, 0.0, -14.0),
-        ("ch09_giovanni_node_2", 438.0, 0.0, 12.0),
-        ("ch09_giovanni_node_3", 458.0, 0.0, -20.0),
-        ("ch09_giovanni_node_4", 476.0, 0.0, 8.0),
+        ("ch09_giovanni_reward", 6710.0, 0.8, 735.0),
+        ("ch09_giovanni_node_1", 6460.0, 0.0, 645.0),
+        ("ch09_giovanni_node_2", 6550.0, 0.0, 805.0),
+        ("ch09_giovanni_node_3", 6670.0, 0.0, 630.0),
+        ("ch09_giovanni_node_4", 6780.0, 0.0, 790.0),
         // Chapter 12: switchworks relay lane
-        ("ch12_gabrio_reward", 348.0, 0.6, -68.0),
-        ("ch12_gabrio_node_1", 304.0, 0.0, -46.0),
-        ("ch12_gabrio_node_2", 326.0, 0.0, -38.0),
-        ("ch12_gabrio_node_3", 348.0, 0.0, -50.0),
-        ("ch12_gabrio_node_4", 372.0, 0.0, -40.0),
+        ("ch12_gabrio_reward", 5530.0, 0.6, -3140.0),
+        ("ch12_gabrio_node_1", 5250.0, 0.0, -3020.0),
+        ("ch12_gabrio_node_2", 5400.0, 0.0, -2960.0),
+        ("ch12_gabrio_node_3", 5550.0, 0.0, -3050.0),
+        ("ch12_gabrio_node_4", 5700.0, 0.0, -2980.0),
     ];
 
     for &(id, x, y_offset, z) in anchors {
@@ -1358,104 +1505,104 @@ fn spawn_secret_cave_systems(
         SecretCaveSpec {
             chapter: 2,
             anchor_id: "secret_cave_ch02",
-            x: 92.0,
-            z: 82.0,
+            x: 2340.0,
+            z: 1780.0,
             yaw: -1.10,
             length: 42.0,
         },
         SecretCaveSpec {
             chapter: 3,
             anchor_id: "secret_cave_ch03",
-            x: -78.0,
-            z: 92.0,
+            x: -2380.0,
+            z: 2720.0,
             yaw: 0.70,
             length: 36.0,
         },
         SecretCaveSpec {
             chapter: 4,
             anchor_id: "secret_cave_ch04",
-            x: 120.0,
-            z: -48.0,
+            x: 3200.0,
+            z: -1800.0,
             yaw: 0.25,
             length: 40.0,
         },
         SecretCaveSpec {
             chapter: 5,
             anchor_id: "secret_cave_ch05",
-            x: -96.0,
-            z: 38.0,
+            x: -3320.0,
+            z: 790.0,
             yaw: 1.20,
             length: 40.0,
         },
         SecretCaveSpec {
             chapter: 6,
             anchor_id: "secret_cave_ch06",
-            x: -520.0,
-            z: -430.0,
+            x: -8850.0,
+            z: -8200.0,
             yaw: 0.78,
             length: 46.0,
         },
         SecretCaveSpec {
             chapter: 7,
             anchor_id: "secret_cave_ch07",
-            x: -430.0,
-            z: 178.0,
+            x: -7950.0,
+            z: 4200.0,
             yaw: -0.40,
             length: 44.0,
         },
         SecretCaveSpec {
             chapter: 8,
             anchor_id: "secret_cave_ch08",
-            x: -338.0,
-            z: 256.0,
+            x: -6000.0,
+            z: 8200.0,
             yaw: -0.90,
             length: 38.0,
         },
         SecretCaveSpec {
             chapter: 9,
             anchor_id: "secret_cave_ch09",
-            x: 438.0,
-            z: -34.0,
+            x: 6300.0,
+            z: 260.0,
             yaw: 1.00,
             length: 36.0,
         },
         SecretCaveSpec {
             chapter: 10,
             anchor_id: "secret_cave_ch10",
-            x: 540.0,
-            z: 170.0,
+            x: 8900.0,
+            z: 5200.0,
             yaw: -1.35,
             length: 46.0,
         },
         SecretCaveSpec {
             chapter: 11,
             anchor_id: "secret_cave_ch11",
-            x: 210.0,
-            z: -328.0,
+            x: 2820.0,
+            z: -8650.0,
             yaw: 0.95,
             length: 42.0,
         },
         SecretCaveSpec {
             chapter: 12,
             anchor_id: "secret_cave_ch12",
-            x: 340.0,
-            z: -96.0,
+            x: 5750.0,
+            z: -3450.0,
             yaw: 0.35,
             length: 38.0,
         },
         SecretCaveSpec {
             chapter: 13,
             anchor_id: "secret_cave_ch13",
-            x: -164.0,
-            z: -254.0,
+            x: -4700.0,
+            z: -6550.0,
             yaw: -0.20,
             length: 42.0,
         },
         SecretCaveSpec {
             chapter: 14,
             anchor_id: "secret_cave_ch14",
-            x: 22.0,
-            z: -246.0,
+            x: 650.0,
+            z: -8300.0,
             yaw: 0.0,
             length: 44.0,
         },
@@ -1741,8 +1888,8 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
             gate_label: "Collosar's Crown Gate",
             reward_id: "dragon_dungeon_ch06_cache",
             reward_label: "Crown Dungeon Hoard",
-            x: -505.0,
-            z: -332.0,
+            x: -8500.0,
+            z: -7800.0,
             yaw: 0.12,
             theme: DragonDungeonTheme::CrownIce,
         },
@@ -1752,8 +1899,8 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
             gate_label: "Tarack's Ember Gate",
             reward_id: "dragon_dungeon_ch07_cache",
             reward_label: "Ember Dungeon Hoard",
-            x: -446.0,
-            z: 132.0,
+            x: -7600.0,
+            z: 3800.0,
             yaw: -0.52,
             theme: DragonDungeonTheme::Ember,
         },
@@ -1763,8 +1910,8 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
             gate_label: "Shread's Fangroot Gate",
             reward_id: "dragon_dungeon_ch08_cache",
             reward_label: "Fangroot Dungeon Hoard",
-            x: -330.0,
-            z: 300.0,
+            x: -5600.0,
+            z: 7800.0,
             yaw: -1.05,
             theme: DragonDungeonTheme::Fangroot,
         },
@@ -1774,8 +1921,8 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
             gate_label: "Pink Flame Garden Gate",
             reward_id: "dragon_dungeon_ch09_cache",
             reward_label: "Pink Flame Garden Hoard",
-            x: 430.0,
-            z: 26.0,
+            x: 6600.0,
+            z: 700.0,
             yaw: 0.84,
             theme: DragonDungeonTheme::Garden,
         },
@@ -1785,8 +1932,8 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
             gate_label: "Ragar's Granite Gate",
             reward_id: "dragon_dungeon_ch10_cache",
             reward_label: "Granite Dungeon Hoard",
-            x: 520.0,
-            z: 230.0,
+            x: 8500.0,
+            z: 4800.0,
             yaw: -1.28,
             theme: DragonDungeonTheme::Granite,
         },
@@ -1796,12 +1943,434 @@ fn dragon_dungeon_specs() -> &'static [DragonDungeonSpec] {
             gate_label: "Blackskull Ice Gate",
             reward_id: "dragon_dungeon_ch11_cache",
             reward_label: "Icebreaker Dungeon Hoard",
-            x: 236.0,
-            z: -360.0,
+            x: 3200.0,
+            z: -8200.0,
             yaw: 0.42,
             theme: DragonDungeonTheme::Icebreaker,
         },
     ]
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScientistTempleTheme {
+    Flight,
+    Solar,
+    Nova,
+    Aegis,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScientistTempleSpec {
+    gate_id: u8,
+    anchor_id: &'static str,
+    gate_label: &'static str,
+    reward_id: &'static str,
+    reward_label: &'static str,
+    scientist: &'static str,
+    x: f32,
+    z: f32,
+    yaw: f32,
+    theme: ScientistTempleTheme,
+    credits: u32,
+    experience: u32,
+    armor: u32,
+    power_up: &'static str,
+    special_ability: &'static str,
+}
+
+fn great_scientist_temple_specs() -> &'static [ScientistTempleSpec] {
+    &[
+        ScientistTempleSpec {
+            gate_id: 101,
+            anchor_id: "great_scientist_temple_flight",
+            gate_label: "Temple of the Sky Equation",
+            reward_id: "ancient_flight_core",
+            reward_label: "Ancient Flight Core",
+            scientist: "Giacoma",
+            x: -6400.0,
+            z: -1800.0,
+            yaw: 0.42,
+            theme: ScientistTempleTheme::Flight,
+            credits: 180,
+            experience: 130,
+            armor: 18,
+            power_up: "ancient_flight_core",
+            special_ability: "ancient_flight_core",
+        },
+        ScientistTempleSpec {
+            gate_id: 102,
+            anchor_id: "great_scientist_temple_solar",
+            gate_label: "Solar Sabre Observatory",
+            reward_id: "solar_sabre_glyph",
+            reward_label: "Solar Sabre Glyph",
+            scientist: "Giovanni",
+            x: -2100.0,
+            z: 6400.0,
+            yaw: -0.78,
+            theme: ScientistTempleTheme::Solar,
+            credits: 150,
+            experience: 120,
+            armor: 14,
+            power_up: "solar_sabre_glyph",
+            special_ability: "solar_sabre_glyph",
+        },
+        ScientistTempleSpec {
+            gate_id: 103,
+            anchor_id: "great_scientist_temple_nova",
+            gate_label: "Nova Missile Foundry",
+            reward_id: "nova_missile_matrix",
+            reward_label: "Nova Missile Matrix",
+            scientist: "Gabrio",
+            x: 7200.0,
+            z: -5200.0,
+            yaw: 1.12,
+            theme: ScientistTempleTheme::Nova,
+            credits: 170,
+            experience: 135,
+            armor: 16,
+            power_up: "nova_missile_matrix",
+            special_ability: "nova_missile_matrix",
+        },
+        ScientistTempleSpec {
+            gate_id: 104,
+            anchor_id: "great_scientist_temple_aegis",
+            gate_label: "Aegis Frame Archive",
+            reward_id: "aegis_armor_frame",
+            reward_label: "Aegis Armor Frame",
+            scientist: "The Great Scientists",
+            x: 1200.0,
+            z: -6100.0,
+            yaw: -0.35,
+            theme: ScientistTempleTheme::Aegis,
+            credits: 140,
+            experience: 115,
+            armor: 30,
+            power_up: "aegis_armor_frame",
+            special_ability: "aegis_armor_frame",
+        },
+    ]
+}
+
+fn spawn_great_scientist_temples(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    seed: u64,
+) {
+    for spec in great_scientist_temple_specs() {
+        spawn_great_scientist_temple(commands, meshes, materials, pal, seed, *spec);
+    }
+}
+
+fn scientist_temple_materials(
+    pal: &Palette,
+    theme: ScientistTempleTheme,
+) -> (
+    Handle<StandardMaterial>,
+    Handle<StandardMaterial>,
+    Handle<StandardMaterial>,
+    Handle<StandardMaterial>,
+) {
+    match theme {
+        ScientistTempleTheme::Flight => (
+            pal.castle_stone.clone(),
+            pal.glass_panel.clone(),
+            pal.crystal_aurora.clone(),
+            pal.window_cool.clone(),
+        ),
+        ScientistTempleTheme::Solar => (
+            pal.castle_stone.clone(),
+            pal.castle_trim.clone(),
+            pal.crystal_aurora.clone(),
+            pal.window_warm.clone(),
+        ),
+        ScientistTempleTheme::Nova => (
+            pal.brushed_metal.clone(),
+            pal.dragon_stone.clone(),
+            pal.crystal_dragon.clone(),
+            pal.dragon_window.clone(),
+        ),
+        ScientistTempleTheme::Aegis => (
+            pal.stone_brick.clone(),
+            pal.brushed_metal.clone(),
+            pal.crystal_aurora.clone(),
+            pal.window_cool.clone(),
+        ),
+    }
+}
+
+fn spawn_great_scientist_temple(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    seed: u64,
+    spec: ScientistTempleSpec,
+) {
+    let floor_y = terrain_surface_y(spec.x, spec.z, seed) + 1.15;
+    let origin = Vec3::new(spec.x, floor_y, spec.z);
+    let rot = Quat::from_rotation_y(spec.yaw);
+    let (stone_mat, floor_mat, accent_mat, glow_mat) = scientist_temple_materials(pal, spec.theme);
+
+    for (local, size) in [
+        (Vec3::new(0.0, 0.0, -46.0), Vec3::new(26.0, 0.7, 30.0)),
+        (Vec3::new(0.0, 0.0, -14.0), Vec3::new(36.0, 0.7, 34.0)),
+        (Vec3::new(-28.0, 0.6, 12.0), Vec3::new(24.0, 0.8, 26.0)),
+        (Vec3::new(28.0, 0.6, 12.0), Vec3::new(24.0, 0.8, 26.0)),
+        (Vec3::new(0.0, 1.4, 44.0), Vec3::new(42.0, 0.9, 28.0)),
+    ] {
+        spawn_dungeon_block(
+            commands,
+            meshes,
+            floor_mat.clone(),
+            origin,
+            rot,
+            local,
+            size,
+            true,
+        );
+    }
+
+    for (local, size) in [
+        (Vec3::new(-18.6, 4.0, -29.0), Vec3::new(1.2, 8.0, 64.0)),
+        (Vec3::new(18.6, 4.0, -29.0), Vec3::new(1.2, 8.0, 64.0)),
+        (Vec3::new(-41.0, 4.0, 12.0), Vec3::new(1.2, 8.0, 28.0)),
+        (Vec3::new(41.0, 4.0, 12.0), Vec3::new(1.2, 8.0, 28.0)),
+        (Vec3::new(-22.0, 5.2, 44.0), Vec3::new(1.4, 10.4, 30.0)),
+        (Vec3::new(22.0, 5.2, 44.0), Vec3::new(1.4, 10.4, 30.0)),
+        (Vec3::new(0.0, 6.0, 60.5), Vec3::new(48.0, 12.0, 1.4)),
+    ] {
+        spawn_dungeon_block(
+            commands,
+            meshes,
+            stone_mat.clone(),
+            origin,
+            rot,
+            local,
+            size,
+            false,
+        );
+    }
+
+    spawn_scientist_temple_gate(
+        commands,
+        meshes,
+        stone_mat.clone(),
+        accent_mat.clone(),
+        origin,
+        rot,
+        spec,
+    );
+
+    for (i, local) in [
+        Vec3::new(-10.0, 2.2, -34.0),
+        Vec3::new(10.0, 2.2, -22.0),
+        Vec3::new(-30.0, 2.2, 12.0),
+        Vec3::new(30.0, 2.2, 12.0),
+        Vec3::new(-15.0, 3.2, 44.0),
+        Vec3::new(15.0, 3.2, 44.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        spawn_dungeon_pillar(
+            commands,
+            meshes,
+            accent_mat.clone(),
+            origin,
+            rot,
+            local,
+            i as f32,
+        );
+    }
+
+    spawn_scientist_temple_mechanism(commands, meshes, accent_mat.clone(), origin, rot, spec);
+
+    for (radius, y, z) in [(4.2_f32, 5.4_f32, 43.0_f32), (2.2, 7.8, 43.0)] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(radius))),
+                material: MeshMaterial3d(glow_mat.clone()),
+                transform: Transform::from_translation(origin + rot * Vec3::new(0.0, y, z)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    for local in [
+        Vec3::new(0.0, 7.5, -34.0),
+        Vec3::new(-28.0, 7.5, 12.0),
+        Vec3::new(28.0, 7.5, 12.0),
+        Vec3::new(0.0, 10.0, 44.0),
+    ] {
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: scientist_temple_light_color(spec.theme),
+                    intensity: 24_000.0,
+                    range: 44.0,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_translation(origin + rot * local),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let reward = DiscoverableKind::HiddenReward {
+        reward_id: spec.reward_id,
+        credits: spec.credits,
+        experience: spec.experience,
+        armor: spec.armor,
+        power_up: Some(spec.power_up),
+        special_ability: Some(spec.special_ability),
+    };
+    spawn_discoverable_beacon(
+        commands,
+        meshes,
+        materials,
+        reward,
+        spec.reward_label,
+        origin + rot * Vec3::new(0.0, 3.2, 49.0),
+    );
+    spawn_world_anchor(
+        commands,
+        spec.anchor_id,
+        origin + rot * Vec3::new(0.0, 3.0, 42.0),
+    );
+}
+
+fn scientist_temple_light_color(theme: ScientistTempleTheme) -> Color {
+    match theme {
+        ScientistTempleTheme::Flight => Color::srgb(0.45, 0.86, 1.0),
+        ScientistTempleTheme::Solar => Color::srgb(1.0, 0.82, 0.28),
+        ScientistTempleTheme::Nova => Color::srgb(1.0, 0.32, 0.12),
+        ScientistTempleTheme::Aegis => Color::srgb(0.62, 0.72, 1.0),
+    }
+}
+
+fn spawn_scientist_temple_gate(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    door_mat: Handle<StandardMaterial>,
+    trim_mat: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    spec: ScientistTempleSpec,
+) {
+    let entry = origin + rot * Vec3::new(0.0, 2.4, -54.0);
+    let focus = origin + rot * Vec3::new(0.0, 2.8, 2.0);
+
+    commands.spawn((
+        Transform::from_translation(entry),
+        GlobalTransform::default(),
+        WorldGeometry,
+        DungeonCrawlGate {
+            chapter: spec.gate_id,
+            label: spec.gate_label,
+            entry,
+            focus,
+            radius: 70.0,
+            interact_radius: 18.0,
+            opened: false,
+        },
+    ));
+
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 3.2, 4.2, -58.5);
+        let open = origin + rot * Vec3::new(side * 9.8, 4.2, -58.5);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(5.8, 8.4, 1.1))),
+                material: MeshMaterial3d(door_mat.clone()),
+                transform: Transform::from_translation(closed).with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+            DungeonGateDoor {
+                chapter: spec.gate_id,
+                closed,
+                open,
+            },
+            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+            bevy_rapier3d::prelude::Collider::cuboid(2.9, 4.2, 0.55),
+        ));
+    }
+
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(1.1, 7.6))),
+                material: MeshMaterial3d(trim_mat.clone()),
+                transform: Transform::from_translation(
+                    entry + rot * Vec3::new(side * 8.2, 3.8, 1.2),
+                ),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_scientist_temple_mechanism(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    origin: Vec3,
+    rot: Quat,
+    spec: ScientistTempleSpec,
+) {
+    let axis = match spec.theme {
+        ScientistTempleTheme::Flight => Vec3::new(0.0, 1.0, 0.0),
+        ScientistTempleTheme::Solar => Vec3::new(1.0, 0.0, 0.0),
+        ScientistTempleTheme::Nova => Vec3::new(0.0, 0.0, 1.0),
+        ScientistTempleTheme::Aegis => Vec3::new(1.0, 0.0, 1.0).normalize(),
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Torus {
+                major_radius: 7.0,
+                minor_radius: 0.35,
+            })),
+            material: MeshMaterial3d(material.clone()),
+            transform: Transform::from_translation(origin + rot * Vec3::new(0.0, 5.4, 36.0))
+                .with_rotation(rot * Quat::from_axis_angle(axis, 0.85)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    let platform_size = Vec3::new(8.0, 0.7, 8.0);
+    for i in 0..3u8 {
+        let local = Vec3::new(-12.0 + i as f32 * 12.0, 1.2, 8.0 + i as f32 * 8.0);
+        let base = origin + rot * local;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(
+                    platform_size.x,
+                    platform_size.y,
+                    platform_size.z,
+                ))),
+                material: MeshMaterial3d(material.clone()),
+                transform: Transform::from_translation(base).with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            MovingPlatform {
+                start: base + Vec3::Y * -0.8,
+                end: base + Vec3::Y * 2.4,
+                speed: 1.7 + i as f32 * 0.35,
+                phase: spec.gate_id as f32 * 0.1 + i as f32,
+                size: platform_size,
+            },
+        ));
+    }
 }
 
 fn spawn_dragon_lair_dungeons(
@@ -2265,7 +2834,7 @@ fn spawn_dungeon_turrets(
 
 // ── Terrain ───────────────────────────────────────────────────────────────────
 
-const TERRAIN_WORLD_SIZE: f32 = 1200.0;
+const TERRAIN_WORLD_SIZE: f32 = EVEREST_RANGE_WORLD_SIZE;
 const EVEREST_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/everest.png");
 static EVEREST_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
 
@@ -2401,28 +2970,28 @@ fn everest_heightmap_relief(x: f32, z: f32) -> f32 {
         return 0.0;
     };
 
-    // The PNG is a local mountain patch for the southwest dragon/Everest biome.
-    // It is centered over the existing authored peak and faded at the edges so
-    // the rest of the deterministic terrain remains stable.
-    const PATCH_CENTER_X: f32 = -500.0;
-    const PATCH_CENTER_Z: f32 = -420.0;
-    const PATCH_WORLD_SIZE: f32 = 480.0;
-
-    let u = (x - PATCH_CENTER_X) / PATCH_WORLD_SIZE + 0.5;
-    let v = 0.5 - (z - PATCH_CENTER_Z) / PATCH_WORLD_SIZE;
+    // The Everest PNG is the world-scale range model. World X/Z maps across the
+    // full image so the whole explorable space follows the imported mountain
+    // photo instead of using it as a small decorative patch.
+    let u = (x + EVEREST_RANGE_HALF_EXTENT) / EVEREST_RANGE_WORLD_SIZE;
+    let v = (EVEREST_RANGE_HALF_EXTENT - z) / EVEREST_RANGE_WORLD_SIZE;
     if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
         return 0.0;
     }
 
-    let edge = edge_fade01(u, 0.08) * edge_fade01(v, 0.08);
+    let edge = edge_fade01(u, 0.025) * edge_fade01(v, 0.025);
     let raw = heightmap.sample(u, v);
-    let ridge = smoothstep(0.18, 0.90, raw);
-    let high_ridge = smoothstep(0.62, 0.96, raw);
-    let valley_cut = (1.0 - smoothstep(0.14, 0.52, raw)) * 12.0;
-    let peak_distance = ((x + 550.0).powi(2) + (z + 480.0).powi(2)).sqrt();
-    let authored_peak_lift = smoothstep(190.0, 0.0, peak_distance) * 72.0;
+    let foothill = smoothstep(0.06, 0.48, raw);
+    let ridge = smoothstep(0.22, 0.86, raw);
+    let high_ridge = smoothstep(0.56, 0.96, raw);
+    let snowline = smoothstep(0.70, 0.985, raw);
+    let valley_cut = (1.0 - smoothstep(0.10, 0.38, raw)) * 34.0;
 
-    edge * (ridge * 90.0 + high_ridge * 58.0 - valley_cut) + authored_peak_lift
+    let crown_distance = ((x + 8500.0).powi(2) + (z + 7800.0).powi(2)).sqrt();
+    let authored_everest_summit = smoothstep(1800.0, 0.0, crown_distance) * 340.0;
+
+    edge * (foothill * 130.0 + ridge * 280.0 + high_ridge * 360.0 + snowline * 180.0 - valley_cut)
+        + authored_everest_summit
 }
 
 /// Layered sine-wave height at world position (x, z).
@@ -2435,50 +3004,50 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     let dist = (x * x + z * z).sqrt();
 
     // 1.0 in the city core, 0.0 beyond the outer threshold.
-    let city_flat = 1.0 - smoothstep(120.0, 260.0, dist);
+    let city_flat = 1.0 - smoothstep(180.0, 620.0, dist);
 
     // ── Layered octaves ─────────────────────────────────────────────────────
     // Large rolling hills (low frequency, high amplitude).
-    let large = (x * 0.007 + so).sin() * (z * 0.008 + so * 0.7).cos() * 16.0;
+    let large = (x * 0.00062 + so).sin() * (z * 0.00078 + so * 0.7).cos() * 42.0;
     // Medium undulations.
-    let med = (x * 0.022 + z * 0.019 + so * 0.3).sin() * 7.0;
+    let med = (x * 0.0021 + z * 0.0018 + so * 0.3).sin() * 15.0;
     // Small surface variation.
-    let small = (x * 0.055 - z * 0.048 + so * 0.5).sin() * 2.8;
+    let small = (x * 0.006 - z * 0.0055 + so * 0.5).sin() * 4.2;
     // Micro detail.
-    let micro = (x * 0.13 + z * 0.11).sin() * 0.9;
+    let micro = (x * 0.018 + z * 0.016).sin() * 1.1;
 
     // ── Ridge lines ─────────────────────────────────────────────────────────
     // abs(sin) creates sharp ridges; scale by distance to keep them in the outer world.
-    let ridge_mask = smoothstep(200.0, 400.0, dist);
-    let ridge = (x * 0.011 + z * 0.009 + so).sin().abs() * 10.0 * ridge_mask;
+    let ridge_mask = smoothstep(1000.0, 6200.0, dist);
+    let ridge = (x * 0.00125 + z * 0.001 + so).sin().abs() * 28.0 * ridge_mask;
 
     let base = large + med + small + micro + ridge;
 
     // Terrain rises significantly toward the world perimeter.
-    let edge_lift = smoothstep(300.0, 520.0, dist) * 28.0;
+    let edge_lift = smoothstep(5200.0, 9800.0, dist) * 88.0;
 
     // Mountain peaks cluster in the four corners.
     let mut peak_boost = 0.0f32;
     for &(cx, cz) in &[
-        (480.0f32, 480.0),
-        (-480.0, 480.0),
-        (480.0, -480.0),
-        (-480.0, -480.0),
+        (8600.0f32, 8600.0),
+        (-8600.0, 8600.0),
+        (8600.0, -8600.0),
+        (-8600.0, -8600.0),
     ] {
         let d = ((x - cx) * (x - cx) + (z - cz) * (z - cz)).sqrt();
-        peak_boost += smoothstep(220.0, 0.0, d) * 60.0;
+        peak_boost += smoothstep(2600.0, 0.0, d) * 180.0;
     }
 
     // Qilian foothills — east of city (positive X), gentle cartoon-cartoon hill range
-    let qilian_blend = smoothstep(220.0, 480.0, x);
-    let qilian = qilian_blend * 42.0 + (z * 0.013 + so).sin() * qilian_blend * 10.0;
+    let qilian_blend = smoothstep(2800.0, 9000.0, x);
+    let qilian = qilian_blend * 110.0 + (z * 0.001 + so).sin() * qilian_blend * 24.0;
 
     // Tibetan plateau — southwest quadrant (neg X, neg Z)
-    let plat_x = smoothstep(-200.0, -450.0, x); // 0 at x>=-200, rises toward -450
-    let plat_z = smoothstep(-150.0, -400.0, z); // 0 at z>=-150, rises toward -400
-    let plateau = plat_x * plat_z * 65.0;
+    let plat_x = smoothstep(-2400.0, -8600.0, x); // 0 near centre, rises west
+    let plat_z = smoothstep(-1800.0, -7800.0, z); // 0 near centre, rises south
+    let plateau = plat_x * plat_z * 160.0;
 
-    // Mt. Everest terrain patch centred around the southwest dragon domain.
+    // Full-range Everest heightmap relief, with an authored summit boost near Collosar.
     let everest = everest_heightmap_relief(x, z);
 
     // Flatten the city zone; outer areas get full amplitude. Keep the terrain
@@ -2491,7 +3060,7 @@ fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
 }
 
 fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
-    const RES: usize = 160; // quads per side — ~7.5 m per cell
+    const RES: usize = 320; // quads per side — 62.5 world units per cell over 200 miles
     const WORLD: f32 = TERRAIN_WORLD_SIZE;
     const CELL: f32 = WORLD / RES as f32;
 
@@ -2574,6 +3143,1246 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
         bevy_rapier3d::prelude::RigidBody::Fixed,
         terrain_collider,
     ));
+}
+
+fn spawn_everest_range_biomes(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    spawn_range_snowfields(commands, meshes, pal, seed);
+    spawn_glacial_streams(commands, meshes, pal, seed);
+    spawn_range_forests(commands, meshes, pal, seed);
+    spawn_range_waylines(commands, meshes, pal, seed);
+    spawn_range_outposts(commands, meshes, pal, seed);
+    spawn_dragon_lair_silhouettes(commands, meshes, pal, seed);
+}
+
+fn spawn_range_snowfields(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let fields = [
+        (-8500.0_f32, -7800.0_f32, 680.0_f32),
+        (-7600.0, 3800.0, 420.0),
+        (3200.0, -8200.0, 520.0),
+        (-4300.0, -6100.0, 360.0),
+        (8500.0, 4800.0, 300.0),
+    ];
+
+    for (fi, &(cx, cz, radius)) in fields.iter().enumerate() {
+        for layer in 0..4u64 {
+            let idx = fi as u64 * 19 + layer;
+            let angle = seeded(seed, idx * 3) * std::f32::consts::TAU;
+            let offset = radius * (0.10 + seeded(seed, idx * 3 + 1) * 0.34);
+            let x = cx + angle.cos() * offset;
+            let z = cz + angle.sin() * offset;
+            let y = terrain_surface_y(x, z, seed) + 0.38 + layer as f32 * 0.08;
+            let r = radius * (0.22 + seeded(seed, idx * 3 + 2) * 0.30);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cylinder::new(r, 0.62))),
+                    material: MeshMaterial3d(pal.snow.clone()),
+                    transform: Transform::from_xyz(x, y, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_glacial_streams(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    spawn_glacial_stream(
+        commands,
+        meshes,
+        pal,
+        seed + 11,
+        seed,
+        &[
+            (-9000.0, -8200.0),
+            (-6800.0, -6600.0),
+            (-4300.0, -4300.0),
+            (-1700.0, -1800.0),
+            (400.0, -620.0),
+        ],
+    );
+    spawn_glacial_stream(
+        commands,
+        meshes,
+        pal,
+        seed + 17,
+        seed,
+        &[
+            (-7800.0, 4200.0),
+            (-5700.0, 5000.0),
+            (-3300.0, 4300.0),
+            (-900.0, 2700.0),
+            (1800.0, 1500.0),
+        ],
+    );
+    spawn_glacial_stream(
+        commands,
+        meshes,
+        pal,
+        seed + 31,
+        seed,
+        &[
+            (8400.0, 5200.0),
+            (6600.0, 3700.0),
+            (5200.0, 1500.0),
+            (4300.0, -900.0),
+            (5400.0, -3200.0),
+        ],
+    );
+    spawn_glacial_stream(
+        commands,
+        meshes,
+        pal,
+        seed + 47,
+        seed,
+        &[
+            (3300.0, -8400.0),
+            (2200.0, -6500.0),
+            (900.0, -4700.0),
+            (-800.0, -3300.0),
+            (-2500.0, -2300.0),
+        ],
+    );
+}
+
+fn spawn_glacial_stream(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+    points: &[(f32, f32)],
+) {
+    for (i, pair) in points.windows(2).enumerate() {
+        let (ax, az) = pair[0];
+        let (bx, bz) = pair[1];
+        let dx = bx - ax;
+        let dz = bz - az;
+        let len = (dx * dx + dz * dz).sqrt();
+        if len <= 1.0 {
+            continue;
+        }
+
+        let mx = (ax + bx) * 0.5;
+        let mz = (az + bz) * 0.5;
+        let ay = terrain_surface_y(ax, az, terrain_seed);
+        let by = terrain_surface_y(bx, bz, terrain_seed);
+        let y = ay.max(by) + 0.42;
+        let width = 18.0 + seeded(seed, i as u64 * 5) * 26.0;
+        let yaw = dx.atan2(dz);
+
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.36, len))),
+                material: MeshMaterial3d(pal.water.clone()),
+                transform: Transform::from_xyz(mx, y, mz).with_rotation(Quat::from_rotation_y(yaw)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_range_forests(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let patches = [
+        (-6200.0_f32, 6500.0_f32, 520.0_f32, 15_u64),
+        (-2800.0, 3300.0, 380.0, 12),
+        (-7100.0, 2600.0, 460.0, 13),
+        (-5000.0, -5400.0, 420.0, 11),
+        (2500.0, 2400.0, 420.0, 12),
+        (6300.0, 1200.0, 360.0, 10),
+        (7900.0, 4200.0, 430.0, 12),
+        (4900.0, -2500.0, 380.0, 10),
+        (1800.0, -6000.0, 420.0, 11),
+        (-1200.0, -4200.0, 360.0, 9),
+    ];
+
+    for (pi, &(cx, cz, spread, count)) in patches.iter().enumerate() {
+        for i in 0..count {
+            let idx = pi as u64 * 101 + i;
+            let angle = seeded(seed, idx * 7) * std::f32::consts::TAU;
+            let radius = spread * seeded(seed, idx * 7 + 1).sqrt();
+            let x = cx + angle.cos() * radius;
+            let z = cz + angle.sin() * radius;
+            if starter_clear_zone(x, z, 180.0) {
+                continue;
+            }
+            let ground = terrain_surface_y(x, z, seed);
+            let scale = 0.82 + seeded(seed, idx * 7 + 2) * 1.15;
+            spawn_alpine_tree(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, ground, z),
+                scale,
+                seed + idx,
+            );
+        }
+    }
+}
+
+fn spawn_alpine_tree(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    scale: f32,
+    seed: u64,
+) {
+    let trunk_h = 9.0 * scale;
+    let trunk_r = 0.85 * scale;
+    let lower_h = 13.0 * scale;
+    let upper_h = 10.0 * scale;
+    let lower_r = 5.2 * scale;
+    let upper_r = 3.6 * scale;
+    let yaw = seeded(seed, 3) * std::f32::consts::TAU;
+    let foliage = match seed % 3 {
+        0 => pal.foliage_a.clone(),
+        1 => pal.foliage_b.clone(),
+        _ => pal.foliage_c.clone(),
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(trunk_r, trunk_h))),
+            material: MeshMaterial3d(pal.rock_dark.clone()),
+            transform: Transform::from_xyz(base.x, base.y + trunk_h * 0.5, base.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    let lower = Transform::from_xyz(base.x, base.y + trunk_h * 0.55 + lower_h * 0.5, base.z)
+        .with_rotation(Quat::from_rotation_y(yaw));
+    let lower_sway = NatureSway::new(&lower, seeded(seed, 11) * 6.0, 0.35, 0.010, 0.015, 0.006);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cone {
+                radius: lower_r,
+                height: lower_h,
+            })),
+            material: MeshMaterial3d(foliage.clone()),
+            transform: lower,
+            ..default()
+        },
+        WorldGeometry,
+        lower_sway,
+    ));
+
+    let upper = Transform::from_xyz(base.x, base.y + trunk_h * 1.10 + lower_h * 0.58, base.z)
+        .with_rotation(Quat::from_rotation_y(yaw + 0.7));
+    let upper_sway = NatureSway::new(&upper, seeded(seed, 13) * 6.0, 0.42, 0.014, 0.018, 0.007);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cone {
+                radius: upper_r,
+                height: upper_h,
+            })),
+            material: MeshMaterial3d(foliage),
+            transform: upper,
+            ..default()
+        },
+        WorldGeometry,
+        upper_sway,
+    ));
+}
+
+fn spawn_range_waylines(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let routes = [
+        ((22.0_f32, 28.0_f32), (2200.0_f32, 1600.0_f32), 7_u64),
+        ((22.0, 28.0), (-8500.0, -7800.0), 11),
+        ((2200.0, 1600.0), (6600.0, 700.0), 8),
+        ((6600.0, 700.0), (8500.0, 4800.0), 6),
+        ((5400.0, -3100.0), (300.0, -7800.0), 8),
+        ((-8500.0, -7800.0), (-4300.0, -6100.0), 6),
+    ];
+
+    for (ri, &((ax, az), (bx, bz), count)) in routes.iter().enumerate() {
+        for i in 1..=count {
+            let t = i as f32 / (count as f32 + 1.0);
+            let wobble = (seeded(seed, ri as u64 * 41 + i) - 0.5) * 180.0;
+            let x = ax + (bx - ax) * t + wobble;
+            let z = az + (bz - az) * t - wobble * 0.55;
+            let y = terrain_surface_y(x, z, seed) + 2.0;
+            let height = 8.0 + seeded(seed, i + ri as u64 * 17) * 9.0;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cylinder::new(1.1, height))),
+                    material: MeshMaterial3d(pal.crystal_aurora.clone()),
+                    transform: Transform::from_xyz(x, y + height * 0.5, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_range_outposts(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    for location in chapter_map_locations() {
+        if matches!(location.id.0, 6..=11) {
+            continue;
+        }
+        spawn_range_outpost(commands, meshes, pal, seed, location);
+    }
+}
+
+fn spawn_range_outpost(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    location: &crate::chapters::ChapterMapLocation,
+) {
+    let ground = terrain_surface_y(location.x, location.z, seed);
+    let base_y = ground + 1.0;
+    let yaw = location.facing_yaw;
+    let rot = Quat::from_rotation_y(yaw);
+    let width = if location.id.0 == 1 { 52.0 } else { 38.0 };
+    let depth = if location.id.0 == 1 { 34.0 } else { 28.0 };
+    let mat = match location.id.0 {
+        3 => pal.castle_stone.clone(),
+        5 => pal.rock_dark.clone(),
+        12 => pal.brushed_metal.clone(),
+        13 | 14 => pal.sky_platform.clone(),
+        _ => pal.downtown_facade.clone(),
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width, 2.0, depth))),
+            material: MeshMaterial3d(mat),
+            transform: Transform::from_xyz(location.x, base_y, location.z).with_rotation(rot),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 1.0, depth * 0.5),
+    ));
+
+    for side in [-1.0_f32, 1.0] {
+        let local = Vec3::new(side * (width * 0.32), 8.0, -depth * 0.18);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(5.0, 16.0, 5.0))),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(
+                    Vec3::new(location.x, base_y, location.z) + rot * local,
+                )
+                .with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let dome = Transform::from_xyz(location.x, base_y + 4.2, location.z)
+        .with_rotation(rot)
+        .with_scale(Vec3::new(2.4, 0.45, 1.6));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(7.0))),
+            material: MeshMaterial3d(pal.glass_panel.clone()),
+            transform: dome,
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    let mast_height = 20.0 + seeded(seed, location.id.0 as u64 * 17 + 5) * 12.0;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(0.9, mast_height))),
+            material: MeshMaterial3d(pal.crystal_aurora.clone()),
+            transform: Transform::from_xyz(
+                location.x,
+                base_y + mast_height * 0.5 + 2.0,
+                location.z,
+            ),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.36, 0.86, 1.0),
+                intensity: 35_000.0,
+                range: 90.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(location.x, base_y + 18.0, location.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_exploration_settlements(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    seed: u64,
+) {
+    for settlement in map_settlements() {
+        spawn_exploration_settlement(commands, meshes, materials, pal, seed, *settlement);
+    }
+}
+
+fn spawn_exploration_settlement(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+) {
+    let center_y = terrain_surface_y(settlement.x, settlement.z, seed);
+    let origin = Vec3::new(settlement.x, center_y, settlement.z);
+    let rot = Quat::from_rotation_y(settlement.facing_yaw);
+    let plaza_radius = match settlement.kind {
+        MapSettlementKind::City => 58.0,
+        MapSettlementKind::Village => 38.0,
+        MapSettlementKind::Harbor => 46.0,
+        MapSettlementKind::Outpost => 34.0,
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(plaza_radius, 0.55))),
+            material: MeshMaterial3d(match settlement.kind {
+                MapSettlementKind::City => pal.downtown_facade.clone(),
+                MapSettlementKind::Village => pal.stone_brick.clone(),
+                MapSettlementKind::Harbor => pal.street_asphalt.clone(),
+                MapSettlementKind::Outpost => pal.brushed_metal.clone(),
+            }),
+            transform: Transform::from_xyz(settlement.x, center_y + 0.28, settlement.z),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(0.28, plaza_radius),
+    ));
+
+    spawn_settlement_roads(
+        commands,
+        meshes,
+        pal,
+        seed,
+        settlement,
+        origin,
+        rot,
+        plaza_radius,
+    );
+    spawn_settlement_buildings(commands, meshes, pal, seed, settlement, origin, rot);
+    spawn_settlement_landmark(commands, meshes, pal, seed, settlement, origin, rot);
+    spawn_settlement_cache(commands, meshes, materials, seed, settlement, origin, rot);
+    spawn_settlement_discussion_npc(commands, meshes, pal, seed, settlement, origin, rot);
+    if matches!(settlement.kind, MapSettlementKind::City) {
+        spawn_city_guardian_ships(commands, meshes, pal, seed, settlement, origin);
+        spawn_city_spy_drones(commands, meshes, pal, seed, settlement, origin);
+    }
+    spawn_world_anchor(commands, settlement.anchor_id, origin + Vec3::Y * 2.4);
+}
+
+fn spawn_settlement_roads(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+    plaza_radius: f32,
+) {
+    let road_len = plaza_radius * 2.8;
+    for (i, local) in [Vec3::ZERO, Vec3::new(0.0, 0.0, 0.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let size = if i == 0 {
+            Vec3::new(road_len, 0.28, 9.0)
+        } else {
+            Vec3::new(9.0, 0.28, road_len)
+        };
+        let world = origin + rot * local;
+        let ground = terrain_surface_y(world.x, world.z, seed);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(match settlement.kind {
+                    MapSettlementKind::Village => pal.mortar_line.clone(),
+                    MapSettlementKind::Harbor => pal.highway.clone(),
+                    _ => pal.street_asphalt.clone(),
+                }),
+                transform: Transform::from_xyz(world.x, ground + 0.18, world.z).with_rotation(
+                    rot * Quat::from_rotation_y(i as f32 * std::f32::consts::FRAC_PI_2),
+                ),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+        ));
+    }
+}
+
+fn settlement_building_material(
+    pal: &Palette,
+    kind: MapSettlementKind,
+    index: usize,
+) -> Handle<StandardMaterial> {
+    match kind {
+        MapSettlementKind::City => match index % 4 {
+            0 => pal.downtown_a.clone(),
+            1 => pal.downtown_b.clone(),
+            2 => pal.glass_panel.clone(),
+            _ => pal.downtown_facade.clone(),
+        },
+        MapSettlementKind::Village => match index % 3 {
+            0 => pal.residential_a.clone(),
+            1 => pal.stone_brick.clone(),
+            _ => pal.castle_stone.clone(),
+        },
+        MapSettlementKind::Harbor => match index % 3 {
+            0 => pal.brushed_metal.clone(),
+            1 => pal.residential_b.clone(),
+            _ => pal.glass_panel.clone(),
+        },
+        MapSettlementKind::Outpost => match index % 3 {
+            0 => pal.brushed_metal.clone(),
+            1 => pal.sky_platform.clone(),
+            _ => pal.downtown_facade.clone(),
+        },
+    }
+}
+
+fn spawn_settlement_buildings(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+) {
+    let count = match settlement.kind {
+        MapSettlementKind::City => 10,
+        MapSettlementKind::Village => 7,
+        MapSettlementKind::Harbor => 8,
+        MapSettlementKind::Outpost => 5,
+    };
+    let ring = match settlement.kind {
+        MapSettlementKind::City => 78.0,
+        MapSettlementKind::Village => 54.0,
+        MapSettlementKind::Harbor => 62.0,
+        MapSettlementKind::Outpost => 46.0,
+    };
+
+    for i in 0..count {
+        let angle = i as f32 * std::f32::consts::TAU / count as f32
+            + seeded(seed, i as u64 + settlement.anchor_id.len() as u64) * 0.28;
+        let radius = ring * (0.72 + seeded(seed, i as u64 * 7 + 3) * 0.38);
+        let local = Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius);
+        let world = origin + rot * local;
+        let ground = terrain_surface_y(world.x, world.z, seed);
+        let height = match settlement.kind {
+            MapSettlementKind::City => 28.0 + seeded(seed, i as u64 * 13 + 1) * 58.0,
+            MapSettlementKind::Village => 9.0 + seeded(seed, i as u64 * 13 + 1) * 12.0,
+            MapSettlementKind::Harbor => 12.0 + seeded(seed, i as u64 * 13 + 1) * 20.0,
+            MapSettlementKind::Outpost => 14.0 + seeded(seed, i as u64 * 13 + 1) * 24.0,
+        };
+        let width = match settlement.kind {
+            MapSettlementKind::City => 12.0 + seeded(seed, i as u64 * 13 + 2) * 14.0,
+            MapSettlementKind::Village => 10.0 + seeded(seed, i as u64 * 13 + 2) * 8.0,
+            MapSettlementKind::Harbor => 12.0 + seeded(seed, i as u64 * 13 + 2) * 12.0,
+            MapSettlementKind::Outpost => 10.0 + seeded(seed, i as u64 * 13 + 2) * 10.0,
+        };
+        let depth = width * (0.75 + seeded(seed, i as u64 * 13 + 3) * 0.55);
+        let material = settlement_building_material(pal, settlement.kind, i);
+        let yaw = settlement.facing_yaw + angle + std::f32::consts::FRAC_PI_2;
+
+        spawn_building(
+            commands,
+            meshes,
+            material,
+            Vec3::new(world.x, ground + height * 0.5, world.z),
+            width,
+            height,
+            depth,
+            match settlement.kind {
+                MapSettlementKind::City => WorldZone::Downtown,
+                MapSettlementKind::Village => WorldZone::Residential,
+                MapSettlementKind::Harbor => WorldZone::OuterDistrict,
+                MapSettlementKind::Outpost => WorldZone::Spaceport,
+            },
+        );
+
+        if !matches!(settlement.kind, MapSettlementKind::City) {
+            spawn_small_building_details(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(world.x, ground + height * 0.5, world.z),
+                width,
+                height,
+                depth,
+                seed + i as u64,
+                i % 2 == 0,
+            );
+        }
+
+        if matches!(
+            settlement.kind,
+            MapSettlementKind::City | MapSettlementKind::Harbor
+        ) && i % 2 == 0
+        {
+            spawn_settlement_window_facades(
+                commands,
+                meshes,
+                if i % 4 == 0 {
+                    pal.window_warm.clone()
+                } else {
+                    pal.window_cool.clone()
+                },
+                world.x,
+                ground,
+                world.z,
+                height,
+                width,
+                depth,
+            );
+        }
+
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(width * 0.35, 0.42, depth * 0.35))),
+                material: MeshMaterial3d(pal.street_paint.clone()),
+                transform: Transform::from_xyz(world.x, ground + height + 0.22, world.z)
+                    .with_rotation(Quat::from_rotation_y(yaw)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_settlement_window_facades(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mat: Handle<StandardMaterial>,
+    x: f32,
+    ground_y: f32,
+    z: f32,
+    h: f32,
+    w: f32,
+    d: f32,
+) {
+    let win_h = h * 0.55;
+    let center_y = ground_y + h * 0.18 + win_h * 0.5;
+    let thickness = 0.28;
+
+    for &fz in &[z - d * 0.5 - thickness * 0.5, z + d * 0.5 + thickness * 0.5] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new((w - 0.8).max(1.0), win_h, thickness))),
+                material: MeshMaterial3d(mat.clone()),
+                transform: Transform::from_xyz(x, center_y, fz),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+    for &fx in &[x - w * 0.5 - thickness * 0.5, x + w * 0.5 + thickness * 0.5] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(thickness, win_h, (d - 0.8).max(1.0)))),
+                material: MeshMaterial3d(mat.clone()),
+                transform: Transform::from_xyz(fx, center_y, z),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_settlement_landmark(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+) {
+    let landmark_height = match settlement.kind {
+        MapSettlementKind::City => 44.0,
+        MapSettlementKind::Village => 20.0,
+        MapSettlementKind::Harbor => 30.0,
+        MapSettlementKind::Outpost => 34.0,
+    };
+    let marker = origin + rot * Vec3::new(0.0, 0.0, -18.0);
+    let ground = terrain_surface_y(marker.x, marker.z, seed);
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(2.0, landmark_height))),
+            material: MeshMaterial3d(match settlement.kind {
+                MapSettlementKind::Village => pal.crystal_aurora.clone(),
+                MapSettlementKind::Harbor => pal.window_cool.clone(),
+                MapSettlementKind::Outpost => pal.crystal_dragon.clone(),
+                MapSettlementKind::City => pal.glass_panel.clone(),
+            }),
+            transform: Transform::from_xyz(
+                marker.x,
+                ground + landmark_height * 0.5 + 1.0,
+                marker.z,
+            ),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: match settlement.kind {
+                    MapSettlementKind::City => Color::srgb(0.35, 0.82, 1.0),
+                    MapSettlementKind::Village => Color::srgb(0.86, 0.65, 1.0),
+                    MapSettlementKind::Harbor => Color::srgb(0.42, 0.90, 1.0),
+                    MapSettlementKind::Outpost => Color::srgb(1.0, 0.46, 0.18),
+                },
+                intensity: 38_000.0,
+                range: 120.0 + seeded(seed, settlement.anchor_id.len() as u64) * 80.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(marker.x, ground + landmark_height + 6.0, marker.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    if matches!(settlement.kind, MapSettlementKind::Harbor) {
+        for i in [-1.0_f32, 1.0] {
+            let dock = origin + rot * Vec3::new(i * 18.0, 0.0, 54.0);
+            let dock_ground = terrain_surface_y(dock.x, dock.z, seed);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(10.0, 0.8, 52.0))),
+                    material: MeshMaterial3d(pal.rooftop.clone()),
+                    transform: Transform::from_xyz(dock.x, dock_ground + 0.5, dock.z)
+                        .with_rotation(rot),
+                    ..default()
+                },
+                WorldGeometry,
+                WalkableSurface,
+            ));
+        }
+    }
+}
+
+fn spawn_settlement_cache(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+) {
+    let (credits, experience, armor) = match settlement.kind {
+        MapSettlementKind::City => (120, 70, 8),
+        MapSettlementKind::Village => (70, 42, 6),
+        MapSettlementKind::Harbor => (95, 55, 7),
+        MapSettlementKind::Outpost => (105, 62, 9),
+    };
+    let cache_pos = origin + rot * Vec3::new(0.0, 3.0, 26.0);
+    let cache_ground = terrain_surface_y(cache_pos.x, cache_pos.z, seed);
+    let reward = DiscoverableKind::HiddenReward {
+        reward_id: settlement.reward_id,
+        credits,
+        experience,
+        armor,
+        power_up: None,
+        special_ability: None,
+    };
+    spawn_discoverable_beacon(
+        commands,
+        meshes,
+        materials,
+        reward,
+        settlement.name,
+        Vec3::new(cache_pos.x, cache_ground + 3.2, cache_pos.z),
+    );
+}
+
+fn spawn_settlement_discussion_npc(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+) {
+    let script_id = settlement_discussion_id(settlement.anchor_id);
+    let Some(script) = discussion_script(script_id) else {
+        return;
+    };
+
+    let local = match settlement.kind {
+        MapSettlementKind::City => Vec3::new(-22.0, 0.0, -12.0),
+        MapSettlementKind::Village => Vec3::new(-14.0, 0.0, 16.0),
+        MapSettlementKind::Harbor => Vec3::new(18.0, 0.0, 24.0),
+        MapSettlementKind::Outpost => Vec3::new(-12.0, 0.0, -18.0),
+    };
+    let pos = origin + rot * local;
+    let ground = terrain_surface_y(pos.x, pos.z, seed);
+    let facing = Transform::from_xyz(pos.x, ground + 1.9, pos.z).with_rotation(
+        Quat::from_rotation_y(settlement.facing_yaw + std::f32::consts::PI),
+    );
+    let body_mat = match settlement.kind {
+        MapSettlementKind::City => pal.window_cool.clone(),
+        MapSettlementKind::Village => pal.residential_b.clone(),
+        MapSettlementKind::Harbor => pal.glass_panel.clone(),
+        MapSettlementKind::Outpost => pal.brushed_metal.clone(),
+    };
+    let role = if matches!(settlement.kind, MapSettlementKind::City) {
+        settlement_guardian_role(settlement.kind)
+    } else {
+        script.role
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(0.85, 3.8))),
+            material: MeshMaterial3d(body_mat),
+            transform: facing,
+            ..default()
+        },
+        WorldGeometry,
+        DiscussionNpc {
+            id: settlement.anchor_id,
+            display_name: script.npc_name,
+            role,
+            script_id,
+            interact_radius: 18.0,
+        },
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.72))),
+            material: MeshMaterial3d(pal.small_window_warm.clone()),
+            transform: Transform::from_xyz(pos.x, ground + 4.25, pos.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(3.2, 0.08))),
+            material: MeshMaterial3d(pal.crystal_aurora.clone()),
+            transform: Transform::from_xyz(pos.x, ground + 0.18, pos.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.50, 0.92, 1.0),
+                intensity: 9_000.0,
+                range: 28.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(pos.x, ground + 4.4, pos.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_city_guardian_ships(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+) {
+    let body_mesh = meshes.add(Cuboid::new(19.0, 3.4, 6.0));
+    let wing_mesh = meshes.add(Cuboid::new(9.5, 0.55, 15.5));
+    let fin_mesh = meshes.add(Cuboid::new(3.2, 4.4, 0.6));
+    let engine_mesh = meshes.add(Cylinder::new(1.15, 3.8));
+    let glow_mesh = meshes.add(Sphere::new(1.15));
+
+    for i in 0..3 {
+        let radius = 135.0 + i as f32 * 36.0 + seeded(seed, i as u64 + 81) * 20.0;
+        let altitude = 92.0 + i as f32 * 16.0 + seeded(seed, i as u64 + 91) * 18.0;
+        let phase = settlement.facing_yaw + i as f32 * std::f32::consts::TAU / 3.0;
+        let angle = phase;
+        let start = Vec3::new(
+            origin.x + angle.cos() * radius,
+            origin.y + altitude,
+            origin.z + angle.sin() * radius,
+        );
+
+        commands
+            .spawn((
+                PbrBundle {
+                    mesh: Mesh3d(body_mesh.clone()),
+                    material: MeshMaterial3d(pal.brushed_metal.clone()),
+                    transform: Transform::from_translation(start)
+                        .with_rotation(Quat::from_rotation_y(-angle + std::f32::consts::FRAC_PI_2)),
+                    ..default()
+                },
+                WorldGeometry,
+                FreePeopleGuardianShip {
+                    center: origin,
+                    radius,
+                    altitude,
+                    angular_speed: 0.10 + i as f32 * 0.025,
+                    phase,
+                    bob: 5.0 + i as f32,
+                },
+            ))
+            .with_children(|ship| {
+                ship.spawn(PbrBundle {
+                    mesh: Mesh3d(wing_mesh.clone()),
+                    material: MeshMaterial3d(pal.glass_panel.clone()),
+                    transform: Transform::from_xyz(0.0, -0.25, 0.0),
+                    ..default()
+                });
+                ship.spawn(PbrBundle {
+                    mesh: Mesh3d(fin_mesh.clone()),
+                    material: MeshMaterial3d(pal.window_cool.clone()),
+                    transform: Transform::from_xyz(-6.4, 3.0, 0.0),
+                    ..default()
+                });
+                for z in [-2.4_f32, 2.4] {
+                    ship.spawn(PbrBundle {
+                        mesh: Mesh3d(engine_mesh.clone()),
+                        material: MeshMaterial3d(pal.downtown_b.clone()),
+                        transform: Transform::from_xyz(-9.8, -0.2, z)
+                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                        ..default()
+                    });
+                    ship.spawn(PbrBundle {
+                        mesh: Mesh3d(glow_mesh.clone()),
+                        material: MeshMaterial3d(pal.crystal_aurora.clone()),
+                        transform: Transform::from_xyz(-12.0, -0.2, z),
+                        ..default()
+                    });
+                }
+                ship.spawn(PointLightBundle {
+                    point_light: PointLight {
+                        color: Color::srgb(0.40, 0.88, 1.0),
+                        intensity: 18_000.0,
+                        range: 60.0,
+                        shadows_enabled: false,
+                        ..default()
+                    },
+                    transform: Transform::from_xyz(0.0, 1.4, 0.0),
+                    ..default()
+                });
+            });
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CitySpyDroneSpec {
+    id: &'static str,
+    label: &'static str,
+    reward_id: &'static str,
+    radius: f32,
+    altitude: f32,
+    angular_speed: f32,
+    phase: f32,
+    credits: u32,
+    experience: u32,
+    armor: u32,
+}
+
+const CLOUDRAIL_SPY_DRONES: &[CitySpyDroneSpec] = &[
+    CitySpyDroneSpec {
+        id: "cloudrail_spy_drone_north",
+        label: "Cloudrail Spy Data North",
+        reward_id: "spy_data_cloudrail_north",
+        radius: 76.0,
+        altitude: 34.0,
+        angular_speed: 0.34,
+        phase: 0.4,
+        credits: 75,
+        experience: 55,
+        armor: 5,
+    },
+    CitySpyDroneSpec {
+        id: "cloudrail_spy_drone_market",
+        label: "Cloudrail Spy Data Market",
+        reward_id: "spy_data_cloudrail_market",
+        radius: 104.0,
+        altitude: 42.0,
+        angular_speed: -0.27,
+        phase: 2.7,
+        credits: 90,
+        experience: 65,
+        armor: 6,
+    },
+];
+
+const SWITCHWORK_SPY_DRONES: &[CitySpyDroneSpec] = &[
+    CitySpyDroneSpec {
+        id: "switchwork_spy_drone_hangar",
+        label: "Switchwork Spy Data Hangar",
+        reward_id: "spy_data_switchwork_hangar",
+        radius: 82.0,
+        altitude: 36.0,
+        angular_speed: 0.31,
+        phase: 1.1,
+        credits: 80,
+        experience: 60,
+        armor: 5,
+    },
+    CitySpyDroneSpec {
+        id: "switchwork_spy_drone_relay",
+        label: "Switchwork Spy Data Relay",
+        reward_id: "spy_data_switchwork_relay",
+        radius: 112.0,
+        altitude: 48.0,
+        angular_speed: -0.24,
+        phase: 3.6,
+        credits: 95,
+        experience: 70,
+        armor: 7,
+    },
+];
+
+fn city_spy_drone_specs(anchor_id: &str) -> &'static [CitySpyDroneSpec] {
+    match anchor_id {
+        "settlement_cloudrail_city" => CLOUDRAIL_SPY_DRONES,
+        "settlement_switchwork_borough" => SWITCHWORK_SPY_DRONES,
+        _ => &[],
+    }
+}
+
+fn spawn_city_spy_drones(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+) {
+    let specs = city_spy_drone_specs(settlement.anchor_id);
+    if specs.is_empty() {
+        return;
+    }
+
+    let body_mesh = meshes.add(Cuboid::new(3.8, 1.35, 2.4));
+    let wing_mesh = meshes.add(Cuboid::new(2.6, 0.24, 6.4));
+    let lens_mesh = meshes.add(Sphere::new(0.46));
+    let antenna_mesh = meshes.add(Cylinder::new(0.08, 2.1));
+
+    for (i, spec) in specs.iter().enumerate() {
+        let phase = settlement.facing_yaw + spec.phase + seeded(seed, i as u64 + 230) * 0.35;
+        let start = Vec3::new(
+            origin.x + phase.cos() * spec.radius,
+            origin.y + spec.altitude,
+            origin.z + phase.sin() * spec.radius,
+        );
+        let enemy = Enemy::new(EnemyType::SpyDrone, start, 1.0);
+        let max_hp = enemy.scaled_health();
+
+        commands
+            .spawn((
+                PbrBundle {
+                    mesh: Mesh3d(body_mesh.clone()),
+                    material: MeshMaterial3d(pal.dragon_window.clone()),
+                    transform: Transform::from_translation(start)
+                        .with_rotation(Quat::from_rotation_y(-phase + std::f32::consts::FRAC_PI_2)),
+                    ..default()
+                },
+                WorldGeometry,
+                enemy,
+                EnemyStateMachine::default(),
+                Health::new(max_hp),
+                Damageable::default(),
+                Faction::DimensionalAlien,
+                CitySpyDrone {
+                    id: spec.id,
+                    label: spec.label,
+                    reward_id: spec.reward_id,
+                    home: origin,
+                    radius: spec.radius,
+                    altitude: spec.altitude,
+                    angular_speed: spec.angular_speed,
+                    phase,
+                    bob: 2.6 + seeded(seed, i as u64 + 240) * 1.2,
+                    credits: spec.credits,
+                    experience: spec.experience,
+                    armor: spec.armor,
+                    data_spawned: false,
+                },
+            ))
+            .with_children(|spy| {
+                spy.spawn(PbrBundle {
+                    mesh: Mesh3d(wing_mesh.clone()),
+                    material: MeshMaterial3d(pal.industrial_rust.clone()),
+                    transform: Transform::from_xyz(0.0, -0.08, 0.0),
+                    ..default()
+                });
+                spy.spawn(PbrBundle {
+                    mesh: Mesh3d(lens_mesh.clone()),
+                    material: MeshMaterial3d(pal.crystal_dragon.clone()),
+                    transform: Transform::from_xyz(2.2, 0.08, 0.0),
+                    ..default()
+                });
+                for z in [-0.72_f32, 0.72] {
+                    spy.spawn(PbrBundle {
+                        mesh: Mesh3d(antenna_mesh.clone()),
+                        material: MeshMaterial3d(pal.brushed_metal.clone()),
+                        transform: Transform::from_xyz(-1.25, 0.92, z)
+                            .with_rotation(Quat::from_rotation_x(0.38 * z.signum())),
+                        ..default()
+                    });
+                }
+                spy.spawn(PointLightBundle {
+                    point_light: PointLight {
+                        color: Color::srgb(1.0, 0.18, 0.08),
+                        intensity: 7_500.0,
+                        range: 22.0,
+                        shadows_enabled: false,
+                        ..default()
+                    },
+                    transform: Transform::from_xyz(2.4, 0.2, 0.0),
+                    ..default()
+                });
+            });
+    }
+}
+
+fn spawn_dragon_lair_silhouettes(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    for spec in dragon_dungeon_specs() {
+        let rot = Quat::from_rotation_y(spec.yaw);
+        let origin_y = terrain_surface_y(spec.x, spec.z, seed);
+        let origin = Vec3::new(spec.x, origin_y, spec.z);
+        let (wall_mat, _, accent_mat, glow_mat) = dragon_dungeon_materials(pal, spec.theme);
+
+        for i in 0..7u64 {
+            let angle = i as f32 * std::f32::consts::TAU / 7.0
+                + seeded(seed, i + spec.chapter as u64) * 0.4;
+            let radius = 95.0 + seeded(seed, i * 3 + spec.chapter as u64) * 115.0;
+            let x = spec.x + angle.cos() * radius;
+            let z = spec.z + angle.sin() * radius;
+            let y = terrain_surface_y(x, z, seed);
+            let h = 34.0 + seeded(seed, i * 3 + 1) * 72.0;
+            let r = 7.0 + seeded(seed, i * 3 + 2) * 10.0;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cone {
+                        radius: r,
+                        height: h,
+                    })),
+                    material: MeshMaterial3d(wall_mat.clone()),
+                    transform: Transform::from_xyz(x, y + h * 0.5, z),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+
+        let entry = origin + rot * Vec3::new(0.0, 0.0, -98.0);
+        for side in [-1.0_f32, 1.0] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(9.0, 32.0, 9.0))),
+                    material: MeshMaterial3d(wall_mat.clone()),
+                    transform: Transform::from_translation(
+                        entry + rot * Vec3::new(side * 24.0, 16.0, 0.0),
+                    )
+                    .with_rotation(rot),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(58.0, 9.0, 10.0))),
+                material: MeshMaterial3d(wall_mat.clone()),
+                transform: Transform::from_translation(entry + rot * Vec3::new(0.0, 32.0, 0.0))
+                    .with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+
+        for side in [-1.0_f32, 1.0] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Sphere::new(4.6))),
+                    material: MeshMaterial3d(glow_mat.clone()),
+                    transform: Transform::from_translation(
+                        entry + rot * Vec3::new(side * 16.0, 19.0, -7.0),
+                    ),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(2.2, 10.0))),
+                material: MeshMaterial3d(accent_mat),
+                transform: Transform::from_translation(entry + rot * Vec3::new(0.0, 7.0, 8.0)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
 }
 
 // ── Downtown ──────────────────────────────────────────────────────────────────
@@ -3959,10 +5768,12 @@ fn spawn_residential(
 
 // ── Highways ──────────────────────────────────────────────────────────────────
 fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette) {
+    let road_len = TERRAIN_WORLD_SIZE;
+    let road_half = road_len * 0.5;
     // Main east-west highway
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(1200.0, 0.8, 18.0))),
+            mesh: Mesh3d(meshes.add(Cuboid::new(road_len, 0.8, 18.0))),
             material: MeshMaterial3d(pal.highway.clone()),
             transform: Transform::from_xyz(0.0, 8.0, 0.0),
             ..default()
@@ -3974,13 +5785,13 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             height: 0.8,
         },
         bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(600.0, 0.4, 9.0),
+        bevy_rapier3d::prelude::Collider::cuboid(road_half, 0.4, 9.0),
     ));
 
     // North-south cross
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(18.0, 0.8, 1200.0))),
+            mesh: Mesh3d(meshes.add(Cuboid::new(18.0, 0.8, road_len))),
             material: MeshMaterial3d(pal.highway.clone()),
             transform: Transform::from_xyz(0.0, 6.0, 0.0),
             ..default()
@@ -3992,12 +5803,13 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             height: 0.8,
         },
         bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(9.0, 0.4, 600.0),
+        bevy_rapier3d::prelude::Collider::cuboid(9.0, 0.4, road_half),
     ));
 
     // Support pillars
-    for i in -6..=6i32 {
-        let x = i as f32 * 100.0;
+    let pillar_count = (road_half / 180.0).ceil() as i32;
+    for i in -pillar_count..=pillar_count {
+        let x = i as f32 * 180.0;
         commands.spawn((
             PbrBundle {
                 mesh: Mesh3d(meshes.add(Cuboid::new(2.5, 8.0, 2.5))),
@@ -4350,26 +6162,26 @@ fn spawn_spaceports(
 /// so the silhouette reads as a proper rocky peak rather than a single cone.
 fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
     let corners = [
-        Vec3::new(460.0, 0.0, 460.0),
-        Vec3::new(-460.0, 0.0, 460.0),
-        Vec3::new(460.0, 0.0, -460.0),
-        Vec3::new(-460.0, 0.0, -460.0),
+        Vec3::new(8600.0, 0.0, 8600.0),
+        Vec3::new(-8600.0, 0.0, 8600.0),
+        Vec3::new(8600.0, 0.0, -8600.0),
+        Vec3::new(-8600.0, 0.0, -8600.0),
     ];
 
     for (ci, &corner) in corners.iter().enumerate() {
         for i in 0..18u64 {
             let idx = ci as u64 * 20 + i;
 
-            let ox = (seeded(seed, idx * 5) - 0.5) * 200.0;
-            let oz = (seeded(seed, idx * 5 + 1) - 0.5) * 200.0;
+            let ox = (seeded(seed, idx * 5) - 0.5) * 1700.0;
+            let oz = (seeded(seed, idx * 5 + 1) - 0.5) * 1700.0;
             let wx = corner.x + ox;
             let wz = corner.z + oz;
 
             // Base Y from terrain so spires sit flush on the landscape.
             let ground_y = terrain_surface_y(wx, wz, seed - 5);
 
-            let peak_h = 50.0 + seeded(seed, idx * 5 + 2) * 130.0;
-            let base_r = 22.0 + seeded(seed, idx * 5 + 3) * 35.0;
+            let peak_h = 110.0 + seeded(seed, idx * 5 + 2) * 260.0;
+            let base_r = 58.0 + seeded(seed, idx * 5 + 3) * 82.0;
 
             // ── Main spire ──────────────────────────────────────────────
             commands.spawn((
@@ -4406,7 +6218,7 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
             }
 
             // ── Snow cap on tall peaks ───────────────────────────────────
-            if peak_h > 90.0 {
+            if peak_h > 190.0 {
                 let cap_r = base_r * 0.28;
                 let cap_h = peak_h * 0.18;
                 let cap_y = ground_y + peak_h - cap_h * 0.35;
@@ -6243,8 +8055,8 @@ fn spawn_collosar_castle(
     pal: &Palette,
     seed: u64,
 ) {
-    let cx = -490.0_f32;
-    let cz = -390.0_f32;
+    let cx = -8800.0_f32;
+    let cz = -8020.0_f32;
     let ground = terrain_surface_y(cx, cz, seed);
     let floor = ground + 6.0;
     let hw = 42.0_f32;
@@ -6407,7 +8219,7 @@ fn spawn_collosar_castle(
     ));
 
     // ── Collosar's Sanctum Spire ───────────────────────────────────────────
-    // The tallest structure — visible from the city below
+    // The tallest structure in Collosar's Tibet domain.
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(Cylinder::new(16.0, 135.0))),
@@ -6575,16 +8387,16 @@ fn spawn_collosar_castle(
         ));
     }
 
-    // ── Everest snow cap (decorative, near the peak at -550, -480) ─────────
-    let ex_x = -550.0_f32;
-    let ex_z = -480.0_f32;
+    // ── Everest snow cap (decorative summit near Collosar's domain) ───────
+    let ex_x = -9000.0_f32;
+    let ex_z = -8350.0_f32;
     let ev_ground = terrain_surface_y(ex_x, ex_z, seed);
     // Snow cap spheres sitting on the Everest terrain peak
     for &(sox, soz, sr) in &[
-        (0.0_f32, 0.0, 35.0_f32),
-        (-18.0, 12.0, 22.0),
-        (16.0, -14.0, 20.0),
-        (0.0, -8.0, 28.0),
+        (0.0_f32, 0.0, 95.0_f32),
+        (-80.0, 54.0, 62.0),
+        (72.0, -66.0, 58.0),
+        (0.0, -46.0, 78.0),
     ] {
         commands.spawn((
             PbrBundle {
@@ -6601,8 +8413,8 @@ fn spawn_collosar_castle(
         PointLightBundle {
             point_light: PointLight {
                 color: Color::srgb(0.6, 0.8, 1.0),
-                intensity: 150_000.0,
-                range: 120.0,
+                intensity: 320_000.0,
+                range: 420.0,
                 shadows_enabled: false,
                 ..default()
             },
@@ -6721,7 +8533,7 @@ mod tests {
 
     #[test]
     fn outer_world_terrain_keeps_relief() {
-        assert!(terrain_height(480.0, 480.0, 42) > 40.0);
+        assert!(terrain_height(-8500.0, -7800.0, 42) > 220.0);
     }
 
     #[test]
@@ -6732,5 +8544,65 @@ mod tests {
             .collect();
 
         assert_eq!(chapters, vec![6, 7, 8, 9, 10, 11]);
+    }
+
+    #[test]
+    fn great_scientist_temples_cover_core_mechanic_rewards() {
+        let reward_ids: Vec<&str> = great_scientist_temple_specs()
+            .iter()
+            .map(|spec| spec.reward_id)
+            .collect();
+
+        assert_eq!(
+            reward_ids,
+            vec![
+                "ancient_flight_core",
+                "solar_sabre_glyph",
+                "nova_missile_matrix",
+                "aegis_armor_frame",
+            ]
+        );
+    }
+
+    #[test]
+    fn great_scientist_temple_gates_are_unique() {
+        let mut gate_ids: Vec<u8> = great_scientist_temple_specs()
+            .iter()
+            .map(|spec| spec.gate_id)
+            .collect();
+        gate_ids.sort_unstable();
+        gate_ids.dedup();
+
+        assert_eq!(gate_ids.len(), great_scientist_temple_specs().len());
+    }
+
+    #[test]
+    fn peaceful_city_spies_exist_for_each_mega_city() {
+        for city in map_settlements()
+            .iter()
+            .filter(|settlement| matches!(settlement.kind, MapSettlementKind::City))
+        {
+            assert_eq!(
+                city_spy_drone_specs(city.anchor_id).len(),
+                2,
+                "{} should have two city spy drones",
+                city.name
+            );
+        }
+    }
+
+    #[test]
+    fn peaceful_city_spy_data_rewards_are_unique() {
+        let mut reward_ids: Vec<&str> = map_settlements()
+            .iter()
+            .flat_map(|settlement| city_spy_drone_specs(settlement.anchor_id))
+            .map(|spec| spec.reward_id)
+            .collect();
+        let original_len = reward_ids.len();
+        reward_ids.sort_unstable();
+        reward_ids.dedup();
+
+        assert_eq!(reward_ids.len(), original_len);
+        assert_eq!(original_len, 4);
     }
 }

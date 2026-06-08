@@ -37,12 +37,37 @@ impl ChapterId {
 }
 
 // ── World Map / Fast Travel Locations ────────────────────────────────────────
+pub const EVEREST_RANGE_MILES: f32 = 200.0;
+pub const EVEREST_RANGE_UNITS_PER_MILE: f32 = 100.0;
+pub const EVEREST_RANGE_WORLD_SIZE: f32 = EVEREST_RANGE_MILES * EVEREST_RANGE_UNITS_PER_MILE;
+pub const EVEREST_RANGE_HALF_EXTENT: f32 = EVEREST_RANGE_WORLD_SIZE * 0.5;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ChapterMapLocation {
     pub id: ChapterId,
     pub anchor_id: &'static str,
     pub region: &'static str,
     pub landmark: &'static str,
+    pub x: f32,
+    pub z: f32,
+    pub facing_yaw: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapSettlementKind {
+    City,
+    Village,
+    Harbor,
+    Outpost,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MapSettlement {
+    pub anchor_id: &'static str,
+    pub name: &'static str,
+    pub region: &'static str,
+    pub kind: MapSettlementKind,
+    pub reward_id: &'static str,
     pub x: f32,
     pub z: f32,
     pub facing_yaw: f32,
@@ -77,8 +102,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch02",
             region: "Rift City",
             landmark: "Tony's Shortcut",
-            x: 96.0,
-            z: 82.0,
+            x: 2200.0,
+            z: 1600.0,
             facing_yaw: -0.80,
         },
         ChapterMapLocation {
@@ -86,8 +111,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch03",
             region: "Sister Starwell",
             landmark: "Sanctum Rise",
-            x: -78.0,
-            z: 98.0,
+            x: -2200.0,
+            z: 2500.0,
             facing_yaw: 0.70,
         },
         ChapterMapLocation {
@@ -95,8 +120,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch04",
             region: "Brother Trials",
             landmark: "Training Court",
-            x: 112.0,
-            z: -34.0,
+            x: 3000.0,
+            z: -1600.0,
             facing_yaw: 0.35,
         },
         ChapterMapLocation {
@@ -104,8 +129,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch05",
             region: "Bile Lab",
             landmark: "Mirror Sludge",
-            x: -102.0,
-            z: 38.0,
+            x: -3100.0,
+            z: 600.0,
             facing_yaw: 1.15,
         },
         ChapterMapLocation {
@@ -113,8 +138,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch06",
             region: "Everest Crown Range",
             landmark: "Collosar's Lair",
-            x: -505.0,
-            z: -332.0,
+            x: -8500.0,
+            z: -7800.0,
             facing_yaw: 0.12,
         },
         ChapterMapLocation {
@@ -122,8 +147,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch07",
             region: "Ember Nest",
             landmark: "Tarack's Furnace",
-            x: -446.0,
-            z: 132.0,
+            x: -7600.0,
+            z: 3800.0,
             facing_yaw: -0.52,
         },
         ChapterMapLocation {
@@ -131,8 +156,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch08",
             region: "Fangroot Wildland",
             landmark: "Shread's Scrapwing",
-            x: -330.0,
-            z: 300.0,
+            x: -5600.0,
+            z: 7800.0,
             facing_yaw: -1.05,
         },
         ChapterMapLocation {
@@ -140,8 +165,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch09",
             region: "Pink Flame Garden",
             landmark: "Rift Bloom Walk",
-            x: 430.0,
-            z: 26.0,
+            x: 6600.0,
+            z: 700.0,
             facing_yaw: 0.84,
         },
         ChapterMapLocation {
@@ -149,8 +174,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch10",
             region: "Colorado Rockies",
             landmark: "Ragar's Granite Gate",
-            x: 520.0,
-            z: 230.0,
+            x: 8500.0,
+            z: 4800.0,
             facing_yaw: -1.28,
         },
         ChapterMapLocation {
@@ -158,8 +183,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch11",
             region: "Antarctica Outpost",
             landmark: "Blackskull Icebreaker",
-            x: 236.0,
-            z: -360.0,
+            x: 3200.0,
+            z: -8200.0,
             facing_yaw: 0.42,
         },
         ChapterMapLocation {
@@ -167,8 +192,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch12",
             region: "Mana Switchworks",
             landmark: "Gear Relay Lane",
-            x: 340.0,
-            z: -96.0,
+            x: 5400.0,
+            z: -3100.0,
             facing_yaw: 0.35,
         },
         ChapterMapLocation {
@@ -176,8 +201,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch13",
             region: "Crown Gate",
             landmark: "Scallarian Front",
-            x: -164.0,
-            z: -254.0,
+            x: -4300.0,
+            z: -6100.0,
             facing_yaw: -0.20,
         },
         ChapterMapLocation {
@@ -185,8 +210,8 @@ pub fn chapter_map_locations() -> &'static [ChapterMapLocation] {
             anchor_id: "chapter_map_ch14",
             region: "Starfall Core",
             landmark: "Sky Closure",
-            x: 22.0,
-            z: -246.0,
+            x: 300.0,
+            z: -7800.0,
             facing_yaw: 0.0,
         },
     ]
@@ -197,6 +222,91 @@ pub fn chapter_map_location(id: ChapterId) -> Option<ChapterMapLocation> {
         .iter()
         .copied()
         .find(|location| location.id == id)
+}
+
+pub fn map_settlements() -> &'static [MapSettlement] {
+    &[
+        MapSettlement {
+            anchor_id: "settlement_riftglass_village",
+            name: "Riftglass Village",
+            region: "Rift Foothills",
+            kind: MapSettlementKind::Village,
+            reward_id: "settlement_riftglass_cache",
+            x: 1500.0,
+            z: 3300.0,
+            facing_yaw: -0.45,
+        },
+        MapSettlement {
+            anchor_id: "settlement_cloudrail_city",
+            name: "Cloudrail City",
+            region: "High Sky Rail",
+            kind: MapSettlementKind::City,
+            reward_id: "settlement_cloudrail_cache",
+            x: 4200.0,
+            z: 4300.0,
+            facing_yaw: -1.10,
+        },
+        MapSettlement {
+            anchor_id: "settlement_lantern_hamlet",
+            name: "Lantern Hamlet",
+            region: "Tibet Snow Road",
+            kind: MapSettlementKind::Village,
+            reward_id: "settlement_lantern_cache",
+            x: -6900.0,
+            z: -4200.0,
+            facing_yaw: 0.28,
+        },
+        MapSettlement {
+            anchor_id: "settlement_star_orchard",
+            name: "Star Orchard",
+            region: "Fangroot Meadow",
+            kind: MapSettlementKind::Village,
+            reward_id: "settlement_star_orchard_cache",
+            x: -3800.0,
+            z: 5700.0,
+            facing_yaw: 0.75,
+        },
+        MapSettlement {
+            anchor_id: "settlement_frost_harbor",
+            name: "Frost Harbor",
+            region: "Antarctic Range",
+            kind: MapSettlementKind::Harbor,
+            reward_id: "settlement_frost_harbor_cache",
+            x: 2300.0,
+            z: -6700.0,
+            facing_yaw: 0.20,
+        },
+        MapSettlement {
+            anchor_id: "settlement_granite_market",
+            name: "Granite Market",
+            region: "Rockies Gate",
+            kind: MapSettlementKind::Village,
+            reward_id: "settlement_granite_market_cache",
+            x: 7100.0,
+            z: 2800.0,
+            facing_yaw: -0.82,
+        },
+        MapSettlement {
+            anchor_id: "settlement_switchwork_borough",
+            name: "Switchwork Borough",
+            region: "Mana Switchworks",
+            kind: MapSettlementKind::City,
+            reward_id: "settlement_switchwork_cache",
+            x: 4400.0,
+            z: -4300.0,
+            facing_yaw: 0.58,
+        },
+        MapSettlement {
+            anchor_id: "settlement_starfell_outpost",
+            name: "Starfell Outpost",
+            region: "Crown Road",
+            kind: MapSettlementKind::Outpost,
+            reward_id: "settlement_starfell_cache",
+            x: -1800.0,
+            z: -6900.0,
+            facing_yaw: -0.15,
+        },
+    ]
 }
 
 // ── Biome ─────────────────────────────────────────────────────────────────────
@@ -1103,8 +1213,42 @@ mod tests {
     #[test]
     fn chapter_map_locations_stay_inside_heightmap_world() {
         for location in chapter_map_locations() {
-            assert!(location.x.abs() <= 560.0);
-            assert!(location.z.abs() <= 560.0);
+            assert!(location.x.abs() <= EVEREST_RANGE_HALF_EXTENT - 120.0);
+            assert!(location.z.abs() <= EVEREST_RANGE_HALF_EXTENT - 120.0);
         }
+    }
+
+    #[test]
+    fn everest_range_scale_matches_design_target() {
+        assert_eq!(EVEREST_RANGE_MILES, 200.0);
+        assert_eq!(EVEREST_RANGE_WORLD_SIZE, 20_000.0);
+    }
+
+    #[test]
+    fn map_settlements_stay_inside_heightmap_world() {
+        for settlement in map_settlements() {
+            assert!(settlement.x.abs() <= EVEREST_RANGE_HALF_EXTENT - 120.0);
+            assert!(settlement.z.abs() <= EVEREST_RANGE_HALF_EXTENT - 120.0);
+        }
+    }
+
+    #[test]
+    fn map_settlement_rewards_and_anchors_are_unique() {
+        let mut anchors: Vec<&str> = map_settlements()
+            .iter()
+            .map(|settlement| settlement.anchor_id)
+            .collect();
+        anchors.sort_unstable();
+        anchors.dedup();
+
+        let mut rewards: Vec<&str> = map_settlements()
+            .iter()
+            .map(|settlement| settlement.reward_id)
+            .collect();
+        rewards.sort_unstable();
+        rewards.dedup();
+
+        assert_eq!(anchors.len(), map_settlements().len());
+        assert_eq!(rewards.len(), map_settlements().len());
     }
 }

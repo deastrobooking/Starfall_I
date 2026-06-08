@@ -46,6 +46,13 @@ pub enum DiscoverableKind {
         power_up: Option<&'static str>,
         special_ability: Option<&'static str>,
     },
+    /// Data core recovered from a spy drone in a peaceful settlement.
+    SpyData {
+        data_id: &'static str,
+        credits: u32,
+        experience: u32,
+        armor: u32,
+    },
     /// Campaign-shared cache for robot parts, upgrade direction, and heal reserve.
     TechCache {
         cache_id: &'static str,
