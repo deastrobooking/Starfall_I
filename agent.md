@@ -23,6 +23,12 @@ together.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
+- Robot pet foundation lives in `src/robot_pets.rs`: shared saved pet records,
+  enemy salvage parts, store-build recipes, and combined vehicle/mech/ship form
+  gates. The garage UI and runtime mech/ship controllers are future work.
+- Tech upgrade foundation lives in `src/upgrades.rs`: shared saved beam,
+  missile, turret, health, rejuvenation, and mech-link ranks. Chapter select
+  spends robot salvage on ranks; rejuvenation healing consumes saved reserve.
 - Core app states are `MainMenu`, `PlayerSelect`, `CharacterDesign`,
   `ChapterSelect`, `ChassisEditor`, `Playing`, `Paused`, and `GameOver`.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
@@ -43,9 +49,10 @@ together.
 4. Treat `PlayerIndex` as the ownership key for local multiplayer. Do not guess
    ownership from query order when an event/component/resource can carry it.
 5. Keep campaign-shared systems explicit. `ChapterProgress`, chapter
-   objectives, kill gates, boss phases, unlocks, and `PerkTree` are shared by
-   default; inventories, rewards, HUD, feedback, companions, crafting, runtime
-   stats, character blueprints, and save `players[]` records are per-player by
+   objectives, kill gates, boss phases, unlocks, `PerkTree`,
+   `RobotPetCollection`, and `UpgradeLedger` are shared by default;
+   inventories, rewards, HUD, feedback, companions, crafting, runtime stats,
+   character blueprints, and save `players[]` records are per-player by
    default.
 6. Keep the current vehicle policy unless explicitly changed: one party-shared
    active vehicle/driver mode with passengers keyed by `PlayerIndex`.
@@ -68,7 +75,11 @@ together.
 3. Pay down engine migration debt while using Bevy 0.18-native APIs for new
    work.
 4. Build the Chapter 1 vertical slice after ownership/save gates are reliable.
-5. Then proceed through production systems, core game depth, presentation, and
+5. Build the robot pet garage loop: rescue/store UI, pet assignment, and runtime
+   adapters for vehicles, mechs, ships, and megaships.
+6. Build the full tech upgrade screen: weapons, missiles, turrets, health,
+   rejuvenation reserve, robot mechs, vehicles, ships, and megaships.
+7. Then proceed through production systems, core game depth, presentation, and
    ship readiness.
 
 ## Definition Of Done

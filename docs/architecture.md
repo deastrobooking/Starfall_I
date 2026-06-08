@@ -13,6 +13,8 @@ src/
   resources.rs              Shared resources (WaveInfo, GameSettings, CurrentChapter, ...)
   character_blueprint.rs    Serializable editable character recipes: body, parts, materials, sockets, rig, animation, movement
   perks.rs                  PerkTree, PerkBranch, PerkDef — Heart / Star / Acrobat branches
+  robot_pets.rs             Saved robot pet collection, salvage parts, store-build recipes, and combined vehicle/mech/ship form gates
+  upgrades.rs               Saved tech upgrade ledger for beams, missiles, turrets, health, rejuvenation, and future mech links
   characters.rs             Cartoon character construction, hero color configs, designer presets
   chapters/mod.rs           All 14 ChapterDef scripts + Biome palettes
   components/
@@ -33,7 +35,7 @@ src/
   plugins/
     input_plugin.rs         Writes per-player PlayerInput from keyboard + gamepads
     player_plugin.rs        Movement, ledge hang, wall jump, jetpack, dodge, parry, perks, death
-    weapon_plugin.rs        Projectile firing, melee combo, Star Sabre, specials, perk ammo/damage, VFX
+    weapon_plugin.rs        Projectile firing, melee combo, Star Sabre, specials, perk/tech ammo and damage, VFX
     enemy_plugin.rs         AI state machine, spawning, loot drops
     character_plugin.rs     Idle/walk/jump/hang cartoon pose animation
     chapter_plugin.rs       Chapter director, secret cave beacons, relic puzzles, relic-fragment obstacle courses, castle airship escalation
@@ -88,7 +90,8 @@ EnemyPlugin:  reads Projectile + Player position → updates EnemyStateMachine, 
 ChapterPlugin: listens to EnemyKilledEvent / BossDefeatedEvent → advances EncounterStep
 DiscoverablePlugin: handles collectible beacons, secret cave charting, ordered relic-switch puzzles, and relic-fragment assembly
 UiPlugin:     listens to all events → updates per-player HUD panels, radio chatter, damage numbers
-SavePlugin:   reads PlayerIndex + PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree + CharacterBlueprints → JSON on disk
+EnemyPlugin:  listens to EnemyKilledEvent → party robot salvage collection
+SavePlugin:   reads PlayerIndex + PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree + CharacterBlueprints + RobotPetCollection + UpgradeLedger → JSON on disk
 ```
 
 ## Ownership Policy
@@ -99,7 +102,7 @@ runtime state. Query order is not an ownership signal.
 Campaign-shared resources:
 
 - `ChapterProgress`, chapter objectives, kill gates, boss phases, unlock
-  progression, and `PerkTree`.
+  progression, `PerkTree`, the robot pet collection, and tech upgrades.
 
 Per-player state:
 
@@ -127,4 +130,6 @@ Party-shared exceptions:
 - **PlayerInput abstraction**: All gameplay input is written into a `PlayerInput` component per player, keeping keyboard/gamepad mapping in `input_plugin.rs` and player behavior in feature plugins.
 - **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, companion ownership, rewards, and feedback use `PlayerIndex` as the shared key. Shared campaign systems intentionally live in resources like `ChapterProgress` and `PerkTree`.
 - **Global perk tree**: `PerkTree` is a shared campaign resource. Level-ups award points, chapter select spends them, combat/movement systems read the resulting multipliers, and save/load persists the ranks.
+- **Robot pets as the vehicle spine**: `RobotPetCollection` is a shared campaign resource that stores rescued/store-built pets, enemy salvage parts, and the active combined form. Recipes currently gate cars, motorcycles, tanks, boats, submarines, space jets, giant mechs, spaceships, and megaships while the future garage/mech/ship runtimes are built.
+- **Tech upgrades as the production upgrade spine**: `UpgradeLedger` is a shared campaign resource for beam, missile, turret, health, rejuvenation, and future mech-link ranks. Chapter select currently spends robot salvage on ranks; weapon, armor, and player regen systems consume those ranks. Rejuvenation healing also spends a saved reserve so it is a paid survival system instead of free passive regen.
 - **Damage pipeline**: `DamageInfo → apply_damage() → DamageResult` with resistance multipliers, then callers emit events. Parry and armor are handled in `damage_player()` in player_plugin before the generic pipeline.

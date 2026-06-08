@@ -44,6 +44,8 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Engine milestone guidance now lives in `docs/engine_upgrade_milestones.md`, `agent.md` points future agents there, and GitHub Actions mirrors the local format/check/clippy/test gates.
 - The multiplayer ownership policy is now documented in architecture/systems docs, and the first save tests cover per-player records, legacy hydration, `player_index` lookup, sorted save output, and clamped runtime application.
 - Default player visuals now move away from tiny voxel/chibi blocks toward taller Dreamcast-anime sci-fantasy heroes with capsule limbs, layered armor, expressive eyes/hair, and glow accents.
+- Robot pets now have a campaign-shared saved data model, enemy-salvage part rewards, named robot-part materials, store-build recipes, and combination gates for cars, motorcycles, tanks, boats, submarines, space jets, giant mechs, spaceships, and megaships.
+- Tech upgrades now have a saved campaign ledger, chapter-select UI, robot-salvage costs, beam/missile/Sprite Turret damage multipliers, armor health bonuses, and paid rejuvenation reserve consumption.
 
 ## High Priority
 
@@ -68,28 +70,42 @@ The current chapter-select perk UI is intentionally small: keyboard shortcuts sp
 
 **Design direction:** make a dedicated perk screen with branch tabs, rank pips, disabled states, previews of stat changes, and controller navigation.
 
-### 3. Deepen airship levels
+### 3. Build the full tech upgrade screen
+**Files:** `src/upgrades.rs`, `src/plugins/ui_plugin.rs`, `src/plugins/weapon_plugin.rs`, `src/plugins/player_plugin.rs`, `src/plugins/vehicle_plugin.rs`
+
+The current tech-upgrade panel proves saved ranks, robot-salvage costs, and runtime effects for beams, missile-like explosives, Sprite Turret, max health, and paid rejuvenation. It is still a compact chapter-select readout rather than a production upgrade interface.
+
+**Design direction:** make a full upgrade screen with tabs for Weapons, Missiles, Turrets, Health/Rejuvenation, Robot Mechs, Vehicles, Ships, and Megaships. Show current stats, next-rank deltas, required parts, source hints, affordability, controller navigation, locked future branches, and an explicit reserve meter for rejuvenation.
+
+### 4. Deepen airship levels
 **Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`
 
 Airship levels currently spawn a solid deck, rail blockers, engine visuals, a guard wave, and a boss rematch. That supports the requested chapter loop, but the levels could become richer platforming spaces.
 
 **Design direction:** add moving deck hazards, side-scrolling sky debris, engine weak points, airship-specific loot, and boarding/extraction transitions.
 
-### 4. Clarify save-game scope
+### 5. Build the robot pet garage loop
+**Files:** `src/robot_pets.rs`, `src/plugins/ui_plugin.rs`, `src/plugins/vehicle_plugin.rs`, future rescue/store plugins
+
+Robot pets now have durable data, save support, salvage, store-build costs, and combined-form recipes. They still need a playable garage/store screen, authored rescue beacons, actual vehicle/mech spawning, upgrade slots, and per-player passenger/driver UX.
+
+**Design direction:** add robot rescue discoverables, a controller-friendly garage UI, store-built pet purchasing from salvage, pet assignment per player, combined-form previews, and runtime adapters that connect robot forms to existing vehicle mode, boat boarding, and future mech/ship controllers.
+
+### 6. Clarify save-game scope
 **File:** `src/plugins/save_plugin.rs`
 
-Save data now persists chapter progress, perks, player-slot character blueprints, and per-player runtime stats. The schema still carries legacy top-level stat fields for old-save compatibility and still mixes shared `wave_number` with newer campaign/chapter data.
+Save data now persists chapter progress, perks, robot pets, tech upgrades, player-slot character blueprints, and per-player runtime stats. The schema still carries legacy top-level stat fields for old-save compatibility and still mixes shared `wave_number` with newer campaign/chapter data.
 
 **Design direction:** split shared campaign data from per-player character data into separate schema sections or files. Treat max health/stamina as derived values when possible.
 
-### 5. Deepen relic-fragment challenge design
+### 7. Deepen relic-fragment challenge design
 **Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
 
 Fragment puzzles now prove the five-pieces-make-a-relic loop with moving bars, lift platforms, saving, and auto-assembly. The next design step is making each fragment course feel more authored and biome-specific.
 
 **Design direction:** add hazard damage, timed doors, rotating platform chains, airship-style variants, and optional bonus fragments that reward careful platforming without blocking chapter completion.
 
-### 6. Tune traversal toys and obstacle courses
+### 8. Tune traversal toys and obstacle courses
 **Files:** `src/components/world.rs`, `src/plugins/world_plugin.rs`, `src/plugins/player_plugin.rs`
 
 Slingshot pads, rotating elevators, ramp towers, and moving brick chains now exist as first-pass traversal toys. They need hands-on tuning for trajectory, camera readability, multiplayer crowding, reset paths, and reward pacing.
@@ -98,37 +114,37 @@ Slingshot pads, rotating elevators, ramp towers, and moving brick chains now exi
 
 ## Medium Priority
 
-### 7. Deepen hidden rewards, cave rewards, and secrets
+### 9. Deepen hidden rewards, cave rewards, and secrets
 **Files:** `src/plugins/world_plugin.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/discoverable_plugin.rs`
 
 Secret caves now exist as discoverable places, and the city has first-pass hidden reward rooms. These prove the reward-cache path, but caves and later levels need more authored secret content.
 
 **Design direction:** add cave-only chests, lore tablets, biome hazards, puzzle-gated doors, hidden relic-fragment shortcuts, unique armor/power-up pools, secret-room completion counts on the map/HUD, and clearer authored clues that lead players to hidden spaces.
 
-### 8. Dual armor tracking can drift
+### 10. Dual armor tracking can drift
 **Files:** `src/components/player.rs`, `src/components/armor.rs`, `src/plugins/armor_plugin.rs`
 
 `PlayerStats` tracks numeric `armor` / `max_armor`, while `ArmorSet` tracks equipped armor pieces and damage reduction. Incoming damage uses both concepts. This should be named and documented as two distinct mechanics, or consolidated.
 
 **Design direction:** either rename `PlayerStats.armor` to `current_armor_points`, or move armor durability into `ArmorSet`.
 
-### 9. Health maximum has multiple writers
+### 11. Health maximum has multiple writers
 **Files:** `src/plugins/player_plugin.rs`, `src/plugins/armor_plugin.rs`, `src/plugins/save_plugin.rs`
 
-Level-up, armor bonuses, perk bonuses, and loading all write max health. The armor/perk sync now recalculates from stable sources, but the data model would be cleaner with one source of truth.
+Level-up, armor bonuses, perk bonuses, tech upgrades, and loading all write or influence max health. The armor/perk/upgrade sync now recalculates from stable sources, but the data model would be cleaner with one source of truth.
 
 **Design direction:** make `Health.max` the canonical runtime value and derive it from level + equipment + perks.
 
 ## Lower Priority
 
-### 10. Second Wind needs an out-of-combat timer
+### 12. Second Wind needs an out-of-combat timer
 **Files:** `src/plugins/player_plugin.rs`, `src/perks.rs`
 
-`Second Wind` currently regenerates HP while the player is alive and below max health. The design text says "out of combat," but there is no combat timer yet.
+`Second Wind` now consumes paid rejuvenation reserve, but it still lacks a real out-of-combat timer.
 
 **Fix:** track recent damage/dealt-damage timestamps and enable regen only after a short quiet window.
 
-### 11. Input conflicts need a final control pass
+### 13. Input conflicts need a final control pass
 **Files:** `src/plugins/input_plugin.rs`, `src/plugins/armor_plugin.rs`
 
 Bracket keys currently overlap weapon cycling and developer elemental armor cycling. This is fine for a prototype, but final controls should separate player-facing actions from debug actions.

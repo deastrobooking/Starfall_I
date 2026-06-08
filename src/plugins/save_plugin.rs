@@ -9,7 +9,9 @@ use crate::damage::Health;
 use crate::events::UiMessageEvent;
 use crate::perks::PerkTree;
 use crate::resources::{ChapterProgress, PlaySessionTransition, PlayerSelectState, WaveInfo};
+use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
+use crate::upgrades::UpgradeLedger;
 
 const SAVE_FILE: &str = "starfall_i_save.json";
 
@@ -43,6 +45,10 @@ pub struct SaveData {
     pub character_blueprints: Vec<Option<CharacterBlueprint>>,
     #[serde(default)]
     pub players: Vec<PlayerSaveData>,
+    #[serde(default)]
+    pub robot_pets: RobotPetCollection,
+    #[serde(default)]
+    pub tech_upgrades: UpgradeLedger,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -123,6 +129,8 @@ impl Default for SaveData {
             perk_ranks: Vec::new(),
             character_blueprints: vec![None, None, None, None],
             players: Vec::new(),
+            robot_pets: RobotPetCollection::default(),
+            tech_upgrades: UpgradeLedger::default(),
         }
     }
 }
@@ -174,8 +182,10 @@ pub fn save_game(
     progress: &ChapterProgress,
     perks: &PerkTree,
     select: &PlayerSelectState,
+    robot_pets: &RobotPetCollection,
+    upgrades: &UpgradeLedger,
 ) -> Result<(), String> {
-    let data = build_save_data(players, wave, progress, perks, select);
+    let data = build_save_data(players, wave, progress, perks, select, robot_pets, upgrades);
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(save_path(), json).map_err(|e| e.to_string())
 }
@@ -186,6 +196,8 @@ fn build_save_data(
     progress: &ChapterProgress,
     perks: &PerkTree,
     select: &PlayerSelectState,
+    robot_pets: &RobotPetCollection,
+    upgrades: &UpgradeLedger,
 ) -> SaveData {
     players.sort_by_key(|player| player.player_index);
     SaveData {
@@ -203,6 +215,8 @@ fn build_save_data(
             .map(|slot| slot.blueprint.clone())
             .collect(),
         players,
+        robot_pets: robot_pets.clone(),
+        tech_upgrades: upgrades.clone(),
         ..SaveData::default()
     }
 }
@@ -253,12 +267,14 @@ pub fn save_current_session(
     progress: &ChapterProgress,
     perks: &PerkTree,
     select: &PlayerSelectState,
+    robot_pets: &RobotPetCollection,
+    upgrades: &UpgradeLedger,
 ) -> Result<(), String> {
     let players = collect_player_saves(player_q);
     if players.is_empty() {
         return Err("No active players to save".to_string());
     }
-    save_game(players, wave, progress, perks, select)
+    save_game(players, wave, progress, perks, select, robot_pets, upgrades)
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
@@ -266,8 +282,12 @@ fn hydrate_progress_from_disk(
     mut progress: ResMut<ChapterProgress>,
     mut perks: ResMut<PerkTree>,
     mut select: ResMut<PlayerSelectState>,
+    mut robot_pets: ResMut<RobotPetCollection>,
+    mut upgrades: ResMut<UpgradeLedger>,
 ) {
     if let Some(data) = load_save() {
+        *robot_pets = data.robot_pets.clone();
+        *upgrades = data.tech_upgrades.clone();
         progress.completed = data.completed_chapters;
         progress.discoverables = data.discoverables;
         progress.companions_recruited = data.companions_recruited;
@@ -285,6 +305,8 @@ fn load_save_on_enter(
     mut progress: ResMut<ChapterProgress>,
     mut perks: ResMut<PerkTree>,
     mut select: ResMut<PlayerSelectState>,
+    mut robot_pets: ResMut<RobotPetCollection>,
+    mut upgrades: ResMut<UpgradeLedger>,
     transition: Res<PlaySessionTransition>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
@@ -293,6 +315,8 @@ fn load_save_on_enter(
     }
 
     if let Some(data) = load_save() {
+        *robot_pets = data.robot_pets.clone();
+        *upgrades = data.tech_upgrades.clone();
         let mut active_players = 0usize;
         for (index, mut stats, mut health) in player_q.iter_mut() {
             active_players += 1;
@@ -330,6 +354,8 @@ fn autosave_system(
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
     select: Res<PlayerSelectState>,
+    robot_pets: Res<RobotPetCollection>,
+    upgrades: Res<UpgradeLedger>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     save_state.last_save_timer += time.delta_secs();
@@ -338,7 +364,15 @@ fn autosave_system(
     }
     save_state.last_save_timer = 0.0;
 
-    match save_current_session(&player_q, &wave, &progress, &perks, &select) {
+    match save_current_session(
+        &player_q,
+        &wave,
+        &progress,
+        &perks,
+        &select,
+        &robot_pets,
+        &upgrades,
+    ) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {
                 text: "Game autosaved.".to_string(),
@@ -358,12 +392,22 @@ fn manual_save_system(
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
     select: Res<PlayerSelectState>,
+    robot_pets: Res<RobotPetCollection>,
+    upgrades: Res<UpgradeLedger>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if !keyboard.just_pressed(KeyCode::F5) {
         return;
     }
-    match save_current_session(&player_q, &wave, &progress, &perks, &select) {
+    match save_current_session(
+        &player_q,
+        &wave,
+        &progress,
+        &perks,
+        &select,
+        &robot_pets,
+        &upgrades,
+    ) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {
                 text: "Game saved! [F5]".to_string(),
@@ -383,6 +427,8 @@ fn manual_save_system(
 mod tests {
     use super::*;
     use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe};
+    use crate::robot_pets::{RobotPartKind, RobotPetBlueprint, RobotPetRole};
+    use crate::upgrades::{TechUpgradeId, UpgradeLedger};
 
     fn player_save(
         player_index: u8,
@@ -445,6 +491,16 @@ mod tests {
         let mut select = PlayerSelectState::default();
         select.slots[0].blueprint = Some(test_blueprint("P1", 1.0));
         select.slots[2].blueprint = Some(test_blueprint("P3", 1.12));
+        let mut robot_pets = RobotPetCollection::default();
+        robot_pets.add_part(RobotPartKind::CircuitBoard, 6);
+        robot_pets.rescue_pet(RobotPetBlueprint::rescued(
+            "spark-pup",
+            "Spark Pup",
+            RobotPetRole::Scout,
+        ));
+        let mut upgrades = UpgradeLedger::default();
+        upgrades.ranks.push((TechUpgradeId::BeamCapacitors, 2));
+        upgrades.rejuvenation_charge = 75.0;
 
         let data = build_save_data(
             vec![
@@ -455,6 +511,8 @@ mod tests {
             &progress,
             &perks,
             &select,
+            &robot_pets,
+            &upgrades,
         );
 
         assert_eq!(data.wave_number, 7);
@@ -476,10 +534,27 @@ mod tests {
                 .map(|blueprint| blueprint.name.as_str()),
             Some("P3")
         );
+        assert_eq!(data.robot_pets.part_count(RobotPartKind::CircuitBoard), 6);
+        assert_eq!(data.robot_pets.pets[0].id, "spark-pup");
+        assert_eq!(data.tech_upgrades.rank(TechUpgradeId::BeamCapacitors), 2);
+        assert_eq!(data.tech_upgrades.rejuvenation_charge, 75.0);
     }
 
     #[test]
     fn save_data_round_trip_preserves_per_player_records() {
+        let mut robot_pets = RobotPetCollection::default();
+        robot_pets.add_part(RobotPartKind::StarDrive, 2);
+        robot_pets.rescue_pet(RobotPetBlueprint::rescued(
+            "nova-kit",
+            "Nova Kit",
+            RobotPetRole::Pilot,
+        ));
+        let mut tech_upgrades = UpgradeLedger::default();
+        tech_upgrades
+            .ranks
+            .push((TechUpgradeId::RejuvenationMatrix, 1));
+        tech_upgrades.rejuvenation_charge = 120.0;
+
         let data = SaveData {
             players: vec![
                 player_save(0, 2, 125, 10, 80.0, 100.0),
@@ -493,6 +568,8 @@ mod tests {
             ],
             completed_chapters: vec![1],
             perk_ranks: vec![("heart_vitality".to_string(), 2)],
+            robot_pets,
+            tech_upgrades,
             ..SaveData::default()
         };
 
@@ -510,6 +587,13 @@ mod tests {
         );
         assert_eq!(loaded.completed_chapters, vec![1]);
         assert_eq!(loaded.perk_ranks, vec![("heart_vitality".to_string(), 2)]);
+        assert_eq!(loaded.robot_pets.part_count(RobotPartKind::StarDrive), 2);
+        assert_eq!(loaded.robot_pets.pets[0].name, "Nova Kit");
+        assert_eq!(
+            loaded.tech_upgrades.rank(TechUpgradeId::RejuvenationMatrix),
+            1
+        );
+        assert_eq!(loaded.tech_upgrades.rejuvenation_charge, 120.0);
     }
 
     #[test]

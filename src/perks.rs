@@ -33,7 +33,7 @@ pub fn all_perks() -> Vec<PerkDef> {
             id: "heart_regen",
             name: "Second Wind",
             branch: PerkBranch::Heart,
-            description: "+0.5 HP/sec out of combat.",
+            description: "+0.5 HP/sec while rejuvenation reserve is available.",
             max_rank: 4,
         },
         PerkDef {

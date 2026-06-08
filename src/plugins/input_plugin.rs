@@ -63,6 +63,14 @@ impl Plugin for InputPlugin {
 const DEADZONE: f32 = 0.18;
 /// Look rate in radians per second at full stick deflection.
 const STICK_LOOK_RATE: f32 = std::f32::consts::PI * 1.5;
+/// Analog trigger deflection required to count as a pressed LT/RT action.
+const TRIGGER_AXIS_THRESHOLD: f32 = 0.35;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TriggerAxisState {
+    left: bool,
+    right: bool,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum NativeButton {
@@ -209,6 +217,7 @@ fn update_player_inputs(
     time: Res<Time>,
     settings: Res<GameSettings>,
     native: Res<NativeControllerState>,
+    mut trigger_history: Local<[TriggerAxisState; 4]>,
     mut players: Query<(&PlayerIndex, &mut PlayerInput), With<Player>>,
 ) {
     let dt = time.delta_secs();
@@ -231,6 +240,7 @@ fn update_player_inputs(
         *pi = PlayerInput::default();
 
         let i = idx.0 as usize;
+        let history_slot = i.min(trigger_history.len() - 1);
         let gp: Option<&Gamepad> = gps.get(i).map(|(_, g)| *g);
         let is_p1 = i == 0;
         let use_native = is_p1 && gp.is_none() && native.connected;
@@ -243,6 +253,17 @@ fn update_player_inputs(
         let axis_val = |a: GamepadAxis| -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
         let native_held = |b: NativeButton| -> bool { use_native && native.pressed(b) };
         let native_just = |b: NativeButton| -> bool { use_native && native.just_pressed(b) };
+        let left_trigger_axis = axis_pressed(axis_val(GamepadAxis::LeftZ));
+        let right_trigger_axis = axis_pressed(axis_val(GamepadAxis::RightZ));
+        let left_trigger_held = btn_held(GamepadButton::LeftTrigger2)
+            || left_trigger_axis
+            || native_held(NativeButton::LeftTrigger);
+        let right_trigger_held = btn_held(GamepadButton::RightTrigger2)
+            || right_trigger_axis
+            || native_held(NativeButton::RightTrigger);
+        let right_trigger_just = btn_just(GamepadButton::RightTrigger2)
+            || native_just(NativeButton::RightTrigger)
+            || (right_trigger_axis && !trigger_history[history_slot].right);
 
         // ── Movement ──────────────────────────────────────────────────────────
         let raw_move = Vec2::new(
@@ -294,17 +315,11 @@ fn update_player_inputs(
         pi.look_delta = if is_p1 { mouse_look } else { Vec2::ZERO } + gp_look + native_look;
 
         // ── Fire ──────────────────────────────────────────────────────────────
-        pi.fire = (is_p1 && mouse_btn.pressed(MouseButton::Left))
-            || btn_held(GamepadButton::RightTrigger2)
-            || native_held(NativeButton::RightTrigger);
-        pi.fire_just = (is_p1 && mouse_btn.just_pressed(MouseButton::Left))
-            || btn_just(GamepadButton::RightTrigger2)
-            || native_just(NativeButton::RightTrigger);
+        pi.fire = (is_p1 && mouse_btn.pressed(MouseButton::Left)) || right_trigger_held;
+        pi.fire_just = (is_p1 && mouse_btn.just_pressed(MouseButton::Left)) || right_trigger_just;
 
         // ── Aim ───────────────────────────────────────────────────────────────
-        pi.aim = (is_p1 && mouse_btn.pressed(MouseButton::Right))
-            || btn_held(GamepadButton::LeftTrigger2)
-            || native_held(NativeButton::LeftTrigger);
+        pi.aim = (is_p1 && mouse_btn.pressed(MouseButton::Right)) || left_trigger_held;
 
         // ── Sprint ────────────────────────────────────────────────────────────
         pi.sprint = (is_p1
@@ -470,6 +485,35 @@ fn update_player_inputs(
             || l3r3
             || (native_just(NativeButton::LeftThumb) && native_held(NativeButton::RightThumb))
             || (native_just(NativeButton::RightThumb) && native_held(NativeButton::LeftThumb));
+
+        trigger_history[history_slot].left = left_trigger_held;
+        trigger_history[history_slot].right = right_trigger_held;
+    }
+}
+
+#[inline]
+fn axis_pressed(value: f32) -> bool {
+    value > TRIGGER_AXIS_THRESHOLD
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deadzone_remaps_stick_smoothly_from_zero() {
+        assert_eq!(apply_deadzone(Vec2::new(0.05, 0.0)), Vec2::ZERO);
+
+        let live = apply_deadzone(Vec2::new(0.59, 0.0));
+
+        assert!(live.x > 0.45 && live.x < 0.55);
+        assert_eq!(live.y, 0.0);
+    }
+
+    #[test]
+    fn trigger_axis_threshold_matches_controller_action_gate() {
+        assert!(!axis_pressed(TRIGGER_AXIS_THRESHOLD));
+        assert!(axis_pressed(TRIGGER_AXIS_THRESHOLD + 0.01));
     }
 }
 

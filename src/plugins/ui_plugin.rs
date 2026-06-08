@@ -21,7 +21,9 @@ use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
     PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
 };
+use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
+use crate::upgrades::{all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger};
 
 pub struct UiPlugin;
 
@@ -126,7 +128,9 @@ impl Plugin for UiPlugin {
                 (
                     chapter_select_input,
                     chapter_select_perk_input,
+                    chapter_select_upgrade_input,
                     chapter_select_perk_panel_update,
+                    chapter_select_upgrade_panel_update,
                 )
                     .run_if(in_state(AppState::ChapterSelect)),
             );
@@ -655,6 +659,8 @@ fn pause_menu_action_system(
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
     select: Res<PlayerSelectState>,
+    robot_pets: Res<RobotPetCollection>,
+    upgrades: Res<UpgradeLedger>,
     mut menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -691,13 +697,29 @@ fn pause_menu_action_system(
         }
         PauseAction::Save => {
             send_pause_save_result(
-                save_current_session(&player_q, &wave, &progress, &perks, &select),
+                save_current_session(
+                    &player_q,
+                    &wave,
+                    &progress,
+                    &perks,
+                    &select,
+                    &robot_pets,
+                    &upgrades,
+                ),
                 &mut msg_ev,
             );
         }
         PauseAction::Title => {
             send_pause_save_result(
-                save_current_session(&player_q, &wave, &progress, &perks, &select),
+                save_current_session(
+                    &player_q,
+                    &wave,
+                    &progress,
+                    &perks,
+                    &select,
+                    &robot_pets,
+                    &upgrades,
+                ),
                 &mut msg_ev,
             );
             transition.pausing = false;
@@ -740,11 +762,15 @@ fn clear_play_session_transition_flags(mut transition: ResMut<PlaySessionTransit
 struct ChapterSelectRoot;
 #[derive(Component)]
 struct PerkPanelText;
+#[derive(Component)]
+struct TechUpgradePanelText;
 
 fn setup_chapter_select(
     mut commands: Commands,
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
+    upgrades: Res<UpgradeLedger>,
+    robot_pets: Res<RobotPetCollection>,
 ) {
     let chapters = all_chapters();
     commands
@@ -824,6 +850,15 @@ fn setup_chapter_select(
                 },
                 TextColor(Color::srgb(0.8, 0.9, 1.0)),
                 PerkPanelText,
+            ));
+            p.spawn((
+                Text::new(format_upgrade_panel(&upgrades, &robot_pets)),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.78, 1.0, 0.88)),
+                TechUpgradePanelText,
             ));
         });
 }
@@ -905,6 +940,40 @@ fn chapter_select_perk_panel_update(
     }
 }
 
+fn chapter_select_upgrade_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut upgrades: ResMut<UpgradeLedger>,
+    mut robot_pets: ResMut<RobotPetCollection>,
+) {
+    let picks = [
+        (KeyCode::KeyZ, TechUpgradeId::BeamCapacitors),
+        (KeyCode::KeyX, TechUpgradeId::NovaMissileForge),
+        (KeyCode::KeyC, TechUpgradeId::SpriteTurretLattice),
+        (KeyCode::KeyV, TechUpgradeId::ArmorPlating),
+        (KeyCode::KeyB, TechUpgradeId::RejuvenationMatrix),
+        (KeyCode::KeyN, TechUpgradeId::MechCommandLink),
+    ];
+    for (key, upgrade_id) in picks {
+        if keyboard.just_pressed(key) {
+            let _ = upgrades.try_purchase(upgrade_id, &mut robot_pets);
+            break;
+        }
+    }
+}
+
+fn chapter_select_upgrade_panel_update(
+    upgrades: Res<UpgradeLedger>,
+    robot_pets: Res<RobotPetCollection>,
+    mut text_q: Query<&mut Text, With<TechUpgradePanelText>>,
+) {
+    if !(upgrades.is_changed() || robot_pets.is_changed()) {
+        return;
+    }
+    for mut text in text_q.iter_mut() {
+        *text = Text::new(format_upgrade_panel(&upgrades, &robot_pets));
+    }
+}
+
 fn format_perk_panel(perks: &PerkTree) -> String {
     let keys = [
         ("A", "heart_vitality"),
@@ -928,6 +997,36 @@ fn format_perk_panel(perks: &PerkTree) -> String {
             ));
         }
     }
+    lines.join("\n")
+}
+
+fn format_upgrade_panel(upgrades: &UpgradeLedger, robot_pets: &RobotPetCollection) -> String {
+    let mut lines = vec![format!(
+        "TECH UPGRADES  Rejuvenation reserve: {:.0} charge",
+        upgrades.rejuvenation_charge
+    )];
+    for def in all_tech_upgrades() {
+        let rank = upgrades.rank(def.id);
+        let cost = def.id.next_rank_cost(rank + 1);
+        let cost_text = if rank >= def.max_rank {
+            "MAX".to_string()
+        } else {
+            let afford = if robot_pets.can_afford(&cost) {
+                "READY"
+            } else {
+                "NEED"
+            };
+            format!("{} [{}]", format_part_costs(&cost), afford)
+        };
+        lines.push(format!(
+            "[{}] {} {}/{} - {} | {}",
+            def.key_hint, def.name, rank, def.max_rank, def.description, cost_text
+        ));
+    }
+    lines.push(
+        "Rejuvenation healing spends reserve; buy Matrix ranks to refill and improve efficiency."
+            .to_string(),
+    );
     lines.join("\n")
 }
 

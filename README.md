@@ -10,6 +10,8 @@ Implemented:
 
 - Player-select flow for 1-4 local players, split-screen cameras, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
 - Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, taller Dreamcast-anime sci-fantasy default heroes, in-game body steppers, gameplay-linked body stats, stride-aware animation, and visual foot grounding.
+- Campaign-shared robot pet foundation: rescued/store-built pet records, robot salvage from defeated enemies, named robot-part materials, save/load persistence, and combination recipes for cars, motorcycles, tanks, boats, submarines, space jets, giant mechs, spaceships, and megaships.
+- Chapter-select tech-upgrade foundation: spend robot salvage on beam, missile, Sprite Turret, armor health, rejuvenation, and mech command ranks; upgrades save/load and already affect weapon damage, turret damage, max health, and paid rejuvenation reserve.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
 - Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
@@ -47,6 +49,7 @@ Space aliens invading Earth from another dimension, Dr. Bile, and the four mirro
 - Classic action platforming with tuned acceleration, jump buffering, coyote time, wall slides, chained wall jumps, edge grabs, ledge hanging, and climb-ups.
 - Simple retro RPG-style cartoon characters with idle, walk, jump, and hanging poses.
 - RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, perks, and chapter progression.
+- Robot pets are the long-term vehicle/mech spine: rescue pets during the campaign or build them from enemy salvage, then combine them into ground, water, air, space, mech, and megaship forms as production systems come online.
 - Cartoon star beams and energy weapons instead of guns.
 - Open-world level spaces with puzzle gates, moving platforms, rotating elevators, slingshot launch pads, windup laser turrets, hidden city reward rooms, hidden cave systems, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
 - Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto their airship, clear the deck, then defeat them again.
@@ -90,6 +93,17 @@ Perk training is also in chapter select. Leveling up grants one perk point; spen
 | `F` | Pocket Constellation |
 | `G` | Wall-Dancer Evasion |
 | `H` | Lucky Parry |
+
+Tech upgrades are also in chapter select and spend robot salvage:
+
+| Key | Upgrade |
+|---|---|
+| `Z` | Beam Capacitors |
+| `X` | Nova Missile Forge |
+| `C` | Sprite Turret Lattice |
+| `V` | Armor Plating |
+| `B` | Rejuvenation Matrix |
+| `N` | Mech Command Link |
 
 ## Controls
 

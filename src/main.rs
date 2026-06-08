@@ -20,8 +20,10 @@ mod perks;
 mod plugins;
 mod rendering;
 mod resources;
+mod robot_pets;
 mod robots;
 mod state;
+mod upgrades;
 
 use events::EventsPlugin;
 use perks::PerkTree;
@@ -34,7 +36,9 @@ use resources::{
     CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlaySessionTransition,
     PlayerScore, PlayerSelectState, WaveInfo,
 };
+use robot_pets::RobotPetCollection;
 use state::AppState;
+use upgrades::UpgradeLedger;
 
 fn main() {
     install_crash_logger();
@@ -73,6 +77,8 @@ fn main() {
         .init_resource::<PlayerSelectState>()
         .init_resource::<CharacterDesignData>()
         .init_resource::<PerkTree>()
+        .init_resource::<RobotPetCollection>()
+        .init_resource::<UpgradeLedger>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
         // Game plugins

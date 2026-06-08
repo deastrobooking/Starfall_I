@@ -11,6 +11,7 @@ use crate::events::*;
 use crate::perks::PerkTree;
 use crate::rendering::PbrBundle;
 use crate::state::AppState;
+use crate::upgrades::UpgradeLedger;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
 #[derive(Component)]
@@ -162,6 +163,7 @@ fn weapon_fire_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     perks: Res<PerkTree>,
+    upgrades: Res<UpgradeLedger>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -200,7 +202,13 @@ fn weapon_fire_system(
         let right = cam.right().as_vec3();
         let up = cam.up().as_vec3();
 
-        let damage = armor.modified_outgoing_damage(weapon.damage * perk_damage_mult);
+        let tech_damage_mult = if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
+            upgrades.missile_damage_mult()
+        } else {
+            upgrades.beam_damage_mult()
+        };
+        let damage =
+            armor.modified_outgoing_damage(weapon.damage * perk_damage_mult * tech_damage_mult);
         let speed = weapon.speed;
         let spread = weapon.spread;
         let pellets = weapon.pellets;
@@ -328,6 +336,7 @@ fn special_weapon_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     perks: Res<PerkTree>,
+    upgrades: Res<UpgradeLedger>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -366,7 +375,9 @@ fn special_weapon_system(
             // Slot 7 — Homing Star
             0 => {
                 if inv.slot7.can_fire() {
-                    let dmg = inv.slot7.effective_damage() * armor_damage_mult;
+                    let dmg = inv.slot7.effective_damage()
+                        * armor_damage_mult
+                        * upgrades.missile_damage_mult();
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;
                     inv.slot7.ammo = inv.slot7.ammo.saturating_sub(1);
                     commands.spawn((
@@ -405,7 +416,9 @@ fn special_weapon_system(
             // Slot 8 — Tri-Star Burst
             1 => {
                 if inv.slot8.can_fire() {
-                    let dmg = inv.slot8.effective_damage() * armor_damage_mult;
+                    let dmg = inv.slot8.effective_damage()
+                        * armor_damage_mult
+                        * upgrades.beam_damage_mult();
                     inv.slot8.cooldown_timer = inv.slot8.cooldown;
                     inv.slot8.ammo = inv.slot8.ammo.saturating_sub(1);
                     use rand::Rng;
@@ -453,7 +466,9 @@ fn special_weapon_system(
             // Slot 9 — Moon Bubble
             2 => {
                 if inv.slot9.can_fire() {
-                    let dmg = inv.slot9.effective_damage() * armor_damage_mult;
+                    let dmg = inv.slot9.effective_damage()
+                        * armor_damage_mult
+                        * upgrades.missile_damage_mult();
                     inv.slot9.cooldown_timer = inv.slot9.cooldown;
                     inv.slot9.ammo = inv.slot9.ammo.saturating_sub(1);
                     commands.spawn((
@@ -492,7 +507,9 @@ fn special_weapon_system(
             // Slot 0 — Sprite Turret
             3 => {
                 if inv.slot0.can_fire() {
-                    let dmg = inv.slot0.effective_damage() * armor_damage_mult;
+                    let dmg = inv.slot0.effective_damage()
+                        * armor_damage_mult
+                        * upgrades.turret_damage_mult();
                     inv.slot0.cooldown_timer = inv.slot0.cooldown;
                     inv.slot0.ammo = inv.slot0.ammo.saturating_sub(1);
                     use rand::Rng;
@@ -892,6 +909,7 @@ fn beam_sabre_update_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     perks: Res<PerkTree>,
+    upgrades: Res<UpgradeLedger>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -909,7 +927,7 @@ fn beam_sabre_update_system(
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
-    let perk_damage_mult = perks.damage_mult();
+    let perk_damage_mult = perks.damage_mult() * upgrades.beam_damage_mult();
     for (player_transform, mut sabre, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;

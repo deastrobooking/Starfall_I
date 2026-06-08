@@ -26,6 +26,7 @@ use crate::resources::{
     CameraShake, LocalPlayerConfig, PlaySessionTransition, PlayerSelectState, PlayerSlotConfig,
 };
 use crate::state::AppState;
+use crate::upgrades::UpgradeLedger;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct PlayerPlugin;
@@ -304,14 +305,16 @@ fn spawn_players(
                 player_collider,
                 KinematicCharacterController {
                     up: Vec3::Y,
-                    offset: CharacterLength::Absolute(0.02),
+                    offset: CharacterLength::Absolute(player_movement.controller_offset),
                     slide: true,
                     autostep: Some(CharacterAutostep {
-                        max_height: CharacterLength::Absolute(0.5),
-                        min_width: CharacterLength::Absolute(0.2),
+                        max_height: CharacterLength::Absolute(player_movement.autostep_height),
+                        min_width: CharacterLength::Absolute(player_movement.autostep_min_width),
                         include_dynamic_bodies: false,
                     }),
-                    snap_to_ground: Some(CharacterLength::Absolute(0.2)),
+                    snap_to_ground: Some(CharacterLength::Absolute(
+                        player_movement.ground_snap_distance,
+                    )),
                     ..default()
                 },
                 KinematicCharacterControllerOutput::default(),
@@ -653,9 +656,11 @@ fn player_movement(
             .with_y(0.0)
             .normalize_or_zero();
         let right = transform.right().as_vec3().with_y(0.0).normalize_or_zero();
-        let input = (fwd * pi.move_axis.y + right * pi.move_axis.x).normalize_or_zero();
+        let (input, input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
 
-        let sprinting = pi.sprint && stats.stamina > 0.0 && input.length_squared() > 0.0;
+        let sprinting = pi.sprint
+            && stats.stamina > 0.0
+            && input_strength >= movement.analog_sprint_threshold;
         let speed = if sprinting {
             movement.sprint_speed
         } else {
@@ -809,7 +814,7 @@ fn player_movement(
             }
         }
 
-        let target_h_vel = input * speed;
+        let target_h_vel = input * speed * input_strength;
         let mut h_vel = if movement.is_grounded {
             let accel = if input.length_squared() > 0.01 {
                 movement.ground_accel
@@ -820,7 +825,10 @@ fn player_movement(
                 approach_vec3(movement.ground_velocity, target_h_vel, accel * dt);
             movement.ground_velocity
         } else {
-            let air_accel = if edge_grab.cooldown_timer > 0.0 {
+            let has_air_input = input_strength > 0.05;
+            let air_accel = if !has_air_input {
+                movement.air_decel
+            } else if edge_grab.cooldown_timer > 0.0 {
                 movement.air_accel * 0.35
             } else if movement.wall_jump_lock_timer > 0.0 {
                 movement.air_accel * 0.22
@@ -840,7 +848,7 @@ fn player_movement(
         controller.translation = Some(translation);
 
         if movement.is_grounded && !dodge.is_dodging {
-            if input.length_squared() > 0.01 {
+            if input_strength > 0.05 {
                 if sprinting {
                     state.transition(PlayerState::Sprinting);
                 } else {
@@ -936,7 +944,7 @@ fn player_dodge_update(
                 .normalize_or_zero();
             let right = transform.right().as_vec3().with_y(0.0).normalize_or_zero();
             // Dodge in the direction the player is moving, or backward if idle.
-            let input = (fwd * pi.move_axis.y + right * pi.move_axis.x).normalize_or_zero();
+            let (input, _) = movement_input_from_axes(fwd, right, pi.move_axis);
             dodge.dodge_direction = if input.length_squared() > 0.01 {
                 input
             } else {
@@ -950,6 +958,11 @@ fn player_dodge_update(
             dodge_ev.write(PlayerDodgeEvent);
         }
     }
+}
+
+fn movement_input_from_axes(forward: Vec3, right: Vec3, axes: Vec2) -> (Vec3, f32) {
+    let raw = forward * axes.y + right * axes.x;
+    (raw.normalize_or_zero(), raw.length().clamp(0.0, 1.0))
 }
 
 // ── Parry Update ──────────────────────────────────────────────────────────────
@@ -1010,16 +1023,22 @@ fn player_stamina_regen(
 fn player_perk_health_regen(
     time: Res<Time>,
     perks: Res<PerkTree>,
+    mut upgrades: ResMut<UpgradeLedger>,
     mut q: Query<(&mut Health, &PlayerStateMachine), With<Player>>,
 ) {
-    let regen = perks.regen_per_sec();
+    let regen = perks.regen_per_sec() + upgrades.rejuvenation_regen_per_sec();
     if regen <= 0.0 {
         return;
     }
     let dt = time.delta_secs();
     for (mut health, state) in q.iter_mut() {
         if state.current != PlayerState::Dead && health.is_alive() && health.current < health.max {
-            health.current = (health.current + regen * dt).min(health.max);
+            let missing = health.max - health.current;
+            let requested = (regen * dt).min(missing);
+            let healed = upgrades.consume_rejuvenation_for_heal(requested);
+            if healed > 0.0 {
+                health.current = (health.current + healed).min(health.max);
+            }
         }
     }
 }
@@ -1132,4 +1151,27 @@ pub fn damage_player(
         amount: result.damage_amount,
         remaining: health.current,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn movement_input_preserves_analog_strength() {
+        let (direction, strength) =
+            movement_input_from_axes(Vec3::NEG_Z, Vec3::X, Vec2::new(0.3, 0.4));
+
+        assert!((strength - 0.5).abs() < 0.001);
+        assert!((direction.length() - 1.0).abs() < 0.001);
+        assert!(direction.x > 0.0);
+        assert!(direction.z < 0.0);
+    }
+
+    #[test]
+    fn movement_input_clamps_full_diagonal_strength() {
+        let (_, strength) = movement_input_from_axes(Vec3::NEG_Z, Vec3::X, Vec2::new(1.0, 1.0));
+
+        assert_eq!(strength, 1.0);
+    }
 }

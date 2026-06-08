@@ -89,6 +89,42 @@ The full procedural mesh/rig/timeline editor is still future work; the saved sch
 
 ---
 
+## Robot Pets And Combined Forms
+
+**File:** `src/robot_pets.rs` | **Runtime hooks:** `src/plugins/enemy_plugin.rs`, `src/plugins/save_plugin.rs`
+
+Robot pets are a campaign-shared collection that can eventually bridge companions, store crafting, vehicle modes, giant mechs, spaceships, and megaships. The current foundation stores:
+
+- `RobotPetBlueprint`: rescued or store-built robot pets with role, level, affection, stat bias, and supported forms.
+- `RobotPartKind`: stable robot salvage/material kinds with inventory item IDs for future stores and crafting UI.
+- `RobotPetCollection`: saved party-wide pets, parts, and the active combined form.
+
+Defeated enemies now grant robot salvage directly to the shared collection. Generic bad guys map to starter parts, while high-value kills grant larger quantities:
+
+| Enemy type | Robot salvage |
+|---|---|
+| Drone | Circuit Board |
+| Soldier / unknown | Scrap Frame |
+| Heavy | Tread Unit |
+| SpikeAlien | Servo Motor |
+| Hybrid | Energy Core |
+
+The collection supports store-built pets through `store_pet_recipe()` and campaign rescues through `rescue_pet()`. Combined-form recipes are milestone gates, not final balance:
+
+| Form | Pet count | Role |
+|---|---:|---|
+| Car / Motorcycle / Boat | 1 | Early travel forms |
+| Tank / Submarine / Space Jet | 2 | Specialized terrain and combat forms |
+| Giant Mech | 4 | Party-scale combat build |
+| Space Ship | 6 | Late campaign travel/combat shell |
+| Megaship | 10 | Endgame fleet-scale build |
+
+Save/load persists the whole `robot_pets` section with `serde(default)`, so older saves without robot data continue to load as an empty collection.
+
+Future runtime work should connect this foundation to authored robot rescue beacons, a store/garage UI, vehicle spawning, mech combat stats, and split-screen passenger/ownership rules.
+
+---
+
 ## Damage Pipeline
 
 **File:** `src/damage.rs`, `src/plugins/player_plugin.rs`
@@ -334,7 +370,7 @@ Three branches, 6 perks total. One point per level-up via `PerkTree.award(1)`. S
 | Branch | Perk | Effect | Max Rank |
 |---|---|---|---|
 | Heart | Family Vitality | +15 max HP/rank | 5 |
-| Heart | Second Wind | +0.5 HP/sec out of combat | 4 |
+| Heart | Second Wind | +0.5 HP/sec/rank while rejuvenation reserve is available | 4 |
 | Star | Star Focus | +5% beam damage/rank | 5 |
 | Star | Pocket Constellation | +15% max charges/rank | 3 |
 | Acrobat | Wall-Dancer Evasion | -10% dodge stamina cost | 3 |
@@ -343,11 +379,32 @@ Three branches, 6 perks total. One point per level-up via `PerkTree.award(1)`. S
 Current wiring:
 
 - `Family Vitality` increases max HP through the armor/perk max-health sync.
-- `Second Wind` passively restores HP while alive; a true out-of-combat timer is still future work.
+- `Second Wind` contributes regen rate, but actual healing now spends the saved tech-upgrade rejuvenation reserve.
 - `Star Focus` increases primary beam, special tool, and Star Sabre damage.
 - `Pocket Constellation` increases primary ammo and special tool charge caps.
 - `Wall-Dancer Evasion` lowers dodge stamina cost.
 - `Lucky Parry` extends the parry window.
+
+---
+
+## Tech Upgrades
+
+**File:** `src/upgrades.rs` | **Resource:** `UpgradeLedger`
+
+Tech upgrades are the campaign-shared production spine for weapon, missile, turret, health, rejuvenation, and future mech/vehicle/ship upgrade paths. Spend robot salvage in chapter select with `Z/X/C/V/B/N`. The current UI is intentionally compact, but it already displays rank, next-rank cost, affordability, and rejuvenation reserve.
+
+| Key | Upgrade | Current runtime effect |
+|---|---|---|
+| `Z` | Beam Capacitors | +6% primary beam and Star Sabre damage/rank |
+| `X` | Nova Missile Forge | +10% explosive nova/missile damage/rank |
+| `C` | Sprite Turret Lattice | +12% Sprite Turret damage/rank |
+| `V` | Armor Plating | +12 max HP/rank through armor/perk health sync |
+| `B` | Rejuvenation Matrix | Adds paid rejuvenation reserve and improves healing efficiency |
+| `N` | Mech Command Link | Saved rank gate for later robot vehicle/mech/ship upgrades |
+
+Rejuvenation is deliberately not free passive healing. `Second Wind` and `Rejuvenation Matrix` set the healing rate, while `UpgradeLedger.rejuvenation_charge` is consumed for each HP restored. Buying Rejuvenation Matrix ranks spends robot salvage, refills the reserve, and lowers charge-per-HP cost.
+
+Future work should split the compact chapter-select panel into a full garage/upgrade screen with tabs, previews, material sources, weapon/turret stat diffs, and controller navigation.
 
 ---
 
@@ -361,7 +418,7 @@ Save file: `starfall_i_save.json` (written next to the binary).
 - **Manual save**: F5 key.
 - **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
 
-Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, and player-slot character blueprints.
+Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, robot pets, tech upgrade ranks, rejuvenation reserve, and player-slot character blueprints.
 
 Saved per-player fields live in `players[]` records keyed by `player_index`: level, experience, credits, health, stamina, and armor values. Older top-level stat fields are still accepted for legacy save migration, but new saves use the per-player records as the authoritative source.
 

@@ -15,6 +15,7 @@ use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
 use crate::rendering::PbrBundle;
 use crate::resources::{PlaySessionTransition, WaveInfo};
+use crate::robot_pets::{salvage_for_enemy, RobotPetCollection};
 use crate::state::AppState;
 
 #[derive(Resource, Clone)]
@@ -51,6 +52,7 @@ impl Plugin for EnemyPlugin {
                     enemy_attack_system,
                     enemy_dead_cleanup,
                     enemy_killed_reward,
+                    robot_salvage_reward_system,
                     enemy_loot_drop_system,
                     loot_bob_system,
                     loot_pickup_system,
@@ -1038,6 +1040,25 @@ fn enemy_killed_reward(
                 .entity(entity)
                 .insert(DeadEnemy { despawn_timer: 2.0 });
         }
+    }
+}
+
+fn robot_salvage_reward_system(
+    mut killed_ev: MessageReader<EnemyKilledEvent>,
+    mut robots: ResMut<RobotPetCollection>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for ev in killed_ev.read() {
+        let reward = salvage_for_enemy(&ev.enemy_type, ev.credits, ev.experience);
+        robots.grant_salvage(reward);
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "Robot salvage: {}x {}",
+                reward.quantity,
+                reward.kind.label()
+            ),
+            duration: 1.4,
+        });
     }
 }
 
