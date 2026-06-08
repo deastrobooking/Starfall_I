@@ -14,7 +14,8 @@ pub struct ChassisEditorPlugin;
 
 impl Plugin for ChassisEditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::ChassisEditor), setup_editor)
+        app.init_resource::<PlayerChassis>()
+            .add_systems(OnEnter(AppState::ChassisEditor), setup_editor)
             .add_systems(OnExit(AppState::ChassisEditor), teardown_editor)
             .add_systems(
                 Update,

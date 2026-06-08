@@ -131,8 +131,16 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                game_over_input
+                (
+                    level_up_event_system,
+                    chapter_completed_ui_system,
+                    boss_defeated_ui_system,
+                )
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+            )
+            .add_systems(
+                Update,
+                game_over_input.run_if(in_state(AppState::GameOver)),
             )
             .add_systems(
                 Update,
@@ -3171,7 +3179,7 @@ fn setup_game_over(mut commands: Commands) {
                 TextColor(Color::srgb(1.0, 0.2, 0.1)),
             ));
             p.spawn((
-                Text::new("Press R to restart"),
+                Text::new("Press R / [A] — Return to Title"),
                 TextFont {
                     font_size: 24.0,
                     ..default()
@@ -3181,14 +3189,61 @@ fn setup_game_over(mut commands: Commands) {
         });
 }
 
+// ── Level-up / chapter event feedback ────────────────────────────────────────
+
+fn level_up_event_system(
+    mut ev: MessageReader<PlayerLevelUpEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for e in ev.read() {
+        msg_ev.write(UiMessageEvent {
+            text: format!("LEVEL UP! Now level {}", e.level),
+            duration: 3.0,
+        });
+    }
+}
+
+fn chapter_completed_ui_system(
+    mut ev: MessageReader<ChapterCompletedEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for e in ev.read() {
+        msg_ev.write(UiMessageEvent {
+            text: format!("Chapter {:02} complete!", e.chapter),
+            duration: 4.0,
+        });
+    }
+}
+
+fn boss_defeated_ui_system(
+    mut ev: MessageReader<BossDefeatedEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for e in ev.read() {
+        msg_ev.write(UiMessageEvent {
+            text: format!("{} defeated!", e.name),
+            duration: 4.0,
+        });
+    }
+}
+
 fn game_over_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
     mut next_state: ResMut<NextState<AppState>>,
     go_root: Query<Entity, With<GameOverRoot>>,
     hud_root: Query<Entity, With<HudRoot>>,
     mut commands: Commands,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyR) {
+    let confirm = keyboard.just_pressed(KeyCode::KeyR)
+        || gamepads.iter().any(|gp| {
+            gp.just_pressed(GamepadButton::South) || gp.just_pressed(GamepadButton::Start)
+        })
+        || native.just_pressed(NativeButton::South)
+        || native.just_pressed(NativeButton::Start);
+
+    if confirm {
         for e in go_root.iter() {
             commands.entity(e).despawn();
         }
