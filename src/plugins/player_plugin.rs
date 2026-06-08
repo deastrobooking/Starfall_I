@@ -65,7 +65,7 @@ impl Default for SharedEncounterCamera {
 }
 
 fn third_person_camera_offset() -> Vec3 {
-    Vec3::new(0.0, 2.2, 6.0)
+    Vec3::new(0.0, 4.5, 11.0)
 }
 
 impl Plugin for PlayerPlugin {
@@ -169,6 +169,7 @@ fn player_viewport(index: u8, active: u8, win_w: u32, win_h: u32) -> Option<View
 
 fn authored_player_defaults(
     blueprint: Option<&CharacterBlueprint>,
+    visual_scale: f32,
 ) -> (PlayerStats, PlayerMovement, DodgeState, Collider) {
     let mut stats = PlayerStats::default();
     let mut movement = PlayerMovement::default();
@@ -200,11 +201,20 @@ fn authored_player_defaults(
             0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20);
     }
 
+    // Scale physical interaction parameters to match the visual character size.
+    movement.autostep_height *= visual_scale;
+    movement.autostep_min_width *= visual_scale;
+    movement.ground_snap_distance *= visual_scale;
+    movement.controller_offset *= visual_scale;
+
     (
         stats,
         movement,
         dodge,
-        Collider::capsule_y(half_height.clamp(0.44, 0.86), radius.clamp(0.26, 0.50)),
+        Collider::capsule_y(
+            (half_height * visual_scale).clamp(0.44 * visual_scale, 0.86 * visual_scale),
+            (radius * visual_scale).clamp(0.26 * visual_scale, 0.50 * visual_scale),
+        ),
     )
 }
 
@@ -402,8 +412,9 @@ fn spawn_players(
             .unwrap_or_else(|| upgraded_player_blueprint(character_name, slot));
         let hero_profile = hero_power_profile(character_name);
         let hero_powers = hero_profile.amplified_powers(&robot_pets);
+        let character_visual_scale = hero_config(character_name).scale;
         let (mut player_stats, mut player_movement, mut dodge_state, player_collider) =
-            authored_player_defaults(Some(&runtime_blueprint));
+            authored_player_defaults(Some(&runtime_blueprint), character_visual_scale);
         let mut jetpack = JetpackState::default();
         let mut weapon_inventory = WeaponInventory::default();
         let mut special_inventory = SpecialWeaponInventory::default();

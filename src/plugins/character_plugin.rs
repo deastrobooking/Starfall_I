@@ -78,9 +78,9 @@ fn cartoon_animation_system(
             } else {
                 CartoonPose::Jump
             }
-        } else if animator.speed > 4.5 {
+        } else if animator.speed > 28.0 {
             CartoonPose::Run
-        } else if animator.speed > 0.06 {
+        } else if animator.speed > 2.0 {
             CartoonPose::Walk
         } else {
             CartoonPose::Idle

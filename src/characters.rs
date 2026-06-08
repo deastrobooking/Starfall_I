@@ -86,7 +86,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.09, 0.28, 0.80),
             accent: Color::srgb(0.95, 0.78, 0.12),
             hair: Color::srgb(0.06, 0.04, 0.02),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 1.0,
             has_hat: false,
@@ -113,7 +113,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.16, 0.48, 0.82),
             accent: Color::srgb(0.10, 0.92, 0.98),
             hair: Color::srgb(0.06, 0.04, 0.02),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.92,
             has_hat: false,
@@ -140,7 +140,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.08, 0.52, 0.20),
             accent: Color::srgb(0.78, 0.86, 0.92),
             hair: Color::srgb(0.06, 0.04, 0.02),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.94,
             has_hat: false,
@@ -167,7 +167,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.75, 0.12, 0.08),
             accent: Color::srgb(0.92, 0.90, 0.84),
             hair: Color::srgb(0.06, 0.04, 0.02),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 1.18,
             has_hat: false,
@@ -194,7 +194,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.48, 0.12, 0.72),
             accent: Color::srgb(1.0, 0.68, 0.95),
             hair: Color::srgb(0.12, 0.06, 0.04),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.98,
             has_hat: false,
@@ -221,7 +221,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.10, 0.18, 0.82),
             accent: Color::srgb(0.10, 1.0, 0.88),
             hair: Color::srgb(0.08, 0.04, 0.12),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.94,
             has_hat: false,
@@ -248,7 +248,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.16, 0.58, 0.42),
             accent: Color::srgb(0.78, 1.0, 0.62),
             hair: Color::srgb(0.10, 0.07, 0.03),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 1.02,
             has_hat: false,
@@ -275,7 +275,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.68, 0.22, 0.10),
             accent: Color::srgb(1.0, 0.92, 0.30),
             hair: Color::srgb(0.16, 0.08, 0.03),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.96,
             has_hat: false,
@@ -302,7 +302,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             outfit: Color::srgb(0.15, 0.45, 0.95),
             accent: Color::srgb(1.0, 0.86, 0.2),
             hair: Color::srgb(0.06, 0.04, 0.02),
-            scale: 1.0,
+            scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 1.0,
             has_hat: false,
@@ -1405,14 +1405,14 @@ fn spawn_part(
 }
 
 fn visual_ground_lift(body: &BodyRecipe, scale: f32) -> f32 {
-    let half_height = 0.6 * (body.height * 0.72 + body.leg_length * 0.28);
-    let radius =
-        0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20);
-    let collider_bottom = -(half_height.clamp(0.44, 0.86) + radius.clamp(0.26, 0.50));
+    // Mirror the scaled collider dimensions used in authored_player_defaults.
+    let half_height = 0.6 * (body.height * 0.72 + body.leg_length * 0.28) * scale;
+    let radius = 0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20) * scale;
+    let collider_bottom = -(half_height.clamp(0.44 * scale, 0.86 * scale) + radius.clamp(0.26 * scale, 0.50 * scale));
     let foot_center_y = -1.25 * scale - (body.leg_length - 1.0) * 0.31 * scale;
     let foot_bottom = foot_center_y - 0.06 * scale;
 
-    (collider_bottom + 0.07 - foot_bottom).clamp(0.0, 0.50)
+    (collider_bottom + 0.07 * scale - foot_bottom).clamp(0.0, 3.0)
 }
 
 /// Stylized PBR: satin low-poly surfaces with a faint self-emissive so
