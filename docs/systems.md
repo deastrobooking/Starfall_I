@@ -65,7 +65,7 @@ Stamina regens at 10/sec while not dodging.
 
 **Files:** `src/character_blueprint.rs`, `src/characters.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
 
-The character designer now stores confirmed edits as `CharacterBlueprint` data rather than only transient UI overrides. A blueprint includes:
+The character designer now stores confirmed edits as `CharacterBlueprint` data rather than only transient UI overrides. The current runtime style target is a taller Dreamcast-anime sci-fantasy hero silhouette: smoother low-poly capsule limbs, expressive eyes/hair, layered armor plates, glow accents, and less tiny voxel/block mass. A blueprint includes:
 
 - `BodyRecipe` proportions: height, shoulders, chest, arms, legs, hands, feet, head, posture/mass fields.
 - Procedural part, material, socket, rig, animation, movement, equipment, and editor recipe sections.

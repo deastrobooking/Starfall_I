@@ -9,7 +9,7 @@ The current build keeps the existing open 3D world, chapter director, RPG stats,
 Implemented:
 
 - Player-select flow for 1-4 local players, split-screen cameras, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
-- Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, upgraded default hero blueprints, in-game body steppers, gameplay-linked body stats, stride-aware animation, and visual foot grounding.
+- Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, taller Dreamcast-anime sci-fantasy default heroes, in-game body steppers, gameplay-linked body stats, stride-aware animation, and visual foot grounding.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
 - Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.

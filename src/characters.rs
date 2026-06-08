@@ -443,6 +443,9 @@ pub fn attach_cartoon_character(
     };
     let brow_color = darken(config.hair, 0.7);
     let brow = char_mat(materials, brow_color);
+    let suit_shadow = char_mat(materials, darken(config.outfit, 0.58));
+    let armor = char_mat(materials, darken(config.accent, 0.78));
+    let accent_glow = emissive_mat(materials, config.accent, 2.4);
 
     let s = config.scale;
     let height = body.height;
@@ -455,6 +458,11 @@ pub fn attach_cartoon_character(
     let foot_scale = body.foot_size;
     let posture = body.spine_posture;
     let head_y = 0.58 * s * height + (body.neck_length - 1.0) * 0.10 * s;
+    let eye_y = head_y + 0.045 * s;
+    let brow_y = head_y + 0.135 * s;
+    let nose_y = head_y - 0.035 * s;
+    let mouth_y = head_y - 0.115 * s;
+    let face_z = -0.34 * s;
 
     // ── Shadow ────────────────────────────────────────────────────────────────
     spawn_part(
@@ -467,21 +475,62 @@ pub fn attach_cartoon_character(
         Transform::from_xyz(0.0, -1.30 * s * height.max(leg_length), 0.0),
     );
 
-    // ── Body ──────────────────────────────────────────────────────────────────
+    // ── Body: Dreamcast-anime low-poly suit core with layered armor ───────────
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Body,
-        Mesh::from(Cuboid::new(
-            0.72 * s * bw,
-            0.86 * s * height,
-            0.42 * s * body.chest_size,
-        )),
+        Mesh::from(Capsule3d::new(0.30 * s, 0.72 * s * height)),
         outfit.clone(),
         Transform::from_xyz(0.0, -0.12 * s, 0.0)
+            .with_scale(Vec3::new(1.12 * bw, 1.0, 0.72 * body.chest_size))
             .with_rotation(Quat::from_rotation_x(-posture * 0.18)),
     );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Cuboid::new(0.58 * s * bw, 0.36 * s, 0.055 * s)),
+        armor.clone(),
+        Transform::from_xyz(0.0, 0.06 * s, -0.265 * s)
+            .with_rotation(Quat::from_rotation_x(-0.08 - posture * 0.12)),
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Cuboid::new(0.40 * s * bw, 0.25 * s, 0.045 * s)),
+        suit_shadow.clone(),
+        Transform::from_xyz(0.0, -0.29 * s, -0.245 * s)
+            .with_rotation(Quat::from_rotation_x(-0.02 - posture * 0.10)),
+    );
+    for (x, rot_z) in [(-0.23_f32, -0.18_f32), (0.23_f32, 0.18_f32)] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Cuboid::new(0.045 * s, 0.44 * s, 0.035 * s)),
+            accent_glow.clone(),
+            Transform::from_xyz(x * s * bw, -0.10 * s, -0.292 * s)
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+        );
+    }
+    for (x, rot_z) in [(-0.26_f32, -0.25_f32), (0.26_f32, 0.25_f32)] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Cuboid::new(0.22 * s, 0.12 * s, 0.30 * s)),
+            armor.clone(),
+            Transform::from_xyz(x * s * hip_width, -0.48 * s * height, -0.02 * s)
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+        );
+    }
 
     // ── Belt (waist strap + centre buckle) ────────────────────────────────────
     if config.has_belt {
@@ -491,7 +540,7 @@ pub fn attach_cartoon_character(
             root,
             CartoonPartKind::Belt,
             Mesh::from(Cuboid::new(0.80 * s * hip_width, 0.11 * s, 0.46 * s)),
-            accent.clone(),
+            suit_shadow.clone(),
             Transform::from_xyz(0.0, -0.38 * s * height, 0.0),
         );
         spawn_part(
@@ -500,70 +549,86 @@ pub fn attach_cartoon_character(
             root,
             CartoonPartKind::Belt,
             Mesh::from(Cuboid::new(0.19 * s, 0.17 * s, 0.06 * s)),
-            emissive_mat(materials, config.accent, 1.6),
+            accent_glow.clone(),
             Transform::from_xyz(0.0, -0.38 * s * height, -0.24 * s),
         );
     }
 
     // ── Head ──────────────────────────────────────────────────────────────────
-    // Slightly enlarged for bolder cartoon silhouette.
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Head,
-        Mesh::from(Sphere::new(0.38 * s * head_scale)),
+        Mesh::from(Sphere::new(0.34 * s * head_scale)),
         skin.clone(),
-        Transform::from_xyz(0.0, head_y, 0.0),
+        Transform::from_xyz(0.0, head_y, -0.005 * s).with_scale(Vec3::new(0.92, 1.08, 0.88)),
     );
 
     // ── Hair ──────────────────────────────────────────────────────────────────
-    // Cap volume
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Hair,
-        Mesh::from(Sphere::new(0.40 * s * head_scale)),
+        Mesh::from(Sphere::new(0.36 * s * head_scale)),
         hair.clone(),
-        Transform::from_xyz(0.0, head_y + 0.18 * s * head_scale, -0.02 * s)
-            .with_scale(Vec3::new(1.02, 0.52, 0.94)),
+        Transform::from_xyz(0.0, head_y + 0.15 * s * head_scale, -0.015 * s)
+            .with_scale(Vec3::new(1.04, 0.48, 0.88)),
     );
-    // Back curtain
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Hair,
-        Mesh::from(Cuboid::new(0.48 * s, 0.56 * s, 0.18 * s)),
+        Mesh::from(Cuboid::new(0.36 * s, 0.50 * s, 0.13 * s)),
         hair.clone(),
-        Transform::from_xyz(0.0, 0.42 * s, 0.13 * s).with_rotation(Quat::from_rotation_x(0.18)),
+        Transform::from_xyz(0.0, head_y - 0.22 * s, 0.14 * s)
+            .with_rotation(Quat::from_rotation_x(0.18)),
     );
-    // Side ringlets
     for (x, rot_z) in [(-0.28_f32, 0.16_f32), (0.28_f32, -0.16_f32)] {
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Hair,
-            Mesh::from(Cylinder::new(0.088 * s, 0.44 * s)),
+            Mesh::from(Cylinder::new(0.068 * s, 0.36 * s)),
             hair.clone(),
-            Transform::from_xyz(x * s, 0.42 * s, 0.08 * s)
+            Transform::from_xyz(x * s, head_y - 0.17 * s, 0.06 * s)
                 .with_rotation(Quat::from_rotation_z(rot_z)),
         );
     }
-    // Nape curl
+    for (x, rot_z, rot_x, spike_s) in [
+        (-0.16_f32, 0.35_f32, -0.85_f32, 0.95_f32),
+        (0.0, 0.0, -1.05, 1.10),
+        (0.16, -0.35, -0.85, 0.95),
+    ] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Hair,
+            Mesh::from(Cone {
+                radius: 0.075 * s * spike_s,
+                height: 0.34 * s * spike_s,
+            }),
+            hair.clone(),
+            Transform::from_xyz(x * s, head_y + 0.18 * s, -0.18 * s)
+                .with_rotation(Quat::from_rotation_x(rot_x) * Quat::from_rotation_z(rot_z)),
+        );
+    }
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Hair,
-        Mesh::from(Cylinder::new(0.062 * s, 0.26 * s)),
+        Mesh::from(Cylinder::new(0.052 * s, 0.24 * s)),
         hair.clone(),
-        Transform::from_xyz(0.0, 0.79 * s, -0.28 * s).with_rotation(Quat::from_rotation_x(1.35)),
+        Transform::from_xyz(0.0, head_y + 0.20 * s, -0.26 * s)
+            .with_rotation(Quat::from_rotation_x(1.35)),
     );
 
-    // ── Eyes (sclera + iris; bigger for cartoon readability) ──────────────────
+    // ── Eyes (large anime planes with iris highlights) ────────────────────────
     for (kind, eye_x) in [
         (CartoonPartKind::LeftEye, -0.13_f32),
         (CartoonPartKind::RightEye, 0.13_f32),
@@ -573,18 +638,29 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             kind,
-            Mesh::from(Sphere::new(0.070 * s)),
+            Mesh::from(Sphere::new(0.074 * s)),
             char_mat(materials, Color::srgb(0.95, 0.95, 0.97)),
-            Transform::from_xyz(eye_x * s, 0.62 * s, -0.33 * s),
+            Transform::from_xyz(eye_x * s, eye_y, face_z).with_scale(Vec3::new(0.82, 1.22, 0.30)),
         );
         spawn_part(
             commands,
             meshes,
             root,
             kind,
-            Mesh::from(Sphere::new(0.050 * s)),
+            Mesh::from(Sphere::new(0.047 * s)),
             eye_mat.clone(),
-            Transform::from_xyz(eye_x * s, 0.62 * s, -0.37 * s),
+            Transform::from_xyz(eye_x * s, eye_y - 0.003 * s, face_z - 0.035 * s)
+                .with_scale(Vec3::new(0.76, 1.20, 0.25)),
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Sphere::new(0.014 * s)),
+            emissive_mat(materials, Color::srgb(1.0, 1.0, 1.0), 1.8),
+            Transform::from_xyz(eye_x * s - 0.020 * s, eye_y + 0.028 * s, face_z - 0.055 * s)
+                .with_scale(Vec3::new(0.80, 1.0, 0.35)),
         );
     }
 
@@ -600,7 +676,7 @@ pub fn attach_cartoon_character(
             kind,
             Mesh::from(Cuboid::new(0.125 * s, 0.036 * s, 0.055 * s)),
             brow.clone(),
-            Transform::from_xyz(brow_x * s, 0.710 * s, -0.33 * s)
+            Transform::from_xyz(brow_x * s, brow_y, face_z + 0.010 * s)
                 .with_rotation(Quat::from_rotation_z(tilt_z)),
         );
     }
@@ -611,9 +687,10 @@ pub fn attach_cartoon_character(
         meshes,
         root,
         CartoonPartKind::Nose,
-        Mesh::from(Sphere::new(0.068 * s)),
+        Mesh::from(Sphere::new(0.050 * s)),
         skin.clone(),
-        Transform::from_xyz(0.0, 0.565 * s, -0.37 * s).with_scale(Vec3::new(0.55, 0.55, 1.0)),
+        Transform::from_xyz(0.0, nose_y, face_z - 0.038 * s)
+            .with_scale(Vec3::new(0.55, 0.78, 0.90)),
     );
 
     // ── Mouth (neutral set; line + lower-lip bump) ────────────────────────────
@@ -625,7 +702,7 @@ pub fn attach_cartoon_character(
             CartoonPartKind::Mouth,
             Mesh::from(Cuboid::new(0.135 * s, 0.030 * s, 0.055 * s)),
             char_mat(materials, Color::srgb(0.17, 0.08, 0.08)),
-            Transform::from_xyz(0.0, 0.500 * s, -0.37 * s),
+            Transform::from_xyz(0.0, mouth_y, face_z - 0.040 * s),
         );
         spawn_part(
             commands,
@@ -634,7 +711,8 @@ pub fn attach_cartoon_character(
             CartoonPartKind::Mouth,
             Mesh::from(Sphere::new(0.033 * s)),
             skin.clone(),
-            Transform::from_xyz(0.0, 0.475 * s, -0.39 * s).with_scale(Vec3::new(2.6, 0.85, 1.0)),
+            Transform::from_xyz(0.0, mouth_y - 0.026 * s, face_z - 0.050 * s)
+                .with_scale(Vec3::new(2.6, 0.85, 1.0)),
         );
     }
 
@@ -645,9 +723,10 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             CartoonPartKind::Hood,
-            Mesh::from(Sphere::new(0.46 * s)),
+            Mesh::from(Sphere::new(0.40 * s)),
             outfit.clone(),
-            Transform::from_xyz(0.0, 0.79 * s, 0.01 * s).with_scale(Vec3::new(1.08, 0.90, 1.04)),
+            Transform::from_xyz(0.0, head_y + 0.15 * s, 0.01 * s)
+                .with_scale(Vec3::new(1.02, 0.82, 0.96)),
         );
         // Face-opening accent trim
         spawn_part(
@@ -655,9 +734,9 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             CartoonPartKind::Hood,
-            Mesh::from(Cuboid::new(0.54 * s, 0.28 * s, 0.18 * s)),
-            accent.clone(),
-            Transform::from_xyz(0.0, 0.67 * s, -0.24 * s)
+            Mesh::from(Cuboid::new(0.46 * s, 0.22 * s, 0.12 * s)),
+            armor.clone(),
+            Transform::from_xyz(0.0, head_y + 0.03 * s, -0.245 * s)
                 .with_rotation(Quat::from_rotation_x(-0.20)),
         );
         // Lower drape onto shoulders
@@ -666,9 +745,10 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             CartoonPartKind::Hood,
-            Mesh::from(Cuboid::new(0.44 * s, 0.24 * s, 0.20 * s)),
+            Mesh::from(Cuboid::new(0.42 * s, 0.20 * s, 0.16 * s)),
             outfit.clone(),
-            Transform::from_xyz(0.0, 0.32 * s, 0.19 * s).with_rotation(Quat::from_rotation_x(0.30)),
+            Transform::from_xyz(0.0, head_y - 0.30 * s, 0.18 * s)
+                .with_rotation(Quat::from_rotation_x(0.30)),
         );
     }
 
@@ -697,8 +777,8 @@ pub fn attach_cartoon_character(
         );
     }
 
-    // ── Arms + Hands (chunkier limbs, bigger cartoon hands) ──────────────────
-    let arm_x = (0.36 + 0.095) * s * bw;
+    // ── Arms + Hands: capsule limbs with armored gloves ──────────────────────
+    let arm_x = (0.34 + 0.075) * s * bw;
     for (kind, x) in [
         (CartoonPartKind::LeftArm, -arm_x),
         (CartoonPartKind::RightArm, arm_x),
@@ -708,13 +788,33 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             kind,
-            Mesh::from(Cuboid::new(0.19 * s, 0.62 * s * arm_length, 0.19 * s)),
+            Mesh::from(Capsule3d::new(0.075 * s, 0.36 * s * arm_length)),
             outfit.clone(),
-            Transform::from_xyz(x, -0.12 * s - (arm_length - 1.0) * 0.10 * s, 0.0),
+            Transform::from_xyz(x, 0.02 * s - (arm_length - 1.0) * 0.07 * s, 0.0)
+                .with_scale(Vec3::new(0.92, 1.0, 0.82)),
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Capsule3d::new(0.085 * s, 0.34 * s * arm_length)),
+            armor.clone(),
+            Transform::from_xyz(x, -0.31 * s - (arm_length - 1.0) * 0.17 * s, -0.005 * s)
+                .with_scale(Vec3::new(0.88, 1.0, 0.80)),
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Cuboid::new(0.19 * s, 0.055 * s, 0.18 * s)),
+            accent_glow.clone(),
+            Transform::from_xyz(x, -0.12 * s - (arm_length - 1.0) * 0.10 * s, -0.080 * s),
         );
     }
     let hand_mat = if config.has_gloves {
-        accent.clone()
+        armor.clone()
     } else {
         skin.clone()
     };
@@ -727,17 +827,17 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             kind,
-            Mesh::from(Sphere::new(0.135 * s * hand_scale)),
+            Mesh::from(Sphere::new(0.115 * s * hand_scale)),
             hand_mat.clone(),
             Transform::from_xyz(x, -0.50 * s - (arm_length - 1.0) * 0.28 * s, 0.02 * s)
-                .with_scale(Vec3::new(1.05, 1.10, 0.92)),
+                .with_scale(Vec3::new(0.90, 1.16, 0.82)),
         );
     }
 
-    // ── Legs + Boots (chunkier, more exaggerated feet) ───────────────────────
-    let leg_x = 0.195 * s * hip_width;
+    // ── Legs + Boots: long anime legs, armored shins, readable boots ─────────
+    let leg_x = 0.165 * s * hip_width;
     let boot_mat = if config.has_boots {
-        accent.clone()
+        armor.clone()
     } else {
         outfit.clone()
     };
@@ -750,23 +850,34 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             leg_k,
-            Mesh::from(Cuboid::new(0.22 * s, 0.68 * s * leg_length, 0.22 * s)),
+            Mesh::from(Capsule3d::new(0.090 * s, 0.42 * s * leg_length)),
             outfit.clone(),
-            Transform::from_xyz(x, -0.80 * s - (leg_length - 1.0) * 0.12 * s, 0.0),
+            Transform::from_xyz(x, -0.67 * s - (leg_length - 1.0) * 0.13 * s, 0.0)
+                .with_scale(Vec3::new(0.86, 1.0, 0.78)),
         );
-        // Oversized cartoon foot
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.086 * s, 0.38 * s * leg_length)),
+            suit_shadow.clone(),
+            Transform::from_xyz(x, -1.02 * s - (leg_length - 1.0) * 0.26 * s, -0.010 * s)
+                .with_scale(Vec3::new(0.82, 1.0, 0.72)),
+        );
         spawn_part(
             commands,
             meshes,
             root,
             foot_k,
             Mesh::from(Cuboid::new(
-                0.34 * s * foot_scale,
-                0.14 * s,
-                0.50 * s * foot_scale,
+                0.30 * s * foot_scale,
+                0.12 * s,
+                0.46 * s * foot_scale,
             )),
             boot_mat.clone(),
-            Transform::from_xyz(x, -1.22 * s - (leg_length - 1.0) * 0.30 * s, -0.12 * s),
+            Transform::from_xyz(x, -1.25 * s - (leg_length - 1.0) * 0.31 * s, -0.14 * s)
+                .with_rotation(Quat::from_rotation_x(-0.05)),
         );
         if config.has_boots {
             let boot_kind = if x < 0.0 {
@@ -780,12 +891,25 @@ pub fn attach_cartoon_character(
                 root,
                 boot_kind,
                 Mesh::from(Cuboid::new(
-                    0.27 * s * foot_scale,
-                    0.27 * s,
-                    0.27 * s * foot_scale,
+                    0.22 * s * foot_scale,
+                    0.25 * s,
+                    0.23 * s * foot_scale,
                 )),
                 boot_mat.clone(),
-                Transform::from_xyz(x, -s - (leg_length - 1.0) * 0.20 * s, -0.03 * s),
+                Transform::from_xyz(x, -1.08 * s - (leg_length - 1.0) * 0.22 * s, -0.03 * s),
+            );
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                boot_kind,
+                Mesh::from(Cuboid::new(
+                    0.24 * s * foot_scale,
+                    0.045 * s,
+                    0.26 * s * foot_scale,
+                )),
+                accent_glow.clone(),
+                Transform::from_xyz(x, -1.03 * s - (leg_length - 1.0) * 0.22 * s, -0.155 * s),
             );
         }
     }
@@ -885,7 +1009,7 @@ pub fn attach_cartoon_character(
         }
     }
 
-    // ── Star Badge (6-pointed star from 3 overlapping bars + emissive gem) ────
+    // ── Star Badge (6-pointed chest reactor + raised gem) ────────────────────
     if config.has_star_badge {
         for rot_z in [0.0_f32, PI / 3.0, -PI / 3.0] {
             spawn_part(
@@ -893,9 +1017,9 @@ pub fn attach_cartoon_character(
                 meshes,
                 root,
                 CartoonPartKind::StarBadge,
-                Mesh::from(Cuboid::new(0.28 * s, 0.09 * s, 0.05 * s)),
-                accent.clone(),
-                Transform::from_xyz(0.0, 0.05 * s, -0.23 * s)
+                Mesh::from(Cuboid::new(0.23 * s, 0.060 * s, 0.040 * s)),
+                accent_glow.clone(),
+                Transform::from_xyz(0.0, 0.080 * s, -0.315 * s)
                     .with_rotation(Quat::from_rotation_z(rot_z)),
             );
         }
@@ -905,8 +1029,8 @@ pub fn attach_cartoon_character(
             root,
             CartoonPartKind::StarBadge,
             Mesh::from(Sphere::new(0.055 * s)),
-            emissive_mat(materials, config.accent, 3.5),
-            Transform::from_xyz(0.0, 0.05 * s, -0.27 * s),
+            emissive_mat(materials, config.accent, 4.2),
+            Transform::from_xyz(0.0, 0.080 * s, -0.345 * s).with_scale(Vec3::new(1.0, 1.0, 0.42)),
         );
     }
 
@@ -917,92 +1041,100 @@ pub fn attach_cartoon_character(
             meshes,
             root,
             CartoonPartKind::Visor,
-            Mesh::from(Cuboid::new(0.40 * s, 0.11 * s, 0.05 * s)),
-            emissive_mat(materials, config.accent, 2.2),
-            Transform::from_xyz(0.0, 0.62 * s, -0.35 * s),
+            Mesh::from(Cuboid::new(0.35 * s, 0.085 * s, 0.040 * s)),
+            accent_glow.clone(),
+            Transform::from_xyz(0.0, eye_y, face_z - 0.052 * s),
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Visor,
+            Mesh::from(Cuboid::new(0.24 * s, 0.020 * s, 0.026 * s)),
+            emissive_mat(materials, Color::srgb(1.0, 1.0, 1.0), 1.5),
+            Transform::from_xyz(0.0, eye_y + 0.012 * s, face_z - 0.080 * s),
         );
     }
 
-    // ── Shoulder pads (3-piece: base + ridge + emissive trim) ────────────────
+    // ── Shoulder pads (layered fantasy sci-fi pauldrons) ─────────────────────
     if config.has_shoulder_pads {
-        for (kind, x) in [
-            (CartoonPartKind::ShoulderPadLeft, -arm_x),
-            (CartoonPartKind::ShoulderPadRight, arm_x),
+        for (kind, x, rot_z) in [
+            (CartoonPartKind::ShoulderPadLeft, -arm_x, -0.18_f32),
+            (CartoonPartKind::ShoulderPadRight, arm_x, 0.18_f32),
         ] {
-            // Base plate
             spawn_part(
                 commands,
                 meshes,
                 root,
                 kind,
-                Mesh::from(Cuboid::new(0.32 * s, 0.14 * s, 0.34 * s)),
-                accent.clone(),
-                Transform::from_xyz(x, 0.22 * s, 0.0),
+                Mesh::from(Cuboid::new(0.30 * s, 0.095 * s, 0.30 * s)),
+                armor.clone(),
+                Transform::from_xyz(x, 0.23 * s, -0.01 * s)
+                    .with_rotation(Quat::from_rotation_z(rot_z)),
             );
-            // Raised ridge on top
             spawn_part(
                 commands,
                 meshes,
                 root,
                 kind,
-                Mesh::from(Cuboid::new(0.26 * s, 0.08 * s, 0.26 * s)),
+                Mesh::from(Cone {
+                    radius: 0.14 * s,
+                    height: 0.20 * s,
+                }),
                 accent.clone(),
-                Transform::from_xyz(x, 0.31 * s, 0.0),
+                Transform::from_xyz(x, 0.32 * s, -0.02 * s)
+                    .with_rotation(Quat::from_rotation_z(rot_z) * Quat::from_rotation_x(0.10)),
             );
-            // Emissive edge trim
             spawn_part(
                 commands,
                 meshes,
                 root,
                 kind,
-                Mesh::from(Cuboid::new(0.36 * s, 0.06 * s, 0.38 * s)),
-                emissive_mat(materials, config.accent, 0.9),
-                Transform::from_xyz(x, 0.17 * s, 0.0),
+                Mesh::from(Cuboid::new(0.31 * s, 0.035 * s, 0.31 * s)),
+                accent_glow.clone(),
+                Transform::from_xyz(x, 0.165 * s, -0.035 * s)
+                    .with_rotation(Quat::from_rotation_z(rot_z)),
             );
         }
     }
 
-    // ── Cape (4 panels: collar → upper → mid → flap tip) ─────────────────────
+    // ── Cape (segmented scarf-coat silhouette) ───────────────────────────────
     if config.has_cape {
-        // Collar strip across shoulders
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Cape,
-            Mesh::from(Cuboid::new(0.64 * s, 0.13 * s, 0.07 * s)),
-            accent.clone(),
+            Mesh::from(Cuboid::new(0.56 * s, 0.10 * s, 0.060 * s)),
+            armor.clone(),
             Transform::from_xyz(0.0, 0.22 * s, 0.19 * s),
         );
-        // Upper panel — accent colour, slight backward lean
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Cape,
-            Mesh::from(Cuboid::new(0.60 * s, 0.56 * s, 0.05 * s)),
+            Mesh::from(Cuboid::new(0.48 * s, 0.52 * s, 0.040 * s)),
             accent.clone(),
             Transform::from_xyz(0.0, -0.06 * s, 0.28 * s)
                 .with_rotation(Quat::from_rotation_x(0.20)),
         );
-        // Mid panel — outfit colour, more angled
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Cape,
-            Mesh::from(Cuboid::new(0.48 * s, 0.42 * s, 0.04 * s)),
+            Mesh::from(Cuboid::new(0.34 * s, 0.44 * s, 0.035 * s)),
             outfit.clone(),
             Transform::from_xyz(0.0, -0.50 * s, 0.35 * s)
                 .with_rotation(Quat::from_rotation_x(0.40)),
         );
-        // Tip flap — accent colour, most swept back
         spawn_part(
             commands,
             meshes,
             root,
             CartoonPartKind::Cape,
-            Mesh::from(Cuboid::new(0.32 * s, 0.20 * s, 0.03 * s)),
+            Mesh::from(Cuboid::new(0.20 * s, 0.24 * s, 0.030 * s)),
             accent.clone(),
             Transform::from_xyz(0.0, -0.74 * s, 0.40 * s)
                 .with_rotation(Quat::from_rotation_x(0.55)),
@@ -1168,22 +1300,22 @@ fn visual_ground_lift(body: &BodyRecipe, scale: f32) -> f32 {
     let radius =
         0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20);
     let collider_bottom = -(half_height.clamp(0.44, 0.86) + radius.clamp(0.26, 0.50));
-    let foot_center_y = -1.22 * scale - (body.leg_length - 1.0) * 0.30 * scale;
-    let foot_bottom = foot_center_y - 0.07 * scale;
+    let foot_center_y = -1.25 * scale - (body.leg_length - 1.0) * 0.31 * scale;
+    let foot_bottom = foot_center_y - 0.06 * scale;
 
     (collider_bottom + 0.07 - foot_bottom).clamp(0.0, 0.50)
 }
 
-/// Stylised PBR: matte surface with a faint self-emissive so characters read
-/// clearly in shadowed areas. No metallic, higher roughness for cartoon look.
+/// Stylized PBR: satin low-poly surfaces with a faint self-emissive so
+/// characters read clearly in shadowed areas.
 fn char_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
     let lin = color.to_linear();
     materials.add(StandardMaterial {
         base_color: color,
-        emissive: LinearRgba::new(lin.red * 0.20, lin.green * 0.20, lin.blue * 0.20, 1.0),
-        perceptual_roughness: 0.78,
+        emissive: LinearRgba::new(lin.red * 0.14, lin.green * 0.14, lin.blue * 0.14, 1.0),
+        perceptual_roughness: 0.56,
         metallic: 0.0,
-        reflectance: 0.16,
+        reflectance: 0.28,
         ..default()
     })
 }

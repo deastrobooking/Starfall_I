@@ -43,6 +43,7 @@ Open issues and design follow-ups found during the May 2026 documentation/code r
 - Engine dependencies are upgraded to Bevy 0.18.1 and bevy_rapier3d 0.34.0, with buffered gameplay events migrated to Bevy messages and the changed 0.18 hierarchy, camera, cursor, render-import, ambient-light, and Rapier trimesh APIs handled.
 - Engine milestone guidance now lives in `docs/engine_upgrade_milestones.md`, `agent.md` points future agents there, and GitHub Actions mirrors the local format/check/clippy/test gates.
 - The multiplayer ownership policy is now documented in architecture/systems docs, and the first save tests cover per-player records, legacy hydration, `player_index` lookup, sorted save output, and clamped runtime application.
+- Default player visuals now move away from tiny voxel/chibi blocks toward taller Dreamcast-anime sci-fantasy heroes with capsule limbs, layered armor, expressive eyes/hair, and glow accents.
 
 ## High Priority
 
