@@ -117,7 +117,10 @@ action RPG accessibility for local multiplayer.
 - Add movement-cancel rules: dodge cancels, parry cancel, jump cancel, air saber,
   wall-kick strike, landing slam, shield bash, and robot-pet boost assist.
 - Make beam saber and hand combat use momentum: sprint strike reach, air strike
-  arc, wall slide kick, heavy landing shock, and knockback into hazards.
+  arc, wall slide kick, heavy landing shock, and knockback into hazards. Current
+  Star Sabre baseline already has upgrade-aware combo waves and a distinct
+  procedural slash pose; future work should add cancel windows, air sabre
+  variants, and hit-stop/VFX timing.
 - Add enemies that require motion: shield aliens, cliff turrets, drone swarms,
   wall-crawlers, boss weak points, and airship boarding guards.
 - Tests: hit arcs in normal and dungeon mode, knockback clamps, parry windows,

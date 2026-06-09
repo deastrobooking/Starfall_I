@@ -11,6 +11,7 @@ use crate::components::character::{
 use crate::components::player::{
     EdgeGrabState, JetpackState, PlayerMovement, PlayerState, PlayerStateMachine,
 };
+use crate::components::weapon::{BeamSabre, MeleeCombo};
 use crate::state::AppState;
 
 pub struct CharacterPlugin;
@@ -134,6 +135,8 @@ fn cartoon_animation_system(
             Option<&EdgeGrabState>,
             Option<&PlayerStateMachine>,
             Option<&JetpackState>,
+            Option<&BeamSabre>,
+            Option<&MeleeCombo>,
         ),
         Without<CartoonPart>,
     >,
@@ -142,8 +145,18 @@ fn cartoon_animation_system(
     let dt = time.delta_secs();
     let mut samples = HashMap::new();
 
-    for (entity, transform, mut animator, character, movement, edge_grab, state, jetpack) in
-        roots.iter_mut()
+    for (
+        entity,
+        transform,
+        mut animator,
+        character,
+        movement,
+        edge_grab,
+        state,
+        jetpack,
+        sabre,
+        melee,
+    ) in roots.iter_mut()
     {
         let delta = transform.translation - animator.last_position;
         let raw_speed = delta.with_y(0.0).length() / dt.max(0.001);
@@ -156,7 +169,15 @@ fn cartoon_animation_system(
 
         let current_state = state.map(|s| s.current);
         let vertical_velocity = movement.map(|m| m.velocity.y).unwrap_or(0.0);
-        animator.pose = if edge_grab.map(|e| e.is_hanging).unwrap_or(false) {
+        let sabre_slashing = sabre
+            .map(|s| s.unlocked && s.active && s.is_slashing)
+            .unwrap_or(false);
+        let melee_attacking = melee.map(|m| m.is_attacking).unwrap_or(false);
+        animator.pose = if sabre_slashing {
+            CartoonPose::SabreSlash
+        } else if current_state == Some(PlayerState::Attacking) || melee_attacking {
+            CartoonPose::Attack
+        } else if edge_grab.map(|e| e.is_hanging).unwrap_or(false) {
             CartoonPose::Hang
         } else if current_state == Some(PlayerState::WallSliding) {
             CartoonPose::WallSlide
@@ -186,6 +207,8 @@ fn cartoon_animation_system(
             CartoonPose::Fall => 3.6,
             CartoonPose::Fly => 8.0,
             CartoonPose::WallSlide => 4.8,
+            CartoonPose::Attack => 8.5,
+            CartoonPose::SabreSlash => 12.0,
             CartoonPose::Hang => 1.4,
         } * (0.88 + agility * 0.12);
         animator.phase += dt * phase_rate;
@@ -632,6 +655,121 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
             if is_cape {
                 transform.rotation *= Quat::from_rotation_x(cape_flap * 0.25);
                 transform.rotation *= Quat::from_rotation_z(-0.18 * cape_flap + wave * 0.04);
+            }
+        }
+
+        // ── Attack ───────────────────────────────────────────────────────────
+        CartoonPose::Attack => {
+            let punch = (sample.phase * 1.7).sin();
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.rotation *=
+                        Quat::from_rotation_y(0.18 + punch * 0.08) * Quat::from_rotation_x(-0.06);
+                    transform.translation.y += punch.abs() * 0.035;
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.rotation *= Quat::from_rotation_y(0.12 + punch * 0.05);
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.55) * Quat::from_rotation_z(-0.35);
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-1.20 + punch * 0.12) * Quat::from_rotation_z(0.42);
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot => {
+                    transform.rotation *= Quat::from_rotation_x(-0.12);
+                }
+                CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *= Quat::from_rotation_x(0.18);
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= Vec3::new(1.10, 1.0, 0.92);
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.rotation *= Quat::from_rotation_y(0.12 + punch * 0.05);
+            }
+            if is_body_acc {
+                transform.rotation *=
+                    Quat::from_rotation_y(0.18 + punch * 0.08) * Quat::from_rotation_x(-0.06);
+            }
+            if is_cape {
+                transform.rotation *= Quat::from_rotation_x(cape_flap * 0.65);
+                transform.rotation *= Quat::from_rotation_z(punch * 0.08 * cape_flap);
+            }
+        }
+
+        // ── Star Sabre slash ─────────────────────────────────────────────────
+        CartoonPose::SabreSlash => {
+            let sweep = (sample.phase * 1.25).sin();
+            let snap = sweep.signum() * sweep.abs().sqrt();
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.rotation *=
+                        Quat::from_rotation_y(0.42 * snap) * Quat::from_rotation_z(-0.08 * snap);
+                    transform.translation.y += sweep.abs() * 0.055;
+                    transform.scale.x *= 1.02;
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.rotation *=
+                        Quat::from_rotation_y(0.30 * snap) * Quat::from_rotation_x(-0.05);
+                    transform.translation.y += sweep.abs() * 0.035;
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.rotation *= Quat::from_rotation_x(-0.78)
+                        * Quat::from_rotation_y(-0.28)
+                        * Quat::from_rotation_z(-0.72 * snap);
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.rotation *= Quat::from_rotation_x(-1.72)
+                        * Quat::from_rotation_y(0.34)
+                        * Quat::from_rotation_z(1.05 * snap);
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.26) * Quat::from_rotation_z(0.10);
+                }
+                CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(0.28) * Quat::from_rotation_z(-0.12);
+                }
+                CartoonPartKind::StarBadge | CartoonPartKind::Belt => {
+                    transform.rotation *= Quat::from_rotation_y(0.42 * snap);
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= Vec3::new(1.18, 1.0, 0.86);
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.rotation *= Quat::from_rotation_y(0.30 * snap);
+                transform.translation.y += sweep.abs() * 0.035;
+            }
+            if is_body_acc {
+                transform.rotation *=
+                    Quat::from_rotation_y(0.42 * snap) * Quat::from_rotation_z(-0.08 * snap);
+                transform.translation.y += sweep.abs() * 0.055;
+            }
+            if is_cape {
+                transform.rotation *= Quat::from_rotation_x(cape_flap * 1.20);
+                transform.rotation *= Quat::from_rotation_z((-0.24 + snap * 0.20) * cape_flap);
             }
         }
 

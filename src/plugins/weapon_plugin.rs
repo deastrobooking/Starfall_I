@@ -12,7 +12,7 @@ use crate::perks::PerkTree;
 use crate::rendering::PbrBundle;
 use crate::resources::DungeonCrawlState;
 use crate::state::AppState;
-use crate::upgrades::UpgradeLedger;
+use crate::upgrades::{TechUpgradeId, UpgradeLedger};
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
 #[derive(Component)]
@@ -910,6 +910,102 @@ fn spawn_melee_flash(commands: &mut Commands, assets: &ProjectileAssets, positio
     ));
 }
 
+fn sabre_effective_wave_level(sabre: &BeamSabre, upgrades: &UpgradeLedger) -> u32 {
+    (sabre.level + upgrades.rank(TechUpgradeId::BeamCapacitors)).clamp(1, 5)
+}
+
+fn sabre_combo_wave_offsets(
+    effective_level: u32,
+    slash_index: u32,
+    slash_count: u32,
+    dungeon_active: bool,
+) -> Vec<f32> {
+    let is_opener = slash_index == 0;
+    let is_finisher = slash_index + 1 >= slash_count;
+    let is_even_chain = slash_index % 2 == 1;
+
+    if effective_level >= 5 && is_finisher {
+        vec![-0.55, 0.0, 0.55]
+    } else if effective_level >= 4 && (is_opener || is_finisher) {
+        vec![-0.42, 0.42]
+    } else if effective_level >= 3 && (is_even_chain || is_finisher) {
+        vec![0.0]
+    } else if effective_level >= 2 && is_finisher {
+        vec![0.0]
+    } else if dungeon_active && (is_opener || is_finisher) {
+        vec![0.0]
+    } else {
+        Vec::new()
+    }
+}
+
+fn sabre_wave_damage_multiplier(
+    effective_level: u32,
+    slash_index: u32,
+    dungeon_active: bool,
+) -> f32 {
+    let combo_ramp = 1.0 + slash_index as f32 * 0.08;
+    let rank_ramp = 1.0 + effective_level.saturating_sub(1) as f32 * 0.05;
+    combo_ramp * rank_ramp * if dungeon_active { 0.72 } else { 1.0 }
+}
+
+fn spawn_sabre_slash_waves(
+    commands: &mut Commands,
+    proj_assets: &ProjectileAssets,
+    origin: Vec3,
+    forward: Vec3,
+    right: Vec3,
+    sabre: &BeamSabre,
+    effective_level: u32,
+    slash_index: u32,
+    armor_damage_mult: f32,
+    dungeon_active: bool,
+) {
+    let wave_offsets = sabre_combo_wave_offsets(
+        effective_level,
+        slash_index,
+        sabre.slash_count,
+        dungeon_active,
+    );
+    if wave_offsets.is_empty() {
+        return;
+    }
+
+    let fwd = forward.with_y(0.0).normalize_or_zero();
+    let right = right.with_y(0.0).normalize_or_zero();
+    let damage = sabre.wave_damage
+        * armor_damage_mult
+        * sabre_wave_damage_multiplier(effective_level, slash_index, dungeon_active);
+    let speed = 20.0 + effective_level as f32 * 2.0 + slash_index as f32 * 1.5;
+    let lifetime = 1.30 + effective_level as f32 * 0.08;
+    let has_splash = effective_level >= 5 || sabre.has_aoe_splash();
+
+    for offset in wave_offsets {
+        let dir = (fwd + right * offset).with_y(0.0).normalize_or_zero();
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(proj_assets.sphere_sm.clone()),
+                material: MeshMaterial3d(proj_assets.mat_melee_flash.clone()),
+                transform: Transform::from_translation(origin + dir * 0.35),
+                ..default()
+            },
+            Projectile {
+                damage,
+                speed,
+                direction: dir,
+                lifetime,
+                is_explosive: has_splash,
+                explosion_radius: if has_splash { 4.0 } else { 0.0 },
+                weapon_type: ProjectileOwner::Player,
+                owner: None,
+                piercing: effective_level >= 3 || sabre.is_piercing(),
+                gravity_affected: false,
+                vertical_velocity: 0.0,
+            },
+        ));
+    }
+}
+
 fn execute_melee_hit(
     origin: Vec3,
     forward: Vec3,
@@ -983,7 +1079,9 @@ fn beam_sabre_update_system(
         };
         let fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let origin = star_muzzle_origin(player_transform, fwd);
+        let right = cam.right().as_vec3();
         let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
+        let effective_wave_level = sabre_effective_wave_level(&sabre, &upgrades);
 
         if pi.sabre_toggle {
             if sabre.unlocked {
@@ -1019,6 +1117,18 @@ fn beam_sabre_update_system(
                         &mut killed_ev,
                     );
                     spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
+                    spawn_sabre_slash_waves(
+                        &mut commands,
+                        &proj_assets,
+                        origin,
+                        fwd,
+                        right,
+                        &sabre,
+                        effective_wave_level,
+                        sabre.slash_index,
+                        armor_damage_mult,
+                        dungeon.active,
+                    );
                     sabre.slash_timer = 0.25;
                 } else {
                     sabre.is_slashing = false;
@@ -1052,43 +1162,18 @@ fn beam_sabre_update_system(
                 &mut killed_ev,
             );
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
-
-            if sabre.fires_dual_wave() || dungeon.active {
-                let right = cam.right().as_vec3();
-                let wave_offsets: &[f32] = if sabre.fires_dual_wave() {
-                    &[-0.4, 0.4]
-                } else {
-                    &[0.0]
-                };
-                for offset in wave_offsets {
-                    let dir = (fwd + right.with_y(0.0).normalize_or_zero() * *offset)
-                        .with_y(0.0)
-                        .normalize_or_zero();
-                    commands.spawn((
-                        PbrBundle {
-                            mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                            material: MeshMaterial3d(proj_assets.mat_melee_flash.clone()),
-                            transform: Transform::from_translation(origin),
-                            ..default()
-                        },
-                        Projectile {
-                            damage: sabre.wave_damage
-                                * armor_damage_mult
-                                * if dungeon.active { 0.72 } else { 1.0 },
-                            speed: 20.0,
-                            direction: dir,
-                            lifetime: 1.5,
-                            is_explosive: sabre.has_aoe_splash(),
-                            explosion_radius: if sabre.has_aoe_splash() { 4.0 } else { 0.0 },
-                            weapon_type: ProjectileOwner::Player,
-                            owner: None,
-                            piercing: sabre.is_piercing(),
-                            gravity_affected: false,
-                            vertical_velocity: 0.0,
-                        },
-                    ));
-                }
-            }
+            spawn_sabre_slash_waves(
+                &mut commands,
+                &proj_assets,
+                origin,
+                fwd,
+                right,
+                &sabre,
+                effective_wave_level,
+                0,
+                armor_damage_mult,
+                dungeon.active,
+            );
         }
     }
 }
@@ -1124,6 +1209,52 @@ fn hit_particle_spawn_system(
                 },
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn beam_capacitors_raise_sabre_wave_level_without_mutating_sabre() {
+        let mut upgrades = UpgradeLedger::default();
+        upgrades.ranks.push((TechUpgradeId::BeamCapacitors, 3));
+        let sabre = BeamSabre {
+            level: 1,
+            ..default()
+        };
+
+        assert_eq!(sabre.level, 1);
+        assert_eq!(sabre_effective_wave_level(&sabre, &upgrades), 4);
+    }
+
+    #[test]
+    fn sabre_combo_wave_offsets_scale_with_effective_level() {
+        assert!(sabre_combo_wave_offsets(1, 0, 3, false).is_empty());
+        assert_eq!(sabre_combo_wave_offsets(2, 2, 3, false), vec![0.0]);
+        assert_eq!(sabre_combo_wave_offsets(3, 1, 3, false), vec![0.0]);
+        assert_eq!(sabre_combo_wave_offsets(4, 0, 3, false), vec![-0.42, 0.42]);
+        assert_eq!(
+            sabre_combo_wave_offsets(5, 2, 3, false),
+            vec![-0.55, 0.0, 0.55]
+        );
+    }
+
+    #[test]
+    fn dungeon_sabre_keeps_accessible_single_wave_at_low_level() {
+        assert_eq!(sabre_combo_wave_offsets(1, 0, 2, true), vec![0.0]);
+        assert_eq!(sabre_combo_wave_offsets(1, 1, 2, true), vec![0.0]);
+    }
+
+    #[test]
+    fn sabre_wave_damage_ramps_through_combo_and_rank() {
+        let opener = sabre_wave_damage_multiplier(2, 0, false);
+        let finisher = sabre_wave_damage_multiplier(5, 3, false);
+        let dungeon = sabre_wave_damage_multiplier(5, 3, true);
+
+        assert!(finisher > opener);
+        assert!(dungeon < finisher);
     }
 }
 

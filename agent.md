@@ -86,6 +86,10 @@ together.
   Keep future parkour/flight/combat traversal work routed through
   `PlayerMovement`, `EdgeGrabState`, and `PlayerStateMachine` before adding
   new standalone movement state.
+- Star Sabre combo work lives in `src/plugins/weapon_plugin.rs` and
+  `src/components/weapon.rs`. Beam Capacitors raise effective saber wave tier
+  for combo waves without mutating `BeamSabre.level`; keep future saber upgrades
+  covered by pure helper tests before adding heavier Bevy app tests.
 - Runtime player guidance uses the `PlayerGuidance` resource and HUD panel in
   `src/plugins/ui_plugin.rs`. Feed new interactables into that panel when they
   need immediate player-facing prompts.

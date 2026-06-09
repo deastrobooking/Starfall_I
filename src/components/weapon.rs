@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 // ── Weapon Type ───────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,7 +30,7 @@ impl WeaponType {
 pub struct Weapon {
     pub weapon_type: WeaponType,
     pub damage: f32,
-    pub fire_rate: f32, // seconds between shots
+    pub fire_rate: f32, // seconds between shots (base)
     pub ammo: u32,
     pub max_ammo: u32,
     pub speed: f32, // projectile speed (units/sec)
@@ -39,11 +40,18 @@ pub struct Weapon {
     pub pellets: u32, // for shotgun
     pub is_explosive: bool,
     pub explosion_radius: f32,
+    // ── Per-slot upgrade rank ──────────────────────────────────────────────
+    pub rank: u32, // 0..=MAX_WEAPON_RANK, synced from WeaponRanks resource
+    // ── Charge blast state ─────────────────────────────────────────────────
+    pub charge_progress: f32, // 0.0..=1.0; builds while fire is held
+    pub charge_held: bool,    // tracks whether fire was held last frame
 }
+
+pub const MAX_WEAPON_RANK: u32 = 4;
 
 impl Weapon {
     pub fn new(weapon_type: WeaponType) -> Self {
-        match weapon_type {
+        let base = match weapon_type {
             WeaponType::Pistol => Self {
                 weapon_type,
                 damage: 16.0,
@@ -57,6 +65,9 @@ impl Weapon {
                 pellets: 1,
                 is_explosive: false,
                 explosion_radius: 0.0,
+                rank: 0,
+                charge_progress: 0.0,
+                charge_held: false,
             },
             WeaponType::Rifle => Self {
                 weapon_type,
@@ -71,6 +82,9 @@ impl Weapon {
                 pellets: 1,
                 is_explosive: false,
                 explosion_radius: 0.0,
+                rank: 0,
+                charge_progress: 0.0,
+                charge_held: false,
             },
             WeaponType::Shotgun => Self {
                 weapon_type,
@@ -85,6 +99,9 @@ impl Weapon {
                 pellets: 10,
                 is_explosive: false,
                 explosion_radius: 0.0,
+                rank: 0,
+                charge_progress: 0.0,
+                charge_held: false,
             },
             WeaponType::Rocket => Self {
                 weapon_type,
@@ -99,6 +116,9 @@ impl Weapon {
                 pellets: 1,
                 is_explosive: true,
                 explosion_radius: 6.5,
+                rank: 0,
+                charge_progress: 0.0,
+                charge_held: false,
             },
             WeaponType::Laser => Self {
                 weapon_type,
@@ -113,6 +133,9 @@ impl Weapon {
                 pellets: 1,
                 is_explosive: false,
                 explosion_radius: 0.0,
+                rank: 0,
+                charge_progress: 0.0,
+                charge_held: false,
             },
             WeaponType::Grenade => Self {
                 weapon_type,
@@ -127,8 +150,12 @@ impl Weapon {
                 pellets: 1,
                 is_explosive: true,
                 explosion_radius: 8.5,
+                rank: 0,
+                charge_progress: 0.0,
+                charge_held: false,
             },
-        }
+        };
+        base
     }
 
     pub fn can_fire(&self) -> bool {
@@ -138,7 +165,90 @@ impl Weapon {
     pub fn reload(&mut self) {
         self.ammo = self.max_ammo;
     }
+
+    // ── Rank scaling ──────────────────────────────────────────────────────────
+    pub fn rank_damage_mult(&self) -> f32 {
+        1.0 + self.rank as f32 * 0.20 // +20 % per rank
+    }
+
+    pub fn rank_effective_fire_rate(&self) -> f32 {
+        // Negative means faster: -6 % cooldown per rank, floor at 40 % of base
+        let reduction = (1.0 - self.rank as f32 * 0.06).max(0.4);
+        self.fire_rate * reduction
+    }
+
+    // ── Charge blast helpers ──────────────────────────────────────────────────
+    pub fn min_charge_time(&self) -> f32 {
+        match self.weapon_type {
+            WeaponType::Pistol => 1.0,
+            WeaponType::Rifle => 1.5,
+            WeaponType::Shotgun => 1.0,
+            WeaponType::Rocket => 2.0,
+            WeaponType::Laser => 1.2,
+            WeaponType::Grenade => 1.5,
+        }
+    }
+
+    // Multiplier on top of rank_damage_mult + perk/tech multipliers.
+    pub fn charge_damage_mult(&self) -> f32 {
+        3.5 + self.rank as f32 * 0.5
+    }
+
+    pub fn charge_explosion_radius(&self) -> f32 {
+        match self.weapon_type {
+            WeaponType::Pistol => 3.5,
+            WeaponType::Rifle => 2.0,
+            WeaponType::Shotgun => 6.5,
+            WeaponType::Rocket => self.explosion_radius * 2.5,
+            WeaponType::Laser => 5.0,
+            WeaponType::Grenade => self.explosion_radius * 2.0,
+        }
+    }
+
+    // Visual stretch factor along travel direction for the projectile mesh.
+    pub fn proj_stretch(&self) -> Vec3 {
+        match self.weapon_type {
+            WeaponType::Rifle => Vec3::new(0.6, 0.6, 4.0), // long needle
+            WeaponType::Laser => Vec3::new(0.5, 0.5, 5.5), // thin beam rod
+            WeaponType::Pistol => Vec3::new(0.9, 0.9, 2.2), // slight ovoid
+            WeaponType::Shotgun => Vec3::new(1.0, 1.0, 1.6),
+            WeaponType::Rocket => Vec3::splat(1.0), // round orb
+            WeaponType::Grenade => Vec3::splat(1.0),
+        }
+    }
 }
+
+// ── Weapon Ranks Resource ─────────────────────────────────────────────────────
+#[derive(Resource, Default, Debug, Clone, Serialize, Deserialize)]
+pub struct WeaponRanks {
+    pub ranks: [u32; 6], // indexed by WeaponInventory.active_slot (0-5)
+}
+
+impl WeaponRanks {
+    pub fn upgrade_cost(current_rank: u32) -> u32 {
+        match current_rank {
+            0 => 8,
+            1 => 15,
+            2 => 25,
+            3 => 40,
+            _ => u32::MAX,
+        }
+    }
+
+    pub fn rank_label(rank: u32) -> &'static str {
+        match rank {
+            0 => "Basic",
+            1 => "Tuned",
+            2 => "Charged",
+            3 => "Overclocked",
+            _ => "Nova",
+        }
+    }
+}
+
+// ── Charge Blast Marker ───────────────────────────────────────────────────────
+#[derive(Component, Debug)]
+pub struct ChargeBlastTag;
 
 // ── Active Weapon Tracker (on Player) ────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
