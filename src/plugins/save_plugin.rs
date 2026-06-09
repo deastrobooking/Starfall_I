@@ -4,11 +4,14 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::character_blueprint::CharacterBlueprint;
+use crate::character_parts::CharacterPartStyle;
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::damage::Health;
 use crate::events::UiMessageEvent;
 use crate::perks::PerkTree;
-use crate::resources::{ChapterProgress, PlaySessionTransition, PlayerSelectState, WaveInfo};
+use crate::resources::{
+    ChapterProgress, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo,
+};
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
@@ -49,6 +52,14 @@ pub struct SaveData {
     pub robot_pets: RobotPetCollection,
     #[serde(default)]
     pub tech_upgrades: UpgradeLedger,
+    #[serde(default)]
+    pub part_loadout_body: CharacterPartStyle,
+    #[serde(default)]
+    pub part_loadout_arms: CharacterPartStyle,
+    #[serde(default)]
+    pub part_loadout_legs: CharacterPartStyle,
+    #[serde(default)]
+    pub part_loadout_shoulders: CharacterPartStyle,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -131,6 +142,10 @@ impl Default for SaveData {
             players: Vec::new(),
             robot_pets: RobotPetCollection::default(),
             tech_upgrades: UpgradeLedger::default(),
+            part_loadout_body: CharacterPartStyle::HumanoidClothing,
+            part_loadout_arms: CharacterPartStyle::HumanoidClothing,
+            part_loadout_legs: CharacterPartStyle::HumanoidClothing,
+            part_loadout_shoulders: CharacterPartStyle::HumanoidClothing,
         }
     }
 }
@@ -184,8 +199,9 @@ pub fn save_game(
     select: &PlayerSelectState,
     robot_pets: &RobotPetCollection,
     upgrades: &UpgradeLedger,
+    part_loadout: &PlayerPartLoadout,
 ) -> Result<(), String> {
-    let data = build_save_data(players, wave, progress, perks, select, robot_pets, upgrades);
+    let data = build_save_data(players, wave, progress, perks, select, robot_pets, upgrades, part_loadout);
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(save_path(), json).map_err(|e| e.to_string())
 }
@@ -198,6 +214,7 @@ fn build_save_data(
     select: &PlayerSelectState,
     robot_pets: &RobotPetCollection,
     upgrades: &UpgradeLedger,
+    part_loadout: &PlayerPartLoadout,
 ) -> SaveData {
     players.sort_by_key(|player| player.player_index);
     SaveData {
@@ -217,6 +234,10 @@ fn build_save_data(
         players,
         robot_pets: robot_pets.clone(),
         tech_upgrades: upgrades.clone(),
+        part_loadout_body: part_loadout.body,
+        part_loadout_arms: part_loadout.arms,
+        part_loadout_legs: part_loadout.legs,
+        part_loadout_shoulders: part_loadout.shoulders,
         ..SaveData::default()
     }
 }
@@ -269,12 +290,13 @@ pub fn save_current_session(
     select: &PlayerSelectState,
     robot_pets: &RobotPetCollection,
     upgrades: &UpgradeLedger,
+    part_loadout: &PlayerPartLoadout,
 ) -> Result<(), String> {
     let players = collect_player_saves(player_q);
     if players.is_empty() {
         return Err("No active players to save".to_string());
     }
-    save_game(players, wave, progress, perks, select, robot_pets, upgrades)
+    save_game(players, wave, progress, perks, select, robot_pets, upgrades, part_loadout)
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
@@ -284,6 +306,7 @@ fn hydrate_progress_from_disk(
     mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
     mut upgrades: ResMut<UpgradeLedger>,
+    mut part_loadout: ResMut<PlayerPartLoadout>,
 ) {
     if let Some(data) = load_save() {
         *robot_pets = data.robot_pets.clone();
@@ -296,6 +319,10 @@ fn hydrate_progress_from_disk(
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
         hydrate_character_blueprints(&mut select, data.character_blueprints);
+        part_loadout.body = data.part_loadout_body;
+        part_loadout.arms = data.part_loadout_arms;
+        part_loadout.legs = data.part_loadout_legs;
+        part_loadout.shoulders = data.part_loadout_shoulders;
     }
 }
 
@@ -307,6 +334,7 @@ fn load_save_on_enter(
     mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
     mut upgrades: ResMut<UpgradeLedger>,
+    mut part_loadout: ResMut<PlayerPartLoadout>,
     transition: Res<PlaySessionTransition>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
@@ -333,6 +361,10 @@ fn load_save_on_enter(
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
         hydrate_character_blueprints(&mut select, data.character_blueprints);
+        part_loadout.body = data.part_loadout_body;
+        part_loadout.arms = data.part_loadout_arms;
+        part_loadout.legs = data.part_loadout_legs;
+        part_loadout.shoulders = data.part_loadout_shoulders;
         let loaded_players = data.players.len().max(active_players);
         msg_ev.write(UiMessageEvent {
             text: format!(
@@ -356,6 +388,7 @@ fn autosave_system(
     select: Res<PlayerSelectState>,
     robot_pets: Res<RobotPetCollection>,
     upgrades: Res<UpgradeLedger>,
+    part_loadout: Res<PlayerPartLoadout>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     save_state.last_save_timer += time.delta_secs();
@@ -372,6 +405,7 @@ fn autosave_system(
         &select,
         &robot_pets,
         &upgrades,
+        &part_loadout,
     ) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {
@@ -394,6 +428,7 @@ fn manual_save_system(
     select: Res<PlayerSelectState>,
     robot_pets: Res<RobotPetCollection>,
     upgrades: Res<UpgradeLedger>,
+    part_loadout: Res<PlayerPartLoadout>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if !keyboard.just_pressed(KeyCode::F5) {
@@ -407,6 +442,7 @@ fn manual_save_system(
         &select,
         &robot_pets,
         &upgrades,
+        &part_loadout,
     ) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {

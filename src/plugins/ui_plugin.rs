@@ -28,7 +28,7 @@ use crate::plugins::save_plugin::save_current_session;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
-    PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
+    PlayerGuidance, PlayerPartLoadout, PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -708,6 +708,7 @@ fn pause_menu_action_system(
     select: Res<PlayerSelectState>,
     robot_pets: Res<RobotPetCollection>,
     upgrades: Res<UpgradeLedger>,
+    part_loadout: Res<PlayerPartLoadout>,
     mut menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -752,6 +753,7 @@ fn pause_menu_action_system(
                     &select,
                     &robot_pets,
                     &upgrades,
+                    &part_loadout,
                 ),
                 &mut msg_ev,
             );
@@ -766,6 +768,7 @@ fn pause_menu_action_system(
                     &select,
                     &robot_pets,
                     &upgrades,
+                    &part_loadout,
                 ),
                 &mut msg_ev,
             );

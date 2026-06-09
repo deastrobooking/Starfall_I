@@ -1,14 +1,26 @@
-//! Vehicle plugin — motorcycle (M) and jet (J) summon-on-call.
-//! Gated by blueprint discoverables.
-//! Vehicle buffs apply only to the player who activated the current vehicle.
+//! Vehicle plugin — ground and air vehicle modes, gated by blueprints and robot assembly.
+//!
+//! Blueprint vehicles (discoverable pickups):
+//!   M / open_map  → motorcycle (walk_speed × 1.58, sprint × 1.58)
+//!   J / enter_vehicle → jet (boosted jetpack)
+//!
+//! Assembly vehicles (Robot Garage assembles a form from pets + parts):
+//!   M / open_map  → tank mode  (assembled Tank)     — slow but heavy armor bonus
+//!   M / open_map  → mech mode  (assembled GiantMech) — very slow, massive melee power
+//!   J / enter_vehicle → ship mode (SpaceShip/MegaShip)  — sustained flight upgrade
+//!
+//! Only one ground mode and one air mode may be active at a time.
 
 use bevy::prelude::*;
 
 use crate::components::mods::PlayerLoadout;
-use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerInput, PlayerMovement};
+use crate::components::player::{
+    JetpackState, Player, PlayerIndex, PlayerInput, PlayerMovement, PlayerStats,
+};
 use crate::components::world::{BoatPassenger, BoatVehicle};
 use crate::events::UiMessageEvent;
 use crate::resources::PlaySessionTransition;
+use crate::robot_pets::{RobotAssemblyForm, RobotPetCollection};
 use crate::state::AppState;
 
 pub struct VehiclePlugin;
@@ -25,9 +37,29 @@ impl Plugin for VehiclePlugin {
                     apply_vehicle_buffs,
                     boat_drive_system,
                 )
+                    .chain()
                     .run_if(in_state(AppState::Playing)),
             );
     }
+}
+
+/// Which ground-mode vehicle is currently active (at most one at a time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GroundMode {
+    #[default]
+    None,
+    Motorcycle,
+    Tank,
+    GiantMech,
+}
+
+/// Which air-mode vehicle is currently active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AirMode {
+    #[default]
+    None,
+    Jet,
+    Ship,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -41,13 +73,47 @@ struct VehicleBaseline {
 
 #[derive(Resource, Debug, Default)]
 pub struct VehicleState {
-    pub motorcycle_active: bool,
-    pub jet_active: bool,
+    pub ground_mode: GroundMode,
+    pub air_mode: AirMode,
     pub boat_active: bool,
     pub active_owner: Option<u8>,
     pub active_boat: Option<Entity>,
     pub boat_heading: f32,
     baselines: [Option<VehicleBaseline>; 4],
+    // Legacy accessors used by external code — kept as computed properties.
+    pub mech_armor_bonus: f32,
+}
+
+impl VehicleState {
+    pub fn motorcycle_active(&self) -> bool {
+        self.ground_mode == GroundMode::Motorcycle
+    }
+    pub fn jet_active(&self) -> bool {
+        self.air_mode == AirMode::Jet
+    }
+    pub fn tank_active(&self) -> bool {
+        self.ground_mode == GroundMode::Tank
+    }
+    pub fn mech_active(&self) -> bool {
+        self.ground_mode == GroundMode::GiantMech
+    }
+    pub fn ship_active(&self) -> bool {
+        self.air_mode == AirMode::Ship
+    }
+    fn deactivate_ground(&mut self) {
+        self.ground_mode = GroundMode::None;
+        self.mech_armor_bonus = 0.0;
+    }
+    fn deactivate_air(&mut self) {
+        self.air_mode = AirMode::None;
+    }
+    fn deactivate_all_vehicle(&mut self) {
+        self.deactivate_ground();
+        self.deactivate_air();
+        self.boat_active = false;
+        self.active_boat = None;
+        self.active_owner = None;
+    }
 }
 
 fn reset_vehicle_state_on_enter(
@@ -57,6 +123,34 @@ fn reset_vehicle_state_on_enter(
     if !transition.resuming_from_pause {
         *state = VehicleState::default();
     }
+}
+
+// ── Assembly form helpers ─────────────────────────────────────────────────────
+
+fn assembled_ground_mode(robot_pets: &RobotPetCollection) -> Option<GroundMode> {
+    robot_pets.active_assembly.as_ref().and_then(|a| match a.form {
+        RobotAssemblyForm::Car | RobotAssemblyForm::Motorcycle => Some(GroundMode::Motorcycle),
+        RobotAssemblyForm::Tank => Some(GroundMode::Tank),
+        RobotAssemblyForm::GiantMech => Some(GroundMode::GiantMech),
+        _ => None,
+    })
+}
+
+fn assembled_air_mode(robot_pets: &RobotPetCollection, loadout: &PlayerLoadout) -> AirMode {
+    // Blueprint jet always available if discovered.
+    if loadout.has_blueprint("jet_blueprint") {
+        return AirMode::Jet;
+    }
+    // Assembly-based air form.
+    if let Some(a) = &robot_pets.active_assembly {
+        if matches!(a.form, RobotAssemblyForm::SpaceJet) {
+            return AirMode::Jet;
+        }
+        if matches!(a.form, RobotAssemblyForm::SpaceShip | RobotAssemblyForm::MegaShip) {
+            return AirMode::Ship;
+        }
+    }
+    AirMode::None
 }
 
 #[allow(clippy::type_complexity)]
@@ -74,42 +168,60 @@ fn vehicle_input(
     >,
     boat_q: Query<(Entity, &Transform, &BoatVehicle)>,
     loadout: Res<PlayerLoadout>,
+    robot_pets: Res<RobotPetCollection>,
     mut state: ResMut<VehicleState>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     for (entity, idx, player_transform, pi, passenger) in player_q.iter() {
+        // ── Ground vehicle toggle (M key / open_map) ──────────────────────────
         if pi.open_map {
-            if loadout.has_blueprint("motorcycle_blueprint") {
-                let toggled_on = !(state.motorcycle_active && state.active_owner == Some(idx.0));
-                state.motorcycle_active = toggled_on;
-                state.jet_active = false;
-                state.boat_active = false;
-                state.active_boat = None;
-                remove_boat_passengers(&mut commands, &player_q, None);
-                state.active_owner = toggled_on.then_some(idx.0);
-                msg_ev.write(UiMessageEvent {
-                    text: if toggled_on {
-                        format!("P{} Motorcycle: ON", idx.0 + 1)
-                    } else {
-                        format!("P{} Motorcycle: OFF", idx.0 + 1)
-                    },
-                    duration: 1.5,
-                });
+            // Determine which ground mode is available (assembly takes priority over blueprint).
+            let available_ground = if let Some(mode) = assembled_ground_mode(&robot_pets) {
+                Some(mode)
+            } else if loadout.has_blueprint("motorcycle_blueprint") {
+                Some(GroundMode::Motorcycle)
+            } else {
+                None
+            };
+
+            if let Some(mode) = available_ground {
+                let currently_on = state.ground_mode == mode && state.active_owner == Some(idx.0);
+                if currently_on {
+                    state.deactivate_ground();
+                    state.active_owner = None;
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {}: OFF", idx.0 + 1, ground_mode_label(mode)),
+                        duration: 1.5,
+                    });
+                } else {
+                    state.ground_mode = mode;
+                    state.mech_armor_bonus = if mode == GroundMode::GiantMech { 40.0 } else { 0.0 };
+                    state.air_mode = AirMode::None;
+                    state.boat_active = false;
+                    state.active_boat = None;
+                    remove_boat_passengers(&mut commands, &player_q, None);
+                    state.active_owner = Some(idx.0);
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {}: ON", idx.0 + 1, ground_mode_label(mode)),
+                        duration: 1.5,
+                    });
+                }
             } else {
                 msg_ev.write(UiMessageEvent {
-                    text: "Motorcycle blueprint required.".into(),
+                    text: "No ground vehicle — assemble one in the Garage or find a blueprint.".into(),
                     duration: 2.0,
                 });
             }
         }
 
+        // ── Air/boat toggle (J key / enter_vehicle) ───────────────────────────
         if pi.enter_vehicle {
+            // Boat passenger disembark takes priority.
             if let Some(passenger) = passenger {
                 let Ok((_, boat_transform, boat)) = boat_q.get(passenger.boat) else {
                     commands.entity(entity).remove::<BoatPassenger>();
                     continue;
                 };
-
                 if !boat_is_at_dock(boat_transform.translation, boat) {
                     msg_ev.write(UiMessageEvent {
                         text: "Dock at the city or island before disembarking.".into(),
@@ -117,7 +229,6 @@ fn vehicle_input(
                     });
                     continue;
                 }
-
                 if passenger.is_driver {
                     state.boat_active = false;
                     state.active_boat = None;
@@ -133,70 +244,81 @@ fn vehicle_input(
                 continue;
             }
 
+            // Embark nearby boat if present.
             if let Some((boat_entity, boat_transform, boat)) = boat_q
                 .iter()
-                .filter(|(_, boat_transform, boat)| {
-                    player_transform
-                        .translation
-                        .distance(boat_transform.translation)
-                        <= boat.embark_radius
+                .filter(|(_, bt, b)| {
+                    player_transform.translation.distance(bt.translation) <= b.embark_radius
                 })
-                .min_by(|(_, left_t, _), (_, right_t, _)| {
+                .min_by(|(_, lt, _), (_, rt, _)| {
                     player_transform
                         .translation
-                        .distance(left_t.translation)
-                        .total_cmp(&player_transform.translation.distance(right_t.translation))
+                        .distance(lt.translation)
+                        .total_cmp(&player_transform.translation.distance(rt.translation))
                 })
             {
                 state.boat_active = true;
-                state.motorcycle_active = false;
-                state.jet_active = false;
+                state.ground_mode = GroundMode::None;
+                state.air_mode = AirMode::None;
                 state.active_owner = Some(idx.0);
                 state.active_boat = Some(boat_entity);
                 state.boat_heading = yaw_from_rotation(boat_transform.rotation);
                 let trip_distance = boat.dock_position.distance(boat.island_position);
-                board_nearby_players(
-                    &mut commands,
-                    &player_q,
-                    boat_entity,
-                    boat_transform,
-                    boat,
-                    entity,
-                );
+                board_nearby_players(&mut commands, &player_q, boat_entity, boat_transform, boat, entity);
                 msg_ev.write(UiMessageEvent {
-                    text: format!(
-                        "P{} Boat: ON - steer along the wake ({:.0}m)",
-                        idx.0 + 1,
-                        trip_distance
-                    ),
+                    text: format!("P{} Boat: ON - steer along the wake ({:.0}m)", idx.0 + 1, trip_distance),
                     duration: 2.4,
                 });
                 continue;
             }
 
-            if loadout.has_blueprint("jet_blueprint") {
-                let toggled_on = !(state.jet_active && state.active_owner == Some(idx.0));
-                state.jet_active = toggled_on;
-                state.motorcycle_active = false;
-                state.boat_active = false;
-                state.active_boat = None;
-                remove_boat_passengers(&mut commands, &player_q, None);
-                state.active_owner = toggled_on.then_some(idx.0);
-                msg_ev.write(UiMessageEvent {
-                    text: if toggled_on {
-                        format!("P{} Jet: ON", idx.0 + 1)
-                    } else {
-                        format!("P{} Jet: OFF", idx.0 + 1)
-                    },
-                    duration: 1.5,
-                });
+            // Air mode toggle.
+            let available_air = assembled_air_mode(&robot_pets, &loadout);
+            if available_air != AirMode::None {
+                let currently_on = state.air_mode == available_air && state.active_owner == Some(idx.0);
+                if currently_on {
+                    state.deactivate_air();
+                    state.active_owner = None;
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {}: OFF", idx.0 + 1, air_mode_label(available_air)),
+                        duration: 1.5,
+                    });
+                } else {
+                    state.air_mode = available_air;
+                    state.ground_mode = GroundMode::None;
+                    state.boat_active = false;
+                    state.active_boat = None;
+                    remove_boat_passengers(&mut commands, &player_q, None);
+                    state.active_owner = Some(idx.0);
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {}: ON", idx.0 + 1, air_mode_label(available_air)),
+                        duration: 1.5,
+                    });
+                }
             } else {
                 msg_ev.write(UiMessageEvent {
-                    text: "Jet blueprint required.".into(),
+                    text: "No air vehicle — assemble SpaceJet in the Garage or find a jet blueprint.".into(),
                     duration: 2.0,
                 });
             }
         }
+    }
+}
+
+fn ground_mode_label(mode: GroundMode) -> &'static str {
+    match mode {
+        GroundMode::None => "None",
+        GroundMode::Motorcycle => "Motorcycle",
+        GroundMode::Tank => "Tank",
+        GroundMode::GiantMech => "Giant Mech",
+    }
+}
+
+fn air_mode_label(mode: AirMode) -> &'static str {
+    match mode {
+        AirMode::None => "None",
+        AirMode::Jet => "Jet",
+        AirMode::Ship => "Ship",
     }
 }
 
@@ -291,9 +413,9 @@ fn clear_stale_boat_passengers_system(
 /// Apply vehicle speed/force buffs only to the player who activated the vehicle.
 fn apply_vehicle_buffs(
     mut state: ResMut<VehicleState>,
-    mut q: Query<(&PlayerIndex, &mut PlayerMovement, &mut JetpackState), With<Player>>,
+    mut q: Query<(&PlayerIndex, &mut PlayerMovement, &mut JetpackState, &mut PlayerStats), With<Player>>,
 ) {
-    for (idx, mut mv, mut jet) in q.iter_mut() {
+    for (idx, mut mv, mut jet, mut stats) in q.iter_mut() {
         let Some(slot) = state.baselines.get_mut(idx.0 as usize) else {
             continue;
         };
@@ -306,25 +428,67 @@ fn apply_vehicle_buffs(
         });
 
         let is_active_owner = state.active_owner == Some(idx.0);
-        if state.boat_active && is_active_owner {
-            mv.walk_speed = baseline.walk_speed.max(0.58);
-            mv.sprint_speed = baseline.sprint_speed.max(0.82);
-        } else if state.motorcycle_active && is_active_owner {
-            mv.walk_speed = baseline.walk_speed.max(0.7);
-            mv.sprint_speed = baseline.sprint_speed.max(1.1);
+
+        // Ground movement
+        if is_active_owner {
+            match state.ground_mode {
+                GroundMode::None => {
+                    if !state.boat_active {
+                        mv.walk_speed = baseline.walk_speed;
+                        mv.sprint_speed = baseline.sprint_speed;
+                    } else {
+                        // Slow on boat deck
+                        mv.walk_speed = baseline.walk_speed.min(0.58);
+                        mv.sprint_speed = baseline.sprint_speed.min(0.82);
+                    }
+                }
+                GroundMode::Motorcycle => {
+                    mv.walk_speed = baseline.walk_speed.max(0.70);
+                    mv.sprint_speed = baseline.sprint_speed.max(1.10);
+                }
+                GroundMode::Tank => {
+                    // Slow but cannot be knocked back
+                    mv.walk_speed = baseline.walk_speed.min(0.32);
+                    mv.sprint_speed = baseline.sprint_speed.min(0.42);
+                }
+                GroundMode::GiantMech => {
+                    mv.walk_speed = baseline.walk_speed.min(0.24);
+                    mv.sprint_speed = baseline.sprint_speed.min(0.34);
+                }
+            }
         } else {
             mv.walk_speed = baseline.walk_speed;
             mv.sprint_speed = baseline.sprint_speed;
         }
-        if state.jet_active && is_active_owner {
-            jet.force = baseline.jet_force.max(0.12);
-            jet.regen_rate = baseline.jet_regen_rate.max(80.0);
-            jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(0.7);
+
+        // Air / jetpack
+        if is_active_owner {
+            match state.air_mode {
+                AirMode::None => {
+                    jet.force = baseline.jet_force;
+                    jet.regen_rate = baseline.jet_regen_rate;
+                    jet.max_vertical_vel = baseline.jet_max_vertical_vel;
+                }
+                AirMode::Jet => {
+                    jet.force = baseline.jet_force.max(0.12);
+                    jet.regen_rate = baseline.jet_regen_rate.max(80.0);
+                    jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(0.7);
+                }
+                AirMode::Ship => {
+                    jet.force = baseline.jet_force.max(0.18);
+                    jet.regen_rate = baseline.jet_regen_rate.max(120.0);
+                    jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(1.1);
+                }
+            }
         } else {
             jet.force = baseline.jet_force;
             jet.regen_rate = baseline.jet_regen_rate;
             jet.max_vertical_vel = baseline.jet_max_vertical_vel;
         }
+
+        // Tank / Mech armor bonus applied to current stats (not max, to avoid save drift)
+        let armor_bonus = if is_active_owner { state.mech_armor_bonus } else { 0.0 };
+        stats.armor = (stats.armor + armor_bonus).min(stats.max_armor + armor_bonus);
     }
 }
 

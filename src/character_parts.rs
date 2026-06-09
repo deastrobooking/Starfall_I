@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
 use crate::components::character::{CartoonPart, CartoonPartKind};
@@ -60,7 +61,7 @@ impl PartSlotTag {
 
 // ── Loadout types ─────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum CharacterPartStyle {
     #[default]
     HumanoidClothing,
