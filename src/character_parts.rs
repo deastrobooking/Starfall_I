@@ -1065,8 +1065,8 @@ fn spawn_head_open_face(
     let s = cfg.scale;
     let head_y = y_lift + 0.58 * s;
 
-    let skin_mat = robot_mat(materials, cfg.skin);
-    let hair_mat = robot_mat(materials, cfg.hair);
+    let skin_mat = soft_mat(materials, cfg.skin);
+    let hair_mat = soft_mat(materials, cfg.hair);
     let eye_mat = emissive_mat(materials, cfg.eye, 5.0);
 
     spawn_part(commands, meshes, root, CartoonPartKind::Head,
@@ -1317,6 +1317,19 @@ fn robot_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<S
         perceptual_roughness: 0.40,
         metallic: 0.65,
         reflectance: 0.50,
+        ..default()
+    })
+}
+
+/// Soft organic material — matches `char_mat()` in characters.rs, used for skin/hair.
+fn soft_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
+    let lin = color.to_linear();
+    materials.add(StandardMaterial {
+        base_color: color,
+        emissive: LinearRgba::new(lin.red * 0.14, lin.green * 0.14, lin.blue * 0.14, 1.0),
+        perceptual_roughness: 0.56,
+        metallic: 0.0,
+        reflectance: 0.28,
         ..default()
     })
 }

@@ -87,7 +87,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             skin: Color::srgb(0.93, 0.70, 0.48),
             outfit: Color::srgb(0.09, 0.28, 0.80),
             accent: Color::srgb(0.95, 0.78, 0.12),
-            hair: Color::srgb(0.06, 0.04, 0.02),
+            hair: Color::srgb(0.06, 0.04, 0.02), // jet black
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 1.0,
@@ -105,7 +105,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.06, 0.06, 0.12),
+            eye_color: Color::srgb(0.08, 0.18, 0.72), // cobalt blue
             emissive_eyes: false,
         },
         "Antonio" => CartoonCharacterConfig {
@@ -114,7 +114,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             skin: Color::srgb(0.90, 0.74, 0.56),
             outfit: Color::srgb(0.16, 0.48, 0.82),
             accent: Color::srgb(0.10, 0.92, 0.98),
-            hair: Color::srgb(0.06, 0.04, 0.02),
+            hair: Color::srgb(0.70, 0.52, 0.18), // sandy blonde
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.92,
@@ -132,7 +132,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.04, 0.06, 0.14),
+            eye_color: Color::srgb(0.08, 0.52, 0.86), // sky blue
             emissive_eyes: false,
         },
         "Angelo" => CartoonCharacterConfig {
@@ -141,7 +141,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             skin: Color::srgb(0.88, 0.68, 0.48),
             outfit: Color::srgb(0.08, 0.52, 0.20),
             accent: Color::srgb(0.78, 0.86, 0.92),
-            hair: Color::srgb(0.06, 0.04, 0.02),
+            hair: Color::srgb(0.28, 0.16, 0.06), // medium brown
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.94,
@@ -159,16 +159,16 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.03, 0.04, 0.10),
+            eye_color: Color::srgb(0.12, 0.52, 0.22), // forest green
             emissive_eyes: false,
         },
         "Joseph" => CartoonCharacterConfig {
             name,
             role: CartoonRole::Hero,
-            skin: Color::srgb(0.86, 0.65, 0.44),
+            skin: Color::srgb(0.76, 0.54, 0.36), // deeper warm brown
             outfit: Color::srgb(0.75, 0.12, 0.08),
             accent: Color::srgb(0.92, 0.90, 0.84),
-            hair: Color::srgb(0.06, 0.04, 0.02),
+            hair: Color::srgb(0.52, 0.48, 0.44), // gray-silver (veteran)
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 1.18,
@@ -186,7 +186,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.05, 0.04, 0.10),
+            eye_color: Color::srgb(0.65, 0.38, 0.08), // warm amber
             emissive_eyes: false,
         },
         "Gabriella" => CartoonCharacterConfig {
@@ -195,7 +195,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             skin: Color::srgb(0.91, 0.69, 0.50),
             outfit: Color::srgb(0.48, 0.12, 0.72),
             accent: Color::srgb(1.0, 0.68, 0.95),
-            hair: Color::srgb(0.12, 0.06, 0.04),
+            hair: Color::srgb(0.52, 0.08, 0.12), // deep crimson
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.98,
@@ -213,16 +213,16 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.16, 0.04, 0.20),
+            eye_color: Color::srgb(0.42, 0.08, 0.58), // violet
             emissive_eyes: false,
         },
         "Nova" => CartoonCharacterConfig {
             name,
             role: CartoonRole::Hero,
-            skin: Color::srgb(0.88, 0.66, 0.48),
+            skin: Color::srgb(0.84, 0.64, 0.50),
             outfit: Color::srgb(0.10, 0.18, 0.82),
             accent: Color::srgb(0.10, 1.0, 0.88),
-            hair: Color::srgb(0.08, 0.04, 0.12),
+            hair: Color::srgb(0.06, 0.06, 0.28), // deep blue-black (sci-fi)
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.94,
@@ -240,7 +240,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.02, 0.14, 0.20),
+            eye_color: Color::srgb(0.04, 0.82, 0.92), // bright cyan (glows)
             emissive_eyes: true,
         },
         "Aurora" => CartoonCharacterConfig {
@@ -249,7 +249,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             skin: Color::srgb(0.90, 0.72, 0.55),
             outfit: Color::srgb(0.16, 0.58, 0.42),
             accent: Color::srgb(0.78, 1.0, 0.62),
-            hair: Color::srgb(0.10, 0.07, 0.03),
+            hair: Color::srgb(0.68, 0.52, 0.14), // warm golden-blonde
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 1.02,
@@ -267,7 +267,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.05, 0.14, 0.08),
+            eye_color: Color::srgb(0.14, 0.62, 0.28), // bright green
             emissive_eyes: false,
         },
         "Fortuna" => CartoonCharacterConfig {
@@ -276,7 +276,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             skin: Color::srgb(0.92, 0.70, 0.52),
             outfit: Color::srgb(0.68, 0.22, 0.10),
             accent: Color::srgb(1.0, 0.92, 0.30),
-            hair: Color::srgb(0.16, 0.08, 0.03),
+            hair: Color::srgb(0.40, 0.08, 0.04), // dark auburn
             scale: 2.0,
             body: BodyRecipe::default(),
             body_width: 0.96,
@@ -294,7 +294,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.18, 0.10, 0.02),
+            eye_color: Color::srgb(0.68, 0.48, 0.06), // golden amber
             emissive_eyes: false,
         },
         _ => CartoonCharacterConfig {
@@ -321,7 +321,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             has_spine_ridges: false,
             has_belt: true,
             has_mouth: true,
-            eye_color: Color::srgb(0.03, 0.03, 0.05),
+            eye_color: Color::srgb(0.10, 0.20, 0.70), // default: blue
             emissive_eyes: false,
         },
     }
