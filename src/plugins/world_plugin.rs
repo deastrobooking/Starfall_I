@@ -1807,6 +1807,7 @@ fn generate_city(
     spawn_water_gardens(&mut commands, &mut meshes, &pal, seed + 12, seed);
     spawn_mana_waterfalls(&mut commands, &mut meshes, &pal, seed + 18, seed);
     spawn_mana_forests(&mut commands, &mut meshes, &pal, seed + 19, seed);
+    spawn_bio_city_tamborn(&mut commands, &mut meshes, &pal, seed + 20, seed);
     spawn_rock_fields(&mut commands, &mut meshes, &pal, seed + 13, seed);
     spawn_understory(&mut commands, &mut meshes, &pal, seed + 14, seed);
     spawn_trees(&mut commands, &mut meshes, &pal, seed + 9, seed);
@@ -5821,6 +5822,721 @@ fn spawn_mana_forests(
                 scale,
                 grove_seed + i * 37,
             );
+        }
+    }
+}
+
+const TAMBORN_MOTHER_LOWER_DECK: f32 = 86.0;
+const TAMBORN_MOTHER_UPPER_DECK: f32 = 168.0;
+const TAMBORN_MOTHER_CROWN_DECK: f32 = 238.0;
+
+#[derive(Clone, Copy)]
+struct TambornTower {
+    base: Vec3,
+    lower_deck_y: f32,
+    upper_deck_y: f32,
+    radius: f32,
+}
+
+fn spawn_bio_city_tamborn(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let center_x = -760.0_f32;
+    let center_z = 1040.0_f32;
+    let center_ground = terrain_surface_y(center_x, center_z, terrain_seed);
+    let center = Vec3::new(center_x, center_ground, center_z);
+
+    spawn_mother_tree_tamborn(commands, meshes, pal, center, seed);
+
+    let tower_count = 13usize;
+    let mut towers = Vec::with_capacity(tower_count);
+    for i in 0..tower_count {
+        let idx = i as u64;
+        let angle = i as f32 / tower_count as f32 * TAU + 0.18;
+        let ring = 218.0 + (i % 4) as f32 * 18.0 + seeded(seed, idx * 23) * 44.0;
+        let x = center_x + angle.cos() * ring;
+        let z = center_z + angle.sin() * ring;
+        let ground = terrain_surface_y(x, z, terrain_seed);
+        let height = 128.0 + seeded(seed, idx * 23 + 1) * 96.0 + (i % 3) as f32 * 18.0;
+        let radius = 7.8 + seeded(seed, idx * 23 + 2) * 5.4 + (i % 2) as f32 * 1.8;
+        towers.push(spawn_tamborn_tree_skyscraper(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, ground, z),
+            height,
+            radius,
+            seed + idx * 211,
+        ));
+    }
+
+    for i in 0..towers.len() {
+        let next = (i + 1) % towers.len();
+        let tower_a = towers[i];
+        let tower_b = towers[next];
+        let use_upper = i % 2 == 1;
+        let a_y = if use_upper {
+            tower_a.upper_deck_y
+        } else {
+            tower_a.lower_deck_y
+        };
+        let b_y = if use_upper {
+            tower_b.upper_deck_y
+        } else {
+            tower_b.lower_deck_y
+        };
+        let start = tamborn_bridge_anchor(tower_a.base, a_y, tower_b.base, tower_a.radius * 2.0);
+        let end = tamborn_bridge_anchor(tower_b.base, b_y, tower_a.base, tower_b.radius * 2.0);
+        spawn_rope_bridge_between(
+            commands,
+            meshes,
+            pal,
+            start,
+            end,
+            9.5 + (i % 3) as f32 * 0.8,
+            seed + i as u64 * 503,
+        );
+    }
+
+    for i in (0..towers.len()).step_by(3) {
+        let tower = towers[i];
+        let target_y = if i % 2 == 0 {
+            center.y + TAMBORN_MOTHER_LOWER_DECK
+        } else {
+            center.y + TAMBORN_MOTHER_UPPER_DECK
+        };
+        let tower_y = if i % 2 == 0 {
+            tower.lower_deck_y
+        } else {
+            tower.upper_deck_y
+        };
+        let start = tamborn_bridge_anchor(tower.base, tower_y, center, tower.radius * 2.2);
+        let end = tamborn_bridge_anchor(center, target_y, tower.base, 36.0);
+        spawn_rope_bridge_between(
+            commands,
+            meshes,
+            pal,
+            start,
+            end,
+            12.0,
+            seed + i as u64 * 719 + 90,
+        );
+    }
+
+    for (path_i, tower_i) in [2usize, 8usize].iter().copied().enumerate() {
+        if let Some(tower) = towers.get(tower_i).copied() {
+            let away = Vec2::new(tower.base.x - center.x, tower.base.z - center.z);
+            let dir = if away.length_squared() > 0.001 {
+                away.normalize()
+            } else {
+                Vec2::Y
+            };
+            let start_x = tower.base.x + dir.x * 156.0;
+            let start_z = tower.base.z + dir.y * 156.0;
+            let start = Vec3::new(
+                start_x,
+                terrain_surface_y(start_x, start_z, terrain_seed) + 2.4,
+                start_z,
+            );
+            let end =
+                tamborn_bridge_anchor(tower.base, tower.lower_deck_y, start, tower.radius * 2.4);
+            spawn_rope_bridge_between(
+                commands,
+                meshes,
+                pal,
+                start,
+                end,
+                13.5,
+                seed + path_i as u64 * 1_113 + 1_900,
+            );
+        }
+    }
+
+    for grove in 0..26u64 {
+        let angle = seeded(seed, 8_000 + grove * 5) * TAU;
+        let dist = 310.0 + seeded(seed, 8_000 + grove * 5 + 1) * 220.0;
+        let x = center_x + angle.cos() * dist;
+        let z = center_z + angle.sin() * dist;
+        let ground = terrain_surface_y(x, z, terrain_seed);
+        spawn_giant_mana_tree(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, ground, z),
+            2.2 + seeded(seed, 8_000 + grove * 5 + 2) * 1.9,
+            seed + 5_000 + grove * 17,
+        );
+    }
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.34, 1.0, 0.64),
+                intensity: 36_000.0,
+                range: 260.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(center + Vec3::Y * 134.0),
+            ..default()
+        },
+        WorldGeometry,
+        Name::new("Bio City Tamborn"),
+    ));
+}
+
+fn spawn_mother_tree_tamborn(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    seed: u64,
+) {
+    let trunk_mesh = meshes.add(Cylinder::new(1.0, 1.0));
+    let sphere_mesh = meshes.add(Sphere::new(1.0));
+    let yaw = seeded(seed, 31) * TAU;
+
+    for (offset_y, height, radius, material) in [
+        (92.0, 184.0, 26.0, pal.bark_dark.clone()),
+        (226.0, 176.0, 18.5, pal.bark_mid.clone()),
+        (328.0, 92.0, 12.5, pal.bark_light.clone()),
+    ] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(trunk_mesh.clone()),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_xyz(base.x, base.y + offset_y, base.z)
+                    .with_rotation(Quat::from_rotation_y(yaw))
+                    .with_scale(Vec3::new(radius, height, radius)),
+                ..default()
+            },
+            WorldGeometry,
+            Name::new("Tamborn Mother Tree Trunk"),
+        ));
+    }
+
+    for root in 0..11u64 {
+        let root_yaw = yaw + root as f32 * TAU / 11.0 + seeded(seed, 100 + root) * 0.16;
+        let dir = Vec3::new(root_yaw.cos(), 0.0, root_yaw.sin());
+        let start = base + dir * 8.0 + Vec3::Y * 7.5;
+        let end = base + dir * (78.0 + seeded(seed, 140 + root) * 52.0) + Vec3::Y * 1.6;
+        spawn_static_cylinder_between(
+            commands,
+            meshes,
+            pal.bark_dark.clone(),
+            start,
+            end,
+            4.6 + seeded(seed, 180 + root) * 2.2,
+        );
+    }
+
+    spawn_tamborn_platform(
+        commands,
+        meshes,
+        pal.moss.clone(),
+        base + Vec3::Y * TAMBORN_MOTHER_LOWER_DECK,
+        76.0,
+        3.0,
+        "Tamborn Mother Tree Lower Terrace",
+    );
+    spawn_tamborn_ring_rail(
+        commands,
+        meshes,
+        pal.vine.clone(),
+        base + Vec3::Y * TAMBORN_MOTHER_LOWER_DECK,
+        78.0,
+        3.0,
+        28,
+        0.24,
+    );
+    spawn_tamborn_platform(
+        commands,
+        meshes,
+        pal.bridge_deck.clone(),
+        base + Vec3::Y * TAMBORN_MOTHER_UPPER_DECK,
+        58.0,
+        2.6,
+        "Tamborn Mother Tree Upper Terrace",
+    );
+    spawn_tamborn_ring_rail(
+        commands,
+        meshes,
+        pal.vine.clone(),
+        base + Vec3::Y * TAMBORN_MOTHER_UPPER_DECK,
+        60.0,
+        3.0,
+        24,
+        0.20,
+    );
+    spawn_tamborn_platform(
+        commands,
+        meshes,
+        pal.marble.clone(),
+        base + Vec3::Y * TAMBORN_MOTHER_CROWN_DECK,
+        38.0,
+        2.3,
+        "Tamborn Moon Crown Terrace",
+    );
+    spawn_tamborn_ring_rail(
+        commands,
+        meshes,
+        pal.guide_glow.clone(),
+        base + Vec3::Y * TAMBORN_MOTHER_CROWN_DECK,
+        40.0,
+        2.8,
+        20,
+        0.16,
+    );
+
+    let canopy_center = base + Vec3::Y * 326.0;
+    let canopy_specs = [
+        (0.0_f32, 0.0_f32, 96.0_f32, 56.0_f32, pal.foliage_a.clone()),
+        (0.0, 64.0, 70.0, 44.0, pal.foliage_b.clone()),
+        (TAU * 0.10, 50.0, 62.0, 38.0, pal.foliage_c.clone()),
+        (TAU * 0.24, 72.0, 68.0, 42.0, pal.foliage_a.clone()),
+        (TAU * 0.40, 66.0, 64.0, 39.0, pal.moss.clone()),
+        (TAU * 0.56, 70.0, 74.0, 43.0, pal.foliage_b.clone()),
+        (TAU * 0.72, 62.0, 66.0, 40.0, pal.foliage_c.clone()),
+        (TAU * 0.88, 58.0, 70.0, 41.0, pal.foliage_a.clone()),
+    ];
+    for (i, (angle, radial, width, height, material)) in canopy_specs.into_iter().enumerate() {
+        let a = yaw + angle + seeded(seed, 260 + i as u64) * 0.12;
+        let transform = Transform::from_translation(
+            canopy_center + Vec3::new(a.cos() * radial, i as f32 * 5.5, a.sin() * radial),
+        )
+        .with_rotation(Quat::from_rotation_y(a))
+        .with_scale(Vec3::new(width, height, width * 0.88));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(sphere_mesh.clone()),
+                material: MeshMaterial3d(material),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(&transform, a, 0.26, 0.006, 0.012, 0.004),
+        ));
+
+        if i > 1 {
+            let branch_start =
+                base + Vec3::new(a.cos() * 12.0, 178.0 + i as f32 * 8.0, a.sin() * 12.0);
+            let branch_end =
+                canopy_center + Vec3::new(a.cos() * radial * 0.72, -12.0, a.sin() * radial * 0.72);
+            spawn_static_cylinder_between(
+                commands,
+                meshes,
+                pal.bark_mid.clone(),
+                branch_start,
+                branch_end,
+                3.2,
+            );
+        }
+    }
+
+    for crystal in 0..10u64 {
+        let angle = yaw + crystal as f32 * TAU / 10.0 + seeded(seed, 400 + crystal) * 0.18;
+        let ring = 44.0 + seeded(seed, 430 + crystal) * 19.0;
+        let pos = base
+            + Vec3::new(
+                angle.cos() * ring,
+                TAMBORN_MOTHER_LOWER_DECK + 4.4,
+                angle.sin() * ring,
+            );
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cone {
+                    radius: 2.0 + seeded(seed, 470 + crystal) * 1.2,
+                    height: 8.0 + seeded(seed, 510 + crystal) * 6.0,
+                })),
+                material: MeshMaterial3d(pal.crystal_emerald.clone()),
+                transform: Transform::from_translation(pos)
+                    .with_rotation(Quat::from_rotation_y(angle)),
+                ..default()
+            },
+            WorldGeometry,
+            Name::new("Tamborn Heart Crystal"),
+        ));
+    }
+
+    spawn_vine_curtain(
+        commands,
+        meshes,
+        pal,
+        canopy_center + Vec3::Y * 32.0,
+        yaw,
+        84.0,
+        236.0,
+        16,
+        seed + 820,
+    );
+
+    for (light_y, range, intensity) in [(62.0, 120.0, 18_000.0), (242.0, 150.0, 26_000.0)] {
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: Color::srgb(0.35, 1.0, 0.52),
+                    intensity,
+                    range,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_translation(base + Vec3::Y * light_y),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_tamborn_tree_skyscraper(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    height: f32,
+    radius: f32,
+    seed: u64,
+) -> TambornTower {
+    let trunk_mesh = meshes.add(Cylinder::new(1.0, 1.0));
+    let sphere_mesh = meshes.add(Sphere::new(1.0));
+    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let yaw = seeded(seed, 8) * TAU;
+    let bark = match seed % 4 {
+        0 => pal.bark_light.clone(),
+        1 => pal.bark_mid.clone(),
+        2 => pal.bark_dark.clone(),
+        _ => pal.rock_dark.clone(),
+    };
+    let foliage = match seed % 4 {
+        0 => pal.foliage_a.clone(),
+        1 => pal.foliage_b.clone(),
+        2 => pal.foliage_c.clone(),
+        _ => pal.moss.clone(),
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(trunk_mesh.clone()),
+            material: MeshMaterial3d(bark.clone()),
+            transform: Transform::from_xyz(base.x, base.y + height * 0.5, base.z)
+                .with_rotation(Quat::from_rotation_y(yaw))
+                .with_scale(Vec3::new(radius, height, radius)),
+            ..default()
+        },
+        WorldGeometry,
+        Name::new("Tamborn Tree Skyscraper"),
+    ));
+
+    for root in 0..6u64 {
+        let root_yaw = yaw + root as f32 * TAU / 6.0 + seeded(seed, 50 + root) * 0.22;
+        let dir = Vec3::new(root_yaw.cos(), 0.0, root_yaw.sin());
+        let start = base + dir * radius * 0.42 + Vec3::Y * (radius * 0.46);
+        let end = base
+            + dir * (radius * (4.6 + seeded(seed, 70 + root) * 2.7))
+            + Vec3::Y * (radius * 0.08);
+        spawn_static_cylinder_between(commands, meshes, bark.clone(), start, end, radius * 0.34);
+    }
+
+    let lower_deck_y = base.y + height * 0.50;
+    let upper_deck_y = base.y + height * 0.76;
+    let lower_radius = radius * 3.1;
+    let upper_radius = radius * 2.35;
+    spawn_tamborn_platform(
+        commands,
+        meshes,
+        pal.bridge_deck.clone(),
+        Vec3::new(base.x, lower_deck_y, base.z),
+        lower_radius,
+        1.8,
+        "Tamborn Canopy Platform",
+    );
+    spawn_tamborn_ring_rail(
+        commands,
+        meshes,
+        pal.vine.clone(),
+        Vec3::new(base.x, lower_deck_y, base.z),
+        lower_radius + 1.0,
+        2.2,
+        16,
+        0.13,
+    );
+    spawn_tamborn_platform(
+        commands,
+        meshes,
+        pal.moss.clone(),
+        Vec3::new(base.x, upper_deck_y, base.z),
+        upper_radius,
+        1.6,
+        "Tamborn High Canopy Platform",
+    );
+    spawn_tamborn_ring_rail(
+        commands,
+        meshes,
+        pal.vine.clone(),
+        Vec3::new(base.x, upper_deck_y, base.z),
+        upper_radius + 1.0,
+        2.0,
+        14,
+        0.12,
+    );
+
+    for level in 0..5u64 {
+        let pod_y = base.y + height * (0.22 + level as f32 * 0.12);
+        let pods = 3 + (level % 2);
+        for pod in 0..pods {
+            if seeded(seed, 110 + level * 17 + pod) < 0.25 {
+                continue;
+            }
+            let a = yaw + pod as f32 * TAU / pods as f32 + level as f32 * 0.37;
+            let dir = Vec3::new(a.cos(), 0.0, a.sin());
+            let mat = if (level + pod + seed) % 2 == 0 {
+                pal.small_window_warm.clone()
+            } else {
+                pal.small_window_cool.clone()
+            };
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(cube_mesh.clone()),
+                    material: MeshMaterial3d(mat),
+                    transform: Transform::from_translation(
+                        base + dir * (radius + 0.28) + Vec3::Y * pod_y,
+                    )
+                    .with_rotation(Quat::from_rotation_y(a))
+                    .with_scale(Vec3::new(radius * 0.44, 3.6, 0.20)),
+                    ..default()
+                },
+                WorldGeometry,
+                Name::new("Tamborn Living Window"),
+            ));
+        }
+    }
+
+    let canopy_base = base + Vec3::Y * (height + radius * 1.4);
+    for crown in 0..5u64 {
+        let a = yaw + crown as f32 * TAU / 5.0 + seeded(seed, 260 + crown) * 0.28;
+        let radial = if crown == 0 {
+            0.0
+        } else {
+            radius * (3.4 + seeded(seed, 280 + crown) * 1.3)
+        };
+        let crown_scale = radius * (3.0 + seeded(seed, 300 + crown) * 1.4);
+        let transform = Transform::from_translation(
+            canopy_base
+                + Vec3::new(
+                    a.cos() * radial,
+                    crown as f32 * radius * 0.30,
+                    a.sin() * radial,
+                ),
+        )
+        .with_rotation(Quat::from_rotation_y(a))
+        .with_scale(Vec3::new(
+            crown_scale * 1.12,
+            crown_scale * 0.74,
+            crown_scale,
+        ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(sphere_mesh.clone()),
+                material: MeshMaterial3d(foliage.clone()),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(&transform, a, 0.34, 0.008, 0.018, 0.006),
+        ));
+
+        if crown != 0 {
+            spawn_static_cylinder_between(
+                commands,
+                meshes,
+                bark.clone(),
+                base + Vec3::new(
+                    a.cos() * radius * 0.55,
+                    height * 0.72,
+                    a.sin() * radius * 0.55,
+                ),
+                canopy_base
+                    + Vec3::new(
+                        a.cos() * radial * 0.80,
+                        -radius * 0.4,
+                        a.sin() * radial * 0.80,
+                    ),
+                radius * 0.24,
+            );
+        }
+    }
+
+    spawn_vine_curtain(
+        commands,
+        meshes,
+        pal,
+        canopy_base + Vec3::Y * (radius * 2.2),
+        yaw,
+        radius * 4.4,
+        height * 0.68,
+        7 + seed % 4,
+        seed + 620,
+    );
+
+    TambornTower {
+        base,
+        lower_deck_y,
+        upper_deck_y,
+        radius,
+    }
+}
+
+fn spawn_tamborn_platform(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    center: Vec3,
+    radius: f32,
+    thickness: f32,
+    name: &'static str,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(radius, thickness))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(center),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        Name::new(name),
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(thickness * 0.5, radius),
+    ));
+}
+
+fn spawn_tamborn_ring_rail(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    center: Vec3,
+    radius: f32,
+    y_offset: f32,
+    segments: usize,
+    tube_radius: f32,
+) {
+    let count = segments.max(6);
+    for segment in 0..count {
+        let a0 = segment as f32 / count as f32 * TAU;
+        let a1 = (segment + 1) as f32 / count as f32 * TAU;
+        let start = center + Vec3::new(a0.cos() * radius, y_offset, a0.sin() * radius);
+        let end = center + Vec3::new(a1.cos() * radius, y_offset, a1.sin() * radius);
+        spawn_static_cylinder_between(commands, meshes, material.clone(), start, end, tube_radius);
+    }
+}
+
+fn tamborn_bridge_anchor(from: Vec3, y: f32, toward: Vec3, offset: f32) -> Vec3 {
+    let dir = Vec2::new(toward.x - from.x, toward.z - from.z);
+    let dir = if dir.length_squared() > 0.001 {
+        dir.normalize()
+    } else {
+        Vec2::Y
+    };
+    Vec3::new(from.x + dir.x * offset, y, from.z + dir.y * offset)
+}
+
+fn spawn_rope_bridge_between(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    start: Vec3,
+    end: Vec3,
+    width: f32,
+    seed: u64,
+) {
+    let delta = end - start;
+    let horizontal_len = Vec2::new(delta.x, delta.z).length();
+    if horizontal_len <= 8.0 {
+        return;
+    }
+
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let yaw = delta.x.atan2(delta.z);
+    let pitch = (delta.y / horizontal_len).atan().clamp(-0.46, 0.46);
+    let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+    let side_rot = Quat::from_rotation_y(yaw);
+    let center = start + delta * 0.5;
+    let deck_thickness = 0.42;
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(unit_cube.clone()),
+            material: MeshMaterial3d(pal.bridge_deck.clone()),
+            transform: Transform::from_translation(center)
+                .with_rotation(rot)
+                .with_scale(Vec3::new(width, deck_thickness, horizontal_len)),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        Name::new("Tamborn Rope Bridge"),
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(
+            width * 0.5,
+            deck_thickness * 0.5,
+            horizontal_len * 0.5,
+        ),
+    ));
+
+    let plank_count = (horizontal_len / 18.0).ceil().clamp(8.0, 28.0) as usize;
+    let plank_depth = horizontal_len / plank_count as f32 * 0.58;
+    for plank in 0..plank_count {
+        let t = (plank as f32 + 0.5) / plank_count as f32;
+        let local_z = -horizontal_len * 0.5 + horizontal_len * t;
+        let centered = t * 2.0 - 1.0;
+        let sag = -(1.0 - centered.abs()).powi(2) * 0.42;
+        let twist = (seeded(seed, plank as u64 * 13) - 0.5) * 0.06;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(unit_cube.clone()),
+                material: MeshMaterial3d(pal.bridge_deck.clone()),
+                transform: Transform::from_translation(
+                    center + rot * Vec3::new(0.0, 0.44 + sag, local_z),
+                )
+                .with_rotation(rot * Quat::from_rotation_z(twist))
+                .with_scale(Vec3::new(width * 0.96, 0.16, plank_depth)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    for side in [-1.0_f32, 1.0] {
+        let side_offset = side_rot * Vec3::new(side * width * 0.62, 0.0, 0.0);
+        let mut last_high: Option<Vec3> = None;
+        let mut last_low: Option<Vec3> = None;
+        for cable_step in 0..=12 {
+            let t = cable_step as f32 / 12.0;
+            let mid_sag = (1.0 - (t * 2.0 - 1.0).abs()).powi(2);
+            let high = start.lerp(end, t) + side_offset + Vec3::Y * (2.8 - mid_sag * 1.1);
+            let low = start.lerp(end, t) + side_offset + Vec3::Y * (1.05 - mid_sag * 0.55);
+            if let Some(last) = last_high {
+                spawn_static_cylinder_between(commands, meshes, pal.vine.clone(), last, high, 0.16);
+            }
+            if let Some(last) = last_low {
+                spawn_static_cylinder_between(
+                    commands,
+                    meshes,
+                    pal.bark_dark.clone(),
+                    last,
+                    low,
+                    0.13,
+                );
+            }
+            if cable_step % 3 == 0 {
+                spawn_static_cylinder_between(commands, meshes, pal.vine.clone(), low, high, 0.08);
+            }
+            last_high = Some(high);
+            last_low = Some(low);
         }
     }
 }

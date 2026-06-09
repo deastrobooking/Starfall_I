@@ -22,6 +22,7 @@ mod final_war;
 mod hacking;
 mod hero_roster;
 mod lsystem;
+mod modular_character;
 mod perks;
 mod plugins;
 mod procedural_meshes;
@@ -38,6 +39,7 @@ use commands::{CommandOverlayState, CommandRegistry};
 use events::EventsPlugin;
 use final_war::FinalWarRegistry;
 use hacking::HackingRegistry;
+use modular_character::ModularCharacterPlugin;
 use perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChassisEditorPlugin,
@@ -131,6 +133,7 @@ fn main() {
             VehiclePlugin,
             ChassisEditorPlugin,
             RobotGaragePlugin,
+            ModularCharacterPlugin,
         ));
 
     if std::env::var_os("STARFALL_AUTOSTART").is_some() {

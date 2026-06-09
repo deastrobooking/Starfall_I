@@ -737,7 +737,7 @@ pub fn attach_cartoon_character(
     let accent = char_mat(materials, config.accent);
     let hair = char_mat(materials, config.hair);
     let shadow = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.02, 0.02, 0.04, 0.35),
+        base_color: Color::srgba(0.03, 0.045, 0.035, 0.12),
         alpha_mode: AlphaMode::Blend,
         unlit: true,
         ..default()
@@ -776,7 +776,7 @@ pub fn attach_cartoon_character(
         meshes,
         root,
         CartoonPartKind::Shadow,
-        Mesh::from(Cylinder::new(0.62 * s * bw.max(foot_scale), 0.02 * s)),
+        Mesh::from(Cylinder::new(0.42 * s * bw.max(foot_scale), 0.012 * s)),
         shadow,
         Transform::from_xyz(0.0, -1.30 * s * height.max(leg_length), 0.0),
     );
