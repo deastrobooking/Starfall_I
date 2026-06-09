@@ -42,6 +42,11 @@ vehicles, and boss-mode camera all remain part of the movement vocabulary.
 - Current procedural character visuals use `CartoonPose` with separate idle,
   walk, run, jump, fall, flight, one-hand wall slide, attack, Star Sabre slash,
   hang, and grapple wind-up poses.
+- Current runtime characters are still skeleton-free modular meshes. Individual
+  `CartoonPart` entities store root-relative base transforms and are parented
+  directly to the character root. `CharacterBlueprint` already stores rig,
+  socket, IK, and animation recipe data, but the live renderer does not yet
+  instantiate joint entities from that schema.
 - `GrappleHookState` is the first MVP hook foundation: it stores the single-hook
   mode, cable tuning, wind-up/cooldown timers, zip/mountain/attack pull tuning,
   and future attach-point data.
@@ -155,34 +160,243 @@ Acceptance:
 - Flight has at least one new controllable verb beyond holding jetpack.
 - Hook, flight, and wall movement can chain without infinite hover.
 
-### MM7: Animation Foundation
+### MM7: Joint-Hierarchical Skeleton Mesh Foundation
 
-Goal: move from pose-only animation toward an animation-ready humanoid system.
+Goal: replace root-offset pose animation with a real runtime joint hierarchy
+while preserving Starfall's modular cartoon part system.
 
-- Keep `PlayerStateMachine` as the source of truth for movement poses.
-- Expand `CartoonPose` coverage for sprint lean, grapple, zip, swing, glide,
-  hover, air dash, hard landing, roll, mantle, parry, stun, and death.
-- Add debug readout for state, pose, vertical velocity, grounded, wall contact,
-  hook mode, attach distance, stamina, and jetpack fuel.
-- Keep procedural poses mapped to future rigged animation clips.
+This is not a glTF import milestone yet. It is an internal Bevy scene-graph
+skeleton that uses parent-child `Transform` propagation as forward kinematics.
+The result should still render the current capsule/anime parts, but those parts
+attach to named joints instead of being animated as root-relative loose pieces.
+
+#### MM7.1 Runtime Components
+
+Add the skeleton component model to `src/components/character.rs`.
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JointKind {
+    Pelvis,
+    Spine,
+    Chest,
+    Neck,
+    Head,
+    LeftShoulder,
+    LeftElbow,
+    LeftWrist,
+    RightShoulder,
+    RightElbow,
+    RightWrist,
+    LeftHip,
+    LeftKnee,
+    LeftAnkle,
+    RightHip,
+    RightKnee,
+    RightAnkle,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct JointMarker {
+    pub kind: JointKind,
+}
+
+#[derive(Component, Debug, Clone, Default)]
+pub struct SkeletonRig {
+    pub joints: std::collections::HashMap<JointKind, Entity>,
+}
+```
+
+Keep this runtime layer separate from `RigRecipe`: `RigRecipe` is saved design
+data, while `SkeletonRig` is the spawned entity map used by systems. Future
+agents may build the runtime rig from `RigRecipe`, but the first slice can use a
+fixed humanoid table.
+
+#### MM7.2 Humanoid Joint Hierarchy
+
+Add `spawn_skeleton_rig(commands, root, scale, body) -> SkeletonRig` in
+`src/characters.rs`. It should spawn `SpatialBundle` joint entities and parent
+them in this order:
+
+```text
+CharacterRoot
+└── Pelvis
+    ├── LeftHip
+    │   └── LeftKnee
+    │       └── LeftAnkle
+    ├── RightHip
+    │   └── RightKnee
+    │       └── RightAnkle
+    └── Spine
+        └── Chest
+            ├── Neck
+            │   └── Head
+            ├── LeftShoulder
+            │   └── LeftElbow
+            │       └── LeftWrist
+            └── RightShoulder
+                └── RightElbow
+                    └── RightWrist
+```
+
+Joint local offsets should derive from `BodyRecipe` so the same character
+sliders that alter collider proportions also alter limb reach, shoulder width,
+hip width, neck length, and head height.
+
+#### MM7.3 Part-To-Joint Attachments
+
+Extend `CartoonPart` with an optional joint binding:
+
+```rust
+pub struct CartoonPart {
+    pub root: Entity,
+    pub kind: CartoonPartKind,
+    pub joint: Option<JointKind>,
+    pub base_translation: Vec3,
+    pub base_rotation: Quat,
+    pub base_scale: Vec3,
+}
+```
+
+Add a local mapping helper:
+
+| Part Kind | Joint |
+|-----------|-------|
+| `Body`, `Belt`, `Cape`, `SpineRidge` | `Chest` or `Spine` |
+| `Head`, `Hair`, `Hood`, `Hat`, `Eyes`, `Brows`, `Nose`, `Mouth`, `Visor`, `Horns` | `Head` |
+| `LeftArm`, `ShoulderPadLeft` | `LeftShoulder` |
+| `RightArm`, `ShoulderPadRight` | `RightShoulder` |
+| `LeftHand` | `LeftWrist` |
+| `RightHand` | `RightWrist` |
+| `LeftLeg` | `LeftHip` |
+| `RightLeg` | `RightHip` |
+| `LeftFoot`, `LeftBoot` | `LeftAnkle` |
+| `RightFoot`, `RightBoot` | `RightAnkle` |
+| `Tail` | `Pelvis` |
+| `StarBadge` | `Chest` |
+
+Update `spawn_part` to accept `Option<&SkeletonRig>`. If a joint exists, parent
+the mesh entity to the joint; otherwise parent to the root as a compatibility
+fallback. Robot swap helpers in `character_parts.rs` should use the same mapping
+so humanoid and mechanical pieces share one attachment contract.
+
+#### MM7.4 Procedural FK Animator
+
+Refactor `cartoon_animation_system` in `src/plugins/character_plugin.rs` so the
+main pose logic drives joint local rotations first. Mesh attachments should keep
+their base local transforms, while joints carry the motion.
+
+Initial forward-kinematic targets:
+
+- `Pelvis`: bob, hip yaw, landing squash.
+- `Spine` / `Chest`: sprint lean, glide lean, wall-slide hunch, parry brace.
+- `Head` / `Neck`: look-at tendency toward movement, hook targets, and enemies.
+- Shoulders / elbows / wrists: run arm swing, one-hand wall clasp, grapple
+  wind-up, swing hang, sabre slash, melee guard.
+- Hips / knees / ankles: walk/run cycle, jump tuck, fall extension, landing
+  bend, wall slide foot drag.
+
+Keep `PlayerStateMachine` as the gameplay source of truth and `CartoonPose` as
+the animation-state bridge. Do not move gameplay authority into the skeleton.
+
+#### MM7.5 Compatibility And Cleanup
+
+- Existing `CharacterLoadout` swaps must keep working.
+- Existing `CharacterDesign` preview must spawn the same skeleton path as live
+  players so previews match runtime.
+- Existing shadow/body/head part kinds should not disappear when a loadout is
+  toggled back from robot to humanoid.
+- Leave a fallback path for non-humanoid enemies until creature/boss rigs are
+  explicitly authored.
 
 Acceptance:
 
-- Every movement state has a distinct silhouette even before skeletal clips.
+- A spawned hero has a `SkeletonRig` with all 17 expected joints.
+- Current cartoon/anime meshes render in the same rough silhouette but are
+  parented to joints, not directly animated from the root.
+- Walk/run/jump/fall/wall-slide/grapple/sabre poses visibly move the skeleton
+  through joint rotations.
+- Robot part swaps attach to the correct joints and survive character designer
+  preview reloads.
+- No gameplay system reads a joint entity as authoritative player position; root
+  movement and collision remain owned by `PlayerMovement` and Rapier.
 
 ### MM8: Procedural Animation And IK
 
-Goal: make the hero body respond naturally to terrain, walls, hooks, and flight.
+Goal: make the skeleton respond naturally to terrain, walls, hooks, and flight.
 
-- Add hand placement for hook wind-up, swing, wall slide, and climb.
-- Add foot placement on uneven terrain and slopes.
-- Add body tilt from velocity, spine twist from swing arc, and head look-at
-  toward hook targets/enemies.
-- Add landing reactions: soft, hard, roll, slam.
+MM8 assumes MM7's `SkeletonRig` exists. Do not build IK directly against loose
+mesh parts.
+
+#### MM8.1 IK Target Components
+
+Add lightweight runtime targets:
+
+```rust
+#[derive(Component, Debug, Clone, Copy)]
+pub struct IkTarget {
+    pub joint: JointKind,
+    pub target: Vec3,
+    pub pole: Option<Vec3>,
+    pub weight: f32,
+}
+```
+
+The first implementation can keep targets on the character root as data
+components/resources rather than spawning separate target entities. The key is
+that IK resolves into joint rotations, not mesh transforms.
+
+#### MM8.2 Foot Placement
+
+- Sample terrain under `LeftAnkle` and `RightAnkle`.
+- Adjust ankle targets up/down within a short range so feet sit on slopes.
+- Bend knees by rotating hip/knee joints; keep pelvis bob smooth.
+- Disable or reduce foot IK during jump, fall, zip, swing, roll, and hard land
+  recovery.
+
+#### MM8.3 Hand And Wall Contact
+
+- One-hand wall slide: place the leading wrist against the wall normal and tilt
+  chest/spine into the wall.
+- Ledge hang/climb: both wrists lock to the ledge while pelvis and knees tuck.
+- Grapple wind-up: lead wrist aims at target; off hand counterbalances.
+- Swing: one-hand and two-hand hang variants driven by speed/angle.
+
+#### MM8.4 Motion-Responsive Body
+
+- Add body tilt from velocity.
+- Add spine twist from swing arc and dodge direction.
+- Add head look-at toward hook targets, enemies, discussion NPCs, and boss weak
+  points.
+- Add landing reactions: soft bend, hard land, roll, slam.
 
 Acceptance:
 
-- The body reads clearly during swing, zip, wall slide, flight, and landing.
+- Foot placement visibly conforms to mild slopes without jittering.
+- Wall slide, ledge hang, grapple, swing, and sabre poses use wrist/arm chains
+  rather than whole-mesh offsets.
+- IK never pulls the character root through walls or terrain.
+- Controller/local-co-op readability remains intact in split screen and boss
+  mode.
+
+### MM8.5: External Skeletal Asset Bridge
+
+Goal: prepare the internal skeleton for real rigged glTF characters without
+blocking the procedural MVP.
+
+- Define a stable Starfall humanoid bone naming table matching `JointKind`.
+- Document required Blender/export conventions: scale, forward axis, rest pose,
+  clip names, material slots, sockets, and optional robot-part attachment bones.
+- Add an asset-loader seam that can map a glTF skeleton to `JointKind` while
+  preserving `CharacterBlueprint` identity, color, stats, and save data.
+- Runtime rule: if a glTF rig is missing or invalid, fall back to the procedural
+  MM7 skeleton and modular meshes.
+
+Acceptance:
+
+- The game has one canonical bone naming table.
+- A future glTF hero can be imported without changing save schema.
+- Missing external assets never prevent the procedural character from spawning.
 
 ### MM9: Camera And Multiplayer Readability
 

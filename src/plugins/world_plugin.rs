@@ -171,6 +171,12 @@ impl Plugin for WorldPlugin {
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
+            .add_systems(
+                Update,
+                (settlement_economy_tick_system, settlement_build_terminal_system)
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            )
             .add_systems(OnExit(AppState::Playing), cleanup_world);
     }
 }

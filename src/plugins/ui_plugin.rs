@@ -34,6 +34,7 @@ use crate::resources::{
 };
 use crate::commands::{CommandOverlayState, CommandRegistry};
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
+use crate::settlement_economy::SettlementEconomy;
 use crate::state::AppState;
 use crate::upgrades::{all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger};
 
@@ -180,6 +181,7 @@ impl Plugin for UiPlugin {
                     chapter_select_perk_panel_update,
                     chapter_select_upgrade_panel_update,
                     chapter_select_weapon_rank_panel_update,
+                    chapter_select_economy_panel_update,
                 )
                     .run_if(in_state(AppState::ChapterSelect)),
             );
@@ -832,6 +834,12 @@ struct WeaponRankHeader;
 #[derive(Component)]
 struct WeaponRankRowText(pub usize); // weapon slot index 0-5
 
+// ── Settlement Economy Panel markers ──────────────────────────────────────────
+#[derive(Component)]
+struct EconomyPanelHeader;
+#[derive(Component)]
+struct EconomyPanelSiteRow(pub usize); // index into map_settlements()
+
 fn setup_chapter_select(
     mut commands: Commands,
     progress: Res<ChapterProgress>,
@@ -840,6 +848,7 @@ fn setup_chapter_select(
     robot_pets: Res<RobotPetCollection>,
     weapon_ranks: Res<WeaponRanks>,
     world_site_registry: Res<WorldSiteRegistry>,
+    economy: Res<SettlementEconomy>,
 ) {
     let chapters = all_chapters();
     commands
@@ -867,7 +876,7 @@ fn setup_chapter_select(
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
             p.spawn((
-                Text::new("1-9 0 Q W R T / click = travel   |   A-H Perks   |   Z-N Tech   |   Y-P/J Weapons   |   E Editor   |   G Garage   |   Esc Back"),
+                Text::new("1-9 0 Q W R T / click = travel   |   A-H Perks   |   Z-N Tech   |   Y-P/J Weapons   |   M Economy   |   E Editor   |   G Garage   |   Esc Back"),
                 TextFont {
                     font_size: 14.5,
                     ..default()
@@ -1043,6 +1052,40 @@ fn setup_chapter_select(
                         TextFont { font_size: 12.0, ..default() },
                         TextColor(Color::srgb(0.72, 0.55, 0.96)),
                         WeaponRankRowText(slot),
+                    ));
+                }
+            });
+
+            // ── Settlement Economy panel ──────────────────────────────────────
+            p.spawn(Node { height: Val::Px(4.0), ..default() });
+            p.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(3.0),
+                    padding: UiRect::all(Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.04, 0.10, 0.10, 0.90)),
+                BorderColor::all(Color::srgba(0.3, 0.8, 0.75, 0.5)),
+            ))
+            .with_children(|ep| {
+                ep.spawn((
+                    Text::new(format_economy_header(&economy)),
+                    TextFont { font_size: 13.5, ..default() },
+                    TextColor(Color::srgb(0.4, 0.95, 0.9)),
+                    EconomyPanelHeader,
+                ));
+                for (idx, settlement) in map_settlements().iter().enumerate() {
+                    ep.spawn((
+                        Text::new(format_economy_site_row(
+                            settlement,
+                            &economy,
+                            &world_site_registry,
+                        )),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(Color::srgb(0.55, 0.85, 0.8)),
+                        EconomyPanelSiteRow(idx),
                     ));
                 }
             });
@@ -1759,6 +1802,65 @@ fn chapter_select_weapon_rank_panel_update(
             &robot_pets,
         ));
     }
+}
+
+fn chapter_select_economy_panel_update(
+    economy: Res<SettlementEconomy>,
+    world_site_registry: Res<WorldSiteRegistry>,
+    mut header_q: Query<&mut Text, (With<EconomyPanelHeader>, Without<EconomyPanelSiteRow>)>,
+    mut row_q: Query<(&EconomyPanelSiteRow, &mut Text), Without<EconomyPanelHeader>>,
+) {
+    if !(economy.is_changed() || world_site_registry.is_changed()) {
+        return;
+    }
+    for mut text in header_q.iter_mut() {
+        *text = Text::new(format_economy_header(&economy));
+    }
+    let settlements = map_settlements();
+    for (row, mut text) in row_q.iter_mut() {
+        if let Some(settlement) = settlements.get(row.0) {
+            *text = Text::new(format_economy_site_row(settlement, &economy, &world_site_registry));
+        }
+    }
+}
+
+fn format_economy_header(economy: &SettlementEconomy) -> String {
+    format!(
+        "SETTLEMENT ECONOMY   stockpile: {}",
+        economy.stockpile.summary()
+    )
+}
+
+fn format_economy_site_row(
+    settlement: &crate::chapters::MapSettlement,
+    economy: &SettlementEconomy,
+    world_site_registry: &WorldSiteRegistry,
+) -> String {
+    let state_badge = settlement
+        .site_id
+        .and_then(|id| world_site_registry.get(crate::resources::WorldSiteId(id)))
+        .map(|site| match site.state {
+            crate::resources::WorldSiteState::Liberated
+            | crate::resources::WorldSiteState::Building
+            | crate::resources::WorldSiteState::Shielded => "[FREE]",
+            crate::resources::WorldSiteState::EnemyHeld
+            | crate::resources::WorldSiteState::OccupiedAgain => "[HELD]",
+            crate::resources::WorldSiteState::Contested
+            | crate::resources::WorldSiteState::UnderAttack => "[RAID]",
+            crate::resources::WorldSiteState::Damaged => "[DMGD]",
+            crate::resources::WorldSiteState::Hidden => "[????]",
+        })
+        .unwrap_or("[????]");
+    let build_count = economy.total_builds_for(settlement.anchor_id);
+    let rec = economy.next_recommended_build(settlement.anchor_id, settlement.kind);
+    format!(
+        "{} {} | {} build{} | next: {}",
+        state_badge,
+        settlement.name,
+        build_count,
+        if build_count == 1 { "" } else { "s" },
+        rec.label()
+    )
 }
 
 fn rank_bar(rank: u32, max: u32) -> String {
