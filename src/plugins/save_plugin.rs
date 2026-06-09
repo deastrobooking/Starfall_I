@@ -867,13 +867,10 @@ mod tests {
         assert_eq!(data.tech_upgrades.rank(TechUpgradeId::BeamCapacitors), 2);
         assert_eq!(data.tech_upgrades.rejuvenation_charge, 75.0);
         assert!(data.raids.is_empty());
-        assert_eq!(data.part_loadout_body, CharacterPartStyle::RobotMechanical);
-        assert_eq!(data.part_loadout_arms, CharacterPartStyle::HumanoidClothing);
-        assert_eq!(data.part_loadout_legs, CharacterPartStyle::RobotMechanical);
-        assert_eq!(
-            data.part_loadout_shoulders,
-            CharacterPartStyle::RobotMechanical
-        );
+        assert_eq!(data.part_loadout_body, BodyPreset::HeavyPlate);
+        assert_eq!(data.part_loadout_arms, ArmPreset::ScoutArms);
+        assert_eq!(data.part_loadout_legs, LegPreset::JetLegs);
+        assert_eq!(data.part_loadout_shoulders, ShoulderPreset::SpikedPauldrons);
     }
 
     #[test]
@@ -924,10 +921,10 @@ mod tests {
                 economy
             },
             tech_upgrades,
-            part_loadout_body: CharacterPartStyle::RobotMechanical,
-            part_loadout_arms: CharacterPartStyle::RobotMechanical,
-            part_loadout_legs: CharacterPartStyle::HumanoidClothing,
-            part_loadout_shoulders: CharacterPartStyle::RobotMechanical,
+            part_loadout_body: BodyPreset::VoidArmor,
+            part_loadout_arms: ArmPreset::ClawArms,
+            part_loadout_legs: LegPreset::HeavyLegs,
+            part_loadout_shoulders: ShoulderPreset::PlateEpaulettes,
             raids: vec![RaidRecord::cloudrail_tutorial(RaidId(7))],
             hacking: {
                 let mut hacking = HackingRegistry::default();
@@ -968,22 +965,10 @@ mod tests {
             1
         );
         assert_eq!(loaded.tech_upgrades.rejuvenation_charge, 120.0);
-        assert_eq!(
-            loaded.part_loadout_body,
-            CharacterPartStyle::RobotMechanical
-        );
-        assert_eq!(
-            loaded.part_loadout_arms,
-            CharacterPartStyle::RobotMechanical
-        );
-        assert_eq!(
-            loaded.part_loadout_legs,
-            CharacterPartStyle::HumanoidClothing
-        );
-        assert_eq!(
-            loaded.part_loadout_shoulders,
-            CharacterPartStyle::RobotMechanical
-        );
+        assert_eq!(loaded.part_loadout_body, BodyPreset::VoidArmor);
+        assert_eq!(loaded.part_loadout_arms, ArmPreset::ClawArms);
+        assert_eq!(loaded.part_loadout_legs, LegPreset::HeavyLegs);
+        assert_eq!(loaded.part_loadout_shoulders, ShoulderPreset::PlateEpaulettes);
         assert_eq!(loaded.raids.len(), 1);
         assert_eq!(loaded.raids[0].id, RaidId(7));
         assert_eq!(loaded.raids[0].phase, RaidPhase::Warning);

@@ -539,6 +539,7 @@ fn rejuvenation_charge_grant(rank: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::prelude::default;
 
     fn stocked_parts() -> RobotPetCollection {
         let mut robots = RobotPetCollection::default();
