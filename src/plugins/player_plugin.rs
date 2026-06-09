@@ -568,6 +568,7 @@ fn spawn_players(
             arms: part_loadout.arms,
             legs: part_loadout.legs,
             shoulders: part_loadout.shoulders,
+            head: part_loadout.head,
         });
 
         let viewport = player_viewport(i, active, win_w, win_h);

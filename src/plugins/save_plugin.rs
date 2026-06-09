@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::character_blueprint::CharacterBlueprint;
-use crate::character_parts::{ArmPreset, BodyPreset, LegPreset, ShoulderPreset};
+use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::components::weapon::WeaponRanks;
@@ -128,6 +128,8 @@ pub struct SaveData {
     #[serde(default)]
     pub part_loadout_shoulders: ShoulderPreset,
     #[serde(default)]
+    pub part_loadout_head: HeadPreset,
+    #[serde(default)]
     pub weapon_ranks: [u32; 6],
     #[serde(default)]
     pub world_sites: Vec<WorldSiteSaveRecord>,
@@ -232,6 +234,7 @@ impl Default for SaveData {
             part_loadout_arms: ArmPreset::default(),
             part_loadout_legs: LegPreset::default(),
             part_loadout_shoulders: ShoulderPreset::default(),
+            part_loadout_head: HeadPreset::default(),
             weapon_ranks: [0u32; 6],
             world_sites: Vec::new(),
             world_routes: Vec::new(),
@@ -429,6 +432,7 @@ fn build_save_data(
         part_loadout_arms: part_loadout.arms,
         part_loadout_legs: part_loadout.legs,
         part_loadout_shoulders: part_loadout.shoulders,
+        part_loadout_head: part_loadout.head,
         weapon_ranks: weapon_ranks.ranks,
         world_sites: world_site_registry.to_save_records(),
         world_routes: world_route_registry.to_save_records(),
@@ -544,6 +548,7 @@ fn hydrate_progress_from_disk(
         part_loadout.arms = data.part_loadout_arms;
         part_loadout.legs = data.part_loadout_legs;
         part_loadout.shoulders = data.part_loadout_shoulders;
+        part_loadout.head = data.part_loadout_head;
         weapon_ranks.ranks = data.weapon_ranks;
         if world_site_registry.sites.is_empty() {
             world_site_registry.sites = initial_world_sites();
@@ -611,6 +616,7 @@ fn load_save_on_enter(
         part_loadout.arms = data.part_loadout_arms;
         part_loadout.legs = data.part_loadout_legs;
         part_loadout.shoulders = data.part_loadout_shoulders;
+        part_loadout.head = data.part_loadout_head;
         weapon_ranks.ranks = data.weapon_ranks;
         if world_site_registry.sites.is_empty() {
             world_site_registry.sites = initial_world_sites();
@@ -814,6 +820,7 @@ mod tests {
             arms: ArmPreset::ScoutArms,
             legs: LegPreset::JetLegs,
             shoulders: ShoulderPreset::SpikedPauldrons,
+            head: HeadPreset::CombatHelmet,
         };
 
         let data = build_save_data(
@@ -871,6 +878,7 @@ mod tests {
         assert_eq!(data.part_loadout_arms, ArmPreset::ScoutArms);
         assert_eq!(data.part_loadout_legs, LegPreset::JetLegs);
         assert_eq!(data.part_loadout_shoulders, ShoulderPreset::SpikedPauldrons);
+        assert_eq!(data.part_loadout_head, HeadPreset::CombatHelmet);
     }
 
     #[test]
@@ -925,6 +933,7 @@ mod tests {
             part_loadout_arms: ArmPreset::ClawArms,
             part_loadout_legs: LegPreset::HeavyLegs,
             part_loadout_shoulders: ShoulderPreset::PlateEpaulettes,
+            part_loadout_head: HeadPreset::VoidMask,
             raids: vec![RaidRecord::cloudrail_tutorial(RaidId(7))],
             hacking: {
                 let mut hacking = HackingRegistry::default();
@@ -969,6 +978,7 @@ mod tests {
         assert_eq!(loaded.part_loadout_arms, ArmPreset::ClawArms);
         assert_eq!(loaded.part_loadout_legs, LegPreset::HeavyLegs);
         assert_eq!(loaded.part_loadout_shoulders, ShoulderPreset::PlateEpaulettes);
+        assert_eq!(loaded.part_loadout_head, HeadPreset::VoidMask);
         assert_eq!(loaded.raids.len(), 1);
         assert_eq!(loaded.raids[0].id, RaidId(7));
         assert_eq!(loaded.raids[0].phase, RaidPhase::Warning);

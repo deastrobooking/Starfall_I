@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 
 use crate::character_parts::{
-    spawn_arms, spawn_body, spawn_legs, spawn_shoulders, CharacterLoadout, CharacterVisualConfig,
-    PartSlotTag,
+    spawn_arms, spawn_body, spawn_head, spawn_legs, spawn_shoulders, CharacterLoadout,
+    CharacterVisualConfig, PartSlotTag,
 };
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
@@ -79,7 +79,14 @@ fn swap_character_parts(
     for (root, loadout, visual_cfg) in &changed {
         let lift = visual_cfg.visual_ground_lift;
 
-        let swappable = [PartSlotTag::Body, PartSlotTag::Arms, PartSlotTag::Legs, PartSlotTag::Shoulders];
+        let swappable = [
+            PartSlotTag::Body,
+            PartSlotTag::Arms,
+            PartSlotTag::Legs,
+            PartSlotTag::Shoulders,
+            PartSlotTag::Head,
+            PartSlotTag::HeadGear,
+        ];
         for (entity, part, tag) in &parts {
             if part.root == root && swappable.contains(tag) {
                 commands.entity(entity).try_despawn();
@@ -90,6 +97,7 @@ fn swap_character_parts(
         spawn_arms(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.arms);
         spawn_legs(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.legs);
         spawn_shoulders(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.shoulders);
+        spawn_head(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.head);
     }
 }
 

@@ -197,6 +197,40 @@ impl ShoulderPreset {
     }
 }
 
+/// Head / helmet preset.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+pub enum HeadPreset {
+    /// Natural humanoid face — exposed head, hair, glowing eyes.
+    #[default]
+    OpenFace,
+    /// Angular tactical shell with forehead brow and eye-slit visor.
+    CombatHelmet,
+    /// Enclosed power-armor dome with glowing horizontal visor strip.
+    FullHelm,
+    /// Dark oversized skull with two glowing void eye sockets.
+    VoidMask,
+}
+
+impl HeadPreset {
+    pub fn label(self) -> &'static str {
+        match self {
+            HeadPreset::OpenFace => "Open Face",
+            HeadPreset::CombatHelmet => "Combat Helmet",
+            HeadPreset::FullHelm => "Full Helm",
+            HeadPreset::VoidMask => "Void Mask",
+        }
+    }
+
+    pub fn cycle(self) -> Self {
+        match self {
+            HeadPreset::OpenFace => HeadPreset::CombatHelmet,
+            HeadPreset::CombatHelmet => HeadPreset::FullHelm,
+            HeadPreset::FullHelm => HeadPreset::VoidMask,
+            HeadPreset::VoidMask => HeadPreset::OpenFace,
+        }
+    }
+}
+
 // ── Loadout types ─────────────────────────────────────────────────────────────
 
 /// Per-slot preset selection. Mutate to trigger `swap_character_parts`.
@@ -206,6 +240,7 @@ pub struct CharacterLoadout {
     pub arms: ArmPreset,
     pub legs: LegPreset,
     pub shoulders: ShoulderPreset,
+    pub head: HeadPreset,
 }
 
 /// Cached visual parameters for part re-spawning.
@@ -220,6 +255,9 @@ pub struct CharacterVisualConfig {
     pub foot_scale: f32,
     pub outfit: Color,
     pub accent: Color,
+    pub skin: Color,
+    pub hair: Color,
+    pub eye: Color,
     pub has_gloves: bool,
     pub has_boots: bool,
     pub visual_ground_lift: f32,
@@ -292,6 +330,23 @@ pub fn spawn_shoulders(
         ShoulderPreset::SpikedPauldrons => spawn_shoulders_spiked(commands, meshes, materials, root, cfg, y_lift),
         ShoulderPreset::PlateEpaulettes => spawn_shoulders_plate(commands, meshes, materials, root, cfg, y_lift),
         ShoulderPreset::None => {}
+    }
+}
+
+pub fn spawn_head(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    cfg: &CharacterVisualConfig,
+    y_lift: f32,
+    preset: HeadPreset,
+) {
+    match preset {
+        HeadPreset::OpenFace => spawn_head_open_face(commands, meshes, materials, root, cfg, y_lift),
+        HeadPreset::CombatHelmet => spawn_head_combat(commands, meshes, materials, root, cfg, y_lift),
+        HeadPreset::FullHelm => spawn_head_full_helm(commands, meshes, materials, root, cfg, y_lift),
+        HeadPreset::VoidMask => spawn_head_void_mask(commands, meshes, materials, root, cfg, y_lift),
     }
 }
 
@@ -995,6 +1050,189 @@ fn spawn_shoulders_plate(
             Transform::from_xyz(x, 0.27 * s + y_lift, -0.010 * s)
                 .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
     }
+}
+
+// ── Head presets ──────────────────────────────────────────────────────────────
+
+fn spawn_head_open_face(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    cfg: &CharacterVisualConfig,
+    y_lift: f32,
+) {
+    let s = cfg.scale;
+    let head_y = y_lift + 0.58 * s;
+
+    let skin_mat = robot_mat(materials, cfg.skin);
+    let hair_mat = robot_mat(materials, cfg.hair);
+    let eye_mat = emissive_mat(materials, cfg.eye, 5.0);
+
+    spawn_part(commands, meshes, root, CartoonPartKind::Head,
+        Mesh::from(Sphere::new(0.34 * s)),
+        skin_mat.clone(),
+        Transform::from_xyz(0.0, head_y, -0.005 * s)
+            .with_scale(Vec3::new(0.92, 1.08, 0.88)),
+        PartSlotTag::Head);
+    spawn_part(commands, meshes, root, CartoonPartKind::Hair,
+        Mesh::from(Sphere::new(0.36 * s)),
+        hair_mat.clone(),
+        Transform::from_xyz(0.0, head_y + 0.12 * s, -0.015 * s)
+            .with_scale(Vec3::new(1.04, 0.42, 0.88)),
+        PartSlotTag::Head);
+    for (kind, eye_x) in [
+        (CartoonPartKind::LeftEye, -0.13_f32),
+        (CartoonPartKind::RightEye, 0.13_f32),
+    ] {
+        spawn_part(commands, meshes, root, kind,
+            Mesh::from(Sphere::new(0.060 * s)),
+            eye_mat.clone(),
+            Transform::from_xyz(eye_x * s, head_y + 0.04 * s, -0.32 * s)
+                .with_scale(Vec3::new(0.82, 1.18, 0.30)),
+            PartSlotTag::Head);
+    }
+}
+
+fn spawn_head_combat(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    cfg: &CharacterVisualConfig,
+    y_lift: f32,
+) {
+    let s = cfg.scale;
+    let head_y = y_lift + 0.58 * s;
+
+    let shell = robot_mat(materials, cfg.outfit);
+    let dark_shell = robot_mat(materials, darken(cfg.outfit, 0.60));
+    let visor_glow = emissive_mat(materials, cfg.accent, 3.5);
+
+    // Main dome — angled flat-top sphere
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Sphere::new(0.38 * s)),
+        shell.clone(),
+        Transform::from_xyz(0.0, head_y + 0.04 * s, 0.02 * s)
+            .with_scale(Vec3::new(1.04, 0.94, 1.0)),
+        PartSlotTag::HeadGear);
+    // Brow plate
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cuboid::new(0.48 * s, 0.10 * s, 0.09 * s)),
+        dark_shell.clone(),
+        Transform::from_xyz(0.0, head_y + 0.22 * s, -0.26 * s),
+        PartSlotTag::HeadGear);
+    // Eye-slit visor
+    spawn_part(commands, meshes, root, CartoonPartKind::Visor,
+        Mesh::from(Cuboid::new(0.30 * s, 0.040 * s, 0.055 * s)),
+        visor_glow.clone(),
+        Transform::from_xyz(0.0, head_y + 0.09 * s, -0.36 * s),
+        PartSlotTag::HeadGear);
+    // Cheek guards
+    for (cx, rz) in [(-0.30_f32, 0.08_f32), (0.30_f32, -0.08_f32)] {
+        spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+            Mesh::from(Cuboid::new(0.09 * s, 0.22 * s, 0.20 * s)),
+            dark_shell.clone(),
+            Transform::from_xyz(cx * s, head_y - 0.07 * s, -0.12 * s)
+                .with_rotation(Quat::from_rotation_z(rz)),
+            PartSlotTag::HeadGear);
+    }
+    // Chin guard
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cuboid::new(0.26 * s, 0.08 * s, 0.13 * s)),
+        dark_shell.clone(),
+        Transform::from_xyz(0.0, head_y - 0.26 * s, -0.22 * s),
+        PartSlotTag::HeadGear);
+}
+
+fn spawn_head_full_helm(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    cfg: &CharacterVisualConfig,
+    y_lift: f32,
+) {
+    let s = cfg.scale;
+    let head_y = y_lift + 0.58 * s;
+
+    let shell = robot_mat(materials, darken(cfg.outfit, 0.78));
+    let brow_mat = robot_mat(materials, darken(cfg.accent, 0.55));
+    let visor_glow = emissive_mat(materials, cfg.accent, 6.0);
+    let collar = robot_mat(materials, darken(cfg.outfit, 0.52));
+
+    // Main ovoid shell
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Sphere::new(0.40 * s)),
+        shell.clone(),
+        Transform::from_xyz(0.0, head_y + 0.04 * s, 0.0)
+            .with_scale(Vec3::new(1.00, 1.10, 0.97)),
+        PartSlotTag::HeadGear);
+    // Brow ridge
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cuboid::new(0.52 * s, 0.078 * s, 0.075 * s)),
+        brow_mat.clone(),
+        Transform::from_xyz(0.0, head_y + 0.26 * s, -0.28 * s),
+        PartSlotTag::HeadGear);
+    // Glowing visor slit
+    spawn_part(commands, meshes, root, CartoonPartKind::Visor,
+        Mesh::from(Cuboid::new(0.34 * s, 0.042 * s, 0.038 * s)),
+        visor_glow.clone(),
+        Transform::from_xyz(0.0, head_y + 0.10 * s, -0.38 * s),
+        PartSlotTag::HeadGear);
+    // Neck collar ring
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cylinder::new(0.30 * s, 0.10 * s)),
+        collar.clone(),
+        Transform::from_xyz(0.0, head_y - 0.38 * s, 0.0),
+        PartSlotTag::HeadGear);
+}
+
+fn spawn_head_void_mask(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    cfg: &CharacterVisualConfig,
+    y_lift: f32,
+) {
+    let s = cfg.scale;
+    let head_y = y_lift + 0.58 * s;
+
+    let void_shell = robot_mat(materials, darken(cfg.outfit, 0.20));
+    let eye_glow = emissive_mat(materials, cfg.accent, 9.0);
+    let crest_mat = robot_mat(materials, darken(cfg.accent, 0.42));
+
+    // Large dark skull sphere
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Sphere::new(0.44 * s)),
+        void_shell.clone(),
+        Transform::from_xyz(0.0, head_y + 0.06 * s, -0.01 * s)
+            .with_scale(Vec3::new(1.02, 1.08, 1.0)),
+        PartSlotTag::HeadGear);
+    // Glowing eye sockets
+    for eye_x in [-0.14_f32, 0.14_f32] {
+        spawn_part(commands, meshes, root, CartoonPartKind::Visor,
+            Mesh::from(Sphere::new(0.058 * s)),
+            eye_glow.clone(),
+            Transform::from_xyz(eye_x * s, head_y + 0.09 * s, -0.38 * s)
+                .with_scale(Vec3::new(1.0, 1.35, 0.38)),
+            PartSlotTag::HeadGear);
+    }
+    // Top crest ridge
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cuboid::new(0.07 * s, 0.18 * s, 0.30 * s)),
+        crest_mat.clone(),
+        Transform::from_xyz(0.0, head_y + 0.48 * s, -0.04 * s)
+            .with_rotation(Quat::from_rotation_x(-0.12)),
+        PartSlotTag::HeadGear);
+    // Lower jaw plate
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Sphere::new(0.5)),
+        void_shell.clone(),
+        Transform::from_xyz(0.0, head_y - 0.22 * s, -0.18 * s)
+            .with_scale(Vec3::new(0.36 * s, 0.19 * s, 0.25 * s)),
+        PartSlotTag::HeadGear);
 }
 
 // ── Legacy aliases (keep callers in characters.rs building) ───────────────────

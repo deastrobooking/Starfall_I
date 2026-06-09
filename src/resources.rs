@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chapters::{Biome, ChapterId};
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
-use crate::character_parts::{ArmPreset, BodyPreset, LegPreset, ShoulderPreset};
+use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
 use crate::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
@@ -338,6 +338,7 @@ pub struct PlayerPartLoadout {
     pub arms: ArmPreset,
     pub legs: LegPreset,
     pub shoulders: ShoulderPreset,
+    pub head: HeadPreset,
 }
 
 // ── Chapter Progress (saveable) ───────────────────────────────────────────────

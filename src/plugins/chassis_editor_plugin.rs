@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::character_parts::{ArmPreset, BodyPreset, CharacterLoadout, LegPreset, ShoulderPreset};
+use crate::character_parts::{ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset};
 use crate::characters::{hero_config, spawn_cartoon_character};
 use crate::resources::{PlayerChassis, PlayerPartLoadout, PlayerSelectState};
 use crate::robots::presets::{amp, atlas, theta, valor, volt};
@@ -38,6 +38,7 @@ struct ChassisEditorData {
     arms: ArmPreset,
     legs: LegPreset,
     shoulders: ShoulderPreset,
+    head: HeadPreset,
 }
 
 // ── Marker components ─────────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ enum SlotId {
     Arms,
     Legs,
     Shoulders,
+    Head,
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ fn setup_editor(
     data.arms = loadout.arms;
     data.legs = loadout.legs;
     data.shoulders = loadout.shoulders;
+    data.head = loadout.head;
     data.spin_angle = 0.0;
 
     // Position camera the same as the character design preview.
@@ -179,6 +182,7 @@ fn setup_editor(
                     (SlotId::Arms, "W", "Arms"),
                     (SlotId::Legs, "E", "Legs"),
                     (SlotId::Shoulders, "R", "Shoulders"),
+                    (SlotId::Head, "T", "Head"),
                 ] {
                     panel
                         .spawn(Node {
@@ -301,6 +305,8 @@ fn editor_keyboard_input(
         Some(SlotId::Legs)
     } else if keyboard.just_pressed(KeyCode::KeyR) {
         Some(SlotId::Shoulders)
+    } else if keyboard.just_pressed(KeyCode::KeyT) {
+        Some(SlotId::Head)
     } else {
         None
     };
@@ -311,6 +317,7 @@ fn editor_keyboard_input(
             SlotId::Arms => data.arms = data.arms.cycle(),
             SlotId::Legs => data.legs = data.legs.cycle(),
             SlotId::Shoulders => data.shoulders = data.shoulders.cycle(),
+            SlotId::Head => data.head = data.head.cycle(),
         };
 
         // Apply to the live preview character immediately
@@ -320,6 +327,7 @@ fn editor_keyboard_input(
                 cl.arms = data.arms;
                 cl.legs = data.legs;
                 cl.shoulders = data.shoulders;
+                cl.head = data.head;
             }
         }
     }
@@ -355,6 +363,7 @@ fn editor_keyboard_input(
         part_loadout.arms = data.arms;
         part_loadout.legs = data.legs;
         part_loadout.shoulders = data.shoulders;
+        part_loadout.head = data.head;
         next_state.set(AppState::ChapterSelect);
     }
 
@@ -379,6 +388,7 @@ fn update_slot_labels(
             SlotId::Arms => data.arms.label(),
             SlotId::Legs => data.legs.label(),
             SlotId::Shoulders => data.shoulders.label(),
+            SlotId::Head => data.head.label(),
         };
         text.0 = format!("◄ {name} ►");
         *color = TextColor(Color::srgb(0.4, 0.95, 1.0));
