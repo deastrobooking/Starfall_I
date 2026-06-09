@@ -1,13 +1,12 @@
-//! Chassis editor — live 3D preview with swappable humanoid/robot part slots.
+//! Chassis editor — live 3D preview with named part presets per slot.
 //!
-//! Keys Q/W/E/R toggle Body/Arms/Legs/Shoulders between Humanoid and Robot.
-//! Keys 1-5 cycle the robot accent colour preset.
-//! +/- adjust the preview scale (informational; applied to the saved PlayerChassis).
-//! Enter confirms and saves to `PlayerPartLoadout`. Esc exits without saving.
+//! Keys Q/W/E/R cycle Body/Arms/Legs/Shoulders through their preset variants.
+//! Keys 1-5 cycle the accent colour preset.
+//! +/- adjust the preview scale. Enter confirms. Esc exits without saving.
 
 use bevy::prelude::*;
 
-use crate::character_parts::{CharacterLoadout, CharacterPartStyle};
+use crate::character_parts::{ArmPreset, BodyPreset, CharacterLoadout, LegPreset, ShoulderPreset};
 use crate::characters::{hero_config, spawn_cartoon_character};
 use crate::resources::{PlayerChassis, PlayerPartLoadout, PlayerSelectState};
 use crate::robots::presets::{amp, atlas, theta, valor, volt};
@@ -35,10 +34,10 @@ impl Plugin for ChassisEditorPlugin {
 struct ChassisEditorData {
     preview_entity: Option<Entity>,
     spin_angle: f32,
-    body: CharacterPartStyle,
-    arms: CharacterPartStyle,
-    legs: CharacterPartStyle,
-    shoulders: CharacterPartStyle,
+    body: BodyPreset,
+    arms: ArmPreset,
+    legs: LegPreset,
+    shoulders: ShoulderPreset,
 }
 
 // ── Marker components ─────────────────────────────────────────────────────────
@@ -307,15 +306,11 @@ fn editor_keyboard_input(
     };
 
     if let Some(slot) = toggled {
-        let style = match slot {
-            SlotId::Body => &mut data.body,
-            SlotId::Arms => &mut data.arms,
-            SlotId::Legs => &mut data.legs,
-            SlotId::Shoulders => &mut data.shoulders,
-        };
-        *style = match *style {
-            CharacterPartStyle::HumanoidClothing => CharacterPartStyle::RobotMechanical,
-            CharacterPartStyle::RobotMechanical => CharacterPartStyle::HumanoidClothing,
+        match slot {
+            SlotId::Body => data.body = data.body.cycle(),
+            SlotId::Arms => data.arms = data.arms.cycle(),
+            SlotId::Legs => data.legs = data.legs.cycle(),
+            SlotId::Shoulders => data.shoulders = data.shoulders.cycle(),
         };
 
         // Apply to the live preview character immediately
@@ -379,21 +374,13 @@ fn update_slot_labels(
         return;
     }
     for (label, mut text, mut color) in label_q.iter_mut() {
-        let style = match label.0 {
-            SlotId::Body => data.body,
-            SlotId::Arms => data.arms,
-            SlotId::Legs => data.legs,
-            SlotId::Shoulders => data.shoulders,
+        let name = match label.0 {
+            SlotId::Body => data.body.label(),
+            SlotId::Arms => data.arms.label(),
+            SlotId::Legs => data.legs.label(),
+            SlotId::Shoulders => data.shoulders.label(),
         };
-        match style {
-            CharacterPartStyle::HumanoidClothing => {
-                text.0 = "◄ Humanoid ►".to_string();
-                *color = TextColor(Color::srgb(1.0, 0.90, 0.55));
-            }
-            CharacterPartStyle::RobotMechanical => {
-                text.0 = "◄ Robot    ►".to_string();
-                *color = TextColor(Color::srgb(0.4, 0.85, 1.0));
-            }
-        }
+        text.0 = format!("◄ {name} ►");
+        *color = TextColor(Color::srgb(0.4, 0.95, 1.0));
     }
 }

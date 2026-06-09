@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::f32::consts::PI;
 
 use crate::character_parts::{
-    spawn_robot_arms, spawn_robot_body, spawn_robot_legs, spawn_robot_shoulders, CharacterLoadout,
-    CharacterPartStyle, CharacterVisualConfig, PartSlotTag,
+    spawn_arms, spawn_body, spawn_legs, spawn_shoulders, CharacterLoadout, CharacterVisualConfig,
+    PartSlotTag,
 };
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
@@ -79,73 +79,17 @@ fn swap_character_parts(
     for (root, loadout, visual_cfg) in &changed {
         let lift = visual_cfg.visual_ground_lift;
 
-        let slots = [
-            (PartSlotTag::Body, loadout.body),
-            (PartSlotTag::Arms, loadout.arms),
-            (PartSlotTag::Legs, loadout.legs),
-            (PartSlotTag::Shoulders, loadout.shoulders),
-        ];
-
-        for (slot_tag, style) in slots {
-            // Despawn all existing parts for this slot on this root.
-            for (entity, part, tag) in &parts {
-                if part.root == root && *tag == slot_tag {
-                    commands.entity(entity).try_despawn();
-                }
-            }
-
-            // Spawn the new style.
-            match style {
-                CharacterPartStyle::RobotMechanical => match slot_tag {
-                    PartSlotTag::Body => {
-                        spawn_robot_body(
-                            &mut commands,
-                            &mut meshes,
-                            &mut materials,
-                            root,
-                            visual_cfg,
-                            lift,
-                        );
-                    }
-                    PartSlotTag::Arms => {
-                        spawn_robot_arms(
-                            &mut commands,
-                            &mut meshes,
-                            &mut materials,
-                            root,
-                            visual_cfg,
-                            lift,
-                        );
-                    }
-                    PartSlotTag::Legs => {
-                        spawn_robot_legs(
-                            &mut commands,
-                            &mut meshes,
-                            &mut materials,
-                            root,
-                            visual_cfg,
-                            lift,
-                        );
-                    }
-                    PartSlotTag::Shoulders => {
-                        spawn_robot_shoulders(
-                            &mut commands,
-                            &mut meshes,
-                            &mut materials,
-                            root,
-                            visual_cfg,
-                            lift,
-                        );
-                    }
-                    _ => {}
-                },
-                CharacterPartStyle::HumanoidClothing => {
-                    // Humanoid parts were just despawned; full re-spawn requires
-                    // calling attach_cartoon_character again from outside this system.
-                    // The caller (e.g. chassis editor) is responsible for that.
-                }
+        let swappable = [PartSlotTag::Body, PartSlotTag::Arms, PartSlotTag::Legs, PartSlotTag::Shoulders];
+        for (entity, part, tag) in &parts {
+            if part.root == root && swappable.contains(tag) {
+                commands.entity(entity).try_despawn();
             }
         }
+
+        spawn_body(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.body);
+        spawn_arms(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.arms);
+        spawn_legs(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.legs);
+        spawn_shoulders(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.shoulders);
     }
 }
 

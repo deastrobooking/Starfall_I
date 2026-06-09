@@ -13,8 +13,35 @@ impl Plugin for ArmorPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (apply_armor_health_bonus, element_switch_system).run_if(in_state(AppState::Playing)),
+            (
+                sync_armor_upgrade_state,
+                apply_armor_health_bonus,
+                element_switch_system,
+            )
+                .chain()
+                .run_if(in_state(AppState::Playing)),
         );
+    }
+}
+
+fn sync_armor_upgrade_state(
+    upgrades: Res<UpgradeLedger>,
+    mut player_q: Query<&mut ArmorSet, With<Player>>,
+) {
+    let state = ArmorUpgradeState {
+        shield_defense_bonus: upgrades.armor_shield_defense_bonus(),
+        hardened_reduction: upgrades.armor_hardened_reduction(),
+        retaliation_damage: upgrades.armor_retaliation_damage(),
+        retaliation_radius: upgrades.armor_retaliation_radius(),
+        speed_mult: upgrades.armor_speed_mult(),
+        strength_mult: upgrades.armor_strength_mult(),
+        jump_mult: upgrades.armor_jump_mult(),
+    };
+
+    for mut armor in player_q.iter_mut() {
+        if armor.upgrade_state != state {
+            armor.upgrade_state = state;
+        }
     }
 }
 
@@ -48,6 +75,17 @@ fn apply_armor_health_bonus(
             };
             stats.max_stamina = new_stamina_max;
             stats.stamina = (new_stamina_max * ratio).min(new_stamina_max);
+        }
+
+        let new_armor_max = 100.0 + armor.upgrade_state.shield_defense_bonus * 0.8;
+        if (stats.max_armor - new_armor_max).abs() > 0.1 {
+            let ratio = if stats.max_armor > 0.0 {
+                stats.armor / stats.max_armor
+            } else {
+                1.0
+            };
+            stats.max_armor = new_armor_max;
+            stats.armor = (new_armor_max * ratio).min(new_armor_max);
         }
     }
 }

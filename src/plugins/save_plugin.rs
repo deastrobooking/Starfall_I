@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::character_blueprint::CharacterBlueprint;
-use crate::character_parts::CharacterPartStyle;
+use crate::character_parts::{ArmPreset, BodyPreset, LegPreset, ShoulderPreset};
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::components::weapon::WeaponRanks;
@@ -120,13 +120,13 @@ pub struct SaveData {
     #[serde(default)]
     pub tech_upgrades: UpgradeLedger,
     #[serde(default)]
-    pub part_loadout_body: CharacterPartStyle,
+    pub part_loadout_body: BodyPreset,
     #[serde(default)]
-    pub part_loadout_arms: CharacterPartStyle,
+    pub part_loadout_arms: ArmPreset,
     #[serde(default)]
-    pub part_loadout_legs: CharacterPartStyle,
+    pub part_loadout_legs: LegPreset,
     #[serde(default)]
-    pub part_loadout_shoulders: CharacterPartStyle,
+    pub part_loadout_shoulders: ShoulderPreset,
     #[serde(default)]
     pub weapon_ranks: [u32; 6],
     #[serde(default)]
@@ -228,10 +228,10 @@ impl Default for SaveData {
             robot_pets: RobotPetCollection::default(),
             settlement_economy: SettlementEconomy::default(),
             tech_upgrades: UpgradeLedger::default(),
-            part_loadout_body: CharacterPartStyle::HumanoidClothing,
-            part_loadout_arms: CharacterPartStyle::HumanoidClothing,
-            part_loadout_legs: CharacterPartStyle::HumanoidClothing,
-            part_loadout_shoulders: CharacterPartStyle::HumanoidClothing,
+            part_loadout_body: BodyPreset::default(),
+            part_loadout_arms: ArmPreset::default(),
+            part_loadout_legs: LegPreset::default(),
+            part_loadout_shoulders: ShoulderPreset::default(),
             weapon_ranks: [0u32; 6],
             world_sites: Vec::new(),
             world_routes: Vec::new(),
@@ -810,10 +810,10 @@ mod tests {
             )
             .expect("test stockpile should build a farm");
         let part_loadout = PlayerPartLoadout {
-            body: CharacterPartStyle::RobotMechanical,
-            arms: CharacterPartStyle::HumanoidClothing,
-            legs: CharacterPartStyle::RobotMechanical,
-            shoulders: CharacterPartStyle::RobotMechanical,
+            body: BodyPreset::HeavyPlate,
+            arms: ArmPreset::ScoutArms,
+            legs: LegPreset::JetLegs,
+            shoulders: ShoulderPreset::SpikedPauldrons,
         };
 
         let data = build_save_data(

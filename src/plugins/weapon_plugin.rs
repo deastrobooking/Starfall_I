@@ -196,17 +196,23 @@ fn aim_assist_direction(
     raw_forward: Vec3,
     muzzle_pos: Vec3,
     enemy_q: &Query<&Transform, (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>)>,
+    range_bonus: f32,
+    cone_relax: f32,
+    strength_bonus: f32,
 ) -> Vec3 {
     const ASSIST_RANGE: f32 = 14.0;
     const ASSIST_CONE_COS: f32 = 0.96; // ~15° half-angle
     const ASSIST_STRENGTH: f32 = 0.28;
 
-    let mut best_dot = ASSIST_CONE_COS;
+    let assist_range = ASSIST_RANGE + range_bonus;
+    let assist_cone_cos = (ASSIST_CONE_COS - cone_relax).clamp(0.82, 0.99);
+    let assist_strength = (ASSIST_STRENGTH + strength_bonus).clamp(0.0, 0.85);
+    let mut best_dot = assist_cone_cos;
     let mut best_dir: Option<Vec3> = None;
 
     for e_transform in enemy_q.iter() {
         let to = e_transform.translation - muzzle_pos;
-        if to.length() > ASSIST_RANGE {
+        if to.length() > assist_range {
             continue;
         }
         let to_norm = to.normalize_or_zero();
@@ -218,9 +224,31 @@ fn aim_assist_direction(
     }
 
     if let Some(target_dir) = best_dir {
-        (raw_forward * (1.0 - ASSIST_STRENGTH) + target_dir * ASSIST_STRENGTH).normalize()
+        (raw_forward * (1.0 - assist_strength) + target_dir * assist_strength).normalize()
     } else {
         raw_forward
+    }
+}
+
+fn gauntlet_projectile_damage_type(upgrades: &UpgradeLedger, fallback: DamageType) -> DamageType {
+    if upgrades.gauntlet_has_rift() {
+        DamageType::Rift
+    } else if upgrades.gauntlet_has_electric() {
+        DamageType::Electric
+    } else if upgrades.gauntlet_has_fire() {
+        DamageType::Fire
+    } else {
+        fallback
+    }
+}
+
+fn primary_fallback_damage_type(weapon_type: WeaponType, is_explosive: bool) -> DamageType {
+    if is_explosive || matches!(weapon_type, WeaponType::Rocket | WeaponType::Grenade) {
+        DamageType::Explosive
+    } else if weapon_type == WeaponType::Laser {
+        DamageType::Laser
+    } else {
+        DamageType::Plasma
     }
 }
 
@@ -315,23 +343,43 @@ fn weapon_fire_system(
             if weapon.charge_progress >= 1.0 && weapon.fire_timer <= 0.0 && weapon.ammo >= 3 {
                 let raw_fwd = cam.forward().as_vec3();
                 let pos = star_muzzle_origin(player_transform, raw_fwd);
-                let aim_fwd = aim_assist_direction(raw_fwd, pos, &enemy_q);
+                let aim_fwd = aim_assist_direction(
+                    raw_fwd,
+                    pos,
+                    &enemy_q,
+                    upgrades.gauntlet_aim_range_bonus(),
+                    upgrades.gauntlet_aim_cone_relax(),
+                    upgrades.gauntlet_aim_strength_bonus(),
+                );
 
-                let tech_mult = if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
+                let explosive_weapon =
+                    weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket;
+                let tech_mult = if explosive_weapon {
                     upgrades.missile_damage_mult()
                 } else {
                     upgrades.beam_damage_mult()
+                };
+                let gauntlet_mult = if explosive_weapon {
+                    upgrades.gauntlet_explosive_damage_mult()
+                } else {
+                    upgrades.gauntlet_energy_damage_mult()
                 };
                 let charge_dmg = armor.modified_outgoing_damage(
                     weapon.damage
                         * weapon.rank_damage_mult()
                         * perk_damage_mult
                         * tech_mult
+                        * gauntlet_mult
                         * weapon.charge_damage_mult(),
                 );
                 let wt = weapon.weapon_type;
-                let charge_radius = weapon.charge_explosion_radius();
-                let base_speed = weapon.speed;
+                let charge_radius =
+                    weapon.charge_explosion_radius() * upgrades.gauntlet_explosion_radius_mult();
+                let base_speed = weapon.speed * upgrades.gauntlet_projectile_speed_mult();
+                let damage_type = gauntlet_projectile_damage_type(
+                    &upgrades,
+                    primary_fallback_damage_type(wt, explosive_weapon),
+                );
                 spawn_charge_blast(
                     &mut commands,
                     &proj_assets,
@@ -340,6 +388,7 @@ fn weapon_fire_system(
                     cam.right().as_vec3(),
                     wt,
                     charge_dmg,
+                    damage_type,
                     charge_radius,
                     base_speed,
                 );
@@ -368,24 +417,51 @@ fn weapon_fire_system(
         let pos = star_muzzle_origin(player_transform, raw_fwd);
         let right = cam.right().as_vec3();
         let up = cam.up().as_vec3();
-        let aim_fwd = aim_assist_direction(raw_fwd, pos, &enemy_q);
+        let aim_fwd = aim_assist_direction(
+            raw_fwd,
+            pos,
+            &enemy_q,
+            upgrades.gauntlet_aim_range_bonus(),
+            upgrades.gauntlet_aim_cone_relax(),
+            upgrades.gauntlet_aim_strength_bonus(),
+        );
 
-        let tech_damage_mult = if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
+        let explosive_weapon = weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket;
+        let tech_damage_mult = if explosive_weapon {
             upgrades.missile_damage_mult()
         } else {
             upgrades.beam_damage_mult()
         };
+        let gauntlet_damage_mult = if explosive_weapon {
+            upgrades.gauntlet_explosive_damage_mult()
+        } else {
+            upgrades.gauntlet_energy_damage_mult()
+        };
         let damage = armor.modified_outgoing_damage(
-            weapon.damage * weapon.rank_damage_mult() * perk_damage_mult * tech_damage_mult,
+            weapon.damage
+                * weapon.rank_damage_mult()
+                * perk_damage_mult
+                * tech_damage_mult
+                * gauntlet_damage_mult,
         );
-        let speed = weapon.speed;
-        let spread = weapon.spread;
-        let pellets = weapon.pellets;
+        let speed = weapon.speed * upgrades.gauntlet_projectile_speed_mult();
+        let extra_pellets = if explosive_weapon {
+            0
+        } else {
+            upgrades.gauntlet_extra_pellets()
+        };
+        let spread_floor = if extra_pellets > 0 { 0.025 } else { 0.0 };
+        let spread = weapon.spread.max(spread_floor) * upgrades.gauntlet_spread_mult();
+        let pellets = weapon.pellets + extra_pellets;
         let is_explosive = weapon.is_explosive;
-        let explosion_radius = weapon.explosion_radius;
+        let explosion_radius = weapon.explosion_radius * upgrades.gauntlet_explosion_radius_mult();
         let gravity_affected = weapon.weapon_type == WeaponType::Grenade;
         let stretch = weapon.proj_stretch();
         let effective_fire_rate = weapon.rank_effective_fire_rate();
+        let damage_type = gauntlet_projectile_damage_type(
+            &upgrades,
+            primary_fallback_damage_type(weapon.weapon_type, explosive_weapon),
+        );
 
         let (mesh_h, mat_h) = base_proj_handles(weapon.weapon_type, &proj_assets);
 
@@ -419,6 +495,7 @@ fn weapon_fire_system(
                 },
                 Projectile {
                     damage,
+                    damage_type,
                     speed,
                     direction: dir,
                     lifetime: 3.0,
@@ -488,6 +565,7 @@ fn spawn_charge_blast(
     right: Vec3,
     wt: WeaponType,
     damage: f32,
+    damage_type: DamageType,
     explosion_radius: f32,
     base_speed: f32,
 ) {
@@ -507,6 +585,7 @@ fn spawn_charge_blast(
                 },
                 Projectile {
                     damage,
+                    damage_type,
                     speed: base_speed * 2.2,
                     direction: dir,
                     lifetime: 3.0,
@@ -534,6 +613,7 @@ fn spawn_charge_blast(
                 },
                 Projectile {
                     damage,
+                    damage_type,
                     speed: base_speed * 1.6,
                     direction: dir,
                     lifetime: 2.5,
@@ -569,6 +649,7 @@ fn spawn_charge_blast(
                     },
                     Projectile {
                         damage: pellet_dmg,
+                        damage_type,
                         speed: base_speed * 1.1,
                         direction: shot_dir,
                         lifetime: 1.8,
@@ -595,6 +676,7 @@ fn spawn_charge_blast(
                 },
                 Projectile {
                     damage,
+                    damage_type,
                     speed: base_speed * 1.2,
                     direction: dir,
                     lifetime: 4.5,
@@ -774,7 +856,10 @@ fn special_weapon_system(
                 if inv.slot7.can_fire() {
                     let dmg = inv.slot7.effective_damage()
                         * armor_damage_mult
-                        * upgrades.missile_damage_mult();
+                        * upgrades.missile_damage_mult()
+                        * upgrades.gauntlet_explosive_damage_mult();
+                    let damage_type =
+                        gauntlet_projectile_damage_type(&upgrades, DamageType::Explosive);
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;
                     inv.slot7.ammo = inv.slot7.ammo.saturating_sub(1);
                     commands.spawn((
@@ -786,11 +871,12 @@ fn special_weapon_system(
                         },
                         Projectile {
                             damage: dmg,
-                            speed: 35.0,
+                            damage_type,
+                            speed: 35.0 * upgrades.gauntlet_projectile_speed_mult(),
                             direction: fwd,
                             lifetime: 5.0,
                             is_explosive: true,
-                            explosion_radius: 5.0,
+                            explosion_radius: 5.0 * upgrades.gauntlet_explosion_radius_mult(),
                             weapon_type: ProjectileOwner::HomingStar,
                             owner: None,
                             piercing: false,
@@ -816,14 +902,18 @@ fn special_weapon_system(
                 if inv.slot8.can_fire() {
                     let dmg = inv.slot8.effective_damage()
                         * armor_damage_mult
-                        * upgrades.beam_damage_mult();
+                        * upgrades.beam_damage_mult()
+                        * upgrades.gauntlet_energy_damage_mult();
+                    let damage_type =
+                        gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
                     inv.slot8.cooldown_timer = inv.slot8.cooldown;
                     inv.slot8.ammo = inv.slot8.ammo.saturating_sub(1);
                     use rand::Rng;
                     let mut rng = rand::thread_rng();
                     let right = cam.right().as_vec3();
                     let up = cam.up().as_vec3();
-                    for _ in 0..3 {
+                    let burst_count = 3 + upgrades.gauntlet_extra_pellets();
+                    for _ in 0..burst_count {
                         let sx = rng.gen_range(-0.05f32..0.05);
                         let sy = rng.gen_range(-0.05f32..0.05);
                         let dir = (fwd + right * sx + up * sy).normalize();
@@ -837,8 +927,9 @@ fn special_weapon_system(
                                 ..default()
                             },
                             Projectile {
-                                damage: dmg / 3.0,
-                                speed: 60.0,
+                                damage: dmg / burst_count as f32,
+                                damage_type,
+                                speed: 60.0 * upgrades.gauntlet_projectile_speed_mult(),
                                 direction: dir,
                                 lifetime: 2.0,
                                 is_explosive: false,
@@ -869,7 +960,10 @@ fn special_weapon_system(
                 if inv.slot9.can_fire() {
                     let dmg = inv.slot9.effective_damage()
                         * armor_damage_mult
-                        * upgrades.missile_damage_mult();
+                        * upgrades.missile_damage_mult()
+                        * upgrades.gauntlet_explosive_damage_mult();
+                    let damage_type =
+                        gauntlet_projectile_damage_type(&upgrades, DamageType::Explosive);
                     inv.slot9.cooldown_timer = inv.slot9.cooldown;
                     inv.slot9.ammo = inv.slot9.ammo.saturating_sub(1);
                     commands.spawn((
@@ -881,11 +975,12 @@ fn special_weapon_system(
                         },
                         Projectile {
                             damage: dmg,
-                            speed: 12.0,
+                            damage_type,
+                            speed: 12.0 * upgrades.gauntlet_projectile_speed_mult(),
                             direction: fwd,
                             lifetime: 3.5,
                             is_explosive: true,
-                            explosion_radius: 12.0,
+                            explosion_radius: 12.0 * upgrades.gauntlet_explosion_radius_mult(),
                             weapon_type: ProjectileOwner::MoonBubble,
                             owner: None,
                             piercing: false,
@@ -911,14 +1006,18 @@ fn special_weapon_system(
                 if inv.slot0.can_fire() {
                     let dmg = inv.slot0.effective_damage()
                         * armor_damage_mult
-                        * upgrades.turret_damage_mult();
+                        * upgrades.turret_damage_mult()
+                        * upgrades.gauntlet_energy_damage_mult();
+                    let damage_type =
+                        gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
                     inv.slot0.cooldown_timer = inv.slot0.cooldown;
                     inv.slot0.ammo = inv.slot0.ammo.saturating_sub(1);
                     use rand::Rng;
                     let mut rng = rand::thread_rng();
                     let right = cam.right().as_vec3();
                     let up = cam.up().as_vec3();
-                    for _ in 0..5 {
+                    let burst_count = 5 + upgrades.gauntlet_extra_pellets();
+                    for _ in 0..burst_count {
                         let sx = rng.gen_range(-0.08f32..0.08);
                         let sy = rng.gen_range(-0.08f32..0.08);
                         let dir = (fwd + right * sx + up * sy).normalize();
@@ -932,8 +1031,9 @@ fn special_weapon_system(
                                 ..default()
                             },
                             Projectile {
-                                damage: dmg / 5.0,
-                                speed: 45.0,
+                                damage: dmg / burst_count as f32,
+                                damage_type,
+                                speed: 45.0 * upgrades.gauntlet_projectile_speed_mult(),
                                 direction: dir,
                                 lifetime: 3.0,
                                 is_explosive: false,
@@ -993,6 +1093,7 @@ fn projectile_update_system(
                     &proj_transform.translation,
                     proj.explosion_radius,
                     proj.damage,
+                    proj.damage_type,
                     &mut enemy_q,
                     &mut enemy_damaged_ev,
                     &mut enemy_killed_ev,
@@ -1008,6 +1109,7 @@ fn projectile_update_system(
                     &proj_transform.translation,
                     proj.explosion_radius,
                     proj.damage,
+                    proj.damage_type,
                     &mut enemy_q,
                     &mut enemy_damaged_ev,
                     &mut enemy_killed_ev,
@@ -1018,7 +1120,7 @@ fn projectile_update_system(
         }
 
         let mut hit = false;
-        let mut explosion: Option<(Vec3, f32, f32)> = None;
+        let mut explosion: Option<(Vec3, f32, f32, DamageType)> = None;
 
         for (e_entity, e_transform, mut e_health, mut e_damageable, enemy) in enemy_q.iter_mut() {
             if !e_health.is_alive() {
@@ -1031,11 +1133,12 @@ fn projectile_update_system(
                         proj_transform.translation,
                         proj.explosion_radius,
                         proj.damage,
+                        proj.damage_type,
                     ));
                     hit = true;
                     break;
                 } else {
-                    let info = DamageInfo::new(proj.damage, DamageType::Plasma);
+                    let info = DamageInfo::new(proj.damage, proj.damage_type);
                     let result = apply_damage(&mut e_health, &mut e_damageable, &info);
                     enemy_damaged_ev.write(EnemyDamagedEvent {
                         entity: e_entity,
@@ -1058,11 +1161,12 @@ fn projectile_update_system(
             }
         }
 
-        if let Some((pos, radius, dmg)) = explosion {
+        if let Some((pos, radius, dmg, damage_type)) = explosion {
             explode(
                 &pos,
                 radius,
                 dmg,
+                damage_type,
                 &mut enemy_q,
                 &mut enemy_damaged_ev,
                 &mut enemy_killed_ev,
@@ -1078,6 +1182,7 @@ fn explode(
     center: &Vec3,
     radius: f32,
     base_damage: f32,
+    damage_type: DamageType,
     enemy_q: &mut Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         (Without<Projectile>, Without<HackedUnit>),
@@ -1092,7 +1197,7 @@ fn explode(
         let dist = center.distance(e_transform.translation);
         if dist <= radius {
             let damage = area_damage_falloff(base_damage, dist, radius).max(1.0);
-            let info = DamageInfo::new(damage, DamageType::Explosive);
+            let info = DamageInfo::new(damage, damage_type);
             let result = apply_damage(&mut e_health, &mut e_damageable, &info);
             damaged_ev.write(EnemyDamagedEvent {
                 entity: e_entity,
@@ -1128,6 +1233,7 @@ fn melee_combo_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     dungeon: Res<DungeonCrawlState>,
+    upgrades: Res<UpgradeLedger>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -1189,12 +1295,21 @@ fn melee_combo_system(
         let cam_fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let cam_pos = star_muzzle_origin(player_transform, cam_fwd);
         let armor_damage_mult = armor.modified_outgoing_damage(1.0);
+        let blade_rank = upgrades.blade_boot_rank();
+        let blade_damage_mult = upgrades.blade_boot_melee_damage_mult();
+        let blade_reach_bonus = upgrades.blade_boot_reach_bonus();
+        let melee_damage_type = if blade_rank > 0 {
+            DamageType::Laser
+        } else {
+            DamageType::Melee
+        };
 
         if do_light && combo.light_index < LIGHT_COMBO.len() {
             let (name, base_damage, _knockback, duration) = LIGHT_COMBO[combo.light_index];
-            let damage = base_damage * combo.damage_multiplier * armor_damage_mult;
-            let radius = if dungeon.active { 4.1 } else { 3.0 };
-            let offset = if dungeon.active { 2.1 } else { 2.5 };
+            let damage =
+                base_damage * combo.damage_multiplier * armor_damage_mult * blade_damage_mult;
+            let radius = (if dungeon.active { 4.1 } else { 3.0 }) + blade_reach_bonus;
+            let offset = (if dungeon.active { 2.1 } else { 2.5 }) + blade_reach_bonus * 0.5;
             let arc_cos = if dungeon.active { -0.20 } else { 0.15 };
 
             execute_melee_hit(
@@ -1204,7 +1319,7 @@ fn melee_combo_system(
                 offset,
                 arc_cos,
                 damage,
-                DamageType::Melee,
+                melee_damage_type,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,
@@ -1229,9 +1344,10 @@ fn melee_combo_system(
             }
         } else if do_heavy && combo.heavy_index < HEAVY_COMBO.len() {
             let (name, base_damage, _knockback, duration) = HEAVY_COMBO[combo.heavy_index];
-            let damage = base_damage * combo.damage_multiplier * armor_damage_mult;
-            let radius = if dungeon.active { 5.7 } else { 4.5 };
-            let offset = if dungeon.active { 2.2 } else { 2.0 };
+            let damage =
+                base_damage * combo.damage_multiplier * armor_damage_mult * blade_damage_mult;
+            let radius = (if dungeon.active { 5.7 } else { 4.5 }) + blade_reach_bonus * 1.3;
+            let offset = (if dungeon.active { 2.2 } else { 2.0 }) + blade_reach_bonus * 0.6;
             let arc_cos = if dungeon.active { -0.35 } else { 0.05 };
 
             execute_melee_hit(
@@ -1241,7 +1357,7 @@ fn melee_combo_system(
                 offset,
                 arc_cos,
                 damage,
-                DamageType::Melee,
+                melee_damage_type,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,
@@ -1338,12 +1454,14 @@ fn beam_sabre_update_system(
     dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
+            Entity,
             &GlobalTransform,
             &mut BeamSabre,
             &mut PlayerStateMachine,
             &PlayerInput,
             &PlayerCameraRef,
             &ArmorSet,
+            Option<&BeamSabreLocked>,
         ),
         With<Player>,
     >,
@@ -1356,14 +1474,29 @@ fn beam_sabre_update_system(
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
-    let perk_damage_mult = perks.damage_mult() * upgrades.beam_damage_mult();
-    for (player_transform, mut sabre, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
+    let perk_damage_mult =
+        perks.damage_mult() * upgrades.beam_damage_mult() * upgrades.gauntlet_energy_damage_mult();
+    for (entity, player_transform, mut sabre, mut sm, pi, cam_ref, armor, locked_marker) in
+        player_q.iter_mut()
+    {
+        if upgrades.blade_boots_unlock_sabre() && !sabre.unlocked {
+            sabre.unlocked = true;
+            if locked_marker.is_some() {
+                commands.entity(entity).remove::<BeamSabreLocked>();
+            }
+        }
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
         };
         let fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let origin = star_muzzle_origin(player_transform, fwd);
         let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
+        let blade_damage_type = if upgrades.blade_boot_rank() > 0 {
+            DamageType::Laser
+        } else {
+            DamageType::Melee
+        };
+        let wave_damage_type = gauntlet_projectile_damage_type(&upgrades, DamageType::Laser);
 
         if pi.sabre_toggle {
             if sabre.unlocked {
@@ -1393,7 +1526,7 @@ fn beam_sabre_update_system(
                         offset,
                         arc_cos,
                         sabre.slash_damage * armor_damage_mult,
-                        DamageType::Melee,
+                        blade_damage_type,
                         &mut enemy_q,
                         &mut damaged_ev,
                         &mut killed_ev,
@@ -1426,7 +1559,7 @@ fn beam_sabre_update_system(
                 offset,
                 arc_cos,
                 sabre.slash_damage * armor_damage_mult,
-                DamageType::Melee,
+                blade_damage_type,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,
@@ -1457,6 +1590,7 @@ fn beam_sabre_update_system(
                             damage: sabre.wave_damage
                                 * armor_damage_mult
                                 * if dungeon.active { 0.72 } else { 1.0 },
+                            damage_type: wave_damage_type,
                             speed: 20.0,
                             direction: dir,
                             lifetime: 1.5,

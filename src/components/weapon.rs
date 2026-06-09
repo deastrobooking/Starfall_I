@@ -453,6 +453,7 @@ impl BeamSabre {
 #[derive(Component, Debug, Clone)]
 pub struct Projectile {
     pub damage: f32,
+    pub damage_type: crate::damage::DamageType,
     pub speed: f32,
     pub direction: Vec3,
     pub lifetime: f32,

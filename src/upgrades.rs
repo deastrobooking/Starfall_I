@@ -12,6 +12,9 @@ pub enum TechUpgradeId {
     ArmorPlating,
     RejuvenationMatrix,
     MechCommandLink,
+    MotionBootSuite,
+    AegisArmorSuite,
+    GauntletMatrix,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +24,9 @@ pub enum TechUpgradeTrack {
     Turrets,
     Health,
     Mechs,
+    Mobility,
+    Armor,
+    Gauntlets,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,13 +40,16 @@ pub struct TechUpgradeDef {
 }
 
 impl TechUpgradeId {
-    pub const ALL: [TechUpgradeId; 6] = [
+    pub const ALL: [TechUpgradeId; 9] = [
         TechUpgradeId::BeamCapacitors,
         TechUpgradeId::NovaMissileForge,
         TechUpgradeId::SpriteTurretLattice,
         TechUpgradeId::ArmorPlating,
         TechUpgradeId::RejuvenationMatrix,
         TechUpgradeId::MechCommandLink,
+        TechUpgradeId::MotionBootSuite,
+        TechUpgradeId::AegisArmorSuite,
+        TechUpgradeId::GauntletMatrix,
     ];
 
     pub fn def(self) -> TechUpgradeDef {
@@ -93,6 +102,33 @@ impl TechUpgradeId {
                 description: "Prepares robot pets for stronger vehicle/mech/ship forms.",
                 max_rank: 4,
             },
+            TechUpgradeId::MotionBootSuite => TechUpgradeDef {
+                id: self,
+                key_hint: "M",
+                name: "Motion Boot Suite",
+                track: TechUpgradeTrack::Mobility,
+                description:
+                    "Unlocks Speed Boots, Jump Boots, Rocket Blades, Blade Boots, and overdrive tuning.",
+                max_rank: 5,
+            },
+            TechUpgradeId::AegisArmorSuite => TechUpgradeDef {
+                id: self,
+                key_hint: "L",
+                name: "Aegis Armor Suite",
+                track: TechUpgradeTrack::Armor,
+                description:
+                    "Adds shield sync, hardened plating, retaliation shock, and servo stat frames.",
+                max_rank: 5,
+            },
+            TechUpgradeId::GauntletMatrix => TechUpgradeDef {
+                id: self,
+                key_hint: "K",
+                name: "Gauntlet Matrix",
+                track: TechUpgradeTrack::Gauntlets,
+                description:
+                    "Lets energy weapons inherit fire, electric, tracking, Sprite Burst, and rift effects.",
+                max_rank: 5,
+            },
         }
     }
 
@@ -123,6 +159,36 @@ impl TechUpgradeId {
                 PartCost::new(RobotPartKind::StarDrive, next_rank),
                 PartCost::new(RobotPartKind::CommandDeck, 1),
             ],
+            TechUpgradeId::MotionBootSuite => {
+                let mut cost = vec![
+                    PartCost::new(RobotPartKind::ServoMotor, 3 + next_rank * 2),
+                    PartCost::new(RobotPartKind::EnergyCore, 1 + next_rank),
+                ];
+                if next_rank >= 3 {
+                    cost.push(PartCost::new(RobotPartKind::StarDrive, next_rank - 2));
+                }
+                cost
+            }
+            TechUpgradeId::AegisArmorSuite => {
+                let mut cost = vec![
+                    PartCost::new(RobotPartKind::HullPlate, 3 + next_rank * 3),
+                    PartCost::new(RobotPartKind::ScrapFrame, 6 + next_rank * 2),
+                ];
+                if next_rank >= 2 {
+                    cost.push(PartCost::new(RobotPartKind::EnergyCore, next_rank));
+                }
+                cost
+            }
+            TechUpgradeId::GauntletMatrix => {
+                let mut cost = vec![
+                    PartCost::new(RobotPartKind::CircuitBoard, 4 + next_rank * 2),
+                    PartCost::new(RobotPartKind::EnergyCore, 1 + next_rank),
+                ];
+                if next_rank >= 4 {
+                    cost.push(PartCost::new(RobotPartKind::ServoMotor, next_rank));
+                }
+                cost
+            }
         }
     }
 }
@@ -203,6 +269,232 @@ impl UpgradeLedger {
 
     pub fn armor_health_bonus(&self) -> f32 {
         12.0 * self.rank(TechUpgradeId::ArmorPlating) as f32
+    }
+
+    pub fn motion_boot_rank(&self) -> u32 {
+        self.rank(TechUpgradeId::MotionBootSuite)
+    }
+
+    pub fn boot_ground_speed_mult(&self) -> f32 {
+        1.0 + 0.06 * self.motion_boot_rank() as f32
+    }
+
+    pub fn boot_jump_mult(&self) -> f32 {
+        let rank = self.motion_boot_rank();
+        if rank >= 2 {
+            1.0 + 0.08 + 0.02 * rank.saturating_sub(2) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn boot_wall_jump_push_mult(&self) -> f32 {
+        let rank = self.motion_boot_rank();
+        if rank >= 2 {
+            1.0 + 0.05 + 0.03 * rank.saturating_sub(2) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn boot_air_motion_mult(&self) -> f32 {
+        let rank = self.motion_boot_rank();
+        if rank >= 3 {
+            1.0 + 0.12 + 0.04 * rank.saturating_sub(3) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn boot_jet_lift_mult(&self) -> f32 {
+        let rank = self.motion_boot_rank();
+        if rank >= 3 {
+            1.0 + 0.08 + 0.03 * rank.saturating_sub(3) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn blade_boot_rank(&self) -> u32 {
+        self.motion_boot_rank().saturating_sub(3)
+    }
+
+    pub fn blade_boots_unlock_sabre(&self) -> bool {
+        self.motion_boot_rank() >= 4
+    }
+
+    pub fn blade_boot_melee_damage_mult(&self) -> f32 {
+        1.0 + 0.18 * self.blade_boot_rank() as f32
+    }
+
+    pub fn blade_boot_reach_bonus(&self) -> f32 {
+        0.25 * self.blade_boot_rank() as f32
+    }
+
+    pub fn armor_suite_rank(&self) -> u32 {
+        self.rank(TechUpgradeId::AegisArmorSuite)
+    }
+
+    pub fn armor_shield_defense_bonus(&self) -> f32 {
+        let rank = self.armor_suite_rank();
+        if rank >= 1 {
+            15.0 + 10.0 * rank as f32
+        } else {
+            0.0
+        }
+    }
+
+    pub fn armor_hardened_reduction(&self) -> f32 {
+        let rank = self.armor_suite_rank();
+        if rank >= 2 {
+            (0.04 + 0.015 * rank.saturating_sub(2) as f32).min(0.12)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn armor_retaliation_damage(&self) -> f32 {
+        let rank = self.armor_suite_rank();
+        if rank >= 3 {
+            14.0 + 6.0 * rank.saturating_sub(3) as f32
+        } else {
+            0.0
+        }
+    }
+
+    pub fn armor_retaliation_radius(&self) -> f32 {
+        let rank = self.armor_suite_rank();
+        if rank >= 3 {
+            3.6 + 0.45 * rank.saturating_sub(3) as f32
+        } else {
+            0.0
+        }
+    }
+
+    pub fn armor_speed_mult(&self) -> f32 {
+        let rank = self.armor_suite_rank();
+        if rank >= 4 {
+            1.0 + 0.04 + 0.02 * rank.saturating_sub(4) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn armor_strength_mult(&self) -> f32 {
+        let rank = self.armor_suite_rank();
+        if rank >= 4 {
+            1.0 + 0.06 + 0.03 * rank.saturating_sub(4) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn armor_jump_mult(&self) -> f32 {
+        let rank = self.armor_suite_rank();
+        if rank >= 4 {
+            1.0 + 0.05 + 0.02 * rank.saturating_sub(4) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn gauntlet_rank(&self) -> u32 {
+        self.rank(TechUpgradeId::GauntletMatrix)
+    }
+
+    pub fn gauntlet_has_fire(&self) -> bool {
+        self.gauntlet_rank() >= 1
+    }
+
+    pub fn gauntlet_has_electric(&self) -> bool {
+        self.gauntlet_rank() >= 2
+    }
+
+    pub fn gauntlet_has_tracking(&self) -> bool {
+        self.gauntlet_rank() >= 3
+    }
+
+    pub fn gauntlet_has_sprite_burst(&self) -> bool {
+        self.gauntlet_rank() >= 4
+    }
+
+    pub fn gauntlet_has_rift(&self) -> bool {
+        self.gauntlet_rank() >= 5
+    }
+
+    pub fn gauntlet_energy_damage_mult(&self) -> f32 {
+        1.0 + 0.04 * self.gauntlet_rank() as f32
+    }
+
+    pub fn gauntlet_explosive_damage_mult(&self) -> f32 {
+        let rank = self.gauntlet_rank();
+        if rank >= 3 {
+            1.0 + 0.06 + 0.02 * rank.saturating_sub(3) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn gauntlet_projectile_speed_mult(&self) -> f32 {
+        let rank = self.gauntlet_rank();
+        if rank >= 2 {
+            1.0 + 0.04 + 0.02 * rank.saturating_sub(2) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn gauntlet_explosion_radius_mult(&self) -> f32 {
+        let rank = self.gauntlet_rank();
+        if rank >= 3 {
+            1.0 + 0.10 + 0.03 * rank.saturating_sub(3) as f32
+        } else {
+            1.0
+        }
+    }
+
+    pub fn gauntlet_extra_pellets(&self) -> u32 {
+        let rank = self.gauntlet_rank();
+        if rank >= 4 {
+            1 + rank.saturating_sub(4)
+        } else {
+            0
+        }
+    }
+
+    pub fn gauntlet_aim_range_bonus(&self) -> f32 {
+        let rank = self.gauntlet_rank();
+        if rank >= 3 {
+            8.0 + 2.0 * rank.saturating_sub(3) as f32
+        } else {
+            0.0
+        }
+    }
+
+    pub fn gauntlet_aim_cone_relax(&self) -> f32 {
+        let rank = self.gauntlet_rank();
+        if rank >= 3 {
+            0.035 + 0.010 * rank.saturating_sub(3) as f32
+        } else {
+            0.0
+        }
+    }
+
+    pub fn gauntlet_aim_strength_bonus(&self) -> f32 {
+        let rank = self.gauntlet_rank();
+        if rank >= 3 {
+            0.18 + 0.04 * rank.saturating_sub(3) as f32
+        } else {
+            0.0
+        }
+    }
+
+    pub fn gauntlet_spread_mult(&self) -> f32 {
+        if self.gauntlet_has_sprite_burst() {
+            0.92
+        } else {
+            1.0
+        }
     }
 
     pub fn rejuvenation_regen_per_sec(&self) -> f32 {
@@ -314,5 +606,24 @@ mod tests {
             upgrades.try_purchase(TechUpgradeId::SpriteTurretLattice, &mut robots),
             Err(TechUpgradeError::MaxRank)
         );
+    }
+
+    #[test]
+    fn equipment_suites_unlock_ranked_mechanics() {
+        let upgrades = UpgradeLedger {
+            ranks: vec![
+                (TechUpgradeId::MotionBootSuite, 4),
+                (TechUpgradeId::AegisArmorSuite, 5),
+                (TechUpgradeId::GauntletMatrix, 5),
+            ],
+            ..default()
+        };
+
+        assert!(upgrades.blade_boots_unlock_sabre());
+        assert!(upgrades.boot_ground_speed_mult() > 1.0);
+        assert!(upgrades.armor_retaliation_damage() > 0.0);
+        assert!(upgrades.armor_strength_mult() > 1.0);
+        assert!(upgrades.gauntlet_has_rift());
+        assert!(upgrades.gauntlet_extra_pellets() > 0);
     }
 }

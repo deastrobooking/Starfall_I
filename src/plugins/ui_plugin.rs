@@ -2014,6 +2014,9 @@ fn track_color(track: crate::upgrades::TechUpgradeTrack) -> Color {
         crate::upgrades::TechUpgradeTrack::Turrets => Color::srgb(0.80, 0.55, 1.0),
         crate::upgrades::TechUpgradeTrack::Health => Color::srgb(0.42, 1.0, 0.55),
         crate::upgrades::TechUpgradeTrack::Mechs => Color::srgb(0.42, 0.88, 1.0),
+        crate::upgrades::TechUpgradeTrack::Mobility => Color::srgb(0.55, 1.0, 0.75),
+        crate::upgrades::TechUpgradeTrack::Armor => Color::srgb(0.70, 0.70, 0.85),
+        crate::upgrades::TechUpgradeTrack::Gauntlets => Color::srgb(1.0, 0.75, 0.45),
     }
 }
 

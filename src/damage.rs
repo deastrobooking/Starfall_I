@@ -9,6 +9,8 @@ pub enum DamageType {
     Laser,
     Melee,
     Fire,
+    Electric,
+    Rift,
     Collision,
     Drowning,
 }
