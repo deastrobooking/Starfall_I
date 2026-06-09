@@ -566,39 +566,59 @@ fn spawn_arms_mech(
     let bw = cfg.body_width;
     let al = cfg.arm_length;
 
-    let primary = robot_mat(materials, cfg.outfit);
-    let armor = robot_mat(materials, darken(cfg.accent, 0.78));
-    let accent_glow = emissive_mat(materials, cfg.accent, 2.4);
+    let sleeve = soft_mat(materials, cfg.outfit);
+    let joint  = soft_mat(materials, darken(cfg.outfit, 0.76));
+    let cuff   = soft_mat(materials, darken(cfg.accent, 0.82));
+    let glove  = if cfg.has_gloves {
+        soft_mat(materials, darken(cfg.accent, 0.88))
+    } else {
+        soft_mat(materials, cfg.skin)
+    };
 
-    let arm_x = (0.34 + 0.075) * s * bw;
-    for (kind_arm, kind_hand, x) in [
-        (CartoonPartKind::LeftArm, CartoonPartKind::LeftHand, -arm_x),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand, arm_x),
+    let arm_x = (0.34 + 0.072) * s * bw;
+    for (kind_arm, kind_hand, x, sign) in [
+        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
+        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
     ] {
+        // Round shoulder cap
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.145 * s)), armor.clone(),
-            Transform::from_xyz(x, 0.18 * s + y_lift, 0.0), PartSlotTag::Arms);
+            Mesh::from(Sphere::new(0.152 * s)), sleeve.clone(),
+            Transform::from_xyz(x, 0.20 * s + y_lift, 0.0), PartSlotTag::Arms);
+        // Upper arm — full round tube
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.100 * s, 0.35 * s * al)), primary.clone(),
-            Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.88, 1.0, 0.80)), PartSlotTag::Arms);
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.105 * s, 0.33 * s * al)), armor.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.005 * s)
-                .with_scale(Vec3::new(0.86, 1.0, 0.78)), PartSlotTag::Arms);
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.125 * s)), primary.clone(),
-            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, -0.008 * s),
+            Mesh::from(Capsule3d::new(0.092 * s, 0.30 * s * al)), sleeve.clone(),
+            Transform::from_xyz(x, 0.04 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
             PartSlotTag::Arms);
+        // Elbow joint sphere — clearly distinct
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.016 * s, 0.14 * s * al)), accent_glow.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.080 * s)
-                .with_scale(Vec3::new(0.5, 1.0, 0.4)), PartSlotTag::Arms);
+            Mesh::from(Sphere::new(0.108 * s)), joint.clone(),
+            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Forearm — slightly narrower
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Capsule3d::new(0.080 * s, 0.28 * s * al)), sleeve.clone(),
+            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Wrist cuff ring
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Cylinder::new(0.096 * s, 0.042 * s)), cuff.clone(),
+            Transform::from_xyz(x, -0.44 * s - (al - 1.0) * 0.24 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Big cartoon glove — 2× the forearm radius
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.145 * s * cfg.hand_scale)),
-            if cfg.has_gloves { armor.clone() } else { primary.clone() },
-            Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, 0.02 * s)
-                .with_scale(Vec3::new(0.88, 1.10, 0.80)), PartSlotTag::Arms);
+            Mesh::from(Sphere::new(0.162 * s * cfg.hand_scale)), glove.clone(),
+            Transform::from_xyz(x, -0.53 * s - (al - 1.0) * 0.28 * s + y_lift, -0.018 * s)
+                .with_scale(Vec3::new(1.0, 0.88, 1.10)),
+            PartSlotTag::Arms);
+        // Thumb nub — side-front of the glove
+        spawn_part(commands, meshes, root, kind_hand,
+            Mesh::from(Sphere::new(0.075 * s)), glove.clone(),
+            Transform::from_xyz(
+                x + sign * 0.122 * s,
+                -0.47 * s - (al - 1.0) * 0.28 * s + y_lift,
+                -0.058 * s,
+            ),
+            PartSlotTag::Arms);
     }
 }
 
@@ -615,43 +635,53 @@ fn spawn_arms_heavy(
     let al = cfg.arm_length;
 
     let primary = robot_mat(materials, cfg.outfit);
-    let armor = robot_mat(materials, darken(cfg.accent, 0.72));
-    let dark = robot_mat(materials, darken(cfg.outfit, 0.65));
+    let armor   = robot_mat(materials, darken(cfg.accent, 0.70));
+    let dark    = robot_mat(materials, darken(cfg.outfit, 0.58));
 
-    let arm_x = (0.36 + 0.09) * s * bw;
-    for (kind_arm, kind_hand, x) in [
-        (CartoonPartKind::LeftArm, CartoonPartKind::LeftHand, -arm_x),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand, arm_x),
+    let arm_x = (0.36 + 0.092) * s * bw;
+    for (kind_arm, kind_hand, x, _sign) in [
+        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
+        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
     ] {
-        // Large shoulder ball
+        // Giant shoulder sphere — Bowser-scale
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.185 * s)), armor.clone(),
-            Transform::from_xyz(x, 0.22 * s + y_lift, 0.0), PartSlotTag::Arms);
-        // Wide upper arm
+            Mesh::from(Sphere::new(0.200 * s)), armor.clone(),
+            Transform::from_xyz(x, 0.24 * s + y_lift, 0.0), PartSlotTag::Arms);
+        // Thick upper arm — barely tapers
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.130 * s, 0.35 * s * al)), primary.clone(),
-            Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(1.10, 1.0, 0.92)), PartSlotTag::Arms);
-        // Elbow spike
+            Mesh::from(Capsule3d::new(0.135 * s, 0.32 * s * al)), primary.clone(),
+            Transform::from_xyz(x, 0.05 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Elbow knob — protrudes behind for brawler silhouette
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.045 * s, 0.14 * s)), dark.clone(),
-            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.085 * s)
-                .with_rotation(Quat::from_rotation_x(-0.7)), PartSlotTag::Arms);
-        // Wide armored forearm
+            Mesh::from(Sphere::new(0.130 * s)), dark.clone(),
+            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.075 * s),
+            PartSlotTag::Arms);
+        // Thick forearm — barely narrows
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.135 * s, 0.34 * s * al)), armor.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.005 * s)
-                .with_scale(Vec3::new(1.08, 1.0, 0.90)), PartSlotTag::Arms);
-        // Knuckle gauntlet fist
+            Mesh::from(Capsule3d::new(0.125 * s, 0.32 * s * al)), armor.clone(),
+            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Wrist plate band
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Cylinder::new(0.142 * s, 0.054 * s)), dark.clone(),
+            Transform::from_xyz(x, -0.46 * s - (al - 1.0) * 0.24 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Boxy squared fist
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.185 * s * cfg.hand_scale)), armor.clone(),
-            Transform::from_xyz(x, -0.52 * s - (al - 1.0) * 0.28 * s + y_lift, 0.02 * s)
-                .with_scale(Vec3::new(1.05, 0.88, 1.10)), PartSlotTag::Arms);
-        // Knuckle ridge bumps
-        for dy in [-0.02_f32, 0.02_f32] {
+            Mesh::from(Sphere::new(0.188 * s * cfg.hand_scale)), armor.clone(),
+            Transform::from_xyz(x, -0.56 * s - (al - 1.0) * 0.28 * s + y_lift, 0.0)
+                .with_scale(Vec3::new(1.12, 0.76, 1.18)),
+            PartSlotTag::Arms);
+        // Three knuckle bumps across the front
+        for i in 0..3_i32 {
             spawn_part(commands, meshes, root, kind_hand,
-                Mesh::from(Sphere::new(0.048 * s)), dark.clone(),
-                Transform::from_xyz(x + dy * 1.8 * s, -0.52 * s - (al - 1.0) * 0.28 * s + y_lift, -0.10 * s),
+                Mesh::from(Sphere::new(0.042 * s)), dark.clone(),
+                Transform::from_xyz(
+                    x + (i as f32 - 1.0) * 0.070 * s,
+                    -0.56 * s - (al - 1.0) * 0.28 * s + y_lift,
+                    -0.122 * s,
+                ),
                 PartSlotTag::Arms);
         }
     }
@@ -669,29 +699,54 @@ fn spawn_arms_scout(
     let bw = cfg.body_width;
     let al = cfg.arm_length;
 
-    let primary = robot_mat(materials, cfg.outfit);
-    let stripe = robot_mat(materials, darken(cfg.accent, 0.85));
+    let primary = soft_mat(materials, cfg.outfit);
+    let stripe  = soft_mat(materials, darken(cfg.accent, 0.86));
+    let glove   = soft_mat(materials, darken(cfg.accent, 0.70));
 
-    let arm_x = (0.32 + 0.07) * s * bw;
-    for (kind_arm, kind_hand, x) in [
-        (CartoonPartKind::LeftArm, CartoonPartKind::LeftHand, -arm_x),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand, arm_x),
+    let arm_x = (0.32 + 0.065) * s * bw;
+    for (kind_arm, kind_hand, x, sign) in [
+        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
+        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
     ] {
-        // Slim upper arm
+        // Small neat shoulder cap
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.078 * s, 0.36 * s * al)), primary.clone(),
-            Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.80, 1.0, 0.72)), PartSlotTag::Arms);
-        // Slim forearm
+            Mesh::from(Sphere::new(0.106 * s)), primary.clone(),
+            Transform::from_xyz(x, 0.17 * s + y_lift, 0.0), PartSlotTag::Arms);
+        // Long slim upper arm — round cross-section
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.082 * s, 0.34 * s * al)), stripe.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.003 * s)
-                .with_scale(Vec3::new(0.78, 1.0, 0.70)), PartSlotTag::Arms);
-        // Light hand
+            Mesh::from(Capsule3d::new(0.072 * s, 0.34 * s * al)), primary.clone(),
+            Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Slim elbow joint
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Sphere::new(0.084 * s)), stripe.clone(),
+            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Long slim forearm
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Capsule3d::new(0.062 * s, 0.32 * s * al)), primary.clone(),
+            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Accent stripe running the length of the forearm
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Capsule3d::new(0.018 * s, 0.22 * s * al)), stripe.clone(),
+            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.052 * s),
+            PartSlotTag::Arms);
+        // Sleek aerodynamic hand — forward-swept
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.108 * s * cfg.hand_scale)), primary.clone(),
-            Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, 0.01 * s)
-                .with_scale(Vec3::new(0.85, 1.05, 0.78)), PartSlotTag::Arms);
+            Mesh::from(Sphere::new(0.120 * s * cfg.hand_scale)), glove.clone(),
+            Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, -0.022 * s)
+                .with_scale(Vec3::new(0.86, 0.94, 1.22)),
+            PartSlotTag::Arms);
+        // Thumb nub
+        spawn_part(commands, meshes, root, kind_hand,
+            Mesh::from(Sphere::new(0.054 * s)), glove.clone(),
+            Transform::from_xyz(
+                x + sign * 0.094 * s,
+                -0.44 * s - (al - 1.0) * 0.28 * s + y_lift,
+                -0.042 * s,
+            ),
+            PartSlotTag::Arms);
     }
 }
 
@@ -707,49 +762,65 @@ fn spawn_arms_claw(
     let bw = cfg.body_width;
     let al = cfg.arm_length;
 
-    let primary = robot_mat(materials, cfg.outfit);
-    let dark = robot_mat(materials, darken(cfg.outfit, 0.55));
-    let accent_glow = emissive_mat(materials, cfg.accent, 2.8);
+    let primary     = robot_mat(materials, cfg.outfit);
+    let dark        = robot_mat(materials, darken(cfg.outfit, 0.55));
+    let accent_glow = emissive_mat(materials, cfg.accent, 3.2);
 
     let arm_x = (0.34 + 0.075) * s * bw;
     for (kind_arm, kind_hand, x, sign) in [
-        (CartoonPartKind::LeftArm, CartoonPartKind::LeftHand, -arm_x, -1.0_f32),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand, arm_x, 1.0_f32),
+        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
+        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
     ] {
-        // Shoulder joint
+        // Shoulder joint ball
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.145 * s)), dark.clone(),
-            Transform::from_xyz(x, 0.18 * s + y_lift, 0.0), PartSlotTag::Arms);
-        // Upper arm with ridge
+            Mesh::from(Sphere::new(0.150 * s)), dark.clone(),
+            Transform::from_xyz(x, 0.20 * s + y_lift, 0.0), PartSlotTag::Arms);
+        // Glowing energy ring at shoulder socket
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.100 * s, 0.35 * s * al)), primary.clone(),
-            Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.88, 1.0, 0.80)), PartSlotTag::Arms);
-        // Forearm with glow vein
+            Mesh::from(Cylinder::new(0.160 * s, 0.026 * s)), accent_glow.clone(),
+            Transform::from_xyz(x, 0.14 * s + y_lift, 0.0), PartSlotTag::Arms);
+        // Upper arm
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.095 * s, 0.33 * s * al)), dark.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.004 * s)
-                .with_scale(Vec3::new(0.84, 1.0, 0.76)), PartSlotTag::Arms);
+            Mesh::from(Capsule3d::new(0.096 * s, 0.30 * s * al)), primary.clone(),
+            Transform::from_xyz(x, 0.04 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Elbow node
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.012 * s, 0.28 * s * al)), accent_glow.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.072 * s)
-                .with_scale(Vec3::new(0.4, 1.0, 0.35)), PartSlotTag::Arms);
+            Mesh::from(Sphere::new(0.110 * s)), dark.clone(),
+            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Forearm
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Capsule3d::new(0.088 * s, 0.30 * s * al)), dark.clone(),
+            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            PartSlotTag::Arms);
+        // Glowing energy vein down forearm
+        spawn_part(commands, meshes, root, kind_arm,
+            Mesh::from(Capsule3d::new(0.015 * s, 0.26 * s * al)), accent_glow.clone(),
+            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.072 * s),
+            PartSlotTag::Arms);
         // Wrist node
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.100 * s)), dark.clone(),
+            Mesh::from(Sphere::new(0.108 * s)), dark.clone(),
             Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, 0.0),
             PartSlotTag::Arms);
-        // Three elongated claw prongs
+        // Four splayed claw prongs — wide menacing spread
         let hand_y = -0.50 * s - (al - 1.0) * 0.28 * s + y_lift;
-        for (angle_off, prong_len) in [(-0.38_f32, 0.22_f32), (0.0_f32, 0.26_f32), (0.38_f32, 0.22_f32)] {
+        for (angle_off, prong_len) in [
+            (-0.55_f32, 0.20_f32),
+            (-0.18_f32, 0.27_f32),
+            ( 0.18_f32, 0.27_f32),
+            ( 0.55_f32, 0.20_f32),
+        ] {
             spawn_part(commands, meshes, root, kind_hand,
-                Mesh::from(Capsule3d::new(0.020 * s, prong_len * s)),
-                dark.clone(),
+                Mesh::from(Capsule3d::new(0.022 * s, prong_len * s)), primary.clone(),
                 Transform::from_xyz(
-                    x + sign * angle_off * 0.12 * s,
-                    hand_y - 0.10 * s,
-                    -0.04 * s,
-                ).with_rotation(Quat::from_rotation_x(0.18) * Quat::from_rotation_z(sign * angle_off)),
+                    x + sign * angle_off * 0.118 * s,
+                    hand_y - 0.11 * s,
+                    -0.025 * s,
+                ).with_rotation(
+                    Quat::from_rotation_x(0.22) * Quat::from_rotation_z(sign * angle_off * 0.88)
+                ),
                 PartSlotTag::Arms);
         }
     }
