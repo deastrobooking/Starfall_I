@@ -55,7 +55,12 @@ impl Plugin for UiPlugin {
             .add_systems(OnExit(AppState::PlayerSelect), despawn_player_select)
             .add_systems(OnEnter(AppState::ChapterSelect), setup_chapter_select)
             .add_systems(OnExit(AppState::ChapterSelect), despawn_chapter_select)
-            .add_systems(OnEnter(AppState::Playing), (setup_hud, despawn_menu))
+            .init_resource::<ControllerDiagState>()
+            .add_systems(
+                OnEnter(AppState::Playing),
+                (setup_hud, despawn_menu, setup_controller_diag),
+            )
+            .add_systems(OnExit(AppState::Playing), despawn_controller_diag)
             .add_systems(
                 OnEnter(AppState::Paused),
                 (setup_pause_menu, freeze_physics_on_pause),
@@ -78,6 +83,11 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 clear_play_session_transition_flags.run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (toggle_controller_diag, update_controller_diag)
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
             )
             .add_systems(
                 Update,
@@ -243,6 +253,16 @@ enum PlayerHudTextKind {
 
 #[derive(Component)]
 struct EnemyCountText;
+
+// ── Controller Diagnostics Overlay ───────────────────────────────────────────
+#[derive(Resource, Default)]
+struct ControllerDiagState {
+    visible: bool,
+}
+#[derive(Component)]
+struct ControllerDiagRoot;
+#[derive(Component)]
+struct ControllerDiagText;
 #[derive(Component)]
 struct WaveText;
 #[derive(Component)]
@@ -1002,38 +1022,34 @@ fn spawn_fast_travel_map(
             BorderColor::all(Color::srgb(0.16, 0.32, 0.48)),
         ))
         .with_children(|map| {
-            spawn_map_region_band(
-                map,
-                2.0,
-                62.0,
-                41.0,
-                36.0,
-                Color::srgba(0.35, 0.48, 0.62, 0.26),
-            );
-            spawn_map_region_band(
-                map,
-                4.0,
-                64.0,
-                25.0,
-                20.0,
-                Color::srgba(0.72, 0.82, 0.94, 0.32),
-            );
-            spawn_map_region_band(
-                map,
-                72.0,
-                20.0,
-                22.0,
-                58.0,
-                Color::srgba(0.45, 0.62, 0.36, 0.22),
-            );
-            spawn_map_region_band(
-                map,
-                0.0,
-                0.0,
-                100.0,
-                8.0,
-                Color::srgba(0.08, 0.28, 0.44, 0.42),
-            );
+            // ── Region bands (ordered back-to-front so labels overlap nicely) ──
+            // Fangroot Wildland — upper strip, heavy forest canopy
+            spawn_map_region_band(map,  0.0,  2.0, 45.0, 18.0,
+                Color::srgba(0.22, 0.48, 0.18, 0.28), "Fangroot Wildland");
+            // Ember Nest — upper-left volcanic highland
+            spawn_map_region_band(map,  2.0, 18.0, 22.0, 22.0,
+                Color::srgba(0.62, 0.30, 0.10, 0.24), "Ember Nest");
+            // Sister Sanctum — center-left valley
+            spawn_map_region_band(map, 26.0, 28.0, 24.0, 30.0,
+                Color::srgba(0.55, 0.36, 0.72, 0.20), "Sister Sanctum");
+            // Starfall Zone — center hub around origin
+            spawn_map_region_band(map, 42.0, 38.0, 18.0, 20.0,
+                Color::srgba(0.94, 0.88, 0.22, 0.18), "Starfall Zone");
+            // Rift Highlands — center-right plateau
+            spawn_map_region_band(map, 55.0, 28.0, 22.0, 36.0,
+                Color::srgba(0.36, 0.58, 0.82, 0.20), "Rift Highlands");
+            // Pink Flame & Rockies — eastern range
+            spawn_map_region_band(map, 72.0, 20.0, 26.0, 58.0,
+                Color::srgba(0.45, 0.62, 0.36, 0.22), "Eastern Range");
+            // Everest Crown — lower-left fortress domain
+            spawn_map_region_band(map,  2.0, 62.0, 41.0, 36.0,
+                Color::srgba(0.35, 0.48, 0.62, 0.26), "Everest Crown");
+            // Glacier Fields — inner sub-region of crown
+            spawn_map_region_band(map,  4.0, 64.0, 22.0, 18.0,
+                Color::srgba(0.72, 0.82, 0.94, 0.30), "Glacier Fields");
+            // Antarctic Reach — bottom strip, ice shelf
+            spawn_map_region_band(map,  0.0, 80.0, 100.0, 18.0,
+                Color::srgba(0.08, 0.28, 0.44, 0.38), "Antarctic Reach");
 
             for location in chapter_map_locations() {
                 let Some(chapter) = chapters.iter().find(|chapter| chapter.id == location.id)
@@ -1294,18 +1310,37 @@ fn spawn_map_region_band(
     width: f32,
     height: f32,
     color: Color,
+    label: &'static str,
 ) {
-    parent.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Percent(left),
-            top: Val::Percent(top),
-            width: Val::Percent(width),
-            height: Val::Percent(height),
-            ..default()
-        },
-        BackgroundColor(color),
-    ));
+    parent
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(left),
+                top: Val::Percent(top),
+                width: Val::Percent(width),
+                height: Val::Percent(height),
+                align_items: AlignItems::FlexStart,
+                justify_content: JustifyContent::FlexStart,
+                padding: UiRect {
+                    left: Val::Px(4.0),
+                    top: Val::Px(3.0),
+                    ..default()
+                },
+                ..default()
+            },
+            BackgroundColor(color),
+        ))
+        .with_children(|band| {
+            band.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: 8.0,
+                    ..default()
+                },
+                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.55)),
+            ));
+        });
 }
 
 fn world_to_map_left(x: f32) -> f32 {
@@ -3335,4 +3370,128 @@ fn game_over_input(
         }
         next_state.set(AppState::MainMenu);
     }
+}
+
+// ── Controller Diagnostics Overlay ───────────────────────────────────────────
+
+fn setup_controller_diag(mut commands: Commands) {
+    commands
+        .spawn((
+            ControllerDiagRoot,
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(8.0),
+                bottom: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.80)),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                ControllerDiagText,
+                Text::new("Controller Diagnostics"),
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.80, 0.95, 1.0)),
+            ));
+        });
+}
+
+fn despawn_controller_diag(
+    mut commands: Commands,
+    q: Query<Entity, With<ControllerDiagRoot>>,
+    mut state: ResMut<ControllerDiagState>,
+) {
+    for e in q.iter() {
+        commands.entity(e).despawn();
+    }
+    state.visible = false;
+}
+
+fn toggle_controller_diag(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<ControllerDiagState>,
+    mut root_q: Query<&mut Visibility, With<ControllerDiagRoot>>,
+) {
+    if !keyboard.just_pressed(KeyCode::F8) {
+        return;
+    }
+    state.visible = !state.visible;
+    let vis = if state.visible {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in root_q.iter_mut() {
+        *v = vis;
+    }
+}
+
+fn update_controller_diag(
+    state: Res<ControllerDiagState>,
+    players: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
+    gamepads: Query<(Entity, &Gamepad)>,
+    native: Res<NativeControllerState>,
+    mut text_q: Query<&mut Text, With<ControllerDiagText>>,
+) {
+    if !state.visible {
+        return;
+    }
+    let Ok(mut text) = text_q.single_mut() else {
+        return;
+    };
+
+    let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
+    gps.sort_by_key(|(e, _)| e.index());
+
+    let mut lines = Vec::with_capacity(8);
+    lines.push("── Controller Diagnostics [F8] ──".to_string());
+
+    for (idx, pi) in players.iter().collect::<Vec<_>>().into_iter().collect::<Vec<_>>() {
+        let i = idx.0 as usize;
+        let gp_info = if let Some((_, gp)) = gps.get(i) {
+            let ls = Vec2::new(
+                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickX).unwrap_or(0.0),
+                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickY).unwrap_or(0.0),
+            );
+            let rs = Vec2::new(
+                gp.get(bevy::input::gamepad::GamepadAxis::RightStickX).unwrap_or(0.0),
+                gp.get(bevy::input::gamepad::GamepadAxis::RightStickY).unwrap_or(0.0),
+            );
+            format!("GP{}  L({:+.2},{:+.2}) R({:+.2},{:+.2})", i, ls.x, ls.y, rs.x, rs.y)
+        } else if i == 0 && native.connected {
+            format!("Native({}) L({:+.2},{:+.2})",
+                &native.name[..native.name.len().min(12)],
+                native.move_axis.x, native.move_axis.y)
+        } else {
+            "KB/no pad".to_string()
+        };
+
+        let mut actions = String::new();
+        if pi.fire        { actions.push_str(" FIRE"); }
+        if pi.jump        { actions.push_str(" JMP"); }
+        if pi.sprint      { actions.push_str(" SPR"); }
+        if pi.dodge       { actions.push_str(" DODGE"); }
+        if pi.melee_light { actions.push_str(" ML"); }
+        if pi.melee_heavy { actions.push_str(" MH"); }
+
+        lines.push(format!(
+            "P{}  Move({:+.2},{:+.2})  {}{}",
+            i + 1, pi.move_axis.x, pi.move_axis.y, gp_info,
+            if actions.is_empty() { String::new() } else { format!(" |{}", actions) }
+        ));
+    }
+
+    if native.connected {
+        lines.push(format!("Native: {} ✓", native.name));
+    } else {
+        lines.push("Native: --".to_string());
+    }
+
+    *text = Text::new(lines.join("\n"));
 }

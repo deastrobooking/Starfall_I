@@ -153,6 +153,33 @@ pub struct FreePeopleGuardianShip {
     pub bob: f32,
 }
 
+/// A collectible key item inside a dungeon that unlocks the boss gate.
+#[derive(Component, Debug, Clone)]
+pub struct DungeonKeyPickup {
+    pub chapter: u8,
+    pub collected: bool,
+    pub pickup_radius: f32,
+}
+
+/// A door slab inside a dungeon that slides aside once the matching key is held.
+#[derive(Component, Debug, Clone)]
+pub struct DungeonKeyGate {
+    pub chapter: u8,
+    pub closed: Vec3,
+    pub open: Vec3,
+}
+
+/// A spawn point inside a dungeon that fires an enemy wave when players enter range.
+#[derive(Component, Debug, Clone)]
+pub struct DungeonEnemySpawner {
+    pub chapter: u8,
+    pub enemy_type: crate::components::enemy::EnemyType,
+    pub count: u8,
+    pub trigger_radius: f32,
+    pub difficulty: f32,
+    pub spawned: bool,
+}
+
 /// Interactable entrance to a single-screen top-down castle/dungeon crawl.
 #[derive(Component, Debug, Clone)]
 pub struct DungeonCrawlGate {

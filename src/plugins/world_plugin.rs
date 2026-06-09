@@ -29,7 +29,10 @@ use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
-use crate::resources::{CurrentChapter, DungeonCrawlState, GameSettings, PlaySessionTransition};
+use crate::plugins::enemy_plugin::spawn_enemy_entity;
+use crate::resources::{
+    CurrentChapter, DungeonCrawlState, DungeonRoomState, GameSettings, PlaySessionTransition,
+};
 use crate::state::AppState;
 
 #[derive(Resource, Default)]
@@ -108,6 +111,7 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ColliderDebugState>()
             .init_resource::<DungeonCrawlState>()
+            .init_resource::<DungeonRoomState>()
             .init_resource::<DiscussionState>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
@@ -121,6 +125,9 @@ impl Plugin for WorldPlugin {
                     city_spy_drone_data_drop_system,
                     discussion_interaction_system,
                     dungeon_crawl_gate_system,
+                    dungeon_key_pickup_system,
+                    dungeon_key_gate_system,
+                    dungeon_enemy_spawner_system,
                     moving_platform_system,
                     rotating_elevator_system,
                     sling_shot_system,
@@ -346,6 +353,96 @@ fn dungeon_crawl_gate_system(
         };
         let blend = 1.0 - (-dt * 5.5).exp();
         transform.translation = transform.translation.lerp(target, blend);
+    }
+}
+
+fn dungeon_key_pickup_system(
+    mut commands: Commands,
+    mut room_state: ResMut<DungeonRoomState>,
+    mut key_q: Query<(Entity, &mut DungeonKeyPickup, &Transform)>,
+    player_q: Query<&Transform, With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (entity, mut key, key_xf) in key_q.iter_mut() {
+        if key.collected {
+            continue;
+        }
+        let any_near = player_q
+            .iter()
+            .any(|p| p.translation.distance(key_xf.translation) <= key.pickup_radius);
+        if any_near {
+            key.collected = true;
+            room_state.collect_key(key.chapter);
+            commands.entity(entity).despawn();
+            msg_ev.write(UiMessageEvent {
+                text: "Crown Key collected! Seek the boss gate.".to_string(),
+                duration: 3.5,
+            });
+        }
+    }
+}
+
+fn dungeon_key_gate_system(
+    room_state: Res<DungeonRoomState>,
+    mut gate_q: Query<(&mut Transform, &DungeonKeyGate)>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_secs();
+    for (mut xf, gate) in gate_q.iter_mut() {
+        let target = if room_state.has_key(gate.chapter) {
+            gate.open
+        } else {
+            gate.closed
+        };
+        let blend = 1.0 - (-dt * 4.0).exp();
+        xf.translation = xf.translation.lerp(target, blend);
+    }
+}
+
+fn dungeon_enemy_spawner_system(
+    dungeon: Res<DungeonCrawlState>,
+    mut spawner_q: Query<(&Transform, &mut DungeonEnemySpawner)>,
+    player_q: Query<&Transform, With<Player>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    if !dungeon.active {
+        return;
+    }
+    for (spawner_xf, mut spawner) in spawner_q.iter_mut() {
+        if spawner.spawned {
+            continue;
+        }
+        let any_near = player_q
+            .iter()
+            .any(|p| p.translation.distance(spawner_xf.translation) <= spawner.trigger_radius);
+        if !any_near {
+            continue;
+        }
+        spawner.spawned = true;
+        let spread = spawner.count as f32 * 2.0;
+        for i in 0..spawner.count {
+            let offset = Vec3::new(
+                (i as f32 - spawner.count as f32 * 0.5) * (spread / spawner.count as f32),
+                0.0,
+                0.0,
+            );
+            spawn_enemy_entity(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                spawner.enemy_type,
+                spawner_xf.translation + offset,
+                spawner.difficulty,
+                None,
+            );
+        }
+        msg_ev.write(UiMessageEvent {
+            text: "Enemies appear!".to_string(),
+            duration: 1.8,
+        });
     }
 }
 
@@ -2645,6 +2742,96 @@ fn spawn_dragon_lair_dungeon(
         spec.anchor_id,
         origin + rot * Vec3::new(0.0, 3.0, 48.0),
     );
+
+    if spec.chapter == 6 {
+        spawn_ch6_crown_dungeon_extras(commands, meshes, materials, pal, origin, rot);
+    }
+}
+
+fn spawn_ch6_crown_dungeon_extras(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    origin: Vec3,
+    rot: Quat,
+) {
+    // ── Key gem — glowing ice-blue orb in a side alcove off the mid room ──────
+    let key_pos = origin + rot * Vec3::new(-12.0, 1.8, 5.0);
+    let key_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.55, 0.92, 1.0),
+        emissive: LinearRgba::new(0.6, 2.4, 3.0, 1.0),
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+            material: MeshMaterial3d(key_mat),
+            transform: Transform::from_translation(key_pos),
+            ..default()
+        },
+        DungeonKeyPickup {
+            chapter: 6,
+            collected: false,
+            pickup_radius: 3.2,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.50, 0.90, 1.0),
+                intensity: 8_000.0,
+                range: 14.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // ── Boss key gate — two ice slabs blocking the throne corridor ────────────
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 3.8, 3.5, 32.0);
+        let open   = origin + rot * Vec3::new(side * 10.0, 3.5, 32.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.5, 7.0, 1.0))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_translation(closed),
+                ..default()
+            },
+            DungeonKeyGate {
+                chapter: 6,
+                closed,
+                open,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // ── Enemy spawners: corridor, mid-room, back room ─────────────────────────
+    for (local, count, enemy_type) in [
+        (Vec3::new(0.0, 1.5, -38.0), 3u8, EnemyType::Soldier),
+        (Vec3::new(0.0, 1.5,  -8.0), 4u8, EnemyType::Hybrid),
+        (Vec3::new(0.0, 1.5,  20.0), 3u8, EnemyType::SpikeAlien),
+    ] {
+        let world_pos = origin + rot * local;
+        commands.spawn((
+            Transform::from_translation(world_pos),
+            GlobalTransform::default(),
+            DungeonEnemySpawner {
+                chapter: 6,
+                enemy_type,
+                count,
+                trigger_radius: 24.0,
+                difficulty: 1.35,
+                spawned: false,
+            },
+        ));
+    }
 }
 
 fn spawn_dungeon_crawl_gate(

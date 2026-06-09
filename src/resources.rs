@@ -204,6 +204,25 @@ impl Default for CurrentChapter {
     }
 }
 
+// ── Dungeon Room Progress ─────────────────────────────────────────────────────
+#[derive(Resource, Default, Debug, Clone)]
+pub struct DungeonRoomState {
+    /// Chapters whose dungeon key has been collected this session.
+    pub keys_collected: Vec<u8>,
+}
+
+impl DungeonRoomState {
+    pub fn has_key(&self, chapter: u8) -> bool {
+        self.keys_collected.contains(&chapter)
+    }
+
+    pub fn collect_key(&mut self, chapter: u8) {
+        if !self.keys_collected.contains(&chapter) {
+            self.keys_collected.push(chapter);
+        }
+    }
+}
+
 // ── Dungeon Crawl Mode ───────────────────────────────────────────────────────
 #[derive(Resource, Debug, Clone)]
 pub struct DungeonCrawlState {
