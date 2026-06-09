@@ -320,22 +320,19 @@ Acceptance:
 - The UI shows why a build is blocked: missing credits, power, workers,
   blueprint, route, or prerequisite.
 
-Current implementation note:
+Current implementation status:
 
 - `src/settlement_economy.rs` owns the saved `SettlementEconomy` resource:
   shared stockpile, build records, tier costs, robot-part costs, deterministic
-  outputs, and first pure tests.
-- `SaveData` persists `settlement_economy` with `serde(default)` so older saves
-  still load.
-- Every `map_settlements()` entry spawns a `SettlementBuildTerminal`.
-  Interacting builds the next recommended structure after the settlement cache
-  is recovered or the matching M5 world site is liberated.
-- Built modules respawn from save data as physical world props: farms,
-  factories, spaceports, power plants, research labs, defense outposts, and
-  bridge hubs.
-- Still missing: confirmation-hold UX, chapter-select economy panel, route
-  unlock effects, assigned units, raid pressure, and per-building local
-  missions.
+  outputs, and tests. **✓ Done.**
+- `SaveData` persists `settlement_economy` with `serde(default)`. **✓ Done.**
+- Every `map_settlements()` entry spawns a `SettlementBuildTerminal`. Interacting
+  builds the next recommended structure. **✓ Done.**
+- Built modules respawn as physical world props: farms, factories, spaceports,
+  power plants, research labs, defense outposts, bridge hubs. **✓ Done.**
+- Confirmation-hold UX and chapter-select economy panel: **not yet (M12).**
+- Route unlock effects from bridge-hub tier upgrades: **not yet (M13).**
+- Assigned units and per-building local missions: **not yet (M14+).**
 
 ### M7: Connected Platformer Level Network
 
@@ -374,6 +371,18 @@ Acceptance:
 - Fast travel can use liberated route anchors but cannot skip enemy-held route
   locks unless a debug setting is active.
 - Connected spaces provide clear player guidance without relying only on text.
+
+Current implementation status:
+
+- `WorldRouteKind`, `WorldRouteState`, `WorldRouteId`, `WorldRoute`,
+  `WorldRouteSaveRecord`, `WorldRouteRegistry`, and `initial_world_routes()`
+  are complete in `src/resources.rs`. Six routes defined. **✓ Done.**
+- `world_route_unlock_system` automatically opens Locked routes when required
+  sites become Liberated. Save/load works. **✓ Done.**
+- Physical world props (beacon entities, bridge meshes, sky-ramp geometry)
+  and fast-travel via liberated route anchors: **not yet (M13).**
+- Route blockade system (route lock driven by a `RouteBlockade` raid):
+  **not yet (M13).**
 
 ### M8: Raids, Counteroffensives, And Regional Defense
 
@@ -442,9 +451,39 @@ Current implementation note:
 - `SaveData.raids` persists raid records with `serde(default)`. Active raids can
   respawn their tagged enemies after save/load because runtime entities are not
   serialized.
-- Route blockade support is intentionally only an integration seam for now:
-  `RaidRecord.target_route: Option<WorldRouteId>` exists, but actual route
-  blocking should land after Engine M7 route behavior is stable.
+- Route blockade support is an integration seam: `RaidRecord.target_route:
+  Option<WorldRouteId>` exists, but actual route blocking lands in M13.
+- M8 core implementation is **✓ Done.** (80 tests passing)
+
+### M9: Command Strategy Layer
+
+Current implementation status:
+
+- `CommandAssetKind` (9 kinds), `CommandRegistry`, defense score integration
+  with raids, F7 overlay, and save/load are complete. **✓ Done.**
+- Controller-friendly assignment screen and per-asset mission queuing:
+  **not yet (M14).**
+
+### M10: Tech Hero Hacking, Takeover Mode, And Blueprints
+
+Current implementation status:
+
+- Data model (`Hackable`, `HackedUnit`, `HackingRegistry`), systems
+  (`hack_interaction_system`, `hack_progress_system`,
+  `hacked_unit_control_system`), small Scallarian drone takeover, and
+  `SaveData.hacking` are complete. **✓ Done — first slice.**
+- Tech-hero gating, true possession camera, stagger requirements for heavy
+  targets, and deterministic blueprint tables: **not yet (M14+).**
+
+### M11: Endgame Reclamation War
+
+Current implementation status:
+
+- `FinalWarPhase`, `FactionPressure`, `FinalWarRegistry`,
+  `pressure_accumulation_system`, `coordinated_raid_trigger_system`,
+  `push_new_raid()`, and save/load are complete. **✓ Done — first slice.**
+- Narrative beats, radio announcements on phase escalation, final chapter
+  unlock, and win condition: **not yet (M17).**
 
 ### 2026-06-09: M9 Command Strategy Layer — First Slice
 
@@ -632,6 +671,257 @@ Acceptance:
   hard-lock players into an unwinnable campaign.
 - The final act still supports 1-4 local players, controller play, save/load,
   and clear player guidance.
+
+### M12: Settlement Economy Panel And Economy Tick Integration
+
+Goal: close the visible gap between the settlement data model and the player's
+ability to understand and manage it from the chapter-select screen.
+
+Context: `SettlementEconomy`, `SettlementBuildKind`, tier costs, robot-part
+costs, and build terminals are all working. What's missing is a player-facing
+panel that reads this state and a real-time economy tick that advances resource
+production between missions.
+
+Work items:
+
+- Add a **settlement economy panel** to the chapter-select screen (or as a
+  dedicated map overlay tab) that lists every settlement with:
+  - Current site state and owner badge.
+  - Stockpile bars for all 9 resource kinds.
+  - Active builds and construction progress.
+  - Next recommended build with cost and blocking reason.
+- Add a `settlement_economy_tick_system` that runs in `Playing` state on a
+  real-time interval (e.g., every 15 s). Each liberated site ticks its
+  registered buildings at the deterministic rate from `SettlementEconomy`.
+- Add `confirmation_hold_system` so build actions at a terminal require holding
+  the interact button for 0.8 s, preventing accidental spending in local co-op.
+- Add resource `transfer_between_sites` seam: when a route between two liberated
+  sites is Open, excess food or power is available to the connected site.
+  Keep this pure data; visuals come in M13.
+
+Acceptance:
+
+- Players can read all settlement states and stockpiles from the chapter-select
+  screen without entering Playing.
+- Economy ticks produce at least one visible resource change per play session.
+- A build action at a terminal requires a visible hold prompt before committing.
+- Route-linked resource sharing saves and loads correctly.
+
+Primary files: `src/settlement_economy.rs`, `src/plugins/ui_plugin.rs`,
+`src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`.
+
+---
+
+### M13: World Route Physical Props, Route Blockades, And Fast Travel
+
+Goal: make M7 routes real in the 3D world — players should be able to see
+route anchors, follow them between sites, and have enemies block them.
+
+Work items:
+
+- Add `spawn_world_route_props` system that, for each `Open` route in
+  `WorldRouteRegistry`, spawns a beacon entity at the route midpoint
+  (`WorldRouteMarker` component). The beacon is a colored pillar or archway:
+  green for Open, amber for Contested, red for Blocked. Locked routes spawn a
+  broken-bridge stub instead.
+- Add `route_blockade_enforcement_system`: when a `RouteBlockade` raid enters
+  `Active` phase, set the matching route to `WorldRouteState::Blocked`. When the
+  raid resolves, revert to `Open` or `Contested`.
+- Add **fast travel** in the chapter-select map: if a target chapter anchor has
+  a liberated site and an `Open` route connecting it to the player's current
+  site, fast travel works. Blocked or Locked routes show a warning and deny
+  travel until the route is cleared.
+- `despawn_route_props_on_state_change` — when a route's state changes,
+  despawn old prop entities and let the next frame re-spawn the correct visual.
+  Use `WorldRouteMarker` to identify owned props.
+
+Acceptance:
+
+- Each Open route has a visible 3D beacon in the world that agrees with the
+  map overlay state.
+- A raid of kind `RouteBlockade` visibly blocks the route beacon and disables
+  fast travel on that route until cleared.
+- Despawning and respawning route props after a state change does not leave
+  ghost entities or duplicate markers.
+- Route state and physical props survive save/load.
+
+Primary files: `src/plugins/world_plugin.rs`, `src/resources.rs`,
+`src/components/world.rs`, `src/plugins/ui_plugin.rs`.
+
+---
+
+### M14: Hero Class Differentiation And Per-Class Ability Layer
+
+Goal: make the 8 hero profiles feel distinct in gameplay, not just in stats.
+
+Context: `hero_power_profile()` has complete data for all 8 heroes — unique
+weapons, special slots, power sets, and robot affinity. `apply_hero_runtime()`
+applies base stats at spawn. The gap is that all heroes currently play
+identically once in the level.
+
+Work items:
+
+- **Apply primary weapon preference at spawn**: call `hero_power_profile()` in
+  `spawn_players` and equip the hero's `primary_weapon` as their starting slot,
+  ensuring e.g. Vincenzo starts with Rifle and Antonio starts with Shotgun.
+- **Hacking strength gating**: heroes with `HeroFamilyRole::WizardScientist`
+  (Giacoma/Giovanni/Gabrio, if added, or tech-class modifier) get `hack_seconds`
+  halved. All others get a penalty until a research-lab discovery unlocks the
+  faster hack.
+- **Companion affinity bonus**: Sister-role heroes (`HeroFamilyRole::Sister`)
+  get `companion_heal_system` output boosted by the hero's `support_mult` from
+  `HeroPowerSet`. This requires reading the owning player's `CharacterBlueprint`
+  name inside `companion_plugin.rs`.
+- **Special slot binding**: the hero's `special_slot` value from their profile
+  binds to the matching `SpecialWeapon` slot at spawn, so each hero enters
+  with their named special ready.
+- **Robot affinity**: `HeroPowerProfile::amplified_powers(robots)` is already
+  defined. Apply the returned `HeroPowerSet` to `PlayerStats` whenever the
+  `RobotPetCollection` changes (an event-driven or changed-resource system).
+
+Acceptance:
+
+- Two different heroes in the same session spawn with different primary weapons
+  and different base special slots.
+- A sister-role hero's companion deals measurably more healing than a
+  brother-role hero's companion with the same companion tier.
+- Robot pet collection changes within a session update the hero's applied power
+  multipliers before the next combat encounter.
+- All hero profile tests pass and hero name uniqueness is enforced.
+
+Primary files: `src/hero_roster.rs`, `src/plugins/player_plugin.rs`,
+`src/plugins/companion_plugin.rs`, `src/plugins/hacking_plugin.rs`.
+
+---
+
+### M15: Enemy AI Depth, UFO Spawner, And Boss UI
+
+Goal: make enemy encounters feel smarter and boss fights feel like events.
+
+Context: `EnemyAIState` has Idle, Patrol, Chase, Attack, Stunned, Dead.
+`patrol_target` is a single random point. `DragonBoss` has a 3-phase health
+system with fireball/breath/slam. No visual boss-health bar exists.
+
+Work items:
+
+- **Patrol waypoints**: replace the single `patrol_target` on `Enemy` with a
+  `patrol_waypoints: Vec<Vec3>` list (2–4 points generated near spawn) and a
+  `patrol_index: usize`. Cycle through waypoints in `EnemyAIState::Patrol`.
+- **CitySpyDrone AI**: `CitySpyDrone` component exists. Add a system that, when
+  a `CitySpyDrone` entity reaches a liberated city terminal, it fires a
+  `UiMessageEvent` and optionally applies a small threat-pressure increment to
+  `FinalWarRegistry`.
+- **UFO spawner entity**: add a `RaidUfoSpawner` component (similar to
+  `DungeonEnemySpawner`) that, when a `GiantUfoSiege` raid goes Active, spawns a
+  visible UFO mesh at high altitude above the target site and periodically drops
+  enemies downward.
+- **Boss health bar UI**: spawn a dedicated boss-health panel when
+  `BossEnemy` entities exist in the world. Show health, phase indicator (I/II/III),
+  and the boss's display name from `NamedCharacter`. Despawn the panel when the
+  boss is cleared.
+- **Stagger requirement for heavy hacks**: `hack_interaction_system` should
+  check `hackable.difficulty >= 2` and require the target entity to be in
+  `EnemyAIState::Stunned` before the hack can begin.
+
+Acceptance:
+
+- Enemies with `EnemyAIState::Patrol` follow a multi-point path visible from
+  above; they do not pace endlessly between two near-identical points.
+- A `GiantUfoSiege` raid in Active phase has a visible UFO prop that periodically
+  drops enemy entities.
+- A boss-health UI panel appears whenever a `BossEnemy` is alive and despawns
+  when the fight ends.
+- Attempting to hack a difficulty-2 enemy while it is in Chase or Attack state
+  fails with a `UiMessageEvent` explaining the stagger requirement.
+
+Primary files: `src/components/enemy.rs`, `src/plugins/enemy_plugin.rs`,
+`src/plugins/ui_plugin.rs`, `src/plugins/hacking_plugin.rs`,
+`src/plugins/world_plugin.rs`.
+
+---
+
+### M16: Settings Panel, Save Hardening, And Accessibility Pass
+
+Goal: make the game survivable for long sessions — settings that stick,
+saves that don't corrupt, and a foundation for accessibility.
+
+Work items:
+
+- **Settings panel in pause menu**: expose `GameSettings.difficulty_scale` as
+  Easy / Normal / Hard selector. Add `music_volume: f32` and `sfx_volume: f32`
+  to `GameSettings` (serde-backed) and hook them to the `PlaybackSettings`
+  volume when spawning audio. Persist `GameSettings` to a separate
+  `starfall_i_settings.json` — do not embed in the campaign save.
+- **Save backup rotation**: instead of writing one `starfall_i_save.json`,
+  maintain three rolling slots: `_save_a.json`, `_save_b.json`, `_save_c.json`.
+  Each autosave and manual save rotates the slot. Load from the most-recently-
+  written valid file. If all three fail to parse, start fresh.
+- **Save version field**: add `pub save_version: u32` (default 1) to `SaveData`
+  with `#[serde(default)]`. Check version on load; log a migration warning if
+  older. Increment to 2 when M16 ships.
+- **Colorblind-safe site indicators**: the fast-travel map uses color alone to
+  show site state. Add a shape overlay (circle = liberated, triangle = enemy-held,
+  diamond = contested) so state is readable without color.
+- **Controller rumble seam**: add `rumble_on_hit: bool` to `GameSettings` and
+  a no-op `trigger_player_rumble(player_index, strength)` function in
+  `input_plugin.rs` as a forward seam for when Bevy adds native rumble support.
+
+Acceptance:
+
+- Changing difficulty scale in the pause menu takes effect on the next enemy
+  spawn without requiring a reload.
+- Three autosave slots rotate correctly; if one is corrupted the next valid
+  one loads.
+- Site state on the chapter-select map is distinguishable by shape alone, not
+  just color.
+- `GameSettings` persists between sessions independently of campaign state.
+
+Primary files: `src/resources.rs`, `src/plugins/ui_plugin.rs`,
+`src/plugins/save_plugin.rs`, `src/plugins/input_plugin.rs`.
+
+---
+
+### M17: Campaign Completion, Final War Narrative, And Win Condition
+
+Goal: give the campaign a proper arc — players should feel the world turning as
+they liberate it and have a clear, celebratory ending.
+
+Context: `FinalWarRegistry` tracks pressure and phase but nothing announces
+phase transitions, and there is no win condition or credits.
+
+Work items:
+
+- **Phase-transition radio events**: when `FinalWarPhase` advances (e.g.,
+  Dormant → Escalating), fire a `UiMessageEvent` and queue a radio chatter line
+  via `RadioChatter` (e.g., "Enemy fleet mobilising — multiple regions at risk!").
+  Add corresponding discussion script entries to `src/discussion.rs`.
+- **Final chapter unlock gate**: add a `FinalWarPhase::Climax` check in the
+  chapter-select system. When Climax is reached AND at least 6 of the 9 world
+  sites are Liberated, unlock a special "Final Push" chapter anchor on the map.
+- **Win condition**: when all 9 world sites are Liberated and the
+  `FinalWarPhase` is Dormant (pressure has been driven to zero), write
+  `campaign_complete: bool` to `SaveData` and trigger the credits/victory
+  sequence. `campaign_complete` is `#[serde(default)]` so old saves load cleanly.
+- **Victory screen**: a simple full-screen panel with hero names, playtime, and
+  chapter count. Return to main menu after a timer or input.
+- **New game plus hook**: after campaign completion, add a "Continue" option that
+  resets site states to initial while preserving hero levels, blueprints, and
+  robot pets. This is a pure save-data reset — no new systems required.
+
+Acceptance:
+
+- Progressing from Escalating to Active in `FinalWarPhase` triggers an
+  in-game radio announcement without requiring a chapter transition.
+- The "Final Push" chapter appears on the map only when the unlock condition
+  is met.
+- Completing the campaign (all sites liberated) triggers the victory screen
+  and sets `campaign_complete: true` in the save.
+- Loading a completed campaign and starting a new game plus resets sites but
+  preserves per-hero progress.
+
+Primary files: `src/final_war.rs`, `src/plugins/world_plugin.rs`,
+`src/plugins/ui_plugin.rs`, `src/discussion.rs`, `src/plugins/save_plugin.rs`,
+`src/plugins/radio_plugin.rs`.
 
 ## Migration Notes
 

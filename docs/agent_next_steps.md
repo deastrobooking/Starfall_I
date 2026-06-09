@@ -55,16 +55,21 @@ Handle these before widening content too much:
   discussion NPCs with MP3 voice hooks plus first peaceful-city spy-drone
   reward activities, but still need quest boards, shops, local enemy routes,
   route clues, and recorded voice assets.
-- Engine M8 now has a first recoverable raid slice: Cloudrail City can warn,
-  spawn a Scallarian drone swarm/UFO marker, resolve through combat or static
-  defenses, and persist raid state. Next raid work should expand targets,
-  consequences, route blockades, and assigned defenses after Engine M7 route
-  behavior settles.
-- Engine M10 now has a first tech-hacking slice: small Scallarian drones can be
-  hacked into temporary friendly linked units, save the first drone blueprint,
-  add a Scout Drone command asset, and neutralize raid threats. Next hacking
-  work should add tech-hero gating, true possession camera/control rules,
-  stagger requirements for larger targets, and deterministic blueprint tables.
+- Engine M8 raids are complete: Cloudrail City tutorial raid, 6 raid kinds,
+  full warning→active→resolved lifecycle, static + command-asset defense,
+  save/load. Route blockades land in M13.
+- Engine M9 command layer first slice is complete: 9 asset kinds, defense
+  integration, F7 overlay, save/load. Assignment UI and per-mission queuing
+  land in M14.
+- Engine M10 hacking first slice is complete: `hack_interaction_system`,
+  `hack_progress_system`, `hacked_unit_control_system`, drone takeover, blueprint
+  save, command asset reward. Tech-hero gating and stagger requirements land in
+  M14–M15.
+- Engine M11 final war first slice is complete: `FinalWarRegistry`, pressure
+  accumulation, coordinated raid trigger, save/load. Narrative beats and win
+  condition land in M17.
+- Milestones M12–M17 are now defined in `docs/engine_upgrade_milestones.md`.
+  Next immediate priority is M12 (settlement economy panel).
 - Controller support is coded, but still needs repeated hardware smoke passes
   and an in-game diagnostics overlay.
 - Performance budgets are informal. The 200-mile terrain and split-screen
