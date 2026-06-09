@@ -1,5 +1,9 @@
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{CompressedImageFormats, Image, ImageSampler, ImageType};
+use bevy::image::{
+    CompressedImageFormats, Image, ImageAddressMode, ImageLoaderSettings, ImageSampler,
+    ImageSamplerDescriptor, ImageType,
+};
+use bevy::math::Affine2;
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
@@ -453,6 +457,7 @@ fn settlement_build_terminal_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
     settings: Res<GameSettings>,
     progress: Res<ChapterProgress>,
     world_site_registry: Res<WorldSiteRegistry>,
@@ -499,7 +504,7 @@ fn settlement_build_terminal_system(
         let def = settlement_build_def(build_kind);
         match economy.try_build(terminal.settlement_id, build_kind, &mut robot_pets) {
             Ok(tier) => {
-                let pal = Palette::build(&mut materials);
+                let pal = Palette::build(&mut materials, &asset_server);
                 let settlement = MapSettlement {
                     anchor_id: terminal.settlement_id,
                     name: terminal.settlement_name,
@@ -1676,6 +1681,7 @@ fn generate_city(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut grass_mats: ResMut<Assets<GrassMaterial>>,
+    asset_server: Res<AssetServer>,
     transition: Res<PlaySessionTransition>,
     settings: Res<GameSettings>,
     current: Res<CurrentChapter>,
@@ -1691,7 +1697,7 @@ fn generate_city(
     let seed = settings.world_seed;
     let m = &mut *mats;
 
-    let pal = Palette::build(m);
+    let pal = Palette::build(m, &asset_server);
 
     spawn_lighting(&mut commands, &mut meshes, m);
     spawn_ground_plane(&mut commands);
@@ -1778,6 +1784,8 @@ struct Palette {
 
     terrain_surface: Handle<StandardMaterial>,
     mountain_path: Handle<StandardMaterial>,
+    bridge_deck: Handle<StandardMaterial>,
+    bridge_stone: Handle<StandardMaterial>,
     highway: Handle<StandardMaterial>,
     sky_platform: Handle<StandardMaterial>,
     water: Handle<StandardMaterial>,
@@ -1814,8 +1822,21 @@ struct Palette {
     dragon_banner: Handle<StandardMaterial>, // Dark crimson banner
 }
 
+fn repeating_texture(asset_server: &AssetServer, path: &'static str) -> Handle<Image> {
+    asset_server.load_with_settings(path, |settings: &mut ImageLoaderSettings| {
+        *settings = ImageLoaderSettings {
+            sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                address_mode_u: ImageAddressMode::Repeat,
+                address_mode_v: ImageAddressMode::Repeat,
+                ..default()
+            }),
+            ..default()
+        };
+    })
+}
+
 impl Palette {
-    fn build(m: &mut Assets<StandardMaterial>) -> Self {
+    fn build(m: &mut Assets<StandardMaterial>, asset_server: &AssetServer) -> Self {
         let mk =
             |base: Color, emissive: LinearRgba, metallic: f32, roughness: f32| StandardMaterial {
                 base_color: base,
@@ -1982,6 +2003,8 @@ impl Palette {
 
             street_asphalt: m.add(StandardMaterial {
                 base_color: Color::srgb(0.16, 0.16, 0.19),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/asphalt.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(8.0)),
                 emissive: LinearRgba::new(0.03, 0.03, 0.05, 1.0),
                 metallic: 0.08,
                 perceptual_roughness: 0.88,
@@ -1997,22 +2020,57 @@ impl Palette {
                 ..default()
             }),
             terrain_surface: m.add(StandardMaterial {
-                base_color: Color::WHITE,
+                base_color: Color::srgb(0.86, 0.94, 0.82),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/rock_grass.png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(96.0)),
                 metallic: 0.0,
                 perceptual_roughness: 0.96,
                 reflectance: 0.18,
                 ..default()
             }),
             mountain_path: m.add(StandardMaterial {
-                base_color: Color::srgb(0.34, 0.31, 0.27),
+                base_color: Color::srgb(0.58, 0.52, 0.44),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/stone (1).png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(3.6)),
                 emissive: LinearRgba::new(0.035, 0.030, 0.020, 1.0),
                 metallic: 0.01,
                 perceptual_roughness: 0.98,
                 reflectance: 0.12,
                 ..default()
             }),
+            bridge_deck: m.add(StandardMaterial {
+                base_color: Color::srgb(0.92, 0.78, 0.52),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/wood.jpg")),
+                uv_transform: Affine2::from_scale(Vec2::new(2.6, 9.0)),
+                emissive: LinearRgba::new(0.06, 0.035, 0.012, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.86,
+                reflectance: 0.18,
+                ..default()
+            }),
+            bridge_stone: m.add(StandardMaterial {
+                base_color: Color::srgb(0.68, 0.66, 0.62),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/stone (1).png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.4)),
+                emissive: LinearRgba::new(0.035, 0.032, 0.028, 1.0),
+                metallic: 0.02,
+                perceptual_roughness: 0.94,
+                reflectance: 0.16,
+                ..default()
+            }),
             highway: m.add(StandardMaterial {
                 base_color: Color::srgb(0.10, 0.10, 0.13),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/asphalt.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(10.0)),
                 metallic: 0.20,
                 perceptual_roughness: 0.75,
                 ..default()
@@ -2035,25 +2093,45 @@ impl Palette {
             }),
 
             rock: m.add(StandardMaterial {
-                base_color: Color::srgb(0.28, 0.25, 0.22),
+                base_color: Color::srgb(0.58, 0.54, 0.48),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/stone (1).png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.7)),
                 metallic: 0.05,
                 perceptual_roughness: 0.95,
                 ..default()
             }),
             rock_dark: m.add(StandardMaterial {
-                base_color: Color::srgb(0.12, 0.11, 0.10),
+                base_color: Color::srgb(0.34, 0.32, 0.29),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/stone (1).png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(3.2)),
                 metallic: 0.02,
                 perceptual_roughness: 0.98,
                 ..default()
             }),
             snow: m.add(StandardMaterial {
-                base_color: Color::srgb(0.88, 0.92, 1.00),
+                base_color: Color::srgb(0.96, 0.98, 1.00),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/rock_snow (1).png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.6)),
                 metallic: 0.0,
                 perceptual_roughness: 0.80,
                 ..default()
             }),
             moss: m.add(StandardMaterial {
-                base_color: Color::srgb(0.10, 0.36, 0.13),
+                base_color: Color::srgb(0.28, 0.50, 0.18),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/grass (1).png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.0)),
                 emissive: LinearRgba::new(0.02, 0.08, 0.02, 1.0),
                 metallic: 0.0,
                 perceptual_roughness: 0.92,
@@ -4624,6 +4702,51 @@ fn edge_fade01(t: f32, feather: f32) -> f32 {
     smoothstep(0.0, feather, t) * (1.0 - smoothstep(1.0 - feather, 1.0, t))
 }
 
+fn terrain_fbm_signed(x: f32, z: f32, seed: u64, salt: u64, base_freq: f32) -> f32 {
+    let mut sum = 0.0;
+    let mut amp = 1.0;
+    let mut norm = 0.0;
+    let mut freq = base_freq;
+
+    for octave in 0..4u64 {
+        let idx = salt + octave * 37;
+        let angle = seeded(seed, idx) * TAU;
+        let phase = seeded(seed, idx + 11) * TAU;
+        let dir = Vec2::new(angle.cos(), angle.sin());
+        let cross = Vec2::new(-dir.y, dir.x);
+        let wave_a = (x * dir.x + z * dir.y) * freq + phase;
+        let wave_b = (x * cross.x + z * cross.y) * freq * 0.73 + phase * 1.37;
+        sum += (wave_a.sin() * 0.62 + wave_b.cos() * 0.38) * amp;
+        norm += amp;
+        amp *= 0.52;
+        freq *= 2.13;
+    }
+
+    if norm > f32::EPSILON {
+        (sum / norm).clamp(-1.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn terrain_fbm_01(x: f32, z: f32, seed: u64, salt: u64, base_freq: f32) -> f32 {
+    (terrain_fbm_signed(x, z, seed, salt, base_freq) * 0.5 + 0.5).clamp(0.0, 1.0)
+}
+
+fn terrain_domain_warp(
+    x: f32,
+    z: f32,
+    seed: u64,
+    salt: u64,
+    strength: f32,
+    base_freq: f32,
+) -> Vec2 {
+    Vec2::new(
+        terrain_fbm_signed(x, z, seed, salt, base_freq),
+        terrain_fbm_signed(x, z, seed, salt + 97, base_freq * 1.17),
+    ) * strength
+}
+
 fn distance_to_segment_xz(px: f32, pz: f32, ax: f32, az: f32, bx: f32, bz: f32) -> f32 {
     let vx = bx - ax;
     let vz = bz - az;
@@ -4651,7 +4774,7 @@ fn mountain_route_influence(x: f32, z: f32) -> f32 {
     influence
 }
 
-fn everest_heightmap_relief(x: f32, z: f32) -> f32 {
+fn everest_heightmap_relief(x: f32, z: f32, seed: u64) -> f32 {
     let Some(heightmap) = everest_heightmap() else {
         return 0.0;
     };
@@ -4666,17 +4789,53 @@ fn everest_heightmap_relief(x: f32, z: f32) -> f32 {
     }
 
     let edge = edge_fade01(u, 0.025) * edge_fade01(v, 0.025);
-    let raw = heightmap.sample(u, v) * 0.38 + heightmap.smooth_sample(u, v) * 0.62;
+    let warp = terrain_domain_warp(x, z, seed, 1_901, 0.020, 0.00046) * edge;
+    let warped_u = (u + warp.x).clamp(0.0, 1.0);
+    let warped_v = (v + warp.y).clamp(0.0, 1.0);
+    let raw_center = heightmap.sample(u, v);
+    let smooth = heightmap.smooth_sample(u, v);
+    let warped = heightmap.sample(warped_u, warped_v);
+    let raw = (raw_center * 0.30 + smooth * 0.45 + warped * 0.25).clamp(0.0, 1.0);
+
+    let du = 2.0 / heightmap.width.max(2) as f32;
+    let dv = 2.0 / heightmap.height.max(2) as f32;
+    let grad_x = heightmap.sample((warped_u + du).clamp(0.0, 1.0), warped_v)
+        - heightmap.sample((warped_u - du).clamp(0.0, 1.0), warped_v);
+    let grad_z = heightmap.sample(warped_u, (warped_v + dv).clamp(0.0, 1.0))
+        - heightmap.sample(warped_u, (warped_v - dv).clamp(0.0, 1.0));
+    let gradient = (grad_x * grad_x + grad_z * grad_z).sqrt();
+
     let foothill = smoothstep(0.06, 0.48, raw);
     let ridge = smoothstep(0.22, 0.86, raw);
     let high_ridge = smoothstep(0.56, 0.96, raw);
     let snowline = smoothstep(0.70, 0.985, raw);
-    let valley_cut = (1.0 - smoothstep(0.10, 0.38, raw)) * 34.0;
+    let fractured = smoothstep(0.020, 0.110, gradient) * smoothstep(0.18, 0.82, raw);
+    let ridge_noise = terrain_fbm_01(x, z, seed, 1_973, 0.00135);
+    let scree_noise = terrain_fbm_signed(x, z, seed, 2_011, 0.0062);
+    let drainage_wave = (x * 0.00039 - z * 0.00027
+        + terrain_fbm_signed(x, z, seed, 2_037, 0.00055) * 1.65)
+        .sin()
+        .abs();
+    let ravine_cut = (1.0 - smoothstep(0.055, 0.24, drainage_wave)) * ridge * 54.0;
+    let valley_cut = (1.0 - smoothstep(0.10, 0.38, raw)) * 34.0 + ravine_cut;
+    let terraced_raw =
+        ((raw * 11.0 + terrain_fbm_signed(x, z, seed, 2_059, 0.0011) * 0.22).floor() / 11.0)
+            .clamp(0.0, 1.0);
+    let terrace_offset = (terraced_raw - raw) * 82.0 * fractured * (1.0 - snowline * 0.35);
+    let fold_lift = fractured * (28.0 + high_ridge * 105.0) * (0.72 + ridge_noise * 0.42);
+    let scree_lift = scree_noise * 18.0 * smoothstep(0.32, 0.84, raw) * (1.0 - snowline * 0.45);
 
     let crown_distance = ((x + 8500.0).powi(2) + (z + 7800.0).powi(2)).sqrt();
     let authored_everest_summit = smoothstep(1800.0, 0.0, crown_distance) * 340.0;
 
-    edge * (foothill * 130.0 + ridge * 280.0 + high_ridge * 360.0 + snowline * 180.0 - valley_cut)
+    edge * (foothill * 130.0
+        + ridge * 280.0
+        + high_ridge * 360.0
+        + snowline * 180.0
+        + fold_lift
+        + scree_lift
+        + terrace_offset
+        - valley_cut)
         + authored_everest_summit
 }
 
@@ -4706,8 +4865,14 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     // abs(sin) creates sharp ridges; scale by distance to keep them in the outer world.
     let ridge_mask = smoothstep(1000.0, 6200.0, dist);
     let ridge = (x * 0.00125 + z * 0.001 + so).sin().abs() * 28.0 * ridge_mask;
+    let warp = terrain_domain_warp(x, z, seed, 2_401, 230.0, 0.00038);
+    let folded = terrain_fbm_signed(x + warp.x, z + warp.y, seed, 2_433, 0.00062).abs();
+    let knife_ridges = (1.0 - smoothstep(0.12, 0.52, folded)) * 68.0 * ridge_mask;
+    let basin_noise = terrain_fbm_01(x - warp.y * 0.35, z + warp.x * 0.35, seed, 2_467, 0.00034);
+    let hanging_valleys =
+        (1.0 - smoothstep(0.18, 0.58, basin_noise)) * 42.0 * smoothstep(1300.0, 7800.0, dist);
 
-    let base = large + med + small + micro + ridge;
+    let base = large + med + small + micro + ridge + knife_ridges - hanging_valleys;
 
     // Terrain rises significantly toward the world perimeter.
     let edge_lift = smoothstep(5200.0, 9800.0, dist) * 88.0;
@@ -4734,9 +4899,14 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     let plateau = plat_x * plat_z * 160.0;
 
     // Full-range Everest heightmap relief, with an authored summit boost near Collosar.
-    let everest = everest_heightmap_relief(x, z);
+    let everest = everest_heightmap_relief(x, z, seed);
 
-    let raw_height = base + edge_lift + peak_boost + qilian + plateau + everest;
+    let mut raw_height = base + edge_lift + peak_boost + qilian + plateau + everest;
+    raw_height += (raw_height * 0.034 + terrain_fbm_signed(x, z, seed, 2_503, 0.00115) * 0.82)
+        .sin()
+        * 8.0
+        * smoothstep(180.0, 680.0, raw_height)
+        * smoothstep(1600.0, 9000.0, dist);
     let route_cut = mountain_route_influence(x, z)
         * smoothstep(700.0, 6200.0, dist)
         * (28.0 + raw_height.max(0.0) * 0.06);
@@ -4775,7 +4945,8 @@ fn terrain_detail_noise(x: f32, z: f32, y: f32, seed: u64) -> f32 {
     let broad = (x * 0.0017 + z * 0.0011 + phase).sin();
     let speckle = (x * 0.015 - z * 0.012 + phase * 0.37).sin();
     let strata = (y * 0.055 + x * 0.0025 - z * 0.0017).sin();
-    ((broad * 0.45 + speckle * 0.35 + strata * 0.20) * 0.5 + 0.5).clamp(0.0, 1.0)
+    let eroded = terrain_fbm_signed(x, z, seed, 2_701, 0.0028);
+    ((broad * 0.34 + speckle * 0.22 + strata * 0.22 + eroded * 0.22) * 0.5 + 0.5).clamp(0.0, 1.0)
 }
 
 fn terrain_vertex_color(x: f32, z: f32, y: f32, normal: Vec3, seed: u64) -> [f32; 4] {
@@ -4905,6 +5076,7 @@ fn spawn_everest_range_biomes(
     spawn_range_forests(commands, meshes, pal, seed);
     spawn_range_waylines(commands, meshes, pal, seed);
     spawn_mountain_path_network(commands, meshes, pal, seed);
+    spawn_mountain_route_bridges(commands, meshes, pal, seed + 83, seed);
     spawn_range_outposts(commands, meshes, pal, seed);
     spawn_dragon_lair_silhouettes(commands, meshes, pal, seed);
 }
@@ -5227,11 +5399,22 @@ fn spawn_mountain_path_network(
                 let z0 = az + dz * t0;
                 let x1 = ax + dx * t1;
                 let z1 = az + dz * t1;
-                let mx = (x0 + x1) * 0.5;
-                let mz = (z0 + z1) * 0.5;
+                let mut mx = (x0 + x1) * 0.5;
+                let mut mz = (z0 + z1) * 0.5;
                 if Vec2::new(mx, mz).length() < 520.0 {
                     continue;
                 }
+
+                let side_wander = terrain_fbm_signed(
+                    mx,
+                    mz,
+                    seed,
+                    2_801 + ri as u64 * 37 + si as u64 * 11,
+                    0.0014,
+                ) * width
+                    * 0.34;
+                mx += perp_x * side_wander;
+                mz += perp_z * side_wander;
 
                 let slab_len = ((x1 - x0).powi(2) + (z1 - z0).powi(2)).sqrt() * 0.94;
                 let y0 = terrain_surface_y(x0, z0, seed);
@@ -5241,14 +5424,27 @@ fn spawn_mountain_path_network(
                 let lift = ((seeded(seed, ri as u64 * 701 + si as u64 * 53 + step as u64) - 0.5)
                     * 0.08)
                     .clamp(-0.04, 0.04);
+                let slab_width = width
+                    * (0.88 + seeded(seed, ri as u64 * 811 + si as u64 * 71 + step as u64) * 0.24);
+                let pitch = ((y1 - y0) / slab_len.max(1.0)).atan().clamp(-0.18, 0.18);
+                let roll = terrain_fbm_signed(
+                    mx,
+                    mz,
+                    seed,
+                    2_907 + ri as u64 * 31 + si as u64 * 13,
+                    0.0031,
+                ) * 0.025;
+                let slab_rot = Quat::from_rotation_y(yaw)
+                    * Quat::from_rotation_x(-pitch)
+                    * Quat::from_rotation_z(roll);
 
                 commands.spawn((
                     PbrBundle {
                         mesh: Mesh3d(slab_mesh.clone()),
                         material: MeshMaterial3d(pal.mountain_path.clone()),
                         transform: Transform::from_xyz(mx, y + lift, mz)
-                            .with_rotation(Quat::from_rotation_y(yaw))
-                            .with_scale(Vec3::new(width, 0.34, slab_len)),
+                            .with_rotation(slab_rot)
+                            .with_scale(Vec3::new(slab_width, 0.34, slab_len)),
                         ..default()
                     },
                     WorldGeometry,
@@ -5259,7 +5455,7 @@ fn spawn_mountain_path_network(
                     let glow_radius = 1.05
                         + seeded(seed, 90_000 + ri as u64 * 79 + si as u64 * 11 + step as u64)
                             * 0.42;
-                    let side_offset = width * 0.72;
+                    let side_offset = slab_width * 0.72;
                     for side in [-1.0_f32, 1.0] {
                         let sx = mx + perp_x * side_offset * side;
                         let sz = mz + perp_z * side_offset * side;
@@ -5270,6 +5466,28 @@ fn spawn_mountain_path_network(
                                 material: MeshMaterial3d(pal.guide_glow.clone()),
                                 transform: Transform::from_xyz(sx, sy, sz)
                                     .with_scale(Vec3::splat(glow_radius)),
+                                ..default()
+                            },
+                            WorldGeometry,
+                        ));
+                    }
+                }
+
+                if step % 5 == 2 {
+                    for side in [-1.0_f32, 1.0] {
+                        let rock_x = mx + perp_x * slab_width * 0.58 * side;
+                        let rock_z = mz + perp_z * slab_width * 0.58 * side;
+                        let rock_y = terrain_surface_y(rock_x, rock_z, seed) + 0.72;
+                        let rock_scale = 0.72
+                            + seeded(seed, 94_000 + ri as u64 * 83 + si as u64 * 17 + step as u64)
+                                * 0.64;
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: Mesh3d(stud_mesh.clone()),
+                                material: MeshMaterial3d(pal.bridge_stone.clone()),
+                                transform: Transform::from_xyz(rock_x, rock_y, rock_z).with_scale(
+                                    Vec3::new(rock_scale * 1.2, rock_scale * 0.62, rock_scale),
+                                ),
                                 ..default()
                             },
                             WorldGeometry,
@@ -5290,6 +5508,165 @@ fn spawn_mountain_path_network(
                         ..default()
                     });
                 }
+            }
+        }
+    }
+}
+
+fn spawn_mountain_route_bridges(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        for (si, pair) in route.windows(2).enumerate() {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let dx = bx - ax;
+            let dz = bz - az;
+            let segment_len = (dx * dx + dz * dz).sqrt();
+            if segment_len < 1650.0 {
+                continue;
+            }
+
+            let roll = seeded(seed, ri as u64 * 97 + si as u64 * 17);
+            if roll < 0.38 {
+                continue;
+            }
+
+            let center_t = 0.40 + seeded(seed, ri as u64 * 131 + si as u64 * 29) * 0.20;
+            let span_len = (segment_len * (0.18 + roll * 0.10)).clamp(260.0, 680.0);
+            let half_t = (span_len * 0.5 / segment_len).min(0.22);
+            let t0 = (center_t - half_t).clamp(0.04, 0.92);
+            let t1 = (center_t + half_t).clamp(0.08, 0.96);
+            if t1 <= t0 + 0.03 {
+                continue;
+            }
+
+            let start_x = ax + dx * t0;
+            let start_z = az + dz * t0;
+            let end_x = ax + dx * t1;
+            let end_z = az + dz * t1;
+            if Vec2::new((start_x + end_x) * 0.5, (start_z + end_z) * 0.5).length() < 720.0 {
+                continue;
+            }
+
+            let start_ground = terrain_surface_y(start_x, start_z, terrain_seed);
+            let end_ground = terrain_surface_y(end_x, end_z, terrain_seed);
+            let mid_x = (start_x + end_x) * 0.5;
+            let mid_z = (start_z + end_z) * 0.5;
+            let mid_ground = terrain_surface_y(mid_x, mid_z, terrain_seed);
+            let clearance = 7.5 + seeded(seed, ri as u64 * 181 + si as u64 * 37) * 8.0;
+            let mut start_y = start_ground + clearance;
+            let mut end_y = end_ground + clearance;
+            let mid_y = (start_y + end_y) * 0.5;
+            let needed_lift = (mid_ground + clearance + 5.0 - mid_y).max(0.0);
+            start_y += needed_lift;
+            end_y += needed_lift;
+
+            let start = Vec3::new(start_x, start_y, start_z);
+            let end = Vec3::new(end_x, end_y, end_z);
+            let delta = end - start;
+            let horizontal_len = Vec2::new(delta.x, delta.z).length();
+            if horizontal_len <= 10.0 {
+                continue;
+            }
+
+            let yaw = delta.x.atan2(delta.z);
+            let pitch = (delta.y / horizontal_len).atan().clamp(-0.28, 0.28);
+            let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+            let side_rot = Quat::from_rotation_y(yaw);
+            let width = 14.0 + (ri % 3) as f32 * 2.0;
+            let center = start + delta * 0.5;
+
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(unit_cube.clone()),
+                    material: MeshMaterial3d(pal.bridge_deck.clone()),
+                    transform: Transform::from_translation(center)
+                        .with_rotation(rot)
+                        .with_scale(Vec3::new(width, 0.68, horizontal_len)),
+                    ..default()
+                },
+                WorldGeometry,
+                WalkableSurface,
+                bevy_rapier3d::prelude::RigidBody::Fixed,
+                bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.55, horizontal_len * 0.5),
+            ));
+
+            let plank_count = 6;
+            for plank in 0..plank_count {
+                let t = (plank as f32 + 0.5) / plank_count as f32;
+                let sag = -(1.0 - (t * 2.0 - 1.0).abs()).powi(2)
+                    * (0.32 + seeded(seed, ri as u64 * 223 + si as u64 * 41) * 0.46);
+                let p = start.lerp(end, t) + Vec3::Y * (0.78 + sag);
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(unit_cube.clone()),
+                        material: MeshMaterial3d(pal.bridge_deck.clone()),
+                        transform: Transform::from_translation(p)
+                            .with_rotation(rot)
+                            .with_scale(Vec3::new(width * 0.96, 0.18, horizontal_len / 7.4)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+
+            for side in [-1.0_f32, 1.0] {
+                let local_side = Vec3::new(side * width * 0.58, 1.95, 0.0);
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(unit_cube.clone()),
+                        material: MeshMaterial3d(pal.bridge_stone.clone()),
+                        transform: Transform::from_translation(center + rot * local_side)
+                            .with_rotation(rot)
+                            .with_scale(Vec3::new(0.42, 0.52, horizontal_len * 0.94)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+
+                let mut last_cable: Option<Vec3> = None;
+                for cable_step in 0..=6 {
+                    let t = cable_step as f32 / 6.0;
+                    let arch = 5.8 - (1.0 - (t * 2.0 - 1.0).abs()).powi(2) * 1.9;
+                    let p =
+                        start.lerp(end, t) + side_rot * Vec3::new(side * width * 0.68, arch, 0.0);
+                    if let Some(last) = last_cable {
+                        spawn_static_cylinder_between(
+                            commands,
+                            meshes,
+                            pal.bridge_stone.clone(),
+                            last,
+                            p,
+                            0.18,
+                        );
+                    }
+                    last_cable = Some(p);
+                }
+            }
+
+            for anchor in [start, end] {
+                let ground = terrain_surface_y(anchor.x, anchor.z, terrain_seed);
+                let tower_h = (anchor.y - ground + 2.4).max(5.0);
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(unit_cube.clone()),
+                        material: MeshMaterial3d(pal.bridge_stone.clone()),
+                        transform: Transform::from_xyz(anchor.x, ground + tower_h * 0.5, anchor.z)
+                            .with_rotation(Quat::from_rotation_y(yaw))
+                            .with_scale(Vec3::new(width * 0.72, tower_h, 4.8)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                    bevy_rapier3d::prelude::RigidBody::Fixed,
+                    bevy_rapier3d::prelude::Collider::cuboid(width * 0.36, tower_h * 0.5, 2.4),
+                ));
             }
         }
     }
@@ -8939,17 +9316,53 @@ fn spawn_sky_platforms(
 }
 
 // ── Sky Bridges ───────────────────────────────────────────────────────────────
+fn spawn_static_cylinder_between(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    start: Vec3,
+    end: Vec3,
+    radius: f32,
+) {
+    let delta = end - start;
+    let length = delta.length();
+    if length <= 0.05 {
+        return;
+    }
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(radius, length))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(start + delta * 0.5)
+                .with_rotation(Quat::from_rotation_arc(Vec3::Y, delta.normalize())),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
 fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+
     for i in 0..8u64 {
-        let x = seeded(seed, i * 3) * 400.0 - 200.0;
-        let y = 60.0 + seeded(seed, i * 3 + 1) * 100.0;
-        let z = seeded(seed, i * 3 + 2) * 400.0 - 200.0;
+        let x = seeded(seed, i * 7) * 480.0 - 240.0;
+        let y = 62.0 + seeded(seed, i * 7 + 1) * 118.0;
+        let z = seeded(seed, i * 7 + 2) * 480.0 - 240.0;
+        let yaw = seeded(seed, i * 7 + 3) * TAU;
+        let len = 74.0 + seeded(seed, i * 7 + 4) * 58.0;
+        let width = 6.2 + seeded(seed, i * 7 + 5) * 3.8;
+        let sag = 1.0 + seeded(seed, i * 7 + 6) * 2.8;
+        let base = Vec3::new(x, y, z);
+        let rot = Quat::from_rotation_y(yaw);
 
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(80.0, 1.5, 6.0))),
-                material: MeshMaterial3d(pal.sky_platform.clone()),
-                transform: Transform::from_xyz(x, y, z),
+                mesh: Mesh3d(unit_cube.clone()),
+                material: MeshMaterial3d(pal.bridge_stone.clone()),
+                transform: Transform::from_translation(base)
+                    .with_rotation(rot)
+                    .with_scale(Vec3::new(width, 0.92, len)),
                 ..default()
             },
             WorldGeometry,
@@ -8959,8 +9372,90 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
                 height: 1.5,
             },
             bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(40.0, 0.75, 3.0),
+            bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.75, len * 0.5),
         ));
+
+        let segments = 8;
+        let plank_len = len / segments as f32;
+        for segment in 0..segments {
+            let t = (segment as f32 + 0.5) / segments as f32;
+            let centered = t * 2.0 - 1.0;
+            let local_z = -len * 0.5 + plank_len * (segment as f32 + 0.5);
+            let sag_y = -(1.0 - centered.abs()).powi(2) * sag * 0.18;
+            let wobble = (seeded(seed, i * 101 + segment as u64) - 0.5) * 0.16;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(unit_cube.clone()),
+                    material: MeshMaterial3d(pal.bridge_deck.clone()),
+                    transform: Transform::from_translation(
+                        base + rot * Vec3::new(0.0, 0.62 + sag_y + wobble, local_z),
+                    )
+                    .with_rotation(rot)
+                    .with_scale(Vec3::new(
+                        width * 0.94,
+                        0.18,
+                        plank_len * 0.82,
+                    )),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+
+        for side in [-1.0_f32, 1.0] {
+            let rail_x = side * width * 0.62;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(unit_cube.clone()),
+                    material: MeshMaterial3d(pal.bridge_stone.clone()),
+                    transform: Transform::from_translation(
+                        base + rot * Vec3::new(rail_x, 2.25, 0.0),
+                    )
+                    .with_rotation(rot)
+                    .with_scale(Vec3::new(0.42, 0.48, len * 0.96)),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+
+            for post in 0..6 {
+                let t = post as f32 / 5.0;
+                let local_z = -len * 0.5 + len * t;
+                let sag_y = -(1.0 - (t * 2.0 - 1.0).abs()).powi(2) * sag * 0.24;
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(unit_cube.clone()),
+                        material: MeshMaterial3d(pal.bridge_stone.clone()),
+                        transform: Transform::from_translation(
+                            base + rot * Vec3::new(rail_x, 1.75 + sag_y, local_z),
+                        )
+                        .with_rotation(rot)
+                        .with_scale(Vec3::new(0.76, 3.2, 0.76)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+
+            let mut last_cable: Option<Vec3> = None;
+            for cable_step in 0..=8 {
+                let t = cable_step as f32 / 8.0;
+                let local_z = -len * 0.5 + len * t;
+                let arch = 5.2 - (1.0 - (t * 2.0 - 1.0).abs()).powi(2) * sag * 0.55;
+                let point = base + rot * Vec3::new(rail_x, arch, local_z);
+                if let Some(last) = last_cable {
+                    spawn_static_cylinder_between(
+                        commands,
+                        meshes,
+                        pal.guide_glow.clone(),
+                        last,
+                        point,
+                        0.12,
+                    );
+                }
+                last_cable = Some(point);
+            }
+        }
     }
 }
 
@@ -9178,6 +9673,14 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
 
             let peak_h = 110.0 + seeded(seed, idx * 5 + 2) * 260.0;
             let base_r = 58.0 + seeded(seed, idx * 5 + 3) * 82.0;
+            let yaw = seeded(seed, idx * 5 + 4) * TAU;
+            let lean_x = (seeded(seed, idx * 5 + 5) - 0.5) * 0.16;
+            let lean_z = (seeded(seed, idx * 5 + 6) - 0.5) * 0.16;
+            let rock_mat = if seeded(seed, idx * 5 + 7) > 0.72 {
+                pal.rock_dark.clone()
+            } else {
+                pal.rock.clone()
+            };
 
             // ── Main spire ──────────────────────────────────────────────
             commands.spawn((
@@ -9186,12 +9689,37 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
                         radius: base_r,
                         height: peak_h,
                     })),
-                    material: MeshMaterial3d(pal.rock.clone()),
-                    transform: Transform::from_xyz(wx, ground_y + peak_h * 0.5, wz),
+                    material: MeshMaterial3d(rock_mat.clone()),
+                    transform: Transform::from_xyz(wx, ground_y + peak_h * 0.5, wz).with_rotation(
+                        Quat::from_rotation_y(yaw)
+                            * Quat::from_rotation_x(lean_x)
+                            * Quat::from_rotation_z(lean_z),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
             ));
+
+            for band in 0..3u64 {
+                let band_t = 0.24 + band as f32 * 0.18;
+                let band_r =
+                    base_r * (0.92 - band_t * 0.55) * (0.78 + seeded(seed, idx * 29 + band) * 0.32);
+                if band_r <= 8.0 {
+                    continue;
+                }
+                let band_y = ground_y + peak_h * band_t;
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cylinder::new(band_r, 0.86))),
+                        material: MeshMaterial3d(pal.rock_dark.clone()),
+                        transform: Transform::from_xyz(wx, band_y, wz)
+                            .with_rotation(Quat::from_rotation_y(yaw + band as f32 * 0.7))
+                            .with_scale(Vec3::new(1.0, 1.0, 0.46)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
 
             // ── Shoulder ridges (2 smaller cones offset from the peak) ──
             for s in 0..2u64 {
@@ -9205,8 +9733,13 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
                             radius: sr,
                             height: sh,
                         })),
-                        material: MeshMaterial3d(pal.rock.clone()),
-                        transform: Transform::from_xyz(wx + sdx, ground_y + sh * 0.5, wz + sdz),
+                        material: MeshMaterial3d(rock_mat.clone()),
+                        transform: Transform::from_xyz(wx + sdx, ground_y + sh * 0.5, wz + sdz)
+                            .with_rotation(
+                                Quat::from_rotation_y(yaw + s as f32 * 1.7)
+                                    * Quat::from_rotation_x(lean_x * 0.7)
+                                    * Quat::from_rotation_z(lean_z * 0.7),
+                            ),
                         ..default()
                     },
                     WorldGeometry,
