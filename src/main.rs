@@ -33,7 +33,8 @@ use perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChassisEditorPlugin,
     ChestPlugin, CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, InputPlugin,
-    PlayerPlugin, RadioPlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
+    PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin,
+    WeaponPlugin, WorldPlugin,
 };
 use resources::{
     CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlaySessionTransition,
@@ -107,6 +108,7 @@ fn main() {
             RadioPlugin,
             VehiclePlugin,
             ChassisEditorPlugin,
+            RobotGaragePlugin,
         ));
 
     if std::env::var_os("STARFALL_AUTOSTART").is_some() {

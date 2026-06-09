@@ -857,7 +857,7 @@ fn setup_chapter_select(
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
             p.spawn((
-                Text::new("200 x 200 mile heightmap range   |   1-9 0 Q W R T / click marker   |   E Editor   |   Esc Back"),
+                Text::new("200 x 200 mile heightmap range   |   1-9 0 Q W R T / click marker   |   E Editor   |   G Garage   |   Esc Back"),
                 TextFont {
                     font_size: 16.0,
                     ..default()
@@ -1403,6 +1403,9 @@ fn chapter_select_input(
     }
     if keyboard.just_pressed(KeyCode::KeyE) {
         next_state.set(AppState::ChassisEditor);
+    }
+    if keyboard.just_pressed(KeyCode::KeyG) {
+        next_state.set(AppState::RobotGarage);
     }
     if keyboard.just_pressed(KeyCode::Escape) {
         next_state.set(AppState::MainMenu);

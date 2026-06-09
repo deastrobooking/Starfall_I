@@ -389,6 +389,8 @@ fn spawn_players(
     progress: Res<ChapterProgress>,
     robot_pets: Res<RobotPetCollection>,
     part_loadout: Res<PlayerPartLoadout>,
+    perks: Res<PerkTree>,
+    upgrades: Res<UpgradeLedger>,
     window_q: Query<&Window, With<PrimaryWindow>>,
     chapter_anchor_q: Query<(&WorldAnchor, &Transform)>,
     existing_players: Query<Entity, With<Player>>,
@@ -440,6 +442,9 @@ fn spawn_players(
             &mut special_inventory,
             &mut melee_combo,
         );
+
+        // Apply perk and tech-upgrade HP bonuses to the authoritative max_health.
+        player_stats.max_health += perks.hp_bonus() + upgrades.armor_health_bonus();
 
         let player = commands
             .spawn((
