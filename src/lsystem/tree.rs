@@ -47,6 +47,21 @@ impl TreeTemplate {
             leaf_mat,
         }
     }
+
+    pub fn new_with_materials(
+        kind: TreeKind,
+        bark_mat: Handle<StandardMaterial>,
+        leaf_mat: Option<Handle<StandardMaterial>>,
+    ) -> Self {
+        let ls = lsystem_for(kind);
+        let geometry = ls.evaluate();
+        Self {
+            kind,
+            geometry,
+            bark_mat,
+            leaf_mat,
+        }
+    }
 }
 
 // ── L-system definitions ──────────────────────────────────────────────────────

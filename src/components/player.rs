@@ -255,6 +255,23 @@ impl Default for TraversalModeState {
     }
 }
 
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BoardBoostState {
+    pub timer: f32,
+    pub speed_mult: f32,
+    pub direction: Vec3,
+}
+
+impl Default for BoardBoostState {
+    fn default() -> Self {
+        Self {
+            timer: 0.0,
+            speed_mult: 1.0,
+            direction: Vec3::ZERO,
+        }
+    }
+}
+
 // ── Grapple Hook ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GrappleHookMode {

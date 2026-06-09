@@ -2,7 +2,9 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
-use crate::components::character::{default_joint_for_part, CartoonPart, CartoonPartKind};
+use crate::components::character::{
+    default_joint_for_part, CartoonPart, CartoonPartKind, JointKind,
+};
 use crate::procedural_meshes::superellipsoid_mesh;
 use crate::rendering::PbrBundle;
 
@@ -821,6 +823,11 @@ fn spawn_arms_mech(
             1.0_f32,
         ),
     ] {
+        let elbow_joint = if x < 0.0 {
+            JointKind::LeftElbow
+        } else {
+            JointKind::RightElbow
+        };
         // Round shoulder cap
         spawn_part(
             commands,
@@ -844,25 +851,28 @@ fn spawn_arms_mech(
             PartSlotTag::Arms,
         );
         // Elbow joint sphere — clearly distinct
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Sphere::new(0.108 * s)),
             joint.clone(),
-            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
+            Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, -0.004 * s),
             PartSlotTag::Arms,
         );
         // Forearm — slightly narrower
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Capsule3d::new(0.080 * s, 0.28 * s * al)),
             sleeve.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            Transform::from_xyz(x, -0.31 * s - (al - 1.0) * 0.17 * s + y_lift, -0.018 * s)
+                .with_rotation(Quat::from_rotation_x(0.08)),
             PartSlotTag::Arms,
         );
         spawn_cartoon_glove(
@@ -918,6 +928,11 @@ fn spawn_arms_heavy(
             1.0_f32,
         ),
     ] {
+        let elbow_joint = if x < 0.0 {
+            JointKind::LeftElbow
+        } else {
+            JointKind::RightElbow
+        };
         // Giant shoulder sphere — Bowser-scale
         spawn_part(
             commands,
@@ -941,25 +956,28 @@ fn spawn_arms_heavy(
             PartSlotTag::Arms,
         );
         // Elbow knob — protrudes behind for brawler silhouette
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Sphere::new(0.130 * s)),
             dark.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.075 * s),
             PartSlotTag::Arms,
         );
         // Thick forearm — barely narrows
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Capsule3d::new(0.125 * s, 0.32 * s * al)),
             armor.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            Transform::from_xyz(x, -0.32 * s - (al - 1.0) * 0.17 * s + y_lift, -0.014 * s)
+                .with_rotation(Quat::from_rotation_x(0.07)),
             PartSlotTag::Arms,
         );
         let hand_y = -0.56 * s - (al - 1.0) * 0.28 * s + y_lift;
@@ -1029,6 +1047,11 @@ fn spawn_arms_scout(
             1.0_f32,
         ),
     ] {
+        let elbow_joint = if x < 0.0 {
+            JointKind::LeftElbow
+        } else {
+            JointKind::RightElbow
+        };
         // Small neat shoulder cap
         spawn_part(
             commands,
@@ -1052,36 +1075,41 @@ fn spawn_arms_scout(
             PartSlotTag::Arms,
         );
         // Slim elbow joint
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Sphere::new(0.084 * s)),
             stripe.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
             PartSlotTag::Arms,
         );
         // Long slim forearm
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Capsule3d::new(0.062 * s, 0.32 * s * al)),
             primary.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            Transform::from_xyz(x, -0.31 * s - (al - 1.0) * 0.17 * s + y_lift, -0.014 * s)
+                .with_rotation(Quat::from_rotation_x(0.09)),
             PartSlotTag::Arms,
         );
         // Accent stripe running the length of the forearm
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Capsule3d::new(0.018 * s, 0.22 * s * al)),
             stripe.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.052 * s),
+            Transform::from_xyz(x, -0.31 * s - (al - 1.0) * 0.17 * s + y_lift, -0.066 * s)
+                .with_rotation(Quat::from_rotation_x(0.09)),
             PartSlotTag::Arms,
         );
         spawn_cartoon_glove(
@@ -1137,6 +1165,11 @@ fn spawn_arms_claw(
             1.0_f32,
         ),
     ] {
+        let elbow_joint = if x < 0.0 {
+            JointKind::LeftElbow
+        } else {
+            JointKind::RightElbow
+        };
         // Shoulder joint ball
         spawn_part(
             commands,
@@ -1171,36 +1204,41 @@ fn spawn_arms_claw(
             PartSlotTag::Arms,
         );
         // Elbow node
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Sphere::new(0.110 * s)),
             dark.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
             PartSlotTag::Arms,
         );
         // Forearm
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Capsule3d::new(0.088 * s, 0.30 * s * al)),
             dark.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
+            Transform::from_xyz(x, -0.31 * s - (al - 1.0) * 0.17 * s + y_lift, -0.018 * s)
+                .with_rotation(Quat::from_rotation_x(0.08)),
             PartSlotTag::Arms,
         );
         // Glowing energy vein down forearm
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             kind_arm,
+            Some(elbow_joint),
             Mesh::from(Capsule3d::new(0.015 * s, 0.26 * s * al)),
             accent_glow.clone(),
-            Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.072 * s),
+            Transform::from_xyz(x, -0.31 * s - (al - 1.0) * 0.17 * s + y_lift, -0.088 * s)
+                .with_rotation(Quat::from_rotation_x(0.08)),
             PartSlotTag::Arms,
         );
         // Rounded claw palm and wrist collar
@@ -1277,7 +1315,7 @@ fn spawn_legs_mech(
     let armor = robot_mat(materials, darken(cfg.accent, 0.78));
     let accent_glow = emissive_mat(materials, cfg.accent, 2.4);
 
-    let leg_x = 0.165 * s * hip_w;
+    let leg_x = 0.180 * s * hip_w;
     for (leg_k, foot_k, boot_k, x) in [
         (
             CartoonPartKind::LeftLeg,
@@ -1300,36 +1338,44 @@ fn spawn_legs_mech(
             Mesh::from(Capsule3d::new(0.120 * s, 0.40 * s * ll)),
             primary.clone(),
             Transform::from_xyz(x, -0.65 * s - (ll - 1.0) * 0.13 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.88, 1.0, 0.80)),
+                .with_scale(Vec3::new(1.00, 1.0, 0.92)),
             PartSlotTag::Legs,
         );
-        spawn_part(
+        let knee_joint = if x < 0.0 {
+            JointKind::LeftKnee
+        } else {
+            JointKind::RightKnee
+        };
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Sphere::new(0.138 * s)),
+            Some(knee_joint),
+            Mesh::from(Sphere::new(0.156 * s)),
             armor.clone(),
             Transform::from_xyz(x, -0.85 * s - (ll - 1.0) * 0.20 * s + y_lift, -0.012 * s),
             PartSlotTag::Legs,
         );
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Capsule3d::new(0.112 * s, 0.37 * s * ll)),
+            Some(knee_joint),
+            Mesh::from(Capsule3d::new(0.128 * s, 0.39 * s * ll)),
             armor.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.008 * s)
-                .with_scale(Vec3::new(0.84, 1.0, 0.74)),
+                .with_scale(Vec3::new(0.96, 1.0, 0.86)),
             PartSlotTag::Legs,
         );
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Capsule3d::new(0.014 * s, 0.20 * s * ll)),
+            Some(knee_joint),
+            Mesh::from(Capsule3d::new(0.016 * s, 0.22 * s * ll)),
             accent_glow.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.082 * s)
                 .with_scale(Vec3::new(0.4, 1.0, 0.3)),
@@ -1352,8 +1398,8 @@ fn spawn_legs_mech(
             if x < 0.0 { -1.0 } else { 1.0 },
             s,
             cfg.foot_scale,
-            0.94,
-            1.05,
+            1.04,
+            1.10,
             cfg.has_boots,
         );
     }
@@ -1375,7 +1421,7 @@ fn spawn_legs_heavy(
     let armor = robot_mat(materials, darken(cfg.accent, 0.70));
     let dark = robot_mat(materials, darken(cfg.outfit, 0.60));
 
-    let leg_x = 0.180 * s * hip_w;
+    let leg_x = 0.195 * s * hip_w;
     for (leg_k, foot_k, boot_k, x) in [
         (
             CartoonPartKind::LeftLeg,
@@ -1396,33 +1442,40 @@ fn spawn_legs_heavy(
             meshes,
             root,
             leg_k,
-            Mesh::from(Capsule3d::new(0.148 * s, 0.38 * s * ll)),
+            Mesh::from(Capsule3d::new(0.170 * s, 0.40 * s * ll)),
             primary.clone(),
             Transform::from_xyz(x, -0.63 * s - (ll - 1.0) * 0.13 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(1.12, 1.0, 0.96)),
+                .with_scale(Vec3::new(1.18, 1.0, 1.02)),
             PartSlotTag::Legs,
         );
         // Large knee guard
-        spawn_part(
+        let knee_joint = if x < 0.0 {
+            JointKind::LeftKnee
+        } else {
+            JointKind::RightKnee
+        };
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Sphere::new(0.182 * s)),
+            Some(knee_joint),
+            Mesh::from(Sphere::new(0.210 * s)),
             armor.clone(),
             Transform::from_xyz(x, -0.86 * s - (ll - 1.0) * 0.20 * s + y_lift, -0.022 * s),
             PartSlotTag::Legs,
         );
         // Wide armored shin block
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Capsule3d::new(0.134 * s, 0.38 * s * ll)),
+            Some(knee_joint),
+            Mesh::from(Capsule3d::new(0.158 * s, 0.40 * s * ll)),
             armor.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.010 * s)
-                .with_scale(Vec3::new(1.06, 1.0, 0.90)),
+                .with_scale(Vec3::new(1.14, 1.0, 0.98)),
             PartSlotTag::Legs,
         );
         spawn_cartoon_shoe(
@@ -1442,8 +1495,8 @@ fn spawn_legs_heavy(
             if x < 0.0 { -1.0 } else { 1.0 },
             s,
             cfg.foot_scale,
+            1.34,
             1.22,
-            1.16,
             cfg.has_boots,
         );
     }
@@ -1464,7 +1517,7 @@ fn spawn_legs_scout(
     let primary = robot_mat(materials, cfg.outfit);
     let stripe = robot_mat(materials, darken(cfg.accent, 0.88));
 
-    let leg_x = 0.158 * s * hip_w;
+    let leg_x = 0.170 * s * hip_w;
     for (leg_k, foot_k, _, x) in [
         (
             CartoonPartKind::LeftLeg,
@@ -1485,22 +1538,28 @@ fn spawn_legs_scout(
             meshes,
             root,
             leg_k,
-            Mesh::from(Capsule3d::new(0.090 * s, 0.42 * s * ll)),
+            Mesh::from(Capsule3d::new(0.105 * s, 0.44 * s * ll)),
             primary.clone(),
             Transform::from_xyz(x, -0.65 * s - (ll - 1.0) * 0.14 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.80, 1.0, 0.72)),
+                .with_scale(Vec3::new(0.90, 1.0, 0.82)),
             PartSlotTag::Legs,
         );
         // Slim shin
-        spawn_part(
+        let knee_joint = if x < 0.0 {
+            JointKind::LeftKnee
+        } else {
+            JointKind::RightKnee
+        };
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Capsule3d::new(0.082 * s, 0.38 * s * ll)),
+            Some(knee_joint),
+            Mesh::from(Capsule3d::new(0.098 * s, 0.40 * s * ll)),
             stripe.clone(),
             Transform::from_xyz(x, -1.02 * s - (ll - 1.0) * 0.26 * s + y_lift, -0.005 * s)
-                .with_scale(Vec3::new(0.76, 1.0, 0.68)),
+                .with_scale(Vec3::new(0.86, 1.0, 0.78)),
             PartSlotTag::Legs,
         );
         spawn_cartoon_shoe(
@@ -1516,8 +1575,8 @@ fn spawn_legs_scout(
             if x < 0.0 { -1.0 } else { 1.0 },
             s,
             cfg.foot_scale,
-            0.78,
-            0.96,
+            0.88,
+            1.04,
             false,
         );
     }
@@ -1540,30 +1599,37 @@ fn spawn_legs_jet(
     let accent_glow = emissive_mat(materials, cfg.accent, 3.0);
     let dark = robot_mat(materials, darken(cfg.outfit, 0.50));
 
-    let leg_x = 0.165 * s * hip_w;
+    let leg_x = 0.180 * s * hip_w;
     for (leg_k, x) in [
         (CartoonPartKind::LeftLeg, -leg_x),
         (CartoonPartKind::RightLeg, leg_x),
     ] {
+        let knee_joint = if x < 0.0 {
+            JointKind::LeftKnee
+        } else {
+            JointKind::RightKnee
+        };
         // Rear nozzle housing
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Cylinder::new(0.075 * s, 0.10 * s)),
+            Some(knee_joint),
+            Mesh::from(Cylinder::new(0.086 * s, 0.112 * s)),
             dark.clone(),
             Transform::from_xyz(x, -1.04 * s - (ll - 1.0) * 0.26 * s + y_lift, 0.088 * s)
                 .with_rotation(Quat::from_rotation_x(0.22)),
             PartSlotTag::Legs,
         );
         // Nozzle exhaust glow
-        spawn_part(
+        spawn_part_bound(
             commands,
             meshes,
             root,
             leg_k,
-            Mesh::from(Cylinder::new(0.068 * s, 0.055 * s)),
+            Some(knee_joint),
+            Mesh::from(Cylinder::new(0.076 * s, 0.062 * s)),
             accent_glow.clone(),
             Transform::from_xyz(x, -1.02 * s - (ll - 1.0) * 0.26 * s + y_lift, 0.096 * s)
                 .with_rotation(Quat::from_rotation_x(0.22)),
@@ -2458,7 +2524,31 @@ fn spawn_part(
     transform: Transform,
     slot: PartSlotTag,
 ) {
-    let part = CartoonPart::new_bound(root, kind, default_joint_for_part(kind), &transform);
+    spawn_part_bound(
+        commands,
+        meshes,
+        root,
+        kind,
+        default_joint_for_part(kind),
+        mesh,
+        material,
+        transform,
+        slot,
+    );
+}
+
+fn spawn_part_bound(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    root: Entity,
+    kind: CartoonPartKind,
+    joint: Option<JointKind>,
+    mesh: Mesh,
+    material: Handle<StandardMaterial>,
+    transform: Transform,
+    slot: PartSlotTag,
+) {
+    let part = CartoonPart::new_bound(root, kind, joint, &transform);
     let entity = commands
         .spawn((
             PbrBundle {

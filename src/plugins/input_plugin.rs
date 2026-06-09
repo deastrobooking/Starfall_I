@@ -12,7 +12,7 @@
 ///
 ///  Left stick        — move
 ///  Right stick       — look (quadratic curve applied)
-///  LT  (LTrigger2)  — aim
+///  LT  (LTrigger2)  — aim + sabre toggle
 ///  RT  (RTrigger2)  — fire
 ///  LB  (LTrigger)   — sprint
 ///  RB  (RTrigger)   — weapon next
@@ -286,6 +286,9 @@ fn update_player_inputs(
         let right_trigger_held = btn_held(GamepadButton::RightTrigger2)
             || right_trigger_axis
             || native_held(NativeButton::RightTrigger);
+        let left_trigger_just = btn_just(GamepadButton::LeftTrigger2)
+            || native_just(NativeButton::LeftTrigger)
+            || (left_trigger_axis && !trigger_history[history_slot].left);
         let right_trigger_just = btn_just(GamepadButton::RightTrigger2)
             || native_just(NativeButton::RightTrigger)
             || (right_trigger_axis && !trigger_history[history_slot].right);
@@ -519,6 +522,7 @@ fn update_player_inputs(
         let l3r3 = btn_just(GamepadButton::LeftThumb) && btn_held(GamepadButton::RightThumb)
             || btn_just(GamepadButton::RightThumb) && btn_held(GamepadButton::LeftThumb);
         pi.sabre_toggle = (is_p1 && keyboard.just_pressed(KeyCode::KeyT))
+            || left_trigger_just
             || btn_just(GamepadButton::Mode)
             || l3r3
             || (native_just(NativeButton::LeftThumb) && native_held(NativeButton::RightThumb))

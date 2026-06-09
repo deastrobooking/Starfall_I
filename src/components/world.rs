@@ -100,6 +100,21 @@ pub struct SlingShotPad {
     pub cooldown_timer: f32,
 }
 
+/// Hoverboard boost pad embedded into express roads and racing bridges.
+#[derive(Component, Debug, Clone)]
+pub struct BoardBoostPad {
+    pub direction: Vec3,
+    pub half_width: f32,
+    pub half_length: f32,
+    pub speed_mult: f32,
+    pub impulse: f32,
+    pub lift: f32,
+    pub duration: f32,
+    pub cooldown: f32,
+    pub cooldown_timer: f32,
+    pub force_hoverboard: bool,
+}
+
 /// Defensive world turret that tracks players and fires a hitscan-style beam.
 #[derive(Component, Debug, Clone)]
 pub struct LaserTurret {

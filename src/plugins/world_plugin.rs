@@ -24,7 +24,8 @@ use crate::components::discoverable::DiscoverableKind;
 use crate::components::enemy::{CitySpyDrone, Enemy, EnemyStateMachine, EnemyType};
 use crate::components::faction::Faction;
 use crate::components::player::{
-    ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement, PlayerStateMachine, PlayerStats,
+    BoardBoostState, ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement,
+    PlayerStateMachine, PlayerStats, TraversalMode, TraversalModeState,
 };
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
@@ -198,6 +199,7 @@ impl Plugin for WorldPlugin {
                     moving_platform_system,
                     rotating_elevator_system,
                     sling_shot_system,
+                    board_boost_pad_system,
                     laser_turret_system,
                     laser_beam_cleanup_system,
                     collider_debug_toggle_system,
@@ -1508,6 +1510,68 @@ fn sling_shot_system(
     }
 }
 
+fn board_boost_pad_system(
+    time: Res<Time>,
+    mut pad_q: Query<(&Transform, &mut BoardBoostPad)>,
+    mut player_q: Query<(
+        &Transform,
+        &mut PlayerMovement,
+        &mut TraversalModeState,
+        &mut BoardBoostState,
+        &mut PlayerStateMachine,
+    )>,
+) {
+    let dt = time.delta_secs();
+    for (pad_transform, mut pad) in pad_q.iter_mut() {
+        pad.cooldown_timer = (pad.cooldown_timer - dt).max(0.0);
+        if pad.cooldown_timer > 0.0 {
+            continue;
+        }
+
+        let direction = pad.direction.with_y(0.0).normalize_or_zero();
+        if direction == Vec3::ZERO {
+            continue;
+        }
+
+        let inv_rot = pad_transform.rotation.inverse();
+        for (player_transform, mut movement, mut traversal, mut boost, mut state) in
+            player_q.iter_mut()
+        {
+            let local = inv_rot * (player_transform.translation - pad_transform.translation);
+            let on_pad = local.x.abs() <= pad.half_width
+                && local.z.abs() <= pad.half_length
+                && local.y >= -2.2
+                && local.y <= 4.2;
+            if !on_pad {
+                continue;
+            }
+
+            if pad.force_hoverboard {
+                traversal.active = TraversalMode::Hoverboard;
+            }
+
+            boost.timer = boost.timer.max(pad.duration);
+            boost.speed_mult = boost.speed_mult.max(pad.speed_mult);
+            boost.direction = direction;
+
+            let current_along = movement.ground_velocity.dot(direction);
+            if current_along < pad.impulse {
+                movement.ground_velocity += direction * (pad.impulse - current_along);
+            }
+            if pad.lift > 0.0 {
+                movement.velocity.y = movement.velocity.y.max(pad.lift);
+                movement.is_grounded = false;
+                movement.coyote_timer = 0.0;
+                state.force(crate::components::player::PlayerState::Jetpack);
+            } else {
+                state.transition(crate::components::player::PlayerState::Sprinting);
+            }
+            pad.cooldown_timer = pad.cooldown;
+            break;
+        }
+    }
+}
+
 fn laser_turret_system(
     mut commands: Commands,
     time: Res<Time>,
@@ -1741,9 +1805,11 @@ fn generate_city(
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8, seed);
     spawn_river(&mut commands, &mut meshes, &pal);
     spawn_water_gardens(&mut commands, &mut meshes, &pal, seed + 12, seed);
+    spawn_mana_waterfalls(&mut commands, &mut meshes, &pal, seed + 18, seed);
+    spawn_mana_forests(&mut commands, &mut meshes, &pal, seed + 19, seed);
     spawn_rock_fields(&mut commands, &mut meshes, &pal, seed + 13, seed);
     spawn_understory(&mut commands, &mut meshes, &pal, seed + 14, seed);
-    spawn_trees(&mut commands, &mut meshes, m, seed + 9, seed);
+    spawn_trees(&mut commands, &mut meshes, &pal, seed + 9, seed);
     spawn_aurora_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_collosar_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
@@ -1781,6 +1847,9 @@ struct Palette {
     downtown_facade: Handle<StandardMaterial>,
     glass_panel: Handle<StandardMaterial>,
     brushed_metal: Handle<StandardMaterial>,
+    stainless_metal: Handle<StandardMaterial>,
+    copper_metal: Handle<StandardMaterial>,
+    city_metal_panel: Handle<StandardMaterial>,
     stone_brick: Handle<StandardMaterial>,
     mortar_line: Handle<StandardMaterial>,
 
@@ -1803,13 +1872,21 @@ struct Palette {
     bridge_deck: Handle<StandardMaterial>,
     bridge_stone: Handle<StandardMaterial>,
     highway: Handle<StandardMaterial>,
+    boost_lane: Handle<StandardMaterial>,
+    boost_pad: Handle<StandardMaterial>,
+    boost_ramp: Handle<StandardMaterial>,
     sky_platform: Handle<StandardMaterial>,
     water: Handle<StandardMaterial>,
+    waterfall_mist: Handle<StandardMaterial>,
 
     rock: Handle<StandardMaterial>,
     rock_dark: Handle<StandardMaterial>,
     snow: Handle<StandardMaterial>,
     moss: Handle<StandardMaterial>,
+    vine: Handle<StandardMaterial>,
+    bark_light: Handle<StandardMaterial>,
+    bark_mid: Handle<StandardMaterial>,
+    bark_dark: Handle<StandardMaterial>,
     foliage_a: Handle<StandardMaterial>,
     foliage_b: Handle<StandardMaterial>,
     foliage_c: Handle<StandardMaterial>,
@@ -1833,7 +1910,9 @@ struct Palette {
     dragon_window: Handle<StandardMaterial>, // Red fire glow windows
     crystal_aurora: Handle<StandardMaterial>, // Glowing purple-blue crystals (alpha blend)
     crystal_dragon: Handle<StandardMaterial>, // Glowing orange-red crystals (alpha blend)
-    guide_glow: Handle<StandardMaterial>,   // Cyan route studs for bridges and mountain paths
+    crystal_emerald: Handle<StandardMaterial>, // Nature/cave emerald crystal
+    marble: Handle<StandardMaterial>,
+    guide_glow: Handle<StandardMaterial>, // Cyan route studs for bridges and mountain paths
     aurora_banner: Handle<StandardMaterial>, // Violet banner
     dragon_banner: Handle<StandardMaterial>, // Dark crimson banner
 }
@@ -1919,11 +1998,49 @@ impl Palette {
                 ..default()
             }),
             brushed_metal: m.add(StandardMaterial {
-                base_color: Color::srgb(0.30, 0.33, 0.38),
+                base_color: Color::srgb(0.62, 0.67, 0.72),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/stainless.png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.4)),
                 emissive: LinearRgba::new(0.05, 0.07, 0.10, 1.0),
                 metallic: 0.92,
                 perceptual_roughness: 0.26,
                 reflectance: 0.82,
+                ..default()
+            }),
+            stainless_metal: m.add(StandardMaterial {
+                base_color: Color::srgb(0.82, 0.86, 0.88),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/stainless.png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(3.0)),
+                emissive: LinearRgba::new(0.08, 0.09, 0.11, 1.0),
+                metallic: 0.96,
+                perceptual_roughness: 0.18,
+                reflectance: 0.92,
+                ..default()
+            }),
+            copper_metal: m.add(StandardMaterial {
+                base_color: Color::srgb(0.95, 0.46, 0.20),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/Copper.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.6)),
+                emissive: LinearRgba::new(0.18, 0.07, 0.02, 1.0),
+                metallic: 0.88,
+                perceptual_roughness: 0.30,
+                reflectance: 0.84,
+                ..default()
+            }),
+            city_metal_panel: m.add(StandardMaterial {
+                base_color: Color::srgb(0.46, 0.49, 0.52),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/metal.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(4.0)),
+                emissive: LinearRgba::new(0.05, 0.06, 0.08, 1.0),
+                metallic: 0.86,
+                perceptual_roughness: 0.34,
+                reflectance: 0.74,
                 ..default()
             }),
             stone_brick: m.add(StandardMaterial {
@@ -1943,18 +2060,26 @@ impl Palette {
                 ..default()
             }),
 
-            industrial_metal: m.add(mk(
-                Color::srgb(0.46, 0.48, 0.55),
-                LinearRgba::new(0.10, 0.12, 0.18, 1.0),
-                0.72,
-                0.36,
-            )),
-            industrial_rust: m.add(mk(
-                Color::srgb(0.58, 0.56, 0.52),
-                LinearRgba::new(0.08, 0.06, 0.03, 1.0),
-                0.06,
-                0.90,
-            )),
+            industrial_metal: m.add(StandardMaterial {
+                base_color: Color::srgb(0.50, 0.52, 0.58),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/metal.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(3.4)),
+                emissive: LinearRgba::new(0.10, 0.12, 0.18, 1.0),
+                metallic: 0.78,
+                perceptual_roughness: 0.36,
+                reflectance: 0.72,
+                ..default()
+            }),
+            industrial_rust: m.add(StandardMaterial {
+                base_color: Color::srgb(0.72, 0.42, 0.22),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/Copper.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(3.0)),
+                emissive: LinearRgba::new(0.11, 0.05, 0.02, 1.0),
+                metallic: 0.42,
+                perceptual_roughness: 0.74,
+                reflectance: 0.46,
+                ..default()
+            }),
 
             // Smaller buildings: painterly brick and cinder block with old-anime warmth.
             residential_a: m.add(StandardMaterial {
@@ -2091,6 +2216,32 @@ impl Palette {
                 perceptual_roughness: 0.75,
                 ..default()
             }),
+            boost_lane: m.add(StandardMaterial {
+                base_color: Color::srgba(0.02, 0.24, 0.34, 0.84),
+                emissive: LinearRgba::new(0.03, 1.45, 2.10, 1.0),
+                metallic: 0.50,
+                perceptual_roughness: 0.18,
+                reflectance: 0.82,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            boost_pad: m.add(StandardMaterial {
+                base_color: Color::srgba(0.18, 0.98, 1.0, 0.92),
+                emissive: LinearRgba::new(0.15, 4.2, 5.6, 1.0),
+                metallic: 0.35,
+                perceptual_roughness: 0.10,
+                reflectance: 0.96,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            boost_ramp: m.add(StandardMaterial {
+                base_color: Color::srgb(0.92, 0.58, 0.18),
+                emissive: LinearRgba::new(2.8, 0.72, 0.04, 1.0),
+                metallic: 0.38,
+                perceptual_roughness: 0.22,
+                reflectance: 0.72,
+                ..default()
+            }),
             sky_platform: m.add(mk(
                 Color::srgb(0.08, 0.11, 0.22),
                 LinearRgba::new(0.0, 0.25, 0.60, 1.0),
@@ -2104,6 +2255,15 @@ impl Palette {
                 metallic: 0.90,
                 perceptual_roughness: 0.08,
                 reflectance: 0.95,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            waterfall_mist: m.add(StandardMaterial {
+                base_color: Color::srgba(0.72, 0.96, 1.0, 0.36),
+                emissive: LinearRgba::new(0.30, 1.15, 1.35, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.18,
+                reflectance: 0.72,
                 alpha_mode: AlphaMode::Blend,
                 ..default()
             }),
@@ -2143,32 +2303,75 @@ impl Palette {
             }),
             moss: m.add(StandardMaterial {
                 base_color: Color::srgb(0.28, 0.50, 0.18),
-                base_color_texture: Some(repeating_texture(
-                    asset_server,
-                    "Materials/grass (1).png",
-                )),
-                uv_transform: Affine2::from_scale(Vec2::splat(2.0)),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/moss.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.8)),
                 emissive: LinearRgba::new(0.02, 0.08, 0.02, 1.0),
                 metallic: 0.0,
                 perceptual_roughness: 0.92,
                 ..default()
             }),
+            vine: m.add(StandardMaterial {
+                base_color: Color::srgb(0.18, 0.42, 0.12),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/leaves.png")),
+                uv_transform: Affine2::from_scale(Vec2::new(0.9, 3.4)),
+                emissive: LinearRgba::new(0.012, 0.060, 0.010, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.94,
+                reflectance: 0.10,
+                ..default()
+            }),
+            bark_light: m.add(StandardMaterial {
+                base_color: Color::srgb(0.68, 0.54, 0.39),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/bark.png")),
+                uv_transform: Affine2::from_scale(Vec2::new(2.0, 5.2)),
+                emissive: LinearRgba::new(0.035, 0.025, 0.015, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.96,
+                reflectance: 0.12,
+                ..default()
+            }),
+            bark_mid: m.add(StandardMaterial {
+                base_color: Color::srgb(0.43, 0.31, 0.21),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/bark.png")),
+                uv_transform: Affine2::from_scale(Vec2::new(2.4, 6.0)),
+                emissive: LinearRgba::new(0.025, 0.018, 0.010, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.98,
+                reflectance: 0.10,
+                ..default()
+            }),
+            bark_dark: m.add(StandardMaterial {
+                base_color: Color::srgb(0.24, 0.18, 0.13),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/bark.png")),
+                uv_transform: Affine2::from_scale(Vec2::new(3.0, 6.8)),
+                emissive: LinearRgba::new(0.015, 0.010, 0.006, 1.0),
+                metallic: 0.0,
+                perceptual_roughness: 0.99,
+                reflectance: 0.08,
+                ..default()
+            }),
             foliage_a: m.add(StandardMaterial {
-                base_color: Color::srgb(0.06, 0.42, 0.15),
+                base_color: Color::srgb(0.18, 0.62, 0.20),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/leaves.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(1.9)),
                 emissive: LinearRgba::new(0.01, 0.08, 0.02, 1.0),
                 metallic: 0.0,
                 perceptual_roughness: 0.86,
                 ..default()
             }),
             foliage_b: m.add(StandardMaterial {
-                base_color: Color::srgb(0.14, 0.58, 0.22),
+                base_color: Color::srgb(0.30, 0.76, 0.24),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/leaves.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.2)),
                 emissive: LinearRgba::new(0.02, 0.10, 0.02, 1.0),
                 metallic: 0.0,
                 perceptual_roughness: 0.84,
                 ..default()
             }),
             foliage_c: m.add(StandardMaterial {
-                base_color: Color::srgb(0.20, 0.52, 0.34),
+                base_color: Color::srgb(0.16, 0.44, 0.32),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/leaves.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.5)),
                 emissive: LinearRgba::new(0.02, 0.08, 0.05, 1.0),
                 metallic: 0.0,
                 perceptual_roughness: 0.88,
@@ -2215,14 +2418,18 @@ impl Palette {
                 ..default()
             }),
             rooftop: m.add(StandardMaterial {
-                base_color: Color::srgb(0.42, 0.40, 0.36),
-                metallic: 0.80,
-                perceptual_roughness: 0.32,
-                reflectance: 0.64,
+                base_color: Color::srgb(0.50, 0.52, 0.54),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/metal.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.2)),
+                metallic: 0.84,
+                perceptual_roughness: 0.30,
+                reflectance: 0.68,
                 ..default()
             }),
             castle_stone: m.add(StandardMaterial {
-                base_color: Color::srgb(0.88, 0.86, 0.94),
+                base_color: Color::srgb(0.93, 0.92, 0.96),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/marble.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(3.0)),
                 emissive: LinearRgba::new(0.08, 0.07, 0.12, 1.0),
                 perceptual_roughness: 0.72,
                 ..default()
@@ -2267,6 +2474,8 @@ impl Palette {
             }),
             crystal_aurora: m.add(StandardMaterial {
                 base_color: Color::srgba(0.55, 0.28, 1.0, 0.72),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/crystal.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(1.8)),
                 emissive: LinearRgba::new(1.6, 0.4, 4.5, 1.0),
                 perceptual_roughness: 0.05,
                 metallic: 0.25,
@@ -2275,10 +2484,32 @@ impl Palette {
             }),
             crystal_dragon: m.add(StandardMaterial {
                 base_color: Color::srgba(1.0, 0.32, 0.08, 0.70),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/crystal.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(1.7)),
                 emissive: LinearRgba::new(4.5, 0.9, 0.0, 1.0),
                 perceptual_roughness: 0.05,
                 metallic: 0.25,
                 alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            crystal_emerald: m.add(StandardMaterial {
+                base_color: Color::srgba(0.20, 1.0, 0.56, 0.74),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/emerald.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(1.9)),
+                emissive: LinearRgba::new(0.12, 3.2, 1.35, 1.0),
+                perceptual_roughness: 0.06,
+                metallic: 0.20,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
+            marble: m.add(StandardMaterial {
+                base_color: Color::srgb(0.90, 0.90, 0.94),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/marble.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.6)),
+                emissive: LinearRgba::new(0.035, 0.035, 0.045, 1.0),
+                metallic: 0.02,
+                perceptual_roughness: 0.50,
+                reflectance: 0.36,
                 ..default()
             }),
             guide_glow: m.add(StandardMaterial {
@@ -2763,7 +2994,7 @@ fn spawn_secret_cave_systems(
 fn secret_cave_accent(pal: &Palette, chapter: u8) -> Handle<StandardMaterial> {
     match chapter {
         6..=8 | 10..=11 => pal.crystal_dragon.clone(),
-        2 | 5 | 12 | 13 => pal.window_cool.clone(),
+        2 | 5 | 12 | 13 => pal.crystal_emerald.clone(),
         _ => pal.crystal_aurora.clone(),
     }
 }
@@ -2810,7 +3041,9 @@ fn spawn_secret_cave_system(
     } else {
         pal.rock.clone()
     };
-    let floor_mat = if matches!(spec.chapter, 1..=5 | 12..=14) {
+    let floor_mat = if matches!(spec.chapter, 3 | 9 | 14) {
+        pal.marble.clone()
+    } else if matches!(spec.chapter, 1..=5 | 12..=14) {
         pal.stone_block.clone()
     } else {
         pal.dragon_stone.clone()
@@ -2917,22 +3150,57 @@ fn spawn_secret_cave_system(
         false,
     );
 
-    for i in 0..4 {
+    for i in 0..7 {
         let side = if i % 2 == 0 { -1.0 } else { 1.0 };
+        let shard_h = 2.4 + seeded(seed, spec.chapter as u64 * 97 + i as u64) * 3.4;
+        let shard_r = 0.45 + seeded(seed, spec.chapter as u64 * 101 + i as u64) * 0.85;
+        let shard_mat = match (spec.chapter + i as u8) % 5 {
+            0 => pal.crystal_emerald.clone(),
+            1 | 2 => accent.clone(),
+            _ => pal.crystal_aurora.clone(),
+        };
         let crystal_pos = chamber
             + right * side * (3.0 + i as f32 * 0.9)
             + forward * (-5.0 + i as f32 * 3.0)
-            + Vec3::Y * 1.8;
+            + Vec3::Y * (shard_h * 0.5);
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(1.2, 3.8, 1.2))),
-                material: MeshMaterial3d(accent.clone()),
-                transform: Transform::from_translation(crystal_pos)
-                    .with_rotation(rotation * Quat::from_rotation_y(i as f32 * 0.7)),
+                mesh: Mesh3d(meshes.add(Cone {
+                    radius: shard_r,
+                    height: shard_h,
+                })),
+                material: MeshMaterial3d(shard_mat.clone()),
+                transform: Transform::from_translation(crystal_pos).with_rotation(
+                    rotation
+                        * Quat::from_rotation_y(i as f32 * 0.7)
+                        * Quat::from_rotation_z((side * 0.16).clamp(-0.22, 0.22)),
+                ),
                 ..default()
             },
             WorldGeometry,
         ));
+        if i % 2 == 0 {
+            commands.spawn((
+                PointLightBundle {
+                    point_light: PointLight {
+                        color: if matches!(spec.chapter, 6..=11) {
+                            Color::srgb(1.0, 0.34, 0.12)
+                        } else if matches!((spec.chapter + i as u8) % 5, 0) {
+                            Color::srgb(0.18, 1.0, 0.55)
+                        } else {
+                            Color::srgb(0.50, 0.78, 1.0)
+                        },
+                        intensity: 5_500.0,
+                        range: 16.0,
+                        shadows_enabled: false,
+                        ..default()
+                    },
+                    transform: Transform::from_translation(crystal_pos + Vec3::Y * shard_h * 0.45),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
     }
 
     for side in [-1.0, 1.0] {
@@ -5242,16 +5510,18 @@ fn spawn_range_forests(
     seed: u64,
 ) {
     let patches = [
-        (-6200.0_f32, 6500.0_f32, 520.0_f32, 15_u64),
-        (-2800.0, 3300.0, 380.0, 12),
-        (-7100.0, 2600.0, 460.0, 13),
-        (-5000.0, -5400.0, 420.0, 11),
-        (2500.0, 2400.0, 420.0, 12),
-        (6300.0, 1200.0, 360.0, 10),
-        (7900.0, 4200.0, 430.0, 12),
-        (4900.0, -2500.0, 380.0, 10),
-        (1800.0, -6000.0, 420.0, 11),
-        (-1200.0, -4200.0, 360.0, 9),
+        (-6200.0_f32, 6500.0_f32, 860.0_f32, 42_u64),
+        (-2800.0, 3300.0, 660.0, 34),
+        (-7100.0, 2600.0, 720.0, 38),
+        (-5000.0, -5400.0, 700.0, 34),
+        (2500.0, 2400.0, 720.0, 38),
+        (6300.0, 1200.0, 640.0, 30),
+        (7900.0, 4200.0, 720.0, 36),
+        (4900.0, -2500.0, 680.0, 32),
+        (1800.0, -6000.0, 700.0, 34),
+        (-1200.0, -4200.0, 640.0, 30),
+        (-980.0, 980.0, 520.0, 28),
+        (1040.0, -860.0, 540.0, 30),
     ];
 
     for (pi, &(cx, cz, spread, count)) in patches.iter().enumerate() {
@@ -5265,7 +5535,7 @@ fn spawn_range_forests(
                 continue;
             }
             let ground = terrain_surface_y(x, z, seed);
-            let scale = 0.82 + seeded(seed, idx * 7 + 2) * 1.15;
+            let scale = 1.65 + seeded(seed, idx * 7 + 2) * 2.35;
             spawn_alpine_tree(
                 commands,
                 meshes,
@@ -5278,6 +5548,104 @@ fn spawn_range_forests(
     }
 }
 
+fn spawn_moss_pad(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    radius: f32,
+    seed: u64,
+) {
+    let patch_count = 2 + (seed % 3);
+    for patch in 0..patch_count {
+        let angle = seeded(seed, patch * 5) * TAU;
+        let offset = radius * (0.18 + seeded(seed, patch * 5 + 1) * 0.58);
+        let scale = radius * (0.28 + seeded(seed, patch * 5 + 2) * 0.36);
+        let pos = center
+            + Vec3::new(
+                angle.cos() * offset,
+                0.10 + patch as f32 * 0.018,
+                angle.sin() * offset,
+            );
+        let transform = Transform::from_translation(pos)
+            .with_rotation(Quat::from_rotation_y(angle))
+            .with_scale(Vec3::new(scale * 1.55, 0.055, scale));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(1.0))),
+                material: MeshMaterial3d(pal.moss.clone()),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(&transform, angle, 0.8, 0.004, 0.006, 0.005),
+        ));
+    }
+}
+
+fn spawn_vine_curtain(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    anchor: Vec3,
+    yaw: f32,
+    radius: f32,
+    height: f32,
+    strands: u64,
+    seed: u64,
+) {
+    let leaf_mesh = meshes.add(Sphere::new(1.0));
+    let strand_count = strands.max(1);
+    for strand in 0..strand_count {
+        let angle = yaw + seeded(seed, strand * 17) * TAU;
+        let radial = radius * (0.35 + seeded(seed, strand * 17 + 1) * 0.78);
+        let top = anchor + Vec3::new(angle.cos() * radial, 0.0, angle.sin() * radial);
+        let sag = height * (0.58 + seeded(seed, strand * 17 + 2) * 0.48);
+        let drift_angle = angle + 0.8 + seeded(seed, strand * 17 + 3) * 1.2;
+        let drift = Vec3::new(drift_angle.cos(), 0.0, drift_angle.sin())
+            * radius
+            * (0.12 + seeded(seed, strand * 17 + 4) * 0.24);
+        let mid = top + drift * 0.65 - Vec3::Y * sag * 0.46;
+        let bottom = top + drift - Vec3::Y * sag;
+        let vine_radius = 0.035 + seeded(seed, strand * 17 + 5) * 0.050;
+
+        spawn_static_cylinder_between(commands, meshes, pal.vine.clone(), top, mid, vine_radius);
+        spawn_static_cylinder_between(
+            commands,
+            meshes,
+            pal.vine.clone(),
+            mid,
+            bottom,
+            vine_radius * 0.84,
+        );
+
+        for leaf in 0..3u64 {
+            let t = 0.24 + leaf as f32 * 0.24 + seeded(seed, strand * 31 + leaf) * 0.08;
+            let p = top.lerp(bottom, t.clamp(0.0, 0.96));
+            let leaf_scale = 0.16 + seeded(seed, strand * 37 + leaf) * 0.18;
+            let transform = Transform::from_translation(p)
+                .with_rotation(Quat::from_rotation_y(angle + leaf as f32 * 0.9))
+                .with_scale(Vec3::new(leaf_scale * 1.45, leaf_scale * 0.52, leaf_scale));
+            let mat = match (seed + strand + leaf) % 4 {
+                0 => pal.moss.clone(),
+                1 => pal.foliage_a.clone(),
+                2 => pal.foliage_b.clone(),
+                _ => pal.foliage_c.clone(),
+            };
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(leaf_mesh.clone()),
+                    material: MeshMaterial3d(mat),
+                    transform,
+                    ..default()
+                },
+                WorldGeometry,
+                NatureSway::new(&transform, angle + leaf as f32, 1.8, 0.030, 0.018, 0.014),
+            ));
+        }
+    }
+}
+
 fn spawn_alpine_tree(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -5286,13 +5654,19 @@ fn spawn_alpine_tree(
     scale: f32,
     seed: u64,
 ) {
-    let trunk_h = 9.0 * scale;
-    let trunk_r = 0.85 * scale;
-    let lower_h = 13.0 * scale;
-    let upper_h = 10.0 * scale;
-    let lower_r = 5.2 * scale;
-    let upper_r = 3.6 * scale;
+    let trunk_h = 12.5 * scale;
+    let trunk_r = 1.10 * scale;
+    let lower_h = 18.0 * scale;
+    let upper_h = 14.0 * scale;
+    let lower_r = 7.2 * scale;
+    let upper_r = 5.2 * scale;
     let yaw = seeded(seed, 3) * std::f32::consts::TAU;
+    let bark = match seed % 4 {
+        0 => pal.bark_light.clone(),
+        1 => pal.bark_mid.clone(),
+        2 => pal.bark_dark.clone(),
+        _ => pal.rock_dark.clone(),
+    };
     let foliage = match seed % 3 {
         0 => pal.foliage_a.clone(),
         1 => pal.foliage_b.clone(),
@@ -5302,12 +5676,30 @@ fn spawn_alpine_tree(
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(Cylinder::new(trunk_r, trunk_h))),
-            material: MeshMaterial3d(pal.rock_dark.clone()),
-            transform: Transform::from_xyz(base.x, base.y + trunk_h * 0.5, base.z),
+            material: MeshMaterial3d(bark.clone()),
+            transform: Transform::from_xyz(base.x, base.y + trunk_h * 0.5, base.z)
+                .with_rotation(Quat::from_rotation_y(yaw)),
             ..default()
         },
         WorldGeometry,
     ));
+
+    for root in 0..3u64 {
+        let root_yaw = yaw + root as f32 * TAU / 3.0 + seeded(seed, 41 + root) * 0.35;
+        let root_len = trunk_r * (3.4 + seeded(seed, 51 + root) * 1.8);
+        let root_transform = Transform::from_xyz(base.x, base.y + trunk_r * 0.22, base.z)
+            .with_rotation(Quat::from_rotation_y(root_yaw))
+            .with_scale(Vec3::new(trunk_r * 0.45, trunk_r * 0.34, root_len));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                material: MeshMaterial3d(bark.clone()),
+                transform: root_transform,
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
 
     let lower = Transform::from_xyz(base.x, base.y + trunk_h * 0.55 + lower_h * 0.5, base.z)
         .with_rotation(Quat::from_rotation_y(yaw));
@@ -5326,6 +5718,41 @@ fn spawn_alpine_tree(
         lower_sway,
     ));
 
+    let branch_ring = Transform::from_xyz(base.x, base.y + trunk_h * 0.92, base.z)
+        .with_rotation(Quat::from_rotation_y(yaw + 0.35))
+        .with_scale(Vec3::new(lower_r * 0.38, trunk_r * 0.30, lower_r * 0.95));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+            material: MeshMaterial3d(bark.clone()),
+            transform: branch_ring,
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    spawn_moss_pad(
+        commands,
+        meshes,
+        pal,
+        base + Vec3::Y * 0.04,
+        trunk_r * 3.2,
+        seed + 701,
+    );
+    if seed % 4 != 1 {
+        spawn_vine_curtain(
+            commands,
+            meshes,
+            pal,
+            base + Vec3::Y * (trunk_h * 1.05),
+            yaw + 0.4,
+            lower_r * 0.42,
+            trunk_h * 0.74,
+            2 + seed % 3,
+            seed + 907,
+        );
+    }
+
     let upper = Transform::from_xyz(base.x, base.y + trunk_h * 1.10 + lower_h * 0.58, base.z)
         .with_rotation(Quat::from_rotation_y(yaw + 0.7));
     let upper_sway = NatureSway::new(&upper, seeded(seed, 13) * 6.0, 0.42, 0.014, 0.018, 0.007);
@@ -5342,6 +5769,360 @@ fn spawn_alpine_tree(
         WorldGeometry,
         upper_sway,
     ));
+}
+
+fn spawn_mana_forests(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let groves = [
+        (-520.0_f32, 380.0_f32, 360.0_f32, 24_u64, 1.25_f32),
+        (520.0, -420.0, 340.0, 23, 1.22),
+        (-880.0, -300.0, 300.0, 18, 1.08),
+        (940.0, 720.0, 420.0, 26, 1.18),
+        (-1820.0, 1520.0, 620.0, 30, 1.35),
+        (2140.0, -1840.0, 660.0, 32, 1.38),
+        (-3180.0, 2860.0, 720.0, 34, 1.42),
+        (3820.0, 2100.0, 760.0, 36, 1.40),
+        (-5520.0, 6120.0, 820.0, 38, 1.52),
+        (6040.0, -1820.0, 720.0, 34, 1.44),
+        (2100.0, -6200.0, 760.0, 36, 1.48),
+        (-6120.0, -4680.0, 780.0, 36, 1.50),
+    ];
+
+    for (gi, &(cx, cz, radius, count, scale_bias)) in groves.iter().enumerate() {
+        let grove_seed = seed + gi as u64 * 997;
+        for i in 0..count {
+            let angle = seeded(grove_seed, i * 11) * TAU;
+            let dist = radius * seeded(grove_seed, i * 11 + 1).sqrt();
+            let x = cx + angle.cos() * dist;
+            let z = cz + angle.sin() * dist;
+            if starter_clear_zone(x, z, 44.0) {
+                continue;
+            }
+            let y = terrain_surface_y(x, z, terrain_seed);
+            if y > 420.0 && gi < 4 {
+                continue;
+            }
+            let old_growth = i % 7 == 0 || seeded(grove_seed, i * 11 + 2) > 0.86;
+            let scale = if old_growth {
+                scale_bias * (2.55 + seeded(grove_seed, i * 11 + 3) * 1.65)
+            } else {
+                scale_bias * (1.15 + seeded(grove_seed, i * 11 + 3) * 1.55)
+            };
+            spawn_giant_mana_tree(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, y, z),
+                scale,
+                grove_seed + i * 37,
+            );
+        }
+    }
+}
+
+fn spawn_giant_mana_tree(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    scale: f32,
+    seed: u64,
+) {
+    let trunk_h = 38.0 * scale;
+    let trunk_r = 3.2 * scale;
+    let canopy_r = 12.5 * scale;
+    let yaw = seeded(seed, 3) * TAU;
+    let trunk_mesh = meshes.add(Cylinder::new(1.0, 1.0));
+    let sphere_mesh = meshes.add(Sphere::new(1.0));
+    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let bark = match seed % 3 {
+        0 => pal.bark_light.clone(),
+        1 => pal.bark_mid.clone(),
+        _ => pal.bark_dark.clone(),
+    };
+    let foliage = match seed % 4 {
+        0 => pal.foliage_a.clone(),
+        1 => pal.foliage_b.clone(),
+        2 => pal.foliage_c.clone(),
+        _ => pal.moss.clone(),
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(trunk_mesh.clone()),
+            material: MeshMaterial3d(bark.clone()),
+            transform: Transform::from_xyz(base.x, base.y + trunk_h * 0.5, base.z)
+                .with_rotation(Quat::from_rotation_y(yaw))
+                .with_scale(Vec3::new(trunk_r, trunk_h, trunk_r)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for root in 0..7u64 {
+        let root_yaw = yaw + root as f32 * TAU / 7.0 + seeded(seed, 40 + root) * 0.22;
+        let root_len = trunk_r * (4.8 + seeded(seed, 70 + root) * 2.4);
+        let root_transform = Transform::from_xyz(base.x, base.y + trunk_r * 0.20, base.z)
+            .with_rotation(Quat::from_rotation_y(root_yaw))
+            .with_scale(Vec3::new(trunk_r * 0.54, trunk_r * 0.36, root_len));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(cube_mesh.clone()),
+                material: MeshMaterial3d(bark.clone()),
+                transform: root_transform,
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let canopy_center = base + Vec3::Y * (trunk_h * 1.02);
+    for branch in 0..5u64 {
+        let branch_yaw = yaw + branch as f32 * TAU / 5.0 + seeded(seed, 120 + branch) * 0.34;
+        let branch_start = base
+            + Vec3::new(
+                branch_yaw.cos() * trunk_r * 0.35,
+                trunk_h * (0.60 + seeded(seed, 130 + branch) * 0.22),
+                branch_yaw.sin() * trunk_r * 0.35,
+            );
+        let branch_end = canopy_center
+            + Vec3::new(
+                branch_yaw.cos() * canopy_r * 0.62,
+                seeded(seed, 150 + branch) * canopy_r * 0.32,
+                branch_yaw.sin() * canopy_r * 0.62,
+            );
+        spawn_static_cylinder_between(
+            commands,
+            meshes,
+            bark.clone(),
+            branch_start,
+            branch_end,
+            trunk_r * (0.28 + seeded(seed, 170 + branch) * 0.10),
+        );
+    }
+
+    let lobe_specs = [
+        (0.0_f32, 0.0_f32, 0.35_f32, 1.28_f32, 0.90_f32),
+        (0.0, 0.0, 1.18, 0.86, 0.72),
+        (0.0, TAU * 0.10, 0.72, 0.96, 0.76),
+        (TAU * 0.25, 0.0, 0.64, 0.92, 0.74),
+        (TAU * 0.50, 0.0, 0.70, 0.98, 0.78),
+        (TAU * 0.75, 0.0, 0.66, 0.94, 0.74),
+    ];
+    for (li, &(angle, extra_yaw, height_mul, width_mul, height_scale)) in
+        lobe_specs.iter().enumerate()
+    {
+        let a = yaw + angle + extra_yaw + seeded(seed, 220 + li as u64) * 0.18;
+        let offset = if li < 2 {
+            Vec3::ZERO
+        } else {
+            Vec3::new(a.cos() * canopy_r * 0.72, 0.0, a.sin() * canopy_r * 0.72)
+        };
+        let lobe_scale = canopy_r * (width_mul + seeded(seed, 240 + li as u64) * 0.22);
+        let transform =
+            Transform::from_translation(canopy_center + offset + Vec3::Y * (canopy_r * height_mul))
+                .with_rotation(Quat::from_rotation_y(a))
+                .with_scale(Vec3::new(
+                    lobe_scale * 1.15,
+                    lobe_scale * height_scale,
+                    lobe_scale,
+                ));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(sphere_mesh.clone()),
+                material: MeshMaterial3d(foliage.clone()),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(&transform, a, 0.38, 0.010, 0.020, 0.006),
+        ));
+    }
+
+    spawn_moss_pad(
+        commands,
+        meshes,
+        pal,
+        base + Vec3::Y * 0.08,
+        trunk_r * 4.8,
+        seed + 500,
+    );
+    spawn_vine_curtain(
+        commands,
+        meshes,
+        pal,
+        canopy_center + Vec3::Y * canopy_r * 0.45,
+        yaw,
+        canopy_r * 0.92,
+        trunk_h * 0.82,
+        6 + seed % 5,
+        seed + 700,
+    );
+
+    if seed % 5 == 0 {
+        commands.spawn((
+            PointLightBundle {
+                point_light: PointLight {
+                    color: Color::srgb(0.35, 1.0, 0.48),
+                    intensity: 6_500.0 * scale.clamp(0.8, 3.0),
+                    range: 18.0 * scale.clamp(1.0, 3.4),
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: Transform::from_translation(base + Vec3::Y * (trunk_h * 0.22)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_mana_waterfalls(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let falls = [
+        (-420.0_f32, 560.0_f32, 2.60_f32, 46.0_f32, 84.0_f32),
+        (620.0, -520.0, -0.65, 42.0, 78.0),
+        (-960.0, -780.0, 1.92, 54.0, 112.0),
+        (1280.0, 980.0, -2.20, 58.0, 126.0),
+        (-2860.0, 3420.0, 2.35, 78.0, 210.0),
+        (3560.0, -2440.0, -0.86, 82.0, 224.0),
+        (-6500.0, 6000.0, 2.75, 98.0, 290.0),
+        (5600.0, 1180.0, -1.48, 88.0, 252.0),
+    ];
+
+    for (i, &(x, z, yaw, width, drop)) in falls.iter().enumerate() {
+        let ground = terrain_surface_y(x, z, terrain_seed);
+        spawn_mana_waterfall(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(x, ground, z),
+            yaw,
+            width,
+            drop * (0.85 + seeded(seed, i as u64 * 17) * 0.35),
+            seed + i as u64 * 113,
+        );
+    }
+}
+
+fn spawn_mana_waterfall(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    yaw: f32,
+    width: f32,
+    drop: f32,
+    seed: u64,
+) {
+    let rot = Quat::from_rotation_y(yaw);
+    let forward = rot * Vec3::Z;
+    let right = rot * Vec3::X;
+    let height = drop.max(48.0);
+    let top_y = base.y + height + 8.0;
+    let fall_center = Vec3::new(base.x, base.y + height * 0.5, base.z);
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width * 1.25, height + 18.0, 9.5))),
+            material: MeshMaterial3d(pal.rock_dark.clone()),
+            transform: Transform::from_translation(fall_center - forward * 4.8)
+                .with_rotation(rot)
+                .with_scale(Vec3::new(1.0, 1.0, 0.82)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for strip in 0..4u64 {
+        let offset = (strip as f32 - 1.5) * width * 0.21;
+        let strip_w = width * (0.22 + seeded(seed, strip * 7) * 0.12);
+        let strip_h = height * (0.88 + seeded(seed, strip * 7 + 1) * 0.16);
+        let transform = Transform::from_translation(
+            Vec3::new(base.x, base.y + strip_h * 0.5 + 2.0, base.z)
+                + right * offset
+                + forward * 0.8,
+        )
+        .with_rotation(rot)
+        .with_scale(Vec3::new(1.0, 1.0, 1.0));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(strip_w, strip_h, 0.52))),
+                material: MeshMaterial3d(pal.water.clone()),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(
+                &transform,
+                seed as f32 * 0.001 + strip as f32,
+                1.1,
+                0.010,
+                0.045,
+                0.006,
+            ),
+        ));
+    }
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(width * 0.72, 0.20))),
+            material: MeshMaterial3d(pal.water.clone()),
+            transform: Transform::from_translation(base + forward * 18.0 + Vec3::Y * 0.16)
+                .with_rotation(rot)
+                .with_scale(Vec3::new(1.45, 1.0, 0.72)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    let mist_mesh = meshes.add(Sphere::new(1.0));
+    for puff in 0..7u64 {
+        let a = yaw + (seeded(seed, 80 + puff) - 0.5) * 1.6;
+        let dist = width * (0.12 + seeded(seed, 90 + puff) * 0.58);
+        let puff_scale = width * (0.12 + seeded(seed, 100 + puff) * 0.18);
+        let transform = Transform::from_translation(
+            base + forward * (10.0 + seeded(seed, 110 + puff) * 20.0)
+                + right * (a.sin() * dist)
+                + Vec3::Y * (1.4 + seeded(seed, 120 + puff) * 7.0),
+        )
+        .with_scale(Vec3::new(puff_scale * 1.5, puff_scale * 0.50, puff_scale));
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(mist_mesh.clone()),
+                material: MeshMaterial3d(pal.waterfall_mist.clone()),
+                transform,
+                ..default()
+            },
+            WorldGeometry,
+            NatureSway::new(&transform, a, 0.55, 0.012, 0.040, 0.012),
+        ));
+    }
+
+    for side in [-1.0_f32, 1.0] {
+        let ledge_pos = Vec3::new(base.x, top_y - 3.5, base.z) + right * side * width * 0.62;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(width * 0.18))),
+                material: MeshMaterial3d(pal.moss.clone()),
+                transform: Transform::from_translation(ledge_pos)
+                    .with_scale(Vec3::new(1.4, 0.34, 0.9))
+                    .with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
 }
 
 fn spawn_range_waylines(
@@ -5545,17 +6326,17 @@ fn spawn_mountain_route_bridges(
             let dx = bx - ax;
             let dz = bz - az;
             let segment_len = (dx * dx + dz * dz).sqrt();
-            if segment_len < 1650.0 {
+            if segment_len < 1250.0 {
                 continue;
             }
 
             let roll = seeded(seed, ri as u64 * 97 + si as u64 * 17);
-            if roll < 0.38 {
+            if roll < 0.18 {
                 continue;
             }
 
             let center_t = 0.40 + seeded(seed, ri as u64 * 131 + si as u64 * 29) * 0.20;
-            let span_len = (segment_len * (0.18 + roll * 0.10)).clamp(260.0, 680.0);
+            let span_len = (segment_len * (0.22 + roll * 0.12)).clamp(340.0, 820.0);
             let half_t = (span_len * 0.5 / segment_len).min(0.22);
             let t0 = (center_t - half_t).clamp(0.04, 0.92);
             let t1 = (center_t + half_t).clamp(0.08, 0.96);
@@ -5596,7 +6377,7 @@ fn spawn_mountain_route_bridges(
             let pitch = (delta.y / horizontal_len).atan().clamp(-0.28, 0.28);
             let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
             let side_rot = Quat::from_rotation_y(yaw);
-            let width = 14.0 + (ri % 3) as f32 * 2.0;
+            let width = 18.0 + (ri % 3) as f32 * 2.8;
             let center = start + delta * 0.5;
 
             commands.spawn((
@@ -5613,6 +6394,19 @@ fn spawn_mountain_route_bridges(
                 bevy_rapier3d::prelude::RigidBody::Fixed,
                 bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.55, horizontal_len * 0.5),
             ));
+
+            spawn_boost_road_span(
+                commands,
+                meshes,
+                pal,
+                center + Vec3::Y * 0.86,
+                yaw,
+                pitch,
+                horizontal_len * 0.78,
+                width * 0.58,
+                true,
+                seed + ri as u64 * 409 + si as u64 * 53,
+            );
 
             let plank_count = 6;
             for plank in 0..plank_count {
@@ -5682,6 +6476,41 @@ fn spawn_mountain_route_bridges(
                     WorldGeometry,
                     bevy_rapier3d::prelude::RigidBody::Fixed,
                     bevy_rapier3d::prelude::Collider::cuboid(width * 0.36, tower_h * 0.5, 2.4),
+                ));
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cone {
+                            radius: width * 0.18,
+                            height: 5.2,
+                        })),
+                        material: MeshMaterial3d(if (ri + si) % 2 == 0 {
+                            pal.crystal_emerald.clone()
+                        } else {
+                            pal.crystal_aurora.clone()
+                        }),
+                        transform: Transform::from_xyz(anchor.x, anchor.y + 4.2, anchor.z)
+                            .with_rotation(Quat::from_rotation_y(yaw)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+                commands.spawn((
+                    PointLightBundle {
+                        point_light: PointLight {
+                            color: if (ri + si) % 2 == 0 {
+                                Color::srgb(0.20, 1.0, 0.58)
+                            } else {
+                                Color::srgb(0.48, 0.86, 1.0)
+                            },
+                            intensity: 8_500.0,
+                            range: 42.0,
+                            shadows_enabled: false,
+                            ..default()
+                        },
+                        transform: Transform::from_xyz(anchor.x, anchor.y + 5.0, anchor.z),
+                        ..default()
+                    },
+                    WorldGeometry,
                 ));
             }
         }
@@ -7795,8 +8624,12 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
 
         let mat = if i % 13 == 0 {
             pal.stone_brick.clone()
+        } else if i % 11 == 0 {
+            pal.stainless_metal.clone()
         } else if i % 7 == 0 {
             pal.brushed_metal.clone()
+        } else if i % 6 == 0 {
+            pal.city_metal_panel.clone()
         } else if i % 5 == 0 {
             pal.glass_panel.clone()
         } else {
@@ -7846,6 +8679,18 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
                 h,
                 d,
                 seed + i,
+            );
+        }
+        if i % 17 == 0 {
+            spawn_metal_cladding(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, h * 0.5, z),
+                w + 0.7,
+                h * 0.72,
+                d + 0.7,
+                seed + i * 5 + 3,
             );
         }
         if i % 13 == 0 {
@@ -8721,10 +9566,11 @@ fn spawn_metal_cladding(
 ) {
     let rib_h = height * 0.84;
     let rib_y = position.y + height * 0.02;
-    let rib_mat = if seeded(seed, 1) > 0.5 {
-        pal.brushed_metal.clone()
-    } else {
-        pal.industrial_metal.clone()
+    let rib_mat = match ((seeded(seed, 1) * 4.0).floor() as u8).min(3) {
+        0 => pal.stainless_metal.clone(),
+        1 => pal.copper_metal.clone(),
+        2 => pal.city_metal_panel.clone(),
+        _ => pal.industrial_metal.clone(),
     };
     let front_cols = (width / 5.5).floor().clamp(3.0, 8.0) as i32;
     for col in 0..=front_cols {
@@ -9156,6 +10002,212 @@ fn spawn_residential(
 }
 
 // ── Highways ──────────────────────────────────────────────────────────────────
+fn spawn_boost_road_span(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    yaw: f32,
+    pitch: f32,
+    length: f32,
+    width: f32,
+    include_ramps: bool,
+    seed: u64,
+) {
+    let flat_rot = Quat::from_rotation_y(yaw);
+    let rot = flat_rot * Quat::from_rotation_x(-pitch);
+    let forward = flat_rot * Vec3::Z;
+    let right = flat_rot * Vec3::X;
+    let lane_width = (width * 0.40).max(3.2);
+    let side_offset = width * 0.24;
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let light_mesh = meshes.add(Sphere::new(1.0));
+
+    for (lane_index, side) in [(-1.0_f32), 1.0].iter().copied().enumerate() {
+        let lane_center = center + right * side * side_offset;
+        let lane_dir = if side > 0.0 { forward } else { -forward };
+        let lane_yaw = if side > 0.0 {
+            yaw
+        } else {
+            yaw + std::f32::consts::PI
+        };
+
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(unit_cube.clone()),
+                material: MeshMaterial3d(pal.boost_lane.clone()),
+                transform: Transform::from_translation(lane_center)
+                    .with_rotation(rot)
+                    .with_scale(Vec3::new(lane_width, 0.07, length * 0.98)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+
+        let pad_count = (length / 88.0).floor().max(2.0) as i32;
+        for pad in 0..pad_count {
+            let t = (pad as f32 + 0.5) / pad_count as f32;
+            let local_z = -length * 0.5 + length * t;
+            let pad_len = 13.0 + seeded(seed, lane_index as u64 * 97 + pad as u64) * 5.5;
+            let pad_width = lane_width * 0.84;
+            let pad_center = lane_center + rot * Vec3::new(0.0, 0.0, local_z) + Vec3::Y * 0.08;
+            spawn_board_boost_pad(
+                commands, meshes, pal, pad_center, lane_yaw, pitch, lane_dir, pad_width, pad_len,
+                2.75, 2.35, 0.0, 1.35,
+            );
+        }
+
+        let light_count = (length / 135.0).floor().max(2.0) as i32;
+        for light in 0..=light_count {
+            let t = light as f32 / light_count as f32;
+            let local_z = -length * 0.5 + length * t;
+            for edge in [-1.0_f32, 1.0] {
+                let light_pos = lane_center
+                    + rot * Vec3::new(edge * lane_width * 0.54, 0.0, local_z)
+                    + Vec3::Y * 0.18;
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(light_mesh.clone()),
+                        material: MeshMaterial3d(pal.boost_pad.clone()),
+                        transform: Transform::from_translation(light_pos)
+                            .with_scale(Vec3::splat(0.42)),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
+
+        if include_ramps {
+            for end in [-1.0_f32, 1.0] {
+                let ramp_dir = if end > 0.0 { lane_dir } else { -lane_dir };
+                let ramp_yaw = if end > 0.0 {
+                    lane_yaw
+                } else {
+                    lane_yaw + std::f32::consts::PI
+                };
+                let ramp_center =
+                    lane_center + forward * end * length * 0.43 + Vec3::Y * (1.0 + end.abs());
+                spawn_board_boost_ramp(
+                    commands,
+                    meshes,
+                    pal,
+                    ramp_center,
+                    ramp_yaw,
+                    ramp_dir,
+                    lane_width * 0.92,
+                    22.0,
+                    4.2,
+                    3.25,
+                    0.92,
+                );
+            }
+        }
+    }
+}
+
+fn spawn_board_boost_pad(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    yaw: f32,
+    pitch: f32,
+    direction: Vec3,
+    width: f32,
+    length: f32,
+    speed_mult: f32,
+    impulse: f32,
+    lift: f32,
+    duration: f32,
+) {
+    let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.16, length))),
+            material: MeshMaterial3d(pal.boost_pad.clone()),
+            transform: Transform::from_translation(center).with_rotation(rot),
+            ..default()
+        },
+        WorldGeometry,
+        BoardBoostPad {
+            direction,
+            half_width: width * 0.5,
+            half_length: length * 0.5,
+            speed_mult,
+            impulse,
+            lift,
+            duration,
+            cooldown: 0.18,
+            cooldown_timer: 0.0,
+            force_hoverboard: true,
+        },
+    ));
+
+    let chevron_mesh = meshes.add(Cuboid::new(width * 0.34, 0.05, 0.82));
+    for (i, offset) in [-0.26_f32, 0.0, 0.26].iter().copied().enumerate() {
+        let z = offset * length;
+        for side in [-1.0_f32, 1.0] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(chevron_mesh.clone()),
+                    material: MeshMaterial3d(pal.boost_ramp.clone()),
+                    transform: Transform::from_translation(
+                        center + rot * Vec3::new(side * width * 0.13, 0.115, z),
+                    )
+                    .with_rotation(
+                        rot * Quat::from_rotation_y(side * 0.34)
+                            * Quat::from_rotation_z(if i % 2 == 0 { 0.03 } else { -0.03 }),
+                    ),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_board_boost_ramp(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    yaw: f32,
+    direction: Vec3,
+    width: f32,
+    length: f32,
+    rise: f32,
+    impulse: f32,
+    lift: f32,
+) {
+    let pitch = (rise / length.max(0.1)).atan();
+    let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.72, length))),
+            material: MeshMaterial3d(pal.boost_ramp.clone()),
+            transform: Transform::from_translation(center).with_rotation(rot),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        BoardBoostPad {
+            direction,
+            half_width: width * 0.5,
+            half_length: length * 0.5,
+            speed_mult: 3.15,
+            impulse,
+            lift,
+            duration: 1.55,
+            cooldown: 0.20,
+            cooldown_timer: 0.0,
+            force_hoverboard: true,
+        },
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.36, length * 0.5),
+    ));
+}
+
 fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette) {
     let road_len = TERRAIN_WORLD_SIZE;
     let road_half = road_len * 0.5;
@@ -9194,6 +10246,31 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cuboid(9.0, 0.4, road_half),
     ));
+
+    spawn_boost_road_span(
+        commands,
+        meshes,
+        pal,
+        Vec3::new(0.0, 8.54, 0.0),
+        std::f32::consts::FRAC_PI_2,
+        0.0,
+        road_len * 0.94,
+        15.4,
+        true,
+        7_101,
+    );
+    spawn_boost_road_span(
+        commands,
+        meshes,
+        pal,
+        Vec3::new(0.0, 6.54, 0.0),
+        0.0,
+        0.0,
+        road_len * 0.94,
+        15.4,
+        true,
+        7_203,
+    );
 
     // Support pillars
     let pillar_count = (road_half / 180.0).ceil() as i32;
@@ -9361,13 +10438,13 @@ fn spawn_static_cylinder_between(
 fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
     let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
-    for i in 0..8u64 {
-        let x = seeded(seed, i * 7) * 480.0 - 240.0;
-        let y = 62.0 + seeded(seed, i * 7 + 1) * 118.0;
-        let z = seeded(seed, i * 7 + 2) * 480.0 - 240.0;
+    for i in 0..12u64 {
+        let x = seeded(seed, i * 7) * 620.0 - 310.0;
+        let y = 58.0 + seeded(seed, i * 7 + 1) * 142.0;
+        let z = seeded(seed, i * 7 + 2) * 620.0 - 310.0;
         let yaw = seeded(seed, i * 7 + 3) * TAU;
-        let len = 74.0 + seeded(seed, i * 7 + 4) * 58.0;
-        let width = 6.2 + seeded(seed, i * 7 + 5) * 3.8;
+        let len = 96.0 + seeded(seed, i * 7 + 4) * 78.0;
+        let width = 7.4 + seeded(seed, i * 7 + 5) * 4.8;
         let sag = 1.0 + seeded(seed, i * 7 + 6) * 2.8;
         let base = Vec3::new(x, y, z);
         let rot = Quat::from_rotation_y(yaw);
@@ -9390,6 +10467,19 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
             bevy_rapier3d::prelude::RigidBody::Fixed,
             bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.75, len * 0.5),
         ));
+
+        spawn_boost_road_span(
+            commands,
+            meshes,
+            pal,
+            base + Vec3::Y * 1.02,
+            yaw,
+            0.0,
+            len * 0.82,
+            width * 0.72,
+            true,
+            seed + i * 311,
+        );
 
         let segments = 8;
         let plank_len = len / segments as f32;
@@ -9471,6 +10561,48 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
                 }
                 last_cable = Some(point);
             }
+        }
+
+        for end in [-1.0_f32, 1.0] {
+            let anchor = base + rot * Vec3::new(0.0, 0.0, end * len * 0.52);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(unit_cube.clone()),
+                    material: MeshMaterial3d(pal.stainless_metal.clone()),
+                    transform: Transform::from_translation(anchor + Vec3::Y * 4.0)
+                        .with_rotation(rot)
+                        .with_scale(Vec3::new(width * 1.15, 8.0, 3.2)),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cone {
+                        radius: width * 0.38,
+                        height: 4.0,
+                    })),
+                    material: MeshMaterial3d(pal.copper_metal.clone()),
+                    transform: Transform::from_translation(anchor + Vec3::Y * 10.0)
+                        .with_rotation(rot),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+            commands.spawn((
+                PointLightBundle {
+                    point_light: PointLight {
+                        color: Color::srgb(0.36, 0.92, 1.0),
+                        intensity: 9_000.0,
+                        range: 46.0,
+                        shadows_enabled: false,
+                        ..default()
+                    },
+                    transform: Transform::from_translation(anchor + Vec3::Y * 7.0),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
         }
     }
 }
@@ -9853,9 +10985,9 @@ fn spawn_grasslands(
     const BASE_STEP: f32 = 0.38;
     const STEP_SCALE: f32 = 0.76; // branches shrink each push level
 
-    for i in 0..760u64 {
-        let x = seeded(seed, i * 4) * 1100.0 - 550.0;
-        let z = seeded(seed, i * 4 + 1) * 1100.0 - 550.0;
+    for i in 0..1_260u64 {
+        let x = seeded(seed, i * 4) * 2300.0 - 1150.0;
+        let z = seeded(seed, i * 4 + 1) * 2300.0 - 1150.0;
         let dist = (x * x + z * z).sqrt();
         if dist < 95.0 {
             continue;
@@ -10053,6 +11185,90 @@ fn spawn_river(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette
             },
             WorldGeometry,
         ));
+    }
+
+    for (z, style) in [(-440.0_f32, 0_u64), (0.0, 1), (440.0, 2)] {
+        let x = (z * 0.05).sin() * 60.0;
+        spawn_river_bridge(commands, meshes, pal, Vec3::new(x, 0.82, z), style);
+    }
+}
+
+fn spawn_river_bridge(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    style: u64,
+) {
+    let deck_len = 74.0 + style as f32 * 8.0;
+    let deck_width = 11.0;
+    let deck_height = 0.72;
+    let yaw = if style % 2 == 0 { 0.08 } else { -0.11 };
+    let rot = Quat::from_rotation_y(yaw);
+    let deck_mat = if style == 1 {
+        pal.bridge_deck.clone()
+    } else {
+        pal.marble.clone()
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(deck_len, deck_height, deck_width))),
+            material: MeshMaterial3d(deck_mat),
+            transform: Transform::from_translation(center).with_rotation(rot),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(
+            deck_len * 0.5,
+            deck_height * 0.5,
+            deck_width * 0.5,
+        ),
+    ));
+
+    spawn_boost_road_span(
+        commands,
+        meshes,
+        pal,
+        center + Vec3::Y * (deck_height * 0.5 + 0.18),
+        yaw + std::f32::consts::FRAC_PI_2,
+        0.0,
+        deck_len * 0.70,
+        deck_width * 0.76,
+        true,
+        8_900 + style,
+    );
+
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(deck_len * 0.96, 0.72, 0.58))),
+                material: MeshMaterial3d(pal.copper_metal.clone()),
+                transform: Transform::from_translation(
+                    center + rot * Vec3::new(0.0, 1.0, side * deck_width * 0.62),
+                )
+                .with_rotation(rot),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    for end in [-1.0_f32, 1.0] {
+        for side in [-1.0_f32, 1.0] {
+            let local = Vec3::new(end * deck_len * 0.42, 1.55, side * deck_width * 0.55);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(2.4, 3.1, 2.4))),
+                    material: MeshMaterial3d(pal.stainless_metal.clone()),
+                    transform: Transform::from_translation(center + rot * local).with_rotation(rot),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
     }
 }
 
@@ -10406,10 +11622,11 @@ fn spawn_understory(
     let bush_mesh = meshes.add(Sphere::new(1.0));
     let flower_mesh = meshes.add(Sphere::new(0.20));
     let stem_mesh = meshes.add(Cylinder::new(0.025, 0.55));
+    let twig_mesh = meshes.add(Cylinder::new(0.05, 1.0));
 
-    for i in 0..520u64 {
-        let x = seeded(seed, i * 5) * 1040.0 - 520.0;
-        let z = seeded(seed, i * 5 + 1) * 1040.0 - 520.0;
+    for i in 0..1_180u64 {
+        let x = seeded(seed, i * 5) * 2200.0 - 1100.0;
+        let z = seeded(seed, i * 5 + 1) * 2200.0 - 1100.0;
         let dist = (x * x + z * z).sqrt();
         if dist < 75.0 && seeded(seed, i * 5 + 2) < 0.55 {
             continue;
@@ -10418,17 +11635,39 @@ fn spawn_understory(
             continue;
         }
         let y = terrain_surface_y(x, z, terrain_seed);
-        if y > 128.0 {
+        if y > 190.0 {
             continue;
         }
         let phase = seeded(seed, i + 300) * std::f32::consts::TAU;
         if i % 3 == 0 {
-            let s = 0.45 + seeded(seed, i * 5 + 3) * 1.15;
+            let s = 0.75 + seeded(seed, i * 5 + 3) * 2.05;
             let mat = match i % 9 {
                 0 | 1 => pal.foliage_a.clone(),
                 2..=4 => pal.foliage_b.clone(),
-                _ => pal.foliage_c.clone(),
+                5 | 6 => pal.foliage_c.clone(),
+                _ => pal.moss.clone(),
             };
+            let twig_mat = match i % 4 {
+                0 => pal.bark_light.clone(),
+                1 => pal.bark_mid.clone(),
+                _ => pal.bark_dark.clone(),
+            };
+            if i % 4 != 0 {
+                let twig_h = s * (0.75 + seeded(seed, i * 11) * 0.65);
+                let twig_transform = Transform::from_xyz(x, y + twig_h * 0.5, z)
+                    .with_rotation(Quat::from_rotation_y(phase))
+                    .with_scale(Vec3::new(s * 1.4, twig_h, s * 1.4));
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(twig_mesh.clone()),
+                        material: MeshMaterial3d(twig_mat),
+                        transform: twig_transform,
+                        ..default()
+                    },
+                    WorldGeometry,
+                    NatureSway::new(&twig_transform, phase, 1.0, 0.018, 0.010, 0.006),
+                ));
+            }
             for lobe in 0..3u64 {
                 let ox = (seeded(seed, i * 9 + lobe) - 0.5) * s * 0.9;
                 let oz = (seeded(seed, i * 9 + lobe + 3) - 0.5) * s * 0.9;
@@ -10451,6 +11690,43 @@ fn spawn_understory(
                         0.025,
                         0.020,
                     ),
+                ));
+            }
+            if i % 11 == 0 {
+                spawn_moss_pad(
+                    commands,
+                    meshes,
+                    pal,
+                    Vec3::new(x, y + 0.035, z),
+                    s * 0.82,
+                    seed + i * 23,
+                );
+            }
+            if i % 19 == 0 {
+                spawn_vine_curtain(
+                    commands,
+                    meshes,
+                    pal,
+                    Vec3::new(x, y + s * 1.10, z),
+                    phase,
+                    s * 0.72,
+                    s * 1.18,
+                    2 + i % 2,
+                    seed + i * 31,
+                );
+            }
+            if i % 17 == 0 {
+                let stone_transform = Transform::from_xyz(x + s * 0.8, y + 0.16, z - s * 0.6)
+                    .with_scale(Vec3::new(s * 1.2, 0.12, s * 0.9));
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(bush_mesh.clone()),
+                        material: MeshMaterial3d(pal.moss.clone()),
+                        transform: stone_transform,
+                        ..default()
+                    },
+                    WorldGeometry,
+                    NatureSway::new(&stone_transform, phase + 1.7, 1.2, 0.006, 0.006, 0.006),
                 ));
             }
         } else {
@@ -10491,15 +11767,27 @@ fn spawn_understory(
 fn spawn_trees(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    mats: &mut Assets<StandardMaterial>,
+    pal: &Palette,
     seed: u64,
     terrain_seed: u64,
 ) {
     // Build one template per species (L-system evaluated once, materials allocated once).
-    let oak = TreeTemplate::new(TreeKind::Oak, mats);
-    let pine = TreeTemplate::new(TreeKind::Pine, mats);
-    let dead = TreeTemplate::new(TreeKind::Dead, mats);
-    let cyber = TreeTemplate::new(TreeKind::Cyber, mats);
+    let oak = TreeTemplate::new_with_materials(
+        TreeKind::Oak,
+        pal.bark_mid.clone(),
+        Some(pal.foliage_b.clone()),
+    );
+    let pine = TreeTemplate::new_with_materials(
+        TreeKind::Pine,
+        pal.bark_dark.clone(),
+        Some(pal.foliage_c.clone()),
+    );
+    let dead = TreeTemplate::new_with_materials(TreeKind::Dead, pal.bark_light.clone(), None);
+    let cyber = TreeTemplate::new_with_materials(
+        TreeKind::Cyber,
+        pal.city_metal_panel.clone(),
+        Some(pal.guide_glow.clone()),
+    );
 
     // (zone_offset, count, template_ref, scale_base, scale_range)
     struct Placement<'a> {
@@ -10515,47 +11803,47 @@ fn spawn_trees(
         // Oak — residential west, scattered at ground level
         Placement {
             offset: Vec3::new(-150.0, 0.0, 0.0),
-            spread: 140.0,
-            count: 36,
+            spread: 210.0,
+            count: 46,
             template: &oak,
-            scale_base: 0.9,
-            scale_range: 0.6,
+            scale_base: 1.65,
+            scale_range: 1.05,
         },
         // Oak — outer district north
         Placement {
             offset: Vec3::new(0.0, 0.0, 250.0),
-            spread: 170.0,
-            count: 32,
+            spread: 250.0,
+            count: 44,
             template: &oak,
-            scale_base: 0.7,
-            scale_range: 0.5,
+            scale_base: 1.45,
+            scale_range: 0.95,
         },
         // Pine — near mountain corners (NE)
         Placement {
             offset: Vec3::new(320.0, 0.0, 320.0),
-            spread: 150.0,
-            count: 28,
+            spread: 240.0,
+            count: 38,
             template: &pine,
-            scale_base: 1.0,
-            scale_range: 0.8,
+            scale_base: 1.85,
+            scale_range: 1.25,
         },
         // Pine — mountain corner SW
         Placement {
             offset: Vec3::new(-320.0, 0.0, -320.0),
-            spread: 150.0,
-            count: 28,
+            spread: 240.0,
+            count: 38,
             template: &pine,
-            scale_base: 1.0,
-            scale_range: 0.8,
+            scale_base: 1.85,
+            scale_range: 1.25,
         },
         // Dead — industrial zone east, gaunt silhouettes
         Placement {
             offset: Vec3::new(200.0, 0.0, 0.0),
-            spread: 100.0,
-            count: 12,
+            spread: 140.0,
+            count: 16,
             template: &dead,
-            scale_base: 0.8,
-            scale_range: 0.4,
+            scale_base: 1.35,
+            scale_range: 0.65,
         },
         // Cyber — downtown fringe, neon accent trees
         Placement {
@@ -10563,25 +11851,41 @@ fn spawn_trees(
             spread: 130.0,
             count: 20,
             template: &cyber,
-            scale_base: 0.6,
-            scale_range: 0.4,
+            scale_base: 0.95,
+            scale_range: 0.45,
         },
         // Mixed forest pockets between the city and fantasy domains.
         Placement {
             offset: Vec3::new(260.0, 0.0, -120.0),
-            spread: 180.0,
-            count: 30,
+            spread: 260.0,
+            count: 44,
             template: &oak,
-            scale_base: 0.55,
-            scale_range: 0.65,
+            scale_base: 1.25,
+            scale_range: 1.05,
         },
         Placement {
             offset: Vec3::new(-260.0, 0.0, 230.0),
-            spread: 170.0,
-            count: 26,
+            spread: 260.0,
+            count: 40,
             template: &oak,
-            scale_base: 0.60,
-            scale_range: 0.55,
+            scale_base: 1.30,
+            scale_range: 0.95,
+        },
+        Placement {
+            offset: Vec3::new(720.0, 0.0, 520.0),
+            spread: 320.0,
+            count: 38,
+            template: &pine,
+            scale_base: 1.70,
+            scale_range: 1.10,
+        },
+        Placement {
+            offset: Vec3::new(-720.0, 0.0, -580.0),
+            spread: 320.0,
+            count: 38,
+            template: &oak,
+            scale_base: 1.55,
+            scale_range: 1.10,
         },
     ];
 
@@ -10608,6 +11912,52 @@ fn spawn_trees(
                 bob: 0.0,
                 pulse: 0.002,
             });
+            if !matches!(p.template.kind, TreeKind::Cyber) {
+                spawn_moss_pad(
+                    commands,
+                    meshes,
+                    pal,
+                    pos + Vec3::Y * 0.035,
+                    sc * (1.75 + seeded(seed, idx * 4 + 7) * 1.05),
+                    seed + idx * 43,
+                );
+            }
+            match p.template.kind {
+                TreeKind::Oak if idx % 3 != 1 => spawn_vine_curtain(
+                    commands,
+                    meshes,
+                    pal,
+                    pos + Vec3::Y * (sc * 3.5),
+                    rot,
+                    sc * 1.9,
+                    sc * 2.7,
+                    2 + idx % 3,
+                    seed + idx * 47,
+                ),
+                TreeKind::Pine if idx % 4 == 0 => spawn_vine_curtain(
+                    commands,
+                    meshes,
+                    pal,
+                    pos + Vec3::Y * (sc * 3.1),
+                    rot + 0.5,
+                    sc * 1.25,
+                    sc * 2.2,
+                    2,
+                    seed + idx * 53,
+                ),
+                TreeKind::Dead if idx % 2 == 0 => spawn_vine_curtain(
+                    commands,
+                    meshes,
+                    pal,
+                    pos + Vec3::Y * (sc * 2.4),
+                    rot + 0.8,
+                    sc * 1.35,
+                    sc * 2.0,
+                    1 + idx % 2,
+                    seed + idx * 59,
+                ),
+                _ => {}
+            }
             idx += 1;
         }
         idx += 100; // separate seed regions between placement groups
@@ -12013,6 +13363,8 @@ fn spawn_magic_crystals(
         (-200.0, -150.0, 8, true),  // Tibetan border (dragon)
         (-320.0, -260.0, 10, true), // Dragon approach
         (-80.0, 200.0, 6, false),   // Aurora domain north (aurora)
+        (220.0, 360.0, 9, false),   // Emerald forest pocket
+        (-460.0, 180.0, 7, false),  // River-bank crystals
     ];
 
     for (zi, &(zx, zz, count, is_dragon)) in zones.iter().enumerate() {
@@ -12026,7 +13378,9 @@ fn spawn_magic_crystals(
             let wz = zz + oz;
             let wy = terrain_surface_y(wx, wz, seed);
 
-            let mat = if is_dragon {
+            let mat = if !is_dragon && (zi + i as usize) % 4 == 0 {
+                pal.crystal_emerald.clone()
+            } else if is_dragon {
                 pal.crystal_dragon.clone()
             } else {
                 pal.crystal_aurora.clone()
@@ -12066,7 +13420,9 @@ fn spawn_magic_crystals(
             }
             // Point light every other crystal
             if i % 2 == 0 {
-                let light_col = if is_dragon {
+                let light_col = if !is_dragon && (zi + i as usize) % 4 == 0 {
+                    Color::srgb(0.18, 1.0, 0.55)
+                } else if is_dragon {
                     Color::srgb(1.0, 0.35, 0.08)
                 } else {
                     Color::srgb(0.55, 0.25, 1.0)

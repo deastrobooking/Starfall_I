@@ -258,7 +258,7 @@ fn authored_player_defaults(
 
 fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> CharacterBlueprint {
     let base = hero_config(name);
-    let body = match name {
+    let mut body = match name {
         "Vincenzo" => BodyRecipe {
             height: 1.14,
             shoulder_width: 1.08,
@@ -384,6 +384,11 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
             ..BodyRecipe::default()
         },
     };
+    body.leg_length = (body.leg_length + 0.16).min(1.42);
+    body.hip_width = (body.hip_width * 1.05).min(1.24);
+    body.foot_size = (body.foot_size * 1.06).min(1.18);
+    body.muscle = (body.muscle * 1.03).min(1.40);
+
     let palette = CharacterPaletteRecipe {
         skin: base.skin,
         outfit: slot.outfit_idx.map(outfit_preset).unwrap_or(base.outfit),
@@ -521,6 +526,7 @@ fn spawn_players(
                 hero_powers,
                 jetpack,
                 TraversalModeState::default(),
+                BoardBoostState::default(),
                 GrappleHookState::default(),
                 EdgeGrabState::new(),
                 dodge_state,
@@ -1325,6 +1331,7 @@ fn player_movement(
             &mut JetpackState,
             &mut GrappleHookState,
             &TraversalModeState,
+            &mut BoardBoostState,
             &mut EdgeGrabState,
             &mut DodgeState,
             &Transform,
@@ -1344,6 +1351,7 @@ fn player_movement(
         mut jetpack,
         mut grapple,
         traversal,
+        mut board_boost,
         mut edge_grab,
         dodge,
         transform,
@@ -1377,6 +1385,11 @@ fn player_movement(
         movement.wall_jump_lock_timer = (movement.wall_jump_lock_timer - dt).max(0.0);
         jetpack.air_dash_timer = (jetpack.air_dash_timer - dt).max(0.0);
         jetpack.air_dash_cooldown_timer = (jetpack.air_dash_cooldown_timer - dt).max(0.0);
+        board_boost.timer = (board_boost.timer - dt).max(0.0);
+        if board_boost.timer <= 0.0 {
+            board_boost.speed_mult = 1.0;
+            board_boost.direction = Vec3::ZERO;
+        }
 
         movement.is_grounded = output.grounded;
         edge_grab.cooldown_timer = (edge_grab.cooldown_timer - dt).max(0.0);
@@ -1409,7 +1422,16 @@ fn player_movement(
                 transform.right().as_vec3().with_y(0.0).normalize_or_zero(),
             )
         };
-        let (input, input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
+        let (mut input, mut input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
+        let board_boost_active =
+            board_boost.timer > 0.0 && board_boost.direction.length_squared() > 0.25;
+        if board_boost_active && input_strength < 0.20 {
+            input = board_boost.direction.normalize_or_zero();
+            input_strength = 1.0;
+        } else if board_boost_active {
+            input = (input + board_boost.direction.normalize_or_zero() * 0.35).normalize_or_zero();
+            input_strength = input_strength.max(0.85);
+        }
         if movement.is_grounded
             && traversal.active == TraversalMode::Hoverboard
             && input_strength > 0.05
@@ -1446,7 +1468,7 @@ fn player_movement(
                 traversal.hoverboard_speed_mult
             } else {
                 1.0
-            };
+            } * board_boost.speed_mult.max(1.0);
         let speed = if sprinting {
             movement.sprint_speed
         } else {

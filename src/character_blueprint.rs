@@ -154,7 +154,7 @@ impl BodyRecipe {
         self.shoulder_width = self.shoulder_width.clamp(0.72, 1.34);
         self.chest_size = self.chest_size.clamp(0.74, 1.30);
         self.arm_length = self.arm_length.clamp(0.72, 1.30);
-        self.leg_length = self.leg_length.clamp(0.74, 1.30);
+        self.leg_length = self.leg_length.clamp(0.74, 1.45);
         self.hand_size = self.hand_size.clamp(0.70, 1.32);
         self.foot_size = self.foot_size.clamp(0.72, 1.36);
         self.head_size = self.head_size.clamp(0.76, 1.24);
