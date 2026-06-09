@@ -31,8 +31,11 @@ use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
 use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
 use crate::resources::{
-    CurrentChapter, DungeonCrawlState, DungeonRoomState, GameSettings, PlaySessionTransition,
+    initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState, DungeonRoomState,
+    GameSettings, PlaySessionTransition, WorldSiteRegistry,
 };
+use crate::robot_pets::RobotPetCollection;
+use crate::settlement_economy::{settlement_build_def, SettlementBuildKind, SettlementEconomy};
 use crate::state::AppState;
 
 #[derive(Resource, Default)]
@@ -112,6 +115,7 @@ impl Plugin for WorldPlugin {
         app.init_resource::<ColliderDebugState>()
             .init_resource::<DungeonCrawlState>()
             .init_resource::<DungeonRoomState>()
+            .init_resource::<WorldSiteRegistry>()
             .init_resource::<DiscussionState>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
@@ -128,6 +132,8 @@ impl Plugin for WorldPlugin {
                     dungeon_key_pickup_system,
                     dungeon_key_gate_system,
                     dungeon_enemy_spawner_system,
+                    world_site_enemy_spawner_system,
+                    site_liberation_system,
                     moving_platform_system,
                     rotating_elevator_system,
                     sling_shot_system,
@@ -236,6 +242,134 @@ fn city_spy_drone_data_drop_system(
             duration: 3.0,
         });
     }
+}
+
+fn settlement_economy_tick_system(time: Res<Time>, mut economy: ResMut<SettlementEconomy>) {
+    economy.tick(time.delta_secs());
+}
+
+fn settlement_build_terminal_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    settings: Res<GameSettings>,
+    progress: Res<ChapterProgress>,
+    world_site_registry: Res<WorldSiteRegistry>,
+    mut economy: ResMut<SettlementEconomy>,
+    mut robot_pets: ResMut<RobotPetCollection>,
+    terminal_q: Query<(&Transform, &SettlementBuildTerminal)>,
+    player_q: Query<(&PlayerIndex, &Transform, &PlayerInput), With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (player_index, player_xf, input) in player_q.iter() {
+        if !input.interact {
+            continue;
+        }
+
+        let mut nearest: Option<(f32, &Transform, &SettlementBuildTerminal)> = None;
+        for (terminal_xf, terminal) in terminal_q.iter() {
+            let distance = player_xf.translation.distance(terminal_xf.translation);
+            if distance <= terminal.interact_radius
+                && nearest
+                    .map(|(nearest_distance, _, _)| distance < nearest_distance)
+                    .unwrap_or(true)
+            {
+                nearest = Some((distance, terminal_xf, terminal));
+            }
+        }
+
+        let Some((_, _terminal_xf, terminal)) = nearest else {
+            continue;
+        };
+
+        if !settlement_terminal_is_buildable(terminal, &progress, &world_site_registry) {
+            msg_ev.write(UiMessageEvent {
+                text: format!(
+                    "P{}: {} needs its cache recovered or site liberated before building.",
+                    player_index.0 + 1,
+                    terminal.settlement_name
+                ),
+                duration: 3.8,
+            });
+            return;
+        }
+
+        let build_kind = economy.next_recommended_build(terminal.settlement_id, terminal.kind);
+        let def = settlement_build_def(build_kind);
+        match economy.try_build(terminal.settlement_id, build_kind, &mut robot_pets) {
+            Ok(tier) => {
+                let pal = Palette::build(&mut materials);
+                let settlement = MapSettlement {
+                    anchor_id: terminal.settlement_id,
+                    name: terminal.settlement_name,
+                    region: "",
+                    kind: terminal.kind,
+                    reward_id: terminal.reward_id,
+                    x: terminal.origin.x,
+                    z: terminal.origin.z,
+                    facing_yaw: terminal.facing_yaw,
+                    site_id: None,
+                };
+                let layout = settlement_layout_profile(
+                    settings.world_seed,
+                    settlement,
+                    settlement_plaza_radius(terminal.kind),
+                );
+                let rot = Quat::from_rotation_y(terminal.facing_yaw);
+                let base = settlement_build_module_base(
+                    terminal.origin,
+                    rot,
+                    layout,
+                    settings.world_seed,
+                    build_kind,
+                );
+                spawn_settlement_build_module(
+                    &mut commands,
+                    &mut meshes,
+                    &pal,
+                    base,
+                    rot,
+                    build_kind,
+                    tier,
+                );
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "P{} built {} tier {} at {}. {}",
+                        player_index.0 + 1,
+                        def.label,
+                        tier,
+                        terminal.settlement_name,
+                        economy.status_line(terminal.settlement_id)
+                    ),
+                    duration: 5.5,
+                });
+            }
+            Err(error) => {
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "Cannot build {} at {}: {}",
+                        def.label,
+                        terminal.settlement_name,
+                        error.message()
+                    ),
+                    duration: 4.5,
+                });
+            }
+        }
+        return;
+    }
+}
+
+fn settlement_terminal_is_buildable(
+    terminal: &SettlementBuildTerminal,
+    progress: &ChapterProgress,
+    world_site_registry: &WorldSiteRegistry,
+) -> bool {
+    progress.has_discoverable(terminal.reward_id)
+        || world_site_registry
+            .sites
+            .iter()
+            .any(|site| site.name == terminal.settlement_name && site.is_liberated())
 }
 
 fn discussion_interaction_system(
@@ -444,6 +578,228 @@ fn dungeon_enemy_spawner_system(
             duration: 1.8,
         });
     }
+}
+
+// ── World Site Systems ────────────────────────────────────────────────────────
+
+/// Initialise the registry from static data. Skips if already populated (e.g.
+/// save plugin already applied records before Playing is entered).
+fn setup_world_site_registry(registry: &mut WorldSiteRegistry) {
+    if !registry.sites.is_empty() {
+        return;
+    }
+    registry.sites = initial_world_sites();
+}
+
+/// Spawn visual markers and enemy sentinels for all registered world sites.
+fn spawn_world_site_props(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    registry: &WorldSiteRegistry,
+    seed: u64,
+) {
+    use crate::components::world::WorldSiteEnemySentinel;
+
+    for site in &registry.sites {
+        let ground_y = terrain_surface_y(site.world_x, site.world_z, seed);
+        let center = Vec3::new(site.world_x, ground_y, site.world_z);
+
+        if site.is_liberated() {
+            spawn_site_terminal(commands, meshes, materials, site.id, center);
+        } else {
+            // Red watchtower pillar — visible marker for an enemy-held site.
+            let tower_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.65, 0.12, 0.08),
+                perceptual_roughness: 0.85,
+                ..Default::default()
+            });
+            commands.spawn((
+                Mesh3d(meshes.add(Mesh::from(Cuboid::new(2.0, 6.0, 2.0)))),
+                MeshMaterial3d(tower_mat),
+                Transform::from_translation(center + Vec3::new(0.0, 3.0, 0.0)),
+                WorldGeometry,
+            ));
+
+            commands.spawn((
+                WorldSiteEnemySentinel {
+                    site_id: site.id,
+                    trigger_radius: 100.0,
+                    spawned: false,
+                    enemy_count: site.enemy_count_to_liberate,
+                    liberated_spawned: false,
+                },
+                Transform::from_translation(center),
+                GlobalTransform::default(),
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+/// Spawn site defenders when players enter range. Tags each spawned enemy with
+/// `WorldSiteMarker` so the liberation system can track them.
+fn world_site_enemy_spawner_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut sentinel_q: Query<(&Transform, &mut WorldSiteEnemySentinel)>,
+    player_q: Query<&Transform, With<Player>>,
+    registry: Res<WorldSiteRegistry>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    use crate::components::world::WorldSiteMarker;
+
+    for (sentinel_xf, mut sentinel) in sentinel_q.iter_mut() {
+        if sentinel.spawned {
+            continue;
+        }
+        if registry
+            .get(sentinel.site_id)
+            .map(|s| s.is_liberated())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let any_near = player_q
+            .iter()
+            .any(|p| p.translation.distance(sentinel_xf.translation) <= sentinel.trigger_radius);
+        if !any_near {
+            continue;
+        }
+        sentinel.spawned = true;
+        let count = sentinel.enemy_count;
+        let spread = count as f32 * 4.5;
+        let site_name = registry
+            .get(sentinel.site_id)
+            .map(|s| s.name)
+            .unwrap_or("Unknown");
+        for i in 0..count {
+            let t = if count > 1 {
+                i as f32 / (count - 1) as f32
+            } else {
+                0.5
+            };
+            let offset = Vec3::new((t - 0.5) * spread, 0.0, (i as f32 % 2.0) * 3.0 - 1.5);
+            let enemy = spawn_enemy_entity(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                crate::components::enemy::EnemyType::Soldier,
+                sentinel_xf.translation + offset,
+                1.0,
+                None,
+            );
+            commands.entity(enemy).insert(WorldSiteMarker {
+                id: sentinel.site_id,
+            });
+        }
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "Enemy patrol at {}! Defeat them to liberate the site.",
+                site_name
+            ),
+            duration: 3.5,
+        });
+    }
+}
+
+/// Detects when all site defenders are dead. Flips the registry state to
+/// Liberated and spawns the command terminal + friendly NPC.
+fn site_liberation_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut sentinel_q: Query<(&Transform, &mut WorldSiteEnemySentinel)>,
+    enemy_q: Query<(&WorldSiteMarker, &Health)>,
+    mut registry: ResMut<WorldSiteRegistry>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (sentinel_xf, mut sentinel) in sentinel_q.iter_mut() {
+        if !sentinel.spawned || sentinel.liberated_spawned {
+            continue;
+        }
+        if registry
+            .get(sentinel.site_id)
+            .map(|s| s.is_liberated())
+            .unwrap_or(false)
+        {
+            sentinel.liberated_spawned = true;
+            continue;
+        }
+        let alive = enemy_q
+            .iter()
+            .filter(|(marker, health)| marker.id == sentinel.site_id && health.is_alive())
+            .count();
+        if alive > 0 {
+            continue;
+        }
+        if let Some(site) = registry.get_mut(sentinel.site_id) {
+            site.enemies_defeated = site.enemy_count_to_liberate;
+            site.state = crate::resources::WorldSiteState::Liberated;
+            site.owner = crate::resources::WorldSiteOwner::PlayerAlliance;
+            let site_name = site.name;
+            sentinel.liberated_spawned = true;
+            spawn_site_terminal(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                sentinel.site_id,
+                sentinel_xf.translation,
+            );
+            msg_ev.write(UiMessageEvent {
+                text: format!("{} liberated! Command terminal online.", site_name),
+                duration: 5.0,
+            });
+        }
+    }
+}
+
+/// Spawn the glowing command terminal + a friendly NPC for a liberated site.
+fn spawn_site_terminal(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    site_id: crate::resources::WorldSiteId,
+    center: Vec3,
+) {
+    use crate::components::world::{DiscussionNpc, SiteCommandTerminal};
+
+    let terminal_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.05, 0.75, 0.15),
+        emissive: LinearRgba::new(0.0, 0.55, 0.05, 1.0),
+        perceptual_roughness: 0.4,
+        ..Default::default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Mesh::from(Cuboid::new(1.0, 1.6, 0.4)))),
+        MeshMaterial3d(terminal_mat),
+        Transform::from_translation(center + Vec3::new(0.0, 0.8, 2.5)),
+        SiteCommandTerminal {
+            id: site_id,
+            interact_radius: 3.5,
+        },
+        WorldGeometry,
+    ));
+
+    let npc_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.35, 0.70, 0.95),
+        perceptual_roughness: 0.7,
+        ..Default::default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Mesh::from(Capsule3d::new(0.35, 1.0)))),
+        MeshMaterial3d(npc_mat),
+        Transform::from_translation(center + Vec3::new(1.8, 0.85, 2.5)),
+        DiscussionNpc {
+            id: "site_commander",
+            display_name: "Site Commander",
+            role: "Liberation Officer",
+            script_id: "site_liberated_greeting",
+            interact_radius: 3.0,
+        },
+        WorldGeometry,
+    ));
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -856,7 +1212,9 @@ fn generate_city(
     transition: Res<PlaySessionTransition>,
     settings: Res<GameSettings>,
     current: Res<CurrentChapter>,
+    economy: Res<SettlementEconomy>,
     existing_world: Query<Entity, With<WorldGeometry>>,
+    mut world_site_registry: ResMut<WorldSiteRegistry>,
 ) {
     if transition.resuming_from_pause || !existing_world.is_empty() {
         return;
@@ -902,9 +1260,11 @@ fn generate_city(
     spawn_secret_cave_systems(&mut commands, &mut meshes, &pal, seed);
     spawn_dragon_lair_dungeons(&mut commands, &mut meshes, m, &pal, seed);
     spawn_great_scientist_temples(&mut commands, &mut meshes, m, &pal, seed);
-    spawn_exploration_settlements(&mut commands, &mut meshes, m, &pal, seed);
+    spawn_exploration_settlements(&mut commands, &mut meshes, m, &pal, seed, &economy);
     spawn_chapter_map_locations(&mut commands, &mut meshes, &pal, seed);
     spawn_puzzle_anchors(&mut commands, seed);
+    setup_world_site_registry(&mut world_site_registry);
+    spawn_world_site_props(&mut commands, &mut meshes, m, &world_site_registry, seed);
 }
 
 // ── Seeded RNG helper ─────────────────────────────────────────────────────────
@@ -4162,12 +4522,14 @@ fn spawn_exploration_settlements(
     materials: &mut Assets<StandardMaterial>,
     pal: &Palette,
     seed: u64,
+    economy: &SettlementEconomy,
 ) {
     for settlement in map_settlements() {
-        spawn_exploration_settlement(commands, meshes, materials, pal, seed, *settlement);
+        spawn_exploration_settlement(commands, meshes, materials, pal, seed, *settlement, economy);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_exploration_settlement(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -4175,6 +4537,7 @@ fn spawn_exploration_settlement(
     pal: &Palette,
     seed: u64,
     settlement: MapSettlement,
+    economy: &SettlementEconomy,
 ) {
     let plaza_radius = settlement_plaza_radius(settlement.kind);
     let layout = settlement_layout_profile(seed, settlement, plaza_radius);
@@ -4215,6 +4578,10 @@ fn spawn_exploration_settlement(
     );
     spawn_settlement_discussion_npc(commands, meshes, pal, seed, settlement, origin, rot, layout);
     spawn_settlement_mountain_inset(commands, meshes, pal, seed, settlement, origin, rot, layout);
+    spawn_settlement_build_terminal(commands, meshes, pal, seed, settlement, origin, rot, layout);
+    spawn_settlement_economy_modules(
+        commands, meshes, pal, seed, settlement, origin, rot, layout, economy,
+    );
     if matches!(settlement.kind, MapSettlementKind::City) {
         spawn_city_guardian_ships(commands, meshes, pal, seed, settlement, origin);
         spawn_city_spy_drones(commands, meshes, pal, seed, settlement, origin);
@@ -5005,6 +5372,451 @@ fn spawn_settlement_discussion_npc(
                 ..default()
             },
             transform: Transform::from_xyz(pos.x, ground + 4.4, pos.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_build_terminal(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+    layout: SettlementTerrainLayout,
+) {
+    let local = settlement_build_terminal_local(settlement.kind);
+    let raw = origin + rot * local;
+    let ground = layout.floor_y_at(raw.x, raw.z, seed);
+    let base = Vec3::new(raw.x, ground, raw.z);
+    let yaw = Quat::from_rotation_y(settlement.facing_yaw + std::f32::consts::PI);
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(3.4, 0.34))),
+            material: MeshMaterial3d(pal.sky_platform.clone()),
+            transform: Transform::from_xyz(base.x, base.y + 0.18, base.z),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(0.17, 3.4),
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(1.25, 2.4))),
+            material: MeshMaterial3d(pal.brushed_metal.clone()),
+            transform: Transform::from_xyz(base.x, base.y + 1.4, base.z),
+            ..default()
+        },
+        WorldGeometry,
+        SettlementBuildTerminal {
+            settlement_id: settlement.anchor_id,
+            settlement_name: settlement.name,
+            reward_id: settlement.reward_id,
+            kind: settlement.kind,
+            origin,
+            facing_yaw: settlement.facing_yaw,
+            interact_radius: 18.0,
+        },
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(3.2, 1.45, 0.22))),
+            material: MeshMaterial3d(pal.guide_glow.clone()),
+            transform: Transform::from_translation(base + Vec3::Y * 2.35 + yaw * Vec3::Z * 1.08)
+                .with_rotation(yaw),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.66))),
+            material: MeshMaterial3d(pal.crystal_aurora.clone()),
+            transform: Transform::from_xyz(base.x, base.y + 3.05, base.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.36, 0.96, 1.0),
+                intensity: 18_000.0,
+                range: 42.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(base.x, base.y + 4.1, base.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn settlement_build_terminal_local(kind: MapSettlementKind) -> Vec3 {
+    match kind {
+        MapSettlementKind::City => Vec3::new(28.0, 0.0, -30.0),
+        MapSettlementKind::Village => Vec3::new(22.0, 0.0, -22.0),
+        MapSettlementKind::Harbor => Vec3::new(-26.0, 0.0, 22.0),
+        MapSettlementKind::Outpost => Vec3::new(18.0, 0.0, 21.0),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_economy_modules(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+    layout: SettlementTerrainLayout,
+    economy: &SettlementEconomy,
+) {
+    for record in economy.builds_for(settlement.anchor_id) {
+        if record.tier == 0 {
+            continue;
+        }
+        let base = settlement_build_module_base(origin, rot, layout, seed, record.kind);
+        spawn_settlement_build_module(commands, meshes, pal, base, rot, record.kind, record.tier);
+    }
+}
+
+fn settlement_build_module_base(
+    origin: Vec3,
+    rot: Quat,
+    layout: SettlementTerrainLayout,
+    seed: u64,
+    kind: SettlementBuildKind,
+) -> Vec3 {
+    let raw = origin + rot * settlement_build_module_local(kind);
+    let floor_y = layout.floor_y_at(raw.x, raw.z, seed);
+    Vec3::new(raw.x, floor_y + 0.08, raw.z)
+}
+
+fn settlement_build_module_local(kind: SettlementBuildKind) -> Vec3 {
+    match kind {
+        SettlementBuildKind::Farm => Vec3::new(-42.0, 0.0, 40.0),
+        SettlementBuildKind::Factory => Vec3::new(54.0, 0.0, -4.0),
+        SettlementBuildKind::Spaceport => Vec3::new(0.0, 0.0, 62.0),
+        SettlementBuildKind::PowerPlant => Vec3::new(44.0, 0.0, 36.0),
+        SettlementBuildKind::ResearchLab => Vec3::new(-46.0, 0.0, -34.0),
+        SettlementBuildKind::DefenseOutpost => Vec3::new(0.0, 0.0, -56.0),
+        SettlementBuildKind::BridgeHub => Vec3::new(62.0, 0.0, -50.0),
+    }
+}
+
+fn spawn_settlement_build_module(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    rot: Quat,
+    kind: SettlementBuildKind,
+    tier: u32,
+) {
+    let tier = tier.clamp(1, 3);
+    let pad_size = match kind {
+        SettlementBuildKind::Farm => Vec3::new(24.0, 0.32, 18.0),
+        SettlementBuildKind::Factory => Vec3::new(18.0, 0.38, 16.0),
+        SettlementBuildKind::Spaceport => Vec3::new(28.0, 0.36, 28.0),
+        SettlementBuildKind::PowerPlant => Vec3::new(17.0, 0.38, 17.0),
+        SettlementBuildKind::ResearchLab => Vec3::new(18.0, 0.34, 18.0),
+        SettlementBuildKind::DefenseOutpost => Vec3::new(16.0, 0.38, 16.0),
+        SettlementBuildKind::BridgeHub => Vec3::new(26.0, 0.34, 14.0),
+    };
+    let pad_mat = match kind {
+        SettlementBuildKind::Farm => pal.moss.clone(),
+        SettlementBuildKind::BridgeHub => pal.mountain_path.clone(),
+        SettlementBuildKind::Spaceport => pal.sky_platform.clone(),
+        _ => pal.brushed_metal.clone(),
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(pad_size.x, pad_size.y, pad_size.z))),
+            material: MeshMaterial3d(pad_mat),
+            transform: Transform::from_translation(base + Vec3::Y * (pad_size.y * 0.5))
+                .with_rotation(rot),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(
+            pad_size.x * 0.5,
+            pad_size.y * 0.5,
+            pad_size.z * 0.5,
+        ),
+    ));
+
+    match kind {
+        SettlementBuildKind::Farm => {
+            for row in -2..=2 {
+                spawn_settlement_module_cube(
+                    commands,
+                    meshes,
+                    pal.foliage_a.clone(),
+                    base,
+                    rot,
+                    Vec3::new(1.0, 0.52, row as f32 * 3.0),
+                    Vec3::new(18.0, 0.28, 1.15),
+                );
+            }
+            spawn_settlement_module_cylinder(
+                commands,
+                meshes,
+                pal.stone_brick.clone(),
+                base,
+                Vec3::new(-8.5, 2.15, 5.8),
+                2.1,
+                4.1,
+            );
+        }
+        SettlementBuildKind::Factory => {
+            spawn_settlement_module_cube(
+                commands,
+                meshes,
+                pal.industrial_metal.clone(),
+                base,
+                rot,
+                Vec3::new(0.0, 2.55, 0.0),
+                Vec3::new(11.5, 4.8, 8.8),
+            );
+            spawn_settlement_module_cylinder(
+                commands,
+                meshes,
+                pal.industrial_rust.clone(),
+                base,
+                Vec3::new(5.3, 5.0, -2.8),
+                1.1,
+                9.2,
+            );
+        }
+        SettlementBuildKind::Spaceport => {
+            spawn_settlement_module_cylinder(
+                commands,
+                meshes,
+                pal.sky_platform.clone(),
+                base,
+                Vec3::new(0.0, 0.72, 0.0),
+                11.0,
+                0.8,
+            );
+            spawn_settlement_module_cube(
+                commands,
+                meshes,
+                pal.guide_glow.clone(),
+                base,
+                rot,
+                Vec3::new(0.0, 0.98, -8.4),
+                Vec3::new(4.2, 0.32, 9.5),
+            );
+            spawn_settlement_module_cube(
+                commands,
+                meshes,
+                pal.brushed_metal.clone(),
+                base,
+                rot,
+                Vec3::new(-8.4, 3.1, 5.2),
+                Vec3::new(3.0, 5.5, 3.0),
+            );
+        }
+        SettlementBuildKind::PowerPlant => {
+            spawn_settlement_module_cylinder(
+                commands,
+                meshes,
+                pal.industrial_metal.clone(),
+                base,
+                Vec3::new(0.0, 3.1, 0.0),
+                4.4,
+                6.0,
+            );
+            spawn_settlement_module_sphere(
+                commands,
+                meshes,
+                pal.crystal_aurora.clone(),
+                base,
+                Vec3::new(0.0, 6.7, 0.0),
+                2.4,
+            );
+        }
+        SettlementBuildKind::ResearchLab => {
+            spawn_settlement_module_cylinder(
+                commands,
+                meshes,
+                pal.glass_panel.clone(),
+                base,
+                Vec3::new(0.0, 1.7, 0.0),
+                5.6,
+                3.0,
+            );
+            spawn_settlement_module_sphere(
+                commands,
+                meshes,
+                pal.small_window_cool.clone(),
+                base,
+                Vec3::new(0.0, 4.2, 0.0),
+                4.2,
+            );
+        }
+        SettlementBuildKind::DefenseOutpost => {
+            spawn_settlement_module_cylinder(
+                commands,
+                meshes,
+                pal.dragon_stone.clone(),
+                base,
+                Vec3::new(0.0, 4.0, 0.0),
+                3.5,
+                7.6,
+            );
+            spawn_settlement_module_cube(
+                commands,
+                meshes,
+                pal.brushed_metal.clone(),
+                base,
+                rot,
+                Vec3::new(0.0, 8.0, -2.8),
+                Vec3::new(9.0, 1.25, 2.0),
+            );
+            spawn_settlement_module_sphere(
+                commands,
+                meshes,
+                pal.guide_glow.clone(),
+                base,
+                Vec3::new(0.0, 8.4, 0.0),
+                1.25,
+            );
+        }
+        SettlementBuildKind::BridgeHub => {
+            spawn_settlement_module_cube(
+                commands,
+                meshes,
+                pal.mountain_path.clone(),
+                base,
+                rot,
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(28.0, 1.1, 4.8),
+            );
+            for side in [-1.0_f32, 1.0] {
+                spawn_settlement_module_cube(
+                    commands,
+                    meshes,
+                    pal.stone_block.clone(),
+                    base,
+                    rot,
+                    Vec3::new(side * 11.0, 3.0, -4.4),
+                    Vec3::new(2.7, 5.3, 2.7),
+                );
+                spawn_settlement_module_sphere(
+                    commands,
+                    meshes,
+                    pal.guide_glow.clone(),
+                    base,
+                    rot * Vec3::new(side * 11.0, 6.0, -4.4),
+                    0.9,
+                );
+            }
+        }
+    }
+
+    for level in 0..tier {
+        let offset = Vec3::new(
+            -pad_size.x * 0.36 + level as f32 * 2.2,
+            1.18,
+            pad_size.z * 0.38,
+        );
+        spawn_settlement_module_sphere(
+            commands,
+            meshes,
+            pal.guide_glow.clone(),
+            base,
+            rot * offset,
+            0.62,
+        );
+    }
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.32, 0.88, 1.0),
+                intensity: 8_000.0 + tier as f32 * 3_000.0,
+                range: 28.0 + tier as f32 * 8.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(base + Vec3::Y * 6.5),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_settlement_module_cube(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    base: Vec3,
+    rot: Quat,
+    local: Vec3,
+    size: Vec3,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(base + rot * local).with_rotation(rot),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_settlement_module_cylinder(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    base: Vec3,
+    local: Vec3,
+    radius: f32,
+    height: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(radius, height))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(base + local),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_settlement_module_sphere(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    base: Vec3,
+    local: Vec3,
+    radius: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(radius))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(base + local),
             ..default()
         },
         WorldGeometry,

@@ -29,6 +29,7 @@ pub enum CartoonPose {
     Fall,
     Fly,
     WallSlide,
+    Grapple,
     Attack,
     SabreSlash,
     Hang,

@@ -142,6 +142,19 @@ pub struct DiscussionNpc {
     pub interact_radius: f32,
 }
 
+/// Build terminal for the settlement economy layer. Today it keys into
+/// `map_settlements()`; M5 can later back it with full `WorldSite` state.
+#[derive(Component, Debug, Clone)]
+pub struct SettlementBuildTerminal {
+    pub settlement_id: &'static str,
+    pub settlement_name: &'static str,
+    pub reward_id: &'static str,
+    pub kind: crate::chapters::MapSettlementKind,
+    pub origin: Vec3,
+    pub facing_yaw: f32,
+    pub interact_radius: f32,
+}
+
 /// Flying Free Peoples ship that patrols above protected cities.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct FreePeopleGuardianShip {
@@ -230,4 +243,29 @@ pub struct BoatPassenger {
     pub boat: Entity,
     pub seat: u8,
     pub is_driver: bool,
+}
+
+/// Tags a world entity (enemy group, patrol, or visual marker) as belonging to
+/// a WorldSite so the liberation system can track enemy deaths by site.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct WorldSiteMarker {
+    pub id: crate::resources::WorldSiteId,
+}
+
+/// Marks the command terminal that spawns at a liberated site.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SiteCommandTerminal {
+    pub id: crate::resources::WorldSiteId,
+    pub interact_radius: f32,
+}
+
+/// Invisible site anchor that triggers enemy spawning when players approach,
+/// then tracks whether the site's defender group has been defeated.
+#[derive(Component, Debug, Clone)]
+pub struct WorldSiteEnemySentinel {
+    pub site_id: crate::resources::WorldSiteId,
+    pub trigger_radius: f32,
+    pub spawned: bool,
+    pub enemy_count: u8,
+    pub liberated_spawned: bool,
 }

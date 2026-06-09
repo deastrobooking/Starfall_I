@@ -10,7 +10,7 @@ src/
   state.rs                  AppState enum (MainMenu → ChapterSelect → Playing → GameOver)
   events.rs                 All game events + EventsPlugin
   damage.rs                 Health, Damageable, DamageInfo, apply_damage(), area_damage_falloff()
-  resources.rs              Shared resources (WaveInfo, GameSettings, CurrentChapter, ...)
+  resources.rs              Shared resources (WaveInfo, GameSettings, CurrentChapter, WorldSiteRegistry, WorldSite, WorldSiteId, WorldSiteKind, WorldSiteState, WorldSiteOwner, WorldSiteSaveRecord, initial_world_sites())
   character_blueprint.rs    Serializable editable character recipes: body, parts, materials, sockets, rig, animation, movement
   character_parts.rs        CharacterPartStyle (HumanoidClothing/RobotMechanical), CharacterLoadout, PlayerPartLoadout resource
   perks.rs                  PerkTree, PerkBranch, PerkDef — Heart / Star / Acrobat branches
@@ -32,7 +32,7 @@ src/
     inventory.rs            Inventory, item slots
     mods.rs                 WeaponMod, ArmorMod data
     discoverable.rs         DiscoverableKind, Discoverable marker, relic puzzle and secret cave markers
-    world.rs                World/terrain, moving platform, and turret components
+    world.rs                World/terrain, moving platform, turret components; WorldSiteMarker, WorldSiteEnemySentinel, SiteCommandTerminal for reclaimable site props
   plugins/
     input_plugin.rs         Writes per-player PlayerInput from keyboard + gamepads
     player_plugin.rs        Movement, ledge hang, wall jump, jetpack, dodge, parry, perks, death
@@ -41,8 +41,8 @@ src/
     character_plugin.rs     Idle/walk/jump/hang cartoon pose animation; swap_character_parts
     chapter_plugin.rs       Chapter director, secret cave beacons, relic puzzles, relic-fragment obstacle courses, castle airship escalation
     ui_plugin.rs            HUD, menus, chapter select, perk training, upgrade shop, damage numbers
-    world_plugin.rs         Deterministic terrain generation, mixed ancient/new city facades, secret cave systems, prop placement, lighting
-    save_plugin.rs          F5 manual save + 30s autosave -> starfall_i_save.json; persists PlayerPartLoadout
+    world_plugin.rs         Deterministic terrain generation, mixed ancient/new city facades, secret cave systems, prop placement, lighting; world site props, enemy sentinels, liberation system
+    save_plugin.rs          F5 manual save + 30s autosave -> starfall_i_save.json; persists PlayerPartLoadout + WorldSiteRegistry via SaveParams SystemParam
     armor_plugin.rs         Armor repair / equip systems
     chest_plugin.rs         Chest spawn, interact, loot roll
     crafting_plugin.rs      Crafting menu, recipe matching
@@ -95,7 +95,7 @@ ChapterPlugin: listens to EnemyKilledEvent / BossDefeatedEvent → advances Enco
 DiscoverablePlugin: handles collectible beacons, secret cave charting, ordered relic-switch puzzles, and relic-fragment assembly
 UiPlugin:     listens to all events → updates per-player HUD panels, radio chatter, damage numbers
 EnemyPlugin:  listens to EnemyKilledEvent → party robot salvage collection
-SavePlugin:   reads PlayerIndex + PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree + CharacterBlueprints + RobotPetCollection + UpgradeLedger + PlayerPartLoadout → JSON on disk
+SavePlugin:   reads PlayerIndex + PlayerStats + Health + WaveInfo + ChapterProgress + PerkTree + CharacterBlueprints + RobotPetCollection + UpgradeLedger + PlayerPartLoadout + WorldSiteRegistry → JSON on disk
 ```
 
 ## Ownership Policy
@@ -138,4 +138,5 @@ Party-shared exceptions:
 - **Tech upgrades as the production upgrade spine**: `UpgradeLedger` is a shared campaign resource for beam, missile, turret, health, rejuvenation, and mech-link ranks. Chapter select spends robot salvage on ranks; weapon, armor, and player regen systems consume those ranks. `MechCommandLink` rank gates GiantMech, SpaceShip, and MegaShip forms in the Robot Garage. Rejuvenation healing spends a saved reserve so it is a paid survival system instead of free passive regen.
 - **Assembly-driven vehicle modes**: `VehicleState` uses `GroundMode` (None/Motorcycle/Tank/GiantMech) and `AirMode` (None/Jet/Ship) enums. `vehicle_input()` checks `RobotPetCollection.active_assembly` first, falling back to `PlayerLoadout` blueprints. Each mode applies its own speed/jetpack/armor buffs via `apply_vehicle_buffs()`. M toggles ground mode, J toggles air/boat mode.
 - **Chassis persistence**: `CharacterPartStyle` is serializable. `PlayerPartLoadout` (body/arms/legs/shoulders slot choices) is saved and hydrated through all save paths using `#[serde(default)]` for backward compatibility.
+- **Reclaimable world state via WorldSite**: the 200-mile Everest Range world can be liberated, defended, rebuilt, and attacked again. `WorldSiteRegistry` (a `Resource` holding `Vec<WorldSite>`) is the single canonical list of named world positions with state, owner, and liberation progress. Save data compacts this to `Vec<WorldSiteSaveRecord>` (id/state/owner/enemies_defeated). At runtime, `WorldSiteEnemySentinel` entities anchor each enemy-held site; `world_site_enemy_spawner_system` triggers a spawn when the player enters the sentinel radius; `site_liberation_system` flips the site to `Liberated` and spawns a `SiteCommandTerminal` when all tagged defenders are dead. Chapter-select badges on the fast-travel map update color to reflect each site's current `WorldSiteState`.
 - **Damage pipeline**: `DamageInfo → apply_damage() → DamageResult` with resistance multipliers, then callers emit events. Parry and armor are handled in `damage_player()` in player_plugin before the generic pipeline.

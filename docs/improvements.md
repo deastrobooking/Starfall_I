@@ -199,3 +199,58 @@ Bracket keys currently overlap weapon cycling and developer elemental armor cycl
 The input path now supports Bevy gamepads plus the macOS native fallback, analog move magnitude, trigger-axis fallback, and Select+D-pad specials. It still needs repeated hands-on validation across at least two Xbox-style controllers, DualSense/DualShock, and reconnect ordering.
 
 **Fix:** add an in-game controller diagnostics overlay showing per-player assignment, left/right stick values, LT/RT source, active button states, and last action fired.
+
+---
+
+## Code Quality — Agent Review Suggestions (2026-06-09)
+
+These items were surfaced by a parallel code-review agent and have not yet been addressed in code. Add them to the appropriate milestone when scope and timing are clear.
+
+### 17. Save schema versioning
+**File:** `src/plugins/save_plugin.rs`
+
+`SaveData` has no `save_version` field. As the schema grows (world sites, settlement economy, weapon ranks, etc.) it becomes hard to detect when a save was written by an older build and apply the right migration path. The current `#[serde(default)]` approach handles new fields cleanly but cannot detect removed or renamed fields or trigger proactive migration logic.
+
+**Fix:** add `save_version: u32` (default 0 for legacy saves) to `SaveData`. Increment on each breaking schema change. On load, branch on `save_version` to run any needed field migrations before applying the data.
+
+### 18. Better save load error surfacing
+**File:** `src/plugins/save_plugin.rs`
+
+`load_save()` currently silently falls back to defaults when the file is missing, which is fine. But deserialization errors (corrupt JSON, truncated file, bad field types) are likely swallowed with the same silent fallback, giving no user-visible signal that progress was lost.
+
+**Fix:** distinguish "file not found" (silent default) from "file corrupt or unreadable" (log a warning + show a UI message or confirmation prompt before overwriting progress).
+
+### 19. Platform-appropriate save path
+**File:** `src/plugins/save_plugin.rs`
+
+The save file is currently written next to the binary. On macOS this usually works during development, but shipped apps may not have write access there, and it diverges from platform conventions (macOS `~/Library/Application Support/`, Windows `%APPDATA%\`, Linux `~/.local/share/`).
+
+**Fix:** use the `dirs` or `directories` crate to resolve the platform's user data directory at runtime and place `starfall_i_save.json` there. Add a fallback to the binary directory for dev builds.
+
+### 20. Explicit gamepad-to-player assignment resource
+**Files:** `src/plugins/input_plugin.rs`, `src/resources.rs`
+
+Gamepad-to-player mapping is currently derived implicitly (gamepad 0 → P1, gamepad 1 → P2, etc.) from Bevy's gamepad connection order. Reconnect ordering, device hotplug, and native macOS controller fallback can cause assignment drift, especially in 3-4 player sessions.
+
+**Fix:** introduce a small `GamepadAssignment` resource (map from `PlayerIndex` to assigned `Gamepad` or native controller id). Populate it on `GamepadConnected` events; update it on reconnect; expose it in the controller diagnostics overlay.
+
+### 21. Narrow `#[allow(dead_code)]` at crate root
+**File:** `src/main.rs` (or crate root attributes)
+
+The crate currently carries a broad `#[allow(dead_code)]` at the crate root that hides real unused-item warnings across all modules. This makes it easier to leave stub functions and removed paths without noticing.
+
+**Fix:** remove the crate-level allowance. Add `#[allow(dead_code)]` at the item level for any stub function that is intentionally kept (e.g., M6 no-op stubs). Let the compiler surface genuinely unused items.
+
+### 22. Heightfield vs trimesh collider evaluation
+**Files:** `src/plugins/world_plugin.rs`, `Cargo.toml`
+
+The terrain currently uses a Rapier `TriMesh` collider built from the generated mesh triangles. For a 200-mile heightmap, a trimesh with many subdivisions can be slow to query and expensive to build. Rapier also supports `HeightField` colliders, which are O(1) to query and use less memory.
+
+**Fix (evaluate, don't blindly apply):** profile the current trimesh collider build time and query cost. If it is a measurable bottleneck, test switching the main terrain collider to `HeightField` using the same `terrain_surface_y()` sampling grid. Document the outcome either way.
+
+### 23. `WaveInfo` legacy isolation
+**Files:** `src/plugins/save_plugin.rs`, `src/resources.rs`, `docs/systems.md`
+
+`WaveInfo` is kept alive only for legacy loot tables and save compatibility. It is still read and written by several systems that predate the `ChapterPlugin` director. Future contributors may not realize it is a deprecated stub and add new behavior to it.
+
+**Fix:** add a `#[doc = "Legacy stub — kept only for save compatibility and loot drop tables. Do not add new game logic here; use ChapterProgress or WorldSiteRegistry instead."]` attribute to `WaveInfo`. Audit and document each remaining read site so a future cleanup pass can remove them safely.

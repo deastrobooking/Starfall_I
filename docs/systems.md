@@ -73,6 +73,7 @@ The panel hides while a discussion is active so the dialogue UI can own the bott
 | Jetpack | Hold Space / South while airborne | Burns `fuel_cost_per_sec = 20`/sec; regens on ground |
 | WallSliding | Pushing into wall while falling | One-hand wall clasp; drains light stamina and caps fall speed at `wall_slide_speed = 0.28` |
 | Hanging | Interact while falling into a wall | Max hang time 2.5s; drains stamina 12/sec |
+| Grappling | `G` / Select+RB | First MVP slice: hook wind-up pose and cooldown only; targeting and pull physics come next |
 
 Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity. The Rapier `KinematicCharacterController` uses explicit movement-profile fields for offset, step height/width, and snap-to-ground distance so small lips and authored traversal props are easier to tune consistently.
 
@@ -80,7 +81,16 @@ Analog movement preserves stick strength. Sprint requires the sprint input plus 
 
 Wall slide is the default wall-contact behavior while falling; it now behaves as a stamina-backed one-hand wall clasp, drains a small amount of stamina, refreshes wall-jump charges, slows descent, and falls back to a faster tired slide when stamina is gone. Hanging is intentional through `E` / D-pad Down. Wall jump is triggered from buffered jump input while `wall_contact_timer > 0` and airborne. It pushes away from wall normal + 25% input direction, has a short steering lockout for cleaner arcs, and carries two wall-jump charges that refresh on landing or renewed wall slide contact.
 
-Procedural character poses now distinguish idle, walk, run, jump, fall, flight, one-hand wall slide, and hang. The long-form roadmap for turning this into a full humanoid traversal/combat system lives in `docs/motion_mechanics_roadmap.md`.
+Procedural character poses now distinguish idle, walk, run, jump, fall, flight,
+one-hand wall slide, hang, combat, Star Sabre slash, and grapple wind-up. The
+long-form roadmap for turning this into a full humanoid traversal/combat system
+lives in `docs/motion_mechanics_roadmap.md`.
+
+Grapple hook foundation: `GrappleHookState` is a single-hook state component
+with Ready/Windup/Searching/Swinging/Zipping/Recovering/Cooldown modes, cable
+tuning, zip/mountain/attack pull tuning, and attach-point fields for future
+raycast work. The current milestone only plays the wind-up/cooldown animation
+path; M2 adds target raycasts and M3-M4 add zip/swing physics.
 
 Climb-up: `E` / D-pad Down while hanging. Boosts player upward `climb_boost * dt * 60`.
 
@@ -182,6 +192,108 @@ Save/load persists the whole `robot_pets` section with `serde(default)`, so olde
 The Robot Garage screen (`AppState::RobotGarage`, `src/plugins/robot_garage_plugin.rs`) is the current player-facing hub. A/D browsing selects one of the 9 `RobotAssemblyForm` variants; pressing Enter auto-selects the first N eligible pets and calls `robot_pets.assemble(form, &pet_ids)`; X disassembles. `MechCommandLink` upgrade rank gates GiantMech, SpaceShip, and MegaShip. Assembled forms drive `VehicleState` at runtime (see Vehicle System below).
 
 Future runtime work: controller-friendly garage/store UI, runtime 3-D mech/ship controllers, per-player passenger/driver UX, and store-built pet purchasing from salvage.
+
+---
+
+## Settlement Builder And Economy
+
+**Files:** `src/settlement_economy.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`
+
+`SettlementEconomy` is the current vertical slice for the Civilization-style
+reclamation layer. It is campaign-shared and save-backed, with a shared
+stockpile, per-settlement build records, deterministic output ticks, and
+robot-part construction costs.
+
+Current build types:
+
+| Build | Role |
+|---|---|
+| Farm | food, workers, recovery support |
+| Factory | alloy, circuits, robot-part industry |
+| Spaceport | fuel, hangar capacity, future rapid response |
+| Power Plant | power, shield/bridge/factory support |
+| Research Lab | research, blueprint and hacking future hooks |
+| Defense Outpost | defense capacity and turret future hooks |
+| Bridge Hub | route repair, mountain pass, and sky-ramp future hooks |
+
+Every authored `map_settlements()` location spawns a `SettlementBuildTerminal`.
+Press `E` / D-pad Down near the terminal after collecting that settlement's
+cache or liberating the matching world site. The terminal chooses the next
+recommended build order for that settlement kind, spends shared resources and
+robot parts, spawns a visible world module, and shows a message when the build
+is blocked by missing resources or parts.
+
+Saved builds respawn as physical props when the world is generated. The current
+gameplay effect is bounded passive output into the shared stockpile; route
+unlocks, assigned defense units, raid pressure, local missions, and map-panel
+management are M7-M9 work.
+
+Tests currently cover successful multi-build setup, deterministic output ticks,
+missing-part errors, and save round-tripping of settlement economy state.
+
+---
+
+## World Sites / Reclaimable World State
+
+**Files:** `src/resources.rs`, `src/components/world.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`, `src/plugins/ui_plugin.rs`
+
+**Resource:** `WorldSiteRegistry` (holds `Vec<WorldSite>`)
+
+World sites are named strategic positions in the 200-mile Everest Range that players can liberate, defend, and rebuild. Each site has a stable `WorldSiteId(u16)`, world position, kind, current `WorldSiteState`, owner faction, and liberation progress tracking.
+
+### Site State Enum
+
+| State | Map badge color | Meaning |
+|---|---|---|
+| `EnemyHeld` | Red | Active enemy presence; defenders not yet defeated |
+| `Contested` | Orange | Liberation in progress |
+| `Liberated` | Green | All defenders defeated; command terminal online |
+| `Building` | Blue | Active construction at the site |
+| `Damaged` | Yellow | Previously liberated; took raid damage |
+| `UnderAttack` | Dark orange | Active raid in progress |
+| `Shielded` | Cyan | Defense shield active |
+| `OccupiedAgain` | Dark red | Re-captured by enemy after liberation |
+| `Hidden` | (no badge) | Site not yet revealed |
+
+### Site Kinds
+
+`WorldSiteKind`: City, Village, Farm, Factory, Spaceport, PowerPlant, ResearchLab, DefenseOutpost, Harbor, Temple, Castle, Mine, BridgeHub, MountainGate.
+
+### Liberation Flow
+
+1. Player approaches an enemy-held site. The invisible `WorldSiteEnemySentinel` entity (spawned at the site center during `spawn_world_site_props`) detects the player inside `trigger_radius` (default 100 units).
+2. `world_site_enemy_spawner_system` spawns `enemy_count` Soldiers around the site and marks each with `WorldSiteMarker { id }`. Sets `sentinel.spawned = true`.
+3. `site_liberation_system` polls for `sentinel.spawned && !sentinel.liberated_spawned` and checks that no enemies with the matching `WorldSiteMarker` remain alive.
+4. When all defenders are dead: `WorldSiteRegistry` flips the site to `Liberated`, a `SiteCommandTerminal` prop (green glowing terminal + blue NPC) is spawned, and a UI message confirms liberation.
+5. Save/load preserves `WorldSiteSaveRecord` (id, state, owner, enemies_defeated) so the liberated state and command terminal survive restarts.
+
+### Current World Sites
+
+| Id | Name | Region | Kind | Initial State | Defenders |
+|---|---|---|---|---|---|
+| 1 | Iron Watchpost | Starfall Zone | DefenseOutpost | EnemyHeld | 5 |
+| 2 | Riftglass Village | Rift Foothills | Village | EnemyHeld | 8 |
+| 3 | Starfell Outpost | Crown Road | DefenseOutpost | EnemyHeld | 6 |
+| 4 | Cloudrail City | High Sky Rail | City | Liberated (FreePeoples) | 0 |
+| 5 | Lantern Hamlet | Tibet Snow Road | Village | EnemyHeld | 8 |
+| 6 | Star Orchard | Fangroot Meadow | Village | EnemyHeld | 6 |
+| 7 | Frost Harbor | Antarctic Range | Harbor | EnemyHeld | 10 |
+| 8 | Granite Market | Rockies Gate | Village | EnemyHeld | 7 |
+| 9 | Switchwork Borough | Mana Switchworks | City | Liberated (FreePeoples) | 0 |
+
+Sites 2–9 correspond to `map_settlements()` entries via `MapSettlement.site_id`. The chapter-select map renders the world-site badge as the canonical marker for linked settlements; the generic `C`/`V`/`H`/`O` marker is suppressed.
+
+### Map Badges
+
+`spawn_fast_travel_map` in `ui_plugin.rs` renders a 14×14px colored badge at each site's mapped position on the chapter-select fast-travel map. Liberated sites show "✓" text and a green border; enemy-held sites show "!" and a red border. A name label appears below each badge.
+
+### Save Schema
+
+`SaveData.world_sites: Vec<WorldSiteSaveRecord>` uses `#[serde(default)]` so older saves without site data continue to load with the initial default site list applied. `SaveParams` includes `world_site_registry: Res<WorldSiteRegistry>` as its tenth field, staying within Bevy's 16-system-parameter limit.
+
+### Spawn Entity Tagging
+
+`spawn_enemy_entity` in `enemy_plugin.rs` returns `Entity` (changed from `()` in M5) so callers can immediately insert `WorldSiteMarker` onto newly spawned enemies. Existing call sites that don't need the return value simply ignore it.
 
 ---
 

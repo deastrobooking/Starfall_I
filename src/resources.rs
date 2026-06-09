@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::chapters::{Biome, ChapterId};
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
@@ -510,6 +511,285 @@ impl PlayerSelectState {
     }
 }
 
+// ── World Site Registry (M5 Reclaimable World State) ─────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WorldSiteKind {
+    City,
+    Village,
+    Farm,
+    Factory,
+    Spaceport,
+    PowerPlant,
+    ResearchLab,
+    DefenseOutpost,
+    Harbor,
+    Temple,
+    Castle,
+    Mine,
+    BridgeHub,
+    MountainGate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum WorldSiteState {
+    Hidden,
+    #[default]
+    EnemyHeld,
+    Contested,
+    Liberated,
+    Building,
+    Damaged,
+    UnderAttack,
+    Shielded,
+    OccupiedAgain,
+}
+
+impl WorldSiteState {
+    pub fn map_badge_color(&self) -> Color {
+        match self {
+            WorldSiteState::EnemyHeld | WorldSiteState::OccupiedAgain => {
+                Color::srgba(0.85, 0.15, 0.15, 0.9)
+            }
+            WorldSiteState::Contested | WorldSiteState::UnderAttack => {
+                Color::srgba(0.95, 0.65, 0.05, 0.9)
+            }
+            WorldSiteState::Liberated | WorldSiteState::Building | WorldSiteState::Shielded => {
+                Color::srgba(0.15, 0.85, 0.25, 0.9)
+            }
+            WorldSiteState::Damaged => Color::srgba(0.85, 0.55, 0.15, 0.9),
+            WorldSiteState::Hidden => Color::srgba(0.4, 0.4, 0.4, 0.5),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum WorldSiteOwner {
+    FreePeoples,
+    #[default]
+    Scallarian,
+    DragonDomain,
+    Neutral,
+    PlayerAlliance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WorldSiteId(pub u16);
+
+#[derive(Debug, Clone)]
+pub struct WorldSite {
+    pub id: WorldSiteId,
+    pub name: &'static str,
+    pub region: &'static str,
+    pub kind: WorldSiteKind,
+    pub state: WorldSiteState,
+    pub owner: WorldSiteOwner,
+    pub world_x: f32,
+    pub world_z: f32,
+    /// Number of enemies that must be defeated to liberate this site.
+    pub enemy_count_to_liberate: u8,
+    pub enemies_defeated: u8,
+}
+
+impl WorldSite {
+    pub fn is_liberated(&self) -> bool {
+        matches!(
+            self.state,
+            WorldSiteState::Liberated | WorldSiteState::Building | WorldSiteState::Shielded
+        )
+    }
+
+    /// Record one enemy defeat. Returns true the first time liberation is reached.
+    pub fn record_enemy_defeated(&mut self) -> bool {
+        if self.is_liberated() {
+            return false;
+        }
+        self.enemies_defeated = self
+            .enemies_defeated
+            .saturating_add(1)
+            .min(self.enemy_count_to_liberate);
+        if self.enemies_defeated >= self.enemy_count_to_liberate {
+            self.state = WorldSiteState::Liberated;
+            self.owner = WorldSiteOwner::PlayerAlliance;
+            return true;
+        }
+        false
+    }
+}
+
+/// Compact record serialized into the save file.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WorldSiteSaveRecord {
+    pub id: u16,
+    pub state: WorldSiteState,
+    pub owner: WorldSiteOwner,
+    pub enemies_defeated: u8,
+}
+
+#[derive(Resource, Debug, Clone)]
+pub struct WorldSiteRegistry {
+    pub sites: Vec<WorldSite>,
+}
+
+impl Default for WorldSiteRegistry {
+    fn default() -> Self {
+        Self {
+            sites: initial_world_sites(),
+        }
+    }
+}
+
+impl WorldSiteRegistry {
+    pub fn get(&self, id: WorldSiteId) -> Option<&WorldSite> {
+        self.sites.iter().find(|s| s.id == id)
+    }
+
+    pub fn get_mut(&mut self, id: WorldSiteId) -> Option<&mut WorldSite> {
+        self.sites.iter_mut().find(|s| s.id == id)
+    }
+
+    pub fn to_save_records(&self) -> Vec<WorldSiteSaveRecord> {
+        self.sites
+            .iter()
+            .map(|s| WorldSiteSaveRecord {
+                id: s.id.0,
+                state: s.state,
+                owner: s.owner,
+                enemies_defeated: s.enemies_defeated,
+            })
+            .collect()
+    }
+
+    pub fn apply_save_records(&mut self, records: &[WorldSiteSaveRecord]) {
+        for record in records {
+            if let Some(site) = self.get_mut(WorldSiteId(record.id)) {
+                site.state = record.state;
+                site.owner = record.owner;
+                site.enemies_defeated = record.enemies_defeated;
+            }
+        }
+    }
+}
+
+// ── World Site Static Definitions ────────────────────────────────────────────
+
+/// Returns the canonical initial set of world sites. Called once on registry setup.
+pub fn initial_world_sites() -> Vec<WorldSite> {
+    vec![
+        // ── Standalone defense sites ──────────────────────────────────────
+        WorldSite {
+            id: WorldSiteId(1),
+            name: "Iron Watchpost",
+            region: "Starfall Zone",
+            kind: WorldSiteKind::DefenseOutpost,
+            state: WorldSiteState::EnemyHeld,
+            owner: WorldSiteOwner::Scallarian,
+            world_x: 380.0,
+            world_z: 520.0,
+            enemy_count_to_liberate: 5,
+            enemies_defeated: 0,
+        },
+        // ── Settlements (match map_settlements() positions and site_id) ───
+        WorldSite {
+            id: WorldSiteId(2),
+            name: "Riftglass Village",
+            region: "Rift Foothills",
+            kind: WorldSiteKind::Village,
+            state: WorldSiteState::EnemyHeld,
+            owner: WorldSiteOwner::Scallarian,
+            world_x: 1500.0,
+            world_z: 3300.0,
+            enemy_count_to_liberate: 8,
+            enemies_defeated: 0,
+        },
+        WorldSite {
+            id: WorldSiteId(3),
+            name: "Starfell Outpost",
+            region: "Crown Road",
+            kind: WorldSiteKind::DefenseOutpost,
+            state: WorldSiteState::EnemyHeld,
+            owner: WorldSiteOwner::Scallarian,
+            world_x: -1800.0,
+            world_z: -6900.0,
+            enemy_count_to_liberate: 6,
+            enemies_defeated: 0,
+        },
+        // Peaceful mega-city hubs — start Liberated under Free Peoples protection.
+        WorldSite {
+            id: WorldSiteId(4),
+            name: "Cloudrail City",
+            region: "High Sky Rail",
+            kind: WorldSiteKind::City,
+            state: WorldSiteState::Liberated,
+            owner: WorldSiteOwner::FreePeoples,
+            world_x: 4200.0,
+            world_z: 4300.0,
+            enemy_count_to_liberate: 0,
+            enemies_defeated: 0,
+        },
+        WorldSite {
+            id: WorldSiteId(5),
+            name: "Lantern Hamlet",
+            region: "Tibet Snow Road",
+            kind: WorldSiteKind::Village,
+            state: WorldSiteState::EnemyHeld,
+            owner: WorldSiteOwner::Scallarian,
+            world_x: -6900.0,
+            world_z: -4200.0,
+            enemy_count_to_liberate: 8,
+            enemies_defeated: 0,
+        },
+        WorldSite {
+            id: WorldSiteId(6),
+            name: "Star Orchard",
+            region: "Fangroot Meadow",
+            kind: WorldSiteKind::Village,
+            state: WorldSiteState::EnemyHeld,
+            owner: WorldSiteOwner::Scallarian,
+            world_x: -3800.0,
+            world_z: 5700.0,
+            enemy_count_to_liberate: 6,
+            enemies_defeated: 0,
+        },
+        WorldSite {
+            id: WorldSiteId(7),
+            name: "Frost Harbor",
+            region: "Antarctic Range",
+            kind: WorldSiteKind::Harbor,
+            state: WorldSiteState::EnemyHeld,
+            owner: WorldSiteOwner::Scallarian,
+            world_x: 2300.0,
+            world_z: -6700.0,
+            enemy_count_to_liberate: 10,
+            enemies_defeated: 0,
+        },
+        WorldSite {
+            id: WorldSiteId(8),
+            name: "Granite Market",
+            region: "Rockies Gate",
+            kind: WorldSiteKind::Village,
+            state: WorldSiteState::EnemyHeld,
+            owner: WorldSiteOwner::Scallarian,
+            world_x: 7100.0,
+            world_z: 2800.0,
+            enemy_count_to_liberate: 7,
+            enemies_defeated: 0,
+        },
+        WorldSite {
+            id: WorldSiteId(9),
+            name: "Switchwork Borough",
+            region: "Mana Switchworks",
+            kind: WorldSiteKind::City,
+            state: WorldSiteState::Liberated,
+            owner: WorldSiteOwner::FreePeoples,
+            world_x: 4400.0,
+            world_z: -4300.0,
+            enemy_count_to_liberate: 0,
+            enemies_defeated: 0,
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,5 +832,73 @@ mod tests {
         assert!(guidance.title.is_empty());
         assert!(guidance.body.is_empty());
         assert!(guidance.action.is_empty());
+    }
+
+    #[test]
+    fn world_site_ids_are_unique() {
+        let sites = initial_world_sites();
+        let mut ids: Vec<u16> = sites.iter().map(|s| s.id.0).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), sites.len(), "duplicate WorldSiteId found");
+    }
+
+    #[test]
+    fn world_site_count_matches_settlements_plus_standalone() {
+        // 8 settlements + 1 standalone (Iron Watchpost) = 9
+        let sites = initial_world_sites();
+        assert_eq!(sites.len(), 9);
+    }
+
+    #[test]
+    fn liberated_cities_have_no_defenders() {
+        for site in initial_world_sites() {
+            if site.state == WorldSiteState::Liberated {
+                assert_eq!(
+                    site.enemy_count_to_liberate, 0,
+                    "Liberated site '{}' should have 0 defenders",
+                    site.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn enemy_held_sites_have_positive_defender_count() {
+        for site in initial_world_sites() {
+            if site.state == WorldSiteState::EnemyHeld {
+                assert!(
+                    site.enemy_count_to_liberate > 0,
+                    "EnemyHeld site '{}' needs at least 1 defender",
+                    site.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn world_site_registry_apply_records_round_trip() {
+        let mut registry = WorldSiteRegistry::default();
+        registry.sites = initial_world_sites();
+
+        // Simulate: liberate site 2
+        let records = vec![WorldSiteSaveRecord {
+            id: 2,
+            state: WorldSiteState::Liberated,
+            owner: WorldSiteOwner::PlayerAlliance,
+            enemies_defeated: 8,
+        }];
+        registry.apply_save_records(&records);
+
+        let site = registry.get(WorldSiteId(2)).unwrap();
+        assert!(site.is_liberated());
+        assert_eq!(site.owner, WorldSiteOwner::PlayerAlliance);
+        assert_eq!(site.enemies_defeated, 8);
+
+        // Other sites unaffected
+        assert_eq!(
+            registry.get(WorldSiteId(1)).unwrap().state,
+            WorldSiteState::EnemyHeld
+        );
     }
 }

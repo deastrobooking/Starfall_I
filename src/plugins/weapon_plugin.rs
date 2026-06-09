@@ -116,29 +116,29 @@ fn setup_weapon_assets(
         sphere_xl: meshes.add(Sphere::new(0.72)),
         flash_sphere: meshes.add(Sphere::new(0.9)),
         // Base materials — emissive tuned for bloom
-        mat_pistol:       mk_proj_mat(m, 1.0, 0.95, 0.25,  4.0,  3.0,  0.4),
-        mat_rifle:        mk_proj_mat(m, 0.15, 0.9, 1.0,   0.4,  3.5,  5.0),
-        mat_shotgun:      mk_proj_mat(m, 1.0, 0.35, 0.85,  4.0,  0.7,  3.5),
-        mat_rocket:       mk_proj_mat(m, 0.95, 0.25, 1.0,  3.5,  0.6,  4.0),
-        mat_laser:        mk_proj_mat(m, 0.45, 1.0, 0.55,  1.5,  5.0,  2.0),
-        mat_grenade:      mk_proj_mat(m, 0.25, 0.55, 1.0,  0.6,  1.5,  4.0),
-        mat_homing_star:  mk_proj_mat(m, 1.0, 0.8, 0.15,   5.0,  2.5,  0.4),
-        mat_energy:       mk_proj_mat(m, 0.2, 1.0, 0.95,   0.5,  4.0,  3.5),
-        mat_moon_bubble:  mk_proj_mat(m, 0.7, 0.35, 1.0,   2.0,  0.8,  5.0),
-        mat_sprite_shot:  mk_proj_mat(m, 0.8, 1.0, 0.25,   2.5,  4.0,  0.6),
-        mat_companion:    mk_proj_mat(m, 1.0, 0.55, 0.2,   4.0,  1.6,  0.4),
-        mat_melee_flash:  mk_proj_mat(m, 1.0, 0.95, 0.35,  5.0,  3.2,  0.6),
-        mat_hit_particle: mk_proj_mat(m, 1.0, 0.85, 0.2,   4.0,  2.5,  0.4),
+        mat_pistol: mk_proj_mat(m, 1.0, 0.95, 0.25, 4.0, 3.0, 0.4),
+        mat_rifle: mk_proj_mat(m, 0.15, 0.9, 1.0, 0.4, 3.5, 5.0),
+        mat_shotgun: mk_proj_mat(m, 1.0, 0.35, 0.85, 4.0, 0.7, 3.5),
+        mat_rocket: mk_proj_mat(m, 0.95, 0.25, 1.0, 3.5, 0.6, 4.0),
+        mat_laser: mk_proj_mat(m, 0.45, 1.0, 0.55, 1.5, 5.0, 2.0),
+        mat_grenade: mk_proj_mat(m, 0.25, 0.55, 1.0, 0.6, 1.5, 4.0),
+        mat_homing_star: mk_proj_mat(m, 1.0, 0.8, 0.15, 5.0, 2.5, 0.4),
+        mat_energy: mk_proj_mat(m, 0.2, 1.0, 0.95, 0.5, 4.0, 3.5),
+        mat_moon_bubble: mk_proj_mat(m, 0.7, 0.35, 1.0, 2.0, 0.8, 5.0),
+        mat_sprite_shot: mk_proj_mat(m, 0.8, 1.0, 0.25, 2.5, 4.0, 0.6),
+        mat_companion: mk_proj_mat(m, 1.0, 0.55, 0.2, 4.0, 1.6, 0.4),
+        mat_melee_flash: mk_proj_mat(m, 1.0, 0.95, 0.35, 5.0, 3.2, 0.6),
+        mat_hit_particle: mk_proj_mat(m, 1.0, 0.85, 0.2, 4.0, 2.5, 0.4),
         // Charge blast materials — ~2-3x emissive, near-white hot core
-        mat_charge_pistol:  mk_proj_mat(m, 1.0, 1.0, 0.6,  10.0,  8.0,  2.0),
-        mat_charge_rifle:   mk_proj_mat(m, 0.6, 0.95, 1.0,  2.0,  9.0, 12.0),
-        mat_charge_shotgun: mk_proj_mat(m, 1.0, 0.7,  1.0, 10.0,  3.0,  9.0),
-        mat_charge_rocket:  mk_proj_mat(m, 1.0, 0.6,  1.0,  9.0,  2.0, 10.0),
-        mat_charge_laser:   mk_proj_mat(m, 0.7, 1.0,  0.7,  4.0, 12.0,  5.0),
-        mat_charge_grenade: mk_proj_mat(m, 0.6, 0.8,  1.0,  2.0,  5.0, 11.0),
+        mat_charge_pistol: mk_proj_mat(m, 1.0, 1.0, 0.6, 10.0, 8.0, 2.0),
+        mat_charge_rifle: mk_proj_mat(m, 0.6, 0.95, 1.0, 2.0, 9.0, 12.0),
+        mat_charge_shotgun: mk_proj_mat(m, 1.0, 0.7, 1.0, 10.0, 3.0, 9.0),
+        mat_charge_rocket: mk_proj_mat(m, 1.0, 0.6, 1.0, 9.0, 2.0, 10.0),
+        mat_charge_laser: mk_proj_mat(m, 0.7, 1.0, 0.7, 4.0, 12.0, 5.0),
+        mat_charge_grenade: mk_proj_mat(m, 0.6, 0.8, 1.0, 2.0, 5.0, 11.0),
         // VFX
-        mat_charge_spark: mk_proj_mat(m, 1.0, 1.0, 0.8,   8.0,  6.0,  2.0),
-        mat_muzzle_flash: mk_proj_mat(m, 1.0, 1.0, 1.0,  10.0, 10.0,  6.0),
+        mat_charge_spark: mk_proj_mat(m, 1.0, 1.0, 0.8, 8.0, 6.0, 2.0),
+        mat_muzzle_flash: mk_proj_mat(m, 1.0, 1.0, 1.0, 10.0, 10.0, 6.0),
     });
 }
 
@@ -316,12 +316,11 @@ fn weapon_fire_system(
                 let pos = star_muzzle_origin(player_transform, raw_fwd);
                 let aim_fwd = aim_assist_direction(raw_fwd, pos, &enemy_q);
 
-                let tech_mult =
-                    if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
-                        upgrades.missile_damage_mult()
-                    } else {
-                        upgrades.beam_damage_mult()
-                    };
+                let tech_mult = if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
+                    upgrades.missile_damage_mult()
+                } else {
+                    upgrades.beam_damage_mult()
+                };
                 let charge_dmg = armor.modified_outgoing_damage(
                     weapon.damage
                         * weapon.rank_damage_mult()
@@ -355,7 +354,11 @@ fn weapon_fire_system(
         }
 
         // ── Normal fire ───────────────────────────────────────────────────────
-        let should_fire = if weapon.automatic { pi.fire } else { pi.fire_just };
+        let should_fire = if weapon.automatic {
+            pi.fire
+        } else {
+            pi.fire_just
+        };
         if !should_fire || !weapon.can_fire() {
             continue;
         }
@@ -366,12 +369,11 @@ fn weapon_fire_system(
         let up = cam.up().as_vec3();
         let aim_fwd = aim_assist_direction(raw_fwd, pos, &enemy_q);
 
-        let tech_damage_mult =
-            if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
-                upgrades.missile_damage_mult()
-            } else {
-                upgrades.beam_damage_mult()
-            };
+        let tech_damage_mult = if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
+            upgrades.missile_damage_mult()
+        } else {
+            upgrades.beam_damage_mult()
+        };
         let damage = armor.modified_outgoing_damage(
             weapon.damage * weapon.rank_damage_mult() * perk_damage_mult * tech_damage_mult,
         );

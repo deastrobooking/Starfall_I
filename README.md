@@ -17,6 +17,7 @@ Implemented:
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
 - Everest-range world-map foundation: the imported Everest heightmap now spans a 200 x 200 mile `20_000`-unit range, with smoothed height/slope terrain color layers, snowfields, glacier streams, alpine forests, sci-fantasy outposts, carved mountain path corridors, glowing guide studs, dragon-lair silhouettes, visible fast-travel beacons, and clickable chapter-select map markers for all 14 chapters.
 - Exploration settlement foundation: eight additional cities, villages, harbors, and outposts now appear physically in the range, use terrain-aware grounded/terraced/sky-district layouts with floating mega-city ramps and mountain-inset gates, show as map markers, expose `WorldAnchor`s for future subquests, and hold saved exploration caches.
+- Settlement builder/economy vertical slice: settlement terminals unlock after cache recovery or site liberation, spend shared resources and robot salvage on farms, factories, spaceports, power plants, research labs, defense outposts, and bridge hubs, save/load build tiers, tick bounded passive outputs, and spawn physical rebuilt modules in the world.
 - Great Scientist temple subquests now fill the wider map with optional dungeon-like labs and chapter-select map hints that grant full mechanics upgrades: Ancient Flight Core, Solar Sabre Glyph, Nova Missile Matrix, and Aegis Armor Frame.
 - Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
@@ -25,6 +26,7 @@ Implemented:
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
+- Player mechanics MVP foundation now includes a single star-tech grappling hook state, `G` / Select+RB input, and a procedural grapple wind-up pose; hook targeting, mountain pull, swing physics, and hook combat are planned in `docs/motion_mechanics_roadmap.md`.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
 - RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
 
@@ -126,6 +128,7 @@ Keyboard and mouse:
 | Hold toward wall while falling | Wall slide |
 | `E` near wall while falling/hanging | Hang or climb up |
 | `E` | Interact; trigger nearby slingshots |
+| `G` | Grapple hook wind-up foundation |
 | `Q` | Dodge or drop from hang |
 | `LMB` | Fire active star beam / Star Sabre slash |
 | `RMB` | Aim |
@@ -168,6 +171,7 @@ Controller:
 | LT | Aim |
 | LB | Sprint |
 | RB | Next beam |
+| Select + RB | Grapple hook wind-up foundation |
 | D-Pad Left | Previous beam |
 | D-Pad Down | Interact / hang / climb / trigger slingshots |
 | D-Pad Up | Enter vehicle |

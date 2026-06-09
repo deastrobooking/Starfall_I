@@ -308,6 +308,23 @@ Acceptance:
 - The UI shows why a build is blocked: missing credits, power, workers,
   blueprint, route, or prerequisite.
 
+Current implementation note:
+
+- `src/settlement_economy.rs` owns the saved `SettlementEconomy` resource:
+  shared stockpile, build records, tier costs, robot-part costs, deterministic
+  outputs, and first pure tests.
+- `SaveData` persists `settlement_economy` with `serde(default)` so older saves
+  still load.
+- Every `map_settlements()` entry spawns a `SettlementBuildTerminal`.
+  Interacting builds the next recommended structure after the settlement cache
+  is recovered or the matching M5 world site is liberated.
+- Built modules respawn from save data as physical world props: farms,
+  factories, spaceports, power plants, research labs, defense outposts, and
+  bridge hubs.
+- Still missing: confirmation-hold UX, chapter-select economy panel, route
+  unlock effects, assigned units, raid pressure, and per-building local
+  missions.
+
 ### M7: Connected Platformer Level Network
 
 Goal: make the strategic world feed directly into action-platformer exploration.
@@ -539,3 +556,29 @@ Acceptance:
 - Added pure save tests for per-player record round-trips, legacy save
   hydration, `player_index` matching independent of record order, sorted save
   data output, and clamped runtime application.
+
+### 2026-06-09: M5 Reclaimable World State — First Slice
+
+- Added `WorldSiteKind`, `WorldSiteState`, `WorldSiteOwner`, `WorldSiteId`,
+  `WorldSite`, `WorldSiteSaveRecord`, `WorldSiteRegistry`, and
+  `initial_world_sites()` to `src/resources.rs`.
+- Added `WorldSiteMarker`, `WorldSiteEnemySentinel`, and `SiteCommandTerminal`
+  components to `src/components/world.rs`.
+- Added `world_sites: Vec<WorldSiteSaveRecord>` to `SaveData` with
+  `#[serde(default)]` for backward save compatibility.
+- Added `world_site_registry: Res<WorldSiteRegistry>` to `SaveParams` (10th
+  field; stays within Bevy's 16-param `SystemParamFunction` limit).
+- Added `setup_world_site_registry`, `spawn_world_site_props`,
+  `world_site_enemy_spawner_system`, and `site_liberation_system` to
+  `world_plugin.rs`. Also added `spawn_site_terminal` and M6 economy no-op
+  stubs to fix pre-existing compile errors.
+- Changed `spawn_enemy_entity` in `enemy_plugin.rs` to return `Entity` so
+  callers can insert `WorldSiteMarker` immediately after spawn.
+- Updated `spawn_fast_travel_map` in `ui_plugin.rs` to accept
+  `world_site_registry: &WorldSiteRegistry` and render colored site badges on
+  the chapter-select map.
+- Three initial sites defined: Iron Watchpost (Starfall Zone), Riftglass
+  Village (Rift Foothills), Starfell Outpost (Crown Road).
+- Removed pre-existing broken stub registrations
+  (`settlement_economy_tick_system`, `settlement_build_terminal_system`) from
+  `WorldPlugin::build`.

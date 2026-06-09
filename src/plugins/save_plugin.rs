@@ -7,14 +7,16 @@ use std::path::PathBuf;
 use crate::character_blueprint::CharacterBlueprint;
 use crate::character_parts::CharacterPartStyle;
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
+use crate::components::weapon::WeaponRanks;
 use crate::damage::Health;
 use crate::events::UiMessageEvent;
 use crate::perks::PerkTree;
 use crate::resources::{
-    ChapterProgress, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo,
+    initial_world_sites, ChapterProgress, PlaySessionTransition, PlayerPartLoadout,
+    PlayerSelectState, WaveInfo, WorldSiteRegistry, WorldSiteSaveRecord,
 };
-use crate::components::weapon::WeaponRanks;
 use crate::robot_pets::RobotPetCollection;
+use crate::settlement_economy::SettlementEconomy;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 
@@ -25,15 +27,18 @@ const SAVE_FILE: &str = "starfall_i_save.json";
 /// `pause_menu_action_system` stay within Bevy's 16-param system limit.
 #[derive(SystemParam)]
 pub struct SaveParams<'w, 's> {
-    pub player_q:    Query<'w, 's, (&'static PlayerIndex, &'static PlayerStats, &'static Health), With<Player>>,
-    pub wave:        Res<'w, WaveInfo>,
-    pub progress:    Res<'w, ChapterProgress>,
-    pub perks:       Res<'w, PerkTree>,
-    pub select:      Res<'w, PlayerSelectState>,
-    pub robot_pets:  Res<'w, RobotPetCollection>,
-    pub upgrades:    Res<'w, UpgradeLedger>,
+    pub player_q:
+        Query<'w, 's, (&'static PlayerIndex, &'static PlayerStats, &'static Health), With<Player>>,
+    pub wave: Res<'w, WaveInfo>,
+    pub progress: Res<'w, ChapterProgress>,
+    pub perks: Res<'w, PerkTree>,
+    pub select: Res<'w, PlayerSelectState>,
+    pub robot_pets: Res<'w, RobotPetCollection>,
+    pub settlement_economy: Res<'w, SettlementEconomy>,
+    pub upgrades: Res<'w, UpgradeLedger>,
     pub part_loadout: Res<'w, PlayerPartLoadout>,
     pub weapon_ranks: Res<'w, WeaponRanks>,
+    pub world_site_registry: Res<'w, WorldSiteRegistry>,
 }
 
 // ── Save Data ─────────────────────────────────────────────────────────────────
@@ -69,6 +74,8 @@ pub struct SaveData {
     #[serde(default)]
     pub robot_pets: RobotPetCollection,
     #[serde(default)]
+    pub settlement_economy: SettlementEconomy,
+    #[serde(default)]
     pub tech_upgrades: UpgradeLedger,
     #[serde(default)]
     pub part_loadout_body: CharacterPartStyle,
@@ -80,6 +87,8 @@ pub struct SaveData {
     pub part_loadout_shoulders: CharacterPartStyle,
     #[serde(default)]
     pub weapon_ranks: [u32; 6],
+    #[serde(default)]
+    pub world_sites: Vec<WorldSiteSaveRecord>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -161,12 +170,14 @@ impl Default for SaveData {
             character_blueprints: vec![None, None, None, None],
             players: Vec::new(),
             robot_pets: RobotPetCollection::default(),
+            settlement_economy: SettlementEconomy::default(),
             tech_upgrades: UpgradeLedger::default(),
             part_loadout_body: CharacterPartStyle::HumanoidClothing,
             part_loadout_arms: CharacterPartStyle::HumanoidClothing,
             part_loadout_legs: CharacterPartStyle::HumanoidClothing,
             part_loadout_shoulders: CharacterPartStyle::HumanoidClothing,
             weapon_ranks: [0u32; 6],
+            world_sites: Vec::new(),
         }
     }
 }
@@ -219,9 +230,11 @@ pub fn save_game(
     perks: &PerkTree,
     select: &PlayerSelectState,
     robot_pets: &RobotPetCollection,
+    settlement_economy: &SettlementEconomy,
     upgrades: &UpgradeLedger,
     part_loadout: &PlayerPartLoadout,
     weapon_ranks: &WeaponRanks,
+    world_site_registry: &WorldSiteRegistry,
 ) -> Result<(), String> {
     let data = build_save_data(
         players,
@@ -230,9 +243,11 @@ pub fn save_game(
         perks,
         select,
         robot_pets,
+        settlement_economy,
         upgrades,
         part_loadout,
         weapon_ranks,
+        world_site_registry,
     );
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(save_path(), json).map_err(|e| e.to_string())
@@ -245,9 +260,11 @@ fn build_save_data(
     perks: &PerkTree,
     select: &PlayerSelectState,
     robot_pets: &RobotPetCollection,
+    settlement_economy: &SettlementEconomy,
     upgrades: &UpgradeLedger,
     part_loadout: &PlayerPartLoadout,
     weapon_ranks: &WeaponRanks,
+    world_site_registry: &WorldSiteRegistry,
 ) -> SaveData {
     players.sort_by_key(|player| player.player_index);
     SaveData {
@@ -266,12 +283,14 @@ fn build_save_data(
             .collect(),
         players,
         robot_pets: robot_pets.clone(),
+        settlement_economy: settlement_economy.clone(),
         tech_upgrades: upgrades.clone(),
         part_loadout_body: part_loadout.body,
         part_loadout_arms: part_loadout.arms,
         part_loadout_legs: part_loadout.legs,
         part_loadout_shoulders: part_loadout.shoulders,
         weapon_ranks: weapon_ranks.ranks,
+        world_sites: world_site_registry.to_save_records(),
         ..SaveData::default()
     }
 }
@@ -328,9 +347,11 @@ pub fn save_current_session(sp: &SaveParams) -> Result<(), String> {
         &sp.perks,
         &sp.select,
         &sp.robot_pets,
+        &sp.settlement_economy,
         &sp.upgrades,
         &sp.part_loadout,
         &sp.weapon_ranks,
+        &sp.world_site_registry,
     )
 }
 
@@ -340,12 +361,15 @@ fn hydrate_progress_from_disk(
     mut perks: ResMut<PerkTree>,
     mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
+    mut settlement_economy: ResMut<SettlementEconomy>,
     mut upgrades: ResMut<UpgradeLedger>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
     mut weapon_ranks: ResMut<WeaponRanks>,
+    mut world_site_registry: ResMut<WorldSiteRegistry>,
 ) {
     if let Some(data) = load_save() {
         *robot_pets = data.robot_pets.clone();
+        *settlement_economy = data.settlement_economy.clone();
         *upgrades = data.tech_upgrades.clone();
         progress.completed = data.completed_chapters;
         progress.discoverables = data.discoverables;
@@ -360,6 +384,10 @@ fn hydrate_progress_from_disk(
         part_loadout.legs = data.part_loadout_legs;
         part_loadout.shoulders = data.part_loadout_shoulders;
         weapon_ranks.ranks = data.weapon_ranks;
+        if world_site_registry.sites.is_empty() {
+            world_site_registry.sites = initial_world_sites();
+        }
+        world_site_registry.apply_save_records(&data.world_sites);
     }
 }
 
@@ -370,9 +398,11 @@ fn load_save_on_enter(
     mut perks: ResMut<PerkTree>,
     mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
+    mut settlement_economy: ResMut<SettlementEconomy>,
     mut upgrades: ResMut<UpgradeLedger>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
     mut weapon_ranks: ResMut<WeaponRanks>,
+    mut world_site_registry: ResMut<WorldSiteRegistry>,
     transition: Res<PlaySessionTransition>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
@@ -382,6 +412,7 @@ fn load_save_on_enter(
 
     if let Some(data) = load_save() {
         *robot_pets = data.robot_pets.clone();
+        *settlement_economy = data.settlement_economy.clone();
         *upgrades = data.tech_upgrades.clone();
         let mut active_players = 0usize;
         for (index, mut stats, mut health) in player_q.iter_mut() {
@@ -404,6 +435,10 @@ fn load_save_on_enter(
         part_loadout.legs = data.part_loadout_legs;
         part_loadout.shoulders = data.part_loadout_shoulders;
         weapon_ranks.ranks = data.weapon_ranks;
+        if world_site_registry.sites.is_empty() {
+            world_site_registry.sites = initial_world_sites();
+        }
+        world_site_registry.apply_save_records(&data.world_sites);
         let loaded_players = data.players.len().max(active_players);
         msg_ev.write(UiMessageEvent {
             text: format!(
@@ -471,6 +506,7 @@ mod tests {
     use super::*;
     use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe};
     use crate::robot_pets::{RobotPartKind, RobotPetBlueprint, RobotPetRole};
+    use crate::settlement_economy::{SettlementBuildKind, SettlementEconomy, SettlementResources};
     use crate::upgrades::{TechUpgradeId, UpgradeLedger};
 
     fn player_save(
@@ -544,6 +580,17 @@ mod tests {
         let mut upgrades = UpgradeLedger::default();
         upgrades.ranks.push((TechUpgradeId::BeamCapacitors, 2));
         upgrades.rejuvenation_charge = 75.0;
+        let mut settlement_economy = SettlementEconomy {
+            stockpile: SettlementResources::new(900, 70, 40, 22, 18, 4, 6, 8, 2),
+            ..SettlementEconomy::default()
+        };
+        settlement_economy
+            .try_build(
+                "settlement_riftglass_village",
+                SettlementBuildKind::Farm,
+                &mut robot_pets,
+            )
+            .expect("test stockpile should build a farm");
         let part_loadout = PlayerPartLoadout {
             body: CharacterPartStyle::RobotMechanical,
             arms: CharacterPartStyle::HumanoidClothing,
@@ -561,9 +608,11 @@ mod tests {
             &perks,
             &select,
             &robot_pets,
+            &settlement_economy,
             &upgrades,
             &part_loadout,
             &WeaponRanks::default(),
+            &WorldSiteRegistry::default(),
         );
 
         assert_eq!(data.wave_number, 7);
@@ -587,6 +636,11 @@ mod tests {
         );
         assert_eq!(data.robot_pets.part_count(RobotPartKind::CircuitBoard), 6);
         assert_eq!(data.robot_pets.pets[0].id, "spark-pup");
+        assert_eq!(
+            data.settlement_economy
+                .build_tier("settlement_riftglass_village", SettlementBuildKind::Farm),
+            1
+        );
         assert_eq!(data.tech_upgrades.rank(TechUpgradeId::BeamCapacitors), 2);
         assert_eq!(data.tech_upgrades.rejuvenation_charge, 75.0);
         assert_eq!(data.part_loadout_body, CharacterPartStyle::RobotMechanical);
@@ -627,6 +681,24 @@ mod tests {
             completed_chapters: vec![1],
             perk_ranks: vec![("heart_vitality".to_string(), 2)],
             robot_pets,
+            settlement_economy: {
+                let mut economy = SettlementEconomy {
+                    stockpile: SettlementResources::new(1_000, 80, 60, 40, 30, 0, 10, 12, 2),
+                    ..SettlementEconomy::default()
+                };
+                let mut parts = RobotPetCollection::default();
+                for kind in RobotPartKind::ALL {
+                    parts.add_part(kind, 10);
+                }
+                economy
+                    .try_build(
+                        "settlement_star_orchard",
+                        SettlementBuildKind::PowerPlant,
+                        &mut parts,
+                    )
+                    .unwrap();
+                economy
+            },
             tech_upgrades,
             part_loadout_body: CharacterPartStyle::RobotMechanical,
             part_loadout_arms: CharacterPartStyle::RobotMechanical,
@@ -651,6 +723,12 @@ mod tests {
         assert_eq!(loaded.perk_ranks, vec![("heart_vitality".to_string(), 2)]);
         assert_eq!(loaded.robot_pets.part_count(RobotPartKind::StarDrive), 2);
         assert_eq!(loaded.robot_pets.pets[0].name, "Nova Kit");
+        assert_eq!(
+            loaded
+                .settlement_economy
+                .build_tier("settlement_star_orchard", SettlementBuildKind::PowerPlant),
+            1
+        );
         assert_eq!(
             loaded.tech_upgrades.rank(TechUpgradeId::RejuvenationMatrix),
             1

@@ -9,7 +9,7 @@ use crate::components::character::{
     CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonPose,
 };
 use crate::components::player::{
-    EdgeGrabState, JetpackState, PlayerMovement, PlayerState, PlayerStateMachine,
+    EdgeGrabState, GrappleHookState, JetpackState, PlayerMovement, PlayerState, PlayerStateMachine,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
 use crate::state::AppState;
@@ -135,6 +135,7 @@ fn cartoon_animation_system(
             Option<&EdgeGrabState>,
             Option<&PlayerStateMachine>,
             Option<&JetpackState>,
+            Option<&GrappleHookState>,
             Option<&BeamSabre>,
             Option<&MeleeCombo>,
         ),
@@ -154,6 +155,7 @@ fn cartoon_animation_system(
         edge_grab,
         state,
         jetpack,
+        grapple,
         sabre,
         melee,
     ) in roots.iter_mut()
@@ -177,6 +179,10 @@ fn cartoon_animation_system(
             CartoonPose::SabreSlash
         } else if current_state == Some(PlayerState::Attacking) || melee_attacking {
             CartoonPose::Attack
+        } else if current_state == Some(PlayerState::Grappling)
+            || grapple.map(|g| g.wants_animation_pose()).unwrap_or(false)
+        {
+            CartoonPose::Grapple
         } else if edge_grab.map(|e| e.is_hanging).unwrap_or(false) {
             CartoonPose::Hang
         } else if current_state == Some(PlayerState::WallSliding) {
@@ -199,7 +205,7 @@ fn cartoon_animation_system(
 
         let stride = character.map(|c| c.stride).unwrap_or(1.0).max(0.45);
         let agility = character.map(|c| c.agility).unwrap_or(1.0).max(0.45);
-        let phase_rate = match animator.pose {
+        let phase_rate: f32 = match animator.pose {
             CartoonPose::Idle => 2.0,
             CartoonPose::Walk => (5.0 + animator.speed * 8.0 / stride).clamp(5.0, 13.0),
             CartoonPose::Run => (10.0 + animator.speed * 5.0 / stride).clamp(10.0, 18.0),
@@ -207,6 +213,7 @@ fn cartoon_animation_system(
             CartoonPose::Fall => 3.6,
             CartoonPose::Fly => 8.0,
             CartoonPose::WallSlide => 4.8,
+            CartoonPose::Grapple => 10.0,
             CartoonPose::Attack => 8.5,
             CartoonPose::SabreSlash => 12.0,
             CartoonPose::Hang => 1.4,
@@ -655,6 +662,63 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
             if is_cape {
                 transform.rotation *= Quat::from_rotation_x(cape_flap * 0.25);
                 transform.rotation *= Quat::from_rotation_z(-0.18 * cape_flap + wave * 0.04);
+            }
+        }
+
+        // ── Grapple ──────────────────────────────────────────────────────────
+        CartoonPose::Grapple => {
+            let throw = (sample.phase * 1.2).sin().abs();
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.16) * Quat::from_rotation_y(0.18);
+                    transform.translation.y += 0.03 + throw * 0.035;
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.10) * Quat::from_rotation_y(0.20);
+                    transform.translation.y += 0.04;
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.42) * Quat::from_rotation_z(-0.52);
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.translation.y += 0.16;
+                    transform.rotation *= Quat::from_rotation_x(-1.62 + throw * 0.16)
+                        * Quat::from_rotation_y(0.20)
+                        * Quat::from_rotation_z(0.18);
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.20) * Quat::from_rotation_z(-0.10);
+                }
+                CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *= Quat::from_rotation_x(0.28) * Quat::from_rotation_z(0.12);
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= Vec3::new(1.14, 1.0, 0.88);
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.rotation *= Quat::from_rotation_y(0.20);
+                transform.translation.y += 0.04;
+            }
+            if is_body_acc {
+                transform.rotation *= Quat::from_rotation_x(-0.16) * Quat::from_rotation_y(0.18);
+                transform.translation.y += 0.03 + throw * 0.035;
+            }
+            if is_cape {
+                transform.rotation *= Quat::from_rotation_x(cape_flap * 0.95);
+                transform.rotation *= Quat::from_rotation_z((0.10 + throw * 0.10) * cape_flap);
             }
         }
 

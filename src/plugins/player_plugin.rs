@@ -83,6 +83,7 @@ impl Plugin for PlayerPlugin {
                     player_look,
                     camera_shake_system,
                     player_movement,
+                    grapple_hook_foundation_update,
                     shared_encounter_camera_mode_system,
                     shared_encounter_party_pull_system,
                     dungeon_crawl_party_pull_system,
@@ -480,6 +481,7 @@ fn spawn_players(
                 hero_profile,
                 hero_powers,
                 jetpack,
+                GrappleHookState::default(),
                 EdgeGrabState::new(),
                 dodge_state,
                 ParryState::new(),
@@ -1424,6 +1426,28 @@ fn approach_vec3(current: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
         target
     } else {
         current + delta / dist * max_delta
+    }
+}
+
+// ── Grapple Hook Foundation ──────────────────────────────────────────────────
+fn grapple_hook_foundation_update(
+    time: Res<Time>,
+    mut player_q: Query<
+        (&PlayerInput, &mut GrappleHookState, &mut PlayerStateMachine),
+        With<Player>,
+    >,
+) {
+    let dt = time.delta_secs();
+    for (input, mut grapple, mut state) in player_q.iter_mut() {
+        grapple.tick_foundation(dt);
+
+        if input.grapple_just && state.current != PlayerState::Dead && grapple.request_fire() {
+            state.force(PlayerState::Grappling);
+        }
+
+        if state.current == PlayerState::Grappling && !grapple.wants_animation_pose() {
+            state.transition(PlayerState::Idle);
+        }
     }
 }
 

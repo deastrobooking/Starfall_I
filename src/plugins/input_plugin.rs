@@ -25,6 +25,7 @@
 ///  Select/Back/Share/View — crafting (alone) OR special-slot modifier (+ DPad)
 ///  Start/Options/Menu     — pause              (Start)
 ///  Guide/Home             — sabre toggle       (Mode)  [fallback: L3+R3]
+///  G / Select+RB      — grapple hook foundation
 ///  DPad Up           — enter vehicle
 ///  DPad Down         — interact
 ///  DPad Left         — weapon prev
@@ -358,10 +359,21 @@ fn update_player_inputs(
             || btn_just(GamepadButton::LeftThumb)
             || native_just(NativeButton::LeftThumb);
 
+        let select_held = btn_held(GamepadButton::Select) || native_held(NativeButton::Select);
+        let grapple_button_held =
+            btn_held(GamepadButton::RightTrigger) || native_held(NativeButton::RightShoulder);
+        let grapple_button_just =
+            btn_just(GamepadButton::RightTrigger) || native_just(NativeButton::RightShoulder);
+        pi.grapple =
+            (is_p1 && keyboard.pressed(KeyCode::KeyG)) || (select_held && grapple_button_held);
+        pi.grapple_just =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyG)) || (select_held && grapple_button_just);
+
         // ── Weapon cycle ──────────────────────────────────────────────────────
         pi.weapon_next = (is_p1 && keyboard.just_pressed(KeyCode::BracketRight))
-            || btn_just(GamepadButton::RightTrigger)
-            || native_just(NativeButton::RightShoulder); // RB only — DPadRight freed for open_map
+            || (!select_held
+                && (btn_just(GamepadButton::RightTrigger)
+                    || native_just(NativeButton::RightShoulder))); // RB only — DPadRight freed for open_map
         pi.weapon_prev = is_p1 && keyboard.just_pressed(KeyCode::BracketLeft);
 
         // ── Direct weapon slots (P1 keyboard) ────────────────────────────────
@@ -389,7 +401,6 @@ fn update_player_inputs(
         // Keyboard (P1): digits 7–0.
         // Controller: hold Select then tap a DPad direction.
         //   Select alone (no DPad) still fires crafting below.
-        let select_held = btn_held(GamepadButton::Select) || native_held(NativeButton::Select);
         let dpad_any_just = btn_just(GamepadButton::DPadUp)
             || btn_just(GamepadButton::DPadDown)
             || btn_just(GamepadButton::DPadLeft)

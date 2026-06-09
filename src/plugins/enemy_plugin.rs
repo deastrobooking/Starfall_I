@@ -202,7 +202,7 @@ pub fn spawn_enemy_entity(
     position: Vec3,
     difficulty_scale: f32,
     faction: Option<Faction>,
-) {
+) -> Entity {
     let preset_name = preset_for_type(enemy_type, faction);
     let enemy_data = Enemy::new(enemy_type, position, difficulty_scale);
     let max_hp = enemy_data.scaled_health();
@@ -229,6 +229,7 @@ pub fn spawn_enemy_entity(
     if enemy_type == EnemyType::Drone {
         commands.entity(root).insert(FlyingDrone::new(position));
     }
+    root
 }
 
 /// Spawn a story-named enemy (mid-boss or boss).

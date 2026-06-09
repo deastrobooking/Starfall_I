@@ -17,8 +17,7 @@ use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::Inventory;
 use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats};
 use crate::components::weapon::{
-    BeamSabre, SpecialWeaponInventory, WeaponInventory, WeaponRanks, WeaponType,
-    MAX_WEAPON_RANK,
+    BeamSabre, SpecialWeaponInventory, WeaponInventory, WeaponRanks, WeaponType, MAX_WEAPON_RANK,
 };
 use crate::components::world::{BoatVehicle, DiscussionNpc, DungeonCrawlGate, WorldLoot};
 use crate::damage::Health;
@@ -31,7 +30,7 @@ use crate::plugins::save_plugin::{save_current_session, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
-    PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
+    PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::state::AppState;
@@ -571,7 +570,7 @@ fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
                 ));
                 page.spawn((
                     Text::new(
-                        "Move: WASD / Left Stick     Look: Mouse / Right Stick     Jump: Space / South\nDodge: Q / East     Parry: F / North     Interact: E / DPad Down     Boat/Vehicle: J / DPad Up\nFire: LMB / RT     Aim: RMB / LT     Weapons: 1-6 / RB     Special Tools: 7-0 or Select + DPad\nTraversal: hold into a wall while falling to slide, then jump to wall-jump. Use slingshot pads with Jump or Interact.",
+                        "Move: WASD / Left Stick     Look: Mouse / Right Stick     Jump: Space / South\nDodge: Q / East     Parry: F / North     Interact: E / DPad Down     Grapple: G / Select+RB     Boat/Vehicle: J / DPad Up\nFire: LMB / RT     Aim: RMB / LT     Weapons: 1-6 / RB     Special Tools: 7-0 or Select + DPad\nTraversal: hold into a wall while falling to slide, then jump to wall-jump. Use slingshot pads with Jump or Interact.",
                     ),
                     TextFont {
                         font_size: 16.0,
@@ -831,6 +830,7 @@ fn setup_chapter_select(
     upgrades: Res<UpgradeLedger>,
     robot_pets: Res<RobotPetCollection>,
     weapon_ranks: Res<WeaponRanks>,
+    world_site_registry: Res<WorldSiteRegistry>,
 ) {
     let chapters = all_chapters();
     commands
@@ -874,7 +874,7 @@ fn setup_chapter_select(
                 ..default()
             })
             .with_children(|row| {
-                spawn_fast_travel_map(row, &chapters, &progress);
+                spawn_fast_travel_map(row, &chapters, &progress, &world_site_registry);
                 row.spawn((
                     Node {
                         width: Val::Px(430.0),
@@ -1050,6 +1050,7 @@ fn spawn_fast_travel_map(
     parent: &mut ChildSpawnerCommands,
     chapters: &[crate::chapters::ChapterDef],
     progress: &ChapterProgress,
+    world_site_registry: &WorldSiteRegistry,
 ) {
     parent
         .spawn((
@@ -1067,32 +1068,95 @@ fn spawn_fast_travel_map(
         .with_children(|map| {
             // ── Region bands (ordered back-to-front so labels overlap nicely) ──
             // Fangroot Wildland — upper strip, heavy forest canopy
-            spawn_map_region_band(map,  0.0,  2.0, 45.0, 18.0,
-                Color::srgba(0.22, 0.48, 0.18, 0.28), "Fangroot Wildland");
+            spawn_map_region_band(
+                map,
+                0.0,
+                2.0,
+                45.0,
+                18.0,
+                Color::srgba(0.22, 0.48, 0.18, 0.28),
+                "Fangroot Wildland",
+            );
             // Ember Nest — upper-left volcanic highland
-            spawn_map_region_band(map,  2.0, 18.0, 22.0, 22.0,
-                Color::srgba(0.62, 0.30, 0.10, 0.24), "Ember Nest");
+            spawn_map_region_band(
+                map,
+                2.0,
+                18.0,
+                22.0,
+                22.0,
+                Color::srgba(0.62, 0.30, 0.10, 0.24),
+                "Ember Nest",
+            );
             // Sister Sanctum — center-left valley
-            spawn_map_region_band(map, 26.0, 28.0, 24.0, 30.0,
-                Color::srgba(0.55, 0.36, 0.72, 0.20), "Sister Sanctum");
+            spawn_map_region_band(
+                map,
+                26.0,
+                28.0,
+                24.0,
+                30.0,
+                Color::srgba(0.55, 0.36, 0.72, 0.20),
+                "Sister Sanctum",
+            );
             // Starfall Zone — center hub around origin
-            spawn_map_region_band(map, 42.0, 38.0, 18.0, 20.0,
-                Color::srgba(0.94, 0.88, 0.22, 0.18), "Starfall Zone");
+            spawn_map_region_band(
+                map,
+                42.0,
+                38.0,
+                18.0,
+                20.0,
+                Color::srgba(0.94, 0.88, 0.22, 0.18),
+                "Starfall Zone",
+            );
             // Rift Highlands — center-right plateau
-            spawn_map_region_band(map, 55.0, 28.0, 22.0, 36.0,
-                Color::srgba(0.36, 0.58, 0.82, 0.20), "Rift Highlands");
+            spawn_map_region_band(
+                map,
+                55.0,
+                28.0,
+                22.0,
+                36.0,
+                Color::srgba(0.36, 0.58, 0.82, 0.20),
+                "Rift Highlands",
+            );
             // Pink Flame & Rockies — eastern range
-            spawn_map_region_band(map, 72.0, 20.0, 26.0, 58.0,
-                Color::srgba(0.45, 0.62, 0.36, 0.22), "Eastern Range");
+            spawn_map_region_band(
+                map,
+                72.0,
+                20.0,
+                26.0,
+                58.0,
+                Color::srgba(0.45, 0.62, 0.36, 0.22),
+                "Eastern Range",
+            );
             // Everest Crown — lower-left fortress domain
-            spawn_map_region_band(map,  2.0, 62.0, 41.0, 36.0,
-                Color::srgba(0.35, 0.48, 0.62, 0.26), "Everest Crown");
+            spawn_map_region_band(
+                map,
+                2.0,
+                62.0,
+                41.0,
+                36.0,
+                Color::srgba(0.35, 0.48, 0.62, 0.26),
+                "Everest Crown",
+            );
             // Glacier Fields — inner sub-region of crown
-            spawn_map_region_band(map,  4.0, 64.0, 22.0, 18.0,
-                Color::srgba(0.72, 0.82, 0.94, 0.30), "Glacier Fields");
+            spawn_map_region_band(
+                map,
+                4.0,
+                64.0,
+                22.0,
+                18.0,
+                Color::srgba(0.72, 0.82, 0.94, 0.30),
+                "Glacier Fields",
+            );
             // Antarctic Reach — bottom strip, ice shelf
-            spawn_map_region_band(map,  0.0, 80.0, 100.0, 18.0,
-                Color::srgba(0.08, 0.28, 0.44, 0.38), "Antarctic Reach");
+            spawn_map_region_band(
+                map,
+                0.0,
+                80.0,
+                100.0,
+                18.0,
+                Color::srgba(0.08, 0.28, 0.44, 0.38),
+                "Antarctic Reach",
+            );
 
             for location in chapter_map_locations() {
                 let Some(chapter) = chapters.iter().find(|chapter| chapter.id == location.id)
@@ -1236,6 +1300,11 @@ fn spawn_fast_travel_map(
             }
 
             for settlement in map_settlements() {
+                // Settlements linked to a WorldSite are rendered as site badges
+                // in the loop below — skip the generic marker here to avoid overlap.
+                if settlement.site_id.is_some() {
+                    continue;
+                }
                 let visited = progress.has_discoverable(settlement.reward_id);
                 let marker_color = if visited {
                     Color::srgb(0.34, 0.92, 0.52)
@@ -1302,6 +1371,66 @@ fn spawn_fast_travel_map(
                         position_type: PositionType::Absolute,
                         left: Val::Percent((world_to_map_left(settlement.x) + 1.2).min(90.0)),
                         top: Val::Percent((world_to_map_top(settlement.z) - 1.8).clamp(3.0, 94.0)),
+                        ..default()
+                    },
+                ));
+            }
+
+            // ── World Site badges ─────────────────────────────────────────
+            for site in &world_site_registry.sites {
+                let badge_color = site.state.map_badge_color();
+                let site_icon = if site.is_liberated() { "✓" } else { "!" };
+                let border_color = if site.is_liberated() {
+                    Color::srgb(0.40, 1.0, 0.50)
+                } else {
+                    Color::srgb(1.0, 0.40, 0.30)
+                };
+                map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(site.world_x)),
+                        top: Val::Percent(world_to_map_top(site.world_z)),
+                        width: Val::Px(14.0),
+                        height: Val::Px(14.0),
+                        margin: UiRect {
+                            left: Val::Px(-7.0),
+                            top: Val::Px(-7.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(1.5)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(badge_color),
+                    BorderColor::all(border_color),
+                ))
+                .with_children(|badge| {
+                    badge.spawn((
+                        Text::new(site_icon),
+                        TextFont {
+                            font_size: 8.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+                map.spawn((
+                    Text::new(site.name),
+                    TextFont {
+                        font_size: 7.5,
+                        ..default()
+                    },
+                    TextColor(if site.is_liberated() {
+                        Color::srgb(0.55, 1.0, 0.65)
+                    } else {
+                        Color::srgb(1.0, 0.65, 0.55)
+                    }),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent((world_to_map_left(site.world_x) + 1.1).min(90.0)),
+                        top: Val::Percent((world_to_map_top(site.world_z) + 1.2).clamp(3.0, 94.0)),
                         ..default()
                     },
                 ));
@@ -1586,7 +1715,10 @@ fn chapter_select_weapon_rank_input(
             break;
         }
         let cost = WeaponRanks::upgrade_cost(rank);
-        let recipe = [crate::robot_pets::PartCost::new(RobotPartKind::CircuitBoard, cost)];
+        let recipe = [crate::robot_pets::PartCost::new(
+            RobotPartKind::CircuitBoard,
+            cost,
+        )];
         if robot_pets.can_afford(&recipe) {
             let _ = robot_pets.spend_parts(&recipe);
             weapon_ranks.ranks[slot] = rank + 1;
@@ -1611,7 +1743,11 @@ fn chapter_select_weapon_rank_panel_update(
         let slot = row.0;
         let (key, weapon_type) = WEAPON_RANK_KEYS[slot];
         *text = Text::new(format_weapon_rank_row(
-            key, slot, weapon_type, &weapon_ranks, &robot_pets,
+            key,
+            slot,
+            weapon_type,
+            &weapon_ranks,
+            &robot_pets,
         ));
     }
 }
@@ -1724,7 +1860,10 @@ fn format_weapon_rank_row(
         "MAX".to_string()
     } else {
         let cost = WeaponRanks::upgrade_cost(rank);
-        let recipe = [crate::robot_pets::PartCost::new(RobotPartKind::CircuitBoard, cost)];
+        let recipe = [crate::robot_pets::PartCost::new(
+            RobotPartKind::CircuitBoard,
+            cost,
+        )];
         if robot_pets.can_afford(&recipe) {
             format!("{cost} boards  READY")
         } else {
@@ -3590,38 +3729,72 @@ fn update_controller_diag(
     let mut lines = Vec::with_capacity(8);
     lines.push("── Controller Diagnostics [F8] ──".to_string());
 
-    for (idx, pi) in players.iter().collect::<Vec<_>>().into_iter().collect::<Vec<_>>() {
+    for (idx, pi) in players
+        .iter()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .collect::<Vec<_>>()
+    {
         let i = idx.0 as usize;
         let gp_info = if let Some((_, gp)) = gps.get(i) {
             let ls = Vec2::new(
-                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickX).unwrap_or(0.0),
-                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickY).unwrap_or(0.0),
+                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickX)
+                    .unwrap_or(0.0),
+                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickY)
+                    .unwrap_or(0.0),
             );
             let rs = Vec2::new(
-                gp.get(bevy::input::gamepad::GamepadAxis::RightStickX).unwrap_or(0.0),
-                gp.get(bevy::input::gamepad::GamepadAxis::RightStickY).unwrap_or(0.0),
+                gp.get(bevy::input::gamepad::GamepadAxis::RightStickX)
+                    .unwrap_or(0.0),
+                gp.get(bevy::input::gamepad::GamepadAxis::RightStickY)
+                    .unwrap_or(0.0),
             );
-            format!("GP{}  L({:+.2},{:+.2}) R({:+.2},{:+.2})", i, ls.x, ls.y, rs.x, rs.y)
+            format!(
+                "GP{}  L({:+.2},{:+.2}) R({:+.2},{:+.2})",
+                i, ls.x, ls.y, rs.x, rs.y
+            )
         } else if i == 0 && native.connected {
-            format!("Native({}) L({:+.2},{:+.2})",
+            format!(
+                "Native({}) L({:+.2},{:+.2})",
                 &native.name[..native.name.len().min(12)],
-                native.move_axis.x, native.move_axis.y)
+                native.move_axis.x,
+                native.move_axis.y
+            )
         } else {
             "KB/no pad".to_string()
         };
 
         let mut actions = String::new();
-        if pi.fire        { actions.push_str(" FIRE"); }
-        if pi.jump        { actions.push_str(" JMP"); }
-        if pi.sprint      { actions.push_str(" SPR"); }
-        if pi.dodge       { actions.push_str(" DODGE"); }
-        if pi.melee_light { actions.push_str(" ML"); }
-        if pi.melee_heavy { actions.push_str(" MH"); }
+        if pi.fire {
+            actions.push_str(" FIRE");
+        }
+        if pi.jump {
+            actions.push_str(" JMP");
+        }
+        if pi.sprint {
+            actions.push_str(" SPR");
+        }
+        if pi.dodge {
+            actions.push_str(" DODGE");
+        }
+        if pi.melee_light {
+            actions.push_str(" ML");
+        }
+        if pi.melee_heavy {
+            actions.push_str(" MH");
+        }
 
         lines.push(format!(
             "P{}  Move({:+.2},{:+.2})  {}{}",
-            i + 1, pi.move_axis.x, pi.move_axis.y, gp_info,
-            if actions.is_empty() { String::new() } else { format!(" |{}", actions) }
+            i + 1,
+            pi.move_axis.x,
+            pi.move_axis.y,
+            gp_info,
+            if actions.is_empty() {
+                String::new()
+            } else {
+                format!(" |{}", actions)
+            }
         ));
     }
 

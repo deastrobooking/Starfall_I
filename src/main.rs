@@ -25,6 +25,7 @@ mod rendering;
 mod resources;
 mod robot_pets;
 mod robots;
+mod settlement_economy;
 mod state;
 mod upgrades;
 
@@ -38,9 +39,10 @@ use plugins::{
 };
 use resources::{
     CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlaySessionTransition,
-    PlayerPartLoadout, PlayerScore, PlayerSelectState, WaveInfo,
+    PlayerPartLoadout, PlayerScore, PlayerSelectState, WaveInfo, WorldSiteRegistry,
 };
 use robot_pets::RobotPetCollection;
+use settlement_economy::SettlementEconomy;
 use state::AppState;
 use upgrades::UpgradeLedger;
 
@@ -82,8 +84,10 @@ fn main() {
         .init_resource::<CharacterDesignData>()
         .init_resource::<PerkTree>()
         .init_resource::<RobotPetCollection>()
+        .init_resource::<SettlementEconomy>()
         .init_resource::<UpgradeLedger>()
         .init_resource::<PlayerPartLoadout>()
+        .init_resource::<WorldSiteRegistry>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
         // Game plugins

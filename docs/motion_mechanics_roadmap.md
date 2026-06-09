@@ -1,173 +1,221 @@
-# Starfall I Motion Mechanics Roadmap
+# Starfall I Player Mechanics And Animation MVP Plan
 
-This is the agent-facing plan for turning Starfall I from a charming prototype
-movement set into a full humanoid sci-fantasy traversal system. The target feel
-is heroic, readable, and physical: mountain-platformer challenge, Spider-Man
-freedom, Assassin's Creed climbing language, Halo combat clarity, and old-school
-action RPG accessibility for local multiplayer.
+This is the agent-facing plan for upgrading Starfall I's player feel from a
+prototype platformer into a heroic sci-fantasy traversal system. The design is
+inspired by superhero swing movement, mountain parkour, fantasy flight, action
+RPG combat readability, and local co-op fairness.
+
+## Core Concept
+
+Starfall uses one star-tech grappling hook per player, not a two-web system.
+The hook should eventually support four verbs:
+
+- Swing: attach to cliffs, bridges, ships, towers, boss armor, and authored hook
+  sockets, then preserve momentum through a readable arc.
+- Zip: pull the player quickly toward a point to climb mountains or cross gaps.
+- Attack pull: yank toward small enemies or pull lighter enemies/items toward
+  the player, depending on target class.
+- Utility pull: trigger switches, rescue civilians, tug crates, open dungeon
+  gates, or latch onto robot-pet boost points.
+
+The hook is a traversal/combat bridge, not a replacement for existing movement.
+Wall slides, wall jumps, ledge hangs, jetpack flight, slingshots, dungeons,
+vehicles, and boss-mode camera all remain part of the movement vocabulary.
 
 ## Current Baseline
 
 - Players are Rapier kinematic capsules driven through `PlayerMovement`.
 - Current mechanics include analog walking/sprinting, stamina, coyote time, jump
   buffering, early jump release, apex float, stronger fall gravity, wall slide,
-  wall jump charges, intentional hang/climb, dodge, parry, jetpack lift, and
-  controller trigger-axis fallback.
+  wall jump charges, intentional hang/climb, dodge, parry, jetpack lift,
+  slingshot pads, moving platforms, rotating elevators, and boss-mode party
+  pull.
 - Current procedural character visuals use `CartoonPose` with separate idle,
-  walk, run, jump, fall, flight, one-hand wall slide, and hang poses.
-- Wall sliding is now a stamina-backed wall clasp: pushing into a wall while
-  falling refreshes wall-jump charges, lightly drains stamina, slows descent,
-  and uses a one-hand slide pose. `E` / D-pad Down still converts a slide into
-  an intentional hang/climb attempt.
-- The world already has mountain routes, path slabs, moving platforms,
-  slingshots, dungeon gates, boss single-screen pull-together, caves, castle
-  bridges, and large terrain height changes that can host traversal challenges.
+  walk, run, jump, fall, flight, one-hand wall slide, attack, Star Sabre slash,
+  hang, and grapple wind-up poses.
+- `GrappleHookState` is the first MVP hook foundation: it stores the single-hook
+  mode, cable tuning, wind-up/cooldown timers, zip/mountain/attack pull tuning,
+  and future attach-point data.
 
-## Motion Pillars
+## MVP Milestones
 
-1. Readable Hero Body
-   - Every mechanical state needs a silhouette: run lean, hard stop, jump
-     stretch, falling brace, flight streamline, wall clasp, hang, mantle, dodge,
-     parry, saber swing, and stunned recovery.
-   - Procedural poses are acceptable for now, but every state should map cleanly
-     to future rigged animation clips.
+### M1: Traversal Foundation And Grapple Input
 
-2. Mountain Parkour
-   - The Everest range should support routes that demand wall jumps, ledge
-     grabs, cliff slides, mantles, slope runs, bridge launches, rope/beam rails,
-     wind gusts, moving platforms, and safe recovery pads.
-   - Path markings and glowing guide studs should show optional routes without
-     turning the world into a tutorial sign farm.
+Goal: create a safe foundation for hook, flight, and animation work without
+destabilizing existing movement.
 
-3. Superhero Flight
-   - Flight should start as short jet-assisted traversal, then upgrade through
-     Great Scientist temples and robot-pet amplification into hover, air dash,
-     glide, boost climb, and squad-friendly regroup tools.
-   - Flight must not erase platforming. Use fuel, heat, wind zones, storm
-     pressure, anti-flight boss fields, and interior ceilings to keep routes
-     meaningful.
+- Add a single-hook component with explicit modes: Ready, Windup, Searching,
+  Swinging, Zipping, Recovering, and Cooldown.
+- Add dedicated input: `G` on keyboard and Select+RB on controller.
+- Add `PlayerState::Grappling` and a distinct `CartoonPose::Grapple`.
+- Keep this first slice non-physical: pressing grapple only plays the wind-up
+  pose and cooldown. Raycasts and movement forces start in M2.
+- Add pure tests for hook readiness, cooldown, and cable-length tuning.
 
-4. Combat And Traversal Are One System
-   - Beam saber, hand combat, missiles, turret command, robot pets, and flight
-     should all have movement hooks: dash strikes, wall-kick attacks, air combos,
-     slam landings, parry vaults, grapple pulls, drone boosts, and shield bashes.
-   - Dungeon top-down mode can use simpler versions: dash slash, roll, guard,
-     knockback, hazards, switch floors, and boss patterns.
+Acceptance:
 
-5. Multiplayer Fairness
-   - Four players need forgiving regroup tools: boss camera pull, soft tether,
-     revive windows, shared lifts, split-screen route markers, and ways for a
-     fallen player to rejoin without spoiling the lead player's challenge.
-   - Any movement upgrade must be tested with keyboard/mouse and at least two
-     controllers.
+- Game still passes format, check, clippy, and tests.
+- Pressing grapple has a visible character pose path.
+- Future agents can add raycasts/physics by extending `GrappleHookState`
+  instead of inventing a parallel traversal state.
 
-## Milestone Path
+### M2: Hook Targeting And Attach Rules
 
-### M0: Animation State Expansion
+Goal: let the single hook find valid targets in the world.
 
-- Keep `CartoonPose` aligned with `PlayerStateMachine`.
-- Add or tune procedural poses for idle, walk, run, sprint lean, jump, fall,
-  flight, wall slide, hang, mantle, dodge, parry, attack, stun, and death.
-- Add animation debug text or overlay showing current state, vertical velocity,
-  grounded state, wall contact, wall jump charges, stamina, and jetpack fuel.
-- Acceptance: every movement state has a visibly distinct body silhouette.
+- Add raycast targeting from camera aim and optional soft-lock from player
+  forward direction.
+- Add `GrappleSocket` or similar marker for authored reliable targets.
+- Support broad surface attach for cliffs/buildings only when the surface is
+  allowed and the angle/distance are readable.
+- Classify target intent: SwingPoint, ZipPoint, EnemyPull, ItemPull, Switch,
+  BossWeakPoint, and Denied.
+- Add player-facing blocked feedback when no target is found.
 
-### M1: Wall, Ledge, And Mantle Suite
+Acceptance:
 
-- Preserve current wall slide and wall jump as the foundation.
-- Add ledge detection separate from wall contact: forward probe, head clearance
-  probe, and landing target validation.
-- Add mantle/climb-up as a short controlled movement arc rather than a raw
-  upward translation.
-- Add one-hand wall slide sparks/dust, stamina drain tuning, and a tired slide
-  state.
-- Add climbable tags for castle walls, dungeon gates, cliffs, towers, giant
-  vehicles, and boss armor plates.
-- Tests: wall jump charge refresh, hang timeout, stamina exhaustion behavior,
-  mantle target validation, and state transition allow-list coverage.
+- A test arena can mark several hook sockets.
+- Pressing grapple enters Searching and records a valid attach point or cleanly
+  fails into cooldown.
+- No target path can crash or leave the player stuck.
 
-### M2: Grounded Athletic Movement
+### M3: Zip And Mountain Pull
 
-- Add acceleration curves per gait: walk, jog, sprint, uphill strain, downhill
-  speed gain, mud/snow slowdown, and ice slip.
-- Add hard stop, pivot, sprint-start, landing recovery, and slope alignment.
-- Add short vaults over low obstacles, parkour step-ups over medium ledges, and
-  roll recovery from high drops.
-- Add terrain-surface tags or procedural material zones for snow, rock, grass,
-  bridge, dungeon, metal, ice, water shallows, and alien corruption.
-- Tests: movement input strength, stamina drain/regeneration gates, slope
-  material modifiers, fall damage thresholds if enabled, and moving-platform
-  carry behavior.
+Goal: make the first physical hook verb useful in the Everest range.
 
-### M3: Air And Flight Kit
+- Add zip-to-point force for rapid mountain ascent and gap crossing.
+- Clamp speed, vertical lift, and arrival radius so players do not tunnel
+  through terrain.
+- Add detach on jump, dodge, attack, distance reached, timeout, or blocked line
+  of sight.
+- Use stamina or hook heat so repeated mountain pulls remain a rhythm.
+- Add route props that teach zip ascent on cliffs and castle gates.
 
-- Split airborne motion into jump, fall, glide, hover, jet boost, air dash, and
-  slam.
-- Make Ancient Flight Core unlock hover/boost improvements. Robot pilot pets can
-  amplify fuel, control, and cooldown recovery.
-- Add wind physics volumes: mountain updrafts, storm downdrafts, side gusts,
-  dragon wing shockwaves, city fan lifts, and airship turbulence.
-- Add air-route collectibles that teach flight without forcing every player to
-  master the hardest route.
-- Tests: fuel drain/regen, upgrade reapplication, air dash cooldown, wind volume
-  force direction, and no infinite hover without the intended upgrades.
+Acceptance:
 
-### M4: Combat Traversal
+- Player can pull rapidly up a test cliff without using jetpack.
+- Zip does not bypass dungeon/boss locks unless a target explicitly permits it.
+- Keyboard/mouse and controller controls both work.
 
-- Add movement-cancel rules: dodge cancels, parry cancel, jump cancel, air saber,
-  wall-kick strike, landing slam, shield bash, and robot-pet boost assist.
-- Make beam saber and hand combat use momentum: sprint strike reach, air strike
-  arc, wall slide kick, heavy landing shock, and knockback into hazards. Current
-  Star Sabre baseline already has upgrade-aware combo waves and a distinct
-  procedural slash pose; future work should add cancel windows, air sabre
-  variants, and hit-stop/VFX timing.
-- Add enemies that require motion: shield aliens, cliff turrets, drone swarms,
-  wall-crawlers, boss weak points, and airship boarding guards.
-- Tests: hit arcs in normal and dungeon mode, knockback clamps, parry windows,
-  stamina costs, and boss camera pull safety.
+### M4: Swing Physics
 
-### M5: Environment Physics Playground
+Goal: turn attached hook movement into a readable pendulum.
 
-- Add authored physics toys across the mountain world: swinging chains, hanging
-  banners, breakable bridges, falling rocks, sliding snow shelves, lift fans,
-  anti-grav panels, magnet rails, rope bridges, zip beams, spring roots, and
-  collapsible dungeon floors.
-- Add environmental damage and recovery: lava, alien slime, freezing wind,
-  crushing doors, rotating blades, lightning rods, falling rubble, and safe
-  rollback pads.
-- Add puzzle traversal: weight switches, moving mirrors, robot-pet power locks,
-  grapple sockets, energy gates, water wheels, and airship cranes.
-- Tests: trigger activation, reset paths, save/load persistence for solved
-  traversal puzzles, and no player soft-lock after failure.
+- Use kinematic-friendly swing math first: cable direction, desired cable
+  length, radial correction, tangential momentum preservation, and damping.
+- Only introduce Rapier joints if the kinematic solution proves insufficient.
+- Add pump/steer inputs, release impulse, swing length tuning, and coyote-style
+  release forgiveness.
+- Add visual line, attach spark, and release trail.
 
-### M6: World And Boss Integration
+Acceptance:
 
-- Use mountain routes for traversal chapters: beginner pass, wall-jump canyon,
-  glide ridge, castle climb, dragon lair ascent, storm airship route, and alien
-  corruption descent.
-- Boss mode should pull the party to one screen and use arenas with verticality:
-  climbable boss armor, turret platforms, drone boost pads, destructible cover,
-  moving weak points, gusts, lava/snow hazards, and regroup portals.
-- Every dragon lair should have a matching traversal identity before its boss:
-  ice climb, lava bridge, wind tower, rock slide, crystal maze, and shadow
-  underpass.
-- Acceptance: each major chapter teaches or tests one movement verb and one
-  combat traversal verb.
+- Player can attach to a bridge/tower and swing across a gap.
+- Release preserves useful momentum without becoming uncontrollable.
+- Swing state interacts safely with boss-mode party pull and split screen.
 
-## Implementation Notes
+### M5: Grapple Combat And Utility Pull
 
-- Keep `PlayerMovement` the home for tunable movement values. Add fields there
-  before scattering constants through systems.
-- Keep `EdgeGrabState` for wall/ledge/mantle timers until the behavior is large
-  enough to deserve a dedicated `TraversalState`.
-- Keep `PlayerStateMachine` as the animation/state source of truth. New states
-  need allow-list transitions and a matching `CartoonPose` or future animation
-  clip.
-- Use `WorldGeometry`, `WalkableSurface`, and explicit marker components for
-  traversal props. Avoid inferring game logic from material color or mesh name.
-- Prefer module-level pure tests for math and state transitions before adding
-  heavyweight Bevy app tests.
+Goal: make the hook part of Starfall combat, not just traversal.
+
+- Pull lightweight enemies or zip to heavy enemies based on target class.
+- Add Star Sabre and hand-combat cancel windows from hook arrival.
+- Add hook stun, shield yank, turret pull, item pull, rescue pull, and switch
+  pull profiles.
+- Boss targets can expose temporary hook weak points during phases.
+
+Acceptance:
+
+- One enemy type and one utility object support hook interaction.
+- Hook combat cannot corrupt per-player ownership or shared campaign state.
+
+### M6: Flight Mechanics Upgrade
+
+Goal: make flight feel like an evolving hero skill while preserving platforming.
+
+- Split airborne behavior into jump, fall, glide, hover, jet boost, air dash,
+  boost climb, and slam.
+- Let Ancient Flight Core and pilot robot pets improve fuel, control, dash
+  cooldown, and recovery.
+- Add wind volumes: updrafts, downdrafts, side gusts, dragon wing shockwaves,
+  city fan lifts, and airship turbulence.
+- Add anti-flight ceilings/zones for dungeons and boss arenas.
+
+Acceptance:
+
+- Flight has at least one new controllable verb beyond holding jetpack.
+- Hook, flight, and wall movement can chain without infinite hover.
+
+### M7: Animation Foundation
+
+Goal: move from pose-only animation toward an animation-ready humanoid system.
+
+- Keep `PlayerStateMachine` as the source of truth for movement poses.
+- Expand `CartoonPose` coverage for sprint lean, grapple, zip, swing, glide,
+  hover, air dash, hard landing, roll, mantle, parry, stun, and death.
+- Add debug readout for state, pose, vertical velocity, grounded, wall contact,
+  hook mode, attach distance, stamina, and jetpack fuel.
+- Keep procedural poses mapped to future rigged animation clips.
+
+Acceptance:
+
+- Every movement state has a distinct silhouette even before skeletal clips.
+
+### M8: Procedural Animation And IK
+
+Goal: make the hero body respond naturally to terrain, walls, hooks, and flight.
+
+- Add hand placement for hook wind-up, swing, wall slide, and climb.
+- Add foot placement on uneven terrain and slopes.
+- Add body tilt from velocity, spine twist from swing arc, and head look-at
+  toward hook targets/enemies.
+- Add landing reactions: soft, hard, roll, slam.
+
+Acceptance:
+
+- The body reads clearly during swing, zip, wall slide, flight, and landing.
+
+### M9: Camera And Multiplayer Readability
+
+Goal: make high-speed movement cinematic without losing local co-op clarity.
+
+- Add speed-based FOV, swing pull-back, vertical look-ahead, and mild roll/tilt.
+- Add camera collision avoidance against cliffs/castles/city geometry.
+- Add split-screen hook target indicators and off-screen route hints.
+- Preserve boss-mode single-screen behavior and party catch-up rules.
+
+Acceptance:
+
+- Grapple and flight feel fast without hiding hazards or other players.
+
+### M10: World, Boss, And Dungeon Integration
+
+Goal: make movement verbs matter across the full game.
+
+- Add hook sockets and zip routes to mountain passes, sky cities, castles,
+  factories, power plants, dragon lairs, and airship decks.
+- Dragon lairs should teach specific verbs: ice climb, lava swing, wind glide,
+  rock zip, crystal maze, and shadow underpass.
+- Boss arenas should include climbable armor, hook weak points, flying drone
+  boosts, destructible cover, and regroup portals.
+- Dungeon top-down mode gets simplified hook verbs: short pull, dash slash,
+  switch pull, item tug, and boss weak-point yank.
+
+Acceptance:
+
+- Each major chapter teaches or tests one movement verb and one combat traversal
+  verb.
+
+## Technical Notes
+
+- Keep `PlayerMovement` the home for tunable movement values.
+- Keep `GrappleHookState` as the single-hook source of truth.
+- Keep `PlayerStateMachine` aligned with `CartoonPose`.
+- Use explicit world marker components for hook targets; do not infer gameplay
+  from material color or mesh name.
+- Prefer pure tests for math/state transitions before heavyweight Bevy app
+  tests.
 - Manual smoke path: keyboard/mouse, two Xbox-style controllers, player select,
   split-screen spawn, run, sprint, jump, wall slide, wall jump, hang, climb,
-  jetpack, dodge, parry, slingshot, moving platform, boss-mode camera pull, and
-  one save/load cycle.
+  grapple wind-up, jetpack, dodge, parry, slingshot, moving platform,
+  boss-mode camera pull, and one save/load cycle.

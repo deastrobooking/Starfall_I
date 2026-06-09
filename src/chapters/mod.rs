@@ -71,6 +71,10 @@ pub struct MapSettlement {
     pub x: f32,
     pub z: f32,
     pub facing_yaw: f32,
+    /// Corresponding `WorldSiteId` if this settlement is tracked in the
+    /// `WorldSiteRegistry`. When `Some`, the chapter-select map renders the
+    /// world-site badge instead of the generic settlement marker.
+    pub site_id: Option<u16>,
 }
 
 impl ChapterMapLocation {
@@ -235,6 +239,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: 1500.0,
             z: 3300.0,
             facing_yaw: -0.45,
+            site_id: Some(2),
         },
         MapSettlement {
             anchor_id: "settlement_cloudrail_city",
@@ -245,6 +250,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: 4200.0,
             z: 4300.0,
             facing_yaw: -1.10,
+            site_id: Some(4),
         },
         MapSettlement {
             anchor_id: "settlement_lantern_hamlet",
@@ -255,6 +261,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: -6900.0,
             z: -4200.0,
             facing_yaw: 0.28,
+            site_id: Some(5),
         },
         MapSettlement {
             anchor_id: "settlement_star_orchard",
@@ -265,6 +272,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: -3800.0,
             z: 5700.0,
             facing_yaw: 0.75,
+            site_id: Some(6),
         },
         MapSettlement {
             anchor_id: "settlement_frost_harbor",
@@ -275,6 +283,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: 2300.0,
             z: -6700.0,
             facing_yaw: 0.20,
+            site_id: Some(7),
         },
         MapSettlement {
             anchor_id: "settlement_granite_market",
@@ -285,6 +294,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: 7100.0,
             z: 2800.0,
             facing_yaw: -0.82,
+            site_id: Some(8),
         },
         MapSettlement {
             anchor_id: "settlement_switchwork_borough",
@@ -295,6 +305,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: 4400.0,
             z: -4300.0,
             facing_yaw: 0.58,
+            site_id: Some(9),
         },
         MapSettlement {
             anchor_id: "settlement_starfell_outpost",
@@ -305,6 +316,7 @@ pub fn map_settlements() -> &'static [MapSettlement] {
             x: -1800.0,
             z: -6900.0,
             facing_yaw: -0.15,
+            site_id: Some(3),
         },
     ]
 }

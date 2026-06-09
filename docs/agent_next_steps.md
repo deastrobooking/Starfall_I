@@ -229,6 +229,30 @@ Verification:
 - `cargo test`
 - Manual macOS smoke when input, rendering, terrain, or engine systems change.
 
+### N7: Codebase Hardening And Stability
+
+Goal: Pay down technical debt and increase stability for save data, input mapping, error handling, and app setup.
+
+- Add an explicit schema version or magic header to `SaveData` to make future save-format upgrades reliable, checking the version on load and surfacing corrupt saves gracefully.
+- Tie multiplayer gamepad assignment to persistent `GamepadConnectionEvent` tracking rather than sorting by volatile `Entity::index()`, which loses deterministic tracking across reconnects.
+- Audit `unwrap`/`expect` usage (especially Rapier trimesh in `src/plugins/world_plugin.rs` and save path lookups) providing fallback behaviors or explicit typed errors instead of silent panics.
+- Unclutter `src/main.rs` by migrating plugin-specific `init_resource` calls and localized configurations into their respective plugin `build()` configurations.
+- Move towards platform-agnostic save paths via standard library/directory hooks instead of writing `starfall_i_save.json` to the current working directory.
+
+Verification:
+
+- Intentionally modifying data in `starfall_i_save.json` surfaces a clear console log rather than failing silently.
+- Disconnecting and reconnecting Player 2's controller correctly preserves their slot without drifting entity IDs.
+- Removing or locking the save footprint does not panic the game.
+- `cargo clippy --all-targets -- -D warnings` allows tighter linting rules on a module-by-module basis.
+
+Primary files:
+
+- `src/plugins/save_plugin.rs`
+- `src/plugins/input_plugin.rs`
+- `src/plugins/world_plugin.rs`
+- `src/main.rs`
+
 ## Work Rules For Future Agents
 
 - Do not shrink the world back to old `1200`-unit assumptions. Use shared

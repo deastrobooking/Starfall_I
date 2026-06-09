@@ -186,6 +186,133 @@ impl Default for JetpackState {
     }
 }
 
+// ── Grapple Hook ─────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum GrappleHookMode {
+    #[default]
+    Ready,
+    Windup,
+    Searching,
+    Swinging,
+    Zipping,
+    Recovering,
+    Cooldown,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct GrappleHookState {
+    pub mode: GrappleHookMode,
+    pub attach_point: Option<Vec3>,
+    pub attach_normal: Vec3,
+    pub cable_length: f32,
+    pub min_cable_length: f32,
+    pub max_cable_length: f32,
+    pub swing_spring: f32,
+    pub swing_damping: f32,
+    pub zip_speed: f32,
+    pub mountain_pull_speed: f32,
+    pub attack_pull_speed: f32,
+    pub windup_time: f32,
+    pub windup_timer: f32,
+    pub recovery_time: f32,
+    pub recovery_timer: f32,
+    pub cooldown: f32,
+    pub cooldown_timer: f32,
+}
+
+impl Default for GrappleHookState {
+    fn default() -> Self {
+        Self {
+            mode: GrappleHookMode::Ready,
+            attach_point: None,
+            attach_normal: Vec3::Y,
+            cable_length: 18.0,
+            min_cable_length: 5.0,
+            max_cable_length: 96.0,
+            swing_spring: 24.0,
+            swing_damping: 4.8,
+            zip_speed: 2.4,
+            mountain_pull_speed: 3.2,
+            attack_pull_speed: 1.65,
+            windup_time: 0.14,
+            windup_timer: 0.0,
+            recovery_time: 0.10,
+            recovery_timer: 0.0,
+            cooldown: 0.32,
+            cooldown_timer: 0.0,
+        }
+    }
+}
+
+impl GrappleHookState {
+    pub fn is_ready(&self) -> bool {
+        self.mode == GrappleHookMode::Ready && self.cooldown_timer <= 0.0
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.mode,
+            GrappleHookMode::Windup
+                | GrappleHookMode::Searching
+                | GrappleHookMode::Swinging
+                | GrappleHookMode::Zipping
+        )
+    }
+
+    pub fn wants_animation_pose(&self) -> bool {
+        matches!(
+            self.mode,
+            GrappleHookMode::Windup
+                | GrappleHookMode::Searching
+                | GrappleHookMode::Swinging
+                | GrappleHookMode::Zipping
+                | GrappleHookMode::Recovering
+        )
+    }
+
+    pub fn request_fire(&mut self) -> bool {
+        if !self.is_ready() {
+            return false;
+        }
+        self.mode = GrappleHookMode::Windup;
+        self.windup_timer = self.windup_time;
+        self.attach_point = None;
+        true
+    }
+
+    pub fn tick_foundation(&mut self, dt: f32) {
+        let dt = dt.max(0.0);
+        self.cooldown_timer = (self.cooldown_timer - dt).max(0.0);
+        match self.mode {
+            GrappleHookMode::Windup => {
+                self.windup_timer = (self.windup_timer - dt).max(0.0);
+                if self.windup_timer <= 0.0 {
+                    self.mode = GrappleHookMode::Recovering;
+                    self.recovery_timer = self.recovery_time;
+                    self.cooldown_timer = self.cooldown;
+                }
+            }
+            GrappleHookMode::Recovering => {
+                self.recovery_timer = (self.recovery_timer - dt).max(0.0);
+                if self.recovery_timer <= 0.0 {
+                    self.mode = if self.cooldown_timer <= 0.0 {
+                        GrappleHookMode::Ready
+                    } else {
+                        GrappleHookMode::Cooldown
+                    };
+                }
+            }
+            GrappleHookMode::Cooldown if self.cooldown_timer <= 0.0 => {
+                self.mode = GrappleHookMode::Ready;
+            }
+            _ => {}
+        }
+        self.cable_length = self
+            .cable_length
+            .clamp(self.min_cable_length, self.max_cable_length);
+    }
+}
+
 // ── Dodge ─────────────────────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone, Default)]
 pub struct DodgeState {
@@ -245,6 +372,7 @@ pub enum PlayerState {
     Jetpack,
     WallSliding,
     Hanging,
+    Grappling,
 }
 
 #[derive(Component, Debug, Clone, Default)]
@@ -270,6 +398,7 @@ impl PlayerStateMachine {
                     | Jetpack
                     | WallSliding
                     | Hanging
+                    | Grappling
             ),
             Moving => matches!(
                 next,
@@ -281,6 +410,7 @@ impl PlayerStateMachine {
                     | Jetpack
                     | WallSliding
                     | Hanging
+                    | Grappling
             ),
             Sprinting => matches!(
                 next,
@@ -292,14 +422,33 @@ impl PlayerStateMachine {
                     | Jetpack
                     | WallSliding
                     | Hanging
+                    | Grappling
             ),
             Dodging => matches!(next, Idle | Moving | Sprinting | Stunned | Dead),
-            Attacking => matches!(next, Idle | Moving | Dodging | Stunned | Dead),
+            Attacking => matches!(next, Idle | Moving | Dodging | Stunned | Dead | Grappling),
             Stunned => matches!(next, Idle | Dead),
             Dead => false,
-            Jetpack => matches!(next, Idle | Moving | Stunned | Dead | WallSliding | Hanging),
-            WallSliding => matches!(next, Idle | Moving | Jetpack | Hanging | Stunned | Dead),
-            Hanging => matches!(next, Idle | Moving | Jetpack | Stunned | Dead),
+            Jetpack => matches!(
+                next,
+                Idle | Moving | Stunned | Dead | WallSliding | Hanging | Grappling
+            ),
+            WallSliding => matches!(
+                next,
+                Idle | Moving | Jetpack | Hanging | Stunned | Dead | Grappling
+            ),
+            Hanging => matches!(next, Idle | Moving | Jetpack | Stunned | Dead | Grappling),
+            Grappling => matches!(
+                next,
+                Idle | Moving
+                    | Sprinting
+                    | Dodging
+                    | Attacking
+                    | Stunned
+                    | Dead
+                    | Jetpack
+                    | WallSliding
+                    | Hanging
+            ),
         };
         if allowed {
             self.previous = Some(self.current);
@@ -350,6 +499,8 @@ pub struct PlayerInput {
     pub reload: bool,
     pub parry: bool,
     pub interact: bool,
+    pub grapple: bool,
+    pub grapple_just: bool,
     pub melee_light: bool,
     pub melee_heavy: bool,
     pub crafting: bool,
@@ -369,3 +520,40 @@ pub struct PlayerInput {
 /// Entity of this player's `PlayerCamera` child. Set during spawn.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct PlayerCameraRef(pub Entity);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grapple_request_enters_windup_and_cooldown() {
+        let mut grapple = GrappleHookState::default();
+
+        assert!(grapple.is_ready());
+        assert!(grapple.request_fire());
+        assert_eq!(grapple.mode, GrappleHookMode::Windup);
+        assert!(!grapple.request_fire());
+
+        grapple.tick_foundation(grapple.windup_time + 0.01);
+        assert_eq!(grapple.mode, GrappleHookMode::Recovering);
+        assert!(grapple.cooldown_timer > 0.0);
+
+        grapple.tick_foundation(grapple.recovery_time + grapple.cooldown + 0.01);
+        assert_eq!(grapple.mode, GrappleHookMode::Ready);
+        assert!(grapple.is_ready());
+    }
+
+    #[test]
+    fn grapple_tick_clamps_cable_length_to_tuning_limits() {
+        let mut grapple = GrappleHookState {
+            cable_length: 999.0,
+            ..GrappleHookState::default()
+        };
+        grapple.tick_foundation(0.0);
+        assert_eq!(grapple.cable_length, grapple.max_cable_length);
+
+        grapple.cable_length = 0.2;
+        grapple.tick_foundation(0.0);
+        assert_eq!(grapple.cable_length, grapple.min_cable_length);
+    }
+}

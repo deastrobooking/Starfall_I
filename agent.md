@@ -74,6 +74,14 @@ together.
   local relief and uses grounded, terraced, or sky-district floors. Mega cities
   float on large walkable platforms with giant ramps/bridges and guide lights;
   rough settlement edges can spawn mountain-inset gates/thresholds.
+- Settlement builder/economy vertical slice lives in
+  `src/settlement_economy.rs`, `src/plugins/world_plugin.rs`, and
+  `src/plugins/save_plugin.rs`. `SettlementEconomy` is campaign-shared and
+  save-backed. Settlement terminals unlock after cache recovery or matching M5
+  site liberation, spend shared stockpile plus robot parts, spawn visible farm,
+  factory, spaceport, power plant, research lab, defense outpost, and bridge hub
+  props, and tick bounded passive outputs. Route unlocks, assigned units,
+  raids, strategy overlays, and confirmation UX are future M7-M9 work.
 - Settlement conversations are data-driven in `src/discussion.rs`.
   `DiscussionNpc` entities open the HUD discussion panel from `E` / D-pad
   Down, and each line can spawn an MP3 voice file from `assets/voice/...`.
@@ -85,11 +93,13 @@ together.
   magnitude, keep circular deadzone remapping, support LT/RT button and axis
   paths, and treat controller smoke testing as required for movement changes.
 - Humanoid traversal planning lives in `docs/motion_mechanics_roadmap.md`.
-  Current first slice: `CartoonPose` distinguishes jump, fall, flight,
-  one-hand wall slide, and hang, and wall sliding is a stamina-backed clasp.
-  Keep future parkour/flight/combat traversal work routed through
-  `PlayerMovement`, `EdgeGrabState`, and `PlayerStateMachine` before adding
-  new standalone movement state.
+  Current first hook slice: `GrappleHookState` is the single star-tech
+  grappling hook source of truth, `PlayerInput` maps `G` / Select+RB, and
+  `CartoonPose::Grapple` gives the wind-up a visible body silhouette. Hook
+  raycasts, mountain pull, swing physics, attack pull, better flight, and IK
+  are future milestones. Keep future parkour/flight/combat traversal work
+  routed through `PlayerMovement`, `EdgeGrabState`, `GrappleHookState`, and
+  `PlayerStateMachine` before adding new standalone movement state.
 - Star Sabre combo work lives in `src/plugins/weapon_plugin.rs` and
   `src/components/weapon.rs`. Beam Capacitors raise effective saber wave tier
   for combo waves without mutating `BeamSabre.level`; keep future saber upgrades
@@ -146,6 +156,7 @@ together.
     `DimensionalAlien`.
 13. Update docs when changing architecture, controls, content flow, save scope,
     engine policy, or production priorities.
+14. Minimize the use of `unwrap()` and `expect()` for system inputs, procedural generation outputs (e.g. Rapier colliders in world generation), and file loading. Handle edge cases with clean defaults, error logging, and explicit failure paths.
 
 ## Completed Feature Milestones (recent)
 
