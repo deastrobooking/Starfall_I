@@ -51,7 +51,7 @@ pub const MAX_WEAPON_RANK: u32 = 4;
 
 impl Weapon {
     pub fn new(weapon_type: WeaponType) -> Self {
-        let base = match weapon_type {
+        match weapon_type {
             WeaponType::Pistol => Self {
                 weapon_type,
                 damage: 16.0,
@@ -154,8 +154,7 @@ impl Weapon {
                 charge_progress: 0.0,
                 charge_held: false,
             },
-        };
-        base
+        }
     }
 
     pub fn can_fire(&self) -> bool {

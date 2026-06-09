@@ -24,11 +24,11 @@ use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
-use crate::plugins::save_plugin::save_current_session;
+use crate::plugins::save_plugin::{save_current_session, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
-    PlayerGuidance, PlayerPartLoadout, PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
+    PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -698,14 +698,7 @@ fn pause_menu_action_system(
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
     button_q: Query<(&Interaction, &PauseMenuButton), (Changed<Interaction>, With<Button>)>,
-    player_q: Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
-    wave: Res<WaveInfo>,
-    progress: Res<ChapterProgress>,
-    perks: Res<PerkTree>,
-    select: Res<PlayerSelectState>,
-    robot_pets: Res<RobotPetCollection>,
-    upgrades: Res<UpgradeLedger>,
-    part_loadout: Res<PlayerPartLoadout>,
+    sp: SaveParams,
     mut menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -741,34 +734,10 @@ fn pause_menu_action_system(
             next_state.set(AppState::Playing);
         }
         PauseAction::Save => {
-            send_pause_save_result(
-                save_current_session(
-                    &player_q,
-                    &wave,
-                    &progress,
-                    &perks,
-                    &select,
-                    &robot_pets,
-                    &upgrades,
-                    &part_loadout,
-                ),
-                &mut msg_ev,
-            );
+            send_pause_save_result(save_current_session(&sp), &mut msg_ev);
         }
         PauseAction::Title => {
-            send_pause_save_result(
-                save_current_session(
-                    &player_q,
-                    &wave,
-                    &progress,
-                    &perks,
-                    &select,
-                    &robot_pets,
-                    &upgrades,
-                    &part_loadout,
-                ),
-                &mut msg_ev,
-            );
+            send_pause_save_result(save_current_session(&sp), &mut msg_ev);
             transition.pausing = false;
             transition.resuming_from_pause = false;
             next_state.set(AppState::MainMenu);

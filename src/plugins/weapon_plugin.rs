@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::armor::ArmorSet;
-use crate::components::enemy::Enemy;
+use crate::components::enemy::{DeadEnemy, Enemy};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::damage::{
@@ -12,7 +12,7 @@ use crate::perks::PerkTree;
 use crate::rendering::PbrBundle;
 use crate::resources::DungeonCrawlState;
 use crate::state::AppState;
-use crate::upgrades::{TechUpgradeId, UpgradeLedger};
+use crate::upgrades::UpgradeLedger;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
 #[derive(Component)]
@@ -25,10 +25,13 @@ pub struct HitParticle {
 // ── Projectile Asset Cache ────────────────────────────────────────────────────
 #[derive(Resource)]
 pub struct ProjectileAssets {
+    // Mesh sizes
     pub sphere_sm: Handle<Mesh>,
     pub sphere_md: Handle<Mesh>,
     pub sphere_lg: Handle<Mesh>,
+    pub sphere_xl: Handle<Mesh>,
     pub flash_sphere: Handle<Mesh>,
+    // Base projectile materials
     pub mat_pistol: Handle<StandardMaterial>,
     pub mat_rifle: Handle<StandardMaterial>,
     pub mat_shotgun: Handle<StandardMaterial>,
@@ -42,6 +45,16 @@ pub struct ProjectileAssets {
     pub mat_companion: Handle<StandardMaterial>,
     pub mat_melee_flash: Handle<StandardMaterial>,
     pub mat_hit_particle: Handle<StandardMaterial>,
+    // Charge blast materials (2-3x emissive of base)
+    pub mat_charge_pistol: Handle<StandardMaterial>,
+    pub mat_charge_rifle: Handle<StandardMaterial>,
+    pub mat_charge_shotgun: Handle<StandardMaterial>,
+    pub mat_charge_rocket: Handle<StandardMaterial>,
+    pub mat_charge_laser: Handle<StandardMaterial>,
+    pub mat_charge_grenade: Handle<StandardMaterial>,
+    // VFX
+    pub mat_charge_spark: Handle<StandardMaterial>,
+    pub mat_muzzle_flash: Handle<StandardMaterial>,
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -49,25 +62,30 @@ pub struct WeaponPlugin;
 
 impl Plugin for WeaponPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_weapon_assets).add_systems(
-            Update,
-            (
-                weapon_select_system,
-                apply_perk_ammo_caps_system,
-                weapon_fire_system,
-                weapon_reload_system,
-                special_weapon_system,
-                projectile_update_system,
-                melee_combo_system,
-                beam_sabre_update_system,
-                hit_particle_spawn_system,
-                particle_update_system,
-            )
-                .run_if(in_state(AppState::Playing)),
-        );
+        app.init_resource::<WeaponRanks>()
+            .add_systems(Startup, setup_weapon_assets)
+            .add_systems(
+                Update,
+                (
+                    apply_weapon_ranks_system,
+                    weapon_select_system,
+                    apply_perk_ammo_caps_system,
+                    weapon_fire_system,
+                    weapon_reload_system,
+                    charge_spark_system,
+                    special_weapon_system,
+                    projectile_update_system,
+                    melee_combo_system,
+                    beam_sabre_update_system,
+                    hit_particle_spawn_system,
+                    particle_update_system,
+                )
+                    .run_if(in_state(AppState::Playing)),
+            );
     }
 }
 
+// ── Material helpers ──────────────────────────────────────────────────────────
 fn mk_proj_mat(
     materials: &mut Assets<StandardMaterial>,
     r: f32,
@@ -95,23 +113,36 @@ fn setup_weapon_assets(
         sphere_sm: meshes.add(Sphere::new(0.08)),
         sphere_md: meshes.add(Sphere::new(0.22)),
         sphere_lg: meshes.add(Sphere::new(0.42)),
+        sphere_xl: meshes.add(Sphere::new(0.72)),
         flash_sphere: meshes.add(Sphere::new(0.9)),
-        mat_pistol: mk_proj_mat(m, 1.0, 0.95, 0.25, 4.0, 3.0, 0.4),
-        mat_rifle: mk_proj_mat(m, 0.15, 0.9, 1.0, 0.4, 3.5, 5.0),
-        mat_shotgun: mk_proj_mat(m, 1.0, 0.35, 0.85, 4.0, 0.7, 3.5),
-        mat_rocket: mk_proj_mat(m, 0.95, 0.25, 1.0, 3.5, 0.6, 4.0),
-        mat_laser: mk_proj_mat(m, 0.45, 1.0, 0.55, 1.5, 5.0, 2.0),
-        mat_grenade: mk_proj_mat(m, 0.25, 0.55, 1.0, 0.6, 1.5, 4.0),
-        mat_homing_star: mk_proj_mat(m, 1.0, 0.8, 0.15, 5.0, 2.5, 0.4),
-        mat_energy: mk_proj_mat(m, 0.2, 1.0, 0.95, 0.5, 4.0, 3.5),
-        mat_moon_bubble: mk_proj_mat(m, 0.7, 0.35, 1.0, 2.0, 0.8, 5.0),
-        mat_sprite_shot: mk_proj_mat(m, 0.8, 1.0, 0.25, 2.5, 4.0, 0.6),
-        mat_companion: mk_proj_mat(m, 1.0, 0.55, 0.2, 4.0, 1.6, 0.4),
-        mat_melee_flash: mk_proj_mat(m, 1.0, 0.95, 0.35, 5.0, 3.2, 0.6),
-        mat_hit_particle: mk_proj_mat(m, 1.0, 0.85, 0.2, 4.0, 2.5, 0.4),
+        // Base materials — emissive tuned for bloom
+        mat_pistol:       mk_proj_mat(m, 1.0, 0.95, 0.25,  4.0,  3.0,  0.4),
+        mat_rifle:        mk_proj_mat(m, 0.15, 0.9, 1.0,   0.4,  3.5,  5.0),
+        mat_shotgun:      mk_proj_mat(m, 1.0, 0.35, 0.85,  4.0,  0.7,  3.5),
+        mat_rocket:       mk_proj_mat(m, 0.95, 0.25, 1.0,  3.5,  0.6,  4.0),
+        mat_laser:        mk_proj_mat(m, 0.45, 1.0, 0.55,  1.5,  5.0,  2.0),
+        mat_grenade:      mk_proj_mat(m, 0.25, 0.55, 1.0,  0.6,  1.5,  4.0),
+        mat_homing_star:  mk_proj_mat(m, 1.0, 0.8, 0.15,   5.0,  2.5,  0.4),
+        mat_energy:       mk_proj_mat(m, 0.2, 1.0, 0.95,   0.5,  4.0,  3.5),
+        mat_moon_bubble:  mk_proj_mat(m, 0.7, 0.35, 1.0,   2.0,  0.8,  5.0),
+        mat_sprite_shot:  mk_proj_mat(m, 0.8, 1.0, 0.25,   2.5,  4.0,  0.6),
+        mat_companion:    mk_proj_mat(m, 1.0, 0.55, 0.2,   4.0,  1.6,  0.4),
+        mat_melee_flash:  mk_proj_mat(m, 1.0, 0.95, 0.35,  5.0,  3.2,  0.6),
+        mat_hit_particle: mk_proj_mat(m, 1.0, 0.85, 0.2,   4.0,  2.5,  0.4),
+        // Charge blast materials — ~2-3x emissive, near-white hot core
+        mat_charge_pistol:  mk_proj_mat(m, 1.0, 1.0, 0.6,  10.0,  8.0,  2.0),
+        mat_charge_rifle:   mk_proj_mat(m, 0.6, 0.95, 1.0,  2.0,  9.0, 12.0),
+        mat_charge_shotgun: mk_proj_mat(m, 1.0, 0.7,  1.0, 10.0,  3.0,  9.0),
+        mat_charge_rocket:  mk_proj_mat(m, 1.0, 0.6,  1.0,  9.0,  2.0, 10.0),
+        mat_charge_laser:   mk_proj_mat(m, 0.7, 1.0,  0.7,  4.0, 12.0,  5.0),
+        mat_charge_grenade: mk_proj_mat(m, 0.6, 0.8,  1.0,  2.0,  5.0, 11.0),
+        // VFX
+        mat_charge_spark: mk_proj_mat(m, 1.0, 1.0, 0.8,   8.0,  6.0,  2.0),
+        mat_muzzle_flash: mk_proj_mat(m, 1.0, 1.0, 1.0,  10.0, 10.0,  6.0),
     });
 }
 
+// ── Muzzle origin ─────────────────────────────────────────────────────────────
 fn star_muzzle_origin(player_transform: &GlobalTransform, aim_forward: Vec3) -> Vec3 {
     let facing = aim_forward.with_y(0.0).normalize_or_zero();
     let facing = if facing.length_squared() > 0.001 {
@@ -146,7 +177,6 @@ fn combat_forward(
             return player_forward;
         }
     }
-
     let camera_forward = camera_transform
         .forward()
         .as_vec3()
@@ -156,6 +186,55 @@ fn combat_forward(
         camera_forward
     } else {
         player_forward
+    }
+}
+
+// ── Soft aim assist ───────────────────────────────────────────────────────────
+// Nudges fire direction toward the nearest enemy within a narrow cone.
+fn aim_assist_direction(
+    raw_forward: Vec3,
+    muzzle_pos: Vec3,
+    enemy_q: &Query<&Transform, (With<Enemy>, Without<DeadEnemy>)>,
+) -> Vec3 {
+    const ASSIST_RANGE: f32 = 14.0;
+    const ASSIST_CONE_COS: f32 = 0.96; // ~15° half-angle
+    const ASSIST_STRENGTH: f32 = 0.28;
+
+    let mut best_dot = ASSIST_CONE_COS;
+    let mut best_dir: Option<Vec3> = None;
+
+    for e_transform in enemy_q.iter() {
+        let to = e_transform.translation - muzzle_pos;
+        if to.length() > ASSIST_RANGE {
+            continue;
+        }
+        let to_norm = to.normalize_or_zero();
+        let dot = to_norm.dot(raw_forward);
+        if dot > best_dot {
+            best_dot = dot;
+            best_dir = Some(to_norm);
+        }
+    }
+
+    if let Some(target_dir) = best_dir {
+        (raw_forward * (1.0 - ASSIST_STRENGTH) + target_dir * ASSIST_STRENGTH).normalize()
+    } else {
+        raw_forward
+    }
+}
+
+// ── Apply weapon ranks ────────────────────────────────────────────────────────
+fn apply_weapon_ranks_system(
+    ranks: Res<WeaponRanks>,
+    mut player_q: Query<&mut WeaponInventory, With<Player>>,
+) {
+    if !ranks.is_changed() {
+        return;
+    }
+    for mut inv in player_q.iter_mut() {
+        for (i, weapon) in inv.slots.iter_mut().enumerate() {
+            weapon.rank = ranks.ranks[i];
+        }
     }
 }
 
@@ -210,10 +289,12 @@ fn weapon_fire_system(
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
+    enemy_q: Query<&Transform, (With<Enemy>, Without<DeadEnemy>)>,
     mut fired_ev: MessageWriter<WeaponFiredEvent>,
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
+
     for (player_transform, mut inv, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
@@ -222,57 +303,91 @@ fn weapon_fire_system(
         let weapon = inv.active_mut();
         weapon.fire_timer = (weapon.fire_timer - dt).max(0.0);
 
-        let should_fire = if weapon.automatic {
-            pi.fire
-        } else {
-            pi.fire_just
-        };
+        // ── Charge tracking ──────────────────────────────────────────────────
+        let charge_released = weapon.charge_held && !pi.fire;
+        if pi.fire {
+            weapon.charge_progress =
+                (weapon.charge_progress + dt / weapon.min_charge_time()).min(1.0);
+            weapon.charge_held = true;
+        } else if charge_released {
+            weapon.charge_held = false;
+            if weapon.charge_progress >= 1.0 && weapon.fire_timer <= 0.0 && weapon.ammo >= 3 {
+                let raw_fwd = cam.forward().as_vec3();
+                let pos = star_muzzle_origin(player_transform, raw_fwd);
+                let aim_fwd = aim_assist_direction(raw_fwd, pos, &enemy_q);
+
+                let tech_mult =
+                    if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
+                        upgrades.missile_damage_mult()
+                    } else {
+                        upgrades.beam_damage_mult()
+                    };
+                let charge_dmg = armor.modified_outgoing_damage(
+                    weapon.damage
+                        * weapon.rank_damage_mult()
+                        * perk_damage_mult
+                        * tech_mult
+                        * weapon.charge_damage_mult(),
+                );
+                let wt = weapon.weapon_type;
+                let charge_radius = weapon.charge_explosion_radius();
+                let base_speed = weapon.speed;
+                spawn_charge_blast(
+                    &mut commands,
+                    &proj_assets,
+                    pos,
+                    aim_fwd,
+                    cam.right().as_vec3(),
+                    wt,
+                    charge_dmg,
+                    charge_radius,
+                    base_speed,
+                );
+
+                weapon.ammo = weapon.ammo.saturating_sub(3);
+                weapon.fire_timer = weapon.rank_effective_fire_rate() * 3.0;
+                weapon.charge_progress = 0.0;
+                sm.transition(PlayerState::Attacking);
+                fired_ev.write(WeaponFiredEvent);
+                continue;
+            }
+            weapon.charge_progress = 0.0;
+        }
+
+        // ── Normal fire ───────────────────────────────────────────────────────
+        let should_fire = if weapon.automatic { pi.fire } else { pi.fire_just };
         if !should_fire || !weapon.can_fire() {
             continue;
         }
 
-        let forward = cam.forward().as_vec3();
-        let pos = star_muzzle_origin(player_transform, forward);
+        let raw_fwd = cam.forward().as_vec3();
+        let pos = star_muzzle_origin(player_transform, raw_fwd);
         let right = cam.right().as_vec3();
         let up = cam.up().as_vec3();
+        let aim_fwd = aim_assist_direction(raw_fwd, pos, &enemy_q);
 
-        let tech_damage_mult = if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
-            upgrades.missile_damage_mult()
-        } else {
-            upgrades.beam_damage_mult()
-        };
-        let damage =
-            armor.modified_outgoing_damage(weapon.damage * perk_damage_mult * tech_damage_mult);
+        let tech_damage_mult =
+            if weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket {
+                upgrades.missile_damage_mult()
+            } else {
+                upgrades.beam_damage_mult()
+            };
+        let damage = armor.modified_outgoing_damage(
+            weapon.damage * weapon.rank_damage_mult() * perk_damage_mult * tech_damage_mult,
+        );
         let speed = weapon.speed;
         let spread = weapon.spread;
         let pellets = weapon.pellets;
         let is_explosive = weapon.is_explosive;
         let explosion_radius = weapon.explosion_radius;
         let gravity_affected = weapon.weapon_type == WeaponType::Grenade;
+        let stretch = weapon.proj_stretch();
+        let effective_fire_rate = weapon.rank_effective_fire_rate();
 
-        let (mesh_h, mat_h) = match weapon.weapon_type {
-            WeaponType::Pistol => (
-                proj_assets.sphere_sm.clone(),
-                proj_assets.mat_pistol.clone(),
-            ),
-            WeaponType::Rifle => (proj_assets.sphere_sm.clone(), proj_assets.mat_rifle.clone()),
-            WeaponType::Shotgun => (
-                proj_assets.sphere_sm.clone(),
-                proj_assets.mat_shotgun.clone(),
-            ),
-            WeaponType::Rocket => (
-                proj_assets.sphere_md.clone(),
-                proj_assets.mat_rocket.clone(),
-            ),
-            WeaponType::Laser => (proj_assets.sphere_sm.clone(), proj_assets.mat_laser.clone()),
-            WeaponType::Grenade => (
-                proj_assets.sphere_md.clone(),
-                proj_assets.mat_grenade.clone(),
-            ),
-        };
+        let (mesh_h, mat_h) = base_proj_handles(weapon.weapon_type, &proj_assets);
 
         weapon.ammo = weapon.ammo.saturating_sub(1);
-        weapon.fire_timer = weapon.fire_rate;
+        weapon.fire_timer = effective_fire_rate;
 
         for _ in 0..pellets {
             use rand::Rng;
@@ -285,13 +400,18 @@ fn weapon_fire_system(
             } else {
                 (0.0, 0.0)
             };
-            let dir = (forward + right * sx + up * sy).normalize();
+            let dir = (aim_fwd + right * sx + up * sy).normalize();
+
+            // Orient along travel direction and apply per-weapon stretch
+            let proj_transform = Transform::from_translation(pos)
+                .looking_to(dir, Vec3::Y)
+                .with_scale(stretch);
 
             commands.spawn((
                 PbrBundle {
                     mesh: Mesh3d(mesh_h.clone()),
                     material: MeshMaterial3d(mat_h.clone()),
-                    transform: Transform::from_translation(pos),
+                    transform: proj_transform,
                     ..default()
                 },
                 Projectile {
@@ -310,8 +430,249 @@ fn weapon_fire_system(
             ));
         }
 
+        spawn_muzzle_flash(&mut commands, &proj_assets, pos);
         sm.transition(PlayerState::Attacking);
         fired_ev.write(WeaponFiredEvent);
+    }
+}
+
+fn base_proj_handles(
+    wt: WeaponType,
+    assets: &ProjectileAssets,
+) -> (Handle<Mesh>, Handle<StandardMaterial>) {
+    match wt {
+        WeaponType::Pistol => (assets.sphere_sm.clone(), assets.mat_pistol.clone()),
+        WeaponType::Rifle => (assets.sphere_sm.clone(), assets.mat_rifle.clone()),
+        WeaponType::Shotgun => (assets.sphere_sm.clone(), assets.mat_shotgun.clone()),
+        WeaponType::Rocket => (assets.sphere_md.clone(), assets.mat_rocket.clone()),
+        WeaponType::Laser => (assets.sphere_sm.clone(), assets.mat_laser.clone()),
+        WeaponType::Grenade => (assets.sphere_md.clone(), assets.mat_grenade.clone()),
+    }
+}
+
+fn charge_mat_handle(wt: WeaponType, assets: &ProjectileAssets) -> Handle<StandardMaterial> {
+    match wt {
+        WeaponType::Pistol => assets.mat_charge_pistol.clone(),
+        WeaponType::Rifle => assets.mat_charge_rifle.clone(),
+        WeaponType::Shotgun => assets.mat_charge_shotgun.clone(),
+        WeaponType::Rocket => assets.mat_charge_rocket.clone(),
+        WeaponType::Laser => assets.mat_charge_laser.clone(),
+        WeaponType::Grenade => assets.mat_charge_grenade.clone(),
+    }
+}
+
+fn spawn_muzzle_flash(commands: &mut Commands, assets: &ProjectileAssets, pos: Vec3) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.flash_sphere.clone()),
+            material: MeshMaterial3d(assets.mat_muzzle_flash.clone()),
+            transform: Transform::from_translation(pos).with_scale(Vec3::splat(0.35)),
+            ..default()
+        },
+        HitParticle {
+            lifetime: 0.06,
+            max_lifetime: 0.06,
+            velocity: Vec3::ZERO,
+        },
+    ));
+}
+
+fn spawn_charge_blast(
+    commands: &mut Commands,
+    assets: &ProjectileAssets,
+    pos: Vec3,
+    dir: Vec3,
+    right: Vec3,
+    wt: WeaponType,
+    damage: f32,
+    explosion_radius: f32,
+    base_speed: f32,
+) {
+    let mat = charge_mat_handle(wt, assets);
+
+    match wt {
+        // Rifle: ultra-fast piercing bolt
+        WeaponType::Rifle => {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(assets.sphere_sm.clone()),
+                    material: MeshMaterial3d(mat),
+                    transform: Transform::from_translation(pos)
+                        .looking_to(dir, Vec3::Y)
+                        .with_scale(Vec3::new(0.5, 0.5, 8.0)),
+                    ..default()
+                },
+                Projectile {
+                    damage,
+                    speed: base_speed * 2.2,
+                    direction: dir,
+                    lifetime: 3.0,
+                    is_explosive: false,
+                    explosion_radius: 0.0,
+                    weapon_type: ProjectileOwner::Player,
+                    owner: None,
+                    piercing: true,
+                    gravity_affected: false,
+                    vertical_velocity: 0.0,
+                },
+                ChargeBlastTag,
+            ));
+        }
+        // Laser: piercing bolt that explodes on expiry
+        WeaponType::Laser => {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(assets.sphere_sm.clone()),
+                    material: MeshMaterial3d(mat),
+                    transform: Transform::from_translation(pos)
+                        .looking_to(dir, Vec3::Y)
+                        .with_scale(Vec3::new(0.45, 0.45, 9.0)),
+                    ..default()
+                },
+                Projectile {
+                    damage,
+                    speed: base_speed * 1.6,
+                    direction: dir,
+                    lifetime: 2.5,
+                    is_explosive: true,
+                    explosion_radius,
+                    weapon_type: ProjectileOwner::Player,
+                    owner: None,
+                    piercing: true,
+                    gravity_affected: false,
+                    vertical_velocity: 0.0,
+                },
+                ChargeBlastTag,
+            ));
+        }
+        // Shotgun: nova burst of 18 wide-spread pellets
+        WeaponType::Shotgun => {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let up = dir.cross(right).normalize_or_zero();
+            let pellet_dmg = damage / 14.0;
+            for _ in 0..18u32 {
+                let sx = rng.gen_range(-0.38f32..0.38);
+                let sy = rng.gen_range(-0.38f32..0.38);
+                let shot_dir = (dir + right * sx + up * sy).normalize_or_zero();
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(assets.sphere_sm.clone()),
+                        material: MeshMaterial3d(mat.clone()),
+                        transform: Transform::from_translation(pos)
+                            .looking_to(shot_dir, Vec3::Y)
+                            .with_scale(Vec3::new(1.0, 1.0, 1.8)),
+                        ..default()
+                    },
+                    Projectile {
+                        damage: pellet_dmg,
+                        speed: base_speed * 1.1,
+                        direction: shot_dir,
+                        lifetime: 1.8,
+                        is_explosive: false,
+                        explosion_radius: 0.0,
+                        weapon_type: ProjectileOwner::Player,
+                        owner: None,
+                        piercing: false,
+                        gravity_affected: false,
+                        vertical_velocity: 0.0,
+                    },
+                    ChargeBlastTag,
+                ));
+            }
+        }
+        // All others: large explosive orb
+        _ => {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(assets.sphere_xl.clone()),
+                    material: MeshMaterial3d(mat),
+                    transform: Transform::from_translation(pos).with_scale(Vec3::splat(1.4)),
+                    ..default()
+                },
+                Projectile {
+                    damage,
+                    speed: base_speed * 1.2,
+                    direction: dir,
+                    lifetime: 4.5,
+                    is_explosive: true,
+                    explosion_radius,
+                    weapon_type: ProjectileOwner::Player,
+                    owner: None,
+                    piercing: false,
+                    gravity_affected: false,
+                    vertical_velocity: 0.0,
+                },
+                ChargeBlastTag,
+            ));
+        }
+    }
+
+    // Big white flash for all charge blasts
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.sphere_xl.clone()),
+            material: MeshMaterial3d(assets.mat_muzzle_flash.clone()),
+            transform: Transform::from_translation(pos).with_scale(Vec3::splat(1.1)),
+            ..default()
+        },
+        HitParticle {
+            lifetime: 0.12,
+            max_lifetime: 0.12,
+            velocity: Vec3::ZERO,
+        },
+    ));
+}
+
+// ── Charge build VFX ─────────────────────────────────────────────────────────
+fn charge_spark_system(
+    mut commands: Commands,
+    proj_assets: Res<ProjectileAssets>,
+    player_q: Query<(&GlobalTransform, &WeaponInventory, &PlayerCameraRef), With<Player>>,
+    cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
+) {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    for (player_transform, inv, cam_ref) in player_q.iter() {
+        let weapon = inv.active();
+        if weapon.charge_progress < 0.1 {
+            continue;
+        }
+        let Ok(cam) = cam_q.get(cam_ref.0) else {
+            continue;
+        };
+        let fwd = cam.forward().as_vec3();
+        let pos = star_muzzle_origin(player_transform, fwd);
+
+        let count = (weapon.charge_progress * 3.5) as u32 + 1;
+        for _ in 0..count {
+            let vel = Vec3::new(
+                rng.gen_range(-4.0f32..4.0),
+                rng.gen_range(1.5f32..6.0),
+                rng.gen_range(-4.0f32..4.0),
+            );
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(proj_assets.sphere_sm.clone()),
+                    material: MeshMaterial3d(proj_assets.mat_charge_spark.clone()),
+                    transform: Transform::from_translation(
+                        pos + Vec3::new(
+                            rng.gen_range(-0.3f32..0.3),
+                            rng.gen_range(-0.2f32..0.2),
+                            rng.gen_range(-0.3f32..0.3),
+                        ),
+                    )
+                    .with_scale(Vec3::splat(0.3 + weapon.charge_progress * 0.5)),
+                    ..default()
+                },
+                HitParticle {
+                    lifetime: 0.22,
+                    max_lifetime: 0.22,
+                    velocity: vel,
+                },
+            ));
+        }
     }
 }
 
@@ -388,7 +749,6 @@ fn special_weapon_system(
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
     for (player_transform, mut inv, pi, cam_ref, armor) in player_q.iter_mut() {
-        // Tick all cooldowns every frame.
         inv.slot7.cooldown_timer = (inv.slot7.cooldown_timer - dt).max(0.0);
         inv.slot8.cooldown_timer = (inv.slot8.cooldown_timer - dt).max(0.0);
         inv.slot9.cooldown_timer = (inv.slot9.cooldown_timer - dt).max(0.0);
@@ -435,6 +795,7 @@ fn special_weapon_system(
                             vertical_velocity: 0.0,
                         },
                     ));
+                    spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
                         text: format!("Homing Star! [{} charges]", inv.slot7.ammo),
@@ -467,7 +828,9 @@ fn special_weapon_system(
                             PbrBundle {
                                 mesh: Mesh3d(proj_assets.sphere_sm.clone()),
                                 material: MeshMaterial3d(proj_assets.mat_energy.clone()),
-                                transform: Transform::from_translation(pos),
+                                transform: Transform::from_translation(pos)
+                                    .looking_to(dir, Vec3::Y)
+                                    .with_scale(Vec3::new(0.8, 0.8, 2.5)),
                                 ..default()
                             },
                             Projectile {
@@ -485,6 +848,7 @@ fn special_weapon_system(
                             },
                         ));
                     }
+                    spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
                         text: format!("Tri-Star Burst! [{} charges]", inv.slot8.ammo),
@@ -526,6 +890,7 @@ fn special_weapon_system(
                             vertical_velocity: 0.1,
                         },
                     ));
+                    spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
                         text: format!("Moon Bubble! [{} charges]", inv.slot9.ammo),
@@ -558,7 +923,9 @@ fn special_weapon_system(
                             PbrBundle {
                                 mesh: Mesh3d(proj_assets.sphere_sm.clone()),
                                 material: MeshMaterial3d(proj_assets.mat_sprite_shot.clone()),
-                                transform: Transform::from_translation(pos),
+                                transform: Transform::from_translation(pos)
+                                    .looking_to(dir, Vec3::Y)
+                                    .with_scale(Vec3::new(0.8, 0.8, 2.0)),
                                 ..default()
                             },
                             Projectile {
@@ -576,6 +943,7 @@ fn special_weapon_system(
                             },
                         ));
                     }
+                    spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
                         text: format!("Sprite Turret! [{} charges]", inv.slot0.ammo),
@@ -910,102 +1278,6 @@ fn spawn_melee_flash(commands: &mut Commands, assets: &ProjectileAssets, positio
     ));
 }
 
-fn sabre_effective_wave_level(sabre: &BeamSabre, upgrades: &UpgradeLedger) -> u32 {
-    (sabre.level + upgrades.rank(TechUpgradeId::BeamCapacitors)).clamp(1, 5)
-}
-
-fn sabre_combo_wave_offsets(
-    effective_level: u32,
-    slash_index: u32,
-    slash_count: u32,
-    dungeon_active: bool,
-) -> Vec<f32> {
-    let is_opener = slash_index == 0;
-    let is_finisher = slash_index + 1 >= slash_count;
-    let is_even_chain = slash_index % 2 == 1;
-
-    if effective_level >= 5 && is_finisher {
-        vec![-0.55, 0.0, 0.55]
-    } else if effective_level >= 4 && (is_opener || is_finisher) {
-        vec![-0.42, 0.42]
-    } else if effective_level >= 3 && (is_even_chain || is_finisher) {
-        vec![0.0]
-    } else if effective_level >= 2 && is_finisher {
-        vec![0.0]
-    } else if dungeon_active && (is_opener || is_finisher) {
-        vec![0.0]
-    } else {
-        Vec::new()
-    }
-}
-
-fn sabre_wave_damage_multiplier(
-    effective_level: u32,
-    slash_index: u32,
-    dungeon_active: bool,
-) -> f32 {
-    let combo_ramp = 1.0 + slash_index as f32 * 0.08;
-    let rank_ramp = 1.0 + effective_level.saturating_sub(1) as f32 * 0.05;
-    combo_ramp * rank_ramp * if dungeon_active { 0.72 } else { 1.0 }
-}
-
-fn spawn_sabre_slash_waves(
-    commands: &mut Commands,
-    proj_assets: &ProjectileAssets,
-    origin: Vec3,
-    forward: Vec3,
-    right: Vec3,
-    sabre: &BeamSabre,
-    effective_level: u32,
-    slash_index: u32,
-    armor_damage_mult: f32,
-    dungeon_active: bool,
-) {
-    let wave_offsets = sabre_combo_wave_offsets(
-        effective_level,
-        slash_index,
-        sabre.slash_count,
-        dungeon_active,
-    );
-    if wave_offsets.is_empty() {
-        return;
-    }
-
-    let fwd = forward.with_y(0.0).normalize_or_zero();
-    let right = right.with_y(0.0).normalize_or_zero();
-    let damage = sabre.wave_damage
-        * armor_damage_mult
-        * sabre_wave_damage_multiplier(effective_level, slash_index, dungeon_active);
-    let speed = 20.0 + effective_level as f32 * 2.0 + slash_index as f32 * 1.5;
-    let lifetime = 1.30 + effective_level as f32 * 0.08;
-    let has_splash = effective_level >= 5 || sabre.has_aoe_splash();
-
-    for offset in wave_offsets {
-        let dir = (fwd + right * offset).with_y(0.0).normalize_or_zero();
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                material: MeshMaterial3d(proj_assets.mat_melee_flash.clone()),
-                transform: Transform::from_translation(origin + dir * 0.35),
-                ..default()
-            },
-            Projectile {
-                damage,
-                speed,
-                direction: dir,
-                lifetime,
-                is_explosive: has_splash,
-                explosion_radius: if has_splash { 4.0 } else { 0.0 },
-                weapon_type: ProjectileOwner::Player,
-                owner: None,
-                piercing: effective_level >= 3 || sabre.is_piercing(),
-                gravity_affected: false,
-                vertical_velocity: 0.0,
-            },
-        ));
-    }
-}
-
 fn execute_melee_hit(
     origin: Vec3,
     forward: Vec3,
@@ -1079,9 +1351,7 @@ fn beam_sabre_update_system(
         };
         let fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let origin = star_muzzle_origin(player_transform, fwd);
-        let right = cam.right().as_vec3();
         let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
-        let effective_wave_level = sabre_effective_wave_level(&sabre, &upgrades);
 
         if pi.sabre_toggle {
             if sabre.unlocked {
@@ -1117,18 +1387,6 @@ fn beam_sabre_update_system(
                         &mut killed_ev,
                     );
                     spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
-                    spawn_sabre_slash_waves(
-                        &mut commands,
-                        &proj_assets,
-                        origin,
-                        fwd,
-                        right,
-                        &sabre,
-                        effective_wave_level,
-                        sabre.slash_index,
-                        armor_damage_mult,
-                        dungeon.active,
-                    );
                     sabre.slash_timer = 0.25;
                 } else {
                     sabre.is_slashing = false;
@@ -1162,18 +1420,45 @@ fn beam_sabre_update_system(
                 &mut killed_ev,
             );
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
-            spawn_sabre_slash_waves(
-                &mut commands,
-                &proj_assets,
-                origin,
-                fwd,
-                right,
-                &sabre,
-                effective_wave_level,
-                0,
-                armor_damage_mult,
-                dungeon.active,
-            );
+
+            if sabre.fires_dual_wave() || dungeon.active {
+                let right = cam.right().as_vec3();
+                let wave_offsets: &[f32] = if sabre.fires_dual_wave() {
+                    &[-0.4, 0.4]
+                } else {
+                    &[0.0]
+                };
+                for wave_offset in wave_offsets {
+                    let dir = (fwd + right.with_y(0.0).normalize_or_zero() * *wave_offset)
+                        .with_y(0.0)
+                        .normalize_or_zero();
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: Mesh3d(proj_assets.sphere_sm.clone()),
+                            material: MeshMaterial3d(proj_assets.mat_melee_flash.clone()),
+                            transform: Transform::from_translation(origin)
+                                .looking_to(dir, Vec3::Y)
+                                .with_scale(Vec3::new(0.8, 0.8, 2.5)),
+                            ..default()
+                        },
+                        Projectile {
+                            damage: sabre.wave_damage
+                                * armor_damage_mult
+                                * if dungeon.active { 0.72 } else { 1.0 },
+                            speed: 20.0,
+                            direction: dir,
+                            lifetime: 1.5,
+                            is_explosive: sabre.has_aoe_splash(),
+                            explosion_radius: if sabre.has_aoe_splash() { 4.0 } else { 0.0 },
+                            weapon_type: ProjectileOwner::Player,
+                            owner: None,
+                            piercing: sabre.is_piercing(),
+                            gravity_affected: false,
+                            vertical_velocity: 0.0,
+                        },
+                    ));
+                }
+            }
         }
     }
 }
@@ -1209,52 +1494,6 @@ fn hit_particle_spawn_system(
                 },
             ));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn beam_capacitors_raise_sabre_wave_level_without_mutating_sabre() {
-        let mut upgrades = UpgradeLedger::default();
-        upgrades.ranks.push((TechUpgradeId::BeamCapacitors, 3));
-        let sabre = BeamSabre {
-            level: 1,
-            ..default()
-        };
-
-        assert_eq!(sabre.level, 1);
-        assert_eq!(sabre_effective_wave_level(&sabre, &upgrades), 4);
-    }
-
-    #[test]
-    fn sabre_combo_wave_offsets_scale_with_effective_level() {
-        assert!(sabre_combo_wave_offsets(1, 0, 3, false).is_empty());
-        assert_eq!(sabre_combo_wave_offsets(2, 2, 3, false), vec![0.0]);
-        assert_eq!(sabre_combo_wave_offsets(3, 1, 3, false), vec![0.0]);
-        assert_eq!(sabre_combo_wave_offsets(4, 0, 3, false), vec![-0.42, 0.42]);
-        assert_eq!(
-            sabre_combo_wave_offsets(5, 2, 3, false),
-            vec![-0.55, 0.0, 0.55]
-        );
-    }
-
-    #[test]
-    fn dungeon_sabre_keeps_accessible_single_wave_at_low_level() {
-        assert_eq!(sabre_combo_wave_offsets(1, 0, 2, true), vec![0.0]);
-        assert_eq!(sabre_combo_wave_offsets(1, 1, 2, true), vec![0.0]);
-    }
-
-    #[test]
-    fn sabre_wave_damage_ramps_through_combo_and_rank() {
-        let opener = sabre_wave_damage_multiplier(2, 0, false);
-        let finisher = sabre_wave_damage_multiplier(5, 3, false);
-        let dungeon = sabre_wave_damage_multiplier(5, 3, true);
-
-        assert!(finisher > opener);
-        assert!(dungeon < finisher);
     }
 }
 

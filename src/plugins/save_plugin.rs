@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -12,11 +13,28 @@ use crate::perks::PerkTree;
 use crate::resources::{
     ChapterProgress, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo,
 };
+use crate::components::weapon::WeaponRanks;
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 
 const SAVE_FILE: &str = "starfall_i_save.json";
+
+// ── Save SystemParam Bundle ───────────────────────────────────────────────────
+/// Groups all save-relevant read params into one SystemParam so callers like
+/// `pause_menu_action_system` stay within Bevy's 16-param system limit.
+#[derive(SystemParam)]
+pub struct SaveParams<'w, 's> {
+    pub player_q:    Query<'w, 's, (&'static PlayerIndex, &'static PlayerStats, &'static Health), With<Player>>,
+    pub wave:        Res<'w, WaveInfo>,
+    pub progress:    Res<'w, ChapterProgress>,
+    pub perks:       Res<'w, PerkTree>,
+    pub select:      Res<'w, PlayerSelectState>,
+    pub robot_pets:  Res<'w, RobotPetCollection>,
+    pub upgrades:    Res<'w, UpgradeLedger>,
+    pub part_loadout: Res<'w, PlayerPartLoadout>,
+    pub weapon_ranks: Res<'w, WeaponRanks>,
+}
 
 // ── Save Data ─────────────────────────────────────────────────────────────────
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -60,6 +78,8 @@ pub struct SaveData {
     pub part_loadout_legs: CharacterPartStyle,
     #[serde(default)]
     pub part_loadout_shoulders: CharacterPartStyle,
+    #[serde(default)]
+    pub weapon_ranks: [u32; 6],
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -146,6 +166,7 @@ impl Default for SaveData {
             part_loadout_arms: CharacterPartStyle::HumanoidClothing,
             part_loadout_legs: CharacterPartStyle::HumanoidClothing,
             part_loadout_shoulders: CharacterPartStyle::HumanoidClothing,
+            weapon_ranks: [0u32; 6],
         }
     }
 }
@@ -200,6 +221,7 @@ pub fn save_game(
     robot_pets: &RobotPetCollection,
     upgrades: &UpgradeLedger,
     part_loadout: &PlayerPartLoadout,
+    weapon_ranks: &WeaponRanks,
 ) -> Result<(), String> {
     let data = build_save_data(
         players,
@@ -210,6 +232,7 @@ pub fn save_game(
         robot_pets,
         upgrades,
         part_loadout,
+        weapon_ranks,
     );
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(save_path(), json).map_err(|e| e.to_string())
@@ -224,6 +247,7 @@ fn build_save_data(
     robot_pets: &RobotPetCollection,
     upgrades: &UpgradeLedger,
     part_loadout: &PlayerPartLoadout,
+    weapon_ranks: &WeaponRanks,
 ) -> SaveData {
     players.sort_by_key(|player| player.player_index);
     SaveData {
@@ -247,6 +271,7 @@ fn build_save_data(
         part_loadout_arms: part_loadout.arms,
         part_loadout_legs: part_loadout.legs,
         part_loadout_shoulders: part_loadout.shoulders,
+        weapon_ranks: weapon_ranks.ranks,
         ..SaveData::default()
     }
 }
@@ -291,29 +316,21 @@ fn collect_player_saves(
     players
 }
 
-pub fn save_current_session(
-    player_q: &Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
-    wave: &WaveInfo,
-    progress: &ChapterProgress,
-    perks: &PerkTree,
-    select: &PlayerSelectState,
-    robot_pets: &RobotPetCollection,
-    upgrades: &UpgradeLedger,
-    part_loadout: &PlayerPartLoadout,
-) -> Result<(), String> {
-    let players = collect_player_saves(player_q);
+pub fn save_current_session(sp: &SaveParams) -> Result<(), String> {
+    let players = collect_player_saves(&sp.player_q);
     if players.is_empty() {
         return Err("No active players to save".to_string());
     }
     save_game(
         players,
-        wave,
-        progress,
-        perks,
-        select,
-        robot_pets,
-        upgrades,
-        part_loadout,
+        &sp.wave,
+        &sp.progress,
+        &sp.perks,
+        &sp.select,
+        &sp.robot_pets,
+        &sp.upgrades,
+        &sp.part_loadout,
+        &sp.weapon_ranks,
     )
 }
 
@@ -325,6 +342,7 @@ fn hydrate_progress_from_disk(
     mut robot_pets: ResMut<RobotPetCollection>,
     mut upgrades: ResMut<UpgradeLedger>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
+    mut weapon_ranks: ResMut<WeaponRanks>,
 ) {
     if let Some(data) = load_save() {
         *robot_pets = data.robot_pets.clone();
@@ -341,6 +359,7 @@ fn hydrate_progress_from_disk(
         part_loadout.arms = data.part_loadout_arms;
         part_loadout.legs = data.part_loadout_legs;
         part_loadout.shoulders = data.part_loadout_shoulders;
+        weapon_ranks.ranks = data.weapon_ranks;
     }
 }
 
@@ -353,6 +372,7 @@ fn load_save_on_enter(
     mut robot_pets: ResMut<RobotPetCollection>,
     mut upgrades: ResMut<UpgradeLedger>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
+    mut weapon_ranks: ResMut<WeaponRanks>,
     transition: Res<PlaySessionTransition>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
@@ -383,6 +403,7 @@ fn load_save_on_enter(
         part_loadout.arms = data.part_loadout_arms;
         part_loadout.legs = data.part_loadout_legs;
         part_loadout.shoulders = data.part_loadout_shoulders;
+        weapon_ranks.ranks = data.weapon_ranks;
         let loaded_players = data.players.len().max(active_players);
         msg_ev.write(UiMessageEvent {
             text: format!(
@@ -399,14 +420,7 @@ fn load_save_on_enter(
 fn autosave_system(
     time: Res<Time>,
     mut save_state: ResMut<SaveState>,
-    player_q: Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
-    wave: Res<WaveInfo>,
-    progress: Res<ChapterProgress>,
-    perks: Res<PerkTree>,
-    select: Res<PlayerSelectState>,
-    robot_pets: Res<RobotPetCollection>,
-    upgrades: Res<UpgradeLedger>,
-    part_loadout: Res<PlayerPartLoadout>,
+    sp: SaveParams,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     save_state.last_save_timer += time.delta_secs();
@@ -415,16 +429,7 @@ fn autosave_system(
     }
     save_state.last_save_timer = 0.0;
 
-    match save_current_session(
-        &player_q,
-        &wave,
-        &progress,
-        &perks,
-        &select,
-        &robot_pets,
-        &upgrades,
-        &part_loadout,
-    ) {
+    match save_current_session(&sp) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {
                 text: "Game autosaved.".to_string(),
@@ -439,29 +444,13 @@ fn autosave_system(
 
 fn manual_save_system(
     keyboard: Res<ButtonInput<KeyCode>>,
-    player_q: Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
-    wave: Res<WaveInfo>,
-    progress: Res<ChapterProgress>,
-    perks: Res<PerkTree>,
-    select: Res<PlayerSelectState>,
-    robot_pets: Res<RobotPetCollection>,
-    upgrades: Res<UpgradeLedger>,
-    part_loadout: Res<PlayerPartLoadout>,
+    sp: SaveParams,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if !keyboard.just_pressed(KeyCode::F5) {
         return;
     }
-    match save_current_session(
-        &player_q,
-        &wave,
-        &progress,
-        &perks,
-        &select,
-        &robot_pets,
-        &upgrades,
-        &part_loadout,
-    ) {
+    match save_current_session(&sp) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {
                 text: "Game saved! [F5]".to_string(),
@@ -574,6 +563,7 @@ mod tests {
             &robot_pets,
             &upgrades,
             &part_loadout,
+            &WeaponRanks::default(),
         );
 
         assert_eq!(data.wave_number, 7);
