@@ -65,6 +65,14 @@ For the current agent-facing execution order, use `docs/agent_next_steps.md`.
 - Boss mode now links 2-4 local players into one full-screen party camera for boss-tier enemies and nearby flying-drone wings, then restores split-screen after the threat clears.
 - Naming canon now lives in `docs/naming.md`; Chapter 1 is `Invasion of the Scallarians`, and player-facing alien labels use Scallarian/Scallarians.
 - The HUD now has a contextual `PlayerGuidance` panel for nearby talk, gate, boat, pickup, spy data, loot, and live city-spy-drone prompts.
+- Swappable character parts system: `CharacterPartStyle` (HumanoidClothing/RobotMechanical) per slot, `CharacterLoadout` component, `PlayerPartLoadout` resource, and `swap_character_parts` system watching `Changed<CharacterLoadout>`. Robot spawn functions use the slot config.
+- Robot factory geometry fully rewritten in `src/robots/factory.rs` with Capsule3d/Sphere/Cylinder primitives, replacing all Cuboid/box geometry for a rounder cartoon silhouette.
+- Chassis Editor (`AppState::ChassisEditor`) built in `chassis_editor_plugin.rs`: live spinning 3-D preview, Q/W/E/R slot toggles between HumanoidClothing and RobotMechanical, 1-5 accent color presets, +/- scale, Enter to confirm into `PlayerPartLoadout`, Esc to cancel. Accessed from chapter select via [E].
+- Perk Tree UI and Tech Upgrade Shop UI added to chapter select in `ui_plugin.rs`: per-branch and per-track colored rank rows with filled/empty rank bars (`■□`), live update systems (`PerkRowText`, `UpgradeRowText`), A–H spend perk points, Z–N purchase tech upgrades.
+- Robot Garage screen (`AppState::RobotGarage`) built in `robot_garage_plugin.rs`: parts inventory and pet roster display, 9-form assembly browser (A/D navigate), auto-pet selection for Enter-to-assemble, MechCommandLink gating for advanced forms (GiantMech/SpaceShip/MegaShip), X to disassemble, [G] from chapter select.
+- HP bonus application fixed: `perks.hp_bonus()` + `upgrades.armor_health_bonus()` now added to `player_stats.max_health` at spawn in `player_plugin.rs`; previously these values were computed but never applied.
+- Chassis persistence: `CharacterPartStyle` derives Serialize/Deserialize; `SaveData` gains `part_loadout_body/arms/legs/shoulders` fields with `#[serde(default)]` for backward save compatibility; all save paths (`save_game`, `save_current_session`, `autosave_system`, `manual_save_system`, pause-menu save) carry `&PlayerPartLoadout`; hydrated from disk on load.
+- Assembly-driven vehicle modes: `VehicleState` rewritten to use `GroundMode` (None/Motorcycle/Tank/GiantMech) and `AirMode` (None/Jet/Ship) enums instead of boolean fields. `vehicle_input()` reads `RobotPetCollection.active_assembly` to determine available modes. `apply_vehicle_buffs()` applies correct speed/jetpack/armor stats per mode (Tank slow+armor, GiantMech very slow+40 armor bonus, Jet enhanced jetpack, Ship 1.5× jet).
 
 ## High Priority
 

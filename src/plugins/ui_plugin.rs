@@ -138,10 +138,7 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
             )
-            .add_systems(
-                Update,
-                game_over_input.run_if(in_state(AppState::GameOver)),
-            )
+            .add_systems(Update, game_over_input.run_if(in_state(AppState::GameOver)))
             .add_systems(
                 Update,
                 (menu_start_button, main_menu_controller_status_system)
@@ -1574,7 +1571,11 @@ fn format_upgrade_row(
         "MAX".to_string()
     } else {
         let cost = def.id.next_rank_cost(rank + 1);
-        let afford = if robot_pets.can_afford(&cost) { "READY" } else { "NEED PARTS" };
+        let afford = if robot_pets.can_afford(&cost) {
+            "READY"
+        } else {
+            "NEED PARTS"
+        };
         format!("{}  {}", format_part_costs(&cost), afford)
     };
     format!(

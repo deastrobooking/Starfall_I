@@ -39,8 +39,10 @@ Handle these before widening content too much:
   controller-friendly production screens.
 - A first `PlayerGuidance` HUD prompt now covers nearby interactions and city
   spy drones; future content should feed it instead of adding one-off hint text.
-- Robot pets have durable data and recipes, but the garage/store and runtime
-  mech/ship controllers are still missing.
+- Robot pets have durable data, recipes, and a keyboard-driven Robot Garage screen
+  (`AppState::RobotGarage`) that assembles forms and drives vehicle modes at runtime.
+  The garage/store still needs a controller-friendly screen, per-player passenger UX,
+  store purchasing, and runtime 3-D mech/ship controllers.
 - Save data still carries legacy top-level fields. Keep compatibility, but
   prefer clean shared campaign sections plus per-player records for new fields.
 - Dragon lair dungeons have physical gates and top-down camera mode, but need
@@ -91,18 +93,22 @@ Primary files:
 - `src/plugins/ui_plugin.rs`
 - `docs/systems.md`
 
-### N2: Controller-First Upgrade And Garage UI
+### N2: Controller-First Upgrade And Garage UI *(keyboard shell complete)*
 
-Goal: turn robot pets and tech upgrades from data foundations into a usable
-player loop.
+The Robot Garage (`AppState::RobotGarage`) keyboard-driven shell is now working:
+A/D browse 9 assembly forms, Enter assembles, X disassembles, assembled forms drive
+`GroundMode`/`AirMode` in the vehicle plugin, and `MechCommandLink` gates advanced
+forms. The chassis editor also persists part loadout to disk. What remains:
 
 - Replace compact chapter-select tech shortcuts with tabbed controller-friendly
   screens: Weapons, Missiles, Turrets, Health/Rejuvenation, Vehicles, Mechs,
   Ships, and Megaships.
-- Add robot garage/store screens for rescue records, store-built pets, salvage
-  costs, pet assignment, and combined-form previews.
+- Add garage store screen for store-built pet purchasing from salvage, per-pet rescue
+  records, pet assignment, and combined-form stat previews.
 - Show rejuvenation as a paid reserve with cost, available charges, and consume
   feedback.
+- Add runtime 3-D mech/ship controllers so assembled forms produce visible 3-D
+  vehicles, not just buffed humanoid movement.
 - Keep `RobotPetCollection` and `UpgradeLedger` campaign-shared until a
   deliberate per-player design changes that policy.
 
@@ -111,14 +117,17 @@ Verification:
 - Save/load after purchasing upgrades and building/rescuing pets.
 - Controller navigation works without keyboard shortcuts.
 - Costs, affordability, locks, and rank deltas render clearly.
+- Assembling a form in the garage and then entering Playing reflects GroundMode/AirMode in `VehicleState`.
 
 Primary files:
 
 - `src/robot_pets.rs`
 - `src/upgrades.rs`
 - `src/plugins/ui_plugin.rs`
+- `src/plugins/robot_garage_plugin.rs`
 - `src/plugins/chassis_editor_plugin.rs`
 - `src/plugins/save_plugin.rs`
+- `src/plugins/vehicle_plugin.rs`
 
 ### N3: Multiplayer Ownership Completion
 
@@ -239,8 +248,9 @@ Verification:
 For the next coding pass, keep the scope tight:
 
 1. Add chapter-select region labels and route/readability markers for the
-   200-mile map.
-2. Add a small controller-friendly screen shell for tech upgrades and robot
-   garage tabs.
-3. Add one manual debug overlay for chapter anchors or controller assignment.
+   200-mile map (N1 — high value, low risk).
+2. Deepen one dragon lair or Great Scientist temple with keys, locked doors,
+   enemy placement, and a boss-room staging beat (N4 starter).
+3. Add a controller diagnostics overlay (stick values, player assignment,
+   last action) for hardware smoke passes (N5 prerequisite).
 4. Add tests only around pure data and ownership behavior touched by the pass.

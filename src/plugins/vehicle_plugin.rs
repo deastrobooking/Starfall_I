@@ -80,6 +80,7 @@ pub struct VehicleState {
     pub active_boat: Option<Entity>,
     pub boat_heading: f32,
     baselines: [Option<VehicleBaseline>; 4],
+    applied_armor_bonuses: [f32; 4],
     // Legacy accessors used by external code — kept as computed properties.
     pub mech_armor_bonus: f32,
 }
@@ -128,27 +129,31 @@ fn reset_vehicle_state_on_enter(
 // ── Assembly form helpers ─────────────────────────────────────────────────────
 
 fn assembled_ground_mode(robot_pets: &RobotPetCollection) -> Option<GroundMode> {
-    robot_pets.active_assembly.as_ref().and_then(|a| match a.form {
-        RobotAssemblyForm::Car | RobotAssemblyForm::Motorcycle => Some(GroundMode::Motorcycle),
-        RobotAssemblyForm::Tank => Some(GroundMode::Tank),
-        RobotAssemblyForm::GiantMech => Some(GroundMode::GiantMech),
-        _ => None,
-    })
+    robot_pets
+        .active_assembly
+        .as_ref()
+        .and_then(|a| match a.form {
+            RobotAssemblyForm::Car | RobotAssemblyForm::Motorcycle => Some(GroundMode::Motorcycle),
+            RobotAssemblyForm::Tank => Some(GroundMode::Tank),
+            RobotAssemblyForm::GiantMech => Some(GroundMode::GiantMech),
+            _ => None,
+        })
 }
 
 fn assembled_air_mode(robot_pets: &RobotPetCollection, loadout: &PlayerLoadout) -> AirMode {
-    // Blueprint jet always available if discovered.
-    if loadout.has_blueprint("jet_blueprint") {
-        return AirMode::Jet;
-    }
-    // Assembly-based air form.
     if let Some(a) = &robot_pets.active_assembly {
         if matches!(a.form, RobotAssemblyForm::SpaceJet) {
             return AirMode::Jet;
         }
-        if matches!(a.form, RobotAssemblyForm::SpaceShip | RobotAssemblyForm::MegaShip) {
+        if matches!(
+            a.form,
+            RobotAssemblyForm::SpaceShip | RobotAssemblyForm::MegaShip
+        ) {
             return AirMode::Ship;
         }
+    }
+    if loadout.has_blueprint("jet_blueprint") {
+        return AirMode::Jet;
     }
     AirMode::None
 }
@@ -195,7 +200,11 @@ fn vehicle_input(
                     });
                 } else {
                     state.ground_mode = mode;
-                    state.mech_armor_bonus = if mode == GroundMode::GiantMech { 40.0 } else { 0.0 };
+                    state.mech_armor_bonus = if mode == GroundMode::GiantMech {
+                        40.0
+                    } else {
+                        0.0
+                    };
                     state.air_mode = AirMode::None;
                     state.boat_active = false;
                     state.active_boat = None;
@@ -208,7 +217,8 @@ fn vehicle_input(
                 }
             } else {
                 msg_ev.write(UiMessageEvent {
-                    text: "No ground vehicle — assemble one in the Garage or find a blueprint.".into(),
+                    text: "No ground vehicle — assemble one in the Garage or find a blueprint."
+                        .into(),
                     duration: 2.0,
                 });
             }
@@ -264,9 +274,20 @@ fn vehicle_input(
                 state.active_boat = Some(boat_entity);
                 state.boat_heading = yaw_from_rotation(boat_transform.rotation);
                 let trip_distance = boat.dock_position.distance(boat.island_position);
-                board_nearby_players(&mut commands, &player_q, boat_entity, boat_transform, boat, entity);
+                board_nearby_players(
+                    &mut commands,
+                    &player_q,
+                    boat_entity,
+                    boat_transform,
+                    boat,
+                    entity,
+                );
                 msg_ev.write(UiMessageEvent {
-                    text: format!("P{} Boat: ON - steer along the wake ({:.0}m)", idx.0 + 1, trip_distance),
+                    text: format!(
+                        "P{} Boat: ON - steer along the wake ({:.0}m)",
+                        idx.0 + 1,
+                        trip_distance
+                    ),
                     duration: 2.4,
                 });
                 continue;
@@ -275,7 +296,8 @@ fn vehicle_input(
             // Air mode toggle.
             let available_air = assembled_air_mode(&robot_pets, &loadout);
             if available_air != AirMode::None {
-                let currently_on = state.air_mode == available_air && state.active_owner == Some(idx.0);
+                let currently_on =
+                    state.air_mode == available_air && state.active_owner == Some(idx.0);
                 if currently_on {
                     state.deactivate_air();
                     state.active_owner = None;
@@ -297,7 +319,9 @@ fn vehicle_input(
                 }
             } else {
                 msg_ev.write(UiMessageEvent {
-                    text: "No air vehicle — assemble SpaceJet in the Garage or find a jet blueprint.".into(),
+                    text:
+                        "No air vehicle — assemble SpaceJet in the Garage or find a jet blueprint."
+                            .into(),
                     duration: 2.0,
                 });
             }
@@ -413,10 +437,19 @@ fn clear_stale_boat_passengers_system(
 /// Apply vehicle speed/force buffs only to the player who activated the vehicle.
 fn apply_vehicle_buffs(
     mut state: ResMut<VehicleState>,
-    mut q: Query<(&PlayerIndex, &mut PlayerMovement, &mut JetpackState, &mut PlayerStats), With<Player>>,
+    mut q: Query<
+        (
+            &PlayerIndex,
+            &mut PlayerMovement,
+            &mut JetpackState,
+            &mut PlayerStats,
+        ),
+        With<Player>,
+    >,
 ) {
     for (idx, mut mv, mut jet, mut stats) in q.iter_mut() {
-        let Some(slot) = state.baselines.get_mut(idx.0 as usize) else {
+        let slot_index = idx.0 as usize;
+        let Some(slot) = state.baselines.get_mut(slot_index) else {
             continue;
         };
         let baseline = *slot.get_or_insert(VehicleBaseline {
@@ -487,8 +520,26 @@ fn apply_vehicle_buffs(
         }
 
         // Tank / Mech armor bonus applied to current stats (not max, to avoid save drift)
-        let armor_bonus = if is_active_owner { state.mech_armor_bonus } else { 0.0 };
-        stats.armor = (stats.armor + armor_bonus).min(stats.max_armor + armor_bonus);
+        let desired_armor_bonus = if is_active_owner {
+            state.mech_armor_bonus
+        } else {
+            0.0
+        };
+        let previous_armor_bonus = state.applied_armor_bonuses[slot_index];
+        apply_vehicle_armor_bonus(&mut stats, previous_armor_bonus, desired_armor_bonus);
+        state.applied_armor_bonuses[slot_index] = desired_armor_bonus;
+    }
+}
+
+fn apply_vehicle_armor_bonus(stats: &mut PlayerStats, previous_bonus: f32, desired_bonus: f32) {
+    let previous_bonus = previous_bonus.max(0.0);
+    let desired_bonus = desired_bonus.max(0.0);
+    let desired_cap = stats.max_armor + desired_bonus;
+
+    if desired_bonus > previous_bonus {
+        stats.armor = (stats.armor + desired_bonus - previous_bonus).min(desired_cap);
+    } else {
+        stats.armor = stats.armor.min(desired_cap);
     }
 }
 
@@ -567,5 +618,72 @@ fn boat_seat_offset(seat: u8) -> Vec3 {
         1 => Vec3::new(-1.35, 1.02, -0.55),
         2 => Vec3::new(1.35, 1.02, -0.55),
         _ => Vec3::new(0.0, 1.02, -2.25),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::robot_pets::RobotAssembly;
+
+    fn robot_pets_with_assembly(form: RobotAssemblyForm) -> RobotPetCollection {
+        RobotPetCollection {
+            active_assembly: Some(RobotAssembly {
+                form,
+                pet_ids: vec!["test-pet".to_string()],
+            }),
+            ..default()
+        }
+    }
+
+    #[test]
+    fn assembled_ship_takes_priority_over_jet_blueprint() {
+        let mut loadout = PlayerLoadout::default();
+        loadout.add_blueprint("jet_blueprint");
+
+        assert_eq!(
+            assembled_air_mode(
+                &robot_pets_with_assembly(RobotAssemblyForm::SpaceShip),
+                &loadout
+            ),
+            AirMode::Ship
+        );
+        assert_eq!(
+            assembled_air_mode(
+                &robot_pets_with_assembly(RobotAssemblyForm::MegaShip),
+                &loadout
+            ),
+            AirMode::Ship
+        );
+    }
+
+    #[test]
+    fn jet_blueprint_remains_air_fallback_without_ship_assembly() {
+        let mut loadout = PlayerLoadout::default();
+        loadout.add_blueprint("jet_blueprint");
+
+        assert_eq!(
+            assembled_air_mode(&RobotPetCollection::default(), &loadout),
+            AirMode::Jet
+        );
+    }
+
+    #[test]
+    fn mech_armor_bonus_applies_once_and_clamps_when_removed() {
+        let mut stats = PlayerStats {
+            armor: 60.0,
+            max_armor: 100.0,
+            ..default()
+        };
+
+        apply_vehicle_armor_bonus(&mut stats, 0.0, 40.0);
+        assert_eq!(stats.armor, 100.0);
+
+        apply_vehicle_armor_bonus(&mut stats, 40.0, 40.0);
+        assert_eq!(stats.armor, 100.0);
+
+        stats.armor = 135.0;
+        apply_vehicle_armor_bonus(&mut stats, 40.0, 0.0);
+        assert_eq!(stats.armor, 100.0);
     }
 }

@@ -51,8 +51,11 @@ pub fn spawn_robot(
         .spawn(PbrBundle {
             mesh: Mesh3d(meshes.add(Capsule3d::new(tw * 0.46, th * 0.55))),
             material: MeshMaterial3d(primary_mat.clone()),
-            transform: Transform::from_xyz(0.0, th * 0.5, 0.0)
-                .with_scale(Vec3::new(1.0, 1.0, td / (tw * 0.92))),
+            transform: Transform::from_xyz(0.0, th * 0.5, 0.0).with_scale(Vec3::new(
+                1.0,
+                1.0,
+                td / (tw * 0.92),
+            )),
             ..default()
         })
         .id();
@@ -63,8 +66,11 @@ pub fn spawn_robot(
         .spawn(PbrBundle {
             mesh: Mesh3d(meshes.add(Sphere::new(0.5))),
             material: MeshMaterial3d(secondary_mat.clone()),
-            transform: Transform::from_xyz(0.0, th * 0.60, td * 0.52)
-                .with_scale(Vec3::new(tw * 0.68, th * 0.42, td * 0.22)),
+            transform: Transform::from_xyz(0.0, th * 0.60, td * 0.52).with_scale(Vec3::new(
+                tw * 0.68,
+                th * 0.42,
+                td * 0.22,
+            )),
             ..default()
         })
         .id();
@@ -95,10 +101,7 @@ pub fn spawn_robot(
             Vec3::ONE,
         ),
         // Round "Box" head into a squashed sphere
-        HeadShape::Box => (
-            Sphere::new(hs * 0.52).into(),
-            Vec3::new(1.0, 0.88, 0.90),
-        ),
+        HeadShape::Box => (Sphere::new(hs * 0.52).into(), Vec3::new(1.0, 0.88, 0.90)),
     };
     let head = commands
         .spawn(PbrBundle {
@@ -125,8 +128,11 @@ pub fn spawn_robot(
             ),
             VisorStyle::Full => (
                 Sphere::new(0.5).into(),
-                Transform::from_xyz(0.0, th + hs * 0.5, hs * 0.52)
-                    .with_scale(Vec3::new(hs * 0.72, hs * 0.48, hs * 0.18)),
+                Transform::from_xyz(0.0, th + hs * 0.5, hs * 0.52).with_scale(Vec3::new(
+                    hs * 0.72,
+                    hs * 0.48,
+                    hs * 0.18,
+                )),
             ),
         };
         let visor = commands
@@ -392,8 +398,12 @@ pub fn spawn_robot(
                 .spawn(PbrBundle {
                     mesh: Mesh3d(meshes.add(Capsule3d::new(radius, seg_len * 0.82))),
                     material: MeshMaterial3d(secondary_mat.clone()),
-                    transform: Transform::from_xyz(0.0, th * 0.3 - t * th * 0.4, tail_z - seg_len * 0.5)
-                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    transform: Transform::from_xyz(
+                        0.0,
+                        th * 0.3 - t * th * 0.4,
+                        tail_z - seg_len * 0.5,
+                    )
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                     ..default()
                 })
                 .id();

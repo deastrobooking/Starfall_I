@@ -26,8 +26,14 @@ together.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
 - Robot pet foundation lives in `src/robot_pets.rs`: shared saved pet records,
   enemy salvage parts, store-build recipes, and combined vehicle/mech/ship form
-  gates. Chapter scripts already use robot rescue pods; the garage UI and
-  runtime mech/ship controllers are future work.
+  gates. Chapter scripts already use robot rescue pods. The Robot Garage screen
+  (`src/plugins/robot_garage_plugin.rs`, `AppState::RobotGarage`) lets players
+  assemble forms from collected pets and parts. Assembled forms drive vehicle
+  modes at runtime: Motorcycle/Car assembly enables Motorcycle mode (M key),
+  Tank enables Tank mode, GiantMech enables Mech mode, SpaceJet enables Jet
+  mode (J key), SpaceShip/MegaShip enables Ship mode. `MechCommandLink` upgrade
+  rank gates advanced forms. Runtime mech/ship 3D controllers are still future
+  work.
 - Tech upgrade foundation lives in `src/upgrades.rs`: shared saved beam,
   missile, turret, health, rejuvenation, and mech-link ranks. Chapter select
   spends robot salvage on ranks; chapter tech caches grant parts/route hints;
@@ -84,7 +90,9 @@ together.
   `src/plugins/ui_plugin.rs`. Feed new interactables into that panel when they
   need immediate player-facing prompts.
 - Core app states are `MainMenu`, `PlayerSelect`, `CharacterDesign`,
-  `ChapterSelect`, `ChassisEditor`, `Playing`, `Paused`, and `GameOver`.
+  `ChapterSelect`, `ChassisEditor`, `RobotGarage`, `Playing`, `Paused`, and
+  `GameOver`. `ChassisEditor` and `RobotGarage` are both entered from
+  `ChapterSelect` via [E] and [G] and return to `ChapterSelect`.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
   `docs/improvements.md`, `docs/naming.md`, and
   `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md` and
@@ -131,19 +139,37 @@ together.
 13. Update docs when changing architecture, controls, content flow, save scope,
     engine policy, or production priorities.
 
+## Completed Feature Milestones (recent)
+
+- **Swappable parts system** — `CharacterLoadout`, `PartSlotTag`, `CharacterVisualConfig`,
+  `PlayerPartLoadout`; `swap_character_parts` system; robot spawn functions.
+- **Rounded robot factory** — `src/robots/factory.rs` fully rewritten with
+  Capsule3d/Sphere/Cylinder geometry.
+- **Chassis Editor** (`AppState::ChassisEditor`) — live 3D spinning preview, Q/W/E/R
+  slot toggles, 1-5 accent presets, +/- scale.
+- **Perk Tree UI + Upgrade Shop UI** — per-branch/per-track colored rows with rank bars
+  in chapter select; live update systems; A–H spend perks, Z–N purchase upgrades.
+- **Robot Garage** (`AppState::RobotGarage`) — assembly form browser, auto pet selection,
+  MechCommandLink gating.
+- **HP bonus application** — `perks.hp_bonus()` + `upgrades.armor_health_bonus()` applied
+  at player spawn.
+- **Chassis persistence** — `CharacterPartStyle` is serde-able; `PlayerPartLoadout` saved
+  and hydrated across all save paths.
+- **Assembly-driven vehicle modes** — `VehicleState` uses `GroundMode`/`AirMode` enums;
+  assembled forms unlock Motorcycle/Tank/Mech/Jet/Ship modes at runtime.
+
 ## Milestone Priority
 
 1. Stabilize the 200-mile Everest Range: marker readability, route signs,
    settlements, grounded anchors, and far-zone smoke tests.
-2. Build controller-first upgrade and robot garage screens.
-3. Finish multiplayer ownership UI and save reliability.
-4. Deepen dragon lairs and Great Scientist temples with keys, locks, room
+2. Deepen dragon lairs and Great Scientist temples with keys, locks, room
    objectives, miniboss staging, mechanics trials, and unique hazards.
-5. Tune player movement, physics, hand combat, beam saber, and controller
+3. Finish multiplayer ownership UI and save reliability.
+4. Tune player movement, physics, hand combat, beam saber, and controller
    diagnostics.
-6. Add app/plugin smoke tests, debug overlays, profiling notes, and repeatable
+5. Add app/plugin smoke tests, debug overlays, profiling notes, and repeatable
    manual macOS validation.
-7. Then proceed through Chapter 1 vertical slice polish, full production
+6. Then proceed through Chapter 1 vertical slice polish, full production
    systems, presentation, accessibility, and ship readiness.
 
 ## Definition Of Done

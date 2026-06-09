@@ -6,7 +6,6 @@
 //! Enter confirms and saves to `PlayerPartLoadout`. Esc exits without saving.
 
 use bevy::prelude::*;
-use std::f32::consts::PI;
 
 use crate::character_parts::{CharacterLoadout, CharacterPartStyle};
 use crate::characters::{hero_config, spawn_cartoon_character};
@@ -24,11 +23,7 @@ impl Plugin for ChassisEditorPlugin {
             .add_systems(OnExit(AppState::ChassisEditor), teardown_editor)
             .add_systems(
                 Update,
-                (
-                    spin_preview,
-                    editor_keyboard_input,
-                    update_slot_labels,
-                )
+                (spin_preview, editor_keyboard_input, update_slot_labels)
                     .run_if(in_state(AppState::ChassisEditor)),
             );
     }
@@ -162,14 +157,20 @@ fn setup_editor(
                 // Title
                 panel.spawn((
                     Text::new("CHASSIS EDITOR"),
-                    TextFont { font_size: 34.0, ..default() },
+                    TextFont {
+                        font_size: 34.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.4, 0.85, 1.0)),
                 ));
 
                 // Divider label
                 panel.spawn((
                     Text::new("── PART STYLES ──"),
-                    TextFont { font_size: 14.0, ..default() },
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.5, 0.6, 0.75)),
                 ));
 
@@ -190,12 +191,18 @@ fn setup_editor(
                         .with_children(|row| {
                             row.spawn((
                                 Text::new(format!("[{key}] {label:<12}")),
-                                TextFont { font_size: 17.0, ..default() },
+                                TextFont {
+                                    font_size: 17.0,
+                                    ..default()
+                                },
                                 TextColor(Color::srgb(0.75, 0.85, 1.0)),
                             ));
                             row.spawn((
                                 Text::new("Humanoid"),
-                                TextFont { font_size: 17.0, ..default() },
+                                TextFont {
+                                    font_size: 17.0,
+                                    ..default()
+                                },
                                 TextColor(Color::srgb(1.0, 0.9, 0.6)),
                                 SlotLabel(slot_id),
                             ));
@@ -205,24 +212,36 @@ fn setup_editor(
                 // Divider label
                 panel.spawn((
                     Text::new("── ROBOT ACCENT PRESET ──"),
-                    TextFont { font_size: 14.0, ..default() },
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.5, 0.6, 0.75)),
                 ));
                 panel.spawn((
                     Text::new("[1] Amp  [2] Atlas  [3] Volt  [4] Valor  [5] Theta"),
-                    TextFont { font_size: 15.0, ..default() },
+                    TextFont {
+                        font_size: 15.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.8, 0.85, 0.95)),
                 ));
 
                 // Divider label
                 panel.spawn((
                     Text::new("── CONTROLS ──"),
-                    TextFont { font_size: 14.0, ..default() },
+                    TextFont {
+                        font_size: 14.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.5, 0.6, 0.75)),
                 ));
                 panel.spawn((
                     Text::new("[+/-]  Scale preview\n[Enter]  Save & return\n[Esc]   Cancel"),
-                    TextFont { font_size: 15.0, ..default() },
+                    TextFont {
+                        font_size: 15.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.7, 0.75, 0.85)),
                 ));
             });
@@ -271,7 +290,7 @@ fn editor_keyboard_input(
     mut chassis: ResMut<PlayerChassis>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
     mut next_state: ResMut<NextState<AppState>>,
-    preview_q: Query<Entity, With<ChassisPreviewRoot>>,
+    _preview_q: Query<Entity, With<ChassisPreviewRoot>>,
     mut loadout_q: Query<&mut CharacterLoadout>,
 ) {
     // Slot toggles
@@ -311,11 +330,21 @@ fn editor_keyboard_input(
     }
 
     // Robot accent preset keys
-    if keyboard.just_pressed(KeyCode::Digit1) { chassis.0 = amp(); }
-    if keyboard.just_pressed(KeyCode::Digit2) { chassis.0 = atlas(); }
-    if keyboard.just_pressed(KeyCode::Digit3) { chassis.0 = volt(); }
-    if keyboard.just_pressed(KeyCode::Digit4) { chassis.0 = valor(); }
-    if keyboard.just_pressed(KeyCode::Digit5) { chassis.0 = theta(); }
+    if keyboard.just_pressed(KeyCode::Digit1) {
+        chassis.0 = amp();
+    }
+    if keyboard.just_pressed(KeyCode::Digit2) {
+        chassis.0 = atlas();
+    }
+    if keyboard.just_pressed(KeyCode::Digit3) {
+        chassis.0 = volt();
+    }
+    if keyboard.just_pressed(KeyCode::Digit4) {
+        chassis.0 = valor();
+    }
+    if keyboard.just_pressed(KeyCode::Digit5) {
+        chassis.0 = theta();
+    }
 
     // Scale
     if keyboard.just_pressed(KeyCode::Equal) || keyboard.just_pressed(KeyCode::NumpadAdd) {

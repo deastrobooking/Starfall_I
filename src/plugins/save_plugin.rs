@@ -201,7 +201,16 @@ pub fn save_game(
     upgrades: &UpgradeLedger,
     part_loadout: &PlayerPartLoadout,
 ) -> Result<(), String> {
-    let data = build_save_data(players, wave, progress, perks, select, robot_pets, upgrades, part_loadout);
+    let data = build_save_data(
+        players,
+        wave,
+        progress,
+        perks,
+        select,
+        robot_pets,
+        upgrades,
+        part_loadout,
+    );
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(save_path(), json).map_err(|e| e.to_string())
 }
@@ -296,7 +305,16 @@ pub fn save_current_session(
     if players.is_empty() {
         return Err("No active players to save".to_string());
     }
-    save_game(players, wave, progress, perks, select, robot_pets, upgrades, part_loadout)
+    save_game(
+        players,
+        wave,
+        progress,
+        perks,
+        select,
+        robot_pets,
+        upgrades,
+        part_loadout,
+    )
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
@@ -537,6 +555,12 @@ mod tests {
         let mut upgrades = UpgradeLedger::default();
         upgrades.ranks.push((TechUpgradeId::BeamCapacitors, 2));
         upgrades.rejuvenation_charge = 75.0;
+        let part_loadout = PlayerPartLoadout {
+            body: CharacterPartStyle::RobotMechanical,
+            arms: CharacterPartStyle::HumanoidClothing,
+            legs: CharacterPartStyle::RobotMechanical,
+            shoulders: CharacterPartStyle::RobotMechanical,
+        };
 
         let data = build_save_data(
             vec![
@@ -549,6 +573,7 @@ mod tests {
             &select,
             &robot_pets,
             &upgrades,
+            &part_loadout,
         );
 
         assert_eq!(data.wave_number, 7);
@@ -574,10 +599,17 @@ mod tests {
         assert_eq!(data.robot_pets.pets[0].id, "spark-pup");
         assert_eq!(data.tech_upgrades.rank(TechUpgradeId::BeamCapacitors), 2);
         assert_eq!(data.tech_upgrades.rejuvenation_charge, 75.0);
+        assert_eq!(data.part_loadout_body, CharacterPartStyle::RobotMechanical);
+        assert_eq!(data.part_loadout_arms, CharacterPartStyle::HumanoidClothing);
+        assert_eq!(data.part_loadout_legs, CharacterPartStyle::RobotMechanical);
+        assert_eq!(
+            data.part_loadout_shoulders,
+            CharacterPartStyle::RobotMechanical
+        );
     }
 
     #[test]
-    fn save_data_round_trip_preserves_per_player_records() {
+    fn save_data_round_trip_preserves_per_player_records_and_part_loadout() {
         let mut robot_pets = RobotPetCollection::default();
         robot_pets.add_part(RobotPartKind::StarDrive, 2);
         robot_pets.rescue_pet(RobotPetBlueprint::rescued(
@@ -606,6 +638,10 @@ mod tests {
             perk_ranks: vec![("heart_vitality".to_string(), 2)],
             robot_pets,
             tech_upgrades,
+            part_loadout_body: CharacterPartStyle::RobotMechanical,
+            part_loadout_arms: CharacterPartStyle::RobotMechanical,
+            part_loadout_legs: CharacterPartStyle::HumanoidClothing,
+            part_loadout_shoulders: CharacterPartStyle::RobotMechanical,
             ..SaveData::default()
         };
 
@@ -630,6 +666,22 @@ mod tests {
             1
         );
         assert_eq!(loaded.tech_upgrades.rejuvenation_charge, 120.0);
+        assert_eq!(
+            loaded.part_loadout_body,
+            CharacterPartStyle::RobotMechanical
+        );
+        assert_eq!(
+            loaded.part_loadout_arms,
+            CharacterPartStyle::RobotMechanical
+        );
+        assert_eq!(
+            loaded.part_loadout_legs,
+            CharacterPartStyle::HumanoidClothing
+        );
+        assert_eq!(
+            loaded.part_loadout_shoulders,
+            CharacterPartStyle::RobotMechanical
+        );
     }
 
     #[test]

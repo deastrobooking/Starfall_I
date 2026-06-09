@@ -126,8 +126,11 @@ pub fn spawn_robot_body(
         CartoonPartKind::Body,
         Mesh::from(Capsule3d::new(0.28 * s, 0.70 * s)),
         primary.clone(),
-        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0)
-            .with_scale(Vec3::new(1.08 * bw, 1.0, 0.68)),
+        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0).with_scale(Vec3::new(
+            1.08 * bw,
+            1.0,
+            0.68,
+        )),
         PartSlotTag::Body,
     );
     // Chest panel: protruding ellipsoid plate
@@ -138,8 +141,11 @@ pub fn spawn_robot_body(
         CartoonPartKind::Body,
         Mesh::from(Sphere::new(0.5)),
         armor.clone(),
-        Transform::from_xyz(0.0, 0.08 * s + y_lift, -0.260 * s)
-            .with_scale(Vec3::new(0.62 * s * bw, 0.38 * s, 0.095 * s)),
+        Transform::from_xyz(0.0, 0.08 * s + y_lift, -0.260 * s).with_scale(Vec3::new(
+            0.62 * s * bw,
+            0.38 * s,
+            0.095 * s,
+        )),
         PartSlotTag::Body,
     );
     // Core reactor glow
@@ -202,8 +208,11 @@ pub fn spawn_robot_body(
         CartoonPartKind::Belt,
         Mesh::from(Sphere::new(0.5)),
         accent_glow.clone(),
-        Transform::from_xyz(0.0, -0.38 * s + y_lift, -0.22 * s)
-            .with_scale(Vec3::new(0.18 * s, 0.16 * s, 0.06 * s)),
+        Transform::from_xyz(0.0, -0.38 * s + y_lift, -0.22 * s).with_scale(Vec3::new(
+            0.18 * s,
+            0.16 * s,
+            0.06 * s,
+        )),
         PartSlotTag::Body,
     );
 }
@@ -368,7 +377,7 @@ pub fn spawn_robot_legs(
             leg_k,
             Mesh::from(Capsule3d::new(0.082 * s, 0.37 * s * ll)),
             armor.clone(),
-            Transform::from_xyz(x, -1.00 * s - (ll - 1.0) * 0.26 * s + y_lift, -0.008 * s)
+            Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.008 * s)
                 .with_scale(Vec3::new(0.80, 1.0, 0.70)),
             PartSlotTag::Legs,
         );
@@ -380,7 +389,7 @@ pub fn spawn_robot_legs(
             leg_k,
             Mesh::from(Capsule3d::new(0.014 * s, 0.20 * s * ll)),
             accent_glow.clone(),
-            Transform::from_xyz(x, -1.00 * s - (ll - 1.0) * 0.26 * s + y_lift, -0.082 * s)
+            Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.082 * s)
                 .with_scale(Vec3::new(0.4, 1.0, 0.3)),
             PartSlotTag::Legs,
         );

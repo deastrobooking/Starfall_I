@@ -179,7 +179,9 @@ The collection supports store-built pets through `store_pet_recipe()` and campai
 
 Save/load persists the whole `robot_pets` section with `serde(default)`, so older saves without robot data continue to load as an empty collection.
 
-Future runtime work should connect this foundation to a store/garage UI, vehicle spawning, mech combat stats, and split-screen passenger/ownership rules.
+The Robot Garage screen (`AppState::RobotGarage`, `src/plugins/robot_garage_plugin.rs`) is the current player-facing hub. A/D browsing selects one of the 9 `RobotAssemblyForm` variants; pressing Enter auto-selects the first N eligible pets and calls `robot_pets.assemble(form, &pet_ids)`; X disassembles. `MechCommandLink` upgrade rank gates GiantMech, SpaceShip, and MegaShip. Assembled forms drive `VehicleState` at runtime (see Vehicle System below).
+
+Future runtime work: controller-friendly garage/store UI, runtime 3-D mech/ship controllers, per-player passenger/driver UX, and store-built pet purchasing from salvage.
 
 ---
 
@@ -544,7 +546,7 @@ Save file: `starfall_i_save.json` (written next to the binary).
 - **Manual save**: F5 key.
 - **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
 
-Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, robot pets, tech upgrade ranks, rejuvenation reserve, and player-slot character blueprints.
+Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, robot pets, tech upgrade ranks, rejuvenation reserve, player-slot character blueprints, and chassis part loadout (`part_loadout_body/arms/legs/shoulders` as `CharacterPartStyle`).
 
 Saved per-player fields live in `players[]` records keyed by `player_index`: level, experience, credits, health, stamina, and armor values. Older top-level stat fields are still accepted for legacy save migration, but new saves use the per-player records as the authoritative source.
 
@@ -596,8 +598,41 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 
 ---
 
+## Vehicle System
+
+**Plugin:** `VehiclePlugin` | **File:** `src/plugins/vehicle_plugin.rs`
+
+`VehicleState` uses two enums instead of boolean flags:
+
+- `GroundMode`: `None`, `Motorcycle`, `Tank`, `GiantMech`
+- `AirMode`: `None`, `Jet`, `Ship`
+
+**M key** cycles ground mode. **J key** cycles air/boat mode. Access is gated by either a `PlayerLoadout` blueprint OR `RobotPetCollection.active_assembly`:
+
+| Assembly form | Ground mode | Air mode |
+|---|---|---|
+| Car / Motorcycle | Motorcycle | — |
+| Tank | Tank | — |
+| GiantMech | GiantMech | — |
+| SpaceJet or jet_blueprint | — | Jet |
+| SpaceShip / MegaShip | — | Ship |
+
+`apply_vehicle_buffs()` applies per-mode stats:
+
+| Mode | Speed cap | Armor bonus | Notes |
+|---|---|---|---|
+| Motorcycle | ×1.58 walk | — | Fast ground travel |
+| Tank | max 0.42 | — | Slow, armored |
+| GiantMech | max 0.34 | +40 | Very slow, heavy armor |
+| Jet | jetpack boosted | — | Enhanced airborne |
+| Ship | 1.5× jet | — | Best air mode |
+
+The party still shares one active vehicle mode at a time. 3-D mech/ship controller runtimes are future work.
+
+---
+
 ## Robot / Chassis System
 
-**Module:** `src/robots/` | **Plugin:** `ChassisEditorPlugin`
+**Module:** `src/robots/` | **Plugins:** `ChassisEditorPlugin`, `RobotGaragePlugin`
 
-`RobotStyle` in `designer.rs` defines colors and part config. `factory.rs` spawns the physical entity. `presets.rs` has named robot builds (e.g., `amp()` is the default player chassis). The chassis editor (`ChassisEditorPlugin`) lets the player restyle their robot before entering a chapter.
+`RobotStyle` in `designer.rs` defines colors and part config. `factory.rs` spawns the physical entity using Capsule3d/Sphere/Cylinder geometry. `presets.rs` has named robot builds (`amp()` is the default player chassis). The chassis editor (`ChassisEditorPlugin`) lets the player restyle their robot and swap humanoid/robot part slots before entering a chapter; the chosen `PlayerPartLoadout` is saved to disk.

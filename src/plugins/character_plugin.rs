@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::character_parts::{
-    spawn_robot_arms, spawn_robot_body, spawn_robot_legs, spawn_robot_shoulders,
-    CharacterLoadout, CharacterPartStyle, CharacterVisualConfig, PartSlotTag,
+    spawn_robot_arms, spawn_robot_body, spawn_robot_legs, spawn_robot_shoulders, CharacterLoadout,
+    CharacterPartStyle, CharacterVisualConfig, PartSlotTag,
 };
 use crate::components::character::{
     CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonPose,
@@ -35,10 +35,7 @@ fn swap_character_parts(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    changed: Query<
-        (Entity, &CharacterLoadout, &CharacterVisualConfig),
-        Changed<CharacterLoadout>,
-    >,
+    changed: Query<(Entity, &CharacterLoadout, &CharacterVisualConfig), Changed<CharacterLoadout>>,
     parts: Query<(Entity, &CartoonPart, &PartSlotTag)>,
 ) {
     for (root, loadout, visual_cfg) in &changed {
@@ -63,16 +60,44 @@ fn swap_character_parts(
             match style {
                 CharacterPartStyle::RobotMechanical => match slot_tag {
                     PartSlotTag::Body => {
-                        spawn_robot_body(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                        spawn_robot_body(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            root,
+                            visual_cfg,
+                            lift,
+                        );
                     }
                     PartSlotTag::Arms => {
-                        spawn_robot_arms(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                        spawn_robot_arms(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            root,
+                            visual_cfg,
+                            lift,
+                        );
                     }
                     PartSlotTag::Legs => {
-                        spawn_robot_legs(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                        spawn_robot_legs(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            root,
+                            visual_cfg,
+                            lift,
+                        );
                     }
                     PartSlotTag::Shoulders => {
-                        spawn_robot_shoulders(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift);
+                        spawn_robot_shoulders(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            root,
+                            visual_cfg,
+                            lift,
+                        );
                     }
                     _ => {}
                 },

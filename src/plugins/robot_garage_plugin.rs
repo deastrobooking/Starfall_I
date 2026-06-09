@@ -5,9 +5,7 @@
 
 use bevy::prelude::*;
 
-use crate::robot_pets::{
-    RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError,
-};
+use crate::robot_pets::{RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError};
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 
@@ -260,11 +258,56 @@ fn update_garage_display(
     data: Res<GarageData>,
     robot_pets: Res<RobotPetCollection>,
     upgrades: Res<UpgradeLedger>,
-    mut parts_q: Query<&mut Text, (With<PartsInventoryText>, Without<PetRosterText>, Without<FormBrowserText>, Without<AssemblyStatusText>, Without<ActionFeedbackText>)>,
-    mut roster_q: Query<&mut Text, (With<PetRosterText>, Without<PartsInventoryText>, Without<FormBrowserText>, Without<AssemblyStatusText>, Without<ActionFeedbackText>)>,
-    mut form_q: Query<&mut Text, (With<FormBrowserText>, Without<PartsInventoryText>, Without<PetRosterText>, Without<AssemblyStatusText>, Without<ActionFeedbackText>)>,
-    mut assembly_q: Query<&mut Text, (With<AssemblyStatusText>, Without<PartsInventoryText>, Without<PetRosterText>, Without<FormBrowserText>, Without<ActionFeedbackText>)>,
-    mut feedback_q: Query<&mut Text, (With<ActionFeedbackText>, Without<PartsInventoryText>, Without<PetRosterText>, Without<FormBrowserText>, Without<AssemblyStatusText>)>,
+    mut parts_q: Query<
+        &mut Text,
+        (
+            With<PartsInventoryText>,
+            Without<PetRosterText>,
+            Without<FormBrowserText>,
+            Without<AssemblyStatusText>,
+            Without<ActionFeedbackText>,
+        ),
+    >,
+    mut roster_q: Query<
+        &mut Text,
+        (
+            With<PetRosterText>,
+            Without<PartsInventoryText>,
+            Without<FormBrowserText>,
+            Without<AssemblyStatusText>,
+            Without<ActionFeedbackText>,
+        ),
+    >,
+    mut form_q: Query<
+        &mut Text,
+        (
+            With<FormBrowserText>,
+            Without<PartsInventoryText>,
+            Without<PetRosterText>,
+            Without<AssemblyStatusText>,
+            Without<ActionFeedbackText>,
+        ),
+    >,
+    mut assembly_q: Query<
+        &mut Text,
+        (
+            With<AssemblyStatusText>,
+            Without<PartsInventoryText>,
+            Without<PetRosterText>,
+            Without<FormBrowserText>,
+            Without<ActionFeedbackText>,
+        ),
+    >,
+    mut feedback_q: Query<
+        &mut Text,
+        (
+            With<ActionFeedbackText>,
+            Without<PartsInventoryText>,
+            Without<PetRosterText>,
+            Without<FormBrowserText>,
+            Without<AssemblyStatusText>,
+        ),
+    >,
 ) {
     if !data.is_changed() && !robot_pets.is_changed() && !upgrades.is_changed() {
         return;
@@ -327,11 +370,7 @@ fn format_pet_roster(robot_pets: &RobotPetCollection) -> String {
                 crate::robot_pets::RobotPetSource::Rescued => "rescued",
                 crate::robot_pets::RobotPetSource::StoreBuilt => "built",
             };
-            let forms: Vec<&str> = pet
-                .unlocked_forms
-                .iter()
-                .map(|f| f.label())
-                .collect();
+            let forms: Vec<&str> = pet.unlocked_forms.iter().map(|f| f.label()).collect();
             let forms_str = if forms.is_empty() {
                 "none".to_string()
             } else {
@@ -392,7 +431,10 @@ fn format_form_browser(
     } else if robot_pets.active_assembly.as_ref().map(|a| a.form) == Some(form) {
         "ASSEMBLED — press [X] to disassemble".to_string()
     } else if !enough_pets && !can_afford {
-        format!("NEED {} more pets + parts", req_pets.saturating_sub(eligible_pets))
+        format!(
+            "NEED {} more pets + parts",
+            req_pets.saturating_sub(eligible_pets)
+        )
     } else if !enough_pets {
         format!(
             "NEED {} more eligible pet(s)  (have {}/{})",
@@ -461,6 +503,8 @@ fn format_feedback(result: Option<GarageActionResult>) -> &'static str {
         Some(GarageActionResult::Disassembled) => "Assembly disbanded.",
         Some(GarageActionResult::NotEnoughPets) => "Not enough eligible pets for this form.",
         Some(GarageActionResult::NotEnoughParts) => "Missing parts — collect more in missions.",
-        Some(GarageActionResult::AlreadyAssembled) => "Already assembled — press [X] to disband first.",
+        Some(GarageActionResult::AlreadyAssembled) => {
+            "Already assembled — press [X] to disband first."
+        }
     }
 }

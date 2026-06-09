@@ -656,8 +656,7 @@ pub fn attach_cartoon_character(
         CartoonPartKind::Head,
         Mesh::from(Capsule3d::new(0.10 * s, 0.08 * s)),
         skin.clone(),
-        Transform::from_xyz(0.0, 0.40 * s, -0.010 * s)
-            .with_scale(Vec3::new(0.72, 1.0, 0.65)),
+        Transform::from_xyz(0.0, 0.40 * s, -0.010 * s).with_scale(Vec3::new(0.72, 1.0, 0.65)),
     );
 
     // ── Belt (waist strap + centre buckle) ────────────────────────────────────
@@ -670,8 +669,11 @@ pub fn attach_cartoon_character(
             CartoonPartKind::Belt,
             Mesh::from(Sphere::new(0.5)),
             suit_shadow.clone(),
-            Transform::from_xyz(0.0, -0.38 * s * height, 0.0)
-                .with_scale(Vec3::new(0.80 * s * hip_width, 0.11 * s, 0.44 * s)),
+            Transform::from_xyz(0.0, -0.38 * s * height, 0.0).with_scale(Vec3::new(
+                0.80 * s * hip_width,
+                0.11 * s,
+                0.44 * s,
+            )),
         );
         // Buckle: rounded ellipsoid
         spawn_part(
@@ -681,8 +683,11 @@ pub fn attach_cartoon_character(
             CartoonPartKind::Belt,
             Mesh::from(Sphere::new(0.5)),
             accent_glow.clone(),
-            Transform::from_xyz(0.0, -0.38 * s * height, -0.24 * s)
-                .with_scale(Vec3::new(0.19 * s, 0.17 * s, 0.07 * s)),
+            Transform::from_xyz(0.0, -0.38 * s * height, -0.24 * s).with_scale(Vec3::new(
+                0.19 * s,
+                0.17 * s,
+                0.07 * s,
+            )),
         );
     }
 
@@ -1440,8 +1445,11 @@ fn spawn_part(
 fn visual_ground_lift(body: &BodyRecipe, scale: f32) -> f32 {
     // Mirror the scaled collider dimensions used in authored_player_defaults.
     let half_height = 0.6 * (body.height * 0.72 + body.leg_length * 0.28) * scale;
-    let radius = 0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20) * scale;
-    let collider_bottom = -(half_height.clamp(0.44 * scale, 0.86 * scale) + radius.clamp(0.26 * scale, 0.50 * scale));
+    let radius = 0.35
+        * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20)
+        * scale;
+    let collider_bottom =
+        -(half_height.clamp(0.44 * scale, 0.86 * scale) + radius.clamp(0.26 * scale, 0.50 * scale));
     let foot_center_y = -1.25 * scale - (body.leg_length - 1.0) * 0.31 * scale;
     let foot_bottom = foot_center_y - 0.06 * scale;
 

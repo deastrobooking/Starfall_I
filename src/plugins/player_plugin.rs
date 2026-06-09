@@ -9,6 +9,7 @@ use crate::chapters::chapter_map_location;
 use crate::character_blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
+use crate::character_parts::CharacterLoadout;
 use crate::characters::{
     accent_preset, attach_cartoon_character, despawn_cartoon_character_parts, hair_preset,
     hero_config, hero_config_with_overrides, outfit_preset,
@@ -25,7 +26,6 @@ use crate::events::*;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile};
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
-use crate::character_parts::CharacterLoadout;
 use crate::resources::{
     CameraShake, ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig,
     PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
