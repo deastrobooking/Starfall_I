@@ -576,18 +576,18 @@ fn spawn_arms_mech(
         (CartoonPartKind::RightArm, CartoonPartKind::RightHand, arm_x),
     ] {
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.11 * s)), armor.clone(),
+            Mesh::from(Sphere::new(0.145 * s)), armor.clone(),
             Transform::from_xyz(x, 0.18 * s + y_lift, 0.0), PartSlotTag::Arms);
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.072 * s, 0.35 * s * al)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.100 * s, 0.35 * s * al)), primary.clone(),
             Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
                 .with_scale(Vec3::new(0.88, 1.0, 0.80)), PartSlotTag::Arms);
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.080 * s, 0.33 * s * al)), armor.clone(),
+            Mesh::from(Capsule3d::new(0.105 * s, 0.33 * s * al)), armor.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.005 * s)
                 .with_scale(Vec3::new(0.86, 1.0, 0.78)), PartSlotTag::Arms);
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.095 * s)), primary.clone(),
+            Mesh::from(Sphere::new(0.125 * s)), primary.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, -0.008 * s),
             PartSlotTag::Arms);
         spawn_part(commands, meshes, root, kind_arm,
@@ -595,7 +595,7 @@ fn spawn_arms_mech(
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.080 * s)
                 .with_scale(Vec3::new(0.5, 1.0, 0.4)), PartSlotTag::Arms);
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.110 * s * cfg.hand_scale)),
+            Mesh::from(Sphere::new(0.145 * s * cfg.hand_scale)),
             if cfg.has_gloves { armor.clone() } else { primary.clone() },
             Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, 0.02 * s)
                 .with_scale(Vec3::new(0.88, 1.10, 0.80)), PartSlotTag::Arms);
@@ -625,32 +625,32 @@ fn spawn_arms_heavy(
     ] {
         // Large shoulder ball
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.145 * s)), armor.clone(),
+            Mesh::from(Sphere::new(0.185 * s)), armor.clone(),
             Transform::from_xyz(x, 0.22 * s + y_lift, 0.0), PartSlotTag::Arms);
         // Wide upper arm
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.095 * s, 0.35 * s * al)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.130 * s, 0.35 * s * al)), primary.clone(),
             Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
                 .with_scale(Vec3::new(1.10, 1.0, 0.92)), PartSlotTag::Arms);
         // Elbow spike
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.036 * s, 0.12 * s)), dark.clone(),
+            Mesh::from(Capsule3d::new(0.045 * s, 0.14 * s)), dark.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.085 * s)
                 .with_rotation(Quat::from_rotation_x(-0.7)), PartSlotTag::Arms);
         // Wide armored forearm
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.100 * s, 0.34 * s * al)), armor.clone(),
+            Mesh::from(Capsule3d::new(0.135 * s, 0.34 * s * al)), armor.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.005 * s)
                 .with_scale(Vec3::new(1.08, 1.0, 0.90)), PartSlotTag::Arms);
         // Knuckle gauntlet fist
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.145 * s * cfg.hand_scale)), armor.clone(),
+            Mesh::from(Sphere::new(0.185 * s * cfg.hand_scale)), armor.clone(),
             Transform::from_xyz(x, -0.52 * s - (al - 1.0) * 0.28 * s + y_lift, 0.02 * s)
                 .with_scale(Vec3::new(1.05, 0.88, 1.10)), PartSlotTag::Arms);
         // Knuckle ridge bumps
         for dy in [-0.02_f32, 0.02_f32] {
             spawn_part(commands, meshes, root, kind_hand,
-                Mesh::from(Sphere::new(0.038 * s)), dark.clone(),
+                Mesh::from(Sphere::new(0.048 * s)), dark.clone(),
                 Transform::from_xyz(x + dy * 1.8 * s, -0.52 * s - (al - 1.0) * 0.28 * s + y_lift, -0.10 * s),
                 PartSlotTag::Arms);
         }
@@ -677,19 +677,19 @@ fn spawn_arms_scout(
         (CartoonPartKind::LeftArm, CartoonPartKind::LeftHand, -arm_x),
         (CartoonPartKind::RightArm, CartoonPartKind::RightHand, arm_x),
     ] {
-        // Thin upper arm
+        // Slim upper arm
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.055 * s, 0.36 * s * al)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.078 * s, 0.36 * s * al)), primary.clone(),
             Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
                 .with_scale(Vec3::new(0.80, 1.0, 0.72)), PartSlotTag::Arms);
-        // Thin forearm
+        // Slim forearm
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.060 * s, 0.34 * s * al)), stripe.clone(),
+            Mesh::from(Capsule3d::new(0.082 * s, 0.34 * s * al)), stripe.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.003 * s)
                 .with_scale(Vec3::new(0.78, 1.0, 0.70)), PartSlotTag::Arms);
         // Light hand
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.082 * s * cfg.hand_scale)), primary.clone(),
+            Mesh::from(Sphere::new(0.108 * s * cfg.hand_scale)), primary.clone(),
             Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, 0.01 * s)
                 .with_scale(Vec3::new(0.85, 1.05, 0.78)), PartSlotTag::Arms);
     }
@@ -718,16 +718,16 @@ fn spawn_arms_claw(
     ] {
         // Shoulder joint
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.11 * s)), dark.clone(),
+            Mesh::from(Sphere::new(0.145 * s)), dark.clone(),
             Transform::from_xyz(x, 0.18 * s + y_lift, 0.0), PartSlotTag::Arms);
         // Upper arm with ridge
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.075 * s, 0.35 * s * al)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.100 * s, 0.35 * s * al)), primary.clone(),
             Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0)
                 .with_scale(Vec3::new(0.88, 1.0, 0.80)), PartSlotTag::Arms);
         // Forearm with glow vein
         spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.070 * s, 0.33 * s * al)), dark.clone(),
+            Mesh::from(Capsule3d::new(0.095 * s, 0.33 * s * al)), dark.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.004 * s)
                 .with_scale(Vec3::new(0.84, 1.0, 0.76)), PartSlotTag::Arms);
         spawn_part(commands, meshes, root, kind_arm,
@@ -736,7 +736,7 @@ fn spawn_arms_claw(
                 .with_scale(Vec3::new(0.4, 1.0, 0.35)), PartSlotTag::Arms);
         // Wrist node
         spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.075 * s)), dark.clone(),
+            Mesh::from(Sphere::new(0.100 * s)), dark.clone(),
             Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, 0.0),
             PartSlotTag::Arms);
         // Three elongated claw prongs
@@ -779,32 +779,32 @@ fn spawn_legs_mech(
         (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot, CartoonPartKind::RightBoot, leg_x),
     ] {
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.088 * s, 0.40 * s * ll)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.120 * s, 0.40 * s * ll)), primary.clone(),
             Transform::from_xyz(x, -0.65 * s - (ll - 1.0) * 0.13 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.84, 1.0, 0.76)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.88, 1.0, 0.80)), PartSlotTag::Legs);
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Sphere::new(0.105 * s)), armor.clone(),
+            Mesh::from(Sphere::new(0.138 * s)), armor.clone(),
             Transform::from_xyz(x, -0.85 * s - (ll - 1.0) * 0.20 * s + y_lift, -0.012 * s),
             PartSlotTag::Legs);
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.082 * s, 0.37 * s * ll)), armor.clone(),
+            Mesh::from(Capsule3d::new(0.112 * s, 0.37 * s * ll)), armor.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.008 * s)
-                .with_scale(Vec3::new(0.80, 1.0, 0.70)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.84, 1.0, 0.74)), PartSlotTag::Legs);
         spawn_part(commands, meshes, root, leg_k,
             Mesh::from(Capsule3d::new(0.014 * s, 0.20 * s * ll)), accent_glow.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.082 * s)
                 .with_scale(Vec3::new(0.4, 1.0, 0.3)), PartSlotTag::Legs);
         spawn_part(commands, meshes, root, foot_k,
-            Mesh::from(Capsule3d::new(0.092 * s, 0.14 * s * cfg.foot_scale)), armor.clone(),
+            Mesh::from(Capsule3d::new(0.120 * s, 0.16 * s * cfg.foot_scale)), armor.clone(),
             Transform::from_xyz(x, -1.23 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.09 * s)
                 .with_rotation(Quat::from_rotation_x(PI * 0.5))
-                .with_scale(Vec3::new(0.84 * cfg.foot_scale, 1.0, 1.12)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.90 * cfg.foot_scale, 1.0, 1.15)), PartSlotTag::Legs);
         spawn_part(commands, meshes, root, boot_k,
-            Mesh::from(Cylinder::new(0.095 * s * cfg.foot_scale, 0.055 * s)), primary.clone(),
+            Mesh::from(Cylinder::new(0.125 * s * cfg.foot_scale, 0.062 * s)), primary.clone(),
             Transform::from_xyz(x, -1.06 * s - (ll - 1.0) * 0.22 * s + y_lift, -0.020 * s)
-                .with_scale(Vec3::new(0.86, 1.0, 0.76)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.90, 1.0, 0.80)), PartSlotTag::Legs);
         spawn_part(commands, meshes, root, boot_k,
-            Mesh::from(Cylinder::new(0.105 * s * cfg.foot_scale, 0.032 * s)), accent_glow.clone(),
+            Mesh::from(Cylinder::new(0.135 * s * cfg.foot_scale, 0.036 * s)), accent_glow.clone(),
             Transform::from_xyz(x, -1.01 * s - (ll - 1.0) * 0.22 * s + y_lift, -0.020 * s),
             PartSlotTag::Legs);
     }
@@ -833,30 +833,30 @@ fn spawn_legs_heavy(
     ] {
         // Wide thigh plate
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.108 * s, 0.38 * s * ll)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.148 * s, 0.38 * s * ll)), primary.clone(),
             Transform::from_xyz(x, -0.63 * s - (ll - 1.0) * 0.13 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(1.10, 1.0, 0.94)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(1.12, 1.0, 0.96)), PartSlotTag::Legs);
         // Large knee guard
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Sphere::new(0.138 * s)), armor.clone(),
+            Mesh::from(Sphere::new(0.182 * s)), armor.clone(),
             Transform::from_xyz(x, -0.86 * s - (ll - 1.0) * 0.20 * s + y_lift, -0.022 * s),
             PartSlotTag::Legs);
         // Wide armored shin block
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.098 * s, 0.38 * s * ll)), armor.clone(),
+            Mesh::from(Capsule3d::new(0.134 * s, 0.38 * s * ll)), armor.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.010 * s)
-                .with_scale(Vec3::new(1.04, 1.0, 0.88)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(1.06, 1.0, 0.90)), PartSlotTag::Legs);
         // Heavy flat boot plate
         spawn_part(commands, meshes, root, foot_k,
-            Mesh::from(Capsule3d::new(0.110 * s, 0.18 * s * cfg.foot_scale)), dark.clone(),
+            Mesh::from(Capsule3d::new(0.148 * s, 0.20 * s * cfg.foot_scale)), dark.clone(),
             Transform::from_xyz(x, -1.24 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.10 * s)
                 .with_rotation(Quat::from_rotation_x(PI * 0.5))
-                .with_scale(Vec3::new(1.05 * cfg.foot_scale, 1.0, 1.20)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(1.08 * cfg.foot_scale, 1.0, 1.22)), PartSlotTag::Legs);
         // Boot reinforcement cylinder
         spawn_part(commands, meshes, root, boot_k,
-            Mesh::from(Cylinder::new(0.112 * s * cfg.foot_scale, 0.088 * s)), primary.clone(),
+            Mesh::from(Cylinder::new(0.150 * s * cfg.foot_scale, 0.096 * s)), primary.clone(),
             Transform::from_xyz(x, -1.06 * s - (ll - 1.0) * 0.22 * s + y_lift, -0.025 * s)
-                .with_scale(Vec3::new(1.0, 1.0, 0.86)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(1.0, 1.0, 0.88)), PartSlotTag::Legs);
     }
 }
 
@@ -882,20 +882,20 @@ fn spawn_legs_scout(
     ] {
         // Slender thigh
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.065 * s, 0.42 * s * ll)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.090 * s, 0.42 * s * ll)), primary.clone(),
             Transform::from_xyz(x, -0.65 * s - (ll - 1.0) * 0.14 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.76, 1.0, 0.68)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.80, 1.0, 0.72)), PartSlotTag::Legs);
         // Slim shin
         spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.060 * s, 0.38 * s * ll)), stripe.clone(),
+            Mesh::from(Capsule3d::new(0.082 * s, 0.38 * s * ll)), stripe.clone(),
             Transform::from_xyz(x, -1.02 * s - (ll - 1.0) * 0.26 * s + y_lift, -0.005 * s)
-                .with_scale(Vec3::new(0.72, 1.0, 0.64)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.76, 1.0, 0.68)), PartSlotTag::Legs);
         // Light foot
         spawn_part(commands, meshes, root, foot_k,
-            Mesh::from(Capsule3d::new(0.072 * s, 0.12 * s * cfg.foot_scale)), primary.clone(),
+            Mesh::from(Capsule3d::new(0.096 * s, 0.14 * s * cfg.foot_scale)), primary.clone(),
             Transform::from_xyz(x, -1.25 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.07 * s)
                 .with_rotation(Quat::from_rotation_x(PI * 0.5))
-                .with_scale(Vec3::new(0.78 * cfg.foot_scale, 1.0, 1.05)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.82 * cfg.foot_scale, 1.0, 1.08)), PartSlotTag::Legs);
     }
 }
 
