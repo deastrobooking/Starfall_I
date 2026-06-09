@@ -4,10 +4,15 @@
 //! Keys 1-5 cycle the accent colour preset.
 //! +/- adjust the preview scale. Enter confirms. Esc exits without saving.
 
+use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
+use bevy::input::ButtonState;
 use bevy::prelude::*;
 
-use crate::character_parts::{ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset};
+use crate::character_parts::{
+    ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
+};
 use crate::characters::{hero_config, spawn_cartoon_character};
+use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{PlayerChassis, PlayerPartLoadout, PlayerSelectState};
 use crate::robots::presets::{amp, atlas, theta, valor, volt};
 use crate::state::AppState;
@@ -289,6 +294,9 @@ fn spin_preview(
 
 fn editor_keyboard_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     mut data: ResMut<ChassisEditorData>,
     mut chassis: ResMut<PlayerChassis>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
@@ -296,16 +304,73 @@ fn editor_keyboard_input(
     _preview_q: Query<Entity, With<ChassisPreviewRoot>>,
     mut loadout_q: Query<&mut CharacterLoadout>,
 ) {
+    let mut toggle_body = keyboard.just_pressed(KeyCode::KeyQ);
+    let mut toggle_arms = keyboard.just_pressed(KeyCode::KeyW);
+    let mut toggle_legs = keyboard.just_pressed(KeyCode::KeyE);
+    let mut toggle_shoulders = keyboard.just_pressed(KeyCode::KeyR);
+    let mut toggle_head = keyboard.just_pressed(KeyCode::KeyT);
+    let mut scale_up =
+        keyboard.just_pressed(KeyCode::Equal) || keyboard.just_pressed(KeyCode::NumpadAdd);
+    let mut scale_down =
+        keyboard.just_pressed(KeyCode::Minus) || keyboard.just_pressed(KeyCode::NumpadSubtract);
+    let mut confirm =
+        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
+    let mut cancel = keyboard.just_pressed(KeyCode::Escape);
+
+    for event in button_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        match event.button {
+            GamepadButton::DPadUp => toggle_body = true,
+            GamepadButton::DPadRight => toggle_arms = true,
+            GamepadButton::DPadDown => toggle_legs = true,
+            GamepadButton::DPadLeft => toggle_shoulders = true,
+            GamepadButton::North => toggle_head = true,
+            GamepadButton::RightTrigger => scale_up = true,
+            GamepadButton::LeftTrigger => scale_down = true,
+            GamepadButton::South | GamepadButton::Start => confirm = true,
+            GamepadButton::East => cancel = true,
+            _ => {}
+        }
+    }
+
+    for gp in gamepads.iter() {
+        toggle_body = toggle_body || gp.just_pressed(GamepadButton::DPadUp);
+        toggle_arms = toggle_arms || gp.just_pressed(GamepadButton::DPadRight);
+        toggle_legs = toggle_legs || gp.just_pressed(GamepadButton::DPadDown);
+        toggle_shoulders = toggle_shoulders || gp.just_pressed(GamepadButton::DPadLeft);
+        toggle_head = toggle_head || gp.just_pressed(GamepadButton::North);
+        scale_up = scale_up || gp.just_pressed(GamepadButton::RightTrigger);
+        scale_down = scale_down || gp.just_pressed(GamepadButton::LeftTrigger);
+        confirm = confirm
+            || gp.just_pressed(GamepadButton::South)
+            || gp.just_pressed(GamepadButton::Start);
+        cancel = cancel || gp.just_pressed(GamepadButton::East);
+    }
+
+    toggle_body = toggle_body || native.just_pressed(NativeButton::DPadUp);
+    toggle_arms = toggle_arms || native.just_pressed(NativeButton::DPadRight);
+    toggle_legs = toggle_legs || native.just_pressed(NativeButton::DPadDown);
+    toggle_shoulders = toggle_shoulders || native.just_pressed(NativeButton::DPadLeft);
+    toggle_head = toggle_head || native.just_pressed(NativeButton::North);
+    scale_up = scale_up || native.just_pressed(NativeButton::RightShoulder);
+    scale_down = scale_down || native.just_pressed(NativeButton::LeftShoulder);
+    confirm = confirm
+        || native.just_pressed(NativeButton::South)
+        || native.just_pressed(NativeButton::Start);
+    cancel = cancel || native.just_pressed(NativeButton::East);
+
     // Slot toggles
-    let toggled = if keyboard.just_pressed(KeyCode::KeyQ) {
+    let toggled = if toggle_body {
         Some(SlotId::Body)
-    } else if keyboard.just_pressed(KeyCode::KeyW) {
+    } else if toggle_arms {
         Some(SlotId::Arms)
-    } else if keyboard.just_pressed(KeyCode::KeyE) {
+    } else if toggle_legs {
         Some(SlotId::Legs)
-    } else if keyboard.just_pressed(KeyCode::KeyR) {
+    } else if toggle_shoulders {
         Some(SlotId::Shoulders)
-    } else if keyboard.just_pressed(KeyCode::KeyT) {
+    } else if toggle_head {
         Some(SlotId::Head)
     } else {
         None
@@ -350,15 +415,15 @@ fn editor_keyboard_input(
     }
 
     // Scale
-    if keyboard.just_pressed(KeyCode::Equal) || keyboard.just_pressed(KeyCode::NumpadAdd) {
+    if scale_up {
         chassis.0.scale = (chassis.0.scale + 0.1).min(2.0);
     }
-    if keyboard.just_pressed(KeyCode::Minus) || keyboard.just_pressed(KeyCode::NumpadSubtract) {
+    if scale_down {
         chassis.0.scale = (chassis.0.scale - 0.1).max(0.5);
     }
 
     // Confirm — save to PlayerPartLoadout
-    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+    if confirm {
         part_loadout.body = data.body;
         part_loadout.arms = data.arms;
         part_loadout.legs = data.legs;
@@ -368,7 +433,7 @@ fn editor_keyboard_input(
     }
 
     // Cancel
-    if keyboard.just_pressed(KeyCode::Escape) {
+    if cancel {
         next_state.set(AppState::ChapterSelect);
     }
 }

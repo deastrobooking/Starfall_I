@@ -35,9 +35,11 @@
 ///    Up → special slot 0 | Down → special slot 1
 ///    Left → special slot 2 | Right → special slot 3
 use bevy::input::gamepad::{
-    Gamepad, GamepadAxis, GamepadButton, GamepadConnection, GamepadConnectionEvent,
+    Gamepad, GamepadAxis, GamepadButton, GamepadButtonStateChangedEvent, GamepadConnection,
+    GamepadConnectionEvent,
 };
 use bevy::input::mouse::MouseMotion;
+use bevy::input::ButtonState;
 use bevy::input::InputSystems;
 use bevy::prelude::*;
 
@@ -215,6 +217,7 @@ fn update_player_inputs(
     mouse_btn: Res<ButtonInput<MouseButton>>,
     mut mouse_ev: MessageReader<MouseMotion>,
     gamepads: Query<(Entity, &Gamepad)>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     time: Res<Time>,
     settings: Res<GameSettings>,
     native: Res<NativeControllerState>,
@@ -236,21 +239,42 @@ fn update_player_inputs(
     // more stable than sorting by the full Entity value across reconnects.
     let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
     gps.sort_by_key(|(e, _)| e.index());
+    let pressed_button_events: Vec<(Entity, GamepadButton)> = button_events
+        .read()
+        .filter(|event| event.state == ButtonState::Pressed)
+        .map(|event| (event.entity, event.button))
+        .collect();
 
     for (idx, mut pi) in players.iter_mut() {
         *pi = PlayerInput::default();
 
         let i = idx.0 as usize;
         let history_slot = i.min(trigger_history.len() - 1);
-        let gp: Option<&Gamepad> = gps.get(i).map(|(_, g)| *g);
+        let gp_entry = gps.get(i).copied();
+        let gp_entity = gp_entry.map(|(entity, _)| entity);
+        let gp: Option<&Gamepad> = gp_entry.map(|(_, gamepad)| gamepad);
         let is_p1 = i == 0;
-        let use_native = is_p1 && gp.is_none() && native.connected;
+        // On macOS, Bevy can report a controller while its SDL/gilrs button
+        // mapping is still wrong for a specific device. Merge the native
+        // GameController reading for P1 whenever it exists so correctly mapped
+        // native buttons can rescue those cases.
+        let use_native = is_p1 && native.connected;
 
         pi.gamepad_active = gp.is_some() || use_native;
 
         // Helper closures — all capture `gp`.
         let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(b)).unwrap_or(false);
-        let btn_just = |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false);
+        let event_just = |b: GamepadButton| {
+            gp_entity.is_some_and(|entity| {
+                pressed_button_events
+                    .iter()
+                    .any(|(event_entity, event_button)| {
+                        *event_entity == entity && *event_button == b
+                    })
+            })
+        };
+        let btn_just =
+            |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false) || event_just(b);
         let axis_val = |a: GamepadAxis| -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
         let native_held = |b: NativeButton| -> bool { use_native && native.pressed(b) };
         let native_just = |b: NativeButton| -> bool { use_native && native.just_pressed(b) };
@@ -288,10 +312,10 @@ fn update_player_inputs(
         } else {
             Vec2::ZERO
         };
-        pi.move_axis = if gp_move.length_squared() > 0.001 {
-            gp_move
-        } else if native_move.length_squared() > 0.001 {
+        pi.move_axis = if native_move.length_squared() > 0.001 {
             native_move
+        } else if gp_move.length_squared() > 0.001 {
+            gp_move
         } else {
             kb_move
         };
@@ -308,12 +332,15 @@ fn update_player_inputs(
             Vec2::ZERO
         };
         // Quadratic curve: more precision at low deflection, full speed at max.
-        let curved = clean * clean.length();
-        let gp_look = curved * STICK_LOOK_RATE * dt;
-        let native_curved = native_clean * native_clean.length();
-        let native_look = native_curved * STICK_LOOK_RATE * dt;
+        let controller_look_axis = if native_clean.length_squared() > 0.001 {
+            native_clean
+        } else {
+            clean
+        };
+        let curved = controller_look_axis * controller_look_axis.length();
+        let controller_look = curved * STICK_LOOK_RATE * dt;
         // P1 gets both mouse and gamepad look simultaneously.
-        pi.look_delta = if is_p1 { mouse_look } else { Vec2::ZERO } + gp_look + native_look;
+        pi.look_delta = if is_p1 { mouse_look } else { Vec2::ZERO } + controller_look;
 
         // ── Fire ──────────────────────────────────────────────────────────────
         pi.fire = (is_p1 && mouse_btn.pressed(MouseButton::Left)) || right_trigger_held;

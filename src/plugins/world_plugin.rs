@@ -7,6 +7,7 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureFormat,
 };
 use bevy::shader::ShaderRef;
+use std::f32::consts::TAU;
 use std::sync::OnceLock;
 
 use crate::chapters::{
@@ -117,12 +118,52 @@ impl NatureSway {
     }
 }
 
+#[derive(Resource, Debug, Clone)]
+struct DayNightCycle {
+    time_of_day: f32,
+    seconds_per_day: f32,
+}
+
+impl Default for DayNightCycle {
+    fn default() -> Self {
+        Self {
+            // Late morning: players load into a readable world, then naturally
+            // drift into afternoon, sunset, moonrise, and night.
+            time_of_day: 0.38,
+            seconds_per_day: 720.0,
+        }
+    }
+}
+
+#[derive(Component)]
+struct SkyDome;
+
+#[derive(Component)]
+struct DayNightSunLight;
+
+#[derive(Component)]
+struct DayNightMoonLight;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CelestialKind {
+    Sun,
+    Moon,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct CelestialVisual {
+    kind: CelestialKind,
+    phase_offset: f32,
+    distance: f32,
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ColliderDebugState>()
+            .init_resource::<DayNightCycle>()
             .init_resource::<DungeonCrawlState>()
             .init_resource::<DungeonRoomState>()
             .init_resource::<WorldSiteRegistry>()
@@ -135,6 +176,7 @@ impl Plugin for WorldPlugin {
             .add_systems(
                 Update,
                 (
+                    update_day_night,
                     animate_nature,
                     guardian_ship_patrol_system,
                     city_spy_drone_patrol_system,
@@ -190,6 +232,120 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(OnExit(AppState::Playing), cleanup_world);
     }
+}
+
+fn update_day_night(
+    time: Res<Time>,
+    mut cycle: ResMut<DayNightCycle>,
+    mut clear: ResMut<ClearColor>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut sun_q: Query<(&mut DirectionalLight, &mut Transform), With<DayNightSunLight>>,
+    mut moon_light_q: Query<
+        (&mut DirectionalLight, &mut Transform),
+        (With<DayNightMoonLight>, Without<DayNightSunLight>),
+    >,
+    mut celestial_q: Query<(&CelestialVisual, &mut Transform, &mut Visibility)>,
+    sky_q: Query<&MeshMaterial3d<StandardMaterial>, With<SkyDome>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    cycle.time_of_day =
+        (cycle.time_of_day + time.delta_secs() / cycle.seconds_per_day.max(1.0)).fract();
+
+    let phase = cycle.time_of_day;
+    let sun_dir = celestial_direction(phase);
+    let moon_dir = celestial_direction(phase + 0.50);
+    let sun_elevation = sun_dir.y;
+    let moon_elevation = moon_dir.y;
+    let day = smoothstep(-0.08, 0.28, sun_elevation);
+    let moonlight = smoothstep(-0.08, 0.30, moon_elevation) * (1.0 - day * 0.72);
+    let sunset = (1.0 - (sun_elevation.abs() / 0.33).clamp(0.0, 1.0))
+        * smoothstep(-0.22, 0.20, sun_elevation);
+    let night = 1.0 - day;
+
+    let night_sky = Color::srgb(0.015, 0.030, 0.110);
+    let dawn_sky = Color::srgb(0.98, 0.34, 0.42);
+    let gold_sky = Color::srgb(1.0, 0.58, 0.18);
+    let day_sky = Color::srgb(0.22, 0.55, 0.96);
+    let mut sky = mix_color(night_sky, day_sky, day);
+    sky = mix_color(sky, dawn_sky, sunset * 0.62);
+    sky = mix_color(sky, gold_sky, sunset * 0.30);
+    clear.0 = sky;
+
+    ambient.color = mix_color(
+        Color::srgb(0.18, 0.22, 0.42),
+        Color::srgb(0.72, 0.78, 0.92),
+        day,
+    );
+    ambient.brightness = 55.0 + day * 245.0 + sunset * 105.0 + moonlight * 80.0;
+
+    if let Ok((mut sun, mut transform)) = sun_q.single_mut() {
+        sun.color = mix_color(
+            Color::srgb(1.0, 0.42, 0.18),
+            Color::srgb(1.0, 0.96, 0.82),
+            day,
+        );
+        sun.illuminance = (2_000.0 + day * 34_000.0 + sunset * 12_000.0) * day.max(0.08);
+        *transform = Transform::from_translation(sun_dir * 6_000.0).looking_at(Vec3::ZERO, Vec3::Y);
+    }
+
+    if let Ok((mut moon, mut transform)) = moon_light_q.single_mut() {
+        moon.color = Color::srgb(0.56, 0.70, 1.0);
+        moon.illuminance = 1_500.0 + moonlight * 13_500.0;
+        *transform =
+            Transform::from_translation(moon_dir * 6_000.0).looking_at(Vec3::ZERO, Vec3::Y);
+    }
+
+    for (visual, mut transform, mut visibility) in celestial_q.iter_mut() {
+        let dir = celestial_direction(phase + visual.phase_offset);
+        let elevation = dir.y;
+        transform.translation = dir * visual.distance;
+        transform.look_at(Vec3::ZERO, Vec3::Y);
+        *visibility = match visual.kind {
+            CelestialKind::Sun => {
+                if elevation > -0.10 {
+                    Visibility::Visible
+                } else {
+                    Visibility::Hidden
+                }
+            }
+            CelestialKind::Moon => {
+                if elevation > -0.12 && night > 0.18 {
+                    Visibility::Visible
+                } else {
+                    Visibility::Hidden
+                }
+            }
+        };
+    }
+
+    for sky_mat in sky_q.iter() {
+        if let Some(material) = materials.get_mut(&sky_mat.0) {
+            material.base_color = sky;
+            let lin = sky.to_linear();
+            material.emissive = LinearRgba::new(
+                lin.red * (0.18 + night * 0.18),
+                lin.green * (0.18 + night * 0.18),
+                lin.blue * (0.22 + night * 0.38),
+                1.0,
+            );
+        }
+    }
+}
+
+fn celestial_direction(phase: f32) -> Vec3 {
+    let angle = TAU * (phase.fract() - 0.25);
+    Vec3::new(angle.cos() * 0.38, angle.sin(), angle.cos() * 0.92).normalize()
+}
+
+fn mix_color(a: Color, b: Color, t: f32) -> Color {
+    let a = a.to_linear();
+    let b = b.to_linear();
+    let t = t.clamp(0.0, 1.0);
+    Color::linear_rgb(
+        a.red + (b.red - a.red) * t,
+        a.green + (b.green - a.green) * t,
+        a.blue + (b.blue - a.blue) * t,
+    )
 }
 
 fn animate_nature(time: Res<Time>, mut q: Query<(&NatureSway, &mut Transform)>) {
@@ -1537,7 +1693,7 @@ fn generate_city(
 
     let pal = Palette::build(m);
 
-    spawn_lighting(&mut commands);
+    spawn_lighting(&mut commands, &mut meshes, m);
     spawn_ground_plane(&mut commands);
     spawn_terrain(&mut commands, &mut meshes, &pal, seed);
     spawn_downtown(&mut commands, &mut meshes, &pal, seed);
@@ -2056,53 +2212,153 @@ impl Palette {
     }
 }
 
-// ── Lighting ──────────────────────────────────────────────────────────────────
-fn spawn_lighting(commands: &mut Commands) {
-    // Ambient — fills dark faces so characters and geometry are always readable.
-    // A cool deep blue matches the neon-city night setting.
+// ── Lighting / Day-Night Cycle ───────────────────────────────────────────────
+fn spawn_lighting(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    commands.insert_resource(ClearColor(Color::srgb(0.20, 0.42, 0.82)));
     commands.insert_resource(GlobalAmbientLight {
-        color: Color::srgb(0.28, 0.32, 0.48),
+        color: Color::srgb(0.30, 0.34, 0.52),
         brightness: 180.0,
         affects_lightmapped_meshes: true,
     });
 
-    // Main directional key-light — warm moonlight-ish coming from upper-right.
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            color: Color::srgb(0.88, 0.92, 1.0),
-            illuminance: 7200.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.65, 0.55, 0.0)),
+    let sky_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.20, 0.42, 0.82),
+        unlit: true,
+        cull_mode: None,
         ..default()
     });
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(7_500.0))),
+            material: MeshMaterial3d(sky_mat),
+            transform: Transform::from_scale(Vec3::new(-1.0, 1.0, 1.0)),
+            ..default()
+        },
+        SkyDome,
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                color: Color::srgb(1.0, 0.92, 0.76),
+                illuminance: 28_000.0,
+                shadows_enabled: true,
+                ..default()
+            },
+            ..default()
+        },
+        DayNightSunLight,
+        WorldGeometry,
+    ));
+    commands.spawn((
+        DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                color: Color::srgb(0.62, 0.76, 1.0),
+                illuminance: 8_000.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            ..default()
+        },
+        DayNightMoonLight,
+        WorldGeometry,
+    ));
+
+    let sun_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.86, 0.34),
+        emissive: LinearRgba::new(9.0, 6.4, 2.6, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let moon_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.78, 0.88, 1.0),
+        emissive: LinearRgba::new(2.6, 3.8, 6.5, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let moon_companion_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.62, 0.75, 1.0),
+        emissive: LinearRgba::new(1.4, 2.3, 4.4, 1.0),
+        unlit: true,
+        ..default()
+    });
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(115.0))),
+            material: MeshMaterial3d(sun_mat),
+            ..default()
+        },
+        CelestialVisual {
+            kind: CelestialKind::Sun,
+            phase_offset: 0.0,
+            distance: 5_200.0,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(210.0))),
+            material: MeshMaterial3d(moon_mat),
+            ..default()
+        },
+        CelestialVisual {
+            kind: CelestialKind::Moon,
+            phase_offset: 0.50,
+            distance: 4_900.0,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(92.0))),
+            material: MeshMaterial3d(moon_companion_mat),
+            ..default()
+        },
+        CelestialVisual {
+            kind: CelestialKind::Moon,
+            phase_offset: 0.58,
+            distance: 4_650.0,
+        },
+        WorldGeometry,
+    ));
 
     // Soft cyan fill-light from below-left for the neon-city under-glow.
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            color: Color::srgb(0.0, 0.72, 1.0),
-            intensity: 800_000.0,
-            range: 550.0,
-            shadows_enabled: false,
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.0, 0.72, 1.0),
+                intensity: 620_000.0,
+                range: 550.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(-80.0, 220.0, 60.0),
             ..default()
         },
-        transform: Transform::from_xyz(-80.0, 220.0, 60.0),
-        ..default()
-    });
+        WorldGeometry,
+    ));
 
-    // Warm orange counter-light from the opposite side.
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            color: Color::srgb(1.0, 0.52, 0.12),
-            intensity: 350_000.0,
-            range: 450.0,
-            shadows_enabled: false,
+    // Warm orange counter-light from the opposite side, strongest near sunset.
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(1.0, 0.52, 0.12),
+                intensity: 260_000.0,
+                range: 450.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(120.0, 160.0, -80.0),
             ..default()
         },
-        transform: Transform::from_xyz(120.0, 160.0, -80.0),
-        ..default()
-    });
+        WorldGeometry,
+    ));
 }
 
 // ── Ground plane ─────────────────────────────────────────────────────────────

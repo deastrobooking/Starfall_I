@@ -1668,10 +1668,107 @@ fn chapter_key_hint(chapter: u8) -> &'static str {
 
 fn chapter_select_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     progress: Res<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
+    let mut controller_left = false;
+    let mut controller_right = false;
+    let mut controller_play = false;
+    let mut controller_back = false;
+    let mut controller_chassis = false;
+    let mut controller_garage = false;
+    for event in button_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        match event.button {
+            GamepadButton::DPadLeft | GamepadButton::LeftTrigger => controller_left = true,
+            GamepadButton::DPadRight | GamepadButton::RightTrigger => controller_right = true,
+            GamepadButton::South | GamepadButton::Start => controller_play = true,
+            GamepadButton::East => controller_back = true,
+            GamepadButton::North => controller_chassis = true,
+            GamepadButton::West | GamepadButton::Select => controller_garage = true,
+            _ => {}
+        }
+    }
+    for gp in gamepads.iter() {
+        controller_left = controller_left
+            || gp.just_pressed(GamepadButton::DPadLeft)
+            || gp.just_pressed(GamepadButton::LeftTrigger);
+        controller_right = controller_right
+            || gp.just_pressed(GamepadButton::DPadRight)
+            || gp.just_pressed(GamepadButton::RightTrigger);
+        controller_play = controller_play
+            || gp.just_pressed(GamepadButton::South)
+            || gp.just_pressed(GamepadButton::Start);
+        controller_back = controller_back || gp.just_pressed(GamepadButton::East);
+        controller_chassis = controller_chassis || gp.just_pressed(GamepadButton::North);
+        controller_garage = controller_garage
+            || gp.just_pressed(GamepadButton::West)
+            || gp.just_pressed(GamepadButton::Select);
+    }
+    controller_left = controller_left
+        || native.just_pressed(NativeButton::DPadLeft)
+        || native.just_pressed(NativeButton::LeftShoulder);
+    controller_right = controller_right
+        || native.just_pressed(NativeButton::DPadRight)
+        || native.just_pressed(NativeButton::RightShoulder);
+    controller_play = controller_play
+        || native.just_pressed(NativeButton::South)
+        || native.just_pressed(NativeButton::Start);
+    controller_back = controller_back || native.just_pressed(NativeButton::East);
+    controller_chassis = controller_chassis || native.just_pressed(NativeButton::North);
+    controller_garage = controller_garage
+        || native.just_pressed(NativeButton::West)
+        || native.just_pressed(NativeButton::Select);
+
+    let pick_unlocked_neighbor = |start: ChapterId, step: i8| -> ChapterId {
+        let mut next = start.0 as i16;
+        for _ in ChapterId::FIRST.0..=ChapterId::LAST.0 {
+            next += step as i16;
+            if next < ChapterId::FIRST.0 as i16 {
+                next = ChapterId::LAST.0 as i16;
+            } else if next > ChapterId::LAST.0 as i16 {
+                next = ChapterId::FIRST.0 as i16;
+            }
+            let candidate = ChapterId(next as u8);
+            if progress.is_unlocked(candidate) {
+                return candidate;
+            }
+        }
+        start
+    };
+
+    if controller_left {
+        current.id = pick_unlocked_neighbor(current.id, -1);
+        current.started = false;
+    }
+    if controller_right {
+        current.id = pick_unlocked_neighbor(current.id, 1);
+        current.started = false;
+    }
+    if controller_play && progress.is_unlocked(current.id) {
+        current.started = false;
+        next_state.set(AppState::Playing);
+        return;
+    }
+    if controller_chassis {
+        next_state.set(AppState::ChassisEditor);
+        return;
+    }
+    if controller_garage {
+        next_state.set(AppState::RobotGarage);
+        return;
+    }
+    if controller_back {
+        next_state.set(AppState::MainMenu);
+        return;
+    }
+
     let try_pick = |k: KeyCode, n: u8| -> Option<u8> {
         if keyboard.just_pressed(k) {
             Some(n)
@@ -2286,7 +2383,7 @@ fn player_select_update(
     gps.sort_by_key(|(e, _)| e.index());
     let p1_gp = gps.first().map(|(_, gamepad)| *gamepad);
     let p1_entity = gps.first().map(|(entity, _)| *entity);
-    let native_for_p1 = p1_gp.is_none() && native.connected;
+    let native_for_p1 = native.connected;
     let pressed_buttons: Vec<(Entity, GamepadButton)> = button_events
         .read()
         .filter(|event| event.state == ButtonState::Pressed)

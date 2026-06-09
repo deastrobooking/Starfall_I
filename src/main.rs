@@ -24,6 +24,7 @@ mod hero_roster;
 mod lsystem;
 mod perks;
 mod plugins;
+mod procedural_meshes;
 mod raids;
 mod rendering;
 mod resources;

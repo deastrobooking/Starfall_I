@@ -1,4 +1,5 @@
-use bevy::input::gamepad::GamepadButton;
+use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
+use bevy::input::ButtonState;
 use bevy::prelude::*;
 
 use crate::character_blueprint::{
@@ -9,6 +10,7 @@ use crate::characters::{
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
     spawn_cartoon_character,
 };
+use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{CharacterDesignData, PlayerSelectState};
 use crate::state::AppState;
 
@@ -354,6 +356,8 @@ fn button_interaction(
 fn design_keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     design_data: Res<CharacterDesignData>,
     mut select_state: ResMut<PlayerSelectState>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -362,14 +366,32 @@ fn design_keyboard_input(
     let mut go_confirm =
         keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
 
+    let mut event_back = false;
+    let mut event_confirm = false;
+    for event in button_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        match event.button {
+            GamepadButton::East => event_back = true,
+            GamepadButton::South | GamepadButton::Start => event_confirm = true,
+            _ => {}
+        }
+    }
+
     for gp in gamepads.iter() {
         if gp.just_pressed(GamepadButton::East) {
             go_back = true;
         }
-        if gp.just_pressed(GamepadButton::South) {
+        if gp.just_pressed(GamepadButton::South) || gp.just_pressed(GamepadButton::Start) {
             go_confirm = true;
         }
     }
+    go_back = go_back || event_back || native.just_pressed(NativeButton::East);
+    go_confirm = go_confirm
+        || event_confirm
+        || native.just_pressed(NativeButton::South)
+        || native.just_pressed(NativeButton::Start);
 
     if go_confirm {
         save_design(&design_data, &mut select_state);

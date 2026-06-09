@@ -2,7 +2,9 @@ use bevy::prelude::*;
 use std::f32::consts::PI;
 
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
-use crate::character_parts::{CharacterLoadout, CharacterVisualConfig, PartSlotTag};
+use crate::character_parts::{
+    spawn_cartoon_glove, spawn_cartoon_shoe, CharacterLoadout, CharacterVisualConfig, PartSlotTag,
+};
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
     CartoonRole, CharacterIkPose, JointKind, JointMarker, SkeletonRig,
@@ -1143,19 +1145,33 @@ pub fn attach_cartoon_character(
     } else {
         skin.clone()
     };
-    for (kind, x) in [
-        (CartoonPartKind::LeftHand, -arm_x),
-        (CartoonPartKind::RightHand, arm_x),
+    let cuff_mat = if config.has_gloves {
+        accent.clone()
+    } else {
+        outfit.clone()
+    };
+    for (kind, x, sign) in [
+        (CartoonPartKind::LeftHand, -arm_x, -1.0_f32),
+        (CartoonPartKind::RightHand, arm_x, 1.0_f32),
     ] {
-        spawn_part(
+        spawn_cartoon_glove(
             commands,
             meshes,
             root,
             kind,
-            Mesh::from(Sphere::new(0.115 * s * hand_scale)),
             hand_mat.clone(),
-            Transform::from_xyz(x, -0.50 * s - (arm_length - 1.0) * 0.28 * s, 0.02 * s)
-                .with_scale(Vec3::new(0.90, 1.16, 0.82)),
+            cuff_mat.clone(),
+            Vec3::new(x, -0.50 * s - (arm_length - 1.0) * 0.28 * s, -0.020 * s),
+            sign,
+            Vec3::new(
+                0.134 * s * hand_scale,
+                0.126 * s * hand_scale,
+                0.126 * s * hand_scale,
+            ),
+            0.030 * s * hand_scale,
+            0.142 * s * hand_scale,
+            0.094 * s,
+            0.046 * s,
         );
     }
 
@@ -1202,46 +1218,28 @@ pub fn attach_cartoon_character(
             armor.clone(),
             Transform::from_xyz(x, -0.86 * s - (leg_length - 1.0) * 0.20 * s, -0.015 * s),
         );
-        // Foot: horizontal Capsule3d (rounded shoe shape)
-        spawn_part(
+        let boot_kind = if x < 0.0 {
+            CartoonPartKind::LeftBoot
+        } else {
+            CartoonPartKind::RightBoot
+        };
+        spawn_cartoon_shoe(
             commands,
             meshes,
             root,
             foot_k,
-            Mesh::from(Capsule3d::new(0.095 * s, 0.14 * s * foot_scale)),
+            Some(boot_kind),
+            suit_shadow.clone(),
             boot_mat.clone(),
-            Transform::from_xyz(x, -1.24 * s - (leg_length - 1.0) * 0.31 * s, -0.10 * s)
-                .with_rotation(Quat::from_rotation_x(PI * 0.5))
-                .with_scale(Vec3::new(0.86 * foot_scale, 1.0, 1.14)),
+            accent_glow.clone(),
+            Vec3::new(x, -1.24 * s - (leg_length - 1.0) * 0.31 * s, -0.10 * s),
+            if x < 0.0 { -1.0 } else { 1.0 },
+            s,
+            foot_scale,
+            0.88,
+            1.04,
+            config.has_boots,
         );
-        if config.has_boots {
-            let boot_kind = if x < 0.0 {
-                CartoonPartKind::LeftBoot
-            } else {
-                CartoonPartKind::RightBoot
-            };
-            // Boot shaft: rounded Capsule3d ankle
-            spawn_part(
-                commands,
-                meshes,
-                root,
-                boot_kind,
-                Mesh::from(Capsule3d::new(0.098 * s * foot_scale, 0.065 * s)),
-                boot_mat.clone(),
-                Transform::from_xyz(x, -1.07 * s - (leg_length - 1.0) * 0.22 * s, -0.025 * s)
-                    .with_scale(Vec3::new(0.88, 1.0, 0.78)),
-            );
-            // Boot accent: Cylinder ring
-            spawn_part(
-                commands,
-                meshes,
-                root,
-                boot_kind,
-                Mesh::from(Cylinder::new(0.106 * s * foot_scale, 0.040 * s)),
-                accent_glow.clone(),
-                Transform::from_xyz(x, -1.02 * s - (leg_length - 1.0) * 0.22 * s, -0.025 * s),
-            );
-        }
     }
 
     // ── Horns ─────────────────────────────────────────────────────────────────

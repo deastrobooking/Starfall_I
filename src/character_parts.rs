@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
 use crate::components::character::{default_joint_for_part, CartoonPart, CartoonPartKind};
+use crate::procedural_meshes::superellipsoid_mesh;
 use crate::rendering::PbrBundle;
 
 // ── Slot identification ───────────────────────────────────────────────────────
@@ -275,10 +276,18 @@ pub fn spawn_body(
     preset: BodyPreset,
 ) {
     match preset {
-        BodyPreset::StandardMech => spawn_body_standard_mech(commands, meshes, materials, root, cfg, y_lift),
-        BodyPreset::HeavyPlate => spawn_body_heavy_plate(commands, meshes, materials, root, cfg, y_lift),
-        BodyPreset::ScoutVest => spawn_body_scout_vest(commands, meshes, materials, root, cfg, y_lift),
-        BodyPreset::VoidArmor => spawn_body_void_armor(commands, meshes, materials, root, cfg, y_lift),
+        BodyPreset::StandardMech => {
+            spawn_body_standard_mech(commands, meshes, materials, root, cfg, y_lift)
+        }
+        BodyPreset::HeavyPlate => {
+            spawn_body_heavy_plate(commands, meshes, materials, root, cfg, y_lift)
+        }
+        BodyPreset::ScoutVest => {
+            spawn_body_scout_vest(commands, meshes, materials, root, cfg, y_lift)
+        }
+        BodyPreset::VoidArmor => {
+            spawn_body_void_armor(commands, meshes, materials, root, cfg, y_lift)
+        }
     }
 }
 
@@ -326,9 +335,15 @@ pub fn spawn_shoulders(
     preset: ShoulderPreset,
 ) {
     match preset {
-        ShoulderPreset::DomePauldrons => spawn_shoulders_dome(commands, meshes, materials, root, cfg, y_lift),
-        ShoulderPreset::SpikedPauldrons => spawn_shoulders_spiked(commands, meshes, materials, root, cfg, y_lift),
-        ShoulderPreset::PlateEpaulettes => spawn_shoulders_plate(commands, meshes, materials, root, cfg, y_lift),
+        ShoulderPreset::DomePauldrons => {
+            spawn_shoulders_dome(commands, meshes, materials, root, cfg, y_lift)
+        }
+        ShoulderPreset::SpikedPauldrons => {
+            spawn_shoulders_spiked(commands, meshes, materials, root, cfg, y_lift)
+        }
+        ShoulderPreset::PlateEpaulettes => {
+            spawn_shoulders_plate(commands, meshes, materials, root, cfg, y_lift)
+        }
         ShoulderPreset::None => {}
     }
 }
@@ -343,10 +358,18 @@ pub fn spawn_head(
     preset: HeadPreset,
 ) {
     match preset {
-        HeadPreset::OpenFace => spawn_head_open_face(commands, meshes, materials, root, cfg, y_lift),
-        HeadPreset::CombatHelmet => spawn_head_combat(commands, meshes, materials, root, cfg, y_lift),
-        HeadPreset::FullHelm => spawn_head_full_helm(commands, meshes, materials, root, cfg, y_lift),
-        HeadPreset::VoidMask => spawn_head_void_mask(commands, meshes, materials, root, cfg, y_lift),
+        HeadPreset::OpenFace => {
+            spawn_head_open_face(commands, meshes, materials, root, cfg, y_lift)
+        }
+        HeadPreset::CombatHelmet => {
+            spawn_head_combat(commands, meshes, materials, root, cfg, y_lift)
+        }
+        HeadPreset::FullHelm => {
+            spawn_head_full_helm(commands, meshes, materials, root, cfg, y_lift)
+        }
+        HeadPreset::VoidMask => {
+            spawn_head_void_mask(commands, meshes, materials, root, cfg, y_lift)
+        }
     }
 }
 
@@ -369,38 +392,96 @@ fn spawn_body_standard_mech(
     let armor = robot_mat(materials, darken(cfg.accent, 0.78));
     let accent_glow = emissive_mat(materials, cfg.accent, 2.4);
 
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Capsule3d::new(0.28 * s, 0.70 * s)), primary.clone(),
-        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0)
-            .with_scale(Vec3::new(1.08 * bw, 1.0, 0.68)), PartSlotTag::Body);
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Sphere::new(0.5)), armor.clone(),
-        Transform::from_xyz(0.0, 0.08 * s + y_lift, -0.260 * s)
-            .with_scale(Vec3::new(0.62 * s * bw, 0.38 * s, 0.095 * s)), PartSlotTag::Body);
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Sphere::new(0.068 * s)), accent_glow.clone(),
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Capsule3d::new(0.28 * s, 0.70 * s)),
+        primary.clone(),
+        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0).with_scale(Vec3::new(
+            1.08 * bw,
+            1.0,
+            0.68,
+        )),
+        PartSlotTag::Body,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Sphere::new(0.5)),
+        armor.clone(),
+        Transform::from_xyz(0.0, 0.08 * s + y_lift, -0.260 * s).with_scale(Vec3::new(
+            0.62 * s * bw,
+            0.38 * s,
+            0.095 * s,
+        )),
+        PartSlotTag::Body,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Sphere::new(0.068 * s)),
+        accent_glow.clone(),
         Transform::from_xyz(0.0, 0.08 * s + y_lift, -0.295 * s)
-            .with_scale(Vec3::new(0.80, 0.80, 0.40)), PartSlotTag::Body);
+            .with_scale(Vec3::new(0.80, 0.80, 0.40)),
+        PartSlotTag::Body,
+    );
     for (x, rot_z) in [(-0.22_f32, -0.15_f32), (0.22_f32, 0.15_f32)] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Body,
-            Mesh::from(Capsule3d::new(0.020 * s, 0.18 * s)), accent_glow.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Capsule3d::new(0.020 * s, 0.18 * s)),
+            accent_glow.clone(),
             Transform::from_xyz(x * s * bw, -0.09 * s + y_lift, -0.285 * s)
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Body);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Body,
+        );
     }
     for (x, rot_z) in [(-0.25_f32, -0.22_f32), (0.25_f32, 0.22_f32)] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Body,
-            Mesh::from(Sphere::new(0.5)), plating.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Sphere::new(0.5)),
+            plating.clone(),
             Transform::from_xyz(x * s * hip_w, -0.52 * s + y_lift, -0.015 * s)
                 .with_scale(Vec3::new(0.26 * s, 0.14 * s, 0.32 * s))
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Body);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Body,
+        );
     }
-    spawn_part(commands, meshes, root, CartoonPartKind::Belt,
-        Mesh::from(Cylinder::new(0.30 * s * bw.max(0.8), 0.045 * s)), plating.clone(),
-        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0), PartSlotTag::Body);
-    spawn_part(commands, meshes, root, CartoonPartKind::Belt,
-        Mesh::from(Sphere::new(0.5)), accent_glow.clone(),
-        Transform::from_xyz(0.0, -0.38 * s + y_lift, -0.22 * s)
-            .with_scale(Vec3::new(0.18 * s, 0.16 * s, 0.06 * s)), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Belt,
+        Mesh::from(Cylinder::new(0.30 * s * bw.max(0.8), 0.045 * s)),
+        plating.clone(),
+        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0),
+        PartSlotTag::Body,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Belt,
+        Mesh::from(Sphere::new(0.5)),
+        accent_glow.clone(),
+        Transform::from_xyz(0.0, -0.38 * s + y_lift, -0.22 * s).with_scale(Vec3::new(
+            0.18 * s,
+            0.16 * s,
+            0.06 * s,
+        )),
+        PartSlotTag::Body,
+    );
 }
 
 fn spawn_body_heavy_plate(
@@ -420,36 +501,87 @@ fn spawn_body_heavy_plate(
     let armor = robot_mat(materials, darken(cfg.accent, 0.70));
 
     // Wide barrel torso
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Capsule3d::new(0.30 * s, 0.72 * s)), primary.clone(),
-        Transform::from_xyz(0.0, -0.08 * s + y_lift, 0.0)
-            .with_scale(Vec3::new(1.22 * bw, 1.0, 0.82)), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Capsule3d::new(0.30 * s, 0.72 * s)),
+        primary.clone(),
+        Transform::from_xyz(0.0, -0.08 * s + y_lift, 0.0).with_scale(Vec3::new(
+            1.22 * bw,
+            1.0,
+            0.82,
+        )),
+        PartSlotTag::Body,
+    );
     // Large dome chest plate
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Sphere::new(0.5)), armor.clone(),
-        Transform::from_xyz(0.0, 0.12 * s + y_lift, -0.24 * s)
-            .with_scale(Vec3::new(0.78 * s * bw, 0.50 * s, 0.14 * s)), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Sphere::new(0.5)),
+        armor.clone(),
+        Transform::from_xyz(0.0, 0.12 * s + y_lift, -0.24 * s).with_scale(Vec3::new(
+            0.78 * s * bw,
+            0.50 * s,
+            0.14 * s,
+        )),
+        PartSlotTag::Body,
+    );
     // Collar reinforcement ring
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Cylinder::new(0.22 * s * bw.max(0.9), 0.060 * s)), plating.clone(),
-        Transform::from_xyz(0.0, 0.38 * s + y_lift, 0.0), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Cylinder::new(0.22 * s * bw.max(0.9), 0.060 * s)),
+        plating.clone(),
+        Transform::from_xyz(0.0, 0.38 * s + y_lift, 0.0),
+        PartSlotTag::Body,
+    );
     // Wide angular hip guards (4 pieces)
     for (x, rot_z) in [(-0.30_f32, -0.28_f32), (0.30_f32, 0.28_f32)] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Body,
-            Mesh::from(Sphere::new(0.5)), plating.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Sphere::new(0.5)),
+            plating.clone(),
             Transform::from_xyz(x * s * hip_w, -0.50 * s + y_lift, -0.010 * s)
                 .with_scale(Vec3::new(0.32 * s, 0.18 * s, 0.36 * s))
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Body);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Body,
+        );
     }
     // Thick waist plate
-    spawn_part(commands, meshes, root, CartoonPartKind::Belt,
-        Mesh::from(Cylinder::new(0.36 * s * bw.max(0.9), 0.075 * s)), plating.clone(),
-        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Belt,
+        Mesh::from(Cylinder::new(0.36 * s * bw.max(0.9), 0.075 * s)),
+        plating.clone(),
+        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0),
+        PartSlotTag::Body,
+    );
     // Flat belt buckle plate
-    spawn_part(commands, meshes, root, CartoonPartKind::Belt,
-        Mesh::from(Sphere::new(0.5)), armor.clone(),
-        Transform::from_xyz(0.0, -0.38 * s + y_lift, -0.26 * s)
-            .with_scale(Vec3::new(0.24 * s, 0.18 * s, 0.05 * s)), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Belt,
+        Mesh::from(Sphere::new(0.5)),
+        armor.clone(),
+        Transform::from_xyz(0.0, -0.38 * s + y_lift, -0.26 * s).with_scale(Vec3::new(
+            0.24 * s,
+            0.18 * s,
+            0.05 * s,
+        )),
+        PartSlotTag::Body,
+    );
 }
 
 fn spawn_body_scout_vest(
@@ -469,31 +601,69 @@ fn spawn_body_scout_vest(
     let accent_glow = emissive_mat(materials, cfg.accent, 1.8);
 
     // Slim torso
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Capsule3d::new(0.24 * s, 0.68 * s)), primary.clone(),
-        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0)
-            .with_scale(Vec3::new(0.90 * bw, 1.0, 0.60)), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Capsule3d::new(0.24 * s, 0.68 * s)),
+        primary.clone(),
+        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0).with_scale(Vec3::new(
+            0.90 * bw,
+            1.0,
+            0.60,
+        )),
+        PartSlotTag::Body,
+    );
     // Diagonal chest stripe (left shoulder to right hip)
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Capsule3d::new(0.022 * s, 0.55 * s)), stripe.clone(),
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Capsule3d::new(0.022 * s, 0.55 * s)),
+        stripe.clone(),
         Transform::from_xyz(-0.05 * s * bw, 0.0 * s + y_lift, -0.24 * s)
-            .with_rotation(Quat::from_rotation_z(0.55)), PartSlotTag::Body);
+            .with_rotation(Quat::from_rotation_z(0.55)),
+        PartSlotTag::Body,
+    );
     // Small badge / sensor node
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Sphere::new(0.042 * s)), accent_glow.clone(),
-        Transform::from_xyz(0.12 * s * bw, 0.15 * s + y_lift, -0.26 * s), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Sphere::new(0.042 * s)),
+        accent_glow.clone(),
+        Transform::from_xyz(0.12 * s * bw, 0.15 * s + y_lift, -0.26 * s),
+        PartSlotTag::Body,
+    );
     // Minimal hip ridge (thin band)
     for (x, rot_z) in [(-0.18_f32, -0.12_f32), (0.18_f32, 0.12_f32)] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Body,
-            Mesh::from(Sphere::new(0.5)), stripe.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Sphere::new(0.5)),
+            stripe.clone(),
             Transform::from_xyz(x * s * hip_w, -0.50 * s + y_lift, -0.008 * s)
                 .with_scale(Vec3::new(0.16 * s, 0.08 * s, 0.20 * s))
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Body);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Body,
+        );
     }
     // Thin belt
-    spawn_part(commands, meshes, root, CartoonPartKind::Belt,
-        Mesh::from(Cylinder::new(0.24 * s * bw.max(0.7), 0.028 * s)), stripe.clone(),
-        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Belt,
+        Mesh::from(Cylinder::new(0.24 * s * bw.max(0.7), 0.028 * s)),
+        stripe.clone(),
+        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0),
+        PartSlotTag::Body,
+    );
 }
 
 fn spawn_body_void_armor(
@@ -513,43 +683,104 @@ fn spawn_body_void_armor(
     let glow_dim = emissive_mat(materials, cfg.accent, 1.6);
 
     // Dark slender torso
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Capsule3d::new(0.26 * s, 0.72 * s)), dark.clone(),
-        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0)
-            .with_scale(Vec3::new(1.0 * bw, 1.0, 0.65)), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Capsule3d::new(0.26 * s, 0.72 * s)),
+        dark.clone(),
+        Transform::from_xyz(0.0, -0.10 * s + y_lift, 0.0).with_scale(Vec3::new(
+            1.0 * bw,
+            1.0,
+            0.65,
+        )),
+        PartSlotTag::Body,
+    );
     // Four vertical edge-glow strips
-    for (x, z) in [(-0.27_f32, -0.14_f32), (0.27_f32, -0.14_f32),
-                   (-0.18_f32, -0.27_f32), (0.18_f32, -0.27_f32)] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Body,
-            Mesh::from(Capsule3d::new(0.014 * s, 0.60 * s)), accent_glow.clone(),
-            Transform::from_xyz(x * s * bw, -0.10 * s + y_lift, z * s), PartSlotTag::Body);
+    for (x, z) in [
+        (-0.27_f32, -0.14_f32),
+        (0.27_f32, -0.14_f32),
+        (-0.18_f32, -0.27_f32),
+        (0.18_f32, -0.27_f32),
+    ] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Capsule3d::new(0.014 * s, 0.60 * s)),
+            accent_glow.clone(),
+            Transform::from_xyz(x * s * bw, -0.10 * s + y_lift, z * s),
+            PartSlotTag::Body,
+        );
     }
     // Hex chest grid (6 small glowing nodes)
-    for (nx, ny) in [(-0.12_f32, 0.14_f32), (0.0_f32, 0.18_f32),
-                     (0.12_f32, 0.14_f32), (-0.12_f32, -0.02_f32),
-                     (0.0_f32, 0.02_f32), (0.12_f32, -0.02_f32)] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Body,
-            Mesh::from(Sphere::new(0.026 * s)), accent_glow.clone(),
-            Transform::from_xyz(nx * s * bw, ny * s + y_lift, -0.285 * s), PartSlotTag::Body);
+    for (nx, ny) in [
+        (-0.12_f32, 0.14_f32),
+        (0.0_f32, 0.18_f32),
+        (0.12_f32, 0.14_f32),
+        (-0.12_f32, -0.02_f32),
+        (0.0_f32, 0.02_f32),
+        (0.12_f32, -0.02_f32),
+    ] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Sphere::new(0.026 * s)),
+            accent_glow.clone(),
+            Transform::from_xyz(nx * s * bw, ny * s + y_lift, -0.285 * s),
+            PartSlotTag::Body,
+        );
     }
     // Large core reactor (bright center)
-    spawn_part(commands, meshes, root, CartoonPartKind::Body,
-        Mesh::from(Sphere::new(0.080 * s)), accent_glow.clone(),
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Body,
+        Mesh::from(Sphere::new(0.080 * s)),
+        accent_glow.clone(),
         Transform::from_xyz(0.0, 0.08 * s + y_lift, -0.295 * s)
-            .with_scale(Vec3::new(1.0, 1.0, 0.45)), PartSlotTag::Body);
+            .with_scale(Vec3::new(1.0, 1.0, 0.45)),
+        PartSlotTag::Body,
+    );
     // Hip glow nodes
     for x in [-0.22_f32 * s * hip_w, 0.22_f32 * s * hip_w] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Body,
-            Mesh::from(Sphere::new(0.048 * s)), glow_dim.clone(),
-            Transform::from_xyz(x, -0.50 * s + y_lift, -0.20 * s), PartSlotTag::Body);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Body,
+            Mesh::from(Sphere::new(0.048 * s)),
+            glow_dim.clone(),
+            Transform::from_xyz(x, -0.50 * s + y_lift, -0.20 * s),
+            PartSlotTag::Body,
+        );
     }
     // Thin void belt
-    spawn_part(commands, meshes, root, CartoonPartKind::Belt,
-        Mesh::from(Cylinder::new(0.25 * s * bw.max(0.8), 0.030 * s)), dark.clone(),
-        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0), PartSlotTag::Body);
-    spawn_part(commands, meshes, root, CartoonPartKind::Belt,
-        Mesh::from(Cylinder::new(0.25 * s * bw.max(0.8), 0.015 * s)), accent_glow.clone(),
-        Transform::from_xyz(0.0, -0.375 * s + y_lift, 0.0), PartSlotTag::Body);
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Belt,
+        Mesh::from(Cylinder::new(0.25 * s * bw.max(0.8), 0.030 * s)),
+        dark.clone(),
+        Transform::from_xyz(0.0, -0.38 * s + y_lift, 0.0),
+        PartSlotTag::Body,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Belt,
+        Mesh::from(Cylinder::new(0.25 * s * bw.max(0.8), 0.015 * s)),
+        accent_glow.clone(),
+        Transform::from_xyz(0.0, -0.375 * s + y_lift, 0.0),
+        PartSlotTag::Body,
+    );
 }
 
 // ── Arm presets ───────────────────────────────────────────────────────────────
@@ -567,9 +798,9 @@ fn spawn_arms_mech(
     let al = cfg.arm_length;
 
     let sleeve = soft_mat(materials, cfg.outfit);
-    let joint  = soft_mat(materials, darken(cfg.outfit, 0.76));
-    let cuff   = soft_mat(materials, darken(cfg.accent, 0.82));
-    let glove  = if cfg.has_gloves {
+    let joint = soft_mat(materials, darken(cfg.outfit, 0.76));
+    let cuff = soft_mat(materials, darken(cfg.accent, 0.82));
+    let glove = if cfg.has_gloves {
         soft_mat(materials, darken(cfg.accent, 0.88))
     } else {
         soft_mat(materials, cfg.skin)
@@ -577,48 +808,82 @@ fn spawn_arms_mech(
 
     let arm_x = (0.34 + 0.072) * s * bw;
     for (kind_arm, kind_hand, x, sign) in [
-        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
+        (
+            CartoonPartKind::LeftArm,
+            CartoonPartKind::LeftHand,
+            -arm_x,
+            -1.0_f32,
+        ),
+        (
+            CartoonPartKind::RightArm,
+            CartoonPartKind::RightHand,
+            arm_x,
+            1.0_f32,
+        ),
     ] {
         // Round shoulder cap
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.152 * s)), sleeve.clone(),
-            Transform::from_xyz(x, 0.20 * s + y_lift, 0.0), PartSlotTag::Arms);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.152 * s)),
+            sleeve.clone(),
+            Transform::from_xyz(x, 0.20 * s + y_lift, 0.0),
+            PartSlotTag::Arms,
+        );
         // Upper arm — full round tube
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.092 * s, 0.30 * s * al)), sleeve.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.092 * s, 0.30 * s * al)),
+            sleeve.clone(),
             Transform::from_xyz(x, 0.04 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Elbow joint sphere — clearly distinct
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.108 * s)), joint.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.108 * s)),
+            joint.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Forearm — slightly narrower
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.080 * s, 0.28 * s * al)), sleeve.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.080 * s, 0.28 * s * al)),
+            sleeve.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
-        // Wrist cuff ring
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Cylinder::new(0.096 * s, 0.042 * s)), cuff.clone(),
-            Transform::from_xyz(x, -0.44 * s - (al - 1.0) * 0.24 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
-        // Big cartoon glove — 2× the forearm radius
-        spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.162 * s * cfg.hand_scale)), glove.clone(),
-            Transform::from_xyz(x, -0.53 * s - (al - 1.0) * 0.28 * s + y_lift, -0.018 * s)
-                .with_scale(Vec3::new(1.0, 0.88, 1.10)),
-            PartSlotTag::Arms);
-        // Thumb nub — side-front of the glove
-        spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.075 * s)), glove.clone(),
-            Transform::from_xyz(
-                x + sign * 0.122 * s,
-                -0.47 * s - (al - 1.0) * 0.28 * s + y_lift,
-                -0.058 * s,
+            PartSlotTag::Arms,
+        );
+        spawn_cartoon_glove(
+            commands,
+            meshes,
+            root,
+            kind_hand,
+            glove.clone(),
+            cuff.clone(),
+            Vec3::new(x, -0.53 * s - (al - 1.0) * 0.28 * s + y_lift, -0.030 * s),
+            sign,
+            Vec3::new(
+                0.150 * s * cfg.hand_scale,
+                0.128 * s * cfg.hand_scale,
+                0.130 * s * cfg.hand_scale,
             ),
-            PartSlotTag::Arms);
+            0.032 * s * cfg.hand_scale,
+            0.150 * s * cfg.hand_scale,
+            0.106 * s,
+            0.052 * s,
+        );
     }
 }
 
@@ -635,54 +900,100 @@ fn spawn_arms_heavy(
     let al = cfg.arm_length;
 
     let primary = robot_mat(materials, cfg.outfit);
-    let armor   = robot_mat(materials, darken(cfg.accent, 0.70));
-    let dark    = robot_mat(materials, darken(cfg.outfit, 0.58));
+    let armor = robot_mat(materials, darken(cfg.accent, 0.70));
+    let dark = robot_mat(materials, darken(cfg.outfit, 0.58));
 
     let arm_x = (0.36 + 0.092) * s * bw;
     for (kind_arm, kind_hand, x, _sign) in [
-        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
+        (
+            CartoonPartKind::LeftArm,
+            CartoonPartKind::LeftHand,
+            -arm_x,
+            -1.0_f32,
+        ),
+        (
+            CartoonPartKind::RightArm,
+            CartoonPartKind::RightHand,
+            arm_x,
+            1.0_f32,
+        ),
     ] {
         // Giant shoulder sphere — Bowser-scale
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.200 * s)), armor.clone(),
-            Transform::from_xyz(x, 0.24 * s + y_lift, 0.0), PartSlotTag::Arms);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.200 * s)),
+            armor.clone(),
+            Transform::from_xyz(x, 0.24 * s + y_lift, 0.0),
+            PartSlotTag::Arms,
+        );
         // Thick upper arm — barely tapers
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.135 * s, 0.32 * s * al)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.135 * s, 0.32 * s * al)),
+            primary.clone(),
             Transform::from_xyz(x, 0.05 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Elbow knob — protrudes behind for brawler silhouette
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.130 * s)), dark.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.130 * s)),
+            dark.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.075 * s),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Thick forearm — barely narrows
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.125 * s, 0.32 * s * al)), armor.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.125 * s, 0.32 * s * al)),
+            armor.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
-        // Wrist plate band
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Cylinder::new(0.142 * s, 0.054 * s)), dark.clone(),
-            Transform::from_xyz(x, -0.46 * s - (al - 1.0) * 0.24 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
-        // Boxy squared fist
-        spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.188 * s * cfg.hand_scale)), armor.clone(),
-            Transform::from_xyz(x, -0.56 * s - (al - 1.0) * 0.28 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(1.12, 0.76, 1.18)),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
+        let hand_y = -0.56 * s - (al - 1.0) * 0.28 * s + y_lift;
+        spawn_cartoon_glove(
+            commands,
+            meshes,
+            root,
+            kind_hand,
+            armor.clone(),
+            dark.clone(),
+            Vec3::new(x, hand_y, -0.020 * s),
+            _sign,
+            Vec3::new(
+                0.178 * s * cfg.hand_scale,
+                0.132 * s * cfg.hand_scale,
+                0.154 * s * cfg.hand_scale,
+            ),
+            0.037 * s * cfg.hand_scale,
+            0.118 * s * cfg.hand_scale,
+            0.148 * s,
+            0.064 * s,
+        );
         // Three knuckle bumps across the front
         for i in 0..3_i32 {
-            spawn_part(commands, meshes, root, kind_hand,
-                Mesh::from(Sphere::new(0.042 * s)), dark.clone(),
-                Transform::from_xyz(
-                    x + (i as f32 - 1.0) * 0.070 * s,
-                    -0.56 * s - (al - 1.0) * 0.28 * s + y_lift,
-                    -0.122 * s,
-                ),
-                PartSlotTag::Arms);
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                kind_hand,
+                Mesh::from(Sphere::new(0.042 * s)),
+                dark.clone(),
+                Transform::from_xyz(x + (i as f32 - 1.0) * 0.070 * s, hand_y, -0.122 * s),
+                PartSlotTag::Arms,
+            );
         }
     }
 }
@@ -700,53 +1011,98 @@ fn spawn_arms_scout(
     let al = cfg.arm_length;
 
     let primary = soft_mat(materials, cfg.outfit);
-    let stripe  = soft_mat(materials, darken(cfg.accent, 0.86));
-    let glove   = soft_mat(materials, darken(cfg.accent, 0.70));
+    let stripe = soft_mat(materials, darken(cfg.accent, 0.86));
+    let glove = soft_mat(materials, darken(cfg.accent, 0.70));
 
     let arm_x = (0.32 + 0.065) * s * bw;
     for (kind_arm, kind_hand, x, sign) in [
-        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
+        (
+            CartoonPartKind::LeftArm,
+            CartoonPartKind::LeftHand,
+            -arm_x,
+            -1.0_f32,
+        ),
+        (
+            CartoonPartKind::RightArm,
+            CartoonPartKind::RightHand,
+            arm_x,
+            1.0_f32,
+        ),
     ] {
         // Small neat shoulder cap
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.106 * s)), primary.clone(),
-            Transform::from_xyz(x, 0.17 * s + y_lift, 0.0), PartSlotTag::Arms);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.106 * s)),
+            primary.clone(),
+            Transform::from_xyz(x, 0.17 * s + y_lift, 0.0),
+            PartSlotTag::Arms,
+        );
         // Long slim upper arm — round cross-section
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.072 * s, 0.34 * s * al)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.072 * s, 0.34 * s * al)),
+            primary.clone(),
             Transform::from_xyz(x, 0.02 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Slim elbow joint
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.084 * s)), stripe.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.084 * s)),
+            stripe.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Long slim forearm
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.062 * s, 0.32 * s * al)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.062 * s, 0.32 * s * al)),
+            primary.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Accent stripe running the length of the forearm
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.018 * s, 0.22 * s * al)), stripe.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.018 * s, 0.22 * s * al)),
+            stripe.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.052 * s),
-            PartSlotTag::Arms);
-        // Sleek aerodynamic hand — forward-swept
-        spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.120 * s * cfg.hand_scale)), glove.clone(),
-            Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, -0.022 * s)
-                .with_scale(Vec3::new(0.86, 0.94, 1.22)),
-            PartSlotTag::Arms);
-        // Thumb nub
-        spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.054 * s)), glove.clone(),
-            Transform::from_xyz(
-                x + sign * 0.094 * s,
-                -0.44 * s - (al - 1.0) * 0.28 * s + y_lift,
-                -0.042 * s,
+            PartSlotTag::Arms,
+        );
+        spawn_cartoon_glove(
+            commands,
+            meshes,
+            root,
+            kind_hand,
+            glove.clone(),
+            stripe.clone(),
+            Vec3::new(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, -0.040 * s),
+            sign,
+            Vec3::new(
+                0.118 * s * cfg.hand_scale,
+                0.112 * s * cfg.hand_scale,
+                0.144 * s * cfg.hand_scale,
             ),
-            PartSlotTag::Arms);
+            0.026 * s * cfg.hand_scale,
+            0.140 * s * cfg.hand_scale,
+            0.080 * s,
+            0.040 * s,
+        );
     }
 }
 
@@ -762,66 +1118,143 @@ fn spawn_arms_claw(
     let bw = cfg.body_width;
     let al = cfg.arm_length;
 
-    let primary     = robot_mat(materials, cfg.outfit);
-    let dark        = robot_mat(materials, darken(cfg.outfit, 0.55));
+    let primary = robot_mat(materials, cfg.outfit);
+    let dark = robot_mat(materials, darken(cfg.outfit, 0.55));
     let accent_glow = emissive_mat(materials, cfg.accent, 3.2);
 
     let arm_x = (0.34 + 0.075) * s * bw;
     for (kind_arm, kind_hand, x, sign) in [
-        (CartoonPartKind::LeftArm,  CartoonPartKind::LeftHand,  -arm_x, -1.0_f32),
-        (CartoonPartKind::RightArm, CartoonPartKind::RightHand,  arm_x,  1.0_f32),
+        (
+            CartoonPartKind::LeftArm,
+            CartoonPartKind::LeftHand,
+            -arm_x,
+            -1.0_f32,
+        ),
+        (
+            CartoonPartKind::RightArm,
+            CartoonPartKind::RightHand,
+            arm_x,
+            1.0_f32,
+        ),
     ] {
         // Shoulder joint ball
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.150 * s)), dark.clone(),
-            Transform::from_xyz(x, 0.20 * s + y_lift, 0.0), PartSlotTag::Arms);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.150 * s)),
+            dark.clone(),
+            Transform::from_xyz(x, 0.20 * s + y_lift, 0.0),
+            PartSlotTag::Arms,
+        );
         // Glowing energy ring at shoulder socket
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Cylinder::new(0.160 * s, 0.026 * s)), accent_glow.clone(),
-            Transform::from_xyz(x, 0.14 * s + y_lift, 0.0), PartSlotTag::Arms);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Cylinder::new(0.160 * s, 0.026 * s)),
+            accent_glow.clone(),
+            Transform::from_xyz(x, 0.14 * s + y_lift, 0.0),
+            PartSlotTag::Arms,
+        );
         // Upper arm
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.096 * s, 0.30 * s * al)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.096 * s, 0.30 * s * al)),
+            primary.clone(),
             Transform::from_xyz(x, 0.04 * s - (al - 1.0) * 0.07 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Elbow node
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Sphere::new(0.110 * s)), dark.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Sphere::new(0.110 * s)),
+            dark.clone(),
             Transform::from_xyz(x, -0.14 * s - (al - 1.0) * 0.12 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Forearm
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.088 * s, 0.30 * s * al)), dark.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.088 * s, 0.30 * s * al)),
+            dark.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
         // Glowing energy vein down forearm
-        spawn_part(commands, meshes, root, kind_arm,
-            Mesh::from(Capsule3d::new(0.015 * s, 0.26 * s * al)), accent_glow.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_arm,
+            Mesh::from(Capsule3d::new(0.015 * s, 0.26 * s * al)),
+            accent_glow.clone(),
             Transform::from_xyz(x, -0.30 * s - (al - 1.0) * 0.17 * s + y_lift, -0.072 * s),
-            PartSlotTag::Arms);
-        // Wrist node
-        spawn_part(commands, meshes, root, kind_hand,
-            Mesh::from(Sphere::new(0.108 * s)), dark.clone(),
-            Transform::from_xyz(x, -0.49 * s - (al - 1.0) * 0.28 * s + y_lift, 0.0),
-            PartSlotTag::Arms);
+            PartSlotTag::Arms,
+        );
+        // Rounded claw palm and wrist collar
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_hand,
+            Mesh::from(Cylinder::new(0.102 * s, 0.040 * s)),
+            accent_glow.clone(),
+            Transform::from_xyz(x, -0.445 * s - (al - 1.0) * 0.28 * s + y_lift, 0.0),
+            PartSlotTag::Arms,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind_hand,
+            superellipsoid_mesh(
+                Vec3::new(0.118 * s, 0.100 * s, 0.118 * s),
+                0.50,
+                0.68,
+                12,
+                18,
+            ),
+            dark.clone(),
+            Transform::from_xyz(x, -0.51 * s - (al - 1.0) * 0.28 * s + y_lift, -0.010 * s),
+            PartSlotTag::Arms,
+        );
         // Four splayed claw prongs — wide menacing spread
         let hand_y = -0.50 * s - (al - 1.0) * 0.28 * s + y_lift;
         for (angle_off, prong_len) in [
             (-0.55_f32, 0.20_f32),
             (-0.18_f32, 0.27_f32),
-            ( 0.18_f32, 0.27_f32),
-            ( 0.55_f32, 0.20_f32),
+            (0.18_f32, 0.27_f32),
+            (0.55_f32, 0.20_f32),
         ] {
-            spawn_part(commands, meshes, root, kind_hand,
-                Mesh::from(Capsule3d::new(0.022 * s, prong_len * s)), primary.clone(),
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                kind_hand,
+                Mesh::from(Capsule3d::new(0.022 * s, prong_len * s)),
+                primary.clone(),
                 Transform::from_xyz(
                     x + sign * angle_off * 0.118 * s,
                     hand_y - 0.11 * s,
                     -0.025 * s,
-                ).with_rotation(
-                    Quat::from_rotation_x(0.22) * Quat::from_rotation_z(sign * angle_off * 0.88)
+                )
+                .with_rotation(
+                    Quat::from_rotation_x(0.22) * Quat::from_rotation_z(sign * angle_off * 0.88),
                 ),
-                PartSlotTag::Arms);
+                PartSlotTag::Arms,
+            );
         }
     }
 }
@@ -846,38 +1279,83 @@ fn spawn_legs_mech(
 
     let leg_x = 0.165 * s * hip_w;
     for (leg_k, foot_k, boot_k, x) in [
-        (CartoonPartKind::LeftLeg, CartoonPartKind::LeftFoot, CartoonPartKind::LeftBoot, -leg_x),
-        (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot, CartoonPartKind::RightBoot, leg_x),
+        (
+            CartoonPartKind::LeftLeg,
+            CartoonPartKind::LeftFoot,
+            CartoonPartKind::LeftBoot,
+            -leg_x,
+        ),
+        (
+            CartoonPartKind::RightLeg,
+            CartoonPartKind::RightFoot,
+            CartoonPartKind::RightBoot,
+            leg_x,
+        ),
     ] {
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.120 * s, 0.40 * s * ll)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.120 * s, 0.40 * s * ll)),
+            primary.clone(),
             Transform::from_xyz(x, -0.65 * s - (ll - 1.0) * 0.13 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.88, 1.0, 0.80)), PartSlotTag::Legs);
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Sphere::new(0.138 * s)), armor.clone(),
+                .with_scale(Vec3::new(0.88, 1.0, 0.80)),
+            PartSlotTag::Legs,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Sphere::new(0.138 * s)),
+            armor.clone(),
             Transform::from_xyz(x, -0.85 * s - (ll - 1.0) * 0.20 * s + y_lift, -0.012 * s),
-            PartSlotTag::Legs);
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.112 * s, 0.37 * s * ll)), armor.clone(),
+            PartSlotTag::Legs,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.112 * s, 0.37 * s * ll)),
+            armor.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.008 * s)
-                .with_scale(Vec3::new(0.84, 1.0, 0.74)), PartSlotTag::Legs);
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.014 * s, 0.20 * s * ll)), accent_glow.clone(),
+                .with_scale(Vec3::new(0.84, 1.0, 0.74)),
+            PartSlotTag::Legs,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.014 * s, 0.20 * s * ll)),
+            accent_glow.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.082 * s)
-                .with_scale(Vec3::new(0.4, 1.0, 0.3)), PartSlotTag::Legs);
-        spawn_part(commands, meshes, root, foot_k,
-            Mesh::from(Capsule3d::new(0.120 * s, 0.16 * s * cfg.foot_scale)), armor.clone(),
-            Transform::from_xyz(x, -1.23 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.09 * s)
-                .with_rotation(Quat::from_rotation_x(PI * 0.5))
-                .with_scale(Vec3::new(0.90 * cfg.foot_scale, 1.0, 1.15)), PartSlotTag::Legs);
-        spawn_part(commands, meshes, root, boot_k,
-            Mesh::from(Cylinder::new(0.125 * s * cfg.foot_scale, 0.062 * s)), primary.clone(),
-            Transform::from_xyz(x, -1.06 * s - (ll - 1.0) * 0.22 * s + y_lift, -0.020 * s)
-                .with_scale(Vec3::new(0.90, 1.0, 0.80)), PartSlotTag::Legs);
-        spawn_part(commands, meshes, root, boot_k,
-            Mesh::from(Cylinder::new(0.135 * s * cfg.foot_scale, 0.036 * s)), accent_glow.clone(),
-            Transform::from_xyz(x, -1.01 * s - (ll - 1.0) * 0.22 * s + y_lift, -0.020 * s),
-            PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.4, 1.0, 0.3)),
+            PartSlotTag::Legs,
+        );
+        spawn_cartoon_shoe(
+            commands,
+            meshes,
+            root,
+            foot_k,
+            Some(boot_k),
+            primary.clone(),
+            if cfg.has_boots {
+                armor.clone()
+            } else {
+                primary.clone()
+            },
+            accent_glow.clone(),
+            Vec3::new(x, -1.23 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.09 * s),
+            if x < 0.0 { -1.0 } else { 1.0 },
+            s,
+            cfg.foot_scale,
+            0.94,
+            1.05,
+            cfg.has_boots,
+        );
     }
 }
 
@@ -899,35 +1377,75 @@ fn spawn_legs_heavy(
 
     let leg_x = 0.180 * s * hip_w;
     for (leg_k, foot_k, boot_k, x) in [
-        (CartoonPartKind::LeftLeg, CartoonPartKind::LeftFoot, CartoonPartKind::LeftBoot, -leg_x),
-        (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot, CartoonPartKind::RightBoot, leg_x),
+        (
+            CartoonPartKind::LeftLeg,
+            CartoonPartKind::LeftFoot,
+            CartoonPartKind::LeftBoot,
+            -leg_x,
+        ),
+        (
+            CartoonPartKind::RightLeg,
+            CartoonPartKind::RightFoot,
+            CartoonPartKind::RightBoot,
+            leg_x,
+        ),
     ] {
         // Wide thigh plate
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.148 * s, 0.38 * s * ll)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.148 * s, 0.38 * s * ll)),
+            primary.clone(),
             Transform::from_xyz(x, -0.63 * s - (ll - 1.0) * 0.13 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(1.12, 1.0, 0.96)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(1.12, 1.0, 0.96)),
+            PartSlotTag::Legs,
+        );
         // Large knee guard
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Sphere::new(0.182 * s)), armor.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Sphere::new(0.182 * s)),
+            armor.clone(),
             Transform::from_xyz(x, -0.86 * s - (ll - 1.0) * 0.20 * s + y_lift, -0.022 * s),
-            PartSlotTag::Legs);
+            PartSlotTag::Legs,
+        );
         // Wide armored shin block
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.134 * s, 0.38 * s * ll)), armor.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.134 * s, 0.38 * s * ll)),
+            armor.clone(),
             Transform::from_xyz(x, -s - (ll - 1.0) * 0.26 * s + y_lift, -0.010 * s)
-                .with_scale(Vec3::new(1.06, 1.0, 0.90)), PartSlotTag::Legs);
-        // Heavy flat boot plate
-        spawn_part(commands, meshes, root, foot_k,
-            Mesh::from(Capsule3d::new(0.148 * s, 0.20 * s * cfg.foot_scale)), dark.clone(),
-            Transform::from_xyz(x, -1.24 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.10 * s)
-                .with_rotation(Quat::from_rotation_x(PI * 0.5))
-                .with_scale(Vec3::new(1.08 * cfg.foot_scale, 1.0, 1.22)), PartSlotTag::Legs);
-        // Boot reinforcement cylinder
-        spawn_part(commands, meshes, root, boot_k,
-            Mesh::from(Cylinder::new(0.150 * s * cfg.foot_scale, 0.096 * s)), primary.clone(),
-            Transform::from_xyz(x, -1.06 * s - (ll - 1.0) * 0.22 * s + y_lift, -0.025 * s)
-                .with_scale(Vec3::new(1.0, 1.0, 0.88)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(1.06, 1.0, 0.90)),
+            PartSlotTag::Legs,
+        );
+        spawn_cartoon_shoe(
+            commands,
+            meshes,
+            root,
+            foot_k,
+            Some(boot_k),
+            dark.clone(),
+            if cfg.has_boots {
+                armor.clone()
+            } else {
+                primary.clone()
+            },
+            primary.clone(),
+            Vec3::new(x, -1.24 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.10 * s),
+            if x < 0.0 { -1.0 } else { 1.0 },
+            s,
+            cfg.foot_scale,
+            1.22,
+            1.16,
+            cfg.has_boots,
+        );
     }
 }
 
@@ -948,25 +1466,60 @@ fn spawn_legs_scout(
 
     let leg_x = 0.158 * s * hip_w;
     for (leg_k, foot_k, _, x) in [
-        (CartoonPartKind::LeftLeg, CartoonPartKind::LeftFoot, CartoonPartKind::LeftBoot, -leg_x),
-        (CartoonPartKind::RightLeg, CartoonPartKind::RightFoot, CartoonPartKind::RightBoot, leg_x),
+        (
+            CartoonPartKind::LeftLeg,
+            CartoonPartKind::LeftFoot,
+            CartoonPartKind::LeftBoot,
+            -leg_x,
+        ),
+        (
+            CartoonPartKind::RightLeg,
+            CartoonPartKind::RightFoot,
+            CartoonPartKind::RightBoot,
+            leg_x,
+        ),
     ] {
         // Slender thigh
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.090 * s, 0.42 * s * ll)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.090 * s, 0.42 * s * ll)),
+            primary.clone(),
             Transform::from_xyz(x, -0.65 * s - (ll - 1.0) * 0.14 * s + y_lift, 0.0)
-                .with_scale(Vec3::new(0.80, 1.0, 0.72)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.80, 1.0, 0.72)),
+            PartSlotTag::Legs,
+        );
         // Slim shin
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Capsule3d::new(0.082 * s, 0.38 * s * ll)), stripe.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Capsule3d::new(0.082 * s, 0.38 * s * ll)),
+            stripe.clone(),
             Transform::from_xyz(x, -1.02 * s - (ll - 1.0) * 0.26 * s + y_lift, -0.005 * s)
-                .with_scale(Vec3::new(0.76, 1.0, 0.68)), PartSlotTag::Legs);
-        // Light foot
-        spawn_part(commands, meshes, root, foot_k,
-            Mesh::from(Capsule3d::new(0.096 * s, 0.14 * s * cfg.foot_scale)), primary.clone(),
-            Transform::from_xyz(x, -1.25 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.07 * s)
-                .with_rotation(Quat::from_rotation_x(PI * 0.5))
-                .with_scale(Vec3::new(0.82 * cfg.foot_scale, 1.0, 1.08)), PartSlotTag::Legs);
+                .with_scale(Vec3::new(0.76, 1.0, 0.68)),
+            PartSlotTag::Legs,
+        );
+        spawn_cartoon_shoe(
+            commands,
+            meshes,
+            root,
+            foot_k,
+            None,
+            stripe.clone(),
+            primary.clone(),
+            stripe.clone(),
+            Vec3::new(x, -1.25 * s - (ll - 1.0) * 0.31 * s + y_lift, -0.07 * s),
+            if x < 0.0 { -1.0 } else { 1.0 },
+            s,
+            cfg.foot_scale,
+            0.78,
+            0.96,
+            false,
+        );
     }
 }
 
@@ -993,15 +1546,29 @@ fn spawn_legs_jet(
         (CartoonPartKind::RightLeg, leg_x),
     ] {
         // Rear nozzle housing
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Cylinder::new(0.075 * s, 0.10 * s)), dark.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Cylinder::new(0.075 * s, 0.10 * s)),
+            dark.clone(),
             Transform::from_xyz(x, -1.04 * s - (ll - 1.0) * 0.26 * s + y_lift, 0.088 * s)
-                .with_rotation(Quat::from_rotation_x(0.22)), PartSlotTag::Legs);
+                .with_rotation(Quat::from_rotation_x(0.22)),
+            PartSlotTag::Legs,
+        );
         // Nozzle exhaust glow
-        spawn_part(commands, meshes, root, leg_k,
-            Mesh::from(Cylinder::new(0.068 * s, 0.055 * s)), accent_glow.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            leg_k,
+            Mesh::from(Cylinder::new(0.068 * s, 0.055 * s)),
+            accent_glow.clone(),
             Transform::from_xyz(x, -1.02 * s - (ll - 1.0) * 0.26 * s + y_lift, 0.096 * s)
-                .with_rotation(Quat::from_rotation_x(0.22)), PartSlotTag::Legs);
+                .with_rotation(Quat::from_rotation_x(0.22)),
+            PartSlotTag::Legs,
+        );
     }
 }
 
@@ -1026,20 +1593,41 @@ fn spawn_shoulders_dome(
         (CartoonPartKind::ShoulderPadLeft, -arm_x, -0.15_f32),
         (CartoonPartKind::ShoulderPadRight, arm_x, 0.15_f32),
     ] {
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Sphere::new(0.22 * s)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Sphere::new(0.22 * s)),
+            primary.clone(),
             Transform::from_xyz(x, 0.26 * s + y_lift, -0.010 * s)
                 .with_scale(Vec3::new(1.0, 0.62, 0.90))
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Sphere::new(0.5)), armor.clone(),
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Sphere::new(0.5)),
+            armor.clone(),
             Transform::from_xyz(x, 0.20 * s + y_lift, -0.060 * s)
                 .with_scale(Vec3::new(0.36 * s, 0.10 * s, 0.26 * s))
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Cylinder::new(0.195 * s, 0.036 * s)), accent_glow.clone(),
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Cylinder::new(0.195 * s, 0.036 * s)),
+            accent_glow.clone(),
             Transform::from_xyz(x, 0.168 * s + y_lift, -0.018 * s)
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
     }
 }
 
@@ -1063,26 +1651,54 @@ fn spawn_shoulders_spiked(
         (CartoonPartKind::ShoulderPadRight, arm_x, 0.15_f32),
     ] {
         // Dome base
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Sphere::new(0.22 * s)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Sphere::new(0.22 * s)),
+            primary.clone(),
             Transform::from_xyz(x, 0.26 * s + y_lift, -0.010 * s)
                 .with_scale(Vec3::new(1.0, 0.65, 0.88))
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
         // Inner plate
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Sphere::new(0.5)), armor.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Sphere::new(0.5)),
+            armor.clone(),
             Transform::from_xyz(x, 0.20 * s + y_lift, -0.055 * s)
                 .with_scale(Vec3::new(0.34 * s, 0.10 * s, 0.24 * s))
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
         // Upward spike
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Capsule3d::new(0.040 * s, 0.20 * s)), dark.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Capsule3d::new(0.040 * s, 0.20 * s)),
+            dark.clone(),
             Transform::from_xyz(x, 0.48 * s + y_lift, -0.015 * s)
-                .with_rotation(Quat::from_rotation_z(rot_z * 0.5)), PartSlotTag::Shoulders);
+                .with_rotation(Quat::from_rotation_z(rot_z * 0.5)),
+            PartSlotTag::Shoulders,
+        );
         // Spike tip
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Sphere::new(0.028 * s)), armor.clone(),
-            Transform::from_xyz(x, 0.62 * s + y_lift, -0.012 * s), PartSlotTag::Shoulders);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Sphere::new(0.028 * s)),
+            armor.clone(),
+            Transform::from_xyz(x, 0.62 * s + y_lift, -0.012 * s),
+            PartSlotTag::Shoulders,
+        );
     }
 }
 
@@ -1106,20 +1722,41 @@ fn spawn_shoulders_plate(
         (CartoonPartKind::ShoulderPadRight, arm_x, 0.08_f32),
     ] {
         // Wide flat disc
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Cylinder::new(0.30 * s, 0.055 * s)), primary.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Cylinder::new(0.30 * s, 0.055 * s)),
+            primary.clone(),
             Transform::from_xyz(x, 0.28 * s + y_lift, -0.005 * s)
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
         // Edge trim strip
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Cylinder::new(0.302 * s, 0.022 * s)), edge.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Cylinder::new(0.302 * s, 0.022 * s)),
+            edge.clone(),
             Transform::from_xyz(x, 0.30 * s + y_lift, -0.004 * s)
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
         // Center accent disc
-        spawn_part(commands, meshes, root, kind,
-            Mesh::from(Cylinder::new(0.10 * s, 0.065 * s)), accent_glow.clone(),
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Cylinder::new(0.10 * s, 0.065 * s)),
+            accent_glow.clone(),
             Transform::from_xyz(x, 0.27 * s + y_lift, -0.010 * s)
-                .with_rotation(Quat::from_rotation_z(rot_z)), PartSlotTag::Shoulders);
+                .with_rotation(Quat::from_rotation_z(rot_z)),
+            PartSlotTag::Shoulders,
+        );
     }
 }
 
@@ -1143,35 +1780,54 @@ fn spawn_head_open_face(
     let cape_mat = soft_mat(materials, purple);
 
     // Skin head
-    spawn_part(commands, meshes, root, CartoonPartKind::Head,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Head,
         Mesh::from(Sphere::new(0.34 * s)),
         skin_mat.clone(),
-        Transform::from_xyz(0.0, head_y, -0.005 * s)
-            .with_scale(Vec3::new(0.92, 1.08, 0.88)),
-        PartSlotTag::Head);
+        Transform::from_xyz(0.0, head_y, -0.005 * s).with_scale(Vec3::new(0.92, 1.08, 0.88)),
+        PartSlotTag::Head,
+    );
 
     // Hair crown cap — full rounded top, not flat
-    spawn_part(commands, meshes, root, CartoonPartKind::Hair,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hair,
         Mesh::from(Sphere::new(0.37 * s)),
         hair_mat.clone(),
         Transform::from_xyz(0.0, head_y + 0.05 * s, 0.02 * s)
             .with_scale(Vec3::new(1.00, 0.70, 0.96)),
-        PartSlotTag::Head);
+        PartSlotTag::Head,
+    );
     // Hair back volume — gives length behind the head
-    spawn_part(commands, meshes, root, CartoonPartKind::Hair,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hair,
         Mesh::from(Sphere::new(0.33 * s)),
         hair_mat.clone(),
         Transform::from_xyz(0.0, head_y - 0.06 * s, 0.22 * s)
             .with_scale(Vec3::new(0.90, 0.94, 0.68)),
-        PartSlotTag::Head);
+        PartSlotTag::Head,
+    );
     // Hair side-temples — fills in above the ears
     for sign in [-1.0_f32, 1.0_f32] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Hair,
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Hair,
             Mesh::from(Sphere::new(0.28 * s)),
             hair_mat.clone(),
             Transform::from_xyz(sign * 0.22 * s, head_y + 0.02 * s, 0.05 * s)
                 .with_scale(Vec3::new(0.52, 0.72, 0.80)),
-            PartSlotTag::Head);
+            PartSlotTag::Head,
+        );
     }
 
     // Eyes
@@ -1179,47 +1835,76 @@ fn spawn_head_open_face(
         (CartoonPartKind::LeftEye, -0.13_f32),
         (CartoonPartKind::RightEye, 0.13_f32),
     ] {
-        spawn_part(commands, meshes, root, kind,
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
             Mesh::from(Sphere::new(0.060 * s)),
             eye_mat.clone(),
             Transform::from_xyz(eye_x * s, head_y + 0.04 * s, -0.32 * s)
                 .with_scale(Vec3::new(0.82, 1.18, 0.30)),
-            PartSlotTag::Head);
+            PartSlotTag::Head,
+        );
     }
 
     // Hood — drapes over crown and back, face left open
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Sphere::new(0.42 * s)),
         cape_mat.clone(),
         Transform::from_xyz(0.0, head_y + 0.04 * s, 0.10 * s)
             .with_scale(Vec3::new(1.12, 1.02, 0.80)),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Hood neck drape — hangs down the back of the neck
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Capsule3d::new(0.22 * s, 0.18 * s)),
         cape_mat.clone(),
-        Transform::from_xyz(0.0, head_y - 0.26 * s, 0.20 * s)
-            .with_scale(Vec3::new(1.0, 1.0, 0.55)),
-        PartSlotTag::HeadGear);
+        Transform::from_xyz(0.0, head_y - 0.26 * s, 0.20 * s).with_scale(Vec3::new(1.0, 1.0, 0.55)),
+        PartSlotTag::HeadGear,
+    );
 
     // Cape upper yoke — broad across the shoulders
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cuboid::new(0.82 * s, 0.24 * s, 0.07 * s)),
         cape_mat.clone(),
         Transform::from_xyz(0.0, y_lift + 0.22 * s, 0.20 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Cape body panel
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cuboid::new(0.72 * s, 0.62 * s, 0.06 * s)),
         cape_mat.clone(),
         Transform::from_xyz(0.0, y_lift - 0.18 * s, 0.22 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Cape lower taper
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cuboid::new(0.54 * s, 0.36 * s, 0.055 * s)),
         cape_mat.clone(),
         Transform::from_xyz(0.0, y_lift - 0.66 * s, 0.22 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
 }
 
 fn spawn_head_combat(
@@ -1238,39 +1923,64 @@ fn spawn_head_combat(
     let visor_glow = emissive_mat(materials, cfg.accent, 3.5);
 
     // Main dome — angled flat-top sphere
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Sphere::new(0.38 * s)),
         shell.clone(),
         Transform::from_xyz(0.0, head_y + 0.04 * s, 0.02 * s)
             .with_scale(Vec3::new(1.04, 0.94, 1.0)),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Brow plate
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cuboid::new(0.48 * s, 0.10 * s, 0.09 * s)),
         dark_shell.clone(),
         Transform::from_xyz(0.0, head_y + 0.22 * s, -0.26 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Eye-slit visor
-    spawn_part(commands, meshes, root, CartoonPartKind::Visor,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Visor,
         Mesh::from(Cuboid::new(0.30 * s, 0.040 * s, 0.055 * s)),
         visor_glow.clone(),
         Transform::from_xyz(0.0, head_y + 0.09 * s, -0.36 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Cheek guards
     for (cx, rz) in [(-0.30_f32, 0.08_f32), (0.30_f32, -0.08_f32)] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Hood,
             Mesh::from(Cuboid::new(0.09 * s, 0.22 * s, 0.20 * s)),
             dark_shell.clone(),
             Transform::from_xyz(cx * s, head_y - 0.07 * s, -0.12 * s)
                 .with_rotation(Quat::from_rotation_z(rz)),
-            PartSlotTag::HeadGear);
+            PartSlotTag::HeadGear,
+        );
     }
     // Chin guard
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cuboid::new(0.26 * s, 0.08 * s, 0.13 * s)),
         dark_shell.clone(),
         Transform::from_xyz(0.0, head_y - 0.26 * s, -0.22 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
 }
 
 fn spawn_head_full_helm(
@@ -1290,30 +2000,49 @@ fn spawn_head_full_helm(
     let collar = robot_mat(materials, darken(cfg.outfit, 0.52));
 
     // Main ovoid shell
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Sphere::new(0.40 * s)),
         shell.clone(),
-        Transform::from_xyz(0.0, head_y + 0.04 * s, 0.0)
-            .with_scale(Vec3::new(1.00, 1.10, 0.97)),
-        PartSlotTag::HeadGear);
+        Transform::from_xyz(0.0, head_y + 0.04 * s, 0.0).with_scale(Vec3::new(1.00, 1.10, 0.97)),
+        PartSlotTag::HeadGear,
+    );
     // Brow ridge
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cuboid::new(0.52 * s, 0.078 * s, 0.075 * s)),
         brow_mat.clone(),
         Transform::from_xyz(0.0, head_y + 0.26 * s, -0.28 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Glowing visor slit
-    spawn_part(commands, meshes, root, CartoonPartKind::Visor,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Visor,
         Mesh::from(Cuboid::new(0.34 * s, 0.042 * s, 0.038 * s)),
         visor_glow.clone(),
         Transform::from_xyz(0.0, head_y + 0.10 * s, -0.38 * s),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Neck collar ring
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cylinder::new(0.30 * s, 0.10 * s)),
         collar.clone(),
         Transform::from_xyz(0.0, head_y - 0.38 * s, 0.0),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
 }
 
 fn spawn_head_void_mask(
@@ -1332,35 +2061,58 @@ fn spawn_head_void_mask(
     let crest_mat = robot_mat(materials, darken(cfg.accent, 0.42));
 
     // Large dark skull sphere
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Sphere::new(0.44 * s)),
         void_shell.clone(),
         Transform::from_xyz(0.0, head_y + 0.06 * s, -0.01 * s)
             .with_scale(Vec3::new(1.02, 1.08, 1.0)),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Glowing eye sockets
     for eye_x in [-0.14_f32, 0.14_f32] {
-        spawn_part(commands, meshes, root, CartoonPartKind::Visor,
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Visor,
             Mesh::from(Sphere::new(0.058 * s)),
             eye_glow.clone(),
             Transform::from_xyz(eye_x * s, head_y + 0.09 * s, -0.38 * s)
                 .with_scale(Vec3::new(1.0, 1.35, 0.38)),
-            PartSlotTag::HeadGear);
+            PartSlotTag::HeadGear,
+        );
     }
     // Top crest ridge
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Cuboid::new(0.07 * s, 0.18 * s, 0.30 * s)),
         crest_mat.clone(),
         Transform::from_xyz(0.0, head_y + 0.48 * s, -0.04 * s)
             .with_rotation(Quat::from_rotation_x(-0.12)),
-        PartSlotTag::HeadGear);
+        PartSlotTag::HeadGear,
+    );
     // Lower jaw plate
-    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Hood,
         Mesh::from(Sphere::new(0.5)),
         void_shell.clone(),
-        Transform::from_xyz(0.0, head_y - 0.22 * s, -0.18 * s)
-            .with_scale(Vec3::new(0.36 * s, 0.19 * s, 0.25 * s)),
-        PartSlotTag::HeadGear);
+        Transform::from_xyz(0.0, head_y - 0.22 * s, -0.18 * s).with_scale(Vec3::new(
+            0.36 * s,
+            0.19 * s,
+            0.25 * s,
+        )),
+        PartSlotTag::HeadGear,
+    );
 }
 
 // ── Legacy aliases (keep callers in characters.rs building) ───────────────────
@@ -1407,6 +2159,291 @@ pub fn spawn_robot_shoulders(
     y_lift: f32,
 ) {
     spawn_shoulders_dome(commands, meshes, materials, root, cfg, y_lift);
+}
+
+pub fn spawn_cartoon_glove(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    root: Entity,
+    kind: CartoonPartKind,
+    hand_material: Handle<StandardMaterial>,
+    cuff_material: Handle<StandardMaterial>,
+    palm_center: Vec3,
+    side: f32,
+    palm_radii: Vec3,
+    finger_radius: f32,
+    finger_length: f32,
+    cuff_radius: f32,
+    cuff_depth: f32,
+) {
+    let side = if side < 0.0 { -1.0 } else { 1.0 };
+    let scale_hint = palm_radii.max_element().max(0.001);
+    let finger_spacing = palm_radii.x * 0.54;
+
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        kind,
+        Mesh::from(Cylinder::new(cuff_radius, cuff_depth)),
+        cuff_material.clone(),
+        Transform::from_xyz(
+            palm_center.x,
+            palm_center.y + palm_radii.y * 0.92,
+            palm_center.z + palm_radii.z * 0.10,
+        )
+        .with_scale(Vec3::new(1.05, 1.0, 0.78)),
+        PartSlotTag::Arms,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        kind,
+        superellipsoid_mesh(palm_radii, 0.55, 0.70, 14, 22),
+        hand_material.clone(),
+        Transform::from_translation(palm_center),
+        PartSlotTag::Arms,
+    );
+
+    for (index, spread) in [(-1_i32, -1.0_f32), (0, 0.0), (1, 1.0)] {
+        let x = palm_center.x + spread * finger_spacing;
+        let y = palm_center.y - palm_radii.y * 0.82;
+        let z = palm_center.z - palm_radii.z * 0.55 - index.abs() as f32 * 0.006 * scale_hint;
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Capsule3d::new(finger_radius, finger_length)),
+            hand_material.clone(),
+            Transform::from_xyz(x, y, z).with_rotation(Quat::from_rotation_z(-spread * 0.16)),
+            PartSlotTag::Arms,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            superellipsoid_mesh(
+                Vec3::new(
+                    finger_radius * 1.34,
+                    finger_radius * 0.82,
+                    finger_radius * 0.86,
+                ),
+                0.55,
+                0.70,
+                8,
+                14,
+            ),
+            hand_material.clone(),
+            Transform::from_xyz(x, palm_center.y - palm_radii.y * 0.14, z),
+            PartSlotTag::Arms,
+        );
+    }
+
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        kind,
+        Mesh::from(Capsule3d::new(finger_radius * 1.05, finger_length * 0.78)),
+        hand_material,
+        Transform::from_xyz(
+            palm_center.x + side * palm_radii.x * 0.92,
+            palm_center.y - palm_radii.y * 0.12,
+            palm_center.z - palm_radii.z * 0.28,
+        )
+        .with_rotation(Quat::from_rotation_z(-side * PI * 0.5) * Quat::from_rotation_x(0.30)),
+        PartSlotTag::Arms,
+    );
+}
+
+pub fn spawn_cartoon_shoe(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    root: Entity,
+    foot_kind: CartoonPartKind,
+    boot_kind: Option<CartoonPartKind>,
+    sole_material: Handle<StandardMaterial>,
+    upper_material: Handle<StandardMaterial>,
+    accent_material: Handle<StandardMaterial>,
+    foot_center: Vec3,
+    side: f32,
+    scale: f32,
+    foot_scale: f32,
+    width_mult: f32,
+    length_mult: f32,
+    boot_details: bool,
+) {
+    let side = if side < 0.0 { -1.0 } else { 1.0 };
+    let scale = scale.max(0.1);
+    let foot_scale = foot_scale.max(0.55);
+    let width = width_mult.max(0.55);
+    let length = length_mult.max(0.65);
+
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        foot_kind,
+        superellipsoid_mesh(
+            Vec3::new(
+                0.165 * scale * foot_scale * width,
+                0.045 * scale,
+                0.285 * scale * foot_scale * length,
+            ),
+            0.42,
+            0.64,
+            12,
+            24,
+        ),
+        sole_material.clone(),
+        Transform::from_xyz(
+            foot_center.x,
+            foot_center.y - 0.038 * scale,
+            foot_center.z - 0.010 * scale,
+        ),
+        PartSlotTag::Legs,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        foot_kind,
+        superellipsoid_mesh(
+            Vec3::new(
+                0.142 * scale * foot_scale * width,
+                0.092 * scale,
+                0.222 * scale * foot_scale * length,
+            ),
+            0.48,
+            0.68,
+            12,
+            22,
+        ),
+        upper_material.clone(),
+        Transform::from_xyz(
+            foot_center.x,
+            foot_center.y + 0.028 * scale,
+            foot_center.z - 0.060 * scale,
+        )
+        .with_rotation(Quat::from_rotation_x(-0.08)),
+        PartSlotTag::Legs,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        foot_kind,
+        superellipsoid_mesh(
+            Vec3::new(
+                0.155 * scale * foot_scale * width,
+                0.100 * scale,
+                0.132 * scale * foot_scale * length,
+            ),
+            0.42,
+            0.62,
+            12,
+            20,
+        ),
+        upper_material.clone(),
+        Transform::from_xyz(
+            foot_center.x,
+            foot_center.y + 0.038 * scale,
+            foot_center.z - 0.220 * scale * length,
+        )
+        .with_rotation(Quat::from_rotation_x(-0.14)),
+        PartSlotTag::Legs,
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        foot_kind,
+        superellipsoid_mesh(
+            Vec3::new(
+                0.112 * scale * foot_scale * width,
+                0.070 * scale,
+                0.092 * scale * foot_scale,
+            ),
+            0.55,
+            0.70,
+            10,
+            18,
+        ),
+        sole_material.clone(),
+        Transform::from_xyz(
+            foot_center.x,
+            foot_center.y + 0.005 * scale,
+            foot_center.z + 0.130 * scale,
+        ),
+        PartSlotTag::Legs,
+    );
+
+    if !boot_details {
+        return;
+    }
+
+    if let Some(boot_kind) = boot_kind {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            boot_kind,
+            Mesh::from(Cylinder::new(
+                0.118 * scale * foot_scale * width,
+                0.082 * scale,
+            )),
+            upper_material,
+            Transform::from_xyz(
+                foot_center.x,
+                foot_center.y + 0.176 * scale,
+                foot_center.z + 0.070 * scale,
+            )
+            .with_scale(Vec3::new(1.0, 1.0, 0.78)),
+            PartSlotTag::Legs,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            boot_kind,
+            Mesh::from(Cuboid::new(
+                0.290 * scale * foot_scale * width,
+                0.035 * scale,
+                0.052 * scale,
+            )),
+            accent_material.clone(),
+            Transform::from_xyz(
+                foot_center.x,
+                foot_center.y + 0.112 * scale,
+                foot_center.z - 0.105 * scale,
+            )
+            .with_rotation(Quat::from_rotation_x(-0.10)),
+            PartSlotTag::Legs,
+        );
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            boot_kind,
+            superellipsoid_mesh(
+                Vec3::new(0.038 * scale, 0.030 * scale, 0.021 * scale),
+                0.52,
+                0.70,
+                8,
+                14,
+            ),
+            accent_material,
+            Transform::from_xyz(
+                foot_center.x + side * 0.135 * scale * foot_scale * width,
+                foot_center.y + 0.114 * scale,
+                foot_center.z - 0.112 * scale,
+            ),
+            PartSlotTag::Legs,
+        );
+    }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

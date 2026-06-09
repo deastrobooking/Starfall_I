@@ -3,8 +3,11 @@
 //! Accessible from the chapter-select screen via [G].
 //! Keys A/D browse assembly forms; Enter assembles; X disassembles; Esc returns.
 
+use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
+use bevy::input::ButtonState;
 use bevy::prelude::*;
 
+use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::robot_pets::{RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError};
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
@@ -181,7 +184,7 @@ fn setup_garage(
             // Controls hint
             root.spawn((
                 Text::new(
-                    "[A/←][D/→]  Browse forms    [Enter]  Assemble    [X]  Disassemble    [Esc]  Back",
+                    "[A/←][D/→] / D-pad / LB/RB  Browse    [Enter/A]  Assemble    [X]  Disassemble    [Esc/B]  Back",
                 ),
                 TextFont { font_size: 14.0, ..default() },
                 TextColor(dim_color),
@@ -204,22 +207,73 @@ fn teardown_garage(mut commands: Commands, q: Query<Entity, With<GarageRoot>>) {
 
 fn garage_keyboard_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     mut data: ResMut<GarageData>,
     mut robot_pets: ResMut<RobotPetCollection>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let form_count = RobotAssemblyForm::ALL.len();
+    let mut browse_left =
+        keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::KeyA);
+    let mut browse_right =
+        keyboard.just_pressed(KeyCode::ArrowRight) || keyboard.just_pressed(KeyCode::KeyD);
+    let mut assemble =
+        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
+    let mut disassemble = keyboard.just_pressed(KeyCode::KeyX);
+    let mut back = keyboard.just_pressed(KeyCode::Escape) || keyboard.just_pressed(KeyCode::KeyG);
 
-    if keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::KeyA) {
+    for event in button_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        match event.button {
+            GamepadButton::DPadLeft | GamepadButton::LeftTrigger => browse_left = true,
+            GamepadButton::DPadRight | GamepadButton::RightTrigger => browse_right = true,
+            GamepadButton::South | GamepadButton::Start => assemble = true,
+            GamepadButton::West => disassemble = true,
+            GamepadButton::East => back = true,
+            _ => {}
+        }
+    }
+
+    for gp in gamepads.iter() {
+        browse_left = browse_left
+            || gp.just_pressed(GamepadButton::DPadLeft)
+            || gp.just_pressed(GamepadButton::LeftTrigger);
+        browse_right = browse_right
+            || gp.just_pressed(GamepadButton::DPadRight)
+            || gp.just_pressed(GamepadButton::RightTrigger);
+        assemble = assemble
+            || gp.just_pressed(GamepadButton::South)
+            || gp.just_pressed(GamepadButton::Start);
+        disassemble = disassemble || gp.just_pressed(GamepadButton::West);
+        back = back || gp.just_pressed(GamepadButton::East);
+    }
+
+    browse_left = browse_left
+        || native.just_pressed(NativeButton::DPadLeft)
+        || native.just_pressed(NativeButton::LeftShoulder);
+    browse_right = browse_right
+        || native.just_pressed(NativeButton::DPadRight)
+        || native.just_pressed(NativeButton::RightShoulder);
+    assemble = assemble
+        || native.just_pressed(NativeButton::South)
+        || native.just_pressed(NativeButton::Start);
+    disassemble = disassemble || native.just_pressed(NativeButton::West);
+    back = back || native.just_pressed(NativeButton::East);
+
+    if browse_left {
         data.form_index = (data.form_index + form_count - 1) % form_count;
         data.last_result = None;
     }
-    if keyboard.just_pressed(KeyCode::ArrowRight) || keyboard.just_pressed(KeyCode::KeyD) {
+    if browse_right {
         data.form_index = (data.form_index + 1) % form_count;
         data.last_result = None;
     }
 
-    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter) {
+    if assemble {
         if robot_pets.active_assembly.is_some() {
             data.last_result = Some(GarageActionResult::AlreadyAssembled);
         } else {
@@ -242,12 +296,12 @@ fn garage_keyboard_input(
         }
     }
 
-    if keyboard.just_pressed(KeyCode::KeyX) {
+    if disassemble {
         robot_pets.disassemble();
         data.last_result = Some(GarageActionResult::Disassembled);
     }
 
-    if keyboard.just_pressed(KeyCode::Escape) || keyboard.just_pressed(KeyCode::KeyG) {
+    if back {
         next_state.set(AppState::ChapterSelect);
     }
 }
