@@ -70,6 +70,10 @@ together.
   vertex colors for grass, alpine rock, ice, snow, and trails. Keep heightmap
   changes tied to the shared height function and `mountain_routes()` so
   visuals, anchors, route markers, and collision agree.
+- Settlement layout is terrain-aware in `world_plugin`: each settlement samples
+  local relief and uses grounded, terraced, or sky-district floors. Mega cities
+  float on large walkable platforms with giant ramps/bridges and guide lights;
+  rough settlement edges can spawn mountain-inset gates/thresholds.
 - Settlement conversations are data-driven in `src/discussion.rs`.
   `DiscussionNpc` entities open the HUD discussion panel from `E` / D-pad
   Down, and each line can spawn an MP3 voice file from `assets/voice/...`.

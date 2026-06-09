@@ -28,8 +28,8 @@ use crate::discussion::{
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
-use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
+use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
 use crate::resources::{
     CurrentChapter, DungeonCrawlState, DungeonRoomState, GameSettings, PlaySessionTransition,
 };
@@ -2795,7 +2795,7 @@ fn spawn_ch6_crown_dungeon_extras(
     // ── Boss key gate — two ice slabs blocking the throne corridor ────────────
     for side in [-1.0_f32, 1.0] {
         let closed = origin + rot * Vec3::new(side * 3.8, 3.5, 32.0);
-        let open   = origin + rot * Vec3::new(side * 10.0, 3.5, 32.0);
+        let open = origin + rot * Vec3::new(side * 10.0, 3.5, 32.0);
         commands.spawn((
             PbrBundle {
                 mesh: Mesh3d(meshes.add(Cuboid::new(6.5, 7.0, 1.0))),
@@ -2815,8 +2815,8 @@ fn spawn_ch6_crown_dungeon_extras(
     // ── Enemy spawners: corridor, mid-room, back room ─────────────────────────
     for (local, count, enemy_type) in [
         (Vec3::new(0.0, 1.5, -38.0), 3u8, EnemyType::Soldier),
-        (Vec3::new(0.0, 1.5,  -8.0), 4u8, EnemyType::Hybrid),
-        (Vec3::new(0.0, 1.5,  20.0), 3u8, EnemyType::SpikeAlien),
+        (Vec3::new(0.0, 1.5, -8.0), 4u8, EnemyType::Hybrid),
+        (Vec3::new(0.0, 1.5, 20.0), 3u8, EnemyType::SpikeAlien),
     ] {
         let world_pos = origin + rot * local;
         commands.spawn((
@@ -4043,6 +4043,119 @@ fn spawn_range_outpost(
     ));
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettlementTerrainMode {
+    Grounded,
+    Terraced,
+    SkyDistrict,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SettlementTerrainLayout {
+    mode: SettlementTerrainMode,
+    center_y: f32,
+    floor_y: f32,
+    relief: f32,
+    max_grade: f32,
+    plaza_radius: f32,
+    platform_radius: f32,
+}
+
+impl SettlementTerrainLayout {
+    fn floor_y_at(&self, x: f32, z: f32, seed: u64) -> f32 {
+        match self.mode {
+            SettlementTerrainMode::SkyDistrict => self.floor_y,
+            SettlementTerrainMode::Grounded => terrain_surface_y(x, z, seed),
+            SettlementTerrainMode::Terraced => {
+                let ground = terrain_surface_y(x, z, seed);
+                let step = 7.5 + (self.relief * 0.035).clamp(0.0, 4.0);
+                let terrace = self.center_y + ((ground - self.center_y) / step).ceil() * step;
+                terrace.max(ground)
+            }
+        }
+    }
+
+    fn is_sky_district(&self) -> bool {
+        matches!(self.mode, SettlementTerrainMode::SkyDistrict)
+    }
+
+    fn needs_mountain_inset(&self, settlement: MapSettlement) -> bool {
+        settlement.kind != MapSettlementKind::Harbor
+            && (self.relief > 18.0
+                || self.max_grade > 0.075
+                || matches!(self.mode, SettlementTerrainMode::SkyDistrict))
+    }
+}
+
+fn settlement_layout_profile(
+    seed: u64,
+    settlement: MapSettlement,
+    plaza_radius: f32,
+) -> SettlementTerrainLayout {
+    let center_y = terrain_surface_y(settlement.x, settlement.z, seed);
+    let sample_radius = match settlement.kind {
+        MapSettlementKind::City => plaza_radius * 2.2,
+        MapSettlementKind::Village => plaza_radius * 1.9,
+        MapSettlementKind::Harbor => plaza_radius * 1.55,
+        MapSettlementKind::Outpost => plaza_radius * 1.8,
+    };
+
+    let rot = Quat::from_rotation_y(settlement.facing_yaw);
+    let mut low = center_y;
+    let mut high = center_y;
+    let mut max_grade = 0.0_f32;
+    for i in 0..12 {
+        let angle = i as f32 * std::f32::consts::TAU / 12.0;
+        for radius in [sample_radius * 0.55, sample_radius] {
+            let local = Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius);
+            let world = Vec3::new(settlement.x, 0.0, settlement.z) + rot * local;
+            let y = terrain_surface_y(world.x, world.z, seed);
+            low = low.min(y);
+            high = high.max(y);
+            max_grade = max_grade.max((y - center_y).abs() / radius.max(1.0));
+        }
+    }
+
+    let relief = high - low;
+    let mode = if matches!(settlement.kind, MapSettlementKind::City) {
+        SettlementTerrainMode::SkyDistrict
+    } else if relief > 14.0 || max_grade > 0.055 {
+        SettlementTerrainMode::Terraced
+    } else {
+        SettlementTerrainMode::Grounded
+    };
+    let platform_radius = match settlement.kind {
+        MapSettlementKind::City => 136.0 + relief.clamp(0.0, 70.0) * 0.45,
+        MapSettlementKind::Village => plaza_radius + 18.0,
+        MapSettlementKind::Harbor => plaza_radius + 20.0,
+        MapSettlementKind::Outpost => plaza_radius + 16.0,
+    };
+    let floor_y = match mode {
+        SettlementTerrainMode::SkyDistrict => center_y + 88.0 + relief.clamp(0.0, 120.0) * 0.38,
+        SettlementTerrainMode::Terraced => center_y,
+        SettlementTerrainMode::Grounded => center_y,
+    };
+
+    SettlementTerrainLayout {
+        mode,
+        center_y,
+        floor_y,
+        relief,
+        max_grade,
+        plaza_radius,
+        platform_radius,
+    }
+}
+
+fn settlement_plaza_radius(kind: MapSettlementKind) -> f32 {
+    match kind {
+        MapSettlementKind::City => 58.0,
+        MapSettlementKind::Village => 38.0,
+        MapSettlementKind::Harbor => 46.0,
+        MapSettlementKind::Outpost => 34.0,
+    }
+}
+
 fn spawn_exploration_settlements(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -4063,15 +4176,18 @@ fn spawn_exploration_settlement(
     seed: u64,
     settlement: MapSettlement,
 ) {
-    let center_y = terrain_surface_y(settlement.x, settlement.z, seed);
-    let origin = Vec3::new(settlement.x, center_y, settlement.z);
+    let plaza_radius = settlement_plaza_radius(settlement.kind);
+    let layout = settlement_layout_profile(seed, settlement, plaza_radius);
+    let origin = Vec3::new(settlement.x, layout.floor_y, settlement.z);
     let rot = Quat::from_rotation_y(settlement.facing_yaw);
-    let plaza_radius = match settlement.kind {
-        MapSettlementKind::City => 58.0,
-        MapSettlementKind::Village => 38.0,
-        MapSettlementKind::Harbor => 46.0,
-        MapSettlementKind::Outpost => 34.0,
-    };
+
+    if layout.is_sky_district() {
+        spawn_settlement_sky_foundation(
+            commands, meshes, pal, seed, settlement, layout, origin, rot,
+        );
+    } else if matches!(layout.mode, SettlementTerrainMode::Terraced) {
+        spawn_settlement_terrace_foundation(commands, meshes, pal, layout, origin, rot);
+    }
 
     commands.spawn((
         PbrBundle {
@@ -4082,7 +4198,7 @@ fn spawn_exploration_settlement(
                 MapSettlementKind::Harbor => pal.street_asphalt.clone(),
                 MapSettlementKind::Outpost => pal.brushed_metal.clone(),
             }),
-            transform: Transform::from_xyz(settlement.x, center_y + 0.28, settlement.z),
+            transform: Transform::from_xyz(settlement.x, layout.floor_y + 0.28, settlement.z),
             ..default()
         },
         WorldGeometry,
@@ -4091,25 +4207,218 @@ fn spawn_exploration_settlement(
         bevy_rapier3d::prelude::Collider::cylinder(0.28, plaza_radius),
     ));
 
-    spawn_settlement_roads(
-        commands,
-        meshes,
-        pal,
-        seed,
-        settlement,
-        origin,
-        rot,
-        plaza_radius,
+    spawn_settlement_roads(commands, meshes, pal, seed, settlement, origin, rot, layout);
+    spawn_settlement_buildings(commands, meshes, pal, seed, settlement, origin, rot, layout);
+    spawn_settlement_landmark(commands, meshes, pal, seed, settlement, origin, rot, layout);
+    spawn_settlement_cache(
+        commands, meshes, materials, seed, settlement, origin, rot, layout,
     );
-    spawn_settlement_buildings(commands, meshes, pal, seed, settlement, origin, rot);
-    spawn_settlement_landmark(commands, meshes, pal, seed, settlement, origin, rot);
-    spawn_settlement_cache(commands, meshes, materials, seed, settlement, origin, rot);
-    spawn_settlement_discussion_npc(commands, meshes, pal, seed, settlement, origin, rot);
+    spawn_settlement_discussion_npc(commands, meshes, pal, seed, settlement, origin, rot, layout);
+    spawn_settlement_mountain_inset(commands, meshes, pal, seed, settlement, origin, rot, layout);
     if matches!(settlement.kind, MapSettlementKind::City) {
         spawn_city_guardian_ships(commands, meshes, pal, seed, settlement, origin);
         spawn_city_spy_drones(commands, meshes, pal, seed, settlement, origin);
     }
     spawn_world_anchor(commands, settlement.anchor_id, origin + Vec3::Y * 2.4);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_sky_foundation(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    layout: SettlementTerrainLayout,
+    origin: Vec3,
+    rot: Quat,
+) {
+    let platform_height = 5.2;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(layout.platform_radius, platform_height))),
+            material: MeshMaterial3d(pal.sky_platform.clone()),
+            transform: Transform::from_xyz(origin.x, origin.y - platform_height * 0.5, origin.z),
+            ..default()
+        },
+        WorldGeometry,
+        SkyPlatform,
+        WalkableSurface,
+        Building {
+            zone: WorldZone::SkyPlatform,
+            height: platform_height,
+        },
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cylinder(platform_height * 0.5, layout.platform_radius),
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(layout.platform_radius * 0.36, 18.0))),
+            material: MeshMaterial3d(pal.glass_panel.clone()),
+            transform: Transform::from_xyz(origin.x, origin.y - 13.0, origin.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for i in 0..12 {
+        let angle = i as f32 * std::f32::consts::TAU / 12.0;
+        let local = Vec3::new(
+            angle.cos() * layout.platform_radius * 0.88,
+            0.0,
+            angle.sin() * layout.platform_radius * 0.88,
+        );
+        let pos = origin + local;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(1.25, 7.5))),
+                material: MeshMaterial3d(pal.guide_glow.clone()),
+                transform: Transform::from_xyz(pos.x, origin.y + 4.0, pos.z),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    for i in 0..3 {
+        let angle = settlement.facing_yaw + i as f32 * std::f32::consts::TAU / 3.0;
+        let dir = Vec2::new(angle.sin(), angle.cos()).normalize();
+        let start_x = settlement.x + dir.x * (layout.platform_radius + 260.0);
+        let start_z = settlement.z + dir.y * (layout.platform_radius + 260.0);
+        let start_ground = terrain_surface_y(start_x, start_z, seed);
+        let end_x = settlement.x + dir.x * (layout.platform_radius - 12.0);
+        let end_z = settlement.z + dir.y * (layout.platform_radius - 12.0);
+        let start = Vec3::new(start_x, start_ground + 1.2, start_z);
+        let end = Vec3::new(end_x, origin.y + 0.42, end_z);
+        spawn_settlement_ramp_span(
+            commands,
+            meshes,
+            pal,
+            start,
+            end,
+            17.0,
+            0.9,
+            i as u64 + settlement.anchor_id.len() as u64 * 41,
+        );
+    }
+
+    let gate_local = Vec3::new(0.0, 0.0, layout.platform_radius + 14.0);
+    let gate = origin + rot * gate_local;
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.35, 0.90, 1.0),
+                intensity: 42_000.0,
+                range: 150.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_xyz(gate.x, origin.y + 12.0, gate.z),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_ramp_span(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    start: Vec3,
+    end: Vec3,
+    width: f32,
+    thickness: f32,
+    seed: u64,
+) {
+    let delta = end - start;
+    let horizontal = Vec2::new(delta.x, delta.z).length().max(0.01);
+    let length = delta.length().max(0.01);
+    let yaw = delta.x.atan2(delta.z);
+    let pitch = (delta.y / horizontal).atan();
+    let rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+    let center = start.lerp(end, 0.5);
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width, thickness, length))),
+            material: MeshMaterial3d(pal.mountain_path.clone()),
+            transform: Transform::from_translation(center).with_rotation(rotation),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, thickness * 0.5, length * 0.5),
+    ));
+
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.55, 1.4, length))),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(
+                    center + rotation * Vec3::new(side * width * 0.48, 0.82, 0.0),
+                )
+                .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let stud_count = (length / 42.0).ceil().clamp(3.0, 16.0) as usize;
+    for i in 0..=stud_count {
+        let t = i as f32 / stud_count as f32;
+        let base = start.lerp(end, t);
+        let pulse = 0.65 + seeded(seed, i as u64 * 5 + 9) * 0.55;
+        for side in [-1.0_f32, 1.0] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Sphere::new(pulse))),
+                    material: MeshMaterial3d(pal.guide_glow.clone()),
+                    transform: Transform::from_translation(
+                        base + rotation * Vec3::new(side * width * 0.38, 1.15, 0.0),
+                    ),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+}
+
+fn spawn_settlement_terrace_foundation(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    layout: SettlementTerrainLayout,
+    origin: Vec3,
+    rot: Quat,
+) {
+    let ring_count = 10;
+    for i in 0..ring_count {
+        let angle = i as f32 * std::f32::consts::TAU / ring_count as f32;
+        let radius = layout.plaza_radius + 8.0;
+        let local = Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius);
+        let pos = origin + rot * local;
+        let tangent_yaw = angle + std::f32::consts::FRAC_PI_2;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(18.0, 3.4, 2.2))),
+                material: MeshMaterial3d(if i % 2 == 0 {
+                    pal.stone_block.clone()
+                } else {
+                    pal.mortar_line.clone()
+                }),
+                transform: Transform::from_xyz(pos.x, origin.y + 1.4, pos.z)
+                    .with_rotation(rot * Quat::from_rotation_y(tangent_yaw)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
 }
 
 fn spawn_settlement_roads(
@@ -4120,36 +4429,64 @@ fn spawn_settlement_roads(
     settlement: MapSettlement,
     origin: Vec3,
     rot: Quat,
-    plaza_radius: f32,
+    layout: SettlementTerrainLayout,
 ) {
-    let road_len = plaza_radius * 2.8;
-    for (i, local) in [Vec3::ZERO, Vec3::new(0.0, 0.0, 0.0)]
-        .into_iter()
-        .enumerate()
-    {
-        let size = if i == 0 {
-            Vec3::new(road_len, 0.28, 9.0)
-        } else {
-            Vec3::new(9.0, 0.28, road_len)
-        };
-        let world = origin + rot * local;
-        let ground = terrain_surface_y(world.x, world.z, seed);
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
-                material: MeshMaterial3d(match settlement.kind {
-                    MapSettlementKind::Village => pal.mortar_line.clone(),
-                    MapSettlementKind::Harbor => pal.highway.clone(),
-                    _ => pal.street_asphalt.clone(),
-                }),
-                transform: Transform::from_xyz(world.x, ground + 0.18, world.z).with_rotation(
-                    rot * Quat::from_rotation_y(i as f32 * std::f32::consts::FRAC_PI_2),
-                ),
-                ..default()
-            },
-            WorldGeometry,
-            WalkableSurface,
-        ));
+    let road_len = layout.plaza_radius * if layout.is_sky_district() { 3.35 } else { 2.85 };
+    let segment_count = if layout.is_sky_district() { 8 } else { 6 };
+    let segment_len = road_len / segment_count as f32;
+    let road_width = match settlement.kind {
+        MapSettlementKind::City => 12.0,
+        MapSettlementKind::Village => 8.0,
+        MapSettlementKind::Harbor => 10.5,
+        MapSettlementKind::Outpost => 9.0,
+    };
+    let material = match settlement.kind {
+        MapSettlementKind::Village => pal.mortar_line.clone(),
+        MapSettlementKind::Harbor => pal.highway.clone(),
+        _ => pal.street_asphalt.clone(),
+    };
+
+    for axis in 0..2 {
+        let axis_rot = rot * Quat::from_rotation_y(axis as f32 * std::f32::consts::FRAC_PI_2);
+        for segment in 0..segment_count {
+            let center_offset = -road_len * 0.5 + segment_len * (segment as f32 + 0.5);
+            let local = if axis == 0 {
+                Vec3::new(center_offset, 0.0, 0.0)
+            } else {
+                Vec3::new(0.0, 0.0, center_offset)
+            };
+            let world = origin + rot * local;
+            let floor_y = layout.floor_y_at(world.x, world.z, seed);
+            let size = if axis == 0 {
+                Vec3::new(segment_len * 0.94, 0.28, road_width)
+            } else {
+                Vec3::new(road_width, 0.28, segment_len * 0.94)
+            };
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                    material: MeshMaterial3d(material.clone()),
+                    transform: Transform::from_xyz(world.x, floor_y + 0.18, world.z)
+                        .with_rotation(axis_rot),
+                    ..default()
+                },
+                WorldGeometry,
+                WalkableSurface,
+            ));
+
+            if layout.is_sky_district() && segment % 2 == 0 {
+                let stud_pos = Vec3::new(world.x, floor_y + 0.92, world.z);
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Sphere::new(0.72))),
+                        material: MeshMaterial3d(pal.guide_glow.clone()),
+                        transform: Transform::from_translation(stud_pos),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+        }
     }
 }
 
@@ -4191,6 +4528,7 @@ fn spawn_settlement_buildings(
     settlement: MapSettlement,
     origin: Vec3,
     rot: Quat,
+    layout: SettlementTerrainLayout,
 ) {
     let count = match settlement.kind {
         MapSettlementKind::City => 10,
@@ -4211,7 +4549,7 @@ fn spawn_settlement_buildings(
         let radius = ring * (0.72 + seeded(seed, i as u64 * 7 + 3) * 0.38);
         let local = Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius);
         let world = origin + rot * local;
-        let ground = terrain_surface_y(world.x, world.z, seed);
+        let floor_y = layout.floor_y_at(world.x, world.z, seed);
         let height = match settlement.kind {
             MapSettlementKind::City => 28.0 + seeded(seed, i as u64 * 13 + 1) * 58.0,
             MapSettlementKind::Village => 9.0 + seeded(seed, i as u64 * 13 + 1) * 12.0,
@@ -4228,11 +4566,23 @@ fn spawn_settlement_buildings(
         let material = settlement_building_material(pal, settlement.kind, i);
         let yaw = settlement.facing_yaw + angle + std::f32::consts::FRAC_PI_2;
 
+        spawn_settlement_building_pad(
+            commands,
+            meshes,
+            pal,
+            layout,
+            Vec3::new(world.x, floor_y, world.z),
+            width,
+            depth,
+            yaw,
+            i,
+        );
+
         spawn_building(
             commands,
             meshes,
             material,
-            Vec3::new(world.x, ground + height * 0.5, world.z),
+            Vec3::new(world.x, floor_y + height * 0.5, world.z),
             width,
             height,
             depth,
@@ -4249,7 +4599,7 @@ fn spawn_settlement_buildings(
                 commands,
                 meshes,
                 pal,
-                Vec3::new(world.x, ground + height * 0.5, world.z),
+                Vec3::new(world.x, floor_y + height * 0.5, world.z),
                 width,
                 height,
                 depth,
@@ -4272,7 +4622,7 @@ fn spawn_settlement_buildings(
                     pal.window_cool.clone()
                 },
                 world.x,
-                ground,
+                floor_y,
                 world.z,
                 height,
                 width,
@@ -4284,8 +4634,133 @@ fn spawn_settlement_buildings(
             PbrBundle {
                 mesh: Mesh3d(meshes.add(Cuboid::new(width * 0.35, 0.42, depth * 0.35))),
                 material: MeshMaterial3d(pal.street_paint.clone()),
-                transform: Transform::from_xyz(world.x, ground + height + 0.22, world.z)
+                transform: Transform::from_xyz(world.x, floor_y + height + 0.22, world.z)
                     .with_rotation(Quat::from_rotation_y(yaw)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+
+        if matches!(settlement.kind, MapSettlementKind::City) {
+            spawn_sky_tower_accents(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(world.x, floor_y + height * 0.5, world.z),
+                width,
+                height,
+                depth,
+                yaw,
+                i,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_building_pad(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    layout: SettlementTerrainLayout,
+    base: Vec3,
+    width: f32,
+    depth: f32,
+    yaw: f32,
+    index: usize,
+) {
+    let pad_extra = if layout.is_sky_district() { 7.0 } else { 3.5 };
+    let pad_height = if layout.is_sky_district() { 1.25 } else { 0.75 };
+    let material = if layout.is_sky_district() {
+        pal.sky_platform.clone()
+    } else if matches!(layout.mode, SettlementTerrainMode::Terraced) {
+        pal.stone_block.clone()
+    } else {
+        pal.mountain_path.clone()
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(
+                width + pad_extra,
+                pad_height,
+                depth + pad_extra,
+            ))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_xyz(base.x, base.y + pad_height * 0.5, base.z)
+                .with_rotation(Quat::from_rotation_y(yaw)),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(
+            (width + pad_extra) * 0.5,
+            pad_height * 0.5,
+            (depth + pad_extra) * 0.5,
+        ),
+    ));
+
+    if matches!(layout.mode, SettlementTerrainMode::Terraced) {
+        let pillar_height = (base.y - layout.center_y).abs().clamp(2.0, 18.0);
+        let pillar_radius = (width.min(depth) * 0.24).max(1.6);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(pillar_radius, pillar_height))),
+                material: MeshMaterial3d(pal.rock_dark.clone()),
+                transform: Transform::from_xyz(base.x, base.y - pillar_height * 0.5 + 0.15, base.z),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    if layout.is_sky_district() && index.is_multiple_of(2) {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(1.05, 24.0))),
+                material: MeshMaterial3d(pal.guide_glow.clone()),
+                transform: Transform::from_xyz(base.x, base.y - 13.0, base.z),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_sky_tower_accents(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    yaw: f32,
+    index: usize,
+) {
+    let rot = Quat::from_rotation_y(yaw);
+    let base_y = center.y - height * 0.5;
+    let balcony_y = base_y + height * (0.42 + (index % 3) as f32 * 0.12).min(0.72);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width + 6.0, 0.36, depth + 6.0))),
+            material: MeshMaterial3d(pal.glass_panel.clone()),
+            transform: Transform::from_xyz(center.x, balcony_y, center.z).with_rotation(rot),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(0.42, height * 0.82))),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(
+                    center + rot * Vec3::new(side * width * 0.54, 0.0, -depth * 0.54),
+                ),
                 ..default()
             },
             WorldGeometry,
@@ -4340,6 +4815,7 @@ fn spawn_settlement_landmark(
     settlement: MapSettlement,
     origin: Vec3,
     rot: Quat,
+    layout: SettlementTerrainLayout,
 ) {
     let landmark_height = match settlement.kind {
         MapSettlementKind::City => 44.0,
@@ -4348,7 +4824,7 @@ fn spawn_settlement_landmark(
         MapSettlementKind::Outpost => 34.0,
     };
     let marker = origin + rot * Vec3::new(0.0, 0.0, -18.0);
-    let ground = terrain_surface_y(marker.x, marker.z, seed);
+    let ground = layout.floor_y_at(marker.x, marker.z, seed);
 
     commands.spawn((
         PbrBundle {
@@ -4392,7 +4868,7 @@ fn spawn_settlement_landmark(
     if matches!(settlement.kind, MapSettlementKind::Harbor) {
         for i in [-1.0_f32, 1.0] {
             let dock = origin + rot * Vec3::new(i * 18.0, 0.0, 54.0);
-            let dock_ground = terrain_surface_y(dock.x, dock.z, seed);
+            let dock_ground = layout.floor_y_at(dock.x, dock.z, seed);
             commands.spawn((
                 PbrBundle {
                     mesh: Mesh3d(meshes.add(Cuboid::new(10.0, 0.8, 52.0))),
@@ -4416,6 +4892,7 @@ fn spawn_settlement_cache(
     settlement: MapSettlement,
     origin: Vec3,
     rot: Quat,
+    layout: SettlementTerrainLayout,
 ) {
     let (credits, experience, armor) = match settlement.kind {
         MapSettlementKind::City => (120, 70, 8),
@@ -4424,7 +4901,7 @@ fn spawn_settlement_cache(
         MapSettlementKind::Outpost => (105, 62, 9),
     };
     let cache_pos = origin + rot * Vec3::new(0.0, 3.0, 26.0);
-    let cache_ground = terrain_surface_y(cache_pos.x, cache_pos.z, seed);
+    let cache_ground = layout.floor_y_at(cache_pos.x, cache_pos.z, seed);
     let reward = DiscoverableKind::HiddenReward {
         reward_id: settlement.reward_id,
         credits,
@@ -4451,6 +4928,7 @@ fn spawn_settlement_discussion_npc(
     settlement: MapSettlement,
     origin: Vec3,
     rot: Quat,
+    layout: SettlementTerrainLayout,
 ) {
     let script_id = settlement_discussion_id(settlement.anchor_id);
     let Some(script) = discussion_script(script_id) else {
@@ -4464,7 +4942,7 @@ fn spawn_settlement_discussion_npc(
         MapSettlementKind::Outpost => Vec3::new(-12.0, 0.0, -18.0),
     };
     let pos = origin + rot * local;
-    let ground = terrain_surface_y(pos.x, pos.z, seed);
+    let ground = layout.floor_y_at(pos.x, pos.z, seed);
     let facing = Transform::from_xyz(pos.x, ground + 1.9, pos.z).with_rotation(
         Quat::from_rotation_y(settlement.facing_yaw + std::f32::consts::PI),
     );
@@ -4531,6 +5009,218 @@ fn spawn_settlement_discussion_npc(
         },
         WorldGeometry,
     ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_mountain_inset(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    settlement: MapSettlement,
+    origin: Vec3,
+    rot: Quat,
+    layout: SettlementTerrainLayout,
+) {
+    if !layout.needs_mountain_inset(settlement) {
+        return;
+    }
+
+    let search_radius = match settlement.kind {
+        MapSettlementKind::City => layout.platform_radius + 170.0,
+        MapSettlementKind::Village => layout.plaza_radius + 78.0,
+        MapSettlementKind::Harbor => layout.plaza_radius + 70.0,
+        MapSettlementKind::Outpost => layout.plaza_radius + 84.0,
+    };
+    let mut best = Vec3::new(settlement.x, layout.center_y, settlement.z);
+    let mut best_score = f32::MIN;
+    for i in 0..12 {
+        let angle = i as f32 * std::f32::consts::TAU / 12.0;
+        let local = Vec3::new(
+            angle.cos() * search_radius,
+            0.0,
+            angle.sin() * search_radius,
+        );
+        let world = Vec3::new(settlement.x, 0.0, settlement.z) + rot * local;
+        let ground = terrain_surface_y(world.x, world.z, seed);
+        let ridge_score = ground + (ground - layout.center_y).abs() * 0.45;
+        let facing_bonus = if i == 0 || i == 11 { 28.0 } else { 0.0 };
+        let score = ridge_score + facing_bonus + seeded(seed, i as u64 + 701) * 8.0;
+        if score > best_score {
+            best_score = score;
+            best = Vec3::new(world.x, ground, world.z);
+        }
+    }
+
+    let to_center = Vec2::new(settlement.x - best.x, settlement.z - best.z);
+    let facing = if to_center.length_squared() > 0.001 {
+        to_center.normalize()
+    } else {
+        Vec2::Y
+    };
+    let gate_yaw = facing.x.atan2(facing.y);
+    let gate_rot = Quat::from_rotation_y(gate_yaw);
+    let gate_base = best + Vec3::Y * 0.2;
+    let wall_mat = if layout.is_sky_district() {
+        pal.brushed_metal.clone()
+    } else {
+        pal.rock_dark.clone()
+    };
+
+    for side in [-1.0_f32, 1.0] {
+        spawn_mountain_inset_piece(
+            commands,
+            meshes,
+            wall_mat.clone(),
+            gate_base,
+            gate_rot,
+            Vec3::new(side * 17.0, 12.0, 0.0),
+            Vec3::new(9.0, 24.0, 8.0),
+            true,
+        );
+        spawn_mountain_inset_piece(
+            commands,
+            meshes,
+            pal.stone_block.clone(),
+            gate_base,
+            gate_rot,
+            Vec3::new(side * 25.0, 7.0, 2.0),
+            Vec3::new(8.0, 14.0, 10.0),
+            true,
+        );
+    }
+
+    spawn_mountain_inset_piece(
+        commands,
+        meshes,
+        wall_mat,
+        gate_base,
+        gate_rot,
+        Vec3::new(0.0, 25.5, 0.0),
+        Vec3::new(50.0, 8.0, 9.0),
+        true,
+    );
+    spawn_mountain_inset_piece(
+        commands,
+        meshes,
+        pal.small_window_dark.clone(),
+        gate_base,
+        gate_rot,
+        Vec3::new(0.0, 9.5, -3.9),
+        Vec3::new(21.0, 17.0, 0.45),
+        false,
+    );
+    spawn_mountain_inset_piece(
+        commands,
+        meshes,
+        pal.mountain_path.clone(),
+        gate_base,
+        gate_rot,
+        Vec3::new(0.0, 0.28, 12.0),
+        Vec3::new(36.0, 0.56, 30.0),
+        true,
+    );
+
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(2.3))),
+                material: MeshMaterial3d(pal.guide_glow.clone()),
+                transform: Transform::from_translation(
+                    gate_base + gate_rot * Vec3::new(side * 10.0, 13.0, -4.6),
+                ),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.30, 0.86, 1.0),
+                intensity: 20_000.0,
+                range: 70.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(gate_base + Vec3::Y * 15.0),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    if layout.is_sky_district() {
+        let lift_height = (origin.y - gate_base.y).max(16.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(3.2, lift_height))),
+                material: MeshMaterial3d(pal.glass_panel.clone()),
+                transform: Transform::from_xyz(
+                    gate_base.x,
+                    gate_base.y + lift_height * 0.5,
+                    gate_base.z,
+                ),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        spawn_settlement_ramp_span(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(gate_base.x, origin.y + 0.35, gate_base.z),
+            origin + gate_rot * Vec3::new(0.0, 0.35, -layout.platform_radius * 0.55),
+            12.0,
+            0.7,
+            seed + settlement.anchor_id.len() as u64 * 97,
+        );
+    } else {
+        let approach_start = origin + gate_rot * Vec3::new(0.0, 0.35, -layout.plaza_radius * 0.6);
+        let approach_end = gate_base + gate_rot * Vec3::new(0.0, 0.55, 26.0);
+        spawn_settlement_ramp_span(
+            commands,
+            meshes,
+            pal,
+            approach_start,
+            approach_end,
+            11.0,
+            0.55,
+            seed + settlement.anchor_id.len() as u64 * 73,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_mountain_inset_piece(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    base: Vec3,
+    rotation: Quat,
+    local: Vec3,
+    size: Vec3,
+    collider: bool,
+) {
+    let entity = commands
+        .spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(base + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ))
+        .id();
+
+    if collider {
+        commands.entity(entity).insert((
+            bevy_rapier3d::prelude::RigidBody::Fixed,
+            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        ));
+    }
 }
 
 fn spawn_city_guardian_ships(
@@ -9131,6 +9821,60 @@ mod tests {
                 city.name
             );
         }
+    }
+
+    #[test]
+    fn mega_city_layouts_float_above_terrain() {
+        for city in map_settlements()
+            .iter()
+            .copied()
+            .filter(|settlement| matches!(settlement.kind, MapSettlementKind::City))
+        {
+            let layout = settlement_layout_profile(42, city, settlement_plaza_radius(city.kind));
+
+            assert_eq!(layout.mode, SettlementTerrainMode::SkyDistrict);
+            assert!(layout.floor_y > layout.center_y + 80.0);
+            assert_eq!(
+                layout.floor_y_at(city.x + 32.0, city.z - 18.0, 42),
+                layout.floor_y
+            );
+        }
+    }
+
+    #[test]
+    fn settlement_floor_profiles_do_not_sink_below_terrain() {
+        for settlement in map_settlements().iter().copied() {
+            let layout =
+                settlement_layout_profile(42, settlement, settlement_plaza_radius(settlement.kind));
+            for i in 0..8 {
+                let angle = i as f32 * std::f32::consts::TAU / 8.0;
+                let radius = layout.plaza_radius * 1.35;
+                let x = settlement.x + angle.cos() * radius;
+                let z = settlement.z + angle.sin() * radius;
+                let ground = terrain_surface_y(x, z, 42);
+                let floor = layout.floor_y_at(x, z, 42);
+
+                assert!(floor + 0.01 >= ground);
+            }
+        }
+    }
+
+    #[test]
+    fn rough_and_sky_settlements_request_mountain_insets() {
+        let inset_count = map_settlements()
+            .iter()
+            .copied()
+            .filter(|settlement| {
+                let layout = settlement_layout_profile(
+                    42,
+                    *settlement,
+                    settlement_plaza_radius(settlement.kind),
+                );
+                layout.needs_mountain_inset(*settlement)
+            })
+            .count();
+
+        assert!(inset_count >= 2);
     }
 
     #[test]
