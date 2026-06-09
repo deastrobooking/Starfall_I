@@ -128,13 +128,15 @@ struct DayNightCycle {
     seconds_per_day: f32,
 }
 
+const DAY_NIGHT_SECONDS_PER_DAY: f32 = 1_800.0;
+
 impl Default for DayNightCycle {
     fn default() -> Self {
         Self {
             // Late morning: players load into a readable world, then naturally
             // drift into afternoon, sunset, moonrise, and night.
             time_of_day: 0.38,
-            seconds_per_day: 720.0,
+            seconds_per_day: DAY_NIGHT_SECONDS_PER_DAY,
         }
     }
 }
@@ -243,12 +245,26 @@ fn update_day_night(
     mut cycle: ResMut<DayNightCycle>,
     mut clear: ResMut<ClearColor>,
     mut ambient: ResMut<GlobalAmbientLight>,
-    mut sun_q: Query<(&mut DirectionalLight, &mut Transform), With<DayNightSunLight>>,
+    mut sun_q: Query<
+        (&mut DirectionalLight, &mut Transform),
+        (
+            With<DayNightSunLight>,
+            Without<DayNightMoonLight>,
+            Without<CelestialVisual>,
+        ),
+    >,
     mut moon_light_q: Query<
         (&mut DirectionalLight, &mut Transform),
-        (With<DayNightMoonLight>, Without<DayNightSunLight>),
+        (
+            With<DayNightMoonLight>,
+            Without<DayNightSunLight>,
+            Without<CelestialVisual>,
+        ),
     >,
-    mut celestial_q: Query<(&CelestialVisual, &mut Transform, &mut Visibility)>,
+    mut celestial_q: Query<
+        (&CelestialVisual, &mut Transform, &mut Visibility),
+        (Without<DayNightSunLight>, Without<DayNightMoonLight>),
+    >,
     sky_q: Query<&MeshMaterial3d<StandardMaterial>, With<SkyDome>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -2046,7 +2062,7 @@ impl Palette {
             }),
             bridge_deck: m.add(StandardMaterial {
                 base_color: Color::srgb(0.92, 0.78, 0.52),
-                base_color_texture: Some(repeating_texture(asset_server, "Materials/wood.jpg")),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/wood.png")),
                 uv_transform: Affine2::from_scale(Vec2::new(2.6, 9.0)),
                 emissive: LinearRgba::new(0.06, 0.035, 0.012, 1.0),
                 metallic: 0.0,
