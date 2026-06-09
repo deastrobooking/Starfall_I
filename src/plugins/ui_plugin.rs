@@ -16,7 +16,10 @@ use crate::components::discoverable::{
 use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::Inventory;
 use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats};
-use crate::components::weapon::{BeamSabre, SpecialWeaponInventory, WeaponInventory};
+use crate::components::weapon::{
+    BeamSabre, SpecialWeaponInventory, WeaponInventory, WeaponRanks, WeaponType,
+    MAX_WEAPON_RANK,
+};
 use crate::components::world::{BoatVehicle, DiscussionNpc, DungeonCrawlGate, WorldLoot};
 use crate::damage::Health;
 use crate::discussion::DiscussionState;
@@ -30,7 +33,7 @@ use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
     PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, HERO_ROSTER,
 };
-use crate::robot_pets::RobotPetCollection;
+use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::state::AppState;
 use crate::upgrades::{all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger};
 
@@ -165,8 +168,10 @@ impl Plugin for UiPlugin {
                     chapter_select_fast_travel_buttons,
                     chapter_select_perk_input,
                     chapter_select_upgrade_input,
+                    chapter_select_weapon_rank_input,
                     chapter_select_perk_panel_update,
                     chapter_select_upgrade_panel_update,
+                    chapter_select_weapon_rank_panel_update,
                 )
                     .run_if(in_state(AppState::ChapterSelect)),
             );
@@ -813,12 +818,19 @@ struct UpgradeReserveHeader;
 #[derive(Component)]
 struct UpgradeRowText(pub TechUpgradeId);
 
+// ── Weapon Rank Panel markers ──────────────────────────────────────────────────
+#[derive(Component)]
+struct WeaponRankHeader;
+#[derive(Component)]
+struct WeaponRankRowText(pub usize); // weapon slot index 0-5
+
 fn setup_chapter_select(
     mut commands: Commands,
     progress: Res<ChapterProgress>,
     perks: Res<PerkTree>,
     upgrades: Res<UpgradeLedger>,
     robot_pets: Res<RobotPetCollection>,
+    weapon_ranks: Res<WeaponRanks>,
 ) {
     let chapters = all_chapters();
     commands
@@ -846,9 +858,9 @@ fn setup_chapter_select(
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
             p.spawn((
-                Text::new("200 x 200 mile heightmap range   |   1-9 0 Q W R T / click marker   |   E Editor   |   G Garage   |   Esc Back"),
+                Text::new("1-9 0 Q W R T / click = travel   |   A-H Perks   |   Z-N Tech   |   Y-P/J Weapons   |   E Editor   |   G Garage   |   Esc Back"),
                 TextFont {
-                    font_size: 16.0,
+                    font_size: 14.5,
                     ..default()
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.85)),
@@ -991,6 +1003,37 @@ fn setup_chapter_select(
                         TextFont { font_size: 12.0, ..default() },
                         TextColor(track_color),
                         UpgradeRowText(def.id),
+                    ));
+                }
+            });
+
+            // ── Weapon Rank panel ─────────────────────────────────────────────
+            p.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(3.0),
+                    padding: UiRect::all(Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.08, 0.04, 0.12, 0.90)),
+                BorderColor::all(Color::srgba(0.72, 0.45, 1.0, 0.55)),
+            ))
+            .with_children(|wp| {
+                wp.spawn((
+                    Text::new(format_weapon_rank_header(&robot_pets)),
+                    TextFont { font_size: 13.5, ..default() },
+                    TextColor(Color::srgb(0.82, 0.62, 1.0)),
+                    WeaponRankHeader,
+                ));
+                for (slot, (key, weapon_type)) in WEAPON_RANK_KEYS.iter().enumerate() {
+                    wp.spawn((
+                        Text::new(format_weapon_rank_row(
+                            key, slot, *weapon_type, &weapon_ranks, &robot_pets,
+                        )),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(Color::srgb(0.72, 0.55, 0.96)),
+                        WeaponRankRowText(slot),
                     ));
                 }
             });
@@ -1521,6 +1564,58 @@ fn chapter_select_upgrade_panel_update(
     }
 }
 
+fn chapter_select_weapon_rank_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut weapon_ranks: ResMut<WeaponRanks>,
+    mut robot_pets: ResMut<RobotPetCollection>,
+) {
+    let picks = [
+        (KeyCode::KeyY, 0usize),
+        (KeyCode::KeyU, 1),
+        (KeyCode::KeyI, 2),
+        (KeyCode::KeyO, 3),
+        (KeyCode::KeyP, 4),
+        (KeyCode::KeyJ, 5),
+    ];
+    for (key, slot) in picks {
+        if !keyboard.just_pressed(key) {
+            continue;
+        }
+        let rank = weapon_ranks.ranks[slot];
+        if rank >= MAX_WEAPON_RANK {
+            break;
+        }
+        let cost = WeaponRanks::upgrade_cost(rank);
+        let recipe = [crate::robot_pets::PartCost::new(RobotPartKind::CircuitBoard, cost)];
+        if robot_pets.can_afford(&recipe) {
+            let _ = robot_pets.spend_parts(&recipe);
+            weapon_ranks.ranks[slot] = rank + 1;
+        }
+        break;
+    }
+}
+
+fn chapter_select_weapon_rank_panel_update(
+    weapon_ranks: Res<WeaponRanks>,
+    robot_pets: Res<RobotPetCollection>,
+    mut header_q: Query<&mut Text, (With<WeaponRankHeader>, Without<WeaponRankRowText>)>,
+    mut row_q: Query<(&WeaponRankRowText, &mut Text), Without<WeaponRankHeader>>,
+) {
+    if !(weapon_ranks.is_changed() || robot_pets.is_changed()) {
+        return;
+    }
+    for mut text in header_q.iter_mut() {
+        *text = Text::new(format_weapon_rank_header(&robot_pets));
+    }
+    for (row, mut text) in row_q.iter_mut() {
+        let slot = row.0;
+        let (key, weapon_type) = WEAPON_RANK_KEYS[slot];
+        *text = Text::new(format_weapon_rank_row(
+            key, slot, weapon_type, &weapon_ranks, &robot_pets,
+        ));
+    }
+}
+
 fn rank_bar(rank: u32, max: u32) -> String {
     let filled = "■".repeat(rank as usize);
     let empty = "□".repeat((max - rank) as usize);
@@ -1598,6 +1693,49 @@ fn track_color(track: crate::upgrades::TechUpgradeTrack) -> Color {
         crate::upgrades::TechUpgradeTrack::Health => Color::srgb(0.42, 1.0, 0.55),
         crate::upgrades::TechUpgradeTrack::Mechs => Color::srgb(0.42, 0.88, 1.0),
     }
+}
+
+// ── Weapon Rank panel helpers ──────────────────────────────────────────────────
+const WEAPON_RANK_KEYS: [(&str, WeaponType); 6] = [
+    ("Y", WeaponType::Pistol),
+    ("U", WeaponType::Rifle),
+    ("I", WeaponType::Shotgun),
+    ("O", WeaponType::Rocket),
+    ("P", WeaponType::Laser),
+    ("J", WeaponType::Grenade),
+];
+
+fn format_weapon_rank_header(robot_pets: &RobotPetCollection) -> String {
+    let boards = robot_pets.part_count(RobotPartKind::CircuitBoard);
+    format!("WEAPON UPGRADES   circuit boards: {boards}")
+}
+
+fn format_weapon_rank_row(
+    key: &str,
+    slot: usize,
+    weapon_type: WeaponType,
+    ranks: &WeaponRanks,
+    robot_pets: &RobotPetCollection,
+) -> String {
+    let rank = ranks.ranks[slot];
+    let bar = rank_bar(rank, MAX_WEAPON_RANK);
+    let label = WeaponRanks::rank_label(rank);
+    let status = if rank >= MAX_WEAPON_RANK {
+        "MAX".to_string()
+    } else {
+        let cost = WeaponRanks::upgrade_cost(rank);
+        let recipe = [crate::robot_pets::PartCost::new(RobotPartKind::CircuitBoard, cost)];
+        if robot_pets.can_afford(&recipe) {
+            format!("{cost} boards  READY")
+        } else {
+            let have = robot_pets.part_count(RobotPartKind::CircuitBoard);
+            format!("{cost} boards  NEED {}", cost.saturating_sub(have))
+        }
+    };
+    format!(
+        "[{key}] {:<24} {bar}  {rank}/{MAX_WEAPON_RANK}  {label}  {status}",
+        weapon_type.display_name(),
+    )
 }
 
 // ── Player Select ─────────────────────────────────────────────────────────────
