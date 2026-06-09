@@ -16,10 +16,10 @@ mod characters;
 mod commands;
 mod components;
 mod damage;
-mod final_war;
-mod hacking;
 mod discussion;
 mod events;
+mod final_war;
+mod hacking;
 mod hero_roster;
 mod lsystem;
 mod perks;
@@ -34,9 +34,9 @@ mod state;
 mod upgrades;
 
 use commands::{CommandOverlayState, CommandRegistry};
+use events::EventsPlugin;
 use final_war::FinalWarRegistry;
 use hacking::HackingRegistry;
-use events::EventsPlugin;
 use perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChassisEditorPlugin,

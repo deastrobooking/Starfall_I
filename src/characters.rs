@@ -4,7 +4,8 @@ use std::f32::consts::PI;
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
 use crate::character_parts::{CharacterLoadout, CharacterVisualConfig, PartSlotTag};
 use crate::components::character::{
-    CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonRole,
+    default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
+    CartoonRole, CharacterIkPose, JointKind, JointMarker, SkeletonRig,
 };
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
@@ -510,6 +511,196 @@ pub fn spawn_cartoon_character(
     root
 }
 
+pub fn spawn_skeleton_rig(
+    commands: &mut Commands,
+    root: Entity,
+    scale: f32,
+    body: &BodyRecipe,
+) -> SkeletonRig {
+    let body = body.validated();
+    let mut rig = SkeletonRig::default();
+
+    let pelvis_rest = humanoid_joint_rest_translation(JointKind::Pelvis, scale, &body);
+    let pelvis = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        root,
+        Vec3::ZERO,
+        JointKind::Pelvis,
+        pelvis_rest,
+    );
+
+    let left_hip_rest = humanoid_joint_rest_translation(JointKind::LeftHip, scale, &body);
+    let left_hip = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        pelvis,
+        pelvis_rest,
+        JointKind::LeftHip,
+        left_hip_rest,
+    );
+    let left_knee_rest = humanoid_joint_rest_translation(JointKind::LeftKnee, scale, &body);
+    let left_knee = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        left_hip,
+        left_hip_rest,
+        JointKind::LeftKnee,
+        left_knee_rest,
+    );
+    let left_ankle_rest = humanoid_joint_rest_translation(JointKind::LeftAnkle, scale, &body);
+    spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        left_knee,
+        left_knee_rest,
+        JointKind::LeftAnkle,
+        left_ankle_rest,
+    );
+
+    let right_hip_rest = humanoid_joint_rest_translation(JointKind::RightHip, scale, &body);
+    let right_hip = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        pelvis,
+        pelvis_rest,
+        JointKind::RightHip,
+        right_hip_rest,
+    );
+    let right_knee_rest = humanoid_joint_rest_translation(JointKind::RightKnee, scale, &body);
+    let right_knee = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        right_hip,
+        right_hip_rest,
+        JointKind::RightKnee,
+        right_knee_rest,
+    );
+    let right_ankle_rest = humanoid_joint_rest_translation(JointKind::RightAnkle, scale, &body);
+    spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        right_knee,
+        right_knee_rest,
+        JointKind::RightAnkle,
+        right_ankle_rest,
+    );
+
+    let spine_rest = humanoid_joint_rest_translation(JointKind::Spine, scale, &body);
+    let spine = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        pelvis,
+        pelvis_rest,
+        JointKind::Spine,
+        spine_rest,
+    );
+    let chest_rest = humanoid_joint_rest_translation(JointKind::Chest, scale, &body);
+    let chest = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        spine,
+        spine_rest,
+        JointKind::Chest,
+        chest_rest,
+    );
+
+    let neck_rest = humanoid_joint_rest_translation(JointKind::Neck, scale, &body);
+    let neck = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        chest,
+        chest_rest,
+        JointKind::Neck,
+        neck_rest,
+    );
+    let head_rest = humanoid_joint_rest_translation(JointKind::Head, scale, &body);
+    spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        neck,
+        neck_rest,
+        JointKind::Head,
+        head_rest,
+    );
+
+    let left_shoulder_rest = humanoid_joint_rest_translation(JointKind::LeftShoulder, scale, &body);
+    let left_shoulder = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        chest,
+        chest_rest,
+        JointKind::LeftShoulder,
+        left_shoulder_rest,
+    );
+    let left_elbow_rest = humanoid_joint_rest_translation(JointKind::LeftElbow, scale, &body);
+    let left_elbow = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        left_shoulder,
+        left_shoulder_rest,
+        JointKind::LeftElbow,
+        left_elbow_rest,
+    );
+    let left_wrist_rest = humanoid_joint_rest_translation(JointKind::LeftWrist, scale, &body);
+    spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        left_elbow,
+        left_elbow_rest,
+        JointKind::LeftWrist,
+        left_wrist_rest,
+    );
+
+    let right_shoulder_rest =
+        humanoid_joint_rest_translation(JointKind::RightShoulder, scale, &body);
+    let right_shoulder = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        chest,
+        chest_rest,
+        JointKind::RightShoulder,
+        right_shoulder_rest,
+    );
+    let right_elbow_rest = humanoid_joint_rest_translation(JointKind::RightElbow, scale, &body);
+    let right_elbow = spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        right_shoulder,
+        right_shoulder_rest,
+        JointKind::RightElbow,
+        right_elbow_rest,
+    );
+    let right_wrist_rest = humanoid_joint_rest_translation(JointKind::RightWrist, scale, &body);
+    spawn_joint(
+        commands,
+        &mut rig,
+        root,
+        right_elbow,
+        right_elbow_rest,
+        JointKind::RightWrist,
+        right_wrist_rest,
+    );
+
+    rig
+}
+
 pub fn attach_cartoon_character(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -520,6 +711,7 @@ pub fn attach_cartoon_character(
 ) {
     let body = config.body.validated();
     let visual_ground_lift = visual_ground_lift(&body, config.scale);
+    let skeleton = spawn_skeleton_rig(commands, root, config.scale, &body);
     commands.entity(root).insert((
         CartoonCharacter {
             name: config.name.to_string(),
@@ -533,6 +725,8 @@ pub fn attach_cartoon_character(
         Visibility::Visible,
         InheritedVisibility::default(),
         ViewVisibility::default(),
+        skeleton,
+        CharacterIkPose::default(),
     ));
 
     // ── Materials ─────────────────────────────────────────────────────────────
@@ -1302,13 +1496,21 @@ pub fn attach_cartoon_character(
 pub fn despawn_cartoon_character_parts(
     commands: &mut Commands,
     root: Entity,
-    parts: &Query<(Entity, &CartoonPart)>,
+    visuals: &Query<
+        (Entity, Option<&CartoonPart>, Option<&JointMarker>),
+        Or<(With<CartoonPart>, With<JointMarker>)>,
+    >,
 ) {
-    for (entity, part) in parts.iter() {
-        if part.root == root {
+    for (entity, part, marker) in visuals.iter() {
+        let matches_root =
+            part.is_some_and(|part| part.root == root) || marker.is_some_and(|m| m.root == root);
+        if matches_root {
             commands.entity(entity).try_despawn();
         }
     }
+    commands
+        .entity(root)
+        .remove::<(SkeletonRig, CharacterIkPose)>();
 }
 
 // ── Color presets for character designer ─────────────────────────────────────
@@ -1426,7 +1628,7 @@ fn spawn_part(
     transform: Transform,
 ) {
     let slot = PartSlotTag::from_kind(kind);
-    let part = CartoonPart::new(root, kind, &transform);
+    let part = CartoonPart::new_bound(root, kind, default_joint_for_part(kind), &transform);
     let entity = commands
         .spawn((
             PbrBundle {
@@ -1440,6 +1642,74 @@ fn spawn_part(
         ))
         .id();
     commands.entity(root).add_child(entity);
+}
+
+fn spawn_joint(
+    commands: &mut Commands,
+    rig: &mut SkeletonRig,
+    root: Entity,
+    parent: Entity,
+    parent_rest: Vec3,
+    kind: JointKind,
+    rest_translation: Vec3,
+) -> Entity {
+    let local_translation = rest_translation - parent_rest;
+    let entity = commands
+        .spawn((
+            Transform::from_translation(local_translation),
+            GlobalTransform::default(),
+            JointMarker {
+                root,
+                kind,
+                local_translation,
+                rest_translation,
+            },
+            Name::new(format!("Joint::{kind:?}")),
+        ))
+        .id();
+    commands.entity(parent).add_child(entity);
+    rig.joints.insert(kind, entity);
+    entity
+}
+
+pub fn humanoid_joint_rest_translation(kind: JointKind, scale: f32, body: &BodyRecipe) -> Vec3 {
+    let body = body.validated();
+    let s = scale;
+    let lift = visual_ground_lift(&body, s);
+    let height = body.height;
+    let shoulder_x = 0.415 * s * body.shoulder_width;
+    let hip_x = 0.165 * s * body.hip_width;
+    let arm_extra = (body.arm_length - 1.0) * s;
+    let leg_extra = (body.leg_length - 1.0) * s;
+    let head_y = 0.58 * s * height + (body.neck_length - 1.0) * 0.10 * s + lift;
+
+    match kind {
+        JointKind::Pelvis => Vec3::new(0.0, -0.48 * s * height + lift, 0.0),
+        JointKind::Spine => Vec3::new(0.0, -0.18 * s * height + lift, 0.0),
+        JointKind::Chest => Vec3::new(0.0, 0.12 * s * height + lift, -0.02 * s),
+        JointKind::Neck => Vec3::new(0.0, 0.40 * s * height + lift, -0.01 * s),
+        JointKind::Head => Vec3::new(0.0, head_y, -0.005 * s),
+        JointKind::LeftShoulder => Vec3::new(-shoulder_x, 0.22 * s * height + lift, 0.0),
+        JointKind::LeftElbow => {
+            Vec3::new(-shoulder_x, -0.14 * s - arm_extra * 0.12 + lift, -0.01 * s)
+        }
+        JointKind::LeftWrist => {
+            Vec3::new(-shoulder_x, -0.50 * s - arm_extra * 0.28 + lift, 0.02 * s)
+        }
+        JointKind::RightShoulder => Vec3::new(shoulder_x, 0.22 * s * height + lift, 0.0),
+        JointKind::RightElbow => {
+            Vec3::new(shoulder_x, -0.14 * s - arm_extra * 0.12 + lift, -0.01 * s)
+        }
+        JointKind::RightWrist => {
+            Vec3::new(shoulder_x, -0.50 * s - arm_extra * 0.28 + lift, 0.02 * s)
+        }
+        JointKind::LeftHip => Vec3::new(-hip_x, -0.55 * s * height + lift, 0.0),
+        JointKind::LeftKnee => Vec3::new(-hip_x, -0.86 * s - leg_extra * 0.20 + lift, -0.015 * s),
+        JointKind::LeftAnkle => Vec3::new(-hip_x, -1.07 * s - leg_extra * 0.22 + lift, -0.025 * s),
+        JointKind::RightHip => Vec3::new(hip_x, -0.55 * s * height + lift, 0.0),
+        JointKind::RightKnee => Vec3::new(hip_x, -0.86 * s - leg_extra * 0.20 + lift, -0.015 * s),
+        JointKind::RightAnkle => Vec3::new(hip_x, -1.07 * s - leg_extra * 0.22 + lift, -0.025 * s),
+    }
 }
 
 fn visual_ground_lift(body: &BodyRecipe, scale: f32) -> f32 {

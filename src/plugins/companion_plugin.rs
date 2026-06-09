@@ -7,6 +7,7 @@ use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::{
     CompanionRecruitedEvent, EnemyDamagedEvent, EnemyKilledEvent, PlayerHealedEvent,
 };
+use crate::hero_roster::HeroPowerSet;
 use crate::plugins::weapon_plugin::ProjectileAssets;
 use crate::rendering::PbrBundle;
 use crate::resources::PlaySessionTransition;
@@ -238,7 +239,7 @@ fn companion_combat_system(
 fn companion_heal_system(
     time: Res<Time>,
     mut companion_q: Query<&mut Companion>,
-    mut player_q: Query<(&PlayerIndex, &mut Health), With<Player>>,
+    mut player_q: Query<(&PlayerIndex, &mut Health, &HeroPowerSet), With<Player>>,
     mut heal_ev: MessageWriter<PlayerHealedEvent>,
 ) {
     let dt = time.delta_secs();
@@ -253,17 +254,20 @@ fn companion_heal_system(
             continue;
         }
 
-        let Some((_, mut p_health)) = player_q
+        let Some((_, mut p_health, powers)) = player_q
             .iter_mut()
-            .find(|(index, _)| index.0 == companion.owner)
+            .find(|(index, _, _)| index.0 == companion.owner)
         else {
             continue;
         };
 
-        p_health.heal(companion.heal_amount);
+        // Sister-role heroes have higher magic; boost companion healing accordingly.
+        let affinity = powers.magic.clamp(0.90, 1.35);
+        let healed = companion.heal_amount * affinity;
+        p_health.heal(healed);
         companion.heal_timer = companion.heal_cooldown;
         heal_ev.write(PlayerHealedEvent {
-            amount: companion.heal_amount,
+            amount: healed,
             health: p_health.current,
         });
     }

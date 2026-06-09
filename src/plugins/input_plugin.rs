@@ -507,6 +507,11 @@ fn axis_pressed(value: f32) -> bool {
     value > TRIGGER_AXIS_THRESHOLD
 }
 
+/// No-op rumble trigger seam — wires up when Bevy adds native rumble API.
+pub fn trigger_player_rumble(_player_index: usize, _strength: f32) {
+    // Reserved for future Bevy gamepad rumble support.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -45,12 +45,32 @@ impl WaveInfo {
 }
 
 // ── Game Settings ─────────────────────────────────────────────────────────────
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Serialize, Deserialize)]
 pub struct GameSettings {
     pub mouse_sensitivity: f32,
     pub master_volume: f32,
     pub show_damage_numbers: bool,
     pub world_seed: u64,
+    /// Difficulty multiplier: Easy=0.7, Normal=1.0, Hard=1.3
+    #[serde(default = "default_one_f32")]
+    pub difficulty_scale: f32,
+    /// Music volume (0.0–1.0)
+    #[serde(default = "default_one_f32")]
+    pub music_volume: f32,
+    /// SFX volume (0.0–1.0)
+    #[serde(default = "default_one_f32")]
+    pub sfx_volume: f32,
+    /// Whether to trigger controller rumble on hit events
+    #[serde(default = "default_true")]
+    pub rumble_on_hit: bool,
+}
+
+fn default_one_f32() -> f32 {
+    1.0
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for GameSettings {
@@ -60,6 +80,10 @@ impl Default for GameSettings {
             master_volume: 1.0,
             show_damage_numbers: true,
             world_seed: 42_195,
+            difficulty_scale: 1.0,
+            music_volume: 1.0,
+            sfx_volume: 1.0,
+            rumble_on_hit: true,
         }
     }
 }
@@ -324,6 +348,8 @@ pub struct ChapterProgress {
     pub companions_recruited: Vec<String>,
     pub scientist_relics: Vec<String>,
     pub relic_fragments: Vec<String>,
+    /// Set to true when all territories are liberated and the Final War is dormant.
+    pub campaign_complete: bool,
 }
 
 impl ChapterProgress {

@@ -189,7 +189,7 @@ impl EnemyStateMachine {
 pub struct Enemy {
     pub enemy_type: EnemyType,
     pub config: EnemyConfig,
-    /// Patrol destination (random point near spawn)
+    /// Current patrol destination (one of patrol_waypoints)
     pub patrol_target: Vec3,
     /// Origin spawn point
     pub spawn_origin: Vec3,
@@ -197,11 +197,23 @@ pub struct Enemy {
     pub velocity: Vec3,
     /// Scale multiplier from wave difficulty
     pub difficulty_scale: f32,
+    /// Three patrol waypoints generated at spawn; cycled in Idle→Patrol transitions
+    pub patrol_waypoints: Vec<Vec3>,
+    pub patrol_index: usize,
 }
 
 impl Enemy {
     pub fn new(enemy_type: EnemyType, position: Vec3, difficulty_scale: f32) -> Self {
         let config = EnemyConfig::for_type(enemy_type);
+        // Three deterministic waypoints at 120° intervals around spawn origin.
+        let base_angle = position.x * 0.013 + position.z * 0.009;
+        let radius = 12.0 + (position.x.abs() % 9.0);
+        let patrol_waypoints: Vec<Vec3> = (0..3)
+            .map(|i| {
+                let a = base_angle + std::f32::consts::TAU * (i as f32 / 3.0);
+                position + Vec3::new(a.cos() * radius, 0.0, a.sin() * radius)
+            })
+            .collect();
         Self {
             enemy_type,
             config,
@@ -210,6 +222,8 @@ impl Enemy {
             attack_cooldown_timer: 0.0,
             velocity: Vec3::ZERO,
             difficulty_scale,
+            patrol_waypoints,
+            patrol_index: 0,
         }
     }
 
@@ -269,6 +283,8 @@ pub struct CitySpyDrone {
     pub experience: u32,
     pub armor: u32,
     pub data_spawned: bool,
+    /// Set once this drone has applied intel pressure to FinalWarRegistry.
+    pub pressure_applied: bool,
 }
 
 /// Boss controller for dragon-domain bosses.

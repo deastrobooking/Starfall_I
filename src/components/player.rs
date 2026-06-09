@@ -170,6 +170,15 @@ pub struct JetpackState {
     pub regen_rate: f32,
     pub max_vertical_vel: f32,
     pub is_active: bool,
+    pub mode: FlightMode,
+    pub glide_fall_speed: f32,
+    pub boost_forward_speed: f32,
+    pub air_dash_speed: f32,
+    pub air_dash_duration: f32,
+    pub air_dash_timer: f32,
+    pub air_dash_cooldown: f32,
+    pub air_dash_cooldown_timer: f32,
+    pub slam_speed: f32,
 }
 
 impl Default for JetpackState {
@@ -182,6 +191,66 @@ impl Default for JetpackState {
             regen_rate: 30.0,
             max_vertical_vel: 0.35,
             is_active: false,
+            mode: FlightMode::Grounded,
+            glide_fall_speed: 0.78,
+            boost_forward_speed: 0.95,
+            air_dash_speed: 1.55,
+            air_dash_duration: 0.18,
+            air_dash_timer: 0.0,
+            air_dash_cooldown: 0.55,
+            air_dash_cooldown_timer: 0.0,
+            slam_speed: 1.35,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FlightMode {
+    #[default]
+    Grounded,
+    Jump,
+    Fall,
+    Glide,
+    Hover,
+    JetBoost,
+    AirDash,
+    Slam,
+    Hoverboard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TraversalMode {
+    #[default]
+    Grapple,
+    HoverJet,
+    Flight,
+    Hoverboard,
+}
+
+impl TraversalMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            TraversalMode::Grapple => "Grapple",
+            TraversalMode::HoverJet => "Hover Jet",
+            TraversalMode::Flight => "Flight",
+            TraversalMode::Hoverboard => "Hoverboard",
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TraversalModeState {
+    pub active: TraversalMode,
+    pub hoverboard_speed_mult: f32,
+    pub hoverboard_air_control_mult: f32,
+}
+
+impl Default for TraversalModeState {
+    fn default() -> Self {
+        Self {
+            active: TraversalMode::Grapple,
+            hoverboard_speed_mult: 1.45,
+            hoverboard_air_control_mult: 1.2,
         }
     }
 }
@@ -199,11 +268,54 @@ pub enum GrappleHookMode {
     Cooldown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum GrappleTargetKind {
+    #[default]
+    Denied,
+    SwingPoint,
+    ZipPoint,
+    MountainPull,
+    EnemyPull,
+    UtilityPull,
+    BossWeakPoint,
+    RouteSocket,
+    BroadSurface,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GrappleSocket {
+    pub kind: GrappleTargetKind,
+    pub radius: f32,
+    pub priority: f32,
+}
+
+impl GrappleSocket {
+    pub fn new(kind: GrappleTargetKind) -> Self {
+        Self {
+            kind,
+            radius: 2.5,
+            priority: 1.0,
+        }
+    }
+
+    pub fn with_radius(mut self, radius: f32) -> Self {
+        self.radius = radius.max(0.1);
+        self
+    }
+
+    pub fn with_priority(mut self, priority: f32) -> Self {
+        self.priority = priority;
+        self
+    }
+}
+
 #[derive(Component, Debug, Clone)]
 pub struct GrappleHookState {
     pub mode: GrappleHookMode,
     pub attach_point: Option<Vec3>,
     pub attach_normal: Vec3,
+    pub target_entity: Option<Entity>,
+    pub target_kind: GrappleTargetKind,
     pub cable_length: f32,
     pub min_cable_length: f32,
     pub max_cable_length: f32,
@@ -212,6 +324,11 @@ pub struct GrappleHookState {
     pub zip_speed: f32,
     pub mountain_pull_speed: f32,
     pub attack_pull_speed: f32,
+    pub arrival_radius: f32,
+    pub heat: f32,
+    pub max_heat: f32,
+    pub heat_per_fire: f32,
+    pub heat_cool_rate: f32,
     pub windup_time: f32,
     pub windup_timer: f32,
     pub recovery_time: f32,
@@ -226,6 +343,8 @@ impl Default for GrappleHookState {
             mode: GrappleHookMode::Ready,
             attach_point: None,
             attach_normal: Vec3::Y,
+            target_entity: None,
+            target_kind: GrappleTargetKind::Denied,
             cable_length: 18.0,
             min_cable_length: 5.0,
             max_cable_length: 96.0,
@@ -234,6 +353,11 @@ impl Default for GrappleHookState {
             zip_speed: 2.4,
             mountain_pull_speed: 3.2,
             attack_pull_speed: 1.65,
+            arrival_radius: 1.4,
+            heat: 0.0,
+            max_heat: 100.0,
+            heat_per_fire: 14.0,
+            heat_cool_rate: 24.0,
             windup_time: 0.14,
             windup_timer: 0.0,
             recovery_time: 0.10,
@@ -246,7 +370,9 @@ impl Default for GrappleHookState {
 
 impl GrappleHookState {
     pub fn is_ready(&self) -> bool {
-        self.mode == GrappleHookMode::Ready && self.cooldown_timer <= 0.0
+        self.mode == GrappleHookMode::Ready
+            && self.cooldown_timer <= 0.0
+            && self.heat < self.max_heat
     }
 
     pub fn is_active(&self) -> bool {
@@ -277,19 +403,21 @@ impl GrappleHookState {
         self.mode = GrappleHookMode::Windup;
         self.windup_timer = self.windup_time;
         self.attach_point = None;
+        self.target_entity = None;
+        self.target_kind = GrappleTargetKind::Denied;
+        self.heat = (self.heat + self.heat_per_fire).min(self.max_heat);
         true
     }
 
     pub fn tick_foundation(&mut self, dt: f32) {
         let dt = dt.max(0.0);
         self.cooldown_timer = (self.cooldown_timer - dt).max(0.0);
+        self.heat = (self.heat - self.heat_cool_rate * dt).max(0.0);
         match self.mode {
             GrappleHookMode::Windup => {
                 self.windup_timer = (self.windup_timer - dt).max(0.0);
                 if self.windup_timer <= 0.0 {
-                    self.mode = GrappleHookMode::Recovering;
-                    self.recovery_timer = self.recovery_time;
-                    self.cooldown_timer = self.cooldown;
+                    self.mode = GrappleHookMode::Searching;
                 }
             }
             GrappleHookMode::Recovering => {
@@ -310,6 +438,35 @@ impl GrappleHookState {
         self.cable_length = self
             .cable_length
             .clamp(self.min_cable_length, self.max_cable_length);
+    }
+
+    pub fn attach(
+        &mut self,
+        point: Vec3,
+        normal: Vec3,
+        target_entity: Option<Entity>,
+        target_kind: GrappleTargetKind,
+        mode: GrappleHookMode,
+        current_position: Vec3,
+    ) {
+        self.attach_point = Some(point);
+        self.attach_normal = normal.normalize_or_zero();
+        self.target_entity = target_entity;
+        self.target_kind = target_kind;
+        self.mode = mode;
+        self.cable_length = current_position
+            .distance(point)
+            .clamp(self.min_cable_length, self.max_cable_length);
+        self.recovery_timer = 0.0;
+    }
+
+    pub fn begin_recovery(&mut self) {
+        self.mode = GrappleHookMode::Recovering;
+        self.recovery_timer = self.recovery_time;
+        self.cooldown_timer = self.cooldown;
+        self.attach_point = None;
+        self.target_entity = None;
+        self.target_kind = GrappleTargetKind::Denied;
     }
 }
 
@@ -511,6 +668,7 @@ pub struct PlayerInput {
     pub open_map: bool,
     pub sabre_toggle: bool,
     pub weapon_slot: Option<usize>,
+    pub traversal_mode_switch: Option<TraversalMode>,
     /// Digit 7/8/9/0 or Select + D-pad → slots 0–3.
     pub special_slot: Option<u8>,
     pub gamepad_active: bool,
@@ -526,7 +684,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grapple_request_enters_windup_and_cooldown() {
+    fn grapple_request_enters_searching_then_recovers() {
         let mut grapple = GrappleHookState::default();
 
         assert!(grapple.is_ready());
@@ -535,7 +693,10 @@ mod tests {
         assert!(!grapple.request_fire());
 
         grapple.tick_foundation(grapple.windup_time + 0.01);
-        assert_eq!(grapple.mode, GrappleHookMode::Recovering);
+        assert_eq!(grapple.mode, GrappleHookMode::Searching);
+        assert!(grapple.heat > 0.0);
+
+        grapple.begin_recovery();
         assert!(grapple.cooldown_timer > 0.0);
 
         grapple.tick_foundation(grapple.recovery_time + grapple.cooldown + 0.01);
@@ -555,5 +716,11 @@ mod tests {
         grapple.cable_length = 0.2;
         grapple.tick_foundation(0.0);
         assert_eq!(grapple.cable_length, grapple.min_cable_length);
+    }
+
+    #[test]
+    fn traversal_mode_labels_are_stable() {
+        assert_eq!(TraversalMode::Grapple.label(), "Grapple");
+        assert_eq!(TraversalMode::Hoverboard.label(), "Hoverboard");
     }
 }

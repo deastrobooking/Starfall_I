@@ -1,18 +1,23 @@
-# Starfall I Player Mechanics And Animation MVP Plan
+# Starfall I Player Mechanics, Skeleton, Animation, And Customization Plan
 
 > **Naming convention:** Motion mechanics milestones use the `MM#` prefix to
 > distinguish them from engine/campaign milestones (`M#` in
-> `docs/engine_upgrade_milestones.md`) and future enemy-AI milestones (`AI#`).
+> `docs/engine_upgrade_milestones.md`), future enemy-AI milestones (`AI#`), and
+> future character customization milestones (`CC#`).
 
 This is the agent-facing plan for upgrading Starfall I's player feel from a
-prototype platformer into a heroic sci-fantasy traversal system. The design is
-inspired by superhero swing movement, mountain parkour, fantasy flight, action
-RPG combat readability, and local co-op fairness.
+prototype platformer into a heroic sci-fantasy traversal system backed by a
+full skeletal, swappable-mesh character pipeline. The design is inspired by
+superhero swing movement, mountain parkour, fantasy flight, action RPG combat
+readability, expressive character customization, and local co-op fairness.
 
 Label convention: this document's milestones should be referenced as
 `Motion MM#`. Bare `M#` labels belong to `docs/engine_upgrade_milestones.md`.
-Future enemy behavior planning should use `Enemy AI AI#` labels so movement,
-engine, and AI work can cross-reference each other without ambiguity.
+Future enemy behavior planning should use `Enemy AI AI#` labels. Future
+character creator, clothing, armor, and prefab-modulation planning should use
+`Character Customization CC#` labels. Movement, engine, enemy AI, and character
+customization work should cross-reference each other without reusing bare
+numbers.
 
 ## Core Concept
 
@@ -31,25 +36,85 @@ The hook is a traversal/combat bridge, not a replacement for existing movement.
 Wall slides, wall jumps, ledge hangs, jetpack flight, slingshots, dungeons,
 vehicles, and boss-mode camera all remain part of the movement vocabulary.
 
+## Skeleton-First AAA Movement And Art Contract
+
+Starfall's long-term character system is a full skeletal modular character
+pipeline, not a collection of independent pose-swapped meshes. Every player
+mechanic after MM7 should assume that a hero has:
+
+- A gameplay root: the Rapier kinematic capsule and `PlayerMovement` remain the
+  authoritative world position, velocity, collision body, and save/load anchor.
+- A visual skeleton: `SkeletonRig` and `JointKind` own visual pose, FK, IK,
+  motion response, sockets, and attachment transforms.
+- Swappable visual layers: body mesh, head mesh, hair, clothing, armor, boots,
+  gloves, capes, robot parts, weapons, tools, and future costume pieces bind to
+  named joints or sockets instead of hardcoded root offsets.
+- A data-driven identity layer: `CharacterBlueprint` remains the durable record
+  for proportions, palette, rig recipe, cosmetic selections, equipment visuals,
+  and future prefab choices.
+- A preview/runtime parity rule: main-menu character previews, chassis editor
+  previews, live players, and save-loaded players must instantiate the same rig
+  and attachment path.
+
+Movement work must never make mesh attachments authoritative. Feet, hands,
+weapons, capes, armor, and clothing may visually react to terrain, walls, hooks,
+wind, and combat, but they do not pull the player root through collision or
+change campaign state directly.
+
+Target feel:
+
+- Locomotion should read like a modern third-person action game: responsive
+  input, clear acceleration, believable body lean, foot locking, hand contact,
+  anticipation, recovery, and readable cancel windows.
+- Traversal should chain cleanly: run, sprint, jump, wall slide, wall jump,
+  ledge hang, climb, grapple wind-up, zip, swing, glide, hover, jet boost, air
+  dash, dodge, parry, sabre slash, and landing reactions should all share one
+  animation-state bridge.
+- Customization should preserve silhouette and gameplay readability. Armor and
+  clothing can be wild, heroic, and modular, but split-screen players must still
+  identify their own character, movement state, team role, and hazards quickly.
+
+Non-goals for MM7-MM11:
+
+- Do not build the full clothing/armor creator inside the movement plugin.
+- Do not encode gameplay unlocks in mesh names, material colors, or prefab file
+  names.
+- Do not introduce root motion as the gameplay authority until there is a
+  deliberate root-motion integration plan that keeps local co-op, collision,
+  save/load, and boss catch-up stable.
+
 ## Current Baseline
 
 - Players are Rapier kinematic capsules driven through `PlayerMovement`.
 - Current mechanics include analog walking/sprinting, stamina, coyote time, jump
   buffering, early jump release, apex float, stronger fall gravity, wall slide,
   wall jump charges, intentional hang/climb, dodge, parry, jetpack lift,
-  slingshot pads, moving platforms, rotating elevators, and boss-mode party
-  pull.
+  traversal quick modes, glide/hover/boost/air-dash/slam flight shaping,
+  hoverboard ground stance, slingshot pads, moving platforms, rotating
+  elevators, and boss-mode party pull.
 - Current procedural character visuals use `CartoonPose` with separate idle,
   walk, run, jump, fall, flight, one-hand wall slide, attack, Star Sabre slash,
   hang, and grapple wind-up poses.
-- Current runtime characters are still skeleton-free modular meshes. Individual
-  `CartoonPart` entities store root-relative base transforms and are parented
-  directly to the character root. `CharacterBlueprint` already stores rig,
-  socket, IK, and animation recipe data, but the live renderer does not yet
-  instantiate joint entities from that schema.
+- Runtime characters now spawn a lightweight 17-joint `SkeletonRig` under the
+  character root. Individual `CartoonPart` entities still keep compatibility
+  base transforms, but humanoid and robot parts are rebound to `JointKind`
+  parents by `bind_parts_to_skeleton` instead of remaining permanently attached
+  to the root.
+- Character roots now carry `CharacterIkPose` data, and the runtime animation
+  path resolves first-pass root-local foot, wrist, and look targets into the
+  skeleton as visual-only pose layers.
+- `CharacterBlueprint` already stores rig, socket, IK, and animation recipe
+  data. The live renderer uses a fixed procedural humanoid joint table for now;
+  mapping saved blueprint rig recipes into runtime joints remains future work.
+- Chassis/body-part swaps already point toward modular customization, but the
+  full main-menu clothing/armor/prefab creator should be planned as a separate
+  `CC#` roadmap once the skeleton and attachment contracts are stable.
 - `GrappleHookState` is the first MVP hook foundation: it stores the single-hook
-  mode, cable tuning, wind-up/cooldown timers, zip/mountain/attack pull tuning,
-  and future attach-point data.
+  mode, target classification, cable tuning, wind-up/search/recovery/cooldown
+  timers, heat, zip/mountain/attack pull tuning, and attach-point data.
+- D-pad quick modes select traversal intent: Grapple, Hover Jet, Flight, and
+  Hoverboard. Select+D-pad keeps legacy utility shortcuts such as interact,
+  vehicle, previous weapon, and map.
 
 ## MVP Milestones
 
@@ -77,6 +142,17 @@ Acceptance:
 
 Goal: let the single hook find valid targets in the world.
 
+Implementation status as of 2026-06-09:
+
+- `GrappleSocket` and `GrappleTargetKind` are implemented as the common hook
+  target contract.
+- Hook search now runs after wind-up and scores authored sockets, world-route
+  beacons, enemies, boss weak points, drones, and a conservative broad-surface
+  fallback in player aim direction.
+- Route beacons spawned by `WorldRouteMarker` are tagged as hook sockets; locked
+  and blocked routes are excluded from targeting.
+- Failed search returns cleanly into recovery and emits a short player message.
+
 - Add raycast targeting from camera aim and optional soft-lock from player
   forward direction.
 - Add `GrappleSocket` or similar marker for authored reliable targets.
@@ -97,6 +173,14 @@ Acceptance:
 
 Goal: make the first physical hook verb useful in the Everest range.
 
+Implementation status as of 2026-06-09:
+
+- Zip, route pull, mountain pull, and enemy pull now drive the same kinematic
+  `PlayerMovement` velocity path as normal movement.
+- Zip speed, mountain speed, attack-pull speed, arrival radius, cable limits,
+  cooldown, and hook heat live on `GrappleHookState`.
+- Jump or dodge cancels a zip and carries momentum back into normal movement.
+
 - Add zip-to-point force for rapid mountain ascent and gap crossing.
 - Clamp speed, vertical lift, and arrival radius so players do not tunnel
   through terrain.
@@ -115,6 +199,14 @@ Acceptance:
 
 Goal: turn attached hook movement into a readable pendulum.
 
+Implementation status as of 2026-06-09:
+
+- Swing targets use kinematic cable math: cable length, radial correction,
+  damping, tangent velocity preservation, steering pump, and release carry.
+- Long upward route/broad-surface targets select Swinging instead of Zipping.
+- The skeleton already reads active Swing/Zip/Grapple state for wrist and
+  look-at IK. A dedicated rendered cable/trail VFX pass remains future work.
+
 - Use kinematic-friendly swing math first: cable direction, desired cable
   length, radial correction, tangential momentum preservation, and damping.
 - Only introduce Rapier joints if the kinematic solution proves insufficient.
@@ -132,6 +224,16 @@ Acceptance:
 
 Goal: make the hook part of Starfall combat, not just traversal.
 
+Implementation status as of 2026-06-09:
+
+- Enemies and boss-tier enemies are valid hook targets through the shared target
+  search.
+- Light enemy hook arrivals yank the target toward the player and apply kinetic
+  damage. Heavy/boss targets resolve as weak-point zip impacts without yanking
+  the boss body.
+- Route and utility sockets resolve through the same targeting and recovery
+  path. Bespoke switch/gate profiles remain future work.
+
 - Pull lightweight enemies or zip to heavy enemies based on target class.
 - Add Star Sabre and hand-combat cancel windows from hook arrival.
 - Add hook stun, shield yank, turret pull, item pull, rescue pull, and switch
@@ -146,6 +248,18 @@ Acceptance:
 ### MM6: Flight Mechanics Upgrade
 
 Goal: make flight feel like an evolving hero skill while preserving platforming.
+
+Implementation status as of 2026-06-09:
+
+- `TraversalModeState` selects Hover Jet, Flight, Hoverboard, or Grapple.
+- `JetpackState` now tracks `FlightMode`: Jump, Fall, Glide, Hover, JetBoost,
+  AirDash, Slam, Hoverboard, and Grounded.
+- Hover Jet mode keeps the old stable vertical lift feel. Flight mode adds
+  glide, sprint boost, dodge air-dash, and down-input slam. Hoverboard mode
+  boosts ground speed and air control while selecting a hoverboard animation
+  stance.
+- Ancient Flight Core upgrades now improve glide, boost, air dash, and cooldown
+  tuning in addition to fuel/lift.
 
 - Split airborne behavior into jump, fall, glide, hover, jet boost, air dash,
   boost climb, and slam.
@@ -169,6 +283,23 @@ This is not a glTF import milestone yet. It is an internal Bevy scene-graph
 skeleton that uses parent-child `Transform` propagation as forward kinematics.
 The result should still render the current capsule/anime parts, but those parts
 attach to named joints instead of being animated as root-relative loose pieces.
+
+Implementation status as of 2026-06-09:
+
+- `JointKind`, `JointMarker`, and `SkeletonRig` are implemented in
+  `src/components/character.rs`.
+- `spawn_skeleton_rig` in `src/characters.rs` creates the 17-joint hierarchy
+  from `BodyRecipe`, including rest/local translations for each joint.
+- Humanoid and robot swap parts now carry default joint bindings; newly spawned
+  parts are converted from root-local to joint-local space and reparented by
+  `bind_parts_to_skeleton`.
+- `cartoon_animation_system` now includes a first-pass FK joint animation layer
+  for idle, walk, run, sprint, jump, fall, flight, wall slide, grapple, swing,
+  zip, hang, roll, parry, attack, sabre, stun, death, hard-land, and mantle
+  poses.
+- Existing per-part pose animation remains as a compatibility layer until MM8
+  replaces the remaining loose-piece offsets with IK and deeper joint-chain
+  animation.
 
 #### MM7.1 Runtime Components
 
@@ -321,16 +452,50 @@ Acceptance:
 - No gameplay system reads a joint entity as authoritative player position; root
   movement and collision remain owned by `PlayerMovement` and Rapier.
 
-### MM8: Procedural Animation And IK
+### MM8: Procedural Animation, IK, And AAA Motion Response
 
-Goal: make the skeleton respond naturally to terrain, walls, hooks, and flight.
+Goal: make the skeleton respond naturally to terrain, walls, hooks, flight,
+combat, and player velocity while preserving the fast kinematic controller.
 
 MM8 assumes MM7's `SkeletonRig` exists. Do not build IK directly against loose
-mesh parts.
+mesh parts. This milestone is the bridge between simple FK pose animation and a
+production animation graph.
+
+MM8 implementation rule: pose selection still flows from gameplay state
+(`PlayerStateMachine`, `PlayerMovement`, `GrappleHookState`, weapon/combat
+state), but final visual output should be layered:
+
+1. Base locomotion pose: idle, walk, run, sprint, jump, fall, flight, hover,
+   wall slide, hang, grapple, swing, zip, dodge, parry, attack, sabre.
+2. Additive motion response: velocity lean, turn anticipation, spine twist,
+   landing compression, cape/cloth response, recoil, hook pull, wind/updraft
+   response.
+3. Contact IK: feet on walkable surfaces, hands on walls/ledges/hooks, weapon
+   aim/sabre target correction.
+4. Cosmetic constraints: armor, clothing, capes, and robot pieces follow their
+   sockets without changing the gameplay root.
+
+Implementation status as of 2026-06-09:
+
+- `IkTarget` and `CharacterIkPose` are implemented in
+  `src/components/character.rs`; every character root gets a pose cache when the
+  rig is attached.
+- `cartoon_animation_system` now builds root-local foot, hand, hook look, wall
+  contact, hang, and dodge look targets from `PlayerMovement`, `EdgeGrabState`,
+  `GrappleHookState`, and `DodgeState`.
+- A clamped additive motion-response layer gives pelvis, spine, chest, neck,
+  head, and shoulders velocity lean, hook/wall orientation, dodge bias, and
+  hang shaping after the base FK pose.
+- A first analytical two-bone leg IK helper blends hip/knee/ankle rotation and
+  ankle translation toward foot targets. Wrist targets for wall slide, hang,
+  swing, zip, and grapple are also blended in root-local skeleton space.
+- The first MM8 slice is visual-only and does not move the Rapier player root.
+  True Rapier foot raycasts, authored ledge/socket wrist targets, foot locking,
+  and slope-normal ankle roll remain the next MM8 implementation bridge.
 
 #### MM8.1 IK Target Components
 
-Add lightweight runtime targets:
+Add lightweight runtime targets and pose caches:
 
 ```rust
 #[derive(Component, Debug, Clone, Copy)]
@@ -340,6 +505,15 @@ pub struct IkTarget {
     pub pole: Option<Vec3>,
     pub weight: f32,
 }
+
+#[derive(Component, Debug, Clone, Default)]
+pub struct CharacterIkPose {
+    pub left_foot: Option<IkTarget>,
+    pub right_foot: Option<IkTarget>,
+    pub left_hand: Option<IkTarget>,
+    pub right_hand: Option<IkTarget>,
+    pub look_at: Option<Vec3>,
+}
 ```
 
 The first implementation can keep targets on the character root as data
@@ -348,11 +522,17 @@ that IK resolves into joint rotations, not mesh transforms.
 
 #### MM8.2 Foot Placement
 
-- Sample terrain under `LeftAnkle` and `RightAnkle`.
+- Sample walkable ground under `LeftAnkle` and `RightAnkle`.
+- Prefer Rapier raycasts against `WalkableSurface`/world geometry when available;
+  a procedural terrain-height fallback is acceptable for early visual-only IK.
 - Adjust ankle targets up/down within a short range so feet sit on slopes.
-- Bend knees by rotating hip/knee joints; keep pelvis bob smooth.
-- Disable or reduce foot IK during jump, fall, zip, swing, roll, and hard land
-  recovery.
+- Use an analytical two-bone leg solve for hip/knee/ankle rotation. Clamp
+  target distance, knee bend, pelvis compensation, and ankle roll so extreme
+  terrain cannot fold the character inside out.
+- Add foot locking during planted walk/run frames, then blend out on step
+  lift-off. Foot IK should never jitter at split-screen camera distances.
+- Disable or reduce foot IK during jump, fall, zip, swing, roll, hard land
+  recovery, flight, hover, air dash, vehicle mode, and any scripted boss pull.
 
 #### MM8.3 Hand And Wall Contact
 
@@ -361,6 +541,10 @@ that IK resolves into joint rotations, not mesh transforms.
 - Ledge hang/climb: both wrists lock to the ledge while pelvis and knees tuck.
 - Grapple wind-up: lead wrist aims at target; off hand counterbalances.
 - Swing: one-hand and two-hand hang variants driven by speed/angle.
+- Sabre and melee: weapon hand follows attack arcs while the off hand and chest
+  counter-rotate for readable strikes.
+- Parry: wrists and forearms brace toward the incoming direction or camera aim
+  when exact attack direction is unavailable.
 
 #### MM8.4 Motion-Responsive Body
 
@@ -369,6 +553,28 @@ that IK resolves into joint rotations, not mesh transforms.
 - Add head look-at toward hook targets, enemies, discussion NPCs, and boss weak
   points.
 - Add landing reactions: soft bend, hard land, roll, slam.
+- Add turn anticipation: shoulders/head start rotating slightly before hips when
+  the player sharply changes direction.
+- Add vertical-state shaping: jump extension, apex float pose, fall bracing,
+  glide spread, hover stabilization, air-dash streamlining, and slam compression.
+- Add local-co-op readability clamps so extreme IK, cape/armor motion, or swing
+  poses do not hide the character silhouette.
+
+#### MM8.5 Animation Graph And Blend Contract
+
+Goal: define the runtime graph that will later host authored clips, procedural
+layers, and imported glTF animations.
+
+- Keep `CartoonPose` as the compact state bridge for now, but begin separating
+  animation output into base clip/pose, additive overlays, and IK/contact solve.
+- Define blend weights for ground locomotion, airborne, wall, ledge, grapple,
+  flight, combat, damage, and death layers.
+- Add motion tags such as `Grounded`, `Airborne`, `WallContact`, `HookContact`,
+  `CombatUpperBody`, `WeaponLocked`, `FootIkAllowed`, and `HandIkAllowed`.
+- Make cancel windows explicit for hook arrival, sabre slash, melee strike,
+  dodge recovery, parry brace, hard land, and flight recovery.
+- Treat root motion as visual-only until a separate root-motion authority plan
+  is accepted.
 
 Acceptance:
 
@@ -378,8 +584,12 @@ Acceptance:
 - IK never pulls the character root through walls or terrain.
 - Controller/local-co-op readability remains intact in split screen and boss
   mode.
+- Existing robot/chassis part swaps still attach through `JointKind` sockets and
+  do not break IK.
+- Character designer previews show the same skeleton, IK settings, and socket
+  bindings as runtime players, with non-gameplay preview controls allowed.
 
-### MM8.5: External Skeletal Asset Bridge
+### MM9: External Skeletal Asset Bridge
 
 Goal: prepare the internal skeleton for real rigged glTF characters without
 blocking the procedural MVP.
@@ -391,16 +601,31 @@ blocking the procedural MVP.
   preserving `CharacterBlueprint` identity, color, stats, and save data.
 - Runtime rule: if a glTF rig is missing or invalid, fall back to the procedural
   MM7 skeleton and modular meshes.
+- Support socketed procedural pieces: current capsule/anime/robot meshes parented
+  to joints or sockets.
+- Support skinned mesh prefabs: authored glTF meshes weighted to the Starfall
+  humanoid armature.
+- Keep clothing and armor compatible with both modes. Early clothing may be
+  socketed rigid pieces; production clothing should support skinned meshes or
+  segmented cloth panels where needed.
 
 Acceptance:
 
 - The game has one canonical bone naming table.
 - A future glTF hero can be imported without changing save schema.
 - Missing external assets never prevent the procedural character from spawning.
+- The importer can reject invalid rigs with clear diagnostics instead of
+  silently producing broken characters.
 
-### MM9: Camera And Multiplayer Readability
+### MM10: Camera And Multiplayer Readability
 
 Goal: make high-speed movement cinematic without losing local co-op clarity.
+
+Implementation status as of 2026-06-09:
+
+- Player cameras now add speed-based pullback, flight lift, hook pullback,
+  hoverboard pullback, and dynamic FOV response in split-screen mode.
+- Boss and dungeon shared-camera modes remain authoritative when active.
 
 - Add speed-based FOV, swing pull-back, vertical look-ahead, and mild roll/tilt.
 - Add camera collision avoidance against cliffs/castles/city geometry.
@@ -411,9 +636,18 @@ Acceptance:
 
 - Grapple and flight feel fast without hiding hazards or other players.
 
-### MM10: World, Boss, And Dungeon Integration
+### MM11: World, Boss, And Dungeon Integration
 
 Goal: make movement verbs matter across the full game.
+
+Implementation status as of 2026-06-09:
+
+- Existing `WorldRouteMarker` beacon props are now hook sockets, giving open
+  mountain paths, sky bridges, space lanes, route sockets, and dungeon gates
+  traversal intent without a parallel level-authoring path.
+- Enemy, drone, and boss markers participate in the same hook targeting layer.
+- Full route-specific encounter scripting, dragon-lair verb lessons, and
+  dungeon top-down hook simplification remain future content passes.
 
 - Add hook sockets and zip routes to mountain passes, sky cities, castles,
   factories, power plants, dragon lairs, and airship decks.
@@ -428,6 +662,95 @@ Acceptance:
 
 - Each major chapter teaches or tests one movement verb and one combat traversal
   verb.
+
+## Future Character Customization Track (`CC#`)
+
+The main-menu character creator, clothing system, armor visuals, and prefab
+modulation pipeline should be planned separately from motion mechanics once the
+MM7-MM9 skeleton contract is stable. The customization track should use `CC#`
+labels so agents can discuss it without overloading movement milestones.
+
+Customization vision:
+
+- Players can customize heroes from the main menu before entering the campaign.
+- The editor supports body proportions, colors, hair, headgear, clothing,
+  armor, gloves, boots, capes, robot/mech parts, weapons/tool visuals, and
+  eventually saved outfit presets.
+- The game can make new character items from authored prefab recipes rather than
+  hardcoded Rust-only mesh layouts.
+- Clothing and armor can be socketed rigid pieces at first, then graduate to
+  skinned glTF meshes, segmented cloth panels, or physics-assisted cloth when
+  the asset pipeline supports it.
+
+### CC0: Customization Architecture Plan
+
+Goal: create a separate durable roadmap for character customization.
+
+- Define `CharacterCustomization` / `CharacterOutfit` save data separate from
+  movement state.
+- Define visual slots: BaseBody, Head, Hair, Face, Hood, Hat, TorsoClothing,
+  LegsClothing, Gloves, Boots, ShoulderArmor, ChestArmor, Belt, Cape, Back,
+  Tail, Horns, Visor, WeaponSkin, ToolSkin, RobotChassis, RobotArms, RobotLegs,
+  RobotShoulders.
+- Define slot compatibility rules: humanoid, robot, alien, dragon, rival, boss,
+  child/teen/adult scale variants, and future non-humanoid rigs.
+- Define unlock sources: story reward, rescued robot pet, crafted item, city
+  economy, boss drop, relic, debug/dev grant, and default starter wardrobe.
+- Define preview requirements: same skeleton path as runtime, local lighting,
+  pose cycling, split-screen color readability preview, and clear save/cancel
+  behavior.
+
+### CC1: Prefab Modulation Data Model
+
+Goal: let new clothes/armor/parts be authored as data.
+
+- Add prefab records with stable ids, display names, slot, allowed rigs,
+  required `JointKind`/socket bindings, material palette channels, default
+  scale, optional stat tags, and unlock metadata.
+- Use data files for non-engine assets where practical. Rust may still spawn
+  procedural fallback pieces, but authored content should not require a full
+  gameplay-code change.
+- Preserve save compatibility: saves store prefab ids and palette overrides, not
+  transient entity ids.
+- Missing prefab rule: if an item id is missing, fall back to a safe default and
+  show a diagnostic in dev builds.
+
+### CC2: Main Menu Character Creator
+
+Goal: move from simple toggles toward a usable in-game customization surface.
+
+- Build a main-menu/editor flow that edits the selected player slot.
+- Let players browse slots, cycle items, adjust colors/material channels, and
+  save named outfit presets.
+- Preview movement-critical poses: idle, run, sprint, jump, wall slide, hang,
+  grapple, swing, flight, parry, sabre slash, and hard land.
+- Validate silhouettes: capes, shoulder armor, helmets, and robot parts should
+  not hide hands, feet, hook poses, or weapon arcs.
+- Keep gameplay stats and visuals separable unless an equipment system
+  explicitly links them.
+
+### CC3: Clothing, Armor, And Equipment Runtime
+
+Goal: make custom outfits survive play, save/load, robot swaps, and future
+asset imports.
+
+- Spawn customization pieces through the same joint/socket binding path as MM7.
+- Support layered draw order and conflict rules, such as hood versus large hair,
+  chest armor over shirt, cape under back gear, and boots over leg clothing.
+- Add material-channel overrides for team/readability colors.
+- Keep collision conservative: visual armor does not resize the player collider
+  unless a separate gameplay equipment rule changes the body type.
+- Ensure local co-op: each active player keeps independent outfit data,
+  cosmetics, palette, and preview state.
+
+Boundary with motion milestones:
+
+- MM7-MM9 define skeletons, sockets, IK, animation graph rules, and asset import
+  compatibility.
+- CC# defines authoring, UI, save data, cosmetic slots, unlocks, and prefab
+  modulation.
+- Shared contract: all CC# assets must bind to `JointKind` or named sockets,
+  and all MM# animation systems must tolerate missing/disabled cosmetic pieces.
 
 ## Integration With Engine M7 (Connected Platformer Level Network)
 
@@ -462,6 +785,10 @@ physical route spaces exist.
 - Keep `PlayerMovement` the home for tunable movement values.
 - Keep `GrappleHookState` as the single-hook source of truth.
 - Keep `PlayerStateMachine` aligned with `CartoonPose`.
+- Bevy hierarchy research note: child `Transform` values are local to their
+  parent/`ChildOf` relationship, while `GlobalTransform` is propagated by Bevy.
+  MM7 therefore mutates joint local `Transform`s and never treats joint
+  `GlobalTransform`s as gameplay authority.
 - Use explicit world marker components for hook targets; do not infer gameplay
   from material color or mesh name.
 - Prefer pure tests for math/state transitions before heavyweight Bevy app

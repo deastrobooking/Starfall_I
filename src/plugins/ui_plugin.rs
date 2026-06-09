@@ -9,6 +9,7 @@ use crate::chapters::{
     all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
     EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE,
 };
+use crate::commands::{CommandOverlayState, CommandRegistry};
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleRelicEncounter,
@@ -29,10 +30,10 @@ use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::{save_current_session, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
-    ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
-    PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
+    ChapterProgress, CharacterDesignData, CurrentChapter, GameSettings, LocalPlayerConfig,
+    PlaySessionTransition, PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo,
+    WorldSiteRegistry, HERO_ROSTER,
 };
-use crate::commands::{CommandOverlayState, CommandRegistry};
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
 use crate::state::AppState;
@@ -62,7 +63,12 @@ impl Plugin for UiPlugin {
             .init_resource::<ControllerDiagState>()
             .add_systems(
                 OnEnter(AppState::Playing),
-                (setup_hud, despawn_menu, setup_controller_diag, setup_command_overlay),
+                (
+                    setup_hud,
+                    despawn_menu,
+                    setup_controller_diag,
+                    setup_command_overlay,
+                ),
             )
             .add_systems(
                 OnExit(AppState::Playing),
@@ -77,6 +83,12 @@ impl Plugin for UiPlugin {
                 (despawn_pause_menu, resume_physics_after_pause),
             )
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
+            .add_systems(OnEnter(AppState::Victory), setup_victory_screen)
+            .add_systems(Update, victory_input.run_if(in_state(AppState::Victory)))
+            .add_systems(
+                Update,
+                settings_panel_input_system.run_if(in_state(AppState::Paused)),
+            )
             .add_systems(
                 Update,
                 pause_input_system
@@ -182,6 +194,7 @@ impl Plugin for UiPlugin {
                     chapter_select_upgrade_panel_update,
                     chapter_select_weapon_rank_panel_update,
                     chapter_select_economy_panel_update,
+                    final_push_unlock_system,
                 )
                     .run_if(in_state(AppState::ChapterSelect)),
             );
@@ -205,6 +218,7 @@ enum PauseAction {
     Save,
     Title,
     Controls,
+    Settings,
     Back,
 }
 #[derive(Component, Clone, Copy)]
@@ -213,6 +227,7 @@ struct PausePagePanel(PausePage);
 enum PausePage {
     Main,
     Controls,
+    Settings,
 }
 #[derive(Resource)]
 struct PauseMenuState {
@@ -231,6 +246,16 @@ impl Default for PauseMenuState {
 }
 #[derive(Component)]
 struct GameOverRoot;
+#[derive(Component)]
+struct VictoryRoot;
+#[derive(Component)]
+struct SettingsPanelRoot;
+#[derive(Component)]
+struct DifficultyText;
+#[derive(Component)]
+struct VolumeText;
+#[derive(Component)]
+struct FinalPushText;
 #[derive(Component)]
 struct StartButton;
 #[derive(Component)]
@@ -395,7 +420,7 @@ fn setup_main_menu(mut commands: Commands) {
         ));
         p.spawn(Node { height: Val::Px(16.0), ..default() });
         p.spawn((
-            Text::new("WASD / Left Stick Move  |  Mouse / Right Stick Look  |  A/Space Jump  |  Start/Esc Pause\nLMB/RT Star Beam  |  V/B Mana Combos  |  T Star Sabre  |  E/DPad Down Interact"),
+            Text::new("WASD / Left Stick Move  |  Mouse / Right Stick Look  |  A/Space Jump  |  Start/Esc Pause\nLMB/RT Star Beam  |  V/B Mana Combos  |  T Star Sabre  |  D-pad Traversal Modes"),
             TextFont { font_size: 14.0, ..default() }, TextColor(Color::srgb(0.5, 0.5, 0.7)),
         ));
     });
@@ -544,6 +569,11 @@ fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
                         PauseAction::Controls,
                         Color::srgb(0.22, 0.24, 0.52),
                     ),
+                    (
+                        "SETTINGS",
+                        PauseAction::Settings,
+                        Color::srgb(0.36, 0.28, 0.52),
+                    ),
                 ] {
                     spawn_pause_button(page, label, action, color);
                 }
@@ -581,7 +611,7 @@ fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
                 ));
                 page.spawn((
                     Text::new(
-                        "Move: WASD / Left Stick     Look: Mouse / Right Stick     Jump: Space / South\nDodge: Q / East     Parry: F / North     Interact: E / DPad Down     Grapple: G / Select+RB     Boat/Vehicle: J / DPad Up\nFire: LMB / RT     Aim: RMB / LT     Weapons: 1-6 / RB     Special Tools: 7-0 or Select + DPad\nTraversal: hold into a wall while falling to slide, then jump to wall-jump. Use slingshot pads with Jump or Interact.",
+                        "Move: WASD / Left Stick     Look: Mouse / Right Stick     Jump: Space / South\nDodge: Q / East     Parry: F / North     Grapple: G / Select+RB     D-pad: Grapple / Hover Jet / Flight / Hoverboard\nFire: LMB / RT     Aim: RMB / LT     Weapons: 1-6 / RB     Special Tools: 7-0 or Select + DPad\nSelect+D-pad: Vehicle / Interact / Weapon Prev / Map     Traversal: wall slide, wall-jump, ledge hang, zip, swing, glide, hover, air dash, hoverboard.",
                     ),
                     TextFont {
                         font_size: 16.0,
@@ -598,6 +628,37 @@ fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
                         ..default()
                     },
                     TextColor(Color::srgb(0.86, 0.90, 1.0)),
+                ));
+                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+            });
+
+            root.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(10.0),
+                    ..default()
+                },
+                Visibility::Hidden,
+                PausePagePanel(PausePage::Settings),
+            ))
+            .with_children(|page| {
+                page.spawn((
+                    Text::new("SETTINGS"),
+                    TextFont { font_size: 30.0, ..default() },
+                    TextColor(Color::srgb(0.9, 0.95, 1.0)),
+                ));
+                page.spawn((
+                    Text::new("Difficulty: [1] Easy  [2] Normal  [3] Hard"),
+                    TextFont { font_size: 16.0, ..default() },
+                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                    DifficultyText,
+                ));
+                page.spawn((
+                    Text::new("Music: [- +]  SFX: [[ ]]  Rumble: [R]"),
+                    TextFont { font_size: 16.0, ..default() },
+                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                    VolumeText,
                 ));
                 spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
@@ -779,6 +840,9 @@ fn pause_menu_action_system(
         }
         PauseAction::Controls => {
             menu.page = PausePage::Controls;
+        }
+        PauseAction::Settings => {
+            menu.page = PausePage::Settings;
         }
         PauseAction::Back => {
             menu.page = PausePage::Main;
@@ -1431,7 +1495,14 @@ fn spawn_fast_travel_map(
             // ── World Site badges ─────────────────────────────────────────
             for site in &world_site_registry.sites {
                 let badge_color = site.state.map_badge_color();
-                let site_icon = if site.is_liberated() { "✓" } else { "!" };
+                use crate::resources::WorldSiteState as WSS;
+                let site_icon = match site.state {
+                    WSS::Liberated | WSS::Building | WSS::Shielded => "●",
+                    WSS::EnemyHeld | WSS::OccupiedAgain => "▲",
+                    WSS::Contested | WSS::UnderAttack => "◆",
+                    WSS::Damaged => "◈",
+                    WSS::Hidden => "?",
+                };
                 let border_color = if site.is_liberated() {
                     Color::srgb(0.40, 1.0, 0.50)
                 } else {
@@ -1461,7 +1532,7 @@ fn spawn_fast_travel_map(
                     badge.spawn((
                         Text::new(site_icon),
                         TextFont {
-                            font_size: 8.0,
+                            font_size: 9.0,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -1819,7 +1890,11 @@ fn chapter_select_economy_panel_update(
     let settlements = map_settlements();
     for (row, mut text) in row_q.iter_mut() {
         if let Some(settlement) = settlements.get(row.0) {
-            *text = Text::new(format_economy_site_row(settlement, &economy, &world_site_registry));
+            *text = Text::new(format_economy_site_row(
+                settlement,
+                &economy,
+                &world_site_registry,
+            ));
         }
     }
 }
@@ -3760,6 +3835,204 @@ fn game_over_input(
     }
 }
 
+// ── Victory Screen ────────────────────────────────────────────────────────────
+
+fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(18.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.02, 0.06, 0.02, 0.96)),
+            VictoryRoot,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Text::new("VICTORY"),
+                TextFont {
+                    font_size: 82.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.72, 1.0, 0.52)),
+            ));
+            root.spawn((
+                Text::new("THE EVEREST RANGE IS FREE!"),
+                TextFont {
+                    font_size: 28.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.95, 0.72)),
+            ));
+            let chapter_count = progress.completed.len();
+            root.spawn((
+                Text::new(format!(
+                    "Chapters completed: {}   Sites liberated: 9 / 9",
+                    chapter_count
+                )),
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.76, 0.92, 0.80)),
+            ));
+            root.spawn((
+                Text::new("Press [Enter / A] to return to the main menu\nPress [N] for New Game+"),
+                TextFont {
+                    font_size: 17.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.78, 0.88, 1.0)),
+            ));
+        });
+}
+
+fn victory_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<AppState>>,
+    victory_q: Query<Entity, With<VictoryRoot>>,
+    mut site_registry: ResMut<WorldSiteRegistry>,
+) {
+    let confirm = keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::NumpadEnter)
+        || gamepads
+            .iter()
+            .any(|gp| gp.just_pressed(GamepadButton::South))
+        || native.just_pressed(NativeButton::South);
+    let new_game_plus = keyboard.just_pressed(KeyCode::KeyN)
+        || gamepads
+            .iter()
+            .any(|gp| gp.just_pressed(GamepadButton::West))
+        || native.just_pressed(NativeButton::West);
+
+    if confirm || new_game_plus {
+        if new_game_plus {
+            site_registry.sites = crate::resources::initial_world_sites();
+        }
+        for entity in victory_q.iter() {
+            commands.entity(entity).despawn();
+        }
+        next_state.set(AppState::MainMenu);
+    }
+}
+
+// ── Settings Panel Input ──────────────────────────────────────────────────────
+
+fn settings_panel_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    menu: Res<PauseMenuState>,
+    mut settings: ResMut<GameSettings>,
+    mut text_q: ParamSet<(
+        Query<&mut Text, With<DifficultyText>>,
+        Query<&mut Text, With<VolumeText>>,
+    )>,
+) {
+    if menu.page != PausePage::Settings {
+        return;
+    }
+    // Difficulty
+    if keyboard.just_pressed(KeyCode::Digit1) {
+        settings.difficulty_scale = 0.7;
+    }
+    if keyboard.just_pressed(KeyCode::Digit2) {
+        settings.difficulty_scale = 1.0;
+    }
+    if keyboard.just_pressed(KeyCode::Digit3) {
+        settings.difficulty_scale = 1.3;
+    }
+    // Music volume: Minus / Equal
+    if keyboard.just_pressed(KeyCode::Minus) {
+        settings.music_volume = (settings.music_volume - 0.1).clamp(0.0, 1.0);
+    }
+    if keyboard.just_pressed(KeyCode::Equal) {
+        settings.music_volume = (settings.music_volume + 0.1).clamp(0.0, 1.0);
+    }
+    // SFX volume: [ and ]
+    if keyboard.just_pressed(KeyCode::BracketLeft) {
+        settings.sfx_volume = (settings.sfx_volume - 0.1).clamp(0.0, 1.0);
+    }
+    if keyboard.just_pressed(KeyCode::BracketRight) {
+        settings.sfx_volume = (settings.sfx_volume + 0.1).clamp(0.0, 1.0);
+    }
+    // Rumble toggle
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        settings.rumble_on_hit = !settings.rumble_on_hit;
+    }
+    // Update difficulty text
+    let difficulty_label = if settings.difficulty_scale <= 0.75 {
+        "EASY"
+    } else if settings.difficulty_scale <= 1.05 {
+        "NORMAL"
+    } else {
+        "HARD"
+    };
+    let diff_str = format!(
+        "Difficulty: [1] Easy  [2] Normal  [3] Hard  — {}",
+        difficulty_label
+    );
+    for mut text in text_q.p0().iter_mut() {
+        *text = Text::new(diff_str.clone());
+    }
+    let vol_str = format!(
+        "Music: {:.0}%  SFX: {:.0}%  Rumble: {}  (- + [ ] R to change)",
+        settings.music_volume * 100.0,
+        settings.sfx_volume * 100.0,
+        if settings.rumble_on_hit { "ON" } else { "OFF" },
+    );
+    for mut text in text_q.p1().iter_mut() {
+        *text = Text::new(vol_str.clone());
+    }
+}
+
+// ── Final Push Unlock ─────────────────────────────────────────────────────────
+
+fn final_push_unlock_system(
+    mut commands: Commands,
+    final_war: Res<crate::final_war::FinalWarRegistry>,
+    site_registry: Res<WorldSiteRegistry>,
+    existing_q: Query<Entity, With<FinalPushText>>,
+    chapter_select_root_q: Query<Entity, With<ChapterSelectRoot>>,
+) {
+    if !final_war.is_changed() && !site_registry.is_changed() {
+        return;
+    }
+    let liberated = site_registry
+        .sites
+        .iter()
+        .filter(|s| s.is_liberated())
+        .count();
+    let show = final_war.phase == crate::final_war::FinalWarPhase::Climax && liberated >= 6;
+    let already_shown = !existing_q.is_empty();
+    if show && !already_shown {
+        if let Ok(root) = chapter_select_root_q.single() {
+            commands.entity(root).with_children(|parent| {
+                parent.spawn((
+                    Text::new("★ FINAL PUSH UNLOCKED — All sites must be reclaimed!"),
+                    TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.88, 0.25)),
+                    FinalPushText,
+                ));
+            });
+        }
+    } else if !show && already_shown {
+        for e in existing_q.iter() {
+            commands.entity(e).despawn();
+        }
+    }
+}
+
 // ── Controller Diagnostics Overlay ───────────────────────────────────────────
 
 fn setup_controller_diag(mut commands: Commands) {
@@ -4036,4 +4309,3 @@ fn update_command_overlay(
 
     *text = Text::new(lines.join("\n"));
 }
-

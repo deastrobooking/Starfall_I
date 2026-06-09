@@ -366,10 +366,16 @@ fn enemy_ai_system(
                 if dist_to_player < detection_range {
                     sm.transition(EnemyAIState::Chase);
                 } else if sm.timer > rng.gen_range(1.0..3.0) {
-                    let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
-                    let dist: f32 = rng.gen_range(10.0..20.0);
-                    enemy.patrol_target =
-                        enemy.spawn_origin + Vec3::new(angle.cos() * dist, 0.0, angle.sin() * dist);
+                    if !enemy.patrol_waypoints.is_empty() {
+                        enemy.patrol_index =
+                            (enemy.patrol_index + 1) % enemy.patrol_waypoints.len();
+                        enemy.patrol_target = enemy.patrol_waypoints[enemy.patrol_index];
+                    } else {
+                        let a: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
+                        let d: f32 = rng.gen_range(10.0..20.0);
+                        enemy.patrol_target =
+                            enemy.spawn_origin + Vec3::new(a.cos() * d, 0.0, a.sin() * d);
+                    }
                     sm.transition(EnemyAIState::Patrol);
                 }
             }

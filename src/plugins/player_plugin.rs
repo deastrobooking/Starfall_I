@@ -15,20 +15,21 @@ use crate::characters::{
     hero_config, hero_config_with_overrides, outfit_preset,
 };
 use crate::components::armor::ArmorSet;
-use crate::components::character::CartoonPart;
-use crate::components::enemy::{BossEnemy, DeadEnemy, FlyingDrone};
+use crate::components::character::{CartoonPart, JointMarker};
+use crate::components::enemy::{BossEnemy, DeadEnemy, Enemy, EnemyType, FlyingDrone};
 use crate::components::inventory::Inventory;
 use crate::components::player::*;
 use crate::components::weapon::*;
-use crate::components::world::{BoatPassenger, WorldAnchor};
-use crate::damage::{apply_damage, DamageInfo, Damageable, Health};
+use crate::components::world::{BoatPassenger, WorldAnchor, WorldRouteMarker};
+use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
-use crate::hero_roster::{apply_hero_runtime, hero_power_profile};
+use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     CameraShake, ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig,
     PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
+    WorldRouteRegistry, WorldRouteState,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -87,6 +88,11 @@ fn third_person_camera_offset() -> Vec3 {
     Vec3::new(0.0, 4.5, 11.0)
 }
 
+#[derive(Component, Debug, Clone, Copy)]
+struct GrappleCableVisual {
+    owner: Entity,
+}
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SharedEncounterCamera>()
@@ -102,11 +108,20 @@ impl Plugin for PlayerPlugin {
                     player_look,
                     camera_shake_system,
                     update_camera_post_processing,
+                    traversal_mode_switch_update,
+                    grapple_hook_update,
                     player_movement,
-                    grapple_hook_foundation_update,
+                    grapple_hook_impact_system,
                     shared_encounter_camera_mode_system,
                     shared_encounter_party_pull_system,
                     dungeon_crawl_party_pull_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (
                     player_dodge_update,
                     player_parry_update,
                     player_state_update,
@@ -115,6 +130,7 @@ impl Plugin for PlayerPlugin {
                     player_invulnerability_update,
                     player_level_up,
                     player_died_check,
+                    hero_affinity_update_system,
                 )
                     .chain()
                     .run_if(in_state(AppState::Playing)),
@@ -415,7 +431,10 @@ fn spawn_players(
     window_q: Query<&Window, With<PrimaryWindow>>,
     chapter_anchor_q: Query<(&WorldAnchor, &Transform)>,
     existing_players: Query<Entity, With<Player>>,
-    existing_parts: Query<(Entity, &CartoonPart)>,
+    existing_visuals: Query<
+        (Entity, Option<&CartoonPart>, Option<&JointMarker>),
+        Or<(With<CartoonPart>, With<JointMarker>)>,
+    >,
 ) {
     if transition.resuming_from_pause || !existing_players.is_empty() {
         return;
@@ -501,6 +520,7 @@ fn spawn_players(
                 hero_profile,
                 hero_powers,
                 jetpack,
+                TraversalModeState::default(),
                 GrappleHookState::default(),
                 EdgeGrabState::new(),
                 dodge_state,
@@ -519,7 +539,7 @@ fn spawn_players(
             ))
             .id();
 
-        despawn_cartoon_character_parts(&mut commands, player, &existing_parts);
+        despawn_cartoon_character_parts(&mut commands, player, &existing_visuals);
         let mut character_config = hero_config_with_overrides(
             character_name,
             slot.outfit_idx.map(outfit_preset),
@@ -632,6 +652,10 @@ pub fn apply_ancient_flight_core(movement: &mut PlayerMovement, jetpack: &mut Je
     jetpack.force = jetpack.force.max(0.085);
     jetpack.regen_rate = jetpack.regen_rate.max(46.0);
     jetpack.max_vertical_vel = jetpack.max_vertical_vel.max(0.52);
+    jetpack.glide_fall_speed = jetpack.glide_fall_speed.min(0.62);
+    jetpack.boost_forward_speed = jetpack.boost_forward_speed.max(1.18);
+    jetpack.air_dash_speed = jetpack.air_dash_speed.max(1.92);
+    jetpack.air_dash_cooldown = jetpack.air_dash_cooldown.min(0.42);
 }
 
 fn cleanup_players_for_menu(
@@ -776,10 +800,18 @@ fn interpolate_viewport(
         ..default()
     });
 
-    let px = (from_vp.physical_position.x as f32 + t * (to_vp.physical_position.x as f32 - from_vp.physical_position.x as f32)).round() as u32;
-    let py = (from_vp.physical_position.y as f32 + t * (to_vp.physical_position.y as f32 - from_vp.physical_position.y as f32)).round() as u32;
-    let sx = (from_vp.physical_size.x as f32 + t * (to_vp.physical_size.x as f32 - from_vp.physical_size.x as f32)).round() as u32;
-    let sy = (from_vp.physical_size.y as f32 + t * (to_vp.physical_size.y as f32 - from_vp.physical_size.y as f32)).round() as u32;
+    let px = (from_vp.physical_position.x as f32
+        + t * (to_vp.physical_position.x as f32 - from_vp.physical_position.x as f32))
+        .round() as u32;
+    let py = (from_vp.physical_position.y as f32
+        + t * (to_vp.physical_position.y as f32 - from_vp.physical_position.y as f32))
+        .round() as u32;
+    let sx = (from_vp.physical_size.x as f32
+        + t * (to_vp.physical_size.x as f32 - from_vp.physical_size.x as f32))
+        .round() as u32;
+    let sy = (from_vp.physical_size.y as f32
+        + t * (to_vp.physical_size.y as f32 - from_vp.physical_size.y as f32))
+        .round() as u32;
 
     Some(Viewport {
         physical_position: UVec2::new(px, py),
@@ -797,11 +829,25 @@ fn player_camera_follow_system(
     shared_camera: Res<SharedEncounterCamera>,
     window_q: Query<&Window, With<PrimaryWindow>>,
     player_q: Query<
-        (&PlayerIndex, &Transform, &PlayerCameraRef),
+        (
+            &PlayerIndex,
+            &Transform,
+            &PlayerCameraRef,
+            Option<&PlayerMovement>,
+            Option<&GrappleHookState>,
+            Option<&JetpackState>,
+            Option<&TraversalModeState>,
+        ),
         (With<Player>, Without<PlayerCamera>),
     >,
     mut cam_q: Query<
-        (Entity, &mut Transform, &CameraPitch, &mut Camera),
+        (
+            Entity,
+            &mut Transform,
+            &CameraPitch,
+            &mut Camera,
+            &mut Projection,
+        ),
         (With<PlayerCamera>, Without<Player>),
     >,
 ) {
@@ -833,7 +879,7 @@ fn player_camera_follow_system(
 
     let max_trauma = player_q
         .iter()
-        .map(|(index, _, _)| shake.trauma_for(index.0))
+        .map(|(index, _, _, _, _, _, _)| shake.trauma_for(index.0))
         .fold(0.0_f32, f32::max);
     let shake_offset = camera_shake_offset(max_trauma);
 
@@ -842,31 +888,63 @@ fn player_camera_follow_system(
         let party_focus = average_positions(
             &player_q
                 .iter()
-                .map(|(_, transform, _)| transform.translation)
+                .map(|(_, transform, _, _, _, _, _)| transform.translation)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or(dungeon.focus);
-        let dungeon_focus = clamp_to_dungeon_focus(party_focus, dungeon.focus, dungeon.radius * 0.62);
+        let dungeon_focus =
+            clamp_to_dungeon_focus(party_focus, dungeon.focus, dungeon.radius * 0.62);
         dungeon_crawl_camera_transform(dungeon_focus, dungeon.radius, shake_offset)
     } else {
-        shared_boss_camera_transform(
-            shared_camera.focus,
-            shared_camera.radius,
-            shake_offset,
-        )
+        shared_boss_camera_transform(shared_camera.focus, shared_camera.radius, shake_offset)
     };
 
     let lead_camera = player_q
         .iter()
-        .min_by_key(|(index, _, _)| index.0)
-        .map(|(_, _, camera_ref)| camera_ref.0);
+        .min_by_key(|(index, _, _, _, _, _, _)| index.0)
+        .map(|(_, _, camera_ref, _, _, _, _)| camera_ref.0);
 
-    for (index, player_transform, camera_ref) in player_q.iter() {
+    for (index, player_transform, camera_ref, movement, grapple, jetpack, traversal) in
+        player_q.iter()
+    {
         referenced.push(camera_ref.0);
         let player_shake = camera_shake_offset(shake.trauma_for(index.0));
 
-        if let Ok((camera_entity, mut camera_transform, pitch, mut camera)) = cam_q.get_mut(camera_ref.0) {
-            let local_ind_transform = player_camera_transform(player_transform, pitch.0, player_shake);
+        if let Ok((camera_entity, mut camera_transform, pitch, mut camera, mut projection)) =
+            cam_q.get_mut(camera_ref.0)
+        {
+            let mut local_ind_transform =
+                player_camera_transform(player_transform, pitch.0, player_shake);
+            let horizontal_speed = movement.map(|m| m.ground_velocity.length()).unwrap_or(0.0);
+            let vertical_speed = movement.map(|m| m.velocity.y.abs()).unwrap_or(0.0);
+            let speed_pullback = (horizontal_speed + vertical_speed * 0.35).clamp(0.0, 2.6);
+            let hook_pullback = grapple
+                .map(|g| if g.is_active() { 3.0 } else { 0.0 })
+                .unwrap_or(0.0);
+            let flight_lift = jetpack
+                .map(|j| if j.is_active { 0.9 } else { 0.0 })
+                .unwrap_or(0.0);
+            let board_pullback = traversal
+                .map(|t| {
+                    if t.active == TraversalMode::Hoverboard {
+                        1.6
+                    } else {
+                        0.0
+                    }
+                })
+                .unwrap_or(0.0);
+            local_ind_transform.translation += player_transform.rotation
+                * Vec3::new(
+                    0.0,
+                    flight_lift + speed_pullback * 0.18,
+                    hook_pullback + board_pullback + speed_pullback,
+                );
+            if let Projection::Perspective(ref mut perspective) = *projection {
+                let target_fov =
+                    (58.0 + speed_pullback * 4.0 + hook_pullback * 1.2 + board_pullback * 1.6)
+                        .to_radians();
+                perspective.fov += (target_fov - perspective.fov) * (1.0 - (-dt * 8.0).exp());
+            }
             let is_lead = Some(camera_entity) == lead_camera;
 
             if p >= 0.999 {
@@ -886,8 +964,12 @@ fn player_camera_follow_system(
                 camera.is_active = true;
 
                 // Position & Rotation Hermite interpolation
-                let blend_pos = local_ind_transform.translation.lerp(shared_target_transform.translation, s);
-                let blend_rot = local_ind_transform.rotation.slerp(shared_target_transform.rotation, s);
+                let blend_pos = local_ind_transform
+                    .translation
+                    .lerp(shared_target_transform.translation, s);
+                let blend_rot = local_ind_transform
+                    .rotation
+                    .slerp(shared_target_transform.rotation, s);
                 *camera_transform = Transform {
                     translation: blend_pos,
                     rotation: blend_rot,
@@ -907,7 +989,8 @@ fn player_camera_follow_system(
                             physical_size: UVec2::new(1, 1),
                             ..default()
                         });
-                        camera.viewport = interpolate_viewport(Some(split), target_vp, s, win_w, win_h);
+                        camera.viewport =
+                            interpolate_viewport(Some(split), target_vp, s, win_w, win_h);
                     } else {
                         camera.viewport = None;
                     }
@@ -916,7 +999,7 @@ fn player_camera_follow_system(
         }
     }
 
-    for (camera, mut camera_transform, _, mut camera_component) in cam_q.iter_mut() {
+    for (camera, mut camera_transform, _, mut camera_component, _) in cam_q.iter_mut() {
         if !referenced.contains(&camera) {
             camera_component.is_active = false;
             camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
@@ -1207,6 +1290,25 @@ fn boss_mode_player_slot_offset(index: u8) -> Vec3 {
     Vec3::new(angle.cos() * 8.0, 0.0, angle.sin() * 8.0)
 }
 
+fn traversal_mode_switch_update(
+    mut player_q: Query<(&PlayerInput, &mut TraversalModeState), With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (input, mut traversal) in player_q.iter_mut() {
+        let Some(mode) = input.traversal_mode_switch else {
+            continue;
+        };
+        if traversal.active == mode {
+            continue;
+        }
+        traversal.active = mode;
+        msg_ev.write(UiMessageEvent {
+            text: format!("Traversal mode: {}", mode.label()),
+            duration: 1.2,
+        });
+    }
+}
+
 // ── Movement & Physics ────────────────────────────────────────────────────────
 fn player_movement(
     time: Res<Time>,
@@ -1220,6 +1322,8 @@ fn player_movement(
             &mut PlayerMovement,
             &mut PlayerStats,
             &mut JetpackState,
+            &mut GrappleHookState,
+            &TraversalModeState,
             &mut EdgeGrabState,
             &mut DodgeState,
             &Transform,
@@ -1237,6 +1341,8 @@ fn player_movement(
         mut movement,
         mut stats,
         mut jetpack,
+        mut grapple,
+        traversal,
         mut edge_grab,
         dodge,
         transform,
@@ -1254,6 +1360,8 @@ fn player_movement(
             movement.wall_jump_lock_timer = 0.0;
             movement.wall_jump_charges = movement.max_wall_jump_charges;
             jetpack.is_active = false;
+            jetpack.mode = FlightMode::Grounded;
+            grapple.begin_recovery();
             edge_grab.is_hanging = false;
             controller.translation = Some(Vec3::ZERO);
             state.force(PlayerState::Idle);
@@ -1266,6 +1374,8 @@ fn player_movement(
             movement.jump_buffer_timer = (movement.jump_buffer_timer - dt).max(0.0);
         }
         movement.wall_jump_lock_timer = (movement.wall_jump_lock_timer - dt).max(0.0);
+        jetpack.air_dash_timer = (jetpack.air_dash_timer - dt).max(0.0);
+        jetpack.air_dash_cooldown_timer = (jetpack.air_dash_cooldown_timer - dt).max(0.0);
 
         movement.is_grounded = output.grounded;
         edge_grab.cooldown_timer = (edge_grab.cooldown_timer - dt).max(0.0);
@@ -1277,6 +1387,7 @@ fn player_movement(
             movement.wall_jump_lock_timer = 0.0;
             jetpack.fuel = (jetpack.fuel + jetpack.regen_rate * dt).min(jetpack.max_fuel);
             movement.velocity.y = movement.velocity.y.max(0.0);
+            jetpack.mode = FlightMode::Grounded;
             edge_grab.is_hanging = false;
             edge_grab.hang_timer = 0.0;
             edge_grab.wall_clasp_timer = 0.0;
@@ -1298,6 +1409,12 @@ fn player_movement(
             )
         };
         let (input, input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
+        if movement.is_grounded
+            && traversal.active == TraversalMode::Hoverboard
+            && input_strength > 0.05
+        {
+            jetpack.mode = FlightMode::Hoverboard;
+        }
 
         // Elastic speed-dampening scale based on player-focus distance for local co-op
         let mut speed_factor = 1.0;
@@ -1323,11 +1440,18 @@ fn player_movement(
 
         let sprinting =
             pi.sprint && stats.stamina > 0.0 && input_strength >= movement.analog_sprint_threshold;
+        let mode_speed_mult =
+            if traversal.active == TraversalMode::Hoverboard && movement.is_grounded {
+                traversal.hoverboard_speed_mult
+            } else {
+                1.0
+            };
         let speed = if sprinting {
             movement.sprint_speed
         } else {
             movement.walk_speed
-        } * speed_factor;
+        } * speed_factor
+            * mode_speed_mult;
 
         if sprinting {
             stats.stamina = (stats.stamina - 15.0 * dt).max(0.0);
@@ -1449,15 +1573,77 @@ fn player_movement(
             continue;
         }
 
-        if pi.jetpack && !started_jump && !movement.is_grounded && jetpack.fuel > 0.0 {
-            movement.velocity.y =
-                (movement.velocity.y + jetpack.force).min(jetpack.max_vertical_vel);
-            jetpack.fuel -= jetpack.fuel_cost_per_sec * dt;
-            jetpack.fuel = jetpack.fuel.max(0.0);
-            jetpack.is_active = true;
+        let wants_air_traversal = pi.jetpack && !started_jump && !movement.is_grounded;
+        jetpack.is_active = false;
+        if jetpack.air_dash_timer > 0.0 {
+            jetpack.mode = FlightMode::AirDash;
+            movement.velocity.y = movement.velocity.y.max(0.0);
+            movement.ground_velocity = approach_vec3(
+                movement.ground_velocity,
+                fwd * jetpack.air_dash_speed,
+                dt * 9.0,
+            );
             state.transition(PlayerState::Jetpack);
-        } else {
-            jetpack.is_active = false;
+        } else if wants_air_traversal && jetpack.fuel > 0.0 {
+            match traversal.active {
+                TraversalMode::HoverJet => {
+                    movement.velocity.y =
+                        (movement.velocity.y + jetpack.force * 0.86).min(jetpack.max_vertical_vel);
+                    jetpack.fuel -= jetpack.fuel_cost_per_sec * 0.72 * dt;
+                    jetpack.is_active = true;
+                    jetpack.mode = if movement.velocity.y.abs() < 0.075 {
+                        FlightMode::Hover
+                    } else {
+                        FlightMode::JetBoost
+                    };
+                    state.transition(PlayerState::Jetpack);
+                }
+                TraversalMode::Flight => {
+                    if pi.dodge && jetpack.air_dash_cooldown_timer <= 0.0 && jetpack.fuel >= 18.0 {
+                        jetpack.air_dash_timer = jetpack.air_dash_duration;
+                        jetpack.air_dash_cooldown_timer = jetpack.air_dash_cooldown;
+                        jetpack.fuel -= 18.0;
+                        movement.ground_velocity = fwd * jetpack.air_dash_speed;
+                        movement.velocity.y = movement.velocity.y.max(0.08);
+                        jetpack.mode = FlightMode::AirDash;
+                    } else if pi.move_axis.y < -0.55 && movement.velocity.y < -0.20 {
+                        movement.velocity.y = -jetpack.slam_speed;
+                        jetpack.mode = FlightMode::Slam;
+                    } else if pi.sprint {
+                        movement.velocity.y =
+                            (movement.velocity.y + jetpack.force * 0.45).min(0.18);
+                        movement.ground_velocity = approach_vec3(
+                            movement.ground_velocity,
+                            fwd * jetpack.boost_forward_speed,
+                            dt * 3.8,
+                        );
+                        jetpack.fuel -= jetpack.fuel_cost_per_sec * 0.82 * dt;
+                        jetpack.is_active = true;
+                        jetpack.mode = FlightMode::JetBoost;
+                    } else {
+                        movement.velocity.y = movement.velocity.y.max(-jetpack.glide_fall_speed);
+                        jetpack.fuel -= jetpack.fuel_cost_per_sec * 0.28 * dt;
+                        jetpack.is_active = true;
+                        jetpack.mode = FlightMode::Glide;
+                    }
+                    state.transition(PlayerState::Jetpack);
+                }
+                _ => {
+                    movement.velocity.y =
+                        (movement.velocity.y + jetpack.force).min(jetpack.max_vertical_vel);
+                    jetpack.fuel -= jetpack.fuel_cost_per_sec * dt;
+                    jetpack.is_active = true;
+                    jetpack.mode = FlightMode::JetBoost;
+                    state.transition(PlayerState::Jetpack);
+                }
+            }
+            jetpack.fuel = jetpack.fuel.max(0.0);
+        } else if !movement.is_grounded {
+            jetpack.mode = if movement.velocity.y >= 0.0 {
+                FlightMode::Jump
+            } else {
+                FlightMode::Fall
+            };
         }
 
         if !movement.is_grounded {
@@ -1504,6 +1690,8 @@ fn player_movement(
                 movement.air_accel * 0.35
             } else if movement.wall_jump_lock_timer > 0.0 {
                 movement.air_accel * 0.22
+            } else if traversal.active == TraversalMode::Hoverboard {
+                movement.air_accel * traversal.hoverboard_air_control_mult
             } else {
                 movement.air_accel
             };
@@ -1514,6 +1702,22 @@ fn player_movement(
 
         if dodge.is_dodging {
             h_vel = dodge.dodge_direction * dodge.dodge_speed;
+        }
+
+        if let Some(grapple_velocity) = grapple_drive_velocity(
+            &mut grapple,
+            transform.translation,
+            h_vel + Vec3::Y * movement.velocity.y,
+            input,
+            pi,
+            dt,
+        ) {
+            h_vel = grapple_velocity.with_y(0.0);
+            movement.velocity.y = grapple_velocity.y;
+            movement.ground_velocity = h_vel;
+            movement.is_grounded = false;
+            edge_grab.is_hanging = false;
+            state.force(PlayerState::Grappling);
         }
 
         let translation = (h_vel + Vec3::new(0.0, movement.velocity.y, 0.0)) * dt * 60.0;
@@ -1570,25 +1774,383 @@ fn approach_vec3(current: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
     }
 }
 
+fn grapple_drive_velocity(
+    grapple: &mut GrappleHookState,
+    position: Vec3,
+    current_velocity: Vec3,
+    move_input: Vec3,
+    input: &PlayerInput,
+    _dt: f32,
+) -> Option<Vec3> {
+    let attach_point = grapple.attach_point?;
+    let to_anchor = attach_point - position;
+    let distance = to_anchor.length();
+    if distance <= 0.001 {
+        grapple.begin_recovery();
+        return None;
+    }
+    let dir = to_anchor / distance;
+
+    match grapple.mode {
+        GrappleHookMode::Zipping => {
+            if input.jump || input.dodge {
+                let carry = dir * grapple.zip_speed * 0.55 + move_input * 0.35;
+                grapple.begin_recovery();
+                return Some(carry);
+            }
+            if distance <= grapple.arrival_radius {
+                return Some(current_velocity * 0.35);
+            }
+            let speed = match grapple.target_kind {
+                GrappleTargetKind::MountainPull | GrappleTargetKind::RouteSocket => {
+                    grapple.mountain_pull_speed
+                }
+                GrappleTargetKind::EnemyPull | GrappleTargetKind::BossWeakPoint => {
+                    grapple.attack_pull_speed
+                }
+                _ => grapple.zip_speed,
+            };
+            let lift = Vec3::Y * (0.18 + dir.y.max(0.0) * 0.24);
+            Some((dir * speed + lift).clamp_length_max(4.0))
+        }
+        GrappleHookMode::Swinging => {
+            if input.jump || input.dodge {
+                let release = (current_velocity
+                    + move_input * 0.65
+                    + dir.cross(Vec3::Y).normalize_or_zero() * 0.18)
+                    .clamp_length_max(3.2);
+                grapple.begin_recovery();
+                return Some(release);
+            }
+
+            let radial_velocity = dir * current_velocity.dot(dir);
+            let tangent_velocity = current_velocity - radial_velocity;
+            let stretch = distance - grapple.cable_length;
+            let radial_correction =
+                dir * (stretch * grapple.swing_spring * 0.025).clamp(-1.35, 1.35);
+            let damping = -radial_velocity * grapple.swing_damping * 0.025;
+            let pump = move_input * 0.42 + Vec3::Y * input.move_axis.y.max(0.0) * 0.08;
+            Some(
+                (tangent_velocity * 0.992 + radial_correction + damping + pump)
+                    .clamp_length_max(3.4),
+            )
+        }
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GrappleCandidate {
+    point: Vec3,
+    normal: Vec3,
+    entity: Option<Entity>,
+    kind: GrappleTargetKind,
+    distance: f32,
+}
+
+fn grapple_candidate_score(
+    origin: Vec3,
+    aim_dir: Vec3,
+    point: Vec3,
+    max_distance: f32,
+    priority: f32,
+    radius: f32,
+) -> Option<(f32, f32)> {
+    let to_target = point - origin;
+    let distance = to_target.length();
+    if distance <= 1.2 || distance > max_distance + radius {
+        return None;
+    }
+    let aim = aim_dir.dot(to_target / distance);
+    if aim < 0.18 {
+        return None;
+    }
+    let distance_score = 1.0 - (distance / max_distance).clamp(0.0, 1.0);
+    Some((
+        aim * 2.2 + priority + distance_score * 0.7 + radius * 0.03,
+        distance,
+    ))
+}
+
+fn grapple_mode_for_target(
+    kind: GrappleTargetKind,
+    distance: f32,
+    aim_dir: Vec3,
+) -> GrappleHookMode {
+    match kind {
+        GrappleTargetKind::SwingPoint => GrappleHookMode::Swinging,
+        GrappleTargetKind::RouteSocket | GrappleTargetKind::BroadSurface
+            if distance > 28.0 && aim_dir.y > 0.08 =>
+        {
+            GrappleHookMode::Swinging
+        }
+        _ => GrappleHookMode::Zipping,
+    }
+}
+
+fn enemy_grapple_kind(
+    enemy: &Enemy,
+    boss: Option<&BossEnemy>,
+    drone: Option<&FlyingDrone>,
+) -> GrappleTargetKind {
+    if boss.is_some() || matches!(enemy.enemy_type, EnemyType::Heavy | EnemyType::Hybrid) {
+        GrappleTargetKind::BossWeakPoint
+    } else if drone.is_some() {
+        GrappleTargetKind::ZipPoint
+    } else {
+        GrappleTargetKind::EnemyPull
+    }
+}
+
 // ── Grapple Hook Foundation ──────────────────────────────────────────────────
-fn grapple_hook_foundation_update(
+fn grapple_hook_update(
     time: Res<Time>,
+    route_registry: Res<WorldRouteRegistry>,
     mut player_q: Query<
-        (&PlayerInput, &mut GrappleHookState, &mut PlayerStateMachine),
+        (
+            Entity,
+            &Transform,
+            &PlayerInput,
+            &TraversalModeState,
+            &mut GrappleHookState,
+            &mut PlayerStateMachine,
+        ),
         With<Player>,
     >,
+    socket_q: Query<
+        (
+            Entity,
+            &Transform,
+            Option<&GrappleSocket>,
+            Option<&WorldRouteMarker>,
+        ),
+        Or<(With<GrappleSocket>, With<WorldRouteMarker>)>,
+    >,
+    enemy_q: Query<
+        (
+            Entity,
+            &Transform,
+            &Enemy,
+            Option<&BossEnemy>,
+            Option<&FlyingDrone>,
+        ),
+        Without<DeadEnemy>,
+    >,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    for (input, mut grapple, mut state) in player_q.iter_mut() {
+    for (entity, transform, input, traversal, mut grapple, mut state) in player_q.iter_mut() {
         grapple.tick_foundation(dt);
 
         if input.grapple_just && state.current != PlayerState::Dead && grapple.request_fire() {
             state.force(PlayerState::Grappling);
         }
 
+        if grapple.mode == GrappleHookMode::Searching {
+            let origin = transform.translation + Vec3::Y * 1.0;
+            let aim_dir = transform.forward().as_vec3().normalize_or_zero();
+            let max_distance = grapple.max_cable_length.min(86.0);
+            let mut best: Option<(GrappleCandidate, f32)> = None;
+
+            for (target_entity, target_transform, socket, route_marker) in socket_q.iter() {
+                if target_entity == entity {
+                    continue;
+                }
+                let mut priority = socket.map(|s| s.priority).unwrap_or(0.72);
+                let radius = socket.map(|s| s.radius).unwrap_or(2.5);
+                if let Some(marker) = route_marker {
+                    let Some(route) = route_registry.get(marker.id) else {
+                        continue;
+                    };
+                    if matches!(
+                        route.state,
+                        WorldRouteState::Locked | WorldRouteState::Blocked
+                    ) {
+                        continue;
+                    }
+                    priority += match route.state {
+                        WorldRouteState::Open => 0.45,
+                        WorldRouteState::Contested => 0.18,
+                        WorldRouteState::Blocked | WorldRouteState::Locked => 0.0,
+                    };
+                }
+
+                let point = target_transform.translation + Vec3::Y * radius.min(7.5) * 0.4;
+                let Some((score, distance)) =
+                    grapple_candidate_score(origin, aim_dir, point, max_distance, priority, radius)
+                else {
+                    continue;
+                };
+                let kind = socket
+                    .map(|s| s.kind)
+                    .unwrap_or(GrappleTargetKind::RouteSocket);
+                let candidate = GrappleCandidate {
+                    point,
+                    normal: (origin - point).normalize_or_zero(),
+                    entity: Some(target_entity),
+                    kind,
+                    distance,
+                };
+                if best.is_none_or(|(_, best_score)| score > best_score) {
+                    best = Some((candidate, score));
+                }
+            }
+
+            for (target_entity, target_transform, enemy, boss, drone) in enemy_q.iter() {
+                let point = target_transform.translation
+                    + Vec3::Y * if drone.is_some() { 1.2 } else { 0.9 };
+                let kind = enemy_grapple_kind(enemy, boss, drone);
+                let priority = match kind {
+                    GrappleTargetKind::BossWeakPoint => 1.75,
+                    GrappleTargetKind::ZipPoint => 1.25,
+                    _ => 1.05,
+                };
+                let Some((score, distance)) =
+                    grapple_candidate_score(origin, aim_dir, point, max_distance, priority, 1.5)
+                else {
+                    continue;
+                };
+                let candidate = GrappleCandidate {
+                    point,
+                    normal: (origin - point).normalize_or_zero(),
+                    entity: Some(target_entity),
+                    kind,
+                    distance,
+                };
+                if best.is_none_or(|(_, best_score)| score > best_score) {
+                    best = Some((candidate, score));
+                }
+            }
+
+            if best.is_none() && traversal.active == TraversalMode::Grapple && aim_dir.y > -0.35 {
+                let distance = max_distance.min(42.0);
+                let point = origin + aim_dir * distance + Vec3::Y * (aim_dir.y.max(0.0) * 8.0);
+                best = Some((
+                    GrappleCandidate {
+                        point,
+                        normal: -aim_dir,
+                        entity: None,
+                        kind: if aim_dir.y > 0.12 {
+                            GrappleTargetKind::SwingPoint
+                        } else {
+                            GrappleTargetKind::BroadSurface
+                        },
+                        distance,
+                    },
+                    0.15,
+                ));
+            }
+
+            if let Some((candidate, _)) = best {
+                let mode = grapple_mode_for_target(candidate.kind, candidate.distance, aim_dir);
+                grapple.attach(
+                    candidate.point,
+                    candidate.normal,
+                    candidate.entity,
+                    candidate.kind,
+                    mode,
+                    transform.translation,
+                );
+                state.force(PlayerState::Grappling);
+                let label = match candidate.kind {
+                    GrappleTargetKind::EnemyPull => "Enemy pull",
+                    GrappleTargetKind::BossWeakPoint => "Boss weak point",
+                    GrappleTargetKind::SwingPoint => "Swing",
+                    GrappleTargetKind::MountainPull => "Mountain pull",
+                    GrappleTargetKind::RouteSocket => "Route socket",
+                    GrappleTargetKind::ZipPoint => "Zip",
+                    GrappleTargetKind::UtilityPull => "Utility pull",
+                    GrappleTargetKind::BroadSurface => "Surface latch",
+                    GrappleTargetKind::Denied => "Denied",
+                };
+                msg_ev.write(UiMessageEvent {
+                    text: format!("{label} locked."),
+                    duration: 1.1,
+                });
+            } else {
+                grapple.begin_recovery();
+                msg_ev.write(UiMessageEvent {
+                    text: "No clean hook target.".to_string(),
+                    duration: 1.2,
+                });
+            }
+        }
+
         if state.current == PlayerState::Grappling && !grapple.wants_animation_pose() {
             state.transition(PlayerState::Idle);
         }
+    }
+}
+
+fn grapple_hook_impact_system(
+    mut player_q: Query<(&Transform, &mut GrappleHookState), With<Player>>,
+    mut enemy_q: Query<
+        (
+            Entity,
+            &mut Transform,
+            &mut Health,
+            &mut Damageable,
+            &Enemy,
+            Option<&BossEnemy>,
+        ),
+        Without<Player>,
+    >,
+    mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
+    mut killed_ev: MessageWriter<EnemyKilledEvent>,
+) {
+    for (player_transform, mut grapple) in player_q.iter_mut() {
+        if !matches!(grapple.mode, GrappleHookMode::Zipping) {
+            continue;
+        }
+        let Some(target_entity) = grapple.target_entity else {
+            if let Some(point) = grapple.attach_point {
+                if player_transform.translation.distance(point) <= grapple.arrival_radius {
+                    grapple.begin_recovery();
+                }
+            }
+            continue;
+        };
+        let Ok((entity, mut target_transform, mut health, mut damageable, enemy, boss)) =
+            enemy_q.get_mut(target_entity)
+        else {
+            grapple.begin_recovery();
+            continue;
+        };
+
+        let player_pos = player_transform.translation;
+        let distance = player_pos.distance(target_transform.translation);
+        if distance > grapple.arrival_radius + 1.2 {
+            continue;
+        }
+
+        let is_heavy = boss.is_some()
+            || matches!(enemy.enemy_type, EnemyType::Heavy | EnemyType::Hybrid)
+            || matches!(grapple.target_kind, GrappleTargetKind::BossWeakPoint);
+        let damage = if is_heavy { 28.0 } else { 18.0 };
+        let result = apply_damage(
+            &mut health,
+            &mut damageable,
+            &DamageInfo::new(damage, DamageType::Kinetic),
+        );
+        damaged_ev.write(EnemyDamagedEvent {
+            entity,
+            damage: result.damage_amount,
+            position: target_transform.translation,
+        });
+        if !is_heavy {
+            target_transform.translation = target_transform
+                .translation
+                .lerp(player_pos + Vec3::Y * 0.7, 0.48);
+        }
+        if result.was_killed {
+            killed_ev.write(EnemyKilledEvent {
+                enemy_type: enemy.enemy_type.as_str().to_string(),
+                credits: enemy.config.credits,
+                experience: enemy.config.experience_value,
+                position: target_transform.translation,
+            });
+        }
+        grapple.begin_recovery();
     }
 }
 
@@ -1811,6 +2373,20 @@ fn player_died_check(
     }
 }
 
+/// Recomputes each player's `HeroPowerSet` from their hero profile + current
+/// robot pet collection whenever pets change mid-session.
+fn hero_affinity_update_system(
+    robot_pets: Res<RobotPetCollection>,
+    mut player_q: Query<(&HeroPowerProfile, &mut HeroPowerSet), With<Player>>,
+) {
+    if !robot_pets.is_changed() {
+        return;
+    }
+    for (profile, mut powers) in player_q.iter_mut() {
+        *powers = profile.amplified_powers(&robot_pets);
+    }
+}
+
 // ── Public helpers (called from other plugins) ────────────────────────────────
 
 /// Apply damage to a player, respecting parry and armor.
@@ -1943,5 +2519,40 @@ mod tests {
         assert!(movement.air_accel > PlayerMovement::default().air_accel);
         assert!(jetpack.max_fuel > JetpackState::default().max_fuel);
         assert_eq!(jetpack.fuel, jetpack.max_fuel);
+        assert!(jetpack.air_dash_speed > JetpackState::default().air_dash_speed);
+    }
+
+    #[test]
+    fn grapple_candidate_prefers_forward_targets() {
+        let origin = Vec3::ZERO;
+        let aim = Vec3::NEG_Z;
+
+        let forward =
+            grapple_candidate_score(origin, aim, Vec3::new(0.0, 0.0, -16.0), 48.0, 1.0, 1.0);
+        let behind =
+            grapple_candidate_score(origin, aim, Vec3::new(0.0, 0.0, 16.0), 48.0, 1.0, 1.0);
+
+        assert!(forward.is_some());
+        assert!(behind.is_none());
+    }
+
+    #[test]
+    fn grapple_mode_selects_swing_for_high_long_targets() {
+        assert_eq!(
+            grapple_mode_for_target(GrappleTargetKind::SwingPoint, 18.0, Vec3::NEG_Z),
+            GrappleHookMode::Swinging
+        );
+        assert_eq!(
+            grapple_mode_for_target(
+                GrappleTargetKind::BroadSurface,
+                38.0,
+                Vec3::new(0.0, 0.2, -1.0).normalize()
+            ),
+            GrappleHookMode::Swinging
+        );
+        assert_eq!(
+            grapple_mode_for_target(GrappleTargetKind::EnemyPull, 18.0, Vec3::NEG_Z),
+            GrappleHookMode::Zipping
+        );
     }
 }

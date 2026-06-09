@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
-use crate::components::character::{CartoonPart, CartoonPartKind};
+use crate::components::character::{default_joint_for_part, CartoonPart, CartoonPartKind};
 use crate::rendering::PbrBundle;
 
 // ── Slot identification ───────────────────────────────────────────────────────
@@ -504,7 +504,7 @@ fn spawn_part(
     transform: Transform,
     slot: PartSlotTag,
 ) {
-    let part = CartoonPart::new(root, kind, &transform);
+    let part = CartoonPart::new_bound(root, kind, default_joint_for_part(kind), &transform);
     let entity = commands
         .spawn((
             PbrBundle {

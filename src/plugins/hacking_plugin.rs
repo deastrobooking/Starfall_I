@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 
 use crate::commands::CommandRegistry;
-use crate::components::enemy::{Enemy, EnemyStateMachine};
+use crate::components::enemy::{Enemy, EnemyAIState, EnemyStateMachine};
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::{EnemyDamagedEvent, EnemyKilledEvent, UiMessageEvent};
 use crate::hacking::{complete_small_drone_hack, Hackable, HackedUnit, HackingRegistry};
+use crate::hero_roster::HeroPowerSet;
 use crate::state::AppState;
 
 pub struct HackingPlugin;
@@ -26,38 +27,64 @@ impl Plugin for HackingPlugin {
 }
 
 fn hack_interaction_system(
-    player_q: Query<(&Transform, &PlayerInput, &PlayerIndex), With<Player>>,
-    mut hackable_q: Query<(&Transform, &mut Hackable, Option<&Health>)>,
+    player_q: Query<(&Transform, &PlayerInput, &PlayerIndex, &HeroPowerSet), With<Player>>,
+    mut hackable_q: Query<(
+        &Transform,
+        &mut Hackable,
+        Option<&Health>,
+        Option<&EnemyStateMachine>,
+    )>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
-    for (target_xf, mut hackable, health) in hackable_q.iter_mut() {
+    for (target_xf, mut hackable, health, state_machine) in hackable_q.iter_mut() {
         if hackable.progress.is_some() {
             continue;
         }
         if health.map(|h| !h.is_alive()).unwrap_or(false) {
             continue;
         }
-        let Some((_player_xf, _input, index, distance)) = player_q
+        let Some((_player_xf, _input, index, powers, distance)) = player_q
             .iter()
-            .filter(|(player_xf, input, _)| {
+            .filter(|(player_xf, input, _, _)| {
                 input.interact
                     && player_xf.translation.distance(target_xf.translation)
                         <= hackable.required_range
             })
-            .map(|(player_xf, input, index)| {
+            .map(|(player_xf, input, index, powers)| {
                 (
                     player_xf,
                     input,
                     index,
+                    powers,
                     player_xf.translation.distance(target_xf.translation),
                 )
             })
-            .min_by(|a, b| a.3.total_cmp(&b.3))
+            .min_by(|a, b| a.4.total_cmp(&b.4))
         else {
             continue;
         };
 
-        let remaining = hackable.hack_seconds();
+        // Difficulty-2+ units require the target to be stunned first.
+        if hackable.difficulty >= 2 {
+            let is_stunned = state_machine
+                .map(|sm| sm.current == EnemyAIState::Stunned)
+                .unwrap_or(false);
+            if !is_stunned {
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "P{}: stun the target before hacking difficulty-{} units.",
+                        index.0 + 1,
+                        hackable.difficulty
+                    ),
+                    duration: 2.0,
+                });
+                continue;
+            }
+        }
+
+        // High-magic heroes (Sisters) hack faster; low-magic heroes take longer.
+        let magic_divisor = powers.magic.clamp(0.85, 1.40);
+        let remaining = hackable.hack_seconds() / magic_divisor;
         hackable.progress = Some(crate::hacking::HackProgress {
             player_index: *index,
             remaining,
@@ -124,12 +151,8 @@ fn hack_progress_system(
 
         let owner = progress.player_index;
         let target_label = hackable.target_class.label();
-        let hacked = complete_small_drone_hack(
-            &mut registry,
-            &mut command_registry,
-            owner,
-            &hackable,
-        );
+        let hacked =
+            complete_small_drone_hack(&mut registry, &mut command_registry, owner, &hackable);
         if let Some(mut sm) = state_machine {
             sm.force(crate::components::enemy::EnemyAIState::Stunned);
         }
@@ -174,21 +197,24 @@ fn hacked_unit_control_system(
             let desired = player_xf.translation
                 + Vec3::new(4.0 + f32::from(hacked.owner.0), 4.2 + phase * 0.5, -5.0);
             transform.translation = transform.translation.lerp(desired, 1.0 - (-dt * 4.0).exp());
-            if transform.translation.distance_squared(player_xf.translation) > 0.1 {
+            if transform
+                .translation
+                .distance_squared(player_xf.translation)
+                > 0.1
+            {
                 transform.look_at(player_xf.translation + Vec3::Y * 1.0, Vec3::Y);
             }
             if hacked.ability_cooldown <= 0.0
                 && (input.fire_just || input.melee_light || input.melee_heavy)
-            {
-                if hacked_drone_pulse(
+                && hacked_drone_pulse(
                     entity,
                     &mut transform,
                     &mut target_q,
                     &mut damaged_ev,
                     &mut killed_ev,
-                ) {
-                    hacked.ability_cooldown = 0.65;
-                }
+                )
+            {
+                hacked.ability_cooldown = 0.65;
             }
         }
 

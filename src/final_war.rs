@@ -2,8 +2,10 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::components::faction::Faction;
+use crate::events::UiMessageEvent;
 use crate::raids::{RaidConsequence, RaidKind, RaidRegistry};
-use crate::resources::{WorldSiteOwner, WorldSiteRegistry, WorldSiteState};
+use crate::resources::{ChapterProgress, WorldSiteOwner, WorldSiteRegistry, WorldSiteState};
+use crate::state::AppState;
 
 const PRESSURE_TICK_INTERVAL: f32 = 10.0;
 const ESCALATING_THRESHOLD: u32 = 50;
@@ -66,6 +68,9 @@ pub struct FinalWarRegistry {
     pub faction_pressures: Vec<FactionPressure>,
     pub pressure_tick_timer: f32,
     pub coordinated_raid_timer: f32,
+    /// Tracks the last phase that was announced so we can detect transitions.
+    #[serde(default)]
+    pub last_announced_phase: FinalWarPhase,
 }
 
 impl Default for FinalWarRegistry {
@@ -75,6 +80,7 @@ impl Default for FinalWarRegistry {
             faction_pressures: initial_faction_pressures(),
             pressure_tick_timer: PRESSURE_TICK_INTERVAL,
             coordinated_raid_timer: FinalWarPhase::Escalating.coordinated_raid_cooldown(),
+            last_announced_phase: FinalWarPhase::Dormant,
         }
     }
 }
@@ -96,8 +102,10 @@ impl FinalWarRegistry {
         {
             fp.pressure = fp.pressure.saturating_add(amount);
         } else {
-            self.faction_pressures
-                .push(FactionPressure { faction, pressure: amount });
+            self.faction_pressures.push(FactionPressure {
+                faction,
+                pressure: amount,
+            });
         }
         self.update_phase();
     }
@@ -114,6 +122,14 @@ impl FinalWarRegistry {
             .map(|fp| fp.faction)
     }
 
+    pub fn phase_just_changed(&self) -> bool {
+        self.phase != self.last_announced_phase
+    }
+
+    pub fn mark_announced(&mut self) {
+        self.last_announced_phase = self.phase;
+    }
+
     pub fn to_save_record(&self) -> FinalWarSaveRecord {
         FinalWarSaveRecord {
             phase: self.phase,
@@ -125,6 +141,8 @@ impl FinalWarRegistry {
 
     pub fn apply_save_record(&mut self, record: FinalWarSaveRecord) {
         self.phase = record.phase;
+        // Sync last_announced_phase so we don't falsely announce on load.
+        self.last_announced_phase = record.phase;
         self.faction_pressures = if record.faction_pressures.is_empty() {
             initial_faction_pressures()
         } else {
@@ -186,9 +204,9 @@ fn owner_faction(owner: WorldSiteOwner) -> Option<Faction> {
     match owner {
         WorldSiteOwner::Scallarian => Some(Faction::DimensionalAlien),
         WorldSiteOwner::DragonDomain => Some(Faction::DragonRoyalty),
-        WorldSiteOwner::FreePeoples
-        | WorldSiteOwner::Neutral
-        | WorldSiteOwner::PlayerAlliance => None,
+        WorldSiteOwner::FreePeoples | WorldSiteOwner::Neutral | WorldSiteOwner::PlayerAlliance => {
+            None
+        }
     }
 }
 
@@ -261,8 +279,7 @@ pub fn coordinated_raid_trigger_system(
         .sites
         .iter()
         .filter(|site| {
-            site.state == WorldSiteState::Liberated
-                && !raid_registry.unresolved_for_site(site.id)
+            site.state == WorldSiteState::Liberated && !raid_registry.unresolved_for_site(site.id)
         })
         .map(|site| site.id)
         .take(max_targets)
@@ -279,6 +296,67 @@ pub fn coordinated_raid_trigger_system(
             COORDINATED_RAID_WAVE_SIZE,
             RaidConsequence::SiteDamaged,
         );
+    }
+}
+
+/// Announces phase transitions to the player via UiMessageEvent.
+pub fn final_war_phase_announce_system(
+    mut registry: ResMut<FinalWarRegistry>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    if !registry.phase_just_changed() {
+        return;
+    }
+
+    let message = match (registry.last_announced_phase, registry.phase) {
+        (FinalWarPhase::Dormant, FinalWarPhase::Escalating) => {
+            "Enemy forces mobilizing — regions across the Everest Range are under threat!"
+        }
+        (FinalWarPhase::Escalating, FinalWarPhase::Active) => {
+            "The Final War has begun! Enemy fleets have launched coordinated strikes!"
+        }
+        (FinalWarPhase::Active, FinalWarPhase::Climax) => {
+            "CLIMAX: The enemy is making their ultimate push — defend all liberated territories!"
+        }
+        (_, FinalWarPhase::Dormant) => {
+            "The enemy has been beaten back. Peace returns to the Everest Range."
+        }
+        _ => "",
+    };
+
+    if !message.is_empty() {
+        msg_ev.write(UiMessageEvent {
+            text: message.to_string(),
+            duration: 6.0,
+        });
+    }
+
+    registry.mark_announced();
+}
+
+/// Checks the win condition: all 9 sites liberated + Final War dormant.
+/// On success, sets campaign_complete and transitions to AppState::Victory.
+pub fn win_condition_system(
+    site_registry: Res<WorldSiteRegistry>,
+    final_war: Res<FinalWarRegistry>,
+    mut progress: ResMut<ChapterProgress>,
+    mut next_state: ResMut<NextState<AppState>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    if progress.campaign_complete {
+        return;
+    }
+
+    let all_liberated = site_registry.sites.iter().all(|site| site.is_liberated());
+    let war_dormant = final_war.phase == FinalWarPhase::Dormant && final_war.total_pressure() == 0;
+
+    if all_liberated && war_dormant {
+        progress.campaign_complete = true;
+        msg_ev.write(UiMessageEvent {
+            text: "Victory! All territories liberated. The Everest Range is free!".to_string(),
+            duration: 10.0,
+        });
+        next_state.set(AppState::Victory);
     }
 }
 
@@ -327,17 +405,13 @@ mod tests {
 
         let record = reg.to_save_record();
         let json = serde_json::to_string(&record).expect("should serialize");
-        let loaded: FinalWarSaveRecord =
-            serde_json::from_str(&json).expect("should deserialize");
+        let loaded: FinalWarSaveRecord = serde_json::from_str(&json).expect("should deserialize");
 
         let mut restored = FinalWarRegistry::default();
         restored.apply_save_record(loaded);
 
         assert_eq!(restored.phase, FinalWarPhase::Active);
-        assert_eq!(
-            restored.pressure_for(Faction::DimensionalAlien),
-            160
-        );
+        assert_eq!(restored.pressure_for(Faction::DimensionalAlien), 160);
         assert_eq!(restored.pressure_tick_timer, 7.3);
         assert_eq!(restored.coordinated_raid_timer, 42.0);
     }

@@ -16,16 +16,38 @@ use crate::hacking::HackingRegistry;
 use crate::perks::PerkTree;
 use crate::raids::{RaidRecord, RaidRegistry};
 use crate::resources::{
-    initial_world_routes, initial_world_sites, ChapterProgress, PlaySessionTransition,
-    PlayerPartLoadout, PlayerSelectState, WaveInfo, WorldRouteRegistry, WorldRouteSaveRecord,
-    WorldSiteRegistry, WorldSiteSaveRecord,
+    initial_world_routes, initial_world_sites, ChapterProgress, GameSettings,
+    PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo, WorldRouteRegistry,
+    WorldRouteSaveRecord, WorldSiteRegistry, WorldSiteSaveRecord,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::SettlementEconomy;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 
-const SAVE_FILE: &str = "starfall_i_save.json";
+const SAVE_FILE_A: &str = "starfall_i_save_a.json";
+const SAVE_FILE_B: &str = "starfall_i_save_b.json";
+const SAVE_FILE_C: &str = "starfall_i_save_c.json";
+const SETTINGS_FILE: &str = "starfall_i_settings.json";
+
+// ── Save Rotation State ───────────────────────────────────────────────────────
+/// Tracks which save slot (0=A, 1=B, 2=C) to write to next.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct SaveRotationState {
+    pub current_slot: u8,
+}
+
+fn save_slot_path(slot: u8) -> PathBuf {
+    match slot % 3 {
+        0 => PathBuf::from(SAVE_FILE_A),
+        1 => PathBuf::from(SAVE_FILE_B),
+        _ => PathBuf::from(SAVE_FILE_C),
+    }
+}
+
+fn next_save_slot(current: u8) -> u8 {
+    (current + 1) % 3
+}
 
 // ── Save SystemParam Bundle ───────────────────────────────────────────────────
 /// Groups all save-relevant read params into one SystemParam so callers like
@@ -119,6 +141,10 @@ pub struct SaveData {
     pub hacking: HackingRegistry,
     #[serde(default)]
     pub final_war: FinalWarSaveRecord,
+    #[serde(default)]
+    pub save_version: u32,
+    #[serde(default)]
+    pub campaign_complete: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -213,12 +239,35 @@ impl Default for SaveData {
             command_assets: Vec::new(),
             hacking: HackingRegistry::default(),
             final_war: FinalWarSaveRecord::default(),
+            save_version: 2,
+            campaign_complete: false,
         }
     }
 }
 
 fn default_max_stat() -> f32 {
     100.0
+}
+
+// ── Settings Persistence ──────────────────────────────────────────────────────
+pub fn save_settings(settings: &GameSettings) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(PathBuf::from(SETTINGS_FILE), json).map_err(|e| e.to_string())
+}
+
+pub fn load_settings() -> Option<GameSettings> {
+    let path = PathBuf::from(SETTINGS_FILE);
+    if !path.exists() {
+        return None;
+    }
+    let json = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&json).ok()
+}
+
+fn load_settings_on_startup(mut settings: ResMut<GameSettings>) {
+    if let Some(loaded) = load_settings() {
+        *settings = loaded;
+    }
 }
 
 // ── Resource ──────────────────────────────────────────────────────────────────
@@ -243,7 +292,11 @@ pub struct SavePlugin;
 impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SaveState>()
-            .add_systems(Startup, hydrate_progress_from_disk)
+            .init_resource::<SaveRotationState>()
+            .add_systems(
+                Startup,
+                (hydrate_progress_from_disk, load_settings_on_startup),
+            )
             .add_systems(OnEnter(AppState::Playing), load_save_on_enter)
             .add_systems(
                 Update,
@@ -252,13 +305,50 @@ impl Plugin for SavePlugin {
     }
 }
 
-// ── Save Path ─────────────────────────────────────────────────────────────────
-fn save_path() -> PathBuf {
-    PathBuf::from(SAVE_FILE)
-}
+// (save_slot_path is defined above near the constants)
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 pub fn save_game(
+    players: Vec<PlayerSaveData>,
+    wave: &WaveInfo,
+    progress: &ChapterProgress,
+    perks: &PerkTree,
+    select: &PlayerSelectState,
+    robot_pets: &RobotPetCollection,
+    settlement_economy: &SettlementEconomy,
+    upgrades: &UpgradeLedger,
+    part_loadout: &PlayerPartLoadout,
+    weapon_ranks: &WeaponRanks,
+    world_site_registry: &WorldSiteRegistry,
+    world_route_registry: &WorldRouteRegistry,
+    raid_registry: &RaidRegistry,
+    command_registry: &CommandRegistry,
+    hacking_registry: &HackingRegistry,
+    final_war_registry: &FinalWarRegistry,
+) -> Result<(), String> {
+    save_game_to_slot(
+        0,
+        players,
+        wave,
+        progress,
+        perks,
+        select,
+        robot_pets,
+        settlement_economy,
+        upgrades,
+        part_loadout,
+        weapon_ranks,
+        world_site_registry,
+        world_route_registry,
+        raid_registry,
+        command_registry,
+        hacking_registry,
+        final_war_registry,
+    )
+}
+
+pub fn save_game_to_slot(
+    slot: u8,
     players: Vec<PlayerSaveData>,
     wave: &WaveInfo,
     progress: &ChapterProgress,
@@ -295,7 +385,7 @@ pub fn save_game(
         final_war_registry,
     );
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    fs::write(save_path(), json).map_err(|e| e.to_string())
+    fs::write(save_slot_path(slot), json).map_err(|e| e.to_string())
 }
 
 fn build_save_data(
@@ -346,17 +436,25 @@ fn build_save_data(
         command_assets: command_registry.to_save_records(),
         hacking: hacking_registry.clone(),
         final_war: final_war_registry.to_save_record(),
+        campaign_complete: progress.campaign_complete,
         ..SaveData::default()
     }
 }
 
 pub fn load_save() -> Option<SaveData> {
-    let path = save_path();
-    if !path.exists() {
-        return None;
+    // Try slots A, B, C in order; return the first that parses successfully.
+    for slot in 0u8..3 {
+        let path = save_slot_path(slot);
+        if !path.exists() {
+            continue;
+        }
+        if let Ok(json) = fs::read_to_string(&path) {
+            if let Ok(data) = serde_json::from_str::<SaveData>(&json) {
+                return Some(data);
+            }
+        }
     }
-    let json = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&json).ok()
+    None
 }
 
 fn hydrate_character_blueprints(
@@ -438,6 +536,7 @@ fn hydrate_progress_from_disk(
         progress.companions_recruited = data.companions_recruited;
         progress.scientist_relics = data.scientist_relics;
         progress.relic_fragments = data.relic_fragments;
+        progress.campaign_complete = data.campaign_complete;
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
         hydrate_character_blueprints(&mut select, data.character_blueprints);
@@ -458,9 +557,11 @@ fn hydrate_progress_from_disk(
         if regs.command_registry.assets.is_empty() {
             regs.command_registry.assets = initial_command_assets();
         }
-        regs.command_registry.apply_save_records(&data.command_assets);
+        regs.command_registry
+            .apply_save_records(&data.command_assets);
         *regs.hacking_registry = data.hacking.clone();
-        regs.final_war_registry.apply_save_record(data.final_war.clone());
+        regs.final_war_registry
+            .apply_save_record(data.final_war.clone());
     }
 }
 
@@ -502,6 +603,7 @@ fn load_save_on_enter(
         progress.companions_recruited = data.companions_recruited;
         progress.scientist_relics = data.scientist_relics;
         progress.relic_fragments = data.relic_fragments;
+        progress.campaign_complete = data.campaign_complete;
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
         hydrate_character_blueprints(&mut select, data.character_blueprints);
@@ -522,9 +624,11 @@ fn load_save_on_enter(
         if regs.command_registry.assets.is_empty() {
             regs.command_registry.assets = initial_command_assets();
         }
-        regs.command_registry.apply_save_records(&data.command_assets);
+        regs.command_registry
+            .apply_save_records(&data.command_assets);
         *regs.hacking_registry = data.hacking.clone();
-        regs.final_war_registry.apply_save_record(data.final_war.clone());
+        regs.final_war_registry
+            .apply_save_record(data.final_war.clone());
         let loaded_players = data.players.len().max(active_players);
         msg_ev.write(UiMessageEvent {
             text: format!(
@@ -541,6 +645,7 @@ fn load_save_on_enter(
 fn autosave_system(
     time: Res<Time>,
     mut save_state: ResMut<SaveState>,
+    mut rotation: ResMut<SaveRotationState>,
     sp: SaveParams,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
@@ -550,10 +655,35 @@ fn autosave_system(
     }
     save_state.last_save_timer = 0.0;
 
-    match save_current_session(&sp) {
+    let slot = rotation.current_slot;
+    rotation.current_slot = next_save_slot(slot);
+
+    let players = collect_player_saves(&sp.player_q);
+    if players.is_empty() {
+        return;
+    }
+    match save_game_to_slot(
+        slot,
+        players,
+        &sp.wave,
+        &sp.progress,
+        &sp.perks,
+        &sp.select,
+        &sp.robot_pets,
+        &sp.settlement_economy,
+        &sp.upgrades,
+        &sp.part_loadout,
+        &sp.weapon_ranks,
+        &sp.world_site_registry,
+        &sp.world_route_registry,
+        &sp.raid_registry,
+        &sp.command_registry,
+        &sp.hacking_registry,
+        &sp.final_war_registry,
+    ) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {
-                text: "Game autosaved.".to_string(),
+                text: format!("Game autosaved (slot {}).", (b'A' + slot) as char),
                 duration: 1.5,
             });
         }
@@ -649,6 +779,7 @@ mod tests {
             companions_recruited: vec!["Nova".to_string()],
             scientist_relics: vec!["Giacoma:focus_lens".to_string()],
             relic_fragments: vec!["Giovanni:caliper:3".to_string()],
+            campaign_complete: false,
         };
         let perks = PerkTree {
             points_unspent: 2,

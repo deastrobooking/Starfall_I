@@ -13,4 +13,5 @@ pub enum AppState {
     Playing,
     Paused,
     GameOver,
+    Victory,
 }

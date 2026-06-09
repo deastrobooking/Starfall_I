@@ -13,6 +13,7 @@ use crate::chapters::{
     chapter_map_locations, map_settlements, MapSettlement, MapSettlementKind,
     EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE,
 };
+use crate::commands::CommandRegistry;
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::DiscoverableKind;
 use crate::components::enemy::{CitySpyDrone, Enemy, EnemyStateMachine, EnemyType};
@@ -26,9 +27,11 @@ use crate::discussion::{
     discussion_script, settlement_discussion_id, settlement_guardian_role, DiscussionState,
 };
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
+use crate::final_war::{
+    coordinated_raid_trigger_system, final_war_phase_announce_system, pressure_accumulation_system,
+    win_condition_system,
+};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
-use crate::commands::CommandRegistry;
-use crate::final_war::{coordinated_raid_trigger_system, pressure_accumulation_system};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
 use crate::raids::{
@@ -167,13 +170,21 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
-                (pressure_accumulation_system, coordinated_raid_trigger_system)
+                (
+                    pressure_accumulation_system,
+                    coordinated_raid_trigger_system,
+                    final_war_phase_announce_system,
+                    win_condition_system,
+                )
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
                 Update,
-                (settlement_economy_tick_system, settlement_build_terminal_system)
+                (
+                    settlement_economy_tick_system,
+                    settlement_build_terminal_system,
+                )
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
@@ -6988,6 +6999,7 @@ fn spawn_city_spy_drones(
                     experience: spec.experience,
                     armor: spec.armor,
                     data_spawned: false,
+                    pressure_applied: false,
                 },
             ))
             .with_children(|spy| {

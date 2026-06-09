@@ -1,16 +1,18 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
+use std::f32::consts::PI;
 
 use crate::character_parts::{
     spawn_robot_arms, spawn_robot_body, spawn_robot_legs, spawn_robot_shoulders, CharacterLoadout,
     CharacterPartStyle, CharacterVisualConfig, PartSlotTag,
 };
 use crate::components::character::{
-    CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonPose,
+    default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
+    CartoonPose, CharacterIkPose, IkTarget, JointKind, JointMarker, SkeletonRig,
 };
 use crate::components::player::{
-    DodgeState, EdgeGrabState, GrappleHookMode, GrappleHookState, JetpackState, ParryState,
-    PlayerMovement, PlayerState, PlayerStateMachine,
+    DodgeState, EdgeGrabState, FlightMode, GrappleHookMode, GrappleHookState, JetpackState,
+    ParryState, PlayerMovement, PlayerState, PlayerStateMachine, TraversalMode, TraversalModeState,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
 use crate::state::AppState;
@@ -22,11 +24,45 @@ impl Plugin for CharacterPlugin {
         app.add_systems(
             Update,
             (
+                bind_parts_to_skeleton,
                 cartoon_animation_system
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::CharacterDesign))),
                 swap_character_parts,
-            ),
+            )
+                .chain(),
         );
+    }
+}
+
+fn bind_parts_to_skeleton(
+    mut commands: Commands,
+    mut parts: Query<(Entity, &mut CartoonPart, &mut Transform), Added<CartoonPart>>,
+    rigs: Query<&SkeletonRig>,
+    joints: Query<&JointMarker>,
+) {
+    for (entity, mut part, mut transform) in &mut parts {
+        let joint_kind = part.joint.or_else(|| default_joint_for_part(part.kind));
+        part.joint = joint_kind;
+
+        let Some(joint_kind) = joint_kind else {
+            continue;
+        };
+        let Ok(rig) = rigs.get(part.root) else {
+            continue;
+        };
+        let Some(&joint_entity) = rig.joints.get(&joint_kind) else {
+            continue;
+        };
+        let Ok(marker) = joints.get(joint_entity) else {
+            continue;
+        };
+        if marker.root != part.root {
+            continue;
+        }
+
+        transform.translation -= marker.rest_translation;
+        part.base_translation = transform.translation;
+        commands.entity(joint_entity).add_child(entity);
     }
 }
 
@@ -118,9 +154,17 @@ struct PoseSample {
     pose: CartoonPose,
     phase: f32,
     speed: f32,
+    scale: f32,
     stride: f32,
     agility: f32,
     vertical_velocity: f32,
+    local_velocity: Vec3,
+    grounded: bool,
+    wall_normal_local: Vec3,
+    hanging: bool,
+    dodge_direction_local: Vec3,
+    grapple_attach_local: Option<Vec3>,
+    ik: CharacterIkPose,
     wall_clasp_time: f32,
 }
 
@@ -133,6 +177,8 @@ struct PoseInput {
     hanging: bool,
     wall_sliding: bool,
     jetpack_active: bool,
+    flight_mode: FlightMode,
+    traversal_mode: TraversalMode,
     grapple_mode: Option<GrappleHookMode>,
     grapple_pose: bool,
     sabre_slashing: bool,
@@ -180,7 +226,19 @@ fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
     if input.wall_sliding || input.state == Some(PlayerState::WallSliding) {
         return CartoonPose::WallSlide;
     }
+    if input.traversal_mode == TraversalMode::Hoverboard
+        && input.grounded
+        && input.horizontal_speed > 0.08
+    {
+        return CartoonPose::Hoverboard;
+    }
     if input.jetpack_active {
+        if input.flight_mode == FlightMode::AirDash {
+            return CartoonPose::AirDash;
+        }
+        if input.flight_mode == FlightMode::Glide {
+            return CartoonPose::Glide;
+        }
         if input.vertical_velocity.abs() < 0.06 {
             return CartoonPose::Hover;
         }
@@ -207,6 +265,152 @@ fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
     CartoonPose::Idle
 }
 
+#[derive(Clone, Copy)]
+struct IkPoseInput {
+    pose: CartoonPose,
+    phase: f32,
+    scale: f32,
+    visual_ground_lift: f32,
+    grounded: bool,
+    hanging: bool,
+    wall_normal_local: Vec3,
+    local_velocity: Vec3,
+    dodge_direction_local: Vec3,
+    grapple_attach_local: Option<Vec3>,
+    wall_clasp_time: f32,
+}
+
+fn build_character_ik_pose(input: IkPoseInput) -> CharacterIkPose {
+    let mut pose = CharacterIkPose::default();
+    let scale = input.scale.max(0.1);
+    let lift = input.visual_ground_lift;
+    let ground_speed = input.local_velocity.with_y(0.0).length();
+    let move_amount = (ground_speed * 1.55).clamp(0.0, 1.0);
+
+    if input.grounded
+        && matches!(
+            input.pose,
+            CartoonPose::Idle | CartoonPose::Walk | CartoonPose::Run | CartoonPose::Sprint
+        )
+    {
+        let step = (input.phase * 1.1).sin();
+        let side = 0.165 * scale;
+        let foot_y = -1.07 * scale + lift;
+        let foot_z = -0.025 * scale;
+        let stride_reach = 0.065 * scale * move_amount;
+        let idle_settle = (1.0 - move_amount) * 0.018 * scale;
+        let foot_weight = (0.88 - move_amount * 0.22).clamp(0.56, 0.9);
+
+        pose.left_foot = Some(
+            IkTarget::new(
+                JointKind::LeftAnkle,
+                Vec3::new(
+                    -side,
+                    foot_y + step.max(0.0) * 0.025 * scale - idle_settle,
+                    foot_z + step * stride_reach,
+                ),
+                foot_weight,
+            )
+            .with_pole(Vec3::Z),
+        );
+        pose.right_foot = Some(
+            IkTarget::new(
+                JointKind::RightAnkle,
+                Vec3::new(
+                    side,
+                    foot_y + (-step).max(0.0) * 0.025 * scale - idle_settle,
+                    foot_z - step * stride_reach,
+                ),
+                foot_weight,
+            )
+            .with_pole(Vec3::Z),
+        );
+    }
+
+    if input.hanging || input.pose == CartoonPose::Hang {
+        let grip_y = 0.58 * scale + lift;
+        pose.left_hand = Some(IkTarget::new(
+            JointKind::LeftWrist,
+            Vec3::new(-0.34 * scale, grip_y, -0.42 * scale),
+            0.96,
+        ));
+        pose.right_hand = Some(IkTarget::new(
+            JointKind::RightWrist,
+            Vec3::new(0.34 * scale, grip_y, -0.42 * scale),
+            0.96,
+        ));
+        pose.look_at = Some(Vec3::new(0.0, 0.45 * scale + lift, -1.2 * scale));
+    } else if input.pose == CartoonPose::WallSlide {
+        let wall = normalized_or_zero(input.wall_normal_local);
+        let scrape = (input.wall_clasp_time * 18.0).sin() * 0.025 * scale;
+        let hand_z = (-0.44 + wall.z * 0.08) * scale;
+        pose.left_hand = Some(IkTarget::new(
+            JointKind::LeftWrist,
+            Vec3::new(-0.42 * scale + scrape, 0.16 * scale + lift, hand_z),
+            0.82,
+        ));
+        pose.right_hand = Some(IkTarget::new(
+            JointKind::RightWrist,
+            Vec3::new(0.34 * scale, -0.16 * scale + lift, -0.18 * scale),
+            0.38,
+        ));
+        pose.look_at = Some(Vec3::new(wall.x * 0.45 * scale, 0.1 * scale + lift, -scale));
+    }
+
+    if matches!(
+        input.pose,
+        CartoonPose::Grapple | CartoonPose::Swing | CartoonPose::Zip
+    ) {
+        if let Some(target) = input.grapple_attach_local {
+            let dir = normalized_or_zero(target);
+            let reach_y = (0.14 * scale + lift + dir.y.clamp(-0.2, 0.8) * 0.45 * scale)
+                .clamp(-0.18 * scale + lift, 0.72 * scale + lift);
+            let reach_z = (dir.z * 0.62 * scale).clamp(-0.72 * scale, 0.18 * scale);
+            let reach_x = (dir.x * 0.48 * scale).clamp(-0.55 * scale, 0.55 * scale);
+            let pull_weight = match input.pose {
+                CartoonPose::Swing => 0.9,
+                CartoonPose::Zip => 0.82,
+                _ => 0.72,
+            };
+
+            pose.right_hand = Some(IkTarget::new(
+                JointKind::RightWrist,
+                Vec3::new(reach_x.max(0.12 * scale), reach_y, reach_z),
+                pull_weight,
+            ));
+            pose.left_hand = Some(IkTarget::new(
+                JointKind::LeftWrist,
+                Vec3::new(-0.24 * scale, 0.02 * scale + lift, -0.20 * scale),
+                (pull_weight * 0.48).clamp(0.0, 0.58),
+            ));
+            pose.look_at = Some(target);
+        }
+    }
+
+    if input.pose == CartoonPose::Roll {
+        let dodge = normalized_or_zero(input.dodge_direction_local);
+        pose.look_at = Some(Vec3::new(dodge.x * 0.35 * scale, lift, -scale));
+    }
+
+    pose
+}
+
+fn root_local_vector(transform: &Transform, vector: Vec3) -> Vec3 {
+    transform.rotation.inverse() * vector
+}
+
+fn world_point_to_root_local(transform: &Transform, point: Vec3) -> Vec3 {
+    root_local_vector(transform, point - transform.translation)
+}
+
+fn normalized_or_zero(vector: Vec3) -> Vec3 {
+    if vector.length_squared() > f32::EPSILON {
+        vector.normalize()
+    } else {
+        Vec3::ZERO
+    }
+}
+
 fn cartoon_animation_system(
     time: Res<Time>,
     mut roots: Query<
@@ -219,14 +423,17 @@ fn cartoon_animation_system(
             Option<&EdgeGrabState>,
             Option<&PlayerStateMachine>,
             Option<&JetpackState>,
+            Option<&TraversalModeState>,
             Option<&GrappleHookState>,
             Option<&DodgeState>,
             Option<&ParryState>,
             Option<&BeamSabre>,
             Option<&MeleeCombo>,
+            Option<&mut CharacterIkPose>,
         ),
-        Without<CartoonPart>,
+        (Without<CartoonPart>, Without<JointMarker>),
     >,
+    mut joints: Query<(&JointMarker, &mut Transform), Without<CartoonPart>>,
     mut parts: Query<(&CartoonPart, &mut Transform), Without<CartoonAnimator>>,
 ) {
     let dt = time.delta_secs();
@@ -241,11 +448,13 @@ fn cartoon_animation_system(
         edge_grab,
         state,
         jetpack,
+        traversal,
         grapple,
         dodge,
         parry,
         sabre,
         melee,
+        root_ik_pose,
     ) in roots.iter_mut()
     {
         let delta = transform.translation - animator.last_position;
@@ -274,6 +483,10 @@ fn cartoon_animation_system(
             hanging: edge_grab.map(|e| e.is_hanging).unwrap_or(false),
             wall_sliding: current_state == Some(PlayerState::WallSliding),
             jetpack_active: jetpack.map(|j| j.is_active).unwrap_or(false),
+            flight_mode: jetpack.map(|j| j.mode).unwrap_or(FlightMode::Grounded),
+            traversal_mode: traversal
+                .map(|t| t.active)
+                .unwrap_or(TraversalMode::Grapple),
             grapple_mode: grapple.map(|g| g.mode),
             grapple_pose: grapple.map(|g| g.wants_animation_pose()).unwrap_or(false),
             sabre_slashing,
@@ -284,6 +497,23 @@ fn cartoon_animation_system(
 
         let stride = character.map(|c| c.stride).unwrap_or(1.0).max(0.45);
         let agility = character.map(|c| c.agility).unwrap_or(1.0).max(0.45);
+        let scale = character.map(|c| c.scale).unwrap_or(1.0).max(0.1);
+        let visual_ground_lift = character.map(|c| c.visual_ground_lift).unwrap_or(0.0);
+        let ground_velocity = movement
+            .map(|m| m.ground_velocity)
+            .unwrap_or(delta.with_y(0.0) / dt.max(0.001));
+        let local_velocity = root_local_vector(transform, ground_velocity);
+        let grounded = movement.map(|m| m.is_grounded).unwrap_or(true);
+        let wall_normal_local = edge_grab
+            .map(|e| root_local_vector(transform, e.wall_normal))
+            .unwrap_or(Vec3::ZERO);
+        let dodge_direction_local = dodge
+            .map(|d| root_local_vector(transform, d.dodge_direction))
+            .unwrap_or(Vec3::ZERO);
+        let grapple_attach_local = grapple
+            .and_then(|g| g.attach_point)
+            .map(|point| world_point_to_root_local(transform, point));
+        let wall_clasp_time = edge_grab.map(|e| e.wall_clasp_timer).unwrap_or(0.0);
         let phase_rate: f32 = match animator.pose {
             CartoonPose::Idle => 2.0,
             CartoonPose::Walk => (5.0 + animator.speed * 8.0 / stride).clamp(5.0, 13.0),
@@ -294,6 +524,7 @@ fn cartoon_animation_system(
             CartoonPose::Fly => 8.0,
             CartoonPose::Glide => 5.0,
             CartoonPose::Hover => 6.5,
+            CartoonPose::Hoverboard => 5.8,
             CartoonPose::AirDash => 14.0,
             CartoonPose::WallSlide => 4.8,
             CartoonPose::Mantle => 6.0,
@@ -311,18 +542,56 @@ fn cartoon_animation_system(
         } * (0.88 + agility * 0.12);
         animator.phase += dt * phase_rate;
 
+        let hanging = edge_grab.map(|e| e.is_hanging).unwrap_or(false);
+        let ik = build_character_ik_pose(IkPoseInput {
+            pose: animator.pose,
+            phase: animator.phase,
+            scale,
+            visual_ground_lift,
+            grounded,
+            hanging,
+            wall_normal_local,
+            local_velocity,
+            dodge_direction_local,
+            grapple_attach_local,
+            wall_clasp_time,
+        });
+        if let Some(mut root_ik_pose) = root_ik_pose {
+            *root_ik_pose = ik;
+        }
+
         samples.insert(
             entity,
             PoseSample {
                 pose: animator.pose,
                 phase: animator.phase,
                 speed: animator.speed,
+                scale,
                 stride,
                 agility,
                 vertical_velocity,
-                wall_clasp_time: edge_grab.map(|e| e.wall_clasp_timer).unwrap_or(0.0),
+                local_velocity,
+                grounded,
+                wall_normal_local,
+                hanging,
+                dodge_direction_local,
+                grapple_attach_local,
+                ik,
+                wall_clasp_time,
             },
         );
+    }
+
+    let joint_rests = joints
+        .iter()
+        .map(|(marker, _)| ((marker.root, marker.kind), marker.rest_translation))
+        .collect::<HashMap<_, _>>();
+
+    for (marker, mut transform) in joints.iter_mut() {
+        let Some(sample) = samples.get(&marker.root) else {
+            continue;
+        };
+        apply_joint_pose(marker, &mut transform, *sample, &joint_rests);
     }
 
     for (part, mut transform) in parts.iter_mut() {
@@ -331,6 +600,572 @@ fn cartoon_animation_system(
         };
         apply_part_pose(part, &mut transform, *sample);
     }
+}
+
+fn apply_joint_pose(
+    marker: &JointMarker,
+    transform: &mut Transform,
+    sample: PoseSample,
+    joint_rests: &HashMap<(Entity, JointKind), Vec3>,
+) {
+    transform.translation = marker.local_translation;
+    transform.rotation = Quat::IDENTITY;
+    transform.scale = Vec3::ONE;
+
+    let wave = sample.phase.sin();
+    let step = (sample.phase * 1.1).sin();
+    let walk_amount = (sample.speed * (2.8 / sample.stride)).clamp(0.0, 1.0);
+    let swing = sample.agility.clamp(0.72, 1.28);
+
+    match sample.pose {
+        CartoonPose::Idle => match marker.kind {
+            JointKind::Pelvis => transform.translation.y += wave * 0.018,
+            JointKind::Spine | JointKind::Chest => {
+                transform.rotation *= Quat::from_rotation_x(-0.025 + wave * 0.018);
+            }
+            JointKind::Head | JointKind::Neck => {
+                transform.rotation *= Quat::from_rotation_y(wave * 0.025);
+            }
+            JointKind::LeftShoulder => {
+                transform.rotation *= Quat::from_rotation_z(-0.08 + wave * 0.035);
+            }
+            JointKind::RightShoulder => {
+                transform.rotation *= Quat::from_rotation_z(0.08 - wave * 0.035);
+            }
+            _ => {}
+        },
+        CartoonPose::Walk | CartoonPose::Run | CartoonPose::Sprint => {
+            let run_scale = match sample.pose {
+                CartoonPose::Walk => 0.72 * walk_amount,
+                CartoonPose::Run => 1.0,
+                CartoonPose::Sprint => 1.22,
+                _ => 1.0,
+            } * swing;
+            let lean = match sample.pose {
+                CartoonPose::Walk => -0.04,
+                CartoonPose::Run => -0.12,
+                CartoonPose::Sprint => -0.22,
+                _ => 0.0,
+            };
+            match marker.kind {
+                JointKind::Pelvis => {
+                    transform.translation.y += wave.abs() * 0.055 * run_scale.max(0.4);
+                    transform.rotation *= Quat::from_rotation_z(step * 0.045 * run_scale);
+                }
+                JointKind::Spine | JointKind::Chest => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(lean) * Quat::from_rotation_z(step * 0.035);
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(lean * 0.45) * Quat::from_rotation_y(step * 0.08);
+                }
+                JointKind::LeftShoulder => {
+                    transform.rotation *= Quat::from_rotation_x(step * 1.10 * run_scale);
+                }
+                JointKind::RightShoulder => {
+                    transform.rotation *= Quat::from_rotation_x(-step * 1.10 * run_scale);
+                }
+                JointKind::LeftElbow => {
+                    transform.rotation *= Quat::from_rotation_x(-0.18 - step.abs() * 0.30);
+                }
+                JointKind::RightElbow => {
+                    transform.rotation *= Quat::from_rotation_x(-0.18 - step.abs() * 0.30);
+                }
+                JointKind::LeftHip => {
+                    transform.rotation *= Quat::from_rotation_x(-step * 0.86 * run_scale);
+                }
+                JointKind::RightHip => {
+                    transform.rotation *= Quat::from_rotation_x(step * 0.86 * run_scale);
+                }
+                JointKind::LeftKnee => {
+                    transform.rotation *= Quat::from_rotation_x(step.max(0.0) * 0.36 * run_scale);
+                }
+                JointKind::RightKnee => {
+                    transform.rotation *=
+                        Quat::from_rotation_x((-step).max(0.0) * 0.36 * run_scale);
+                }
+                _ => {}
+            }
+        }
+        CartoonPose::Jump => match marker.kind {
+            JointKind::Pelvis => transform.translation.y += 0.08,
+            JointKind::Spine | JointKind::Chest => {
+                transform.rotation *= Quat::from_rotation_x(-0.16);
+            }
+            JointKind::LeftShoulder => transform.rotation *= Quat::from_rotation_x(-1.00),
+            JointKind::RightShoulder => transform.rotation *= Quat::from_rotation_x(-0.82),
+            JointKind::LeftHip => transform.rotation *= Quat::from_rotation_x(0.38),
+            JointKind::RightHip => transform.rotation *= Quat::from_rotation_x(-0.30),
+            JointKind::LeftKnee | JointKind::RightKnee => {
+                transform.rotation *= Quat::from_rotation_x(0.28);
+            }
+            _ => {}
+        },
+        CartoonPose::Fall
+        | CartoonPose::Fly
+        | CartoonPose::Glide
+        | CartoonPose::Hover
+        | CartoonPose::AirDash => {
+            let fall_pull = (-sample.vertical_velocity).clamp(0.0, 2.2);
+            let pitch = match sample.pose {
+                CartoonPose::Fly => -0.36,
+                CartoonPose::Glide => -0.22,
+                CartoonPose::Hover => -0.06,
+                CartoonPose::AirDash => -0.48,
+                _ => 0.08 + fall_pull * 0.04,
+            };
+            match marker.kind {
+                JointKind::Spine | JointKind::Chest => {
+                    transform.rotation *= Quat::from_rotation_x(pitch);
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *= Quat::from_rotation_x(pitch * 0.55);
+                }
+                JointKind::LeftShoulder => {
+                    transform.rotation *= Quat::from_rotation_z(-0.82 + wave * 0.06);
+                }
+                JointKind::RightShoulder => {
+                    transform.rotation *= Quat::from_rotation_z(0.82 - wave * 0.06);
+                }
+                JointKind::LeftHip => transform.rotation *= Quat::from_rotation_x(0.26),
+                JointKind::RightHip => transform.rotation *= Quat::from_rotation_x(0.18),
+                _ => {}
+            }
+        }
+        CartoonPose::Hoverboard => {
+            let carve = (sample.phase * 0.8).sin();
+            match marker.kind {
+                JointKind::Pelvis => {
+                    transform.translation.y -= 0.08;
+                    transform.translation.x += carve * 0.018 * sample.scale;
+                    transform.rotation *= Quat::from_rotation_z(carve * 0.12);
+                }
+                JointKind::Spine | JointKind::Chest => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.18) * Quat::from_rotation_z(-carve * 0.10);
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.08) * Quat::from_rotation_y(carve * 0.10);
+                }
+                JointKind::LeftShoulder => {
+                    transform.rotation *=
+                        Quat::from_rotation_z(-0.72) * Quat::from_rotation_x(-0.12);
+                }
+                JointKind::RightShoulder => {
+                    transform.rotation *=
+                        Quat::from_rotation_z(0.72) * Quat::from_rotation_x(-0.12);
+                }
+                JointKind::LeftHip => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(0.34) * Quat::from_rotation_z(-0.12);
+                }
+                JointKind::RightHip => {
+                    transform.rotation *= Quat::from_rotation_x(0.30) * Quat::from_rotation_z(0.12);
+                }
+                JointKind::LeftKnee | JointKind::RightKnee => {
+                    transform.rotation *= Quat::from_rotation_x(0.42);
+                }
+                _ => {}
+            }
+        }
+        CartoonPose::WallSlide => {
+            let scrape = (sample.wall_clasp_time * 18.0).sin() * 0.035;
+            match marker.kind {
+                JointKind::Pelvis => transform.translation.x += scrape,
+                JointKind::Spine | JointKind::Chest => {
+                    transform.rotation *=
+                        Quat::from_rotation_z(-0.16) * Quat::from_rotation_x(0.10);
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *= Quat::from_rotation_z(-0.10);
+                }
+                JointKind::LeftShoulder => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-1.38) * Quat::from_rotation_z(-0.36);
+                }
+                JointKind::RightShoulder => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.28) * Quat::from_rotation_z(0.58);
+                }
+                JointKind::LeftHip => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(0.34) * Quat::from_rotation_z(-0.16);
+                }
+                JointKind::RightHip => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.42) * Quat::from_rotation_z(0.22);
+                }
+                _ => {}
+            }
+        }
+        CartoonPose::Grapple | CartoonPose::Swing | CartoonPose::Zip | CartoonPose::Hang => {
+            let is_zip = sample.pose == CartoonPose::Zip;
+            let overhead = if sample.pose == CartoonPose::Hang || sample.pose == CartoonPose::Swing
+            {
+                -1.55
+            } else if is_zip {
+                -1.34
+            } else {
+                -1.15
+            };
+            match marker.kind {
+                JointKind::Spine | JointKind::Chest => {
+                    let pitch = if is_zip { -0.32 } else { -0.12 };
+                    transform.rotation *=
+                        Quat::from_rotation_x(pitch) * Quat::from_rotation_y(0.16);
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.08) * Quat::from_rotation_y(0.20);
+                }
+                JointKind::LeftShoulder => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(overhead * 0.86) * Quat::from_rotation_z(-0.24);
+                }
+                JointKind::RightShoulder => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(overhead) * Quat::from_rotation_z(0.22);
+                }
+                JointKind::LeftElbow | JointKind::RightElbow => {
+                    transform.rotation *= Quat::from_rotation_x(-0.22);
+                }
+                JointKind::LeftHip => {
+                    transform.rotation *= Quat::from_rotation_x(if is_zip { 0.34 } else { 0.16 });
+                }
+                JointKind::RightHip => {
+                    transform.rotation *= Quat::from_rotation_x(if is_zip { 0.22 } else { -0.18 });
+                }
+                _ => {}
+            }
+        }
+        CartoonPose::Roll | CartoonPose::Parry => {
+            let is_parry = sample.pose == CartoonPose::Parry;
+            match marker.kind {
+                JointKind::Pelvis => transform.translation.y -= if is_parry { 0.02 } else { 0.12 },
+                JointKind::Spine | JointKind::Chest => {
+                    transform.rotation *= if is_parry {
+                        Quat::from_rotation_y(-0.18) * Quat::from_rotation_x(-0.05)
+                    } else {
+                        Quat::from_rotation_x(0.62) * Quat::from_rotation_z(wave * 0.18)
+                    };
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *= if is_parry {
+                        Quat::from_rotation_y(-0.16)
+                    } else {
+                        Quat::from_rotation_x(0.38)
+                    };
+                }
+                JointKind::LeftShoulder => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-1.0) * Quat::from_rotation_z(-0.55);
+                }
+                JointKind::RightShoulder => {
+                    transform.rotation *= Quat::from_rotation_x(-1.1) * Quat::from_rotation_z(0.52);
+                }
+                JointKind::LeftHip | JointKind::RightHip => {
+                    transform.rotation *= Quat::from_rotation_x(if is_parry { 0.16 } else { 0.55 });
+                }
+                _ => {}
+            }
+        }
+        CartoonPose::Attack | CartoonPose::SabreSlash => {
+            let sweep = (sample.phase * 1.25).sin();
+            let snap = sweep.signum() * sweep.abs().sqrt();
+            let is_sabre = sample.pose == CartoonPose::SabreSlash;
+            match marker.kind {
+                JointKind::Spine | JointKind::Chest => {
+                    transform.rotation *= if is_sabre {
+                        Quat::from_rotation_y(0.42 * snap) * Quat::from_rotation_z(-0.08 * snap)
+                    } else {
+                        Quat::from_rotation_y(0.18 + sweep * 0.08) * Quat::from_rotation_x(-0.06)
+                    };
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *= Quat::from_rotation_y(if is_sabre {
+                        0.30 * snap
+                    } else {
+                        0.12 + sweep * 0.05
+                    });
+                }
+                JointKind::LeftShoulder => {
+                    transform.rotation *= if is_sabre {
+                        Quat::from_rotation_x(-0.78)
+                            * Quat::from_rotation_y(-0.28)
+                            * Quat::from_rotation_z(-0.72 * snap)
+                    } else {
+                        Quat::from_rotation_x(-0.55) * Quat::from_rotation_z(-0.35)
+                    };
+                }
+                JointKind::RightShoulder => {
+                    transform.rotation *= if is_sabre {
+                        Quat::from_rotation_x(-1.55)
+                            * Quat::from_rotation_y(0.34)
+                            * Quat::from_rotation_z(1.05 * snap)
+                    } else {
+                        Quat::from_rotation_x(-1.12 + sweep * 0.12) * Quat::from_rotation_z(0.42)
+                    };
+                }
+                JointKind::LeftHip => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(if is_sabre { -0.22 } else { -0.10 });
+                }
+                JointKind::RightHip => {
+                    transform.rotation *= Quat::from_rotation_x(if is_sabre { 0.24 } else { 0.16 });
+                }
+                _ => {}
+            }
+        }
+        CartoonPose::Stun | CartoonPose::Death | CartoonPose::HardLand | CartoonPose::Mantle => {
+            match marker.kind {
+                JointKind::Pelvis => transform.translation.y -= 0.08,
+                JointKind::Spine | JointKind::Chest => {
+                    transform.rotation *= Quat::from_rotation_x(0.28);
+                }
+                JointKind::Head | JointKind::Neck => {
+                    transform.rotation *= Quat::from_rotation_x(0.18);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    apply_motion_response(marker, transform, sample);
+    apply_contact_ik(marker, transform, sample, joint_rests);
+}
+
+fn apply_motion_response(marker: &JointMarker, transform: &mut Transform, sample: PoseSample) {
+    let scale = sample.scale.max(0.1);
+    let horizontal_velocity = sample.local_velocity.with_y(0.0);
+    let speed_norm = (horizontal_velocity.length() * 1.45).clamp(0.0, 1.0);
+    let grounded = if sample.grounded { 1.0 } else { 0.55 };
+    let strafe = (sample.local_velocity.x * 1.4).clamp(-1.0, 1.0);
+    let forward = (-sample.local_velocity.z * 1.2).clamp(-1.0, 1.0);
+    let dodge = normalized_or_zero(sample.dodge_direction_local);
+    let wall = normalized_or_zero(sample.wall_normal_local);
+    let hook = sample
+        .grapple_attach_local
+        .map(normalized_or_zero)
+        .unwrap_or(Vec3::ZERO);
+
+    match marker.kind {
+        JointKind::Pelvis => {
+            transform.translation.x += strafe * 0.018 * scale * grounded;
+            transform.translation.y -= speed_norm * 0.012 * scale * grounded;
+            transform.rotation *= Quat::from_rotation_z(-strafe * 0.07 * speed_norm);
+            if sample.pose == CartoonPose::Roll {
+                transform.translation.x += dodge.x * 0.055 * scale;
+                transform.rotation *= Quat::from_rotation_z(-dodge.x * 0.22);
+            }
+        }
+        JointKind::Spine => {
+            transform.rotation *= Quat::from_rotation_x(-forward * 0.055 * speed_norm * grounded)
+                * Quat::from_rotation_y(strafe * 0.05 * speed_norm + hook.x * 0.04)
+                * Quat::from_rotation_z(-strafe * 0.035 * speed_norm);
+            if sample.pose == CartoonPose::WallSlide {
+                transform.rotation *= Quat::from_rotation_z(-wall.x * 0.08);
+            }
+        }
+        JointKind::Chest => {
+            transform.rotation *= Quat::from_rotation_x(-forward * 0.075 * speed_norm * grounded)
+                * Quat::from_rotation_y(strafe * 0.075 * speed_norm + hook.x * 0.09)
+                * Quat::from_rotation_z(-strafe * 0.05 * speed_norm + dodge.x * 0.06);
+            if sample.hanging {
+                transform.rotation *= Quat::from_rotation_x(0.08);
+            }
+            if sample.pose == CartoonPose::WallSlide {
+                transform.translation.z += wall.z * 0.018 * scale;
+                transform.rotation *= Quat::from_rotation_z(-wall.x * 0.12);
+            }
+        }
+        JointKind::Neck | JointKind::Head => {
+            if let Some(look) = sample.ik.look_at {
+                let dir = normalized_or_zero(look);
+                if dir != Vec3::ZERO {
+                    let yaw = dir.x.atan2(-dir.z).clamp(-0.55, 0.55);
+                    let pitch = dir
+                        .y
+                        .atan2(Vec2::new(dir.x, dir.z).length().max(0.001))
+                        .clamp(-0.34, 0.34);
+                    let head_weight = if marker.kind == JointKind::Head {
+                        0.62
+                    } else {
+                        0.36
+                    };
+                    transform.rotation *= Quat::from_rotation_y(yaw * head_weight)
+                        * Quat::from_rotation_x(-pitch * head_weight);
+                }
+            } else {
+                transform.rotation *= Quat::from_rotation_y(strafe * 0.055 * speed_norm)
+                    * Quat::from_rotation_x(-forward * 0.035 * speed_norm);
+            }
+        }
+        JointKind::LeftShoulder => {
+            transform.rotation *= Quat::from_rotation_z(-strafe.max(0.0) * 0.05 * speed_norm);
+        }
+        JointKind::RightShoulder => {
+            transform.rotation *= Quat::from_rotation_z((-strafe).max(0.0) * 0.05 * speed_norm);
+        }
+        _ => {}
+    }
+}
+
+fn apply_contact_ik(
+    marker: &JointMarker,
+    transform: &mut Transform,
+    sample: PoseSample,
+    joint_rests: &HashMap<(Entity, JointKind), Vec3>,
+) {
+    if let Some(solution) = solve_leg_ik(marker.root, true, sample.ik.left_foot, joint_rests) {
+        apply_leg_ik_rotation(marker.kind, transform, true, solution);
+    }
+    if let Some(solution) = solve_leg_ik(marker.root, false, sample.ik.right_foot, joint_rests) {
+        apply_leg_ik_rotation(marker.kind, transform, false, solution);
+    }
+
+    if let Some(target) = ik_target_for_joint(sample.ik, marker.kind) {
+        let translation_weight = match marker.kind {
+            JointKind::LeftAnkle | JointKind::RightAnkle => 0.42,
+            JointKind::LeftWrist | JointKind::RightWrist => 0.78,
+            _ => 0.0,
+        };
+        apply_root_local_target_translation(marker, transform, target, translation_weight);
+    }
+}
+
+fn apply_leg_ik_rotation(
+    joint: JointKind,
+    transform: &mut Transform,
+    left: bool,
+    solution: TwoBoneIkAngles,
+) {
+    let (hip, knee, ankle) = if left {
+        (
+            JointKind::LeftHip,
+            JointKind::LeftKnee,
+            JointKind::LeftAnkle,
+        )
+    } else {
+        (
+            JointKind::RightHip,
+            JointKind::RightKnee,
+            JointKind::RightAnkle,
+        )
+    };
+
+    if joint == hip {
+        transform.rotation *= Quat::from_rotation_x(solution.hip_pitch);
+    } else if joint == knee {
+        transform.rotation *= Quat::from_rotation_x(solution.knee_pitch);
+    } else if joint == ankle {
+        transform.rotation *= Quat::from_rotation_x(solution.ankle_pitch);
+    }
+}
+
+fn apply_root_local_target_translation(
+    marker: &JointMarker,
+    transform: &mut Transform,
+    target: IkTarget,
+    weight_scale: f32,
+) {
+    if target.joint != marker.kind {
+        return;
+    }
+    let weight = (target.weight * weight_scale).clamp(0.0, 1.0);
+    if weight <= 0.0 {
+        return;
+    }
+
+    let parent_rest = marker.rest_translation - marker.local_translation;
+    let local_target = target.target - parent_rest;
+    transform.translation = transform.translation.lerp(local_target, weight);
+}
+
+fn ik_target_for_joint(ik: CharacterIkPose, joint: JointKind) -> Option<IkTarget> {
+    match joint {
+        JointKind::LeftAnkle => ik.left_foot,
+        JointKind::RightAnkle => ik.right_foot,
+        JointKind::LeftWrist => ik.left_hand,
+        JointKind::RightWrist => ik.right_hand,
+        _ => None,
+    }
+    .filter(|target| target.joint == joint)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TwoBoneIkAngles {
+    hip_pitch: f32,
+    knee_pitch: f32,
+    ankle_pitch: f32,
+}
+
+fn solve_leg_ik(
+    root: Entity,
+    left: bool,
+    target: Option<IkTarget>,
+    joint_rests: &HashMap<(Entity, JointKind), Vec3>,
+) -> Option<TwoBoneIkAngles> {
+    let (hip, knee, ankle) = if left {
+        (
+            JointKind::LeftHip,
+            JointKind::LeftKnee,
+            JointKind::LeftAnkle,
+        )
+    } else {
+        (
+            JointKind::RightHip,
+            JointKind::RightKnee,
+            JointKind::RightAnkle,
+        )
+    };
+    let target = target.filter(|target| target.joint == ankle && target.weight > 0.0)?;
+    solve_two_bone_leg_ik(
+        *joint_rests.get(&(root, hip))?,
+        *joint_rests.get(&(root, knee))?,
+        *joint_rests.get(&(root, ankle))?,
+        target,
+    )
+}
+
+fn solve_two_bone_leg_ik(
+    hip: Vec3,
+    knee: Vec3,
+    ankle_rest: Vec3,
+    target: IkTarget,
+) -> Option<TwoBoneIkAngles> {
+    let upper = hip.distance(knee).max(0.001);
+    let lower = knee.distance(ankle_rest).max(0.001);
+    let to_target = target.target - hip;
+    let reach = to_target.length();
+    if reach <= 0.001 {
+        return None;
+    }
+
+    let max_reach = (upper + lower - 0.001).max(0.001);
+    let min_reach = ((upper - lower).abs() + 0.001).min(max_reach);
+    let clamped_reach = reach.clamp(min_reach, max_reach);
+    let hip_cos = ((upper.powi(2) + clamped_reach.powi(2) - lower.powi(2))
+        / (2.0 * upper * clamped_reach))
+        .clamp(-1.0, 1.0);
+    let knee_cos = ((upper.powi(2) + lower.powi(2) - clamped_reach.powi(2))
+        / (2.0 * upper * lower))
+        .clamp(-1.0, 1.0);
+
+    let target_pitch = to_target.z.atan2((-to_target.y).max(0.001));
+    let hip_bend = hip_cos.acos();
+    let knee_bend = PI - knee_cos.acos();
+    let weight = target.weight.clamp(0.0, 1.0);
+    let hip_pitch = (target_pitch - hip_bend * 0.34).clamp(-0.9, 0.9) * weight;
+    let knee_pitch = (knee_bend * 0.78).clamp(0.0, 1.35) * weight;
+    let ankle_pitch = (-hip_pitch - knee_pitch * 0.42).clamp(-0.8, 0.8) * weight;
+
+    Some(TwoBoneIkAngles {
+        hip_pitch,
+        knee_pitch,
+        ankle_pitch,
+    })
 }
 
 fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSample) {
@@ -586,6 +1421,62 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
             if is_cape {
                 transform.rotation *= Quat::from_rotation_x(cape_flap * 1.45);
                 transform.rotation *= Quat::from_rotation_z(step * 0.06 * cape_flap);
+            }
+        }
+
+        // ── Hoverboard ───────────────────────────────────────────────────────
+        CartoonPose::Hoverboard => {
+            let carve = (sample.phase * 0.8).sin();
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.translation.y -= 0.06;
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.16) * Quat::from_rotation_z(carve * 0.10);
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.translation.y -= 0.03;
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.08) * Quat::from_rotation_y(carve * 0.08);
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.rotation *=
+                        Quat::from_rotation_z(-0.72) * Quat::from_rotation_x(-0.10);
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.rotation *=
+                        Quat::from_rotation_z(0.72) * Quat::from_rotation_x(-0.10);
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(0.32) * Quat::from_rotation_z(-0.08);
+                }
+                CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *= Quat::from_rotation_x(0.30) * Quat::from_rotation_z(0.08);
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= Vec3::new(1.24, 1.0, 0.68);
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.translation.y -= 0.03;
+                transform.rotation *= Quat::from_rotation_y(carve * 0.08);
+            }
+            if is_body_acc {
+                transform.translation.y -= 0.06;
+                transform.rotation *=
+                    Quat::from_rotation_x(-0.16) * Quat::from_rotation_z(carve * 0.10);
+            }
+            if is_cape {
+                transform.rotation *= Quat::from_rotation_x(cape_flap * 1.25);
+                transform.rotation *= Quat::from_rotation_z(carve * 0.10 * cape_flap);
             }
         }
 
@@ -1288,5 +2179,50 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rest_leg() -> (Vec3, Vec3, Vec3) {
+        (
+            Vec3::new(-0.33, -0.55, 0.0),
+            Vec3::new(-0.33, -0.86, -0.015),
+            Vec3::new(-0.33, -1.07, -0.025),
+        )
+    }
+
+    #[test]
+    fn two_bone_ik_keeps_rest_leg_relaxed() {
+        let (hip, knee, ankle) = rest_leg();
+        let solution = solve_two_bone_leg_ik(
+            hip,
+            knee,
+            ankle,
+            IkTarget::new(JointKind::LeftAnkle, ankle, 1.0),
+        )
+        .expect("rest leg should solve");
+
+        assert!(solution.hip_pitch.abs() < 0.12);
+        assert!(solution.knee_pitch < 0.14);
+        assert!(solution.ankle_pitch.abs() < 0.16);
+    }
+
+    #[test]
+    fn two_bone_ik_bends_knee_for_closer_target() {
+        let (hip, knee, ankle) = rest_leg();
+        let closer_target = ankle + Vec3::new(0.0, 0.22, 0.04);
+        let solution = solve_two_bone_leg_ik(
+            hip,
+            knee,
+            ankle,
+            IkTarget::new(JointKind::LeftAnkle, closer_target, 1.0),
+        )
+        .expect("closer leg target should solve");
+
+        assert!(solution.knee_pitch > 0.35);
+        assert!(solution.ankle_pitch < 0.0);
     }
 }
