@@ -1068,19 +1068,42 @@ fn spawn_head_open_face(
     let skin_mat = soft_mat(materials, cfg.skin);
     let hair_mat = soft_mat(materials, cfg.hair);
     let eye_mat = emissive_mat(materials, cfg.eye, 5.0);
+    let purple = Color::srgb(0.42, 0.07, 0.62);
+    let cape_mat = soft_mat(materials, purple);
 
+    // Skin head
     spawn_part(commands, meshes, root, CartoonPartKind::Head,
         Mesh::from(Sphere::new(0.34 * s)),
         skin_mat.clone(),
         Transform::from_xyz(0.0, head_y, -0.005 * s)
             .with_scale(Vec3::new(0.92, 1.08, 0.88)),
         PartSlotTag::Head);
+
+    // Hair crown cap — full rounded top, not flat
     spawn_part(commands, meshes, root, CartoonPartKind::Hair,
-        Mesh::from(Sphere::new(0.36 * s)),
+        Mesh::from(Sphere::new(0.37 * s)),
         hair_mat.clone(),
-        Transform::from_xyz(0.0, head_y + 0.12 * s, -0.015 * s)
-            .with_scale(Vec3::new(1.04, 0.42, 0.88)),
+        Transform::from_xyz(0.0, head_y + 0.05 * s, 0.02 * s)
+            .with_scale(Vec3::new(1.00, 0.70, 0.96)),
         PartSlotTag::Head);
+    // Hair back volume — gives length behind the head
+    spawn_part(commands, meshes, root, CartoonPartKind::Hair,
+        Mesh::from(Sphere::new(0.33 * s)),
+        hair_mat.clone(),
+        Transform::from_xyz(0.0, head_y - 0.06 * s, 0.22 * s)
+            .with_scale(Vec3::new(0.90, 0.94, 0.68)),
+        PartSlotTag::Head);
+    // Hair side-temples — fills in above the ears
+    for sign in [-1.0_f32, 1.0_f32] {
+        spawn_part(commands, meshes, root, CartoonPartKind::Hair,
+            Mesh::from(Sphere::new(0.28 * s)),
+            hair_mat.clone(),
+            Transform::from_xyz(sign * 0.22 * s, head_y + 0.02 * s, 0.05 * s)
+                .with_scale(Vec3::new(0.52, 0.72, 0.80)),
+            PartSlotTag::Head);
+    }
+
+    // Eyes
     for (kind, eye_x) in [
         (CartoonPartKind::LeftEye, -0.13_f32),
         (CartoonPartKind::RightEye, 0.13_f32),
@@ -1092,6 +1115,40 @@ fn spawn_head_open_face(
                 .with_scale(Vec3::new(0.82, 1.18, 0.30)),
             PartSlotTag::Head);
     }
+
+    // Hood — drapes over crown and back, face left open
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Sphere::new(0.42 * s)),
+        cape_mat.clone(),
+        Transform::from_xyz(0.0, head_y + 0.04 * s, 0.10 * s)
+            .with_scale(Vec3::new(1.12, 1.02, 0.80)),
+        PartSlotTag::HeadGear);
+    // Hood neck drape — hangs down the back of the neck
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Capsule3d::new(0.22 * s, 0.18 * s)),
+        cape_mat.clone(),
+        Transform::from_xyz(0.0, head_y - 0.26 * s, 0.20 * s)
+            .with_scale(Vec3::new(1.0, 1.0, 0.55)),
+        PartSlotTag::HeadGear);
+
+    // Cape upper yoke — broad across the shoulders
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cuboid::new(0.82 * s, 0.24 * s, 0.07 * s)),
+        cape_mat.clone(),
+        Transform::from_xyz(0.0, y_lift + 0.22 * s, 0.20 * s),
+        PartSlotTag::HeadGear);
+    // Cape body panel
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cuboid::new(0.72 * s, 0.62 * s, 0.06 * s)),
+        cape_mat.clone(),
+        Transform::from_xyz(0.0, y_lift - 0.18 * s, 0.22 * s),
+        PartSlotTag::HeadGear);
+    // Cape lower taper
+    spawn_part(commands, meshes, root, CartoonPartKind::Hood,
+        Mesh::from(Cuboid::new(0.54 * s, 0.36 * s, 0.055 * s)),
+        cape_mat.clone(),
+        Transform::from_xyz(0.0, y_lift - 0.66 * s, 0.22 * s),
+        PartSlotTag::HeadGear);
 }
 
 fn spawn_head_combat(
