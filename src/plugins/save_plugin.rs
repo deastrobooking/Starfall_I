@@ -6,14 +6,19 @@ use std::path::PathBuf;
 
 use crate::character_blueprint::CharacterBlueprint;
 use crate::character_parts::CharacterPartStyle;
+use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::components::weapon::WeaponRanks;
 use crate::damage::Health;
 use crate::events::UiMessageEvent;
+use crate::final_war::{FinalWarRegistry, FinalWarSaveRecord};
+use crate::hacking::HackingRegistry;
 use crate::perks::PerkTree;
+use crate::raids::{RaidRecord, RaidRegistry};
 use crate::resources::{
-    initial_world_sites, ChapterProgress, PlaySessionTransition, PlayerPartLoadout,
-    PlayerSelectState, WaveInfo, WorldSiteRegistry, WorldSiteSaveRecord,
+    initial_world_routes, initial_world_sites, ChapterProgress, PlaySessionTransition,
+    PlayerPartLoadout, PlayerSelectState, WaveInfo, WorldRouteRegistry, WorldRouteSaveRecord,
+    WorldSiteRegistry, WorldSiteSaveRecord,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::SettlementEconomy;
@@ -39,6 +44,21 @@ pub struct SaveParams<'w, 's> {
     pub part_loadout: Res<'w, PlayerPartLoadout>,
     pub weapon_ranks: Res<'w, WeaponRanks>,
     pub world_site_registry: Res<'w, WorldSiteRegistry>,
+    pub world_route_registry: Res<'w, WorldRouteRegistry>,
+    pub raid_registry: Res<'w, RaidRegistry>,
+    pub command_registry: Res<'w, CommandRegistry>,
+    pub hacking_registry: Res<'w, HackingRegistry>,
+    pub final_war_registry: Res<'w, FinalWarRegistry>,
+}
+
+/// Bundles the mutable registry resources that were added in later milestones so
+/// that `load_save_on_enter` stays within Bevy's 16-parameter system limit.
+#[derive(SystemParam)]
+struct LoadRegistriesParam<'w> {
+    raid_registry: ResMut<'w, RaidRegistry>,
+    command_registry: ResMut<'w, CommandRegistry>,
+    hacking_registry: ResMut<'w, HackingRegistry>,
+    final_war_registry: ResMut<'w, FinalWarRegistry>,
 }
 
 // ── Save Data ─────────────────────────────────────────────────────────────────
@@ -89,6 +109,16 @@ pub struct SaveData {
     pub weapon_ranks: [u32; 6],
     #[serde(default)]
     pub world_sites: Vec<WorldSiteSaveRecord>,
+    #[serde(default)]
+    pub world_routes: Vec<WorldRouteSaveRecord>,
+    #[serde(default)]
+    pub raids: Vec<RaidRecord>,
+    #[serde(default)]
+    pub command_assets: Vec<CommandAssetSaveRecord>,
+    #[serde(default)]
+    pub hacking: HackingRegistry,
+    #[serde(default)]
+    pub final_war: FinalWarSaveRecord,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -178,6 +208,11 @@ impl Default for SaveData {
             part_loadout_shoulders: CharacterPartStyle::HumanoidClothing,
             weapon_ranks: [0u32; 6],
             world_sites: Vec::new(),
+            world_routes: Vec::new(),
+            raids: Vec::new(),
+            command_assets: Vec::new(),
+            hacking: HackingRegistry::default(),
+            final_war: FinalWarSaveRecord::default(),
         }
     }
 }
@@ -235,6 +270,11 @@ pub fn save_game(
     part_loadout: &PlayerPartLoadout,
     weapon_ranks: &WeaponRanks,
     world_site_registry: &WorldSiteRegistry,
+    world_route_registry: &WorldRouteRegistry,
+    raid_registry: &RaidRegistry,
+    command_registry: &CommandRegistry,
+    hacking_registry: &HackingRegistry,
+    final_war_registry: &FinalWarRegistry,
 ) -> Result<(), String> {
     let data = build_save_data(
         players,
@@ -248,6 +288,11 @@ pub fn save_game(
         part_loadout,
         weapon_ranks,
         world_site_registry,
+        world_route_registry,
+        raid_registry,
+        command_registry,
+        hacking_registry,
+        final_war_registry,
     );
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     fs::write(save_path(), json).map_err(|e| e.to_string())
@@ -265,6 +310,11 @@ fn build_save_data(
     part_loadout: &PlayerPartLoadout,
     weapon_ranks: &WeaponRanks,
     world_site_registry: &WorldSiteRegistry,
+    world_route_registry: &WorldRouteRegistry,
+    raid_registry: &RaidRegistry,
+    command_registry: &CommandRegistry,
+    hacking_registry: &HackingRegistry,
+    final_war_registry: &FinalWarRegistry,
 ) -> SaveData {
     players.sort_by_key(|player| player.player_index);
     SaveData {
@@ -291,6 +341,11 @@ fn build_save_data(
         part_loadout_shoulders: part_loadout.shoulders,
         weapon_ranks: weapon_ranks.ranks,
         world_sites: world_site_registry.to_save_records(),
+        world_routes: world_route_registry.to_save_records(),
+        raids: raid_registry.to_save_records(),
+        command_assets: command_registry.to_save_records(),
+        hacking: hacking_registry.clone(),
+        final_war: final_war_registry.to_save_record(),
         ..SaveData::default()
     }
 }
@@ -352,6 +407,11 @@ pub fn save_current_session(sp: &SaveParams) -> Result<(), String> {
         &sp.part_loadout,
         &sp.weapon_ranks,
         &sp.world_site_registry,
+        &sp.world_route_registry,
+        &sp.raid_registry,
+        &sp.command_registry,
+        &sp.hacking_registry,
+        &sp.final_war_registry,
     )
 }
 
@@ -366,6 +426,8 @@ fn hydrate_progress_from_disk(
     mut part_loadout: ResMut<PlayerPartLoadout>,
     mut weapon_ranks: ResMut<WeaponRanks>,
     mut world_site_registry: ResMut<WorldSiteRegistry>,
+    mut world_route_registry: ResMut<WorldRouteRegistry>,
+    mut regs: LoadRegistriesParam,
 ) {
     if let Some(data) = load_save() {
         *robot_pets = data.robot_pets.clone();
@@ -388,6 +450,17 @@ fn hydrate_progress_from_disk(
             world_site_registry.sites = initial_world_sites();
         }
         world_site_registry.apply_save_records(&data.world_sites);
+        if world_route_registry.routes.is_empty() {
+            world_route_registry.routes = initial_world_routes();
+        }
+        world_route_registry.apply_save_records(&data.world_routes);
+        regs.raid_registry.apply_save_records(data.raids);
+        if regs.command_registry.assets.is_empty() {
+            regs.command_registry.assets = initial_command_assets();
+        }
+        regs.command_registry.apply_save_records(&data.command_assets);
+        *regs.hacking_registry = data.hacking.clone();
+        regs.final_war_registry.apply_save_record(data.final_war.clone());
     }
 }
 
@@ -403,6 +476,8 @@ fn load_save_on_enter(
     mut part_loadout: ResMut<PlayerPartLoadout>,
     mut weapon_ranks: ResMut<WeaponRanks>,
     mut world_site_registry: ResMut<WorldSiteRegistry>,
+    mut world_route_registry: ResMut<WorldRouteRegistry>,
+    mut regs: LoadRegistriesParam,
     transition: Res<PlaySessionTransition>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
@@ -439,6 +514,17 @@ fn load_save_on_enter(
             world_site_registry.sites = initial_world_sites();
         }
         world_site_registry.apply_save_records(&data.world_sites);
+        if world_route_registry.routes.is_empty() {
+            world_route_registry.routes = initial_world_routes();
+        }
+        world_route_registry.apply_save_records(&data.world_routes);
+        regs.raid_registry.apply_save_records(data.raids);
+        if regs.command_registry.assets.is_empty() {
+            regs.command_registry.assets = initial_command_assets();
+        }
+        regs.command_registry.apply_save_records(&data.command_assets);
+        *regs.hacking_registry = data.hacking.clone();
+        regs.final_war_registry.apply_save_record(data.final_war.clone());
         let loaded_players = data.players.len().max(active_players);
         msg_ev.write(UiMessageEvent {
             text: format!(
@@ -505,6 +591,7 @@ fn manual_save_system(
 mod tests {
     use super::*;
     use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe};
+    use crate::raids::{RaidId, RaidPhase};
     use crate::robot_pets::{RobotPartKind, RobotPetBlueprint, RobotPetRole};
     use crate::settlement_economy::{SettlementBuildKind, SettlementEconomy, SettlementResources};
     use crate::upgrades::{TechUpgradeId, UpgradeLedger};
@@ -613,6 +700,11 @@ mod tests {
             &part_loadout,
             &WeaponRanks::default(),
             &WorldSiteRegistry::default(),
+            &WorldRouteRegistry::default(),
+            &RaidRegistry::default(),
+            &CommandRegistry::default(),
+            &HackingRegistry::default(),
+            &FinalWarRegistry::default(),
         );
 
         assert_eq!(data.wave_number, 7);
@@ -643,6 +735,7 @@ mod tests {
         );
         assert_eq!(data.tech_upgrades.rank(TechUpgradeId::BeamCapacitors), 2);
         assert_eq!(data.tech_upgrades.rejuvenation_charge, 75.0);
+        assert!(data.raids.is_empty());
         assert_eq!(data.part_loadout_body, CharacterPartStyle::RobotMechanical);
         assert_eq!(data.part_loadout_arms, CharacterPartStyle::HumanoidClothing);
         assert_eq!(data.part_loadout_legs, CharacterPartStyle::RobotMechanical);
@@ -704,6 +797,16 @@ mod tests {
             part_loadout_arms: CharacterPartStyle::RobotMechanical,
             part_loadout_legs: CharacterPartStyle::HumanoidClothing,
             part_loadout_shoulders: CharacterPartStyle::RobotMechanical,
+            raids: vec![RaidRecord::cloudrail_tutorial(RaidId(7))],
+            hacking: {
+                let mut hacking = HackingRegistry::default();
+                hacking.learn_blueprint(
+                    "blueprint_scallarian_drone_core",
+                    crate::hacking::HackTargetClass::SmallDrone,
+                    PlayerIndex(0),
+                );
+                hacking
+            },
             ..SaveData::default()
         };
 
@@ -750,6 +853,12 @@ mod tests {
             loaded.part_loadout_shoulders,
             CharacterPartStyle::RobotMechanical
         );
+        assert_eq!(loaded.raids.len(), 1);
+        assert_eq!(loaded.raids[0].id, RaidId(7));
+        assert_eq!(loaded.raids[0].phase, RaidPhase::Warning);
+        assert!(loaded
+            .hacking
+            .has_blueprint("blueprint_scallarian_drone_core"));
     }
 
     #[test]

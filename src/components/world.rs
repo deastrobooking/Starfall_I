@@ -269,3 +269,9 @@ pub struct WorldSiteEnemySentinel {
     pub enemy_count: u8,
     pub liberated_spawned: bool,
 }
+
+/// Tags the beacon entity spawned at a world route midpoint.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct WorldRouteMarker {
+    pub id: crate::resources::WorldRouteId,
+}

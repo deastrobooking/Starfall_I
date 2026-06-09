@@ -55,6 +55,16 @@ Handle these before widening content too much:
   discussion NPCs with MP3 voice hooks plus first peaceful-city spy-drone
   reward activities, but still need quest boards, shops, local enemy routes,
   route clues, and recorded voice assets.
+- Engine M8 now has a first recoverable raid slice: Cloudrail City can warn,
+  spawn a Scallarian drone swarm/UFO marker, resolve through combat or static
+  defenses, and persist raid state. Next raid work should expand targets,
+  consequences, route blockades, and assigned defenses after Engine M7 route
+  behavior settles.
+- Engine M10 now has a first tech-hacking slice: small Scallarian drones can be
+  hacked into temporary friendly linked units, save the first drone blueprint,
+  add a Scout Drone command asset, and neutralize raid threats. Next hacking
+  work should add tech-hero gating, true possession camera/control rules,
+  stagger requirements for larger targets, and deterministic blueprint tables.
 - Controller support is coded, but still needs repeated hardware smoke passes
   and an in-game diagnostics overlay.
 - Performance budgets are informal. The 200-mile terrain and split-screen
@@ -253,6 +263,76 @@ Primary files:
 - `src/plugins/world_plugin.rs`
 - `src/main.rs`
 
+### N8: Graphics, VFX, And Skeletal Animation Foundation
+
+Goal: Move beyond primitive capsule visuals to a full AAA cartoon aesthetic.
+
+- Integrate skeletal animation support via `bevy_animation` or external glTF skeletal assets to replace static `CartoonPose` transitions.
+- Enhance render pipeline with dedicated cel-shaded materials, rim lighting, and distinct visual treatments for energy beams and particle VFX.
+- Bring in structural post-processing (Bloom, HDR, color grading) dynamically mapping to the current active biome/chapter room.
+- Expand Inverse Kinematics (IK) for precise foot placement on sloped terrain and dynamic hand-IK during wall sliding, ledge hanging, and grappling.
+
+Verification:
+
+- Character models smoothly blend between animations (e.g. walk-to-run, jump-to-fall, parry).
+- Projectiles and collision sparks emit particle/VFX efficiently.
+
+Primary files:
+
+- `src/plugins/character_plugin.rs`
+- `src/rendering.rs`
+
+### N9: Art Tools And Data-Driven Pipeline
+
+Goal: Unblock content creators by removing hardcoded visual recipes from Rust.
+
+- Implement hot-reloading for character presets, level configs, and robot pet geometries using RON/JSON asset loaders.
+- Integrate immediate-mode dev UI (e.g. `bevy_inspector_egui` or custom) to provide a dev-only in-engine tweaker for character sliders, terrain color palettes, and lighting variables.
+- Establish a prop-placement and level-design workflow that either serializes developer camera actions into world state or integrates directly via Blender glTF scenes.
+
+Verification:
+
+- Changing a JSON/RON configuration file automatically updates the respective entities in the live game without recompiling.
+- Egui-based dev panel successfully mutates game state/variables at runtime.
+
+Primary files:
+
+- `src/plugins/world_plugin.rs`
+- `src/character_blueprint.rs`
+
+### N10: Deep Performance And Asset Streaming
+
+Goal: Ensure the 200-mile Everest range runs flawlessly at true 60fps, even in 4-player split-screen with dense combat encounters.
+
+- Establish level-of-detail (LOD) generation and distance culling for cities, rendering, and terrain meshes.
+- Stream biomes and distant geometry asynchronously so the 200-mile world does not indefinitely bog down the Rapier physics solver.
+- Refactor heavy queries and giant systems (e.g. `world_plugin.rs`) hitting `clippy::too_many_arguments` to use focused Bevy `SystemParam` structs.
+- Implement object pooling for projectiles, enemies, and common SFX.
+
+Verification:
+
+- Profiling tooling (like `bevy_tracy` or frame-time diagnostics) displays 60+ FPS on medium-spec machines during 4-player split-screen boss fights.
+- Walking between distant biomes results in no massive stutter frames while meshes generate or Rapier loads geometry.
+
+Primary files:
+
+- `src/plugins/world_plugin.rs`
+- `src/main.rs`
+- `src/plugins/enemy_plugin.rs`
+
+## Milestone Naming Conventions
+
+Use these prefixes consistently in commits, comments, and planning docs to
+avoid ambiguity across the three living roadmaps:
+
+| Prefix | Roadmap | File |
+|--------|---------|------|
+| `M#` | Engine / campaign strategy | `docs/engine_upgrade_milestones.md` |
+| `MM#` | Motion mechanics / traversal | `docs/motion_mechanics_roadmap.md` |
+| `AI#` | Enemy AI behavior | `docs/ai_enemy_mechanics_roadmap.md` (future) |
+
+Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol".
+
 ## Work Rules For Future Agents
 
 - Do not shrink the world back to old `1200`-unit assumptions. Use shared
@@ -262,6 +342,7 @@ Primary files:
 - Do not hide save migrations. Use `serde(default)` and tests.
 - Do not add a new engine version casually. Follow
   `docs/engine_upgrade_milestones.md`.
+- Use `M#` / `MM#` / `AI#` prefixes when referencing milestones; do not mix them.
 - Keep star-beam, high-fantasy sci-fi, kid-friendly tone. Avoid realistic
   firearm language and grim presentation.
 - Update docs when changing controls, save scope, world scale, map flow, boss
@@ -277,4 +358,5 @@ For the next coding pass, keep the scope tight:
    enemy placement, and a boss-room staging beat (N4 starter).
 3. Add a controller diagnostics overlay (stick values, player assignment,
    last action) for hardware smoke passes (N5 prerequisite).
-4. Add tests only around pure data and ownership behavior touched by the pass.
+4. Prototype a data-driven hot-reloading asset format for `CharacterBlueprint` or `RobotPetBlueprint` (N9 starter).
+5. Add tests only around pure data and ownership behavior touched by the pass.

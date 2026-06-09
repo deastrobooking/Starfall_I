@@ -27,12 +27,19 @@ use crate::discussion::{
 };
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
+use crate::commands::CommandRegistry;
+use crate::final_war::{coordinated_raid_trigger_system, pressure_accumulation_system};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
+use crate::raids::{
+    static_defense_score_for_site, RaidId, RaidKind, RaidRegistry, RaidStartResult,
+    RaidThreatMarker, RaidTickEvent, RaidUfoMarker, CLOUDRAIL_TUTORIAL_RAID_SITE,
+};
 use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
 use crate::resources::{
-    initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState, DungeonRoomState,
-    GameSettings, PlaySessionTransition, WorldSiteRegistry,
+    initial_world_routes, initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState,
+    DungeonRoomState, GameSettings, PlaySessionTransition, WorldRouteRegistry, WorldRouteState,
+    WorldSiteRegistry, WorldSiteState,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::{settlement_build_def, SettlementBuildKind, SettlementEconomy};
@@ -116,6 +123,8 @@ impl Plugin for WorldPlugin {
             .init_resource::<DungeonCrawlState>()
             .init_resource::<DungeonRoomState>()
             .init_resource::<WorldSiteRegistry>()
+            .init_resource::<WorldRouteRegistry>()
+            .init_resource::<RaidRegistry>()
             .init_resource::<DiscussionState>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::Playing), generate_city)
@@ -134,6 +143,7 @@ impl Plugin for WorldPlugin {
                     dungeon_enemy_spawner_system,
                     world_site_enemy_spawner_system,
                     site_liberation_system,
+                    world_route_unlock_system,
                     moving_platform_system,
                     rotating_elevator_system,
                     sling_shot_system,
@@ -141,6 +151,24 @@ impl Plugin for WorldPlugin {
                     laser_beam_cleanup_system,
                     collider_debug_toggle_system,
                 )
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (
+                    raid_counteroffensive_start_system,
+                    raid_tick_system,
+                    raid_spawn_system,
+                    raid_combat_resolution_system,
+                    raid_cleanup_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (pressure_accumulation_system, coordinated_raid_trigger_system)
+                    .chain()
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(OnExit(AppState::Playing), cleanup_world);
@@ -637,6 +665,30 @@ fn spawn_world_site_props(
     }
 }
 
+fn setup_world_route_registry(registry: &mut WorldRouteRegistry) {
+    if !registry.routes.is_empty() {
+        return;
+    }
+    registry.routes = initial_world_routes();
+}
+
+/// Opens routes whose `required_site` has just become Liberated.
+fn world_route_unlock_system(
+    site_registry: Res<WorldSiteRegistry>,
+    mut route_registry: ResMut<WorldRouteRegistry>,
+) {
+    for route in route_registry.routes.iter_mut() {
+        if route.state != WorldRouteState::Locked {
+            continue;
+        }
+        if let Some(site) = site_registry.get(route.required_site) {
+            if site.state == WorldSiteState::Liberated {
+                route.state = WorldRouteState::Open;
+            }
+        }
+    }
+}
+
 /// Spawn site defenders when players enter range. Tags each spawned enemy with
 /// `WorldSiteMarker` so the liberation system can track them.
 fn world_site_enemy_spawner_system(
@@ -800,6 +852,248 @@ fn spawn_site_terminal(
         },
         WorldGeometry,
     ));
+}
+
+fn raid_counteroffensive_start_system(
+    mut raids: ResMut<RaidRegistry>,
+    mut sites: ResMut<WorldSiteRegistry>,
+    economy: Res<SettlementEconomy>,
+    command_registry: Res<CommandRegistry>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let defense_score = static_defense_score_for_site(CLOUDRAIL_TUTORIAL_RAID_SITE, &economy)
+        + command_registry.defense_score_for_site(CLOUDRAIL_TUTORIAL_RAID_SITE);
+    match raids.try_start_cloudrail_tutorial(&mut sites, defense_score) {
+        RaidStartResult::Started(_) => {
+            msg_ev.write(UiMessageEvent {
+                text: "Cloudrail City under attack! Scallarian drones are inbound.".to_string(),
+                duration: 5.0,
+            });
+        }
+        RaidStartResult::AutoResolved(_) => {
+            msg_ev.write(UiMessageEvent {
+                text: "Cloudrail defenses intercepted a Scallarian drone swarm.".to_string(),
+                duration: 4.0,
+            });
+        }
+        RaidStartResult::AlreadyExists | RaidStartResult::TargetNotLiberated => {}
+    }
+}
+
+fn raid_tick_system(
+    time: Res<Time>,
+    mut raids: ResMut<RaidRegistry>,
+    mut sites: ResMut<WorldSiteRegistry>,
+    economy: Res<SettlementEconomy>,
+    command_registry: Res<CommandRegistry>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let defense_scores: Vec<_> = raids
+        .raids
+        .iter()
+        .filter(|raid| raid.is_unresolved())
+        .map(|raid| {
+            (
+                raid.target_site,
+                static_defense_score_for_site(raid.target_site, &economy)
+                    + command_registry.defense_score_for_site(raid.target_site),
+            )
+        })
+        .collect();
+    let events = raids.tick(time.delta_secs(), &mut sites, &defense_scores);
+    for event in events {
+        match event {
+            RaidTickEvent::WarningExpired(id) => {
+                let site_name = raid_site_name(&raids, &sites, id);
+                msg_ev.write(UiMessageEvent {
+                    text: format!("{site_name}: drone swarm has arrived! Clear the sky."),
+                    duration: 4.5,
+                });
+            }
+            RaidTickEvent::AutoDefended(_, site_id) => {
+                let site_name = site_name(&sites, site_id);
+                msg_ev.write(UiMessageEvent {
+                    text: format!("{site_name} shield grid held. Raid repelled."),
+                    duration: 4.0,
+                });
+            }
+            RaidTickEvent::Failed(_, site_id) => {
+                let site_name = site_name(&sites, site_id);
+                msg_ev.write(UiMessageEvent {
+                    text: format!("{site_name} damaged. Repair crews need help later."),
+                    duration: 5.0,
+                });
+            }
+        }
+    }
+}
+
+fn raid_spawn_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut raids: ResMut<RaidRegistry>,
+    sites: Res<WorldSiteRegistry>,
+    settings: Res<GameSettings>,
+    threat_q: Query<&RaidThreatMarker>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let existing_threats: Vec<RaidId> = threat_q.iter().map(|marker| marker.raid_id).collect();
+    let requests: Vec<_> = raids
+        .raids
+        .iter()
+        .filter(|raid| {
+            raid.phase == crate::raids::RaidPhase::Active
+                && (!raid.spawned || !existing_threats.contains(&raid.id))
+        })
+        .map(|raid| (raid.id, raid.target_site, raid.kind, raid.wave_size))
+        .collect();
+
+    for (raid_id, site_id, kind, wave_size) in requests {
+        let Some(site) = sites.get(site_id) else {
+            continue;
+        };
+        let ground_y = terrain_surface_y(site.world_x, site.world_z, settings.world_seed);
+        let center = Vec3::new(site.world_x, ground_y, site.world_z);
+        spawn_raid_ufo_marker(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            raid_id,
+            center + Vec3::new(0.0, 34.0, 0.0),
+        );
+
+        let enemy_type = match kind {
+            RaidKind::DroneSwarm | RaidKind::FighterAttack | RaidKind::GiantUfoSiege => {
+                EnemyType::Drone
+            }
+            RaidKind::RobotLanding | RaidKind::RouteBlockade => EnemyType::Soldier,
+            RaidKind::DragonDomainAssault => EnemyType::SpikeAlien,
+        };
+        let radius = 22.0;
+        for i in 0..wave_size {
+            let t = i as f32 / wave_size.max(1) as f32;
+            let angle = t * std::f32::consts::TAU;
+            let offset = Vec3::new(
+                angle.cos() * radius,
+                8.0 + (i % 3) as f32 * 2.2,
+                angle.sin() * radius,
+            );
+            let enemy = spawn_enemy_entity(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                enemy_type,
+                center + offset,
+                1.12,
+                Some(Faction::DimensionalAlien),
+            );
+            commands.entity(enemy).insert(RaidThreatMarker { raid_id });
+        }
+        raids.mark_spawned(raid_id);
+        msg_ev.write(UiMessageEvent {
+            text: format!("{} raid force deployed over {}.", kind.label(), site.name),
+            duration: 3.5,
+        });
+    }
+}
+
+fn spawn_raid_ufo_marker(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    raid_id: RaidId,
+    position: Vec3,
+) {
+    let hull = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.10, 0.12, 0.16),
+        emissive: LinearRgba::new(0.08, 0.18, 0.22, 1.0),
+        perceptual_roughness: 0.38,
+        ..Default::default()
+    });
+    let glow = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.95, 1.0),
+        emissive: LinearRgba::new(0.0, 0.70, 0.95, 1.0),
+        ..Default::default()
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Mesh::from(Cylinder::new(13.0, 1.2)))),
+        MeshMaterial3d(hull),
+        Transform::from_translation(position).with_scale(Vec3::new(1.45, 1.0, 0.48)),
+        RaidUfoMarker { raid_id },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        Mesh3d(meshes.add(Mesh::from(Cylinder::new(5.2, 0.32)))),
+        MeshMaterial3d(glow),
+        Transform::from_translation(position + Vec3::new(0.0, -0.82, 0.0))
+            .with_scale(Vec3::new(1.2, 1.0, 0.48)),
+        RaidUfoMarker { raid_id },
+        WorldGeometry,
+    ));
+}
+
+fn raid_combat_resolution_system(
+    mut raids: ResMut<RaidRegistry>,
+    mut sites: ResMut<WorldSiteRegistry>,
+    threat_q: Query<(&RaidThreatMarker, &Health)>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for raid_id in raids.spawned_active_ids() {
+        let alive = threat_q
+            .iter()
+            .any(|(marker, health)| marker.raid_id == raid_id && health.is_alive());
+        if alive {
+            continue;
+        }
+        let site_id = raids
+            .get(raid_id)
+            .map(|raid| raid.target_site)
+            .unwrap_or(CLOUDRAIL_TUTORIAL_RAID_SITE);
+        if raids.resolve_combat_success(raid_id, &mut sites) {
+            let site_name = site_name(&sites, site_id);
+            msg_ev.write(UiMessageEvent {
+                text: format!("{site_name} saved! The raid has been cleared."),
+                duration: 5.0,
+            });
+        }
+    }
+}
+
+fn raid_cleanup_system(
+    mut commands: Commands,
+    raids: Res<RaidRegistry>,
+    threat_q: Query<(Entity, &RaidThreatMarker)>,
+    ufo_q: Query<(Entity, &RaidUfoMarker)>,
+) {
+    for (entity, marker) in threat_q.iter() {
+        if raids.is_resolved(marker.raid_id) {
+            commands.entity(entity).try_despawn();
+        }
+    }
+    for (entity, marker) in ufo_q.iter() {
+        if raids.is_resolved(marker.raid_id) {
+            commands.entity(entity).try_despawn();
+        }
+    }
+}
+
+fn site_name(sites: &WorldSiteRegistry, site_id: crate::resources::WorldSiteId) -> &'static str {
+    sites
+        .get(site_id)
+        .map(|site| site.name)
+        .unwrap_or("Unknown site")
+}
+
+fn raid_site_name(
+    raids: &RaidRegistry,
+    sites: &WorldSiteRegistry,
+    raid_id: RaidId,
+) -> &'static str {
+    raids
+        .get(raid_id)
+        .map(|raid| site_name(sites, raid.target_site))
+        .unwrap_or("Unknown site")
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1215,6 +1509,7 @@ fn generate_city(
     economy: Res<SettlementEconomy>,
     existing_world: Query<Entity, With<WorldGeometry>>,
     mut world_site_registry: ResMut<WorldSiteRegistry>,
+    mut world_route_registry: ResMut<WorldRouteRegistry>,
 ) {
     if transition.resuming_from_pause || !existing_world.is_empty() {
         return;
@@ -1265,6 +1560,7 @@ fn generate_city(
     spawn_puzzle_anchors(&mut commands, seed);
     setup_world_site_registry(&mut world_site_registry);
     spawn_world_site_props(&mut commands, &mut meshes, m, &world_site_registry, seed);
+    setup_world_route_registry(&mut world_route_registry);
 }
 
 // ── Seeded RNG helper ─────────────────────────────────────────────────────────
@@ -3103,8 +3399,14 @@ fn spawn_dragon_lair_dungeon(
         origin + rot * Vec3::new(0.0, 3.0, 48.0),
     );
 
-    if spec.chapter == 6 {
-        spawn_ch6_crown_dungeon_extras(commands, meshes, materials, pal, origin, rot);
+    match spec.chapter {
+        6 => spawn_ch6_crown_dungeon_extras(commands, meshes, materials, pal, origin, rot),
+        7 => spawn_ch7_ember_dungeon_extras(commands, meshes, materials, pal, origin, rot),
+        8 => spawn_ch8_fangroot_dungeon_extras(commands, meshes, materials, pal, origin, rot),
+        9 => spawn_ch9_garden_dungeon_extras(commands, meshes, materials, pal, origin, rot),
+        10 => spawn_ch10_granite_dungeon_extras(commands, meshes, materials, pal, origin, rot),
+        11 => spawn_ch11_icebreaker_dungeon_extras(commands, meshes, materials, pal, origin, rot),
+        _ => {}
     }
 }
 
@@ -3188,6 +3490,431 @@ fn spawn_ch6_crown_dungeon_extras(
                 count,
                 trigger_radius: 24.0,
                 difficulty: 1.35,
+                spawned: false,
+            },
+        ));
+    }
+}
+
+fn spawn_ch7_ember_dungeon_extras(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    origin: Vec3,
+    rot: Quat,
+) {
+    // Key — ember-orange orb in a side alcove
+    let key_pos = origin + rot * Vec3::new(-10.0, 1.8, 8.0);
+    let key_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.98, 0.35, 0.05),
+        emissive: LinearRgba::new(2.5, 0.6, 0.0, 1.0),
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+            material: MeshMaterial3d(key_mat),
+            transform: Transform::from_translation(key_pos),
+            ..default()
+        },
+        DungeonKeyPickup {
+            chapter: 7,
+            collected: false,
+            pickup_radius: 3.2,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(1.0, 0.42, 0.05),
+                intensity: 9_000.0,
+                range: 14.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // Gate — dark volcanic-stone slabs blocking the boss corridor
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 3.8, 3.5, 30.0);
+        let open = origin + rot * Vec3::new(side * 10.0, 3.5, 30.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.5, 7.0, 1.0))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_translation(closed),
+                ..default()
+            },
+            DungeonKeyGate {
+                chapter: 7,
+                closed,
+                open,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // Enemy spawners: entrance corridor, mid lava room, boss chamber
+    for (local, count, enemy_type) in [
+        (Vec3::new(0.0, 1.5, -38.0), 3u8, EnemyType::Soldier),
+        (Vec3::new(0.0, 1.5, -8.0), 4u8, EnemyType::SpikeAlien),
+        (Vec3::new(0.0, 1.5, 18.0), 2u8, EnemyType::Heavy),
+    ] {
+        commands.spawn((
+            Transform::from_translation(origin + rot * local),
+            GlobalTransform::default(),
+            DungeonEnemySpawner {
+                chapter: 7,
+                enemy_type,
+                count,
+                trigger_radius: 24.0,
+                difficulty: 1.40,
+                spawned: false,
+            },
+        ));
+    }
+}
+
+fn spawn_ch8_fangroot_dungeon_extras(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    origin: Vec3,
+    rot: Quat,
+) {
+    // Key — vine-green crystal on a raised root platform
+    let key_pos = origin + rot * Vec3::new(14.0, 1.8, 12.0);
+    let key_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.28, 0.88, 0.18),
+        emissive: LinearRgba::new(0.4, 2.2, 0.1, 1.0),
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+            material: MeshMaterial3d(key_mat),
+            transform: Transform::from_translation(key_pos),
+            ..default()
+        },
+        DungeonKeyPickup {
+            chapter: 8,
+            collected: false,
+            pickup_radius: 3.2,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.35, 0.90, 0.20),
+                intensity: 8_500.0,
+                range: 14.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // Gate — dark organic-root slabs
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 3.8, 3.5, 32.0);
+        let open = origin + rot * Vec3::new(side * 10.0, 3.5, 32.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.5, 7.0, 1.0))),
+                material: MeshMaterial3d(pal.rock_dark.clone()),
+                transform: Transform::from_translation(closed),
+                ..default()
+            },
+            DungeonKeyGate {
+                chapter: 8,
+                closed,
+                open,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // Enemy spawners: vine-lined entrance, mid tangle room, lair boss chamber
+    for (local, count, enemy_type) in [
+        (Vec3::new(0.0, 1.5, -40.0), 5u8, EnemyType::Drone),
+        (Vec3::new(0.0, 1.5, -10.0), 3u8, EnemyType::Soldier),
+        (Vec3::new(0.0, 1.5, 20.0), 1u8, EnemyType::Hybrid),
+    ] {
+        commands.spawn((
+            Transform::from_translation(origin + rot * local),
+            GlobalTransform::default(),
+            DungeonEnemySpawner {
+                chapter: 8,
+                enemy_type,
+                count,
+                trigger_radius: 24.0,
+                difficulty: 1.50,
+                spawned: false,
+            },
+        ));
+    }
+}
+
+fn spawn_ch9_garden_dungeon_extras(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    origin: Vec3,
+    rot: Quat,
+) {
+    // Key — pink-blossom orb on a garden plinth
+    let key_pos = origin + rot * Vec3::new(12.0, 1.8, -4.0);
+    let key_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.52, 0.88),
+        emissive: LinearRgba::new(2.0, 0.6, 1.5, 1.0),
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+            material: MeshMaterial3d(key_mat),
+            transform: Transform::from_translation(key_pos),
+            ..default()
+        },
+        DungeonKeyPickup {
+            chapter: 9,
+            collected: false,
+            pickup_radius: 3.2,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(1.0, 0.50, 0.88),
+                intensity: 8_000.0,
+                range: 14.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // Gate — castle-stone arched slabs with garden detail
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 3.8, 3.5, 30.0);
+        let open = origin + rot * Vec3::new(side * 10.0, 3.5, 30.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.5, 7.0, 1.0))),
+                material: MeshMaterial3d(pal.castle_stone.clone()),
+                transform: Transform::from_translation(closed),
+                ..default()
+            },
+            DungeonKeyGate {
+                chapter: 9,
+                closed,
+                open,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // Enemy spawners: garden path, fountain room, inner sanctum
+    for (local, count, enemy_type) in [
+        (Vec3::new(0.0, 1.5, -35.0), 3u8, EnemyType::Soldier),
+        (Vec3::new(0.0, 1.5, -5.0), 3u8, EnemyType::SpikeAlien),
+        (Vec3::new(0.0, 1.5, 22.0), 2u8, EnemyType::Heavy),
+    ] {
+        commands.spawn((
+            Transform::from_translation(origin + rot * local),
+            GlobalTransform::default(),
+            DungeonEnemySpawner {
+                chapter: 9,
+                enemy_type,
+                count,
+                trigger_radius: 24.0,
+                difficulty: 1.55,
+                spawned: false,
+            },
+        ));
+    }
+}
+
+fn spawn_ch10_granite_dungeon_extras(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    origin: Vec3,
+    rot: Quat,
+) {
+    // Key — amber-granite gem in the side mineshaft
+    let key_pos = origin + rot * Vec3::new(-14.0, 1.8, 10.0);
+    let key_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.92, 0.55, 0.10),
+        emissive: LinearRgba::new(2.8, 1.0, 0.0, 1.0),
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+            material: MeshMaterial3d(key_mat),
+            transform: Transform::from_translation(key_pos),
+            ..default()
+        },
+        DungeonKeyPickup {
+            chapter: 10,
+            collected: false,
+            pickup_radius: 3.2,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.95, 0.65, 0.15),
+                intensity: 9_500.0,
+                range: 16.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // Gate — heavy granite slabs blocking the throne vault
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 3.8, 3.5, 30.0);
+        let open = origin + rot * Vec3::new(side * 10.0, 3.5, 30.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.5, 7.0, 1.0))),
+                material: MeshMaterial3d(pal.rock.clone()),
+                transform: Transform::from_translation(closed),
+                ..default()
+            },
+            DungeonKeyGate {
+                chapter: 10,
+                closed,
+                open,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // Enemy spawners: mine shaft, forge room, vault hall
+    for (local, count, enemy_type) in [
+        (Vec3::new(0.0, 1.5, -40.0), 2u8, EnemyType::Heavy),
+        (Vec3::new(0.0, 1.5, -10.0), 5u8, EnemyType::Soldier),
+        (Vec3::new(0.0, 1.5, 24.0), 2u8, EnemyType::Hybrid),
+    ] {
+        commands.spawn((
+            Transform::from_translation(origin + rot * local),
+            GlobalTransform::default(),
+            DungeonEnemySpawner {
+                chapter: 10,
+                enemy_type,
+                count,
+                trigger_radius: 24.0,
+                difficulty: 1.65,
+                spawned: false,
+            },
+        ));
+    }
+}
+
+fn spawn_ch11_icebreaker_dungeon_extras(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    pal: &Palette,
+    origin: Vec3,
+    rot: Quat,
+) {
+    // Key — cold-white ice shard — visually distinct from Ch.6's warmer ice-blue
+    let key_pos = origin + rot * Vec3::new(10.0, 1.8, -6.0);
+    let key_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.80, 0.95, 1.0),
+        emissive: LinearRgba::new(1.5, 2.0, 3.0, 1.0),
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+            material: MeshMaterial3d(key_mat),
+            transform: Transform::from_translation(key_pos),
+            ..default()
+        },
+        DungeonKeyPickup {
+            chapter: 11,
+            collected: false,
+            pickup_radius: 3.2,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.75, 0.88, 1.0),
+                intensity: 10_000.0,
+                range: 16.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // Gate — dark fortress-ice slabs blocking the final vault
+    for side in [-1.0_f32, 1.0] {
+        let closed = origin + rot * Vec3::new(side * 3.8, 3.5, 34.0);
+        let open = origin + rot * Vec3::new(side * 10.0, 3.5, 34.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(6.5, 7.0, 1.0))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
+                transform: Transform::from_translation(closed),
+                ..default()
+            },
+            DungeonKeyGate {
+                chapter: 11,
+                closed,
+                open,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // Enemy spawners: frozen entrance hall, blizzard corridor, inner ice citadel
+    for (local, count, enemy_type) in [
+        (Vec3::new(0.0, 1.5, -42.0), 4u8, EnemyType::Soldier),
+        (Vec3::new(0.0, 1.5, -8.0), 4u8, EnemyType::SpikeAlien),
+        (Vec3::new(0.0, 1.5, 26.0), 2u8, EnemyType::Hybrid),
+    ] {
+        commands.spawn((
+            Transform::from_translation(origin + rot * local),
+            GlobalTransform::default(),
+            DungeonEnemySpawner {
+                chapter: 11,
+                enemy_type,
+                count,
+                trigger_radius: 24.0,
+                difficulty: 1.75,
                 spawned: false,
             },
         ));

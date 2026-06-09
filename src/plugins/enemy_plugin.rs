@@ -13,6 +13,7 @@ use crate::components::player::{ParryState, Player, PlayerIndex, PlayerStats};
 use crate::components::world::WorldLoot;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
+use crate::hacking::{Hackable, HackedUnit};
 use crate::rendering::PbrBundle;
 use crate::resources::{PlaySessionTransition, WaveInfo};
 use crate::robot_pets::{salvage_for_enemy, RobotPetCollection};
@@ -227,7 +228,9 @@ pub fn spawn_enemy_entity(
         faction.unwrap_or_default(),
     ));
     if enemy_type == EnemyType::Drone {
-        commands.entity(root).insert(FlyingDrone::new(position));
+        commands
+            .entity(root)
+            .insert((FlyingDrone::new(position), Hackable::scallarian_drone()));
     }
     root
 }
@@ -312,7 +315,7 @@ fn enemy_ai_system(
             Option<&CitySpyDrone>,
             Option<&DragonBoss>,
         ),
-        Without<Player>,
+        (Without<Player>, Without<HackedUnit>),
     >,
 ) {
     let dt = time.delta_secs();
@@ -487,13 +490,16 @@ fn flying_drone_attack_system(
     mut commands: Commands,
     assets: Res<EnemyAttackAssets>,
     player_q: Query<(Entity, &Transform), (With<Player>, Without<FlyingDrone>)>,
-    mut drone_q: Query<(
-        &Transform,
-        &mut Enemy,
-        &mut FlyingDrone,
-        &EnemyStateMachine,
-        &Health,
-    )>,
+    mut drone_q: Query<
+        (
+            &Transform,
+            &mut Enemy,
+            &mut FlyingDrone,
+            &EnemyStateMachine,
+            &Health,
+        ),
+        Without<HackedUnit>,
+    >,
 ) {
     for (transform, mut enemy, mut drone, sm, health) in drone_q.iter_mut() {
         if !health.is_alive() || sm.current != EnemyAIState::Attack {
@@ -953,7 +959,7 @@ fn enemy_attack_system(
             Option<&FlyingDrone>,
             Option<&DragonBoss>,
         ),
-        Without<Player>,
+        (Without<Player>, Without<HackedUnit>),
     >,
     mut player_damage_q: Query<
         (

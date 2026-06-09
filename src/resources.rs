@@ -790,6 +790,145 @@ pub fn initial_world_sites() -> Vec<WorldSite> {
     ]
 }
 
+// ── World Routes ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WorldRouteKind {
+    Road,
+    MountainPath,
+    SkyBridge,
+    Rail,
+    River,
+    OceanLane,
+    Tunnel,
+    SpaceLane,
+    DungeonGate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum WorldRouteState {
+    #[default]
+    Locked,
+    Open,
+    Contested,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WorldRouteId(pub u16);
+
+#[derive(Debug, Clone)]
+pub struct WorldRoute {
+    pub id: WorldRouteId,
+    pub from_site: WorldSiteId,
+    pub to_site: WorldSiteId,
+    pub kind: WorldRouteKind,
+    pub state: WorldRouteState,
+    /// The site that must be `Liberated` for this route to auto-open.
+    pub required_site: WorldSiteId,
+}
+
+impl WorldRoute {
+    pub fn is_open(&self) -> bool {
+        self.state == WorldRouteState::Open
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WorldRouteSaveRecord {
+    pub id: u16,
+    pub state: WorldRouteState,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
+pub struct WorldRouteRegistry {
+    pub routes: Vec<WorldRoute>,
+}
+
+impl WorldRouteRegistry {
+    pub fn get(&self, id: WorldRouteId) -> Option<&WorldRoute> {
+        self.routes.iter().find(|r| r.id.0 == id.0)
+    }
+    pub fn get_mut(&mut self, id: WorldRouteId) -> Option<&mut WorldRoute> {
+        self.routes.iter_mut().find(|r| r.id.0 == id.0)
+    }
+    pub fn to_save_records(&self) -> Vec<WorldRouteSaveRecord> {
+        self.routes
+            .iter()
+            .map(|r| WorldRouteSaveRecord {
+                id: r.id.0,
+                state: r.state,
+            })
+            .collect()
+    }
+    pub fn apply_save_records(&mut self, records: &[WorldRouteSaveRecord]) {
+        for record in records {
+            if let Some(route) = self.routes.iter_mut().find(|r| r.id.0 == record.id) {
+                route.state = record.state;
+            }
+        }
+    }
+}
+
+pub fn initial_world_routes() -> Vec<WorldRoute> {
+    vec![
+        // Iron Watchpost → Riftglass Village (unlock by liberating Watchpost)
+        WorldRoute {
+            id: WorldRouteId(1),
+            from_site: WorldSiteId(1),
+            to_site: WorldSiteId(2),
+            kind: WorldRouteKind::SkyBridge,
+            state: WorldRouteState::Locked,
+            required_site: WorldSiteId(1),
+        },
+        // Riftglass Village → Cloudrail City (unlock by liberating Village)
+        WorldRoute {
+            id: WorldRouteId(2),
+            from_site: WorldSiteId(2),
+            to_site: WorldSiteId(4),
+            kind: WorldRouteKind::Road,
+            state: WorldRouteState::Locked,
+            required_site: WorldSiteId(2),
+        },
+        // Cloudrail City → Granite Market via Rail — starts Open (Cloudrail is pre-Liberated)
+        WorldRoute {
+            id: WorldRouteId(3),
+            from_site: WorldSiteId(4),
+            to_site: WorldSiteId(8),
+            kind: WorldRouteKind::Rail,
+            state: WorldRouteState::Open,
+            required_site: WorldSiteId(4),
+        },
+        // Starfell Outpost → Frost Harbor via MountainPath
+        WorldRoute {
+            id: WorldRouteId(4),
+            from_site: WorldSiteId(3),
+            to_site: WorldSiteId(7),
+            kind: WorldRouteKind::MountainPath,
+            state: WorldRouteState::Locked,
+            required_site: WorldSiteId(3),
+        },
+        // Star Orchard → Lantern Hamlet via Road
+        WorldRoute {
+            id: WorldRouteId(5),
+            from_site: WorldSiteId(6),
+            to_site: WorldSiteId(5),
+            kind: WorldRouteKind::Road,
+            state: WorldRouteState::Locked,
+            required_site: WorldSiteId(6),
+        },
+        // Switchwork Borough → Frost Harbor via OceanLane — starts Open (Switchwork pre-Liberated)
+        WorldRoute {
+            id: WorldRouteId(6),
+            from_site: WorldSiteId(9),
+            to_site: WorldSiteId(7),
+            kind: WorldRouteKind::OceanLane,
+            state: WorldRouteState::Open,
+            required_site: WorldSiteId(9),
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,8 +1017,9 @@ mod tests {
 
     #[test]
     fn world_site_registry_apply_records_round_trip() {
-        let mut registry = WorldSiteRegistry::default();
-        registry.sites = initial_world_sites();
+        let mut registry = WorldSiteRegistry {
+            sites: initial_world_sites(),
+        };
 
         // Simulate: liberate site 2
         let records = vec![WorldSiteSaveRecord {

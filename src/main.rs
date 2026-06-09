@@ -13,14 +13,18 @@ mod chapters;
 mod character_blueprint;
 mod character_parts;
 mod characters;
+mod commands;
 mod components;
 mod damage;
+mod final_war;
+mod hacking;
 mod discussion;
 mod events;
 mod hero_roster;
 mod lsystem;
 mod perks;
 mod plugins;
+mod raids;
 mod rendering;
 mod resources;
 mod robot_pets;
@@ -29,17 +33,22 @@ mod settlement_economy;
 mod state;
 mod upgrades;
 
+use commands::{CommandOverlayState, CommandRegistry};
+use final_war::FinalWarRegistry;
+use hacking::HackingRegistry;
 use events::EventsPlugin;
 use perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChassisEditorPlugin,
-    ChestPlugin, CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, InputPlugin,
-    PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin,
+    ChestPlugin, CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, HackingPlugin,
+    InputPlugin, PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin,
     WeaponPlugin, WorldPlugin,
 };
+use raids::RaidRegistry;
 use resources::{
     CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlaySessionTransition,
-    PlayerPartLoadout, PlayerScore, PlayerSelectState, WaveInfo, WorldSiteRegistry,
+    PlayerPartLoadout, PlayerScore, PlayerSelectState, WaveInfo, WorldRouteRegistry,
+    WorldSiteRegistry,
 };
 use robot_pets::RobotPetCollection;
 use settlement_economy::SettlementEconomy;
@@ -88,8 +97,15 @@ fn main() {
         .init_resource::<UpgradeLedger>()
         .init_resource::<PlayerPartLoadout>()
         .init_resource::<WorldSiteRegistry>()
+        .init_resource::<WorldRouteRegistry>()
+        .init_resource::<RaidRegistry>()
+        .init_resource::<CommandRegistry>()
+        .init_resource::<CommandOverlayState>()
+        .init_resource::<HackingRegistry>()
+        .init_resource::<FinalWarRegistry>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
+        .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
         // Game plugins
         .add_plugins((
             InputPlugin,
@@ -100,6 +116,7 @@ fn main() {
             CharacterDesignPlugin,
             WeaponPlugin,
             EnemyPlugin,
+            HackingPlugin,
             ChestPlugin,
             CompanionPlugin,
             ArmorPlugin,

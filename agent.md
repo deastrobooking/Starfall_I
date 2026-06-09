@@ -80,8 +80,25 @@ together.
   save-backed. Settlement terminals unlock after cache recovery or matching M5
   site liberation, spend shared stockpile plus robot parts, spawn visible farm,
   factory, spaceport, power plant, research lab, defense outpost, and bridge hub
-  props, and tick bounded passive outputs. Route unlocks, assigned units,
-  raids, strategy overlays, and confirmation UX are future M7-M9 work.
+  props, and tick bounded passive outputs. Route unlocks are Engine M7,
+  assigned units/strategy overlays are Engine M9, and confirmation UX is still
+  future polish.
+- Engine M8 raid counteroffensives live in `src/raids.rs`,
+  `src/plugins/world_plugin.rs`, and `src/plugins/save_plugin.rs`.
+  `RaidRegistry` is save-backed through `SaveData.raids`. The first playable
+  slice is a recoverable Cloudrail City `DroneSwarm`: warning sets the site to
+  `UnderAttack`, active phase spawns a visible UFO marker plus tagged drones,
+  player victory returns the site to `Liberated`, static defenses can resolve it
+  as `Shielded`, and failure marks the site `Damaged` without deleting progress.
+- Engine M10 tech hacking lives in `src/hacking.rs`,
+  `src/plugins/hacking_plugin.rs`, `src/plugins/enemy_plugin.rs`,
+  `src/plugins/weapon_plugin.rs`, and `src/plugins/save_plugin.rs`.
+  `HackingRegistry` is save-backed through
+  `SaveData.hacking`. The first slice makes small Scallarian drones hackable:
+  interact starts a short range-held hack, completion saves
+  `blueprint_scallarian_drone_core`, adds a `ScoutDrone` command asset, converts
+  the drone into a temporary friendly `HackedUnit`, removes raid threat markers,
+  and lets the owner fire a basic pulse through the linked drone.
 - Settlement conversations are data-driven in `src/discussion.rs`.
   `DiscussionNpc` entities open the HUD discussion panel from `E` / D-pad
   Down, and each line can spawn an MP3 voice file from `assets/voice/...`.
@@ -92,6 +109,10 @@ together.
 - Player input is controller-first local multiplayer: preserve analog movement
   magnitude, keep circular deadzone remapping, support LT/RT button and axis
   paths, and treat controller smoke testing as required for movement changes.
+- Roadmap labels are intentionally namespaced: Engine M# refers to
+  `docs/engine_upgrade_milestones.md`; Motion MM# refers to
+  `docs/motion_mechanics_roadmap.md`; future enemy behavior planning should use
+  Enemy AI AI# labels.
 - Humanoid traversal planning lives in `docs/motion_mechanics_roadmap.md`.
   Current first hook slice: `GrappleHookState` is the single star-tech
   grappling hook source of truth, `PlayerInput` maps `G` / Select+RB, and

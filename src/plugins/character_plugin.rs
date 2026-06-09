@@ -9,7 +9,8 @@ use crate::components::character::{
     CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind, CartoonPose,
 };
 use crate::components::player::{
-    EdgeGrabState, GrappleHookState, JetpackState, PlayerMovement, PlayerState, PlayerStateMachine,
+    DodgeState, EdgeGrabState, GrappleHookMode, GrappleHookState, JetpackState, ParryState,
+    PlayerMovement, PlayerState, PlayerStateMachine,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
 use crate::state::AppState;
@@ -123,6 +124,89 @@ struct PoseSample {
     wall_clasp_time: f32,
 }
 
+#[derive(Clone, Copy, Default)]
+struct PoseInput {
+    state: Option<PlayerState>,
+    grounded: bool,
+    horizontal_speed: f32,
+    vertical_velocity: f32,
+    hanging: bool,
+    wall_sliding: bool,
+    jetpack_active: bool,
+    grapple_mode: Option<GrappleHookMode>,
+    grapple_pose: bool,
+    sabre_slashing: bool,
+    melee_attacking: bool,
+    dodging: bool,
+    parrying: bool,
+}
+
+fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
+    if input.state == Some(PlayerState::Dead) {
+        return CartoonPose::Death;
+    }
+    if input.state == Some(PlayerState::Stunned) {
+        return CartoonPose::Stun;
+    }
+    if input.sabre_slashing {
+        return CartoonPose::SabreSlash;
+    }
+    if input.state == Some(PlayerState::Attacking) || input.melee_attacking {
+        return CartoonPose::Attack;
+    }
+    if input.parrying {
+        return CartoonPose::Parry;
+    }
+    if input.dodging || input.state == Some(PlayerState::Dodging) {
+        return CartoonPose::Roll;
+    }
+
+    match input.grapple_mode {
+        Some(GrappleHookMode::Swinging) => return CartoonPose::Swing,
+        Some(GrappleHookMode::Zipping) => return CartoonPose::Zip,
+        Some(GrappleHookMode::Windup)
+        | Some(GrappleHookMode::Searching)
+        | Some(GrappleHookMode::Recovering)
+            if input.grapple_pose || input.state == Some(PlayerState::Grappling) =>
+        {
+            return CartoonPose::Grapple;
+        }
+        _ => {}
+    }
+
+    if input.hanging {
+        return CartoonPose::Hang;
+    }
+    if input.wall_sliding || input.state == Some(PlayerState::WallSliding) {
+        return CartoonPose::WallSlide;
+    }
+    if input.jetpack_active {
+        if input.vertical_velocity.abs() < 0.06 {
+            return CartoonPose::Hover;
+        }
+        return CartoonPose::Fly;
+    }
+    if !input.grounded {
+        if input.vertical_velocity < -0.18 && input.horizontal_speed > 0.30 {
+            return CartoonPose::Glide;
+        }
+        if input.vertical_velocity < -0.12 {
+            return CartoonPose::Fall;
+        }
+        return CartoonPose::Jump;
+    }
+    if input.state == Some(PlayerState::Sprinting) {
+        return CartoonPose::Sprint;
+    }
+    if input.horizontal_speed > 28.0 {
+        return CartoonPose::Run;
+    }
+    if input.horizontal_speed > 2.0 {
+        return CartoonPose::Walk;
+    }
+    CartoonPose::Idle
+}
+
 fn cartoon_animation_system(
     time: Res<Time>,
     mut roots: Query<
@@ -136,6 +220,8 @@ fn cartoon_animation_system(
             Option<&PlayerStateMachine>,
             Option<&JetpackState>,
             Option<&GrappleHookState>,
+            Option<&DodgeState>,
+            Option<&ParryState>,
             Option<&BeamSabre>,
             Option<&MeleeCombo>,
         ),
@@ -156,6 +242,8 @@ fn cartoon_animation_system(
         state,
         jetpack,
         grapple,
+        dodge,
+        parry,
         sabre,
         melee,
     ) in roots.iter_mut()
@@ -171,37 +259,28 @@ fn cartoon_animation_system(
 
         let current_state = state.map(|s| s.current);
         let vertical_velocity = movement.map(|m| m.velocity.y).unwrap_or(0.0);
+        let horizontal_speed = movement
+            .map(|m| m.ground_velocity.length())
+            .unwrap_or(animator.speed);
         let sabre_slashing = sabre
             .map(|s| s.unlocked && s.active && s.is_slashing)
             .unwrap_or(false);
         let melee_attacking = melee.map(|m| m.is_attacking).unwrap_or(false);
-        animator.pose = if sabre_slashing {
-            CartoonPose::SabreSlash
-        } else if current_state == Some(PlayerState::Attacking) || melee_attacking {
-            CartoonPose::Attack
-        } else if current_state == Some(PlayerState::Grappling)
-            || grapple.map(|g| g.wants_animation_pose()).unwrap_or(false)
-        {
-            CartoonPose::Grapple
-        } else if edge_grab.map(|e| e.is_hanging).unwrap_or(false) {
-            CartoonPose::Hang
-        } else if current_state == Some(PlayerState::WallSliding) {
-            CartoonPose::WallSlide
-        } else if jetpack.map(|j| j.is_active).unwrap_or(false) {
-            CartoonPose::Fly
-        } else if movement.map(|m| !m.is_grounded).unwrap_or(false) {
-            if vertical_velocity < -0.12 {
-                CartoonPose::Fall
-            } else {
-                CartoonPose::Jump
-            }
-        } else if animator.speed > 28.0 {
-            CartoonPose::Run
-        } else if animator.speed > 2.0 {
-            CartoonPose::Walk
-        } else {
-            CartoonPose::Idle
-        };
+        animator.pose = select_cartoon_pose(PoseInput {
+            state: current_state,
+            grounded: movement.map(|m| m.is_grounded).unwrap_or(true),
+            horizontal_speed,
+            vertical_velocity,
+            hanging: edge_grab.map(|e| e.is_hanging).unwrap_or(false),
+            wall_sliding: current_state == Some(PlayerState::WallSliding),
+            jetpack_active: jetpack.map(|j| j.is_active).unwrap_or(false),
+            grapple_mode: grapple.map(|g| g.mode),
+            grapple_pose: grapple.map(|g| g.wants_animation_pose()).unwrap_or(false),
+            sabre_slashing,
+            melee_attacking,
+            dodging: dodge.map(|d| d.is_dodging).unwrap_or(false),
+            parrying: parry.map(|p| p.is_parrying).unwrap_or(false),
+        });
 
         let stride = character.map(|c| c.stride).unwrap_or(1.0).max(0.45);
         let agility = character.map(|c| c.agility).unwrap_or(1.0).max(0.45);
@@ -209,13 +288,25 @@ fn cartoon_animation_system(
             CartoonPose::Idle => 2.0,
             CartoonPose::Walk => (5.0 + animator.speed * 8.0 / stride).clamp(5.0, 13.0),
             CartoonPose::Run => (10.0 + animator.speed * 5.0 / stride).clamp(10.0, 18.0),
+            CartoonPose::Sprint => (14.0 + animator.speed * 5.5 / stride).clamp(14.0, 22.0),
             CartoonPose::Jump => 2.5,
             CartoonPose::Fall => 3.6,
             CartoonPose::Fly => 8.0,
+            CartoonPose::Glide => 5.0,
+            CartoonPose::Hover => 6.5,
+            CartoonPose::AirDash => 14.0,
             CartoonPose::WallSlide => 4.8,
+            CartoonPose::Mantle => 6.0,
             CartoonPose::Grapple => 10.0,
+            CartoonPose::Swing => 9.0,
+            CartoonPose::Zip => 13.5,
+            CartoonPose::Roll => 12.0,
+            CartoonPose::Parry => 7.2,
             CartoonPose::Attack => 8.5,
             CartoonPose::SabreSlash => 12.0,
+            CartoonPose::HardLand => 7.5,
+            CartoonPose::Stun => 3.0,
+            CartoonPose::Death => 1.0,
             CartoonPose::Hang => 1.4,
         } * (0.88 + agility * 0.12);
         animator.phase += dt * phase_rate;
@@ -443,6 +534,62 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
         }
 
         // ── Jump ─────────────────────────────────────────────────────────────
+        CartoonPose::Sprint => {
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.translation.y += wave.abs() * 0.12;
+                    transform.rotation *=
+                        Quat::from_rotation_z(step * 0.08) * Quat::from_rotation_x(-0.22);
+                    transform.scale.z *= 1.04;
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.translation.y += wave.abs() * 0.08;
+                    transform.rotation *=
+                        Quat::from_rotation_y(step * 0.13) * Quat::from_rotation_x(-0.14);
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(step * 1.58 * swing) * Quat::from_rotation_z(-0.10);
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(-step * 1.58 * swing) * Quat::from_rotation_z(0.10);
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot => {
+                    transform.rotation *= Quat::from_rotation_x(-step * 1.18 * swing);
+                }
+                CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *= Quat::from_rotation_x(step * 1.18 * swing);
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= Vec3::new(1.18, 1.0, 0.80);
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.translation.y += wave.abs() * 0.08;
+                transform.rotation *=
+                    Quat::from_rotation_y(step * 0.13) * Quat::from_rotation_x(-0.14);
+            }
+            if is_body_acc {
+                transform.translation.y += wave.abs() * 0.12;
+                transform.rotation *=
+                    Quat::from_rotation_z(step * 0.08) * Quat::from_rotation_x(-0.22);
+            }
+            if is_cape {
+                transform.rotation *= Quat::from_rotation_x(cape_flap * 1.45);
+                transform.rotation *= Quat::from_rotation_z(step * 0.06 * cape_flap);
+            }
+        }
+
+        // ── Jump ─────────────────────────────────────────────────────────────
         CartoonPose::Jump => {
             match part.kind {
                 CartoonPartKind::Body => {
@@ -601,6 +748,80 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
         }
 
         // ── Wall slide ───────────────────────────────────────────────────────
+        CartoonPose::Glide | CartoonPose::Hover | CartoonPose::AirDash => {
+            let is_hover = sample.pose == CartoonPose::Hover;
+            let is_dash = sample.pose == CartoonPose::AirDash;
+            let pitch = if is_hover {
+                -0.06
+            } else if is_dash {
+                -0.48
+            } else {
+                -0.22
+            };
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.rotation *= Quat::from_rotation_x(pitch);
+                    transform.translation.y += if is_hover { wave * 0.055 } else { 0.04 };
+                    if is_dash {
+                        transform.scale.z *= 1.10;
+                    }
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.rotation *= Quat::from_rotation_x(pitch * 0.55);
+                    transform.translation.y += if is_hover { 0.06 + wave * 0.04 } else { 0.05 };
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.rotation *= if is_hover {
+                        Quat::from_rotation_z(-0.55 + wave * 0.08)
+                    } else {
+                        Quat::from_rotation_x(0.18) * Quat::from_rotation_z(-1.05)
+                    };
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.rotation *= if is_hover {
+                        Quat::from_rotation_z(0.55 - wave * 0.08)
+                    } else {
+                        Quat::from_rotation_x(0.18) * Quat::from_rotation_z(1.05)
+                    };
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot => {
+                    transform.rotation *= Quat::from_rotation_x(if is_dash { 0.46 } else { 0.18 });
+                }
+                CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *= Quat::from_rotation_x(if is_dash { 0.38 } else { 0.12 });
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= if is_hover {
+                        Vec3::new(0.78, 1.0, 0.78)
+                    } else {
+                        Vec3::new(0.60, 1.0, 0.60)
+                    };
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.rotation *= Quat::from_rotation_x(pitch * 0.55);
+                transform.translation.y += if is_hover { 0.06 + wave * 0.04 } else { 0.05 };
+            }
+            if is_body_acc {
+                transform.rotation *= Quat::from_rotation_x(pitch);
+                transform.translation.y += if is_hover { wave * 0.055 } else { 0.04 };
+            }
+            if is_cape {
+                transform.rotation *=
+                    Quat::from_rotation_x(cape_flap * if is_dash { 1.65 } else { 1.10 });
+                transform.rotation *= Quat::from_rotation_z(wave * 0.08 * cape_flap);
+            }
+        }
+
+        // ── Wall slide ───────────────────────────────────────────────────────
         CartoonPose::WallSlide => {
             let scrape = (sample.wall_clasp_time * 18.0).sin() * 0.035;
             match part.kind {
@@ -666,6 +887,52 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
         }
 
         // ── Grapple ──────────────────────────────────────────────────────────
+        CartoonPose::Mantle => {
+            let pull = wave.abs();
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.translation.y += 0.18 + pull * 0.04;
+                    transform.rotation *= Quat::from_rotation_x(-0.20);
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.translation.y += 0.20;
+                    transform.rotation *= Quat::from_rotation_x(-0.12);
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.translation.y += 0.28;
+                    transform.rotation *=
+                        Quat::from_rotation_x(-1.34) * Quat::from_rotation_z(-0.30);
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.translation.y += 0.28;
+                    transform.rotation *=
+                        Quat::from_rotation_x(-1.34) * Quat::from_rotation_z(0.30);
+                }
+                CartoonPartKind::LeftLeg | CartoonPartKind::RightLeg => {
+                    transform.rotation *= Quat::from_rotation_x(0.42);
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= Vec3::new(0.86, 1.0, 0.86);
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.translation.y += 0.20;
+                transform.rotation *= Quat::from_rotation_x(-0.12);
+            }
+            if is_body_acc {
+                transform.translation.y += 0.18 + pull * 0.04;
+                transform.rotation *= Quat::from_rotation_x(-0.20);
+            }
+            if is_cape {
+                transform.rotation *= Quat::from_rotation_x(cape_flap * 0.35);
+            }
+        }
+
+        // ── Grapple ──────────────────────────────────────────────────────────
         CartoonPose::Grapple => {
             let throw = (sample.phase * 1.2).sin().abs();
             match part.kind {
@@ -719,6 +986,145 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
             if is_cape {
                 transform.rotation *= Quat::from_rotation_x(cape_flap * 0.95);
                 transform.rotation *= Quat::from_rotation_z((0.10 + throw * 0.10) * cape_flap);
+            }
+        }
+
+        // ── Attack ───────────────────────────────────────────────────────────
+        CartoonPose::Swing | CartoonPose::Zip => {
+            let is_zip = sample.pose == CartoonPose::Zip;
+            let stretch = if is_zip { 1.18 } else { 1.02 };
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.rotation *= if is_zip {
+                        Quat::from_rotation_x(-0.32)
+                    } else {
+                        Quat::from_rotation_z(wave * 0.18) * Quat::from_rotation_x(-0.10)
+                    };
+                    transform.scale.z *= stretch;
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.rotation *= Quat::from_rotation_x(if is_zip { -0.20 } else { -0.06 });
+                    transform.translation.y += 0.06;
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.translation.y += if is_zip { 0.10 } else { 0.26 };
+                    transform.rotation *=
+                        Quat::from_rotation_x(-1.42) * Quat::from_rotation_z(-0.22);
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.translation.y += 0.30;
+                    transform.rotation *=
+                        Quat::from_rotation_x(-1.72) * Quat::from_rotation_z(0.22);
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(if is_zip { 0.36 } else { 0.16 + wave * 0.18 });
+                }
+                CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *=
+                        Quat::from_rotation_x(if is_zip { 0.24 } else { -0.20 - wave * 0.18 });
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= Vec3::new(0.64, 1.0, 0.64);
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.translation.y += 0.06;
+                transform.rotation *= Quat::from_rotation_x(if is_zip { -0.20 } else { -0.06 });
+            }
+            if is_body_acc {
+                transform.scale.z *= stretch;
+            }
+            if is_cape {
+                transform.rotation *=
+                    Quat::from_rotation_x(cape_flap * if is_zip { 1.55 } else { 1.15 });
+                transform.rotation *= Quat::from_rotation_z(wave * 0.12 * cape_flap);
+            }
+        }
+
+        // ── Roll / Parry ─────────────────────────────────────────────────────
+        CartoonPose::Roll | CartoonPose::Parry => {
+            let is_parry = sample.pose == CartoonPose::Parry;
+            match part.kind {
+                CartoonPartKind::Body => {
+                    transform.translation.y -= if is_parry { 0.02 } else { 0.18 };
+                    transform.rotation *= if is_parry {
+                        Quat::from_rotation_y(-0.18) * Quat::from_rotation_x(-0.05)
+                    } else {
+                        Quat::from_rotation_x(0.82) * Quat::from_rotation_z(wave * 0.22)
+                    };
+                }
+                CartoonPartKind::Head
+                | CartoonPartKind::Hair
+                | CartoonPartKind::Hood
+                | CartoonPartKind::Hat => {
+                    transform.translation.y -= if is_parry { 0.0 } else { 0.12 };
+                    transform.rotation *= if is_parry {
+                        Quat::from_rotation_y(-0.16)
+                    } else {
+                        Quat::from_rotation_x(0.55)
+                    };
+                }
+                CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
+                    transform.rotation *= if is_parry {
+                        Quat::from_rotation_x(-1.05) * Quat::from_rotation_z(-0.65)
+                    } else {
+                        Quat::from_rotation_x(0.72) * Quat::from_rotation_z(-0.40)
+                    };
+                }
+                CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
+                    transform.rotation *= if is_parry {
+                        Quat::from_rotation_x(-1.12) * Quat::from_rotation_z(0.58)
+                    } else {
+                        Quat::from_rotation_x(0.68) * Quat::from_rotation_z(0.40)
+                    };
+                }
+                CartoonPartKind::LeftLeg
+                | CartoonPartKind::LeftFoot
+                | CartoonPartKind::LeftBoot
+                | CartoonPartKind::RightLeg
+                | CartoonPartKind::RightFoot
+                | CartoonPartKind::RightBoot => {
+                    transform.rotation *= if is_parry {
+                        Quat::from_rotation_x(0.16)
+                    } else {
+                        Quat::from_rotation_x(0.70)
+                    };
+                }
+                CartoonPartKind::Shadow => {
+                    transform.scale *= if is_parry {
+                        Vec3::new(1.12, 1.0, 0.90)
+                    } else {
+                        Vec3::new(1.24, 1.0, 0.70)
+                    };
+                }
+                _ => {}
+            }
+            if is_face {
+                transform.rotation *= if is_parry {
+                    Quat::from_rotation_y(-0.16)
+                } else {
+                    Quat::from_rotation_x(0.55)
+                };
+            }
+            if is_body_acc {
+                transform.rotation *= if is_parry {
+                    Quat::from_rotation_y(-0.18)
+                } else {
+                    Quat::from_rotation_x(0.82)
+                };
+            }
+            if is_cape {
+                transform.rotation *=
+                    Quat::from_rotation_x(cape_flap * if is_parry { 0.45 } else { 0.20 });
             }
         }
 
@@ -881,5 +1287,6 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                 transform.rotation *= Quat::from_rotation_x(-cape_flap * 0.5 + wave * 0.03);
             }
         }
+        _ => {}
     }
 }

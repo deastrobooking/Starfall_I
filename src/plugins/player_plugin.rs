@@ -51,6 +51,7 @@ struct SharedEncounterCamera {
     anchor: Vec3,
     focus: Vec3,
     radius: f32,
+    reversion_cooldown: f32,
 }
 
 impl Default for SharedEncounterCamera {
@@ -61,6 +62,23 @@ impl Default for SharedEncounterCamera {
             anchor: Vec3::ZERO,
             focus: Vec3::ZERO,
             radius: 24.0,
+            reversion_cooldown: 0.0,
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone)]
+pub struct CameraDisplayTransition {
+    /// 0.0 = fully split, 1.0 = fully shared
+    pub progress: f32,
+    pub last_was_dungeon: bool,
+}
+
+impl Default for CameraDisplayTransition {
+    fn default() -> Self {
+        Self {
+            progress: 0.0,
+            last_was_dungeon: false,
         }
     }
 }
@@ -73,6 +91,7 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SharedEncounterCamera>()
             .init_resource::<DungeonCrawlState>()
+            .init_resource::<CameraDisplayTransition>()
             .add_systems(OnEnter(AppState::Playing), (spawn_players, grab_cursor))
             .add_systems(OnEnter(AppState::MainMenu), cleanup_players_for_menu)
             .add_systems(OnExit(AppState::Playing), release_cursor)
@@ -82,6 +101,7 @@ impl Plugin for PlayerPlugin {
                     dedupe_player_entities,
                     player_look,
                     camera_shake_system,
+                    update_camera_post_processing,
                     player_movement,
                     grapple_hook_foundation_update,
                     shared_encounter_camera_mode_system,
@@ -735,8 +755,43 @@ fn camera_shake_system(
     shake.decay(time.delta_secs() * 2.0);
 }
 
+fn interpolate_viewport(
+    from: Option<Viewport>,
+    to: Option<Viewport>,
+    t: f32,
+    win_w: u32,
+    win_h: u32,
+) -> Option<Viewport> {
+    if from.is_none() && to.is_none() {
+        return None;
+    }
+    let from_vp = from.unwrap_or(Viewport {
+        physical_position: UVec2::ZERO,
+        physical_size: UVec2::new(win_w, win_h),
+        ..default()
+    });
+    let to_vp = to.unwrap_or(Viewport {
+        physical_position: UVec2::ZERO,
+        physical_size: UVec2::new(win_w, win_h),
+        ..default()
+    });
+
+    let px = (from_vp.physical_position.x as f32 + t * (to_vp.physical_position.x as f32 - from_vp.physical_position.x as f32)).round() as u32;
+    let py = (from_vp.physical_position.y as f32 + t * (to_vp.physical_position.y as f32 - from_vp.physical_position.y as f32)).round() as u32;
+    let sx = (from_vp.physical_size.x as f32 + t * (to_vp.physical_size.x as f32 - from_vp.physical_size.x as f32)).round() as u32;
+    let sy = (from_vp.physical_size.y as f32 + t * (to_vp.physical_size.y as f32 - from_vp.physical_size.y as f32)).round() as u32;
+
+    Some(Viewport {
+        physical_position: UVec2::new(px, py),
+        physical_size: UVec2::new(sx.max(1), sy.max(1)),
+        ..default()
+    })
+}
+
 fn player_camera_follow_system(
     mut commands: Commands,
+    time: Res<Time>,
+    mut transition: ResMut<CameraDisplayTransition>,
     shake: Res<CameraShake>,
     dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
@@ -757,16 +812,33 @@ fn player_camera_follow_system(
         .map(|w| (w.physical_width(), w.physical_height()))
         .unwrap_or((1280, 720));
 
+    let dungeon_or_boss_active = dungeon.active || (shared_camera.active && active_players > 1);
+
     if dungeon.active {
-        let lead_camera = player_q
-            .iter()
-            .min_by_key(|(index, _, _)| index.0)
-            .map(|(_, _, camera_ref)| camera_ref.0);
-        let max_trauma = player_q
-            .iter()
-            .map(|(index, _, _)| shake.trauma_for(index.0))
-            .fold(0.0_f32, f32::max);
-        let shake_offset = camera_shake_offset(max_trauma);
+        transition.last_was_dungeon = true;
+    } else if shared_camera.active && active_players > 1 {
+        transition.last_was_dungeon = false;
+    }
+
+    // Dynamic S-curve display transition rate: ~0.45s and Hermite smoothstep
+    let dt = time.delta_secs();
+    let target = if dungeon_or_boss_active { 1.0 } else { 0.0 };
+    if transition.progress < target {
+        transition.progress = (transition.progress + dt * 2.2).min(target);
+    } else if transition.progress > target {
+        transition.progress = (transition.progress - dt * 2.2).max(target);
+    }
+    let p = transition.progress;
+    let s = 3.0 * p * p - 2.0 * p * p * p; // Smoothstep S-curve
+
+    let max_trauma = player_q
+        .iter()
+        .map(|(index, _, _)| shake.trauma_for(index.0))
+        .fold(0.0_f32, f32::max);
+    let shake_offset = camera_shake_offset(max_trauma);
+
+    // Compute target single screen/unified shared viewport transform
+    let shared_target_transform = if transition.last_was_dungeon {
         let party_focus = average_positions(
             &player_q
                 .iter()
@@ -774,73 +846,73 @@ fn player_camera_follow_system(
                 .collect::<Vec<_>>(),
         )
         .unwrap_or(dungeon.focus);
-        let focus = clamp_to_dungeon_focus(party_focus, dungeon.focus, dungeon.radius * 0.62);
+        let dungeon_focus = clamp_to_dungeon_focus(party_focus, dungeon.focus, dungeon.radius * 0.62);
+        dungeon_crawl_camera_transform(dungeon_focus, dungeon.radius, shake_offset)
+    } else {
+        shared_boss_camera_transform(
+            shared_camera.focus,
+            shared_camera.radius,
+            shake_offset,
+        )
+    };
 
-        for (_, _, camera_ref) in player_q.iter() {
-            referenced.push(camera_ref.0);
-            if let Ok((_, mut camera_transform, _, mut camera)) = cam_q.get_mut(camera_ref.0) {
-                camera.is_active = Some(camera_ref.0) == lead_camera;
-                camera.viewport = None;
-                if camera.is_active {
-                    *camera_transform =
-                        dungeon_crawl_camera_transform(focus, dungeon.radius, shake_offset);
-                }
-            }
-        }
-
-        for (camera, mut camera_transform, _, mut camera_component) in cam_q.iter_mut() {
-            if !referenced.contains(&camera) {
-                camera_component.is_active = false;
-                camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
-                commands.entity(camera).try_despawn();
-            }
-        }
-        return;
-    }
-
-    if shared_camera.active && active_players > 1 {
-        let lead_camera = player_q
-            .iter()
-            .min_by_key(|(index, _, _)| index.0)
-            .map(|(_, _, camera_ref)| camera_ref.0);
-        let max_trauma = player_q
-            .iter()
-            .map(|(index, _, _)| shake.trauma_for(index.0))
-            .fold(0.0_f32, f32::max);
-        let shake_offset = camera_shake_offset(max_trauma);
-
-        for (_, _, camera_ref) in player_q.iter() {
-            referenced.push(camera_ref.0);
-            if let Ok((_, mut camera_transform, _, mut camera)) = cam_q.get_mut(camera_ref.0) {
-                camera.is_active = Some(camera_ref.0) == lead_camera;
-                camera.viewport = None;
-                if camera.is_active {
-                    *camera_transform = shared_boss_camera_transform(
-                        shared_camera.focus,
-                        shared_camera.radius,
-                        shake_offset,
-                    );
-                }
-            }
-        }
-
-        for (camera, mut camera_transform, _, mut camera_component) in cam_q.iter_mut() {
-            if !referenced.contains(&camera) {
-                camera_component.is_active = false;
-                camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
-                commands.entity(camera).try_despawn();
-            }
-        }
-        return;
-    }
+    let lead_camera = player_q
+        .iter()
+        .min_by_key(|(index, _, _)| index.0)
+        .map(|(_, _, camera_ref)| camera_ref.0);
 
     for (index, player_transform, camera_ref) in player_q.iter() {
         referenced.push(camera_ref.0);
-        let shake_offset = camera_shake_offset(shake.trauma_for(index.0));
-        if let Ok((_, mut camera_transform, pitch, mut camera)) = cam_q.get_mut(camera_ref.0) {
-            camera.is_active = true;
-            camera.viewport = player_viewport(index.0, active_players, win_w, win_h);
-            *camera_transform = player_camera_transform(player_transform, pitch.0, shake_offset);
+        let player_shake = camera_shake_offset(shake.trauma_for(index.0));
+
+        if let Ok((camera_entity, mut camera_transform, pitch, mut camera)) = cam_q.get_mut(camera_ref.0) {
+            let local_ind_transform = player_camera_transform(player_transform, pitch.0, player_shake);
+            let is_lead = Some(camera_entity) == lead_camera;
+
+            if p >= 0.999 {
+                // Fully transitioned: Only the lead camera is active, filling screen completely
+                camera.is_active = is_lead;
+                camera.viewport = None;
+                if is_lead {
+                    *camera_transform = shared_target_transform;
+                }
+            } else if p <= 0.001 {
+                // Fully split-screen mode
+                camera.is_active = true;
+                camera.viewport = player_viewport(index.0, active_players, win_w, win_h);
+                *camera_transform = local_ind_transform;
+            } else {
+                // In transition: Keep both active to perform the blending
+                camera.is_active = true;
+
+                // Position & Rotation Hermite interpolation
+                let blend_pos = local_ind_transform.translation.lerp(shared_target_transform.translation, s);
+                let blend_rot = local_ind_transform.rotation.slerp(shared_target_transform.rotation, s);
+                *camera_transform = Transform {
+                    translation: blend_pos,
+                    rotation: blend_rot,
+                    scale: Vec3::ONE,
+                };
+
+                // Viewport sliding/collapsing lerp
+                let split_vp = player_viewport(index.0, active_players, win_w, win_h);
+                if is_lead {
+                    // P1 Lead camera expands seamlessly to cover full viewport
+                    camera.viewport = interpolate_viewport(split_vp, None, s, win_w, win_h);
+                } else {
+                    // Secondary players collapse smoothly to 1x1 corners to clear the master panel
+                    if let Some(split) = split_vp {
+                        let target_vp = Some(Viewport {
+                            physical_position: split.physical_position,
+                            physical_size: UVec2::new(1, 1),
+                            ..default()
+                        });
+                        camera.viewport = interpolate_viewport(Some(split), target_vp, s, win_w, win_h);
+                    } else {
+                        camera.viewport = None;
+                    }
+                }
+            }
         }
     }
 
@@ -905,12 +977,18 @@ fn clamp_to_dungeon_focus(position: Vec3, center: Vec3, radius: f32) -> Vec3 {
 }
 
 fn shared_encounter_camera_mode_system(
+    time: Res<Time>,
     mut mode: ResMut<SharedEncounterCamera>,
     player_q: Query<&Transform, With<Player>>,
     boss_q: Query<&Transform, (With<BossEnemy>, Without<DeadEnemy>)>,
     drone_q: Query<&Transform, (With<FlyingDrone>, Without<BossEnemy>, Without<DeadEnemy>)>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
+    let dt = time.delta_secs();
+    if mode.reversion_cooldown > 0.0 {
+        mode.reversion_cooldown = (mode.reversion_cooldown - dt).max(0.0);
+    }
+
     let players: Vec<Vec3> = player_q
         .iter()
         .map(|transform| transform.translation)
@@ -919,6 +997,7 @@ fn shared_encounter_camera_mode_system(
         if mode.active {
             mode.active = false;
             mode.reason = SharedEncounterReason::None;
+            mode.reversion_cooldown = 0.0;
         }
         return;
     }
@@ -927,11 +1006,36 @@ fn shared_encounter_camera_mode_system(
         .iter()
         .map(|transform| transform.translation)
         .collect();
-    let drone_positions = nearby_drone_threats(&players, &drone_q);
+
+    // Dual-threshold hysteresis check for FlyingDrone threats
+    let is_currently_active = mode.active && mode.reason == SharedEncounterReason::DroneWing;
+    let drone_positions = if is_currently_active {
+        // Hysteresis exit / retention boundary: within 88.0 meters
+        drone_q
+            .iter()
+            .map(|transform| transform.translation)
+            .filter(|drone| players.iter().any(|player| player.distance(*drone) <= 88.0))
+            .collect::<Vec<Vec3>>()
+    } else {
+        // Hysteresis entry / activation boundary: within 72.0 meters
+        drone_q
+            .iter()
+            .map(|transform| transform.translation)
+            .filter(|drone| players.iter().any(|player| player.distance(*drone) <= 72.0))
+            .collect::<Vec<Vec3>>()
+    };
+
+    let drone_with_hysteresis = if is_currently_active {
+        // Retention count threshold: keep camera active if at least 2 active drones remain
+        drone_positions.len() >= 2
+    } else {
+        // Activation count threshold: trigger camera if at least 3 active drones group here
+        drone_positions.len() >= 3
+    };
 
     let (reason, threats): (SharedEncounterReason, &[Vec3]) = if !boss_positions.is_empty() {
         (SharedEncounterReason::Boss, &boss_positions)
-    } else if drone_positions.len() >= 3 {
+    } else if drone_with_hysteresis {
         (SharedEncounterReason::DroneWing, &drone_positions)
     } else {
         (SharedEncounterReason::None, &[])
@@ -939,15 +1043,28 @@ fn shared_encounter_camera_mode_system(
 
     if reason == SharedEncounterReason::None {
         if mode.active {
-            mode.active = false;
-            mode.reason = SharedEncounterReason::None;
-            msg_ev.write(UiMessageEvent {
-                text: "Party camera released.".to_string(),
-                duration: 1.6,
-            });
+            if mode.reversion_cooldown > 0.0 {
+                // Return and let cooldown tick down before reverting
+                return;
+            } else if mode.reason != SharedEncounterReason::None {
+                // Seed reversion cooldown
+                mode.reversion_cooldown = 2.5;
+                mode.reason = SharedEncounterReason::None;
+                return;
+            } else {
+                // Cooldown elapsed fully
+                mode.active = false;
+                msg_ev.write(UiMessageEvent {
+                    text: "Party camera released.".to_string(),
+                    duration: 1.6,
+                });
+            }
         }
         return;
     }
+
+    // Entering or remaining in an active threat mode: reset any reversion timing
+    mode.reversion_cooldown = 0.0;
 
     let was_active = mode.active;
     let previous_reason = mode.reason;
@@ -1094,6 +1211,8 @@ fn boss_mode_player_slot_offset(index: u8) -> Vec3 {
 fn player_movement(
     time: Res<Time>,
     dungeon: Res<DungeonCrawlState>,
+    shared_camera: Res<SharedEncounterCamera>,
+    player_config: Res<LocalPlayerConfig>,
     mut player_q: Query<
         (
             &mut KinematicCharacterController,
@@ -1180,13 +1299,35 @@ fn player_movement(
         };
         let (input, input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
 
+        // Elastic speed-dampening scale based on player-focus distance for local co-op
+        let mut speed_factor = 1.0;
+        let active_coop = dungeon.active || (shared_camera.active && player_config.active > 1);
+        if active_coop {
+            let (anchor, soft_r, hard_r) = if dungeon.active {
+                (dungeon.focus, dungeon.radius * 0.52, dungeon.radius * 0.92)
+            } else {
+                (shared_camera.anchor, 54.0, 108.0)
+            };
+
+            let to_anchor = (anchor - transform.translation).with_y(0.0);
+            let distance = to_anchor.length();
+            if distance > soft_r {
+                let away_dir = -to_anchor.normalize_or_zero();
+                let dot = input.dot(away_dir);
+                if dot > 0.0 {
+                    let progress = ((distance - soft_r) / (hard_r - soft_r)).clamp(0.0, 1.0);
+                    speed_factor = 1.0 - progress * dot * 0.85;
+                }
+            }
+        }
+
         let sprinting =
             pi.sprint && stats.stamina > 0.0 && input_strength >= movement.analog_sprint_threshold;
         let speed = if sprinting {
             movement.sprint_speed
         } else {
             movement.walk_speed
-        };
+        } * speed_factor;
 
         if sprinting {
             stats.stamina = (stats.stamina - 15.0 * dt).max(0.0);
@@ -1717,6 +1858,24 @@ pub fn damage_player(
         amount: result.damage_amount,
         remaining: health.current,
     });
+}
+
+fn update_camera_post_processing(
+    chapter: Res<CurrentChapter>,
+    mut cameras: Query<
+        (&mut bevy::post_process::bloom::Bloom, &mut DistanceFog),
+        With<PlayerCamera>,
+    >,
+) {
+    if chapter.is_changed() {
+        let (bloom, fog) = chapter.biome.atmosphere_settings();
+        let (_, fog_col, _, _) = chapter.biome.palette();
+        for (mut b, mut f) in cameras.iter_mut() {
+            b.intensity = bloom;
+            f.color = fog_col;
+            f.falloff = FogFalloff::ExponentialSquared { density: fog };
+        }
+    }
 }
 
 #[cfg(test)]

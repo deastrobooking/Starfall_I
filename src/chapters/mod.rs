@@ -341,6 +341,19 @@ pub enum Biome {
 }
 
 impl Biome {
+    /// Returns (bloom_intensity, fog_density) configuration for dynamic post-processing.
+    pub fn atmosphere_settings(&self) -> (f32, f32) {
+        use Biome::*;
+        match self {
+            StarfallLab => (0.35, 0.00018),
+            RiftCity => (0.4, 0.00025),
+            PinkFlameGarden => (0.45, 0.00015),
+            AntarcticaOutpost => (0.2, 0.00030),
+            TibetPeak => (0.15, 0.00010),
+            _ => (0.25, 0.00018),
+        }
+    }
+
     /// Returns (sky, fog, ground, accent) palette for this biome.
     pub fn palette(&self) -> (Color, Color, Color, Color) {
         use Biome::*;

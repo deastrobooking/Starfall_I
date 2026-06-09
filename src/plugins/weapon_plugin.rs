@@ -8,6 +8,7 @@ use crate::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
 };
 use crate::events::*;
+use crate::hacking::HackedUnit;
 use crate::perks::PerkTree;
 use crate::rendering::PbrBundle;
 use crate::resources::DungeonCrawlState;
@@ -194,7 +195,7 @@ fn combat_forward(
 fn aim_assist_direction(
     raw_forward: Vec3,
     muzzle_pos: Vec3,
-    enemy_q: &Query<&Transform, (With<Enemy>, Without<DeadEnemy>)>,
+    enemy_q: &Query<&Transform, (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>)>,
 ) -> Vec3 {
     const ASSIST_RANGE: f32 = 14.0;
     const ASSIST_CONE_COS: f32 = 0.96; // ~15° half-angle
@@ -289,7 +290,7 @@ fn weapon_fire_system(
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
-    enemy_q: Query<&Transform, (With<Enemy>, Without<DeadEnemy>)>,
+    enemy_q: Query<&Transform, (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>)>,
     mut fired_ev: MessageWriter<WeaponFiredEvent>,
 ) {
     let dt = time.delta_secs();
@@ -970,7 +971,7 @@ fn projectile_update_system(
     mut proj_q: Query<(Entity, &mut Transform, &mut Projectile)>,
     mut enemy_q: Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
-        Without<Projectile>,
+        (Without<Projectile>, Without<HackedUnit>),
     >,
     mut enemy_damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut enemy_killed_ev: MessageWriter<EnemyKilledEvent>,
@@ -1079,7 +1080,7 @@ fn explode(
     base_damage: f32,
     enemy_q: &mut Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
-        Without<Projectile>,
+        (Without<Projectile>, Without<HackedUnit>),
     >,
     damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
     killed_ev: &mut MessageWriter<EnemyKilledEvent>,
@@ -1139,7 +1140,10 @@ fn melee_combo_system(
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut enemy_q: Query<(Entity, &Transform, &mut Health, &mut Damageable, &Enemy)>,
+    mut enemy_q: Query<
+        (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
+        Without<HackedUnit>,
+    >,
     mut combo_ev: MessageWriter<ComboHitEvent>,
     mut finished_ev: MessageWriter<ComboFinishedEvent>,
     mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
@@ -1288,7 +1292,10 @@ fn execute_melee_hit(
     arc_cos: f32,
     damage: f32,
     damage_type: DamageType,
-    enemy_q: &mut Query<(Entity, &Transform, &mut Health, &mut Damageable, &Enemy)>,
+    enemy_q: &mut Query<
+        (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
+        Without<HackedUnit>,
+    >,
     damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
     killed_ev: &mut MessageWriter<EnemyKilledEvent>,
 ) {
@@ -1341,7 +1348,10 @@ fn beam_sabre_update_system(
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
-    mut enemy_q: Query<(Entity, &Transform, &mut Health, &mut Damageable, &Enemy)>,
+    mut enemy_q: Query<
+        (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
+        Without<HackedUnit>,
+    >,
     mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {

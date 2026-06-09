@@ -59,6 +59,8 @@ For the current agent-facing execution order, use `docs/agent_next_steps.md`.
 - Exploration settlements now add eight cities, villages, harbors, and outposts to the 200-mile range, with physical building clusters, `WorldAnchor`s, map markers, and saved exploration caches for future subquests.
 - Settlement NPCs now open a discussion GUI from `E` / D-pad Down, with data-driven MP3 voice hooks per line in `src/discussion.rs`; Cloudrail City and Switchwork Borough also have Free Peoples guardian ships patrolling above the peaceful mega-city hubs.
 - Peaceful mega cities now hide Scallarian spy drones: each city has two non-combat `CitySpyDrone`s that can be shot down, dropping save-backed `SpyData` rewards for credits, XP, and armor.
+- Engine M8 counteroffensives now have a first save-backed raid slice: Cloudrail City can enter `UnderAttack`, spawn a visible UFO marker plus Scallarian drone swarm, resolve through player combat or static settlement defenses, and fail softly to `Damaged`.
+- Engine M10 tech hacking now has a first save-backed slice: small Scallarian drones can be hacked from interact range, learn `blueprint_scallarian_drone_core`, add a Scout Drone command asset, temporarily link as friendly `HackedUnit`s, pulse nearby hostile targets from owner input, and count as neutralized raid threats.
 - Great Scientist temple subquests now fill more of the 200-mile map with optional dungeon-like labs. Their hidden cores grant persistent mechanics upgrades for flight, laser/sabre pressure, nova missiles, and armor traversal.
 - Dragon lair dungeons now exist for chapters 6-11, with SNES-RPG-style room/corridor layouts, moving bridge platforms, turret guards, raised lair dais anchors, and save-backed hoard beacons.
 - Dragon lair entrances now have interactable big gates that activate single-screen top-down dungeon crawl mode, open sliding door panels, pull the party together, remap movement to top-down axes, and widen hand/Star Sabre attack arcs for hack-and-slash rooms.
@@ -254,3 +256,24 @@ The terrain currently uses a Rapier `TriMesh` collider built from the generated 
 `WaveInfo` is kept alive only for legacy loot tables and save compatibility. It is still read and written by several systems that predate the `ChapterPlugin` director. Future contributors may not realize it is a deprecated stub and add new behavior to it.
 
 **Fix:** add a `#[doc = "Legacy stub — kept only for save compatibility and loot drop tables. Do not add new game logic here; use ChapterProgress or WorldSiteRegistry instead."]` attribute to `WaveInfo`. Audit and document each remaining read site so a future cleanup pass can remove them safely.
+
+### 24. Replace Placeholder Capsule Visuals with Full Skeletal Animation
+**Files:** `src/plugins/character_plugin.rs`
+
+Character models are essentially modular capsules swapped around to emulate poses. Transitioning to complex movesets (e.g. chaining swings, glides, parkour) will become unmaintainable using static pose-swaps.
+
+**Fix:** Adopt `bevy_animation` and migrate character rigs to proper glTF skeletal meshes. Connect these animations directly into the logic of `PlayerStateMachine`, mapping variables like velocity and wall-proximity to blend trees.
+
+### 25. Art Tool Integration & Data-Driven Assets
+**Files:** `src/main.rs`, `src/plugins/world_plugin.rs`, `src/character_blueprint.rs`
+
+All character recipes, world colors, and lighting values are currently hardcoded in Rust structs, necessitating a full engine recompile for any graphical tweak. 
+
+**Fix:** Adopt external data formats (JSON or RON) for non-engine assets, enabling hot-reloading using the Bevy asset server. Implement an immediate-mode dev GUI (like `bevy_inspector_egui`) allowing artists and designers to mutate `GameSettings` and character sliders on the fly. 
+
+### 26. Performance Profiling and Asset Streaming
+**Files:** `src/plugins/world_plugin.rs`, `src/plugins/enemy_plugin.rs`
+
+The giant 200x200 mile Everest terrain map, its biomes, and cities load massively heavy loops inside `world_plugin.rs`. Spawning this synchronously or computing collision for all distant terrain risks massive lag spikes.
+
+**Fix:** Adopt level-of-detail (LOD), frustum culling overrides, or spatial chunking so Rapier and Bevy graphics pipelines only load/compute the active gameplay vicinity while streaming distant blocks asynchronously. Use benchmarking utilities (like `bevy_tracy`) to lock in optimization budgets.

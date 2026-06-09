@@ -32,6 +32,7 @@ use crate::resources::{
     ChapterProgress, CharacterDesignData, CurrentChapter, LocalPlayerConfig, PlaySessionTransition,
     PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
+use crate::commands::{CommandOverlayState, CommandRegistry};
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::state::AppState;
 use crate::upgrades::{all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger};
@@ -60,9 +61,12 @@ impl Plugin for UiPlugin {
             .init_resource::<ControllerDiagState>()
             .add_systems(
                 OnEnter(AppState::Playing),
-                (setup_hud, despawn_menu, setup_controller_diag),
+                (setup_hud, despawn_menu, setup_controller_diag, setup_command_overlay),
             )
-            .add_systems(OnExit(AppState::Playing), despawn_controller_diag)
+            .add_systems(
+                OnExit(AppState::Playing),
+                (despawn_controller_diag, despawn_command_overlay),
+            )
             .add_systems(
                 OnEnter(AppState::Paused),
                 (setup_pause_menu, freeze_physics_on_pause),
@@ -89,6 +93,11 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (toggle_controller_diag, update_controller_diag)
+                    .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
+            )
+            .add_systems(
+                Update,
+                (toggle_command_overlay, update_command_overlay)
                     .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
             )
             .add_systems(
@@ -3806,3 +3815,123 @@ fn update_controller_diag(
 
     *text = Text::new(lines.join("\n"));
 }
+
+// ── Command Strategy Overlay ──────────────────────────────────────────────────
+
+#[derive(Component)]
+struct CommandOverlayRoot;
+
+#[derive(Component)]
+struct CommandOverlayText;
+
+fn setup_command_overlay(mut commands: Commands) {
+    commands
+        .spawn((
+            CommandOverlayRoot,
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(8.0),
+                bottom: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                flex_direction: FlexDirection::Column,
+                max_width: Val::Px(340.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.05, 0.12, 0.85)),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                CommandOverlayText,
+                Text::new("Command Assets"),
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.70, 1.0, 0.80)),
+            ));
+        });
+}
+
+fn despawn_command_overlay(
+    mut commands: Commands,
+    q: Query<Entity, With<CommandOverlayRoot>>,
+    mut state: ResMut<CommandOverlayState>,
+) {
+    for e in q.iter() {
+        commands.entity(e).despawn();
+    }
+    state.enabled = false;
+}
+
+fn toggle_command_overlay(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<CommandOverlayState>,
+    mut root_q: Query<&mut Visibility, With<CommandOverlayRoot>>,
+) {
+    if !keyboard.just_pressed(KeyCode::F7) {
+        return;
+    }
+    state.enabled = !state.enabled;
+    let vis = if state.enabled {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in root_q.iter_mut() {
+        *v = vis;
+    }
+}
+
+fn update_command_overlay(
+    state: Res<CommandOverlayState>,
+    command_registry: Res<CommandRegistry>,
+    site_registry: Res<WorldSiteRegistry>,
+    mut text_q: Query<&mut Text, With<CommandOverlayText>>,
+) {
+    if !state.enabled {
+        return;
+    }
+    let Ok(mut text) = text_q.single_mut() else {
+        return;
+    };
+
+    let mut lines = Vec::new();
+    lines.push("── Command Assets [F7] ──".to_string());
+
+    for site in &site_registry.sites {
+        let at_site = command_registry.assets_at_site(site.id);
+        if at_site.is_empty() {
+            continue;
+        }
+        lines.push(format!("{} [{:?}]:", site.name, site.state));
+        for a in at_site {
+            lines.push(format!(
+                "  {} hp:{} rd:{}",
+                a.kind.label(),
+                a.health,
+                a.readiness
+            ));
+        }
+    }
+
+    let unassigned = command_registry.unassigned();
+    if !unassigned.is_empty() {
+        lines.push("Reserve:".to_string());
+        for a in unassigned {
+            lines.push(format!(
+                "  {} hp:{} rd:{}",
+                a.kind.label(),
+                a.health,
+                a.readiness
+            ));
+        }
+    }
+
+    if command_registry.assets.is_empty() {
+        lines.push("No command assets yet.".to_string());
+    }
+
+    *text = Text::new(lines.join("\n"));
+}
+

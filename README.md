@@ -18,6 +18,9 @@ Implemented:
 - Everest-range world-map foundation: the imported Everest heightmap now spans a 200 x 200 mile `20_000`-unit range, with smoothed height/slope terrain color layers, snowfields, glacier streams, alpine forests, sci-fantasy outposts, carved mountain path corridors, glowing guide studs, dragon-lair silhouettes, visible fast-travel beacons, and clickable chapter-select map markers for all 14 chapters.
 - Exploration settlement foundation: eight additional cities, villages, harbors, and outposts now appear physically in the range, use terrain-aware grounded/terraced/sky-district layouts with floating mega-city ramps and mountain-inset gates, show as map markers, expose `WorldAnchor`s for future subquests, and hold saved exploration caches.
 - Settlement builder/economy vertical slice: settlement terminals unlock after cache recovery or site liberation, spend shared resources and robot salvage on farms, factories, spaceports, power plants, research labs, defense outposts, and bridge hubs, save/load build tiers, tick bounded passive outputs, and spawn physical rebuilt modules in the world.
+- Raid counteroffensive slice: liberated Cloudrail City can enter an `UnderAttack` warning, spawn a visible Scallarian UFO marker plus drone swarm, resolve through player combat or static settlement defenses, and save/load raid state.
+- Command strategy first slice: `CommandRegistry` tracks 9 commandable asset kinds (Worker/Scout/FighterDrones, TurretDrone, GroundMech, Boat, FighterJet, Ship, MegaShip) with health/readiness/assignment; assets assigned to a liberated site add to its raid defense score so players can auto-resolve threats with positioned forces; F7 overlay shows asset roster grouped by site; save/load persistent.
+- Tech hacking first slice: small Scallarian drones are hackable with interact, grant the saved `blueprint_scallarian_drone_core`, add a Scout Drone command asset, temporarily link as a friendly follower, and pulse nearby hostile enemies from the owner's fire/melee input.
 - Great Scientist temple subquests now fill the wider map with optional dungeon-like labs and chapter-select map hints that grant full mechanics upgrades: Ancient Flight Core, Solar Sabre Glyph, Nova Missile Matrix, and Aegis Armor Frame.
 - Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
 - Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
@@ -26,7 +29,7 @@ Implemented:
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
-- Player mechanics MVP foundation now includes a single star-tech grappling hook state, `G` / Select+RB input, and a procedural grapple wind-up pose; hook targeting, mountain pull, swing physics, and hook combat are planned in `docs/motion_mechanics_roadmap.md`.
+- Player mechanics MVP foundation now includes a single star-tech grappling hook state, `G` / Select+RB input, and a procedural grapple wind-up pose; hook targeting, mountain pull, swing physics, and hook combat are planned in `docs/motion_mechanics_roadmap.md` (milestones MM1–MM10).
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
 - RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
 
@@ -224,7 +227,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 - [Motion Mechanics Roadmap](docs/motion_mechanics_roadmap.md)
 - [Naming Guide](docs/naming.md)
 - [Agent Next Steps](docs/agent_next_steps.md)
-- [Engine Upgrade Milestones](docs/engine_upgrade_milestones.md)
+- [Engine Upgrade Milestones](docs/engine_upgrade_milestones.md) — campaign/engine milestones `M#`; also defines the `MM#` / `AI#` naming convention
 
 ## Project Structure
 

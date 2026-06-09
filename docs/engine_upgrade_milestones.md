@@ -72,6 +72,18 @@ Manual macOS smoke validation is required for engine bumps:
 If the upgrade requires a risky architecture choice, stop and document the
 decision before changing broad gameplay code.
 
+## Milestone Naming Conventions
+
+To prevent label collision across the three living roadmaps, use these prefixes everywhere — in code comments, commit messages, and planning docs:
+
+| Prefix | Roadmap | File |
+|--------|---------|------|
+| `M#` | Engine / campaign strategy milestones | `docs/engine_upgrade_milestones.md` (this file) |
+| `MM#` | Motion mechanics / traversal milestones | `docs/motion_mechanics_roadmap.md` |
+| `AI#` | Enemy AI behavior milestones | `docs/ai_enemy_mechanics_roadmap.md` (future) |
+
+Examples: "M7 Connected Platformer Route Network", "MM3 Zip And Mountain Pull", "AI2 Patrol Behavior".
+
 ## Milestones
 
 ### M0: Baseline And Documentation
@@ -412,6 +424,52 @@ Acceptance:
 - Raid UI clearly tells players where to go, what is attacking, and what is at
   risk.
 
+Current implementation note:
+
+- `src/raids.rs` owns the first save-backed raid layer: `RaidKind`,
+  `RaidPhase`, `RaidConsequence`, `RaidResolution`, `RaidId`, `RaidRecord`,
+  and `RaidRegistry`.
+- The first playable slice is a tutorial Scallarian `DroneSwarm` targeting
+  Cloudrail City (`WorldSiteId(4)`). A liberated Cloudrail can enter
+  `UnderAttack`, warn players, spawn a visible UFO marker plus tagged drone
+  enemies, and resolve back to `Liberated` when players clear the threat.
+- Static settlement defense is calculated from built modules. `DefenseOutpost`
+  contributes the most; `PowerPlant`, `Spaceport`, and `ResearchLab` provide
+  smaller support. If Cloudrail has enough defense before the warning expires,
+  the raid resolves as `Shielded`.
+- Failed early raids mark the site `Damaged` instead of deleting progress or
+  returning it to `EnemyHeld`.
+- `SaveData.raids` persists raid records with `serde(default)`. Active raids can
+  respawn their tagged enemies after save/load because runtime entities are not
+  serialized.
+- Route blockade support is intentionally only an integration seam for now:
+  `RaidRecord.target_route: Option<WorldRouteId>` exists, but actual route
+  blocking should land after Engine M7 route behavior is stable.
+
+### 2026-06-09: M9 Command Strategy Layer — First Slice
+
+- Added `src/commands.rs` with `CommandAssetKind`, `CommandAssetAssignment`,
+  `CommandAssetId`, `CommandAsset`, `CommandAssetSaveRecord`,
+  `CommandRegistry`, `CommandOverlayState`, and `initial_command_assets()`
+  (2 WorkerDrones + 1 ScoutDrone at campaign start).
+- `CommandRegistry.defense_score_for_site()` sums defense contributions from
+  assets assigned to a site; `FighterDrone` = 4, `TurretDrone` = 5, etc.
+  Assets below 30 readiness or at 0 health contribute nothing.
+- `raid_counteroffensive_start_system` and `raid_tick_system` in
+  `world_plugin.rs` now add `command_registry.defense_score_for_site()` to
+  the static settlement defense score, so assigned fighters and mechs can
+  auto-resolve or delay raids before players arrive.
+- `SaveData.command_assets: Vec<CommandAssetSaveRecord>` added with
+  `#[serde(default)]` for backward compatibility. `SaveParams` extended to
+  14 fields (within the 16-param limit).
+- `hydrate_progress_from_disk` and `load_save_on_enter` initialize from
+  `initial_command_assets()` if empty, then apply save records.
+- F7 toggles a bottom-left command overlay in Playing/Paused showing all
+  assets grouped by assigned site plus an unassigned reserve section.
+- 4 new pure tests: fighter at site contributes defense, low-readiness gives
+  zero, save round-trip preserves health/assignment, initial assets count.
+  72 tests passing.
+
 ### M9: Command Strategy Layer
 
 Goal: introduce endgame-scale resource management where players control the
@@ -504,6 +562,44 @@ Acceptance:
 - Hacking cannot corrupt player ownership, split-screen camera assignment, or
   party-shared save state.
 
+Current implementation note:
+
+- `src/hacking.rs` owns the first hacking data model: `HackTargetClass`,
+  `TakeoverProfile`, `Hackable`, `HackProgress`, `HackedUnit`,
+  `HackBlueprintRecord`, `HackCaptureRecord`, and the save-backed
+  `HackingRegistry`.
+- `src/plugins/hacking_plugin.rs` adds the first playable action: any active
+  player can hold the existing interact input near a small Scallarian drone to
+  complete a short hack link. The first slice deliberately uses the shared
+  input map before adding a dedicated tech-hero-only UX.
+- Enemy drones spawned through `spawn_enemy_entity()` now receive
+  `Hackable::scallarian_drone()`. Completing the hack learns
+  `blueprint_scallarian_drone_core`, records the capture in `HackingRegistry`,
+  adds a `ScoutDrone` to the `CommandRegistry`, and converts the drone into a
+  temporary `HackedUnit` that follows the owning player.
+- While linked, pressing fire or a melee input makes the hacked drone pulse the
+  nearest still-hostile enemy, using the normal enemy damage/kill event path
+  before entering a short cooldown.
+- Hacked units are filtered out of hostile drone AI, enemy attack systems, and
+  player weapon aim/damage queries.
+  If the hacked drone was part of a raid, the raid threat marker is removed so
+  the takeover counts as neutralizing that threat.
+- `SaveData.hacking` persists blueprint/capture records with
+  `#[serde(default)]`. The temporary linked drone entity itself is runtime-only
+  and safely powers down after its timer expires.
+
+Next M10 work:
+
+- Gate advanced hacking strength by tech/scientist hero identity, upgrade rank,
+  target stagger state, and research-lab discoveries.
+- Add true possession camera/control mode for remote drones, then extend the
+  same handoff rules to worker robots, combat robots, mechs, ships, and UFO
+  weak-point systems.
+- Replace the simple follow-and-pulse prototype with true remote movement,
+  aiming, and animation poses once possession camera rules are stable.
+- Add deterministic reward tables for blueprints, enemy weakness entries,
+  research projects, and command/fleet component designs.
+
 ### M11: Endgame Reclamation War
 
 Goal: combine action RPG, platforming, cities, fleets, drones, resources,
@@ -582,3 +678,105 @@ Acceptance:
 - Removed pre-existing broken stub registrations
   (`settlement_economy_tick_system`, `settlement_build_terminal_system`) from
   `WorldPlugin::build`.
+
+### 2026-06-09: M5 Reclaimable World State — Second Slice (Full Settlement Registry)
+
+- `initial_world_sites()` expanded from 3 to 9 entries covering all 8
+  `map_settlements()` locations plus Iron Watchpost.
+- Cloudrail City (site 4) and Switchwork Borough (site 9) start `Liberated /
+  FreePeoples`; the 6 remaining settlements start `EnemyHeld / Scallarian`.
+- `MapSettlement` gained `site_id: Option<u16>` field; all 8 entries populated
+  with matching site IDs 2–9.
+- `spawn_fast_travel_map` now skips generic settlement map markers when a
+  `site_id` is set — the world-site colored badge is the canonical marker.
+- Added 4 tests: unique site IDs, count = 9, liberated cities have 0 defenders,
+  enemy-held sites have > 0 defenders. 62 tests passing.
+
+### 2026-06-09: N4 Dragon Lair Deepening — Chapters 7–11
+
+- Added `spawn_ch7_ember_dungeon_extras` through `spawn_ch11_icebreaker_dungeon_extras`
+  in `world_plugin.rs`.
+- Each function adds a themed key gem (colored orb + point light), two sliding
+  boss-gate slabs, and three `DungeonEnemySpawner` entities at entrance/mid/boss
+  positions.
+- Dispatch in `spawn_dragon_lair_dungeons` changed from `if chapter == 6` to a
+  full `match chapter { 6..=11 }` block.
+
+### 2026-06-09: M7 Connected Platformer Level Network — First Slice
+
+- Added `WorldRouteKind`, `WorldRouteState`, `WorldRouteId`, `WorldRoute`,
+  `WorldRouteSaveRecord`, `WorldRouteRegistry`, and `initial_world_routes()` to
+  `src/resources.rs`. Six initial routes defined (IDs 1–6) covering the 9-site
+  world: two start `Open` (requiring already-liberated cities), four start
+  `Locked`.
+- Added `WorldRouteMarker` component to `src/components/world.rs`.
+- Added `world_routes: Vec<WorldRouteSaveRecord>` to `SaveData` with
+  `#[serde(default)]` for backward save compatibility.
+- Added `world_route_registry: Res<WorldRouteRegistry>` to `SaveParams` (12th
+  field; stays within Bevy's 16-param limit).
+- Added `setup_world_route_registry` and `world_route_unlock_system` to
+  `world_plugin.rs`. `world_route_unlock_system` runs every frame in Playing,
+  opening any Locked route whose `required_site` has become Liberated.
+- `hydrate_progress_from_disk` and `load_save_on_enter` now initialize and apply
+  route records from disk.
+- 68 tests passing.
+
+### 2026-06-09: M10 Tech Hero Hacking — First Drone Takeover Slice
+
+- Added `src/hacking.rs` and `src/plugins/hacking_plugin.rs` for hack target
+  classes, takeover profiles, `Hackable`, `HackProgress`, `HackedUnit`,
+  blueprint/capture records, and `HackingRegistry`.
+- Registered `HackingPlugin` and `HackingRegistry`, and wired
+  `SaveData.hacking` / `SaveParams.hacking_registry` with `#[serde(default)]`
+  compatibility.
+- Small Scallarian drones spawned through `spawn_enemy_entity()` now become
+  hackable. Holding interact near one completes a short hack, saves
+  `blueprint_scallarian_drone_core`, records the capture, and adds a
+  `ScoutDrone` command asset.
+- Completed hacks convert the drone into a temporary friendly `HackedUnit` that
+  follows the owning player, pulses nearby hostile enemies from owner fire/melee
+  input, and powers down safely when its timer expires.
+- Hacked units are excluded from hostile drone AI, enemy attack systems, and
+  player weapon aim/damage queries. Raid threat markers are removed on takeover
+  so hacking a raid drone counts as neutralizing it.
+- `LoadRegistriesParam` SystemParam bundle carries `raid_registry`,
+  `command_registry`, `hacking_registry`, and `final_war_registry` to keep
+  load systems within Bevy's 16-param limit as more save resources accrue.
+
+### 2026-06-09: M11 Endgame Reclamation War — First Slice
+
+- New module `src/final_war.rs`:
+  - `FinalWarPhase` enum: `Dormant` / `Escalating` / `Active` / `Climax`.
+  - `FactionPressure { faction, pressure }` — per-faction enemy pressure counter.
+  - `FinalWarRegistry` resource: phase, faction pressures, pressure tick timer,
+    coordinated raid cooldown timer; `add_pressure()` auto-advances phase when
+    thresholds are crossed (50 / 150 / 300 total pressure).
+  - `FinalWarSaveRecord` — serde round-trip; `apply_save_record` restores full state.
+  - `initial_faction_pressures()` seeds DimensionalAlien, DragonRoyalty, DragonExile at 0.
+  - `pressure_accumulation_system` — ticks every 10 s; each enemy-held site owned by
+    Scallarian or DragonDomain contributes +1 pressure to its faction.
+  - `coordinated_raid_trigger_system` — fires when cooldown expires; targets up to
+    N liberated sites simultaneously (1/2/4 based on phase); attacker/raid kind
+    derived from dominant faction. Cooldown resets to 120/60/30 s by phase.
+- `push_new_raid()` added to `RaidRegistry` — public constructor that allocates
+  an ID and pushes a `RaidRecord` with `RaidPhase::Warning`.
+- Both systems registered in `world_plugin.rs` Update chain for `Playing` state.
+- `FinalWarRegistry` registered as resource in `main.rs`.
+- `SaveParams` gains `final_war_registry` (16th field); `SaveData` gains
+  `pub final_war: FinalWarSaveRecord`; wired into `build_save_data`, `save_game`,
+  `save_current_session`, `hydrate_progress_from_disk`, and `load_save_on_enter`.
+- 4 new tests: phase escalation, dominant faction, save round-trip, cooldown ordering.
+- 80 tests passing.
+
+### 2026-06-09: Local Co-op Viewport Transitions & Hysteresis Camera Tweaks
+
+- Added `CameraDisplayTransition` resource to `src/plugins/player_plugin.rs` to track smooth transitions between split-screen and shared-screen camera modes.
+- Implemented Hermite S-curve interpolation ($s = 3p^2 - 2p^3$) for camera position, rotation, and viewports during transitions.
+  - Lead camera (P1) viewports expand seamlessly from split-screen to full screen.
+  - Secondary player cameras (P2-P4) slide and shrink down to $1 \times 1$ corners inside their frames during transitions before turning off.
+- Introduced a dual-threshold hysteresis filter for drone-based cooperative cameras:
+  - Cameras group and trigger shared mode when $\ge 3$ active drones remain within $72.0\text{m}$.
+  - Cameras stay linked until drone count drops $< 2$ or distance exceeds $88.0\text{m}$.
+- Added a `reversion_cooldown: f32` timer of $2.5\text{s}$ to `SharedEncounterCamera` to prevent rapid toggling/camera flicker when crossing threat boundaries.
+- Introduced elastic tether speed dampening ($speed\_factor = 1.0 - progress \times dot \times 0.85$) for players running *away* from co-op anchors inside shared modes, creating a tactile "heavy tug" feel near the hard radius limit while allowing unrestricted speed when moving back toward the group.
+- Verified all modifications compiling cleanly. 80 tests passing.

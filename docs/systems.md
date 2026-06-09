@@ -289,11 +289,134 @@ Sites 2–9 correspond to `map_settlements()` entries via `MapSettlement.site_id
 
 ### Save Schema
 
-`SaveData.world_sites: Vec<WorldSiteSaveRecord>` uses `#[serde(default)]` so older saves without site data continue to load with the initial default site list applied. `SaveParams` includes `world_site_registry: Res<WorldSiteRegistry>` as its tenth field, staying within Bevy's 16-system-parameter limit.
+`SaveData.world_sites: Vec<WorldSiteSaveRecord>` uses `#[serde(default)]` so older saves without site data continue to load with the initial default site list applied. `SaveParams` includes `world_site_registry: Res<WorldSiteRegistry>` alongside other shared campaign registries.
 
 ### Spawn Entity Tagging
 
 `spawn_enemy_entity` in `enemy_plugin.rs` returns `Entity` (changed from `()` in M5) so callers can immediately insert `WorldSiteMarker` onto newly spawned enemies. Existing call sites that don't need the return value simply ignore it.
+
+---
+
+## World Routes / Connected Platformer Network (M7)
+
+**File:** `src/resources.rs` (types), `src/plugins/world_plugin.rs` (systems), `src/plugins/save_plugin.rs` (persistence)
+
+**Resource:** `WorldRouteRegistry` (holds `Vec<WorldRoute>`)
+
+World routes are typed, persistent connections between two `WorldSite` nodes. They model the physical traversal spaces players use to move across the strategic map: roads, mountain trails, sky bridges, rail lines, rivers, ocean lanes, tunnels, space lanes, and dungeon gates.
+
+### Route State Machine
+
+`WorldRouteState`:
+- `Locked` — impassable; cannot be used for fast-travel or physical traversal (default).
+- `Open` — passable; physical props spawned, fast-travel allowed via liberated anchors.
+- `Contested` — open but under enemy pressure; spawns a raid encounter in the traversal space.
+- `Blocked` — temporarily sealed; requires a specific player action to reopen.
+
+### Route Kinds
+
+`WorldRouteKind`: Road, MountainPath, SkyBridge, Rail, River, OceanLane, Tunnel, SpaceLane, DungeonGate.
+
+### Auto-Unlock Rule
+
+Each `WorldRoute` has a `required_site: WorldSiteId`. Every frame, `world_route_unlock_system` scans Locked routes and opens any route whose required site has become `Liberated`. Routes requiring sites that start liberated (Cloudrail City, Switchwork Borough) are initialized `Open` in `initial_world_routes()`.
+
+### Initial Route Table (6 routes)
+
+| ID | From → To | Kind | Initial State |
+|----|-----------|------|---------------|
+| 1 | Iron Watchpost → Riftglass Village | SkyBridge | Locked (req site 1) |
+| 2 | Riftglass Village → Cloudrail City | Road | Locked (req site 2) |
+| 3 | Cloudrail City → Granite Market | Rail | Open (city pre-liberated) |
+| 4 | Starfell Outpost → Frost Harbor | MountainPath | Locked (req site 3) |
+| 5 | Star Orchard → Lantern Hamlet | Road | Locked (req site 6) |
+| 6 | Switchwork Borough → Frost Harbor | OceanLane | Open (city pre-liberated) |
+
+### World Marker
+
+`WorldRouteMarker { id: WorldRouteId }` tags beacon entities spawned at route midpoints. These are valid hook-attach targets (MM2+) and encounter anchor points.
+
+### Save Schema
+
+`SaveData.world_routes: Vec<WorldRouteSaveRecord>` (`#[serde(default)]`) stores only `id + state` per route. On load, `initial_world_routes()` seeds the registry first, then `apply_save_records` patches states from disk. `SaveParams` carries `world_route_registry` alongside the other shared campaign registries.
+
+---
+
+## Raid Counteroffensives (M8)
+
+**Files:** `src/raids.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`
+
+**Resource:** `RaidRegistry` (holds `Vec<RaidRecord>`)
+
+Engine M8 adds the first save-backed counteroffensive layer. A `RaidRecord`
+stores a stable `RaidId`, `RaidKind`, `RaidPhase`, target `WorldSiteId`,
+optional `WorldRouteId`, attacker faction, warning/active timers, required
+static defense score, spawned flag, wave size, consequence, and resolution.
+
+Current first slice:
+
+- Cloudrail City (`WorldSiteId(4)`) can trigger one tutorial Scallarian
+  `DroneSwarm` after it is liberated.
+- Warning phase sets the site to `UnderAttack` and announces the incoming raid.
+- Active phase spawns a visible UFO marker above the site and tagged drone
+  enemies through `spawn_enemy_entity`.
+- Defeating all tagged `RaidThreatMarker` enemies resolves the raid and returns
+  the site to `Liberated`.
+- Timeout/failure marks the site `Damaged`; early raids do not erase builds or
+  permanently reoccupy major progress.
+
+Static defense is computed from settlement builds linked to the target site.
+`DefenseOutpost` contributes the most, while `PowerPlant`, `Spaceport`, and
+`ResearchLab` provide smaller support. If the defense score meets the raid's
+required score during warning, the site becomes `Shielded` and the raid resolves
+without spawning enemies.
+
+`SaveData.raids: Vec<RaidRecord>` uses `#[serde(default)]` for legacy saves.
+Runtime raid enemies/UFOs are not serialized; active saved raids respawn their
+tagged threats when the world is generated again. Route blockade raids have an
+optional `target_route`, but actual route blocking should stay behind Engine M7
+route behavior.
+
+---
+
+## Tech Hacking And Takeover (M10)
+
+**Files:** `src/hacking.rs`, `src/plugins/hacking_plugin.rs`,
+`src/plugins/enemy_plugin.rs`, `src/plugins/weapon_plugin.rs`,
+`src/plugins/save_plugin.rs`
+
+**Resource:** `HackingRegistry` (saved blueprint and capture records)
+
+Engine M10 starts the tech hero hacking path. The current slice gives small
+Scallarian drones a `Hackable::scallarian_drone()` component when they spawn.
+Any active player can use the existing interact input near the drone to start a
+short hack link; staying in range completes the hack.
+
+On completion:
+
+- `HackingRegistry` learns `blueprint_scallarian_drone_core` once and records
+  each capture attempt.
+- `CommandRegistry` gains a new unassigned `ScoutDrone` asset, so hacked enemy
+  tech feeds the command strategy layer.
+- The drone becomes a temporary `HackedUnit` owned by the initiating
+  `PlayerIndex`.
+- Hacked drones are excluded from normal hostile AI, enemy attack systems, and
+  player weapon aim/damage queries while linked.
+- If the drone was part of an active raid, its `RaidThreatMarker` is removed so
+  the takeover counts as neutralizing that hostile unit.
+
+Linked drones follow their owning player for a short timer. Pressing fire or
+melee while linked triggers a basic laser pulse against the nearest still-hostile
+enemy in range, using the normal enemy damage/damaged/killed event path. The
+linked drone powers down safely when its timer expires.
+
+`SaveData.hacking: HackingRegistry` uses `#[serde(default)]` for legacy saves.
+Only blueprint/capture knowledge is persisted; runtime linked drone entities are
+not serialized.
+
+Future M10 work should add tech/scientist gating, true remote possession camera
+rules, target stagger requirements for larger robots/mechs/ships, deterministic
+blueprint reward tables, and UFO weak-point hacking.
 
 ---
 

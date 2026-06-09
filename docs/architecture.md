@@ -16,6 +16,9 @@ src/
   perks.rs                  PerkTree, PerkBranch, PerkDef — Heart / Star / Acrobat branches
   robot_pets.rs             Saved robot pet collection, salvage parts, store-build recipes, and combined vehicle/mech/ship form gates
   upgrades.rs               Saved tech upgrade ledger for beams, missiles, turrets, health, rejuvenation, and future mech links
+  commands.rs               Save-backed command asset roster for workers, drones, mechs, ships, assignments, and defense scores
+  raids.rs                  Save-backed raid counteroffensive records, phases, defense scoring, and raid markers
+  hacking.rs                Hackable targets, takeover profiles, hacked units, blueprint/capture registry
   characters.rs             Cartoon character construction, hero color configs, designer presets
   chapters/mod.rs           All 14 ChapterDef scripts + Biome palettes
   components/
@@ -38,11 +41,12 @@ src/
     player_plugin.rs        Movement, ledge hang, wall jump, jetpack, dodge, parry, perks, death
     weapon_plugin.rs        Projectile firing, melee combo, Star Sabre, specials, perk/tech ammo and damage, VFX
     enemy_plugin.rs         AI state machine, spawning, loot drops
+    hacking_plugin.rs       Interact-to-hack drone links, hacked-unit follow/pulse behavior, blueprint capture rewards
     character_plugin.rs     Idle/walk/jump/hang cartoon pose animation; swap_character_parts
     chapter_plugin.rs       Chapter director, secret cave beacons, relic puzzles, relic-fragment obstacle courses, castle airship escalation
     ui_plugin.rs            HUD, menus, chapter select, perk training, upgrade shop, damage numbers
     world_plugin.rs         Deterministic terrain generation, mixed ancient/new city facades, secret cave systems, prop placement, lighting; world site props, enemy sentinels, liberation system
-    save_plugin.rs          F5 manual save + 30s autosave -> starfall_i_save.json; persists PlayerPartLoadout + WorldSiteRegistry via SaveParams SystemParam
+    save_plugin.rs          F5 manual save + 30s autosave -> starfall_i_save.json; persists PlayerPartLoadout + world site/route/raid/command/hacking registries via SaveParams SystemParam
     armor_plugin.rs         Armor repair / equip systems
     chest_plugin.rs         Chest spawn, interact, loot roll
     crafting_plugin.rs      Crafting menu, recipe matching
@@ -139,4 +143,6 @@ Party-shared exceptions:
 - **Assembly-driven vehicle modes**: `VehicleState` uses `GroundMode` (None/Motorcycle/Tank/GiantMech) and `AirMode` (None/Jet/Ship) enums. `vehicle_input()` checks `RobotPetCollection.active_assembly` first, falling back to `PlayerLoadout` blueprints. Each mode applies its own speed/jetpack/armor buffs via `apply_vehicle_buffs()`. M toggles ground mode, J toggles air/boat mode.
 - **Chassis persistence**: `CharacterPartStyle` is serializable. `PlayerPartLoadout` (body/arms/legs/shoulders slot choices) is saved and hydrated through all save paths using `#[serde(default)]` for backward compatibility.
 - **Reclaimable world state via WorldSite**: the 200-mile Everest Range world can be liberated, defended, rebuilt, and attacked again. `WorldSiteRegistry` (a `Resource` holding `Vec<WorldSite>`) is the single canonical list of named world positions with state, owner, and liberation progress. Save data compacts this to `Vec<WorldSiteSaveRecord>` (id/state/owner/enemies_defeated). At runtime, `WorldSiteEnemySentinel` entities anchor each enemy-held site; `world_site_enemy_spawner_system` triggers a spawn when the player enters the sentinel radius; `site_liberation_system` flips the site to `Liberated` and spawns a `SiteCommandTerminal` when all tagged defenders are dead. Chapter-select badges on the fast-travel map update color to reflect each site's current `WorldSiteState`.
+- **Recoverable raid counteroffensives**: `RaidRegistry` stores save-backed `RaidRecord`s for warning, active, and resolved counterattacks. The first Engine M8 slice targets Cloudrail City with a Scallarian drone swarm, uses settlement builds for static defense auto-resolution, and fails softly to `Damaged` instead of deleting progress.
+- **Tech hacking as the takeover spine**: `HackingRegistry` stores saved blueprint and capture records. The first Engine M10 slice lets players hack small Scallarian drones, add a `ScoutDrone` command asset, temporarily link the drone as a friendly `HackedUnit`, pulse nearby hostile enemies from the owner's input, and neutralize raid threat markers without taking over the player camera yet.
 - **Damage pipeline**: `DamageInfo → apply_damage() → DamageResult` with resistance multipliers, then callers emit events. Parry and armor are handled in `damage_player()` in player_plugin before the generic pipeline.

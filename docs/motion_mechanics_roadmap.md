@@ -1,9 +1,18 @@
 # Starfall I Player Mechanics And Animation MVP Plan
 
+> **Naming convention:** Motion mechanics milestones use the `MM#` prefix to
+> distinguish them from engine/campaign milestones (`M#` in
+> `docs/engine_upgrade_milestones.md`) and future enemy-AI milestones (`AI#`).
+
 This is the agent-facing plan for upgrading Starfall I's player feel from a
 prototype platformer into a heroic sci-fantasy traversal system. The design is
 inspired by superhero swing movement, mountain parkour, fantasy flight, action
 RPG combat readability, and local co-op fairness.
+
+Label convention: this document's milestones should be referenced as
+`Motion MM#`. Bare `M#` labels belong to `docs/engine_upgrade_milestones.md`.
+Future enemy behavior planning should use `Enemy AI AI#` labels so movement,
+engine, and AI work can cross-reference each other without ambiguity.
 
 ## Core Concept
 
@@ -39,7 +48,7 @@ vehicles, and boss-mode camera all remain part of the movement vocabulary.
 
 ## MVP Milestones
 
-### M1: Traversal Foundation And Grapple Input
+### MM1: Traversal Foundation And Grapple Input
 
 Goal: create a safe foundation for hook, flight, and animation work without
 destabilizing existing movement.
@@ -59,7 +68,7 @@ Acceptance:
 - Future agents can add raycasts/physics by extending `GrappleHookState`
   instead of inventing a parallel traversal state.
 
-### M2: Hook Targeting And Attach Rules
+### MM2: Hook Targeting And Attach Rules
 
 Goal: let the single hook find valid targets in the world.
 
@@ -79,7 +88,7 @@ Acceptance:
   fails into cooldown.
 - No target path can crash or leave the player stuck.
 
-### M3: Zip And Mountain Pull
+### MM3: Zip And Mountain Pull
 
 Goal: make the first physical hook verb useful in the Everest range.
 
@@ -97,7 +106,7 @@ Acceptance:
 - Zip does not bypass dungeon/boss locks unless a target explicitly permits it.
 - Keyboard/mouse and controller controls both work.
 
-### M4: Swing Physics
+### MM4: Swing Physics
 
 Goal: turn attached hook movement into a readable pendulum.
 
@@ -114,7 +123,7 @@ Acceptance:
 - Release preserves useful momentum without becoming uncontrollable.
 - Swing state interacts safely with boss-mode party pull and split screen.
 
-### M5: Grapple Combat And Utility Pull
+### MM5: Grapple Combat And Utility Pull
 
 Goal: make the hook part of Starfall combat, not just traversal.
 
@@ -129,7 +138,7 @@ Acceptance:
 - One enemy type and one utility object support hook interaction.
 - Hook combat cannot corrupt per-player ownership or shared campaign state.
 
-### M6: Flight Mechanics Upgrade
+### MM6: Flight Mechanics Upgrade
 
 Goal: make flight feel like an evolving hero skill while preserving platforming.
 
@@ -146,7 +155,7 @@ Acceptance:
 - Flight has at least one new controllable verb beyond holding jetpack.
 - Hook, flight, and wall movement can chain without infinite hover.
 
-### M7: Animation Foundation
+### MM7: Animation Foundation
 
 Goal: move from pose-only animation toward an animation-ready humanoid system.
 
@@ -161,7 +170,7 @@ Acceptance:
 
 - Every movement state has a distinct silhouette even before skeletal clips.
 
-### M8: Procedural Animation And IK
+### MM8: Procedural Animation And IK
 
 Goal: make the hero body respond naturally to terrain, walls, hooks, and flight.
 
@@ -175,7 +184,7 @@ Acceptance:
 
 - The body reads clearly during swing, zip, wall slide, flight, and landing.
 
-### M9: Camera And Multiplayer Readability
+### MM9: Camera And Multiplayer Readability
 
 Goal: make high-speed movement cinematic without losing local co-op clarity.
 
@@ -188,7 +197,7 @@ Acceptance:
 
 - Grapple and flight feel fast without hiding hazards or other players.
 
-### M10: World, Boss, And Dungeon Integration
+### MM10: World, Boss, And Dungeon Integration
 
 Goal: make movement verbs matter across the full game.
 
@@ -205,6 +214,34 @@ Acceptance:
 
 - Each major chapter teaches or tests one movement verb and one combat traversal
   verb.
+
+## Integration With Engine M7 (Connected Platformer Level Network)
+
+Engine M7 adds `WorldRoute` — a typed, persistent connection between two
+`WorldSite` nodes on the strategic map. Motion mechanics intersect with routes
+in several concrete ways:
+
+- **Route traversal spaces**: a Road, MountainPath, or SkyBridge route is not
+  just a map edge. It is a real 3-D space players traverse. The route's physical
+  props (bridge spans, mountain trail sections, sky-lane platforms) live in the
+  world and must be safe for MM3/MM4 hook verbs, MM6 flight, and split-screen.
+- **Hook attach points on routes**: authored `WorldRouteMarker` beacon entities
+  at route midpoints are valid hook targets for MM2 targeting and MM3/MM4 zip/
+  swing. Mark them with a hook-socket component when those milestones ship.
+- **Route-gated movement verbs**: some routes require specific verbs. A
+  `MountainPath` route may require MM3 zip to reach; a `SkyBridge` route may
+  require MM6 flight thrust or MM4 swing clearance. Gate these in
+  `world_route_unlock_system` by checking the player's unlocked movement state.
+- **Route contest encounters**: when a route is `Contested`, the platformer
+  space spawns enemies. MM5 grapple combat verbs (attack pull, enemy yank) should
+  work in the route space without collision edge cases.
+- **Save/load contract**: `WorldRouteState` persists. Motion milestone work must
+  not reset route state on respawn or level reload.
+
+Decision record: Engine M7 owns `WorldRoute` types, save records, route spawning,
+UI gating, and the first playable route slice. Motion milestones MM2–MM6 will
+extend route traversal with hook targeting, zip, swing, and flight once the
+physical route spaces exist.
 
 ## Technical Notes
 

@@ -136,3 +136,19 @@ impl Default for StarfallPointLightBundle {
 pub type Camera3dBundle = StarfallCamera3dBundle;
 pub type DirectionalLightBundle = StarfallDirectionalLightBundle;
 pub type PointLightBundle = StarfallPointLightBundle;
+
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
+
+// ── Toon Material ─────────────────────────────────────────────────────────────
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct ToonMaterial {
+    #[uniform(0)]
+    pub color: LinearRgba,
+}
+
+impl Material for ToonMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/toon.wgsl".into()
+    }
+}
