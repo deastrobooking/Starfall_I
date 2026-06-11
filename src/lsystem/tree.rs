@@ -13,7 +13,8 @@ use bevy::prelude::*;
 
 use super::{turtle::TurtleResult, LSystem};
 use crate::components::world::WorldGeometry;
-use crate::rendering::{PbrBundle, SpatialBundle};
+use crate::modular_character::bake_character_mesh as bake_meshes;
+use crate::rendering::PbrBundle;
 
 // ── Tree species ──────────────────────────────────────────────────────────────
 
@@ -26,32 +27,55 @@ pub enum TreeKind {
 }
 
 /// Cached geometry + materials for one tree species.
+///
+/// `branch_mesh`/`leaf_mesh` are shared *unit* primitives (radius 1, height 1)
+/// reused by every segment and leaf of every tree; the per-instance size is
+/// baked into the entity's `Transform.scale`. Reusing one mesh handle (instead
+/// of allocating a fresh `Cylinder`/`Sphere` per primitive) keeps `Assets<Mesh>`
+/// tiny and lets Bevy batch all branches/leaves into a handful of draw calls.
 pub struct TreeTemplate {
     pub kind: TreeKind,
     pub geometry: TurtleResult,
     pub bark_mat: Handle<StandardMaterial>,
     pub leaf_mat: Option<Handle<StandardMaterial>>,
+    pub branch_mesh: Handle<Mesh>,
+    pub leaf_mesh: Handle<Mesh>,
 }
 
 impl TreeTemplate {
+    /// A unit cylinder (radius 1, height 1) along +Y, shared by all branches.
+    pub fn unit_branch_mesh(meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
+        meshes.add(Cylinder::new(1.0, 1.0))
+    }
+
+    /// A unit sphere (radius 1), shared by all leaf clusters.
+    pub fn unit_leaf_mesh(meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
+        meshes.add(Sphere::new(1.0))
+    }
+
     /// Build the template — evaluates the L-system and allocates materials once.
-    pub fn new(kind: TreeKind, materials: &mut Assets<StandardMaterial>) -> Self {
-        let ls = lsystem_for(kind);
-        let geometry = ls.evaluate();
+    pub fn new(
+        kind: TreeKind,
+        materials: &mut Assets<StandardMaterial>,
+        meshes: &mut Assets<Mesh>,
+    ) -> Self {
         let bark_mat = materials.add(bark_material(kind));
         let leaf_mat = leaf_material(kind).map(|m| materials.add(m));
-        Self {
+        Self::new_with_materials(
             kind,
-            geometry,
             bark_mat,
             leaf_mat,
-        }
+            Self::unit_branch_mesh(meshes),
+            Self::unit_leaf_mesh(meshes),
+        )
     }
 
     pub fn new_with_materials(
         kind: TreeKind,
         bark_mat: Handle<StandardMaterial>,
         leaf_mat: Option<Handle<StandardMaterial>>,
+        branch_mesh: Handle<Mesh>,
+        leaf_mesh: Handle<Mesh>,
     ) -> Self {
         let ls = lsystem_for(kind);
         let geometry = ls.evaluate();
@@ -60,6 +84,8 @@ impl TreeTemplate {
             geometry,
             bark_mat,
             leaf_mat,
+            branch_mesh,
+            leaf_mesh,
         }
     }
 }
@@ -184,8 +210,14 @@ fn leaf_material(kind: TreeKind) -> Option<StandardMaterial> {
 pub struct TreeRoot;
 
 /// Instantiate a tree from a pre-built `TreeTemplate` at `position` with the
-/// given Y-axis `rotation_y` (radians).  All branch/leaf entities are spawned
-/// as children of the root so despawning the root removes the whole tree.
+/// given Y-axis `rotation_y` (radians).
+///
+/// All branch segments are baked into a **single** bark mesh and all leaf
+/// clusters into a single foliage mesh (both in tree-local space). A tree is
+/// therefore 1–2 entities instead of ~100, which keeps transform propagation
+/// and render extraction cheap when hundreds of trees populate the world. The
+/// merged meshes ride on the root/child transforms so `NatureSway` still
+/// animates the whole tree.
 pub fn spawn_tree(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -198,50 +230,72 @@ pub fn spawn_tree(
         .with_rotation(Quat::from_rotation_y(rotation_y))
         .with_scale(Vec3::splat(scale));
 
+    // ── Bake every branch segment into one bark mesh (tree-local space) ───────
+    let branch_parts: Vec<(Handle<Mesh>, Mat4)> = template
+        .geometry
+        .branches
+        .iter()
+        .filter_map(|seg| {
+            let dir = seg.end - seg.start;
+            let length = dir.length();
+            if length < 0.001 {
+                return None;
+            }
+            let mid = (seg.start + seg.end) * 0.5;
+            // Unit cylinder (axis +Y): X/Z = radius, Y = length, oriented to `dir`.
+            let model = Mat4::from_scale_rotation_translation(
+                Vec3::new(seg.radius, length, seg.radius),
+                super::turtle::orient_along(dir),
+                mid,
+            );
+            Some((template.branch_mesh.clone(), model))
+        })
+        .collect();
+    let bark_mesh = bake_meshes(meshes, &branch_parts);
+    let bark_handle = meshes.add(bark_mesh);
+
     let root = commands
         .spawn((
-            SpatialBundle::from_transform(root_transform),
+            PbrBundle {
+                mesh: Mesh3d(bark_handle),
+                material: MeshMaterial3d(template.bark_mat.clone()),
+                transform: root_transform,
+                ..default()
+            },
             WorldGeometry,
             TreeRoot,
         ))
         .id();
 
-    commands.entity(root).with_children(|parent| {
-        // ── Branch segments ──────────────────────────────────────────────
-        for seg in &template.geometry.branches {
-            let dir = seg.end - seg.start;
-            let length = dir.length();
-            if length < 0.001 {
-                continue;
-            }
-
-            let mid = (seg.start + seg.end) * 0.5;
-            let rot = super::turtle::orient_along(dir);
-
-            parent.spawn(PbrBundle {
-                mesh: Mesh3d(meshes.add(Cylinder::new(seg.radius, length))),
-                material: MeshMaterial3d(template.bark_mat.clone()),
-                transform: Transform {
-                    translation: mid,
-                    rotation: rot,
-                    scale: Vec3::ONE,
-                },
-                ..default()
-            });
-        }
-
-        // ── Leaf clusters ────────────────────────────────────────────────
-        if let Some(leaf_mat) = &template.leaf_mat {
-            for leaf in &template.geometry.leaves {
+    // ── Bake every leaf cluster into one foliage mesh ─────────────────────────
+    if let Some(leaf_mat) = &template.leaf_mat {
+        let leaf_parts: Vec<(Handle<Mesh>, Mat4)> = template
+            .geometry
+            .leaves
+            .iter()
+            .map(|leaf| {
+                let model = Mat4::from_scale_rotation_translation(
+                    Vec3::splat(leaf.size),
+                    Quat::IDENTITY,
+                    leaf.position,
+                );
+                (template.leaf_mesh.clone(), model)
+            })
+            .collect();
+        if !leaf_parts.is_empty() {
+            let foliage_mesh = bake_meshes(meshes, &leaf_parts);
+            let foliage_handle = meshes.add(foliage_mesh);
+            let leaf_mat = leaf_mat.clone();
+            commands.entity(root).with_children(|parent| {
                 parent.spawn(PbrBundle {
-                    mesh: Mesh3d(meshes.add(Sphere::new(leaf.size))),
-                    material: MeshMaterial3d(leaf_mat.clone()),
-                    transform: Transform::from_translation(leaf.position),
+                    mesh: Mesh3d(foliage_handle),
+                    material: MeshMaterial3d(leaf_mat),
+                    transform: Transform::IDENTITY,
                     ..default()
                 });
-            }
+            });
         }
-    });
+    }
 
     root
 }

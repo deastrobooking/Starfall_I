@@ -12488,21 +12488,37 @@ fn spawn_trees(
     terrain_seed: u64,
 ) {
     // Build one template per species (L-system evaluated once, materials allocated once).
+    // All species share a single unit cylinder + unit sphere mesh so the
+    // thousands of branch/leaf entities batch into a handful of draw calls.
+    let branch_mesh = TreeTemplate::unit_branch_mesh(meshes);
+    let leaf_mesh = TreeTemplate::unit_leaf_mesh(meshes);
     let oak = TreeTemplate::new_with_materials(
         TreeKind::Oak,
         pal.bark_mid.clone(),
         Some(pal.foliage_b.clone()),
+        branch_mesh.clone(),
+        leaf_mesh.clone(),
     );
     let pine = TreeTemplate::new_with_materials(
         TreeKind::Pine,
         pal.bark_dark.clone(),
         Some(pal.foliage_c.clone()),
+        branch_mesh.clone(),
+        leaf_mesh.clone(),
     );
-    let dead = TreeTemplate::new_with_materials(TreeKind::Dead, pal.bark_light.clone(), None);
+    let dead = TreeTemplate::new_with_materials(
+        TreeKind::Dead,
+        pal.bark_light.clone(),
+        None,
+        branch_mesh.clone(),
+        leaf_mesh.clone(),
+    );
     let cyber = TreeTemplate::new_with_materials(
         TreeKind::Cyber,
         pal.city_metal_panel.clone(),
         Some(pal.guide_glow.clone()),
+        branch_mesh.clone(),
+        leaf_mesh.clone(),
     );
 
     // (zone_offset, count, template_ref, scale_base, scale_range)
