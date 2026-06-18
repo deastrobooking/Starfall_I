@@ -7,9 +7,9 @@ use crate::character_blueprint::{
 };
 use crate::character_parts::CharacterLoadout;
 use crate::characters::{
-    accent_preset, accent_presets, hair_preset, hair_presets, hero_config,
+    accent_preset, accent_presets, eye_preset, eye_presets, hair_preset, hair_presets, hero_config,
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
-    spawn_cartoon_character,
+    skin_preset, skin_presets, spawn_cartoon_character,
 };
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{CharacterDesignData, PlayerPartLoadout, PlayerSelectState};
@@ -69,9 +69,11 @@ struct SwatchButton {
 
 #[derive(Clone, Copy, PartialEq)]
 enum SwatchCategory {
+    Skin,
     Outfit,
     Accent,
     Hair,
+    Eye,
 }
 
 #[derive(Component, Clone, Copy, PartialEq)]
@@ -156,30 +158,43 @@ fn setup_character_design(
     // Pre-populate design data from current slot overrides (or hero defaults)
     let slot = &select_state.slots[design_data.player_index];
     let base = hero_config(select_state.character_name(design_data.player_index));
-    design_data.outfit_idx = slot
-        .outfit_idx
-        .map(normalize_color_preset_index)
-        .unwrap_or(0);
-    design_data.accent_idx = slot
-        .accent_idx
-        .map(normalize_color_preset_index)
-        .unwrap_or(0);
-    design_data.hair_idx = slot.hair_idx.map(normalize_color_preset_index).unwrap_or(0);
+    let blueprint = slot.blueprint.as_ref();
+    design_data.skin_idx =
+        palette_index_from_saved(slot.skin_idx, blueprint, "skin", base.skin, &skin_presets());
+    design_data.outfit_idx = palette_index_from_saved(
+        slot.outfit_idx,
+        blueprint,
+        "outfit",
+        base.outfit,
+        &outfit_presets(),
+    );
+    design_data.accent_idx = palette_index_from_saved(
+        slot.accent_idx,
+        blueprint,
+        "accent",
+        base.accent,
+        &accent_presets(),
+    );
+    design_data.hair_idx =
+        palette_index_from_saved(slot.hair_idx, blueprint, "hair", base.hair, &hair_presets());
+    design_data.eye_idx = palette_index_from_saved(
+        slot.eye_idx,
+        blueprint,
+        "eye",
+        base.eye_color,
+        &eye_presets(),
+    );
     design_data.body_preset = part_loadout.body;
     design_data.arm_preset = part_loadout.arms;
     design_data.leg_preset = part_loadout.legs;
     design_data.shoulder_preset = part_loadout.shoulders;
     design_data.head_preset = part_loadout.head;
-    design_data.body = slot
-        .blueprint
+    design_data.body = blueprint
         .as_ref()
         .map(|blueprint| blueprint.body)
         .unwrap_or_default()
         .validated();
-    let blueprint_appearance = slot
-        .blueprint
-        .as_ref()
-        .map(|blueprint| blueprint.cartoon_appearance);
+    let blueprint_appearance = blueprint.map(|blueprint| blueprint.cartoon_appearance);
     design_data.has_hood = slot
         .has_hood
         .or(blueprint_appearance.map(|appearance| appearance.has_hood))
@@ -288,12 +303,14 @@ fn rebuild_preview_if_dirty(
     }
 
     design_data.player_index = design_data.player_index.min(select_state.slots.len() - 1);
+    design_data.skin_idx = normalize_color_preset_index(design_data.skin_idx);
     design_data.outfit_idx = normalize_color_preset_index(design_data.outfit_idx);
     design_data.accent_idx = normalize_color_preset_index(design_data.accent_idx);
     design_data.hair_idx = normalize_color_preset_index(design_data.hair_idx);
+    design_data.eye_idx = normalize_color_preset_index(design_data.eye_idx);
 
     let name = select_state.character_name(design_data.player_index);
-    let config = hero_config_with_overrides(
+    let mut config = hero_config_with_overrides(
         name,
         Some(outfit_preset(design_data.outfit_idx)),
         Some(accent_preset(design_data.accent_idx)),
@@ -306,6 +323,9 @@ fn rebuild_preview_if_dirty(
         Some(design_data.has_visor),
     )
     .with_body_recipe(design_data.body);
+    config.skin = skin_preset(design_data.skin_idx);
+    config.eye_color = eye_preset(design_data.eye_idx);
+    config.emissive_eyes = config.emissive_eyes || design_data.has_visor;
 
     let entity = spawn_cartoon_character(
         &mut commands,
@@ -337,9 +357,11 @@ fn swatch_interaction(
     for (interaction, swatch) in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
             match swatch.category {
+                SwatchCategory::Skin => design_data.skin_idx = swatch.index,
                 SwatchCategory::Outfit => design_data.outfit_idx = swatch.index,
                 SwatchCategory::Accent => design_data.accent_idx = swatch.index,
                 SwatchCategory::Hair => design_data.hair_idx = swatch.index,
+                SwatchCategory::Eye => design_data.eye_idx = swatch.index,
             }
             design_data.dirty = true;
         }
@@ -500,18 +522,17 @@ fn save_design(
     part_loadout: &mut PlayerPartLoadout,
 ) {
     let name = select_state.character_name(design_data.player_index);
-    let base = hero_config(name);
     let mut body = design_data.body;
     body.validate();
     let blueprint = CharacterBlueprint::hero(
         name,
         body,
         CharacterPaletteRecipe {
-            skin: base.skin,
+            skin: skin_preset(design_data.skin_idx),
             outfit: outfit_preset(design_data.outfit_idx),
             accent: accent_preset(design_data.accent_idx),
             hair: hair_preset(design_data.hair_idx),
-            eye: base.eye_color,
+            eye: eye_preset(design_data.eye_idx),
         },
         CartoonAppearanceRecipe {
             has_hood: design_data.has_hood,
@@ -526,9 +547,11 @@ fn save_design(
     let Some(slot) = select_state.slots.get_mut(design_data.player_index) else {
         return;
     };
+    slot.skin_idx = Some(normalize_color_preset_index(design_data.skin_idx));
     slot.outfit_idx = Some(normalize_color_preset_index(design_data.outfit_idx));
     slot.accent_idx = Some(normalize_color_preset_index(design_data.accent_idx));
     slot.hair_idx = Some(normalize_color_preset_index(design_data.hair_idx));
+    slot.eye_idx = Some(normalize_color_preset_index(design_data.eye_idx));
     slot.has_hood = Some(design_data.has_hood);
     slot.has_cape = Some(design_data.has_cape);
     slot.has_gloves = Some(design_data.has_gloves);
@@ -555,9 +578,11 @@ fn update_swatch_borders(
     }
     for (swatch, mut border, mut node) in swatch_q.iter_mut() {
         let selected = match swatch.category {
+            SwatchCategory::Skin => design_data.skin_idx == swatch.index,
             SwatchCategory::Outfit => design_data.outfit_idx == swatch.index,
             SwatchCategory::Accent => design_data.accent_idx == swatch.index,
             SwatchCategory::Hair => design_data.hair_idx == swatch.index,
+            SwatchCategory::Eye => design_data.eye_idx == swatch.index,
         };
         node.border = UiRect::all(Val::Px(if selected { 3.0 } else { 1.0 }));
         *border = BorderColor::all(if selected {
@@ -650,6 +675,43 @@ fn update_body_value_text(
     }
 }
 
+fn palette_index_from_saved(
+    slot_index: Option<usize>,
+    blueprint: Option<&CharacterBlueprint>,
+    material_id: &str,
+    default_color: Color,
+    presets: &[Color; 8],
+) -> usize {
+    slot_index
+        .map(normalize_color_preset_index)
+        .unwrap_or_else(|| {
+            let color = blueprint
+                .and_then(|blueprint| blueprint.material_color(material_id))
+                .unwrap_or(default_color);
+            closest_palette_index(color, presets)
+        })
+}
+
+fn closest_palette_index(color: Color, presets: &[Color; 8]) -> usize {
+    let target = color.to_srgba();
+    presets
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            let a = a.to_srgba();
+            let b = b.to_srgba();
+            let da = (target.red - a.red).powi(2)
+                + (target.green - a.green).powi(2)
+                + (target.blue - a.blue).powi(2);
+            let db = (target.red - b.red).powi(2)
+                + (target.green - b.green).powi(2)
+                + (target.blue - b.blue).powi(2);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
 // ── UI construction ───────────────────────────────────────────────────────────
 
 fn spawn_design_ui(
@@ -658,9 +720,11 @@ fn spawn_design_ui(
     design_data: &CharacterDesignData,
 ) {
     let hero_name = select_state.character_name(design_data.player_index);
+    let skins = skin_presets();
     let outfits = outfit_presets();
     let accents = accent_presets();
     let hairs = hair_presets();
+    let eyes = eye_presets();
 
     commands
         .spawn((
@@ -705,6 +769,13 @@ fn spawn_design_ui(
 
                 spawn_swatch_row(
                     panel,
+                    "SKIN",
+                    SwatchCategory::Skin,
+                    &skins,
+                    design_data.skin_idx,
+                );
+                spawn_swatch_row(
+                    panel,
                     "OUTFIT",
                     SwatchCategory::Outfit,
                     &outfits,
@@ -723,6 +794,13 @@ fn spawn_design_ui(
                     SwatchCategory::Hair,
                     &hairs,
                     design_data.hair_idx,
+                );
+                spawn_swatch_row(
+                    panel,
+                    "EYES",
+                    SwatchCategory::Eye,
+                    &eyes,
+                    design_data.eye_idx,
                 );
 
                 spawn_section_label(panel, "BATTLE SILHOUETTE");

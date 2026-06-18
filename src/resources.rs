@@ -433,9 +433,11 @@ pub struct RadioLine {
 #[derive(Resource, Debug)]
 pub struct CharacterDesignData {
     pub player_index: usize,
+    pub skin_idx: usize,
     pub outfit_idx: usize,
     pub accent_idx: usize,
     pub hair_idx: usize,
+    pub eye_idx: usize,
     pub body_preset: BodyPreset,
     pub arm_preset: ArmPreset,
     pub leg_preset: LegPreset,
@@ -457,9 +459,11 @@ impl Default for CharacterDesignData {
     fn default() -> Self {
         Self {
             player_index: 0,
+            skin_idx: 0,
             outfit_idx: 0,
             accent_idx: 0,
             hair_idx: 0,
+            eye_idx: 0,
             body_preset: BodyPreset::default(),
             arm_preset: ArmPreset::default(),
             leg_preset: LegPreset::default(),
@@ -490,9 +494,11 @@ pub struct PlayerSlotConfig {
     pub ready: bool,
     pub stick_cooldown: f32,
     // Customization overrides — None means use the hero's default
+    pub skin_idx: Option<usize>,
     pub outfit_idx: Option<usize>,
     pub accent_idx: Option<usize>,
     pub hair_idx: Option<usize>,
+    pub eye_idx: Option<usize>,
     pub has_hood: Option<bool>,
     pub has_cape: Option<bool>,
     pub has_gloves: Option<bool>,
@@ -509,9 +515,11 @@ impl Default for PlayerSlotConfig {
             character_index: 0,
             ready: false,
             stick_cooldown: 0.0,
+            skin_idx: None,
             outfit_idx: None,
             accent_idx: None,
             hair_idx: None,
+            eye_idx: None,
             has_hood: None,
             has_cape: None,
             has_gloves: None,

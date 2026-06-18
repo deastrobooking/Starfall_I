@@ -11,8 +11,8 @@ use crate::character_blueprint::{
 };
 use crate::character_parts::CharacterLoadout;
 use crate::characters::{
-    accent_preset, attach_cartoon_character, despawn_cartoon_character_parts, hair_preset,
-    hero_config, hero_config_with_overrides, outfit_preset,
+    accent_preset, attach_cartoon_character, despawn_cartoon_character_parts, eye_preset,
+    hair_preset, hero_config, hero_config_with_overrides, outfit_preset, skin_preset,
 };
 use crate::components::armor::ArmorSet;
 use crate::components::character::{CartoonPart, JointMarker};
@@ -390,7 +390,7 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
     body.muscle = (body.muscle * 1.03).min(1.40);
 
     let palette = CharacterPaletteRecipe {
-        skin: base.skin,
+        skin: slot.skin_idx.map(skin_preset).unwrap_or(base.skin),
         outfit: slot.outfit_idx.map(outfit_preset).unwrap_or(base.outfit),
         accent: slot.accent_idx.map(accent_preset).unwrap_or_else(|| {
             if matches!(name, "Vincenzo" | "Antonio") {
@@ -400,7 +400,7 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
             }
         }),
         hair: slot.hair_idx.map(hair_preset).unwrap_or(base.hair),
-        eye: base.eye_color,
+        eye: slot.eye_idx.map(eye_preset).unwrap_or(base.eye_color),
     };
     let appearance = CartoonAppearanceRecipe {
         has_hood: slot.has_hood.unwrap_or(true),

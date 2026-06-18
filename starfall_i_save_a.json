@@ -1,0 +1,198 @@
+{
+  "level": 1,
+  "experience": 0,
+  "credits": 0,
+  "max_health": 100.0,
+  "max_stamina": 100.0,
+  "max_armor": 100.0,
+  "wave_number": 1,
+  "completed_chapters": [],
+  "discoverables": [],
+  "companions_recruited": [],
+  "scientist_relics": [],
+  "relic_fragments": [],
+  "perk_points_unspent": 0,
+  "perk_ranks": [],
+  "character_blueprints": [
+    null,
+    null,
+    null,
+    null
+  ],
+  "players": [
+    {
+      "player_index": 0,
+      "level": 1,
+      "experience": 0,
+      "credits": 0,
+      "health_current": 100.0,
+      "health_max": 100.0,
+      "stamina": 100.0,
+      "max_stamina": 100.0,
+      "armor": 100.0,
+      "max_armor": 100.0
+    }
+  ],
+  "robot_pets": {
+    "pets": [],
+    "parts": [],
+    "active_assembly": null
+  },
+  "settlement_economy": {
+    "stockpile": {
+      "credits": 420,
+      "food": 60,
+      "power": 45,
+      "alloy": 34,
+      "circuits": 20,
+      "research": 0,
+      "fuel_cells": 8,
+      "workers": 16,
+      "hangar_capacity": 2
+    },
+    "builds": [],
+    "tick_timer": 0.0
+  },
+  "tech_upgrades": {
+    "ranks": [],
+    "rejuvenation_charge": 0.0
+  },
+  "part_loadout_body": "StandardMech",
+  "part_loadout_arms": "MechArms",
+  "part_loadout_legs": "MechLegs",
+  "part_loadout_shoulders": "DomePauldrons",
+  "part_loadout_head": "OpenFace",
+  "weapon_ranks": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "world_sites": [
+    {
+      "id": 1,
+      "state": "EnemyHeld",
+      "owner": "Scallarian",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 2,
+      "state": "EnemyHeld",
+      "owner": "Scallarian",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 3,
+      "state": "EnemyHeld",
+      "owner": "Scallarian",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 4,
+      "state": "UnderAttack",
+      "owner": "FreePeoples",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 5,
+      "state": "EnemyHeld",
+      "owner": "Scallarian",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 6,
+      "state": "EnemyHeld",
+      "owner": "Scallarian",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 7,
+      "state": "EnemyHeld",
+      "owner": "Scallarian",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 8,
+      "state": "EnemyHeld",
+      "owner": "Scallarian",
+      "enemies_defeated": 0
+    },
+    {
+      "id": 9,
+      "state": "Liberated",
+      "owner": "FreePeoples",
+      "enemies_defeated": 0
+    }
+  ],
+  "world_routes": [
+    {
+      "id": 1,
+      "state": "Locked"
+    },
+    {
+      "id": 2,
+      "state": "Locked"
+    },
+    {
+      "id": 3,
+      "state": "Open"
+    },
+    {
+      "id": 4,
+      "state": "Locked"
+    },
+    {
+      "id": 5,
+      "state": "Locked"
+    },
+    {
+      "id": 6,
+      "state": "Open"
+    }
+  ],
+  "raids": [
+    {
+      "id": 1,
+      "kind": "DroneSwarm",
+      "phase": "Active",
+      "target_site": 4,
+      "target_route": null,
+      "attacker": "DimensionalAlien",
+      "warning_timer": 0.0,
+      "active_timer": 102.00115,
+      "required_defense_score": 10,
+      "spawned": true,
+      "wave_size": 5,
+      "consequence": "SiteDamaged",
+      "resolution": null
+    }
+  ],
+  "command_assets": [],
+  "hacking": {
+    "blueprints": [],
+    "captures": []
+  },
+  "final_war": {
+    "phase": "Dormant",
+    "faction_pressures": [
+      {
+        "faction": "DimensionalAlien",
+        "pressure": 21
+      },
+      {
+        "faction": "DragonRoyalty",
+        "pressure": 0
+      },
+      {
+        "faction": "DragonExile",
+        "pressure": 0
+      }
+    ],
+    "pressure_tick_timer": 9.983719,
+    "coordinated_raid_timer": 120.0
+  },
+  "save_version": 2,
+  "campaign_complete": false
+}

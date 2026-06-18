@@ -1473,8 +1473,11 @@ pub fn attach_cartoon_character(
         skin: config.skin,
         hair: config.hair,
         eye: config.eye_color,
+        has_hood: config.has_hood,
+        has_cape: config.has_cape,
         has_gloves: config.has_gloves,
         has_boots: config.has_boots,
+        has_visor: config.has_visor,
         visual_ground_lift,
     };
     commands
@@ -1522,6 +1525,19 @@ pub fn normalize_color_preset_index(index: usize) -> usize {
     index.min(COLOR_PRESET_COUNT - 1)
 }
 
+pub fn skin_presets() -> [Color; 8] {
+    [
+        Color::srgb(0.93, 0.70, 0.48),
+        Color::srgb(0.90, 0.74, 0.56),
+        Color::srgb(0.84, 0.64, 0.50),
+        Color::srgb(0.76, 0.54, 0.36),
+        Color::srgb(0.58, 0.38, 0.25),
+        Color::srgb(0.38, 0.24, 0.17),
+        Color::srgb(0.68, 0.58, 0.50),
+        Color::srgb(0.94, 0.82, 0.66),
+    ]
+}
+
 pub fn outfit_presets() -> [Color; 8] {
     [
         Color::srgb(0.07, 0.10, 0.18),
@@ -1561,6 +1577,23 @@ pub fn hair_presets() -> [Color; 8] {
     ]
 }
 
+pub fn eye_presets() -> [Color; 8] {
+    [
+        Color::srgb(0.10, 0.20, 0.70),
+        Color::srgb(0.08, 0.52, 0.86),
+        Color::srgb(0.12, 0.52, 0.22),
+        Color::srgb(0.65, 0.38, 0.08),
+        Color::srgb(0.42, 0.08, 0.58),
+        Color::srgb(0.04, 0.82, 0.92),
+        Color::srgb(0.68, 0.48, 0.06),
+        Color::srgb(0.86, 0.82, 0.74),
+    ]
+}
+
+pub fn skin_preset(index: usize) -> Color {
+    skin_presets()[normalize_color_preset_index(index)]
+}
+
 pub fn outfit_preset(index: usize) -> Color {
     outfit_presets()[normalize_color_preset_index(index)]
 }
@@ -1571,6 +1604,10 @@ pub fn accent_preset(index: usize) -> Color {
 
 pub fn hair_preset(index: usize) -> Color {
     hair_presets()[normalize_color_preset_index(index)]
+}
+
+pub fn eye_preset(index: usize) -> Color {
+    eye_presets()[normalize_color_preset_index(index)]
 }
 
 /// Returns a hero config with per-slot customization overrides applied.
