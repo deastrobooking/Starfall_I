@@ -1524,40 +1524,40 @@ pub fn normalize_color_preset_index(index: usize) -> usize {
 
 pub fn outfit_presets() -> [Color; 8] {
     [
-        Color::srgb(0.09, 0.28, 0.80),
-        Color::srgb(0.75, 0.12, 0.08),
-        Color::srgb(0.08, 0.52, 0.20),
-        Color::srgb(0.52, 0.10, 0.52),
-        Color::srgb(0.80, 0.48, 0.06),
-        Color::srgb(0.08, 0.42, 0.56),
-        Color::srgb(0.18, 0.18, 0.22),
-        Color::srgb(0.62, 0.56, 0.48),
+        Color::srgb(0.07, 0.10, 0.18),
+        Color::srgb(0.28, 0.05, 0.06),
+        Color::srgb(0.10, 0.23, 0.15),
+        Color::srgb(0.18, 0.13, 0.28),
+        Color::srgb(0.34, 0.20, 0.10),
+        Color::srgb(0.09, 0.25, 0.30),
+        Color::srgb(0.11, 0.11, 0.12),
+        Color::srgb(0.38, 0.34, 0.28),
     ]
 }
 
 pub fn accent_presets() -> [Color; 8] {
     [
-        Color::srgb(0.95, 0.78, 0.12),
-        Color::srgb(0.10, 0.92, 0.98),
-        Color::srgb(0.78, 0.86, 0.92),
-        Color::srgb(0.92, 0.90, 0.84),
-        Color::srgb(0.95, 0.40, 0.10),
-        Color::srgb(0.65, 0.92, 0.30),
-        Color::srgb(0.98, 0.28, 0.60),
-        Color::srgb(0.20, 0.80, 1.00),
+        Color::srgb(0.86, 0.62, 0.24),
+        Color::srgb(0.28, 0.78, 0.88),
+        Color::srgb(0.72, 0.78, 0.84),
+        Color::srgb(0.84, 0.78, 0.66),
+        Color::srgb(0.72, 0.22, 0.08),
+        Color::srgb(0.38, 0.72, 0.34),
+        Color::srgb(0.76, 0.28, 0.48),
+        Color::srgb(0.34, 0.56, 0.92),
     ]
 }
 
 pub fn hair_presets() -> [Color; 8] {
     [
         Color::srgb(0.06, 0.04, 0.02),
-        Color::srgb(0.20, 0.12, 0.06),
-        Color::srgb(0.45, 0.28, 0.12),
-        Color::srgb(0.70, 0.45, 0.18),
-        Color::srgb(0.88, 0.76, 0.32),
-        Color::srgb(0.85, 0.85, 0.90),
-        Color::srgb(0.60, 0.58, 0.56),
-        Color::srgb(0.18, 0.05, 0.20),
+        Color::srgb(0.18, 0.10, 0.05),
+        Color::srgb(0.36, 0.22, 0.10),
+        Color::srgb(0.58, 0.34, 0.16),
+        Color::srgb(0.72, 0.58, 0.28),
+        Color::srgb(0.74, 0.74, 0.78),
+        Color::srgb(0.44, 0.42, 0.40),
+        Color::srgb(0.15, 0.05, 0.16),
     ]
 }
 
