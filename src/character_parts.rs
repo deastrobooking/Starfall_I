@@ -2564,31 +2564,58 @@ fn spawn_part_bound(
     commands.entity(root).add_child(entity);
 }
 
+// ── Material kit: "Crystal Chronicles meets sci-fi" ──────────────────────────
+//
+// The look is soft and painterly, not hard cel: matte surfaces, a warm storybook
+// shadow-lift so unlit faces never crush to black, a lacquered toy-tech sheen on
+// armour, and bright crystalline accents that bloom (the player camera runs a
+// Bloom pass). Hues come from each hero's palette — these helpers only grade the
+// lighting response so every part reads as one cohesive, hand-painted world.
+
+/// Faint, warm self-illumination so faces turned away from the key light glow
+/// softly instead of crushing to black — the "filled shadow" that defines the
+/// storybook look. `k` scales the lift; the colour is biased toward amber.
+fn warm_floor(lin: LinearRgba, k: f32) -> LinearRgba {
+    let base = Vec3::new(lin.red, lin.green, lin.blue);
+    let amber = Vec3::new(1.0, 0.72, 0.42);
+    let tint = base.lerp(amber, 0.22) * k;
+    LinearRgba::new(tint.x, tint.y, tint.z, 1.0)
+}
+
+/// Tech armour / robot plating: semi-metallic with a lacquered clearcoat sheen
+/// and soft, broad highlights — storybook toy-robot, never chrome.
 fn robot_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
     let lin = color.to_linear();
     materials.add(StandardMaterial {
         base_color: color,
-        emissive: LinearRgba::new(lin.red * 0.08, lin.green * 0.08, lin.blue * 0.08, 1.0),
-        perceptual_roughness: 0.40,
-        metallic: 0.65,
-        reflectance: 0.50,
+        emissive: warm_floor(lin, 0.10),
+        perceptual_roughness: 0.50,
+        metallic: 0.45,
+        reflectance: 0.42,
+        clearcoat: 0.55,
+        clearcoat_perceptual_roughness: 0.30,
         ..default()
     })
 }
 
-/// Soft organic material — matches `char_mat()` in characters.rs, used for skin/hair.
+/// Soft organic material for skin / cloth / hair — matches `char_mat()` in
+/// characters.rs. Very matte, low specular, with a touch of subsurface
+/// light-bleed for that hand-painted softness.
 fn soft_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
     let lin = color.to_linear();
     materials.add(StandardMaterial {
         base_color: color,
-        emissive: LinearRgba::new(lin.red * 0.14, lin.green * 0.14, lin.blue * 0.14, 1.0),
-        perceptual_roughness: 0.56,
+        emissive: warm_floor(lin, 0.16),
+        perceptual_roughness: 0.82,
         metallic: 0.0,
-        reflectance: 0.28,
+        reflectance: 0.16,
+        diffuse_transmission: 0.12,
         ..default()
     })
 }
 
+/// Crystal / energy accents: a bright blooming core under a glassy clearcoat so
+/// it reads like a polished gem — the sci-fi spark in the fantasy frame.
 fn emissive_mat(
     materials: &mut Assets<StandardMaterial>,
     color: Color,
@@ -2603,7 +2630,11 @@ fn emissive_mat(
             lin.blue * strength,
             1.0,
         ),
-        perceptual_roughness: 0.38,
+        perceptual_roughness: 0.22,
+        metallic: 0.0,
+        reflectance: 0.5,
+        clearcoat: 0.9,
+        clearcoat_perceptual_roughness: 0.12,
         ..default()
     })
 }

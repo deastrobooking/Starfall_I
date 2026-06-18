@@ -1729,19 +1729,32 @@ fn visual_ground_lift(body: &BodyRecipe, scale: f32) -> f32 {
 
 /// Stylized PBR: satin low-poly surfaces with a faint self-emissive so
 /// characters read clearly in shadowed areas.
+/// Warm storybook shadow-lift so unlit faces glow softly instead of going black
+/// — the painterly "filled shadow" of the Crystal Chronicles look.
+fn warm_floor(lin: LinearRgba, k: f32) -> LinearRgba {
+    let base = Vec3::new(lin.red, lin.green, lin.blue);
+    let amber = Vec3::new(1.0, 0.72, 0.42);
+    let tint = base.lerp(amber, 0.22) * k;
+    LinearRgba::new(tint.x, tint.y, tint.z, 1.0)
+}
+
+/// Soft, matte, hand-painted material for skin / cloth / hair, with a touch of
+/// subsurface light-bleed. Kept in lock-step with `soft_mat()` in character_parts.rs.
 fn char_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
     let lin = color.to_linear();
     materials.add(StandardMaterial {
         base_color: color,
-        emissive: LinearRgba::new(lin.red * 0.14, lin.green * 0.14, lin.blue * 0.14, 1.0),
-        perceptual_roughness: 0.56,
+        emissive: warm_floor(lin, 0.16),
+        perceptual_roughness: 0.82,
         metallic: 0.0,
-        reflectance: 0.28,
+        reflectance: 0.16,
+        diffuse_transmission: 0.12,
         ..default()
     })
 }
 
-/// Brightly glowing material for eyes, badge gems, visor, buckle.
+/// Brightly glowing crystal material for eyes, badge gems, visor, buckle —
+/// a blooming core under a glassy clearcoat so it reads like a polished gem.
 fn emissive_mat(
     materials: &mut Assets<StandardMaterial>,
     color: Color,
@@ -1756,7 +1769,11 @@ fn emissive_mat(
             lin.blue * strength,
             1.0,
         ),
-        perceptual_roughness: 0.38,
+        perceptual_roughness: 0.22,
+        metallic: 0.0,
+        reflectance: 0.5,
+        clearcoat: 0.9,
+        clearcoat_perceptual_roughness: 0.12,
         ..default()
     })
 }
