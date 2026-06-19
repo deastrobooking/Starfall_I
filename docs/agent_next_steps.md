@@ -113,7 +113,7 @@ Primary files:
 The Robot Garage (`AppState::RobotGarage`) keyboard-driven shell is now working:
 A/D browse 9 assembly forms, Enter assembles, X disassembles, assembled forms drive
 `GroundMode`/`AirMode` in the vehicle plugin, and `MechCommandLink` gates advanced
-forms. The chassis editor also persists part loadout to disk. What remains:
+forms. Character Design now persists playable-character part loadouts to disk. What remains:
 
 - Replace compact chapter-select tech shortcuts with tabbed controller-friendly
   screens: Weapons, Missiles, Turrets, Health/Rejuvenation, Vehicles, Mechs,
@@ -140,7 +140,7 @@ Primary files:
 - `src/upgrades.rs`
 - `src/plugins/ui_plugin.rs`
 - `src/plugins/robot_garage_plugin.rs`
-- `src/plugins/chassis_editor_plugin.rs`
+- `src/plugins/character_design_plugin.rs`
 - `src/plugins/save_plugin.rs`
 - `src/plugins/vehicle_plugin.rs`
 

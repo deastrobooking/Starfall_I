@@ -65,7 +65,7 @@ impl PartSlotTag {
 // ── Per-slot preset enums ─────────────────────────────────────────────────────
 
 /// Torso/chest preset.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize, Reflect)]
 pub enum BodyPreset {
     /// Standard mech — reactor core, side vents, hip guards.
     StandardMech,
@@ -111,7 +111,7 @@ impl BodyPreset {
 }
 
 /// Arm/hand preset.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize, Reflect)]
 pub enum ArmPreset {
     /// Standard mech — shoulder ball, forearm armor, accent stripe.
     MechArms,
@@ -157,7 +157,7 @@ impl ArmPreset {
 }
 
 /// Leg/boot preset.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize, Reflect)]
 pub enum LegPreset {
     /// Standard mech — thigh, knee, shin, ankle thrusters.
     MechLegs,
@@ -203,7 +203,7 @@ impl LegPreset {
 }
 
 /// Shoulder pad preset.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize, Reflect)]
 pub enum ShoulderPreset {
     /// Dome pauldrons — classic domed shoulder caps with accent ring.
     DomePauldrons,
@@ -249,7 +249,7 @@ impl ShoulderPreset {
 }
 
 /// Head / helmet preset.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize, Reflect)]
 pub enum HeadPreset {
     /// Natural humanoid face — exposed head, hair, glowing eyes.
     OpenFace,
@@ -297,7 +297,8 @@ impl HeadPreset {
 // ── Loadout types ─────────────────────────────────────────────────────────────
 
 /// Per-slot preset selection. Mutate to trigger `swap_character_parts`.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
 pub struct CharacterLoadout {
     pub body: BodyPreset,
     pub arms: ArmPreset,

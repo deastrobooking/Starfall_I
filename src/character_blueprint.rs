@@ -82,7 +82,7 @@ pub enum CharacterArchetype {
     BossScale,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Reflect, PartialEq)]
 pub struct BodyRecipe {
     pub height: f32,
     pub shoulder_width: f32,
@@ -102,7 +102,7 @@ pub struct BodyRecipe {
     pub asymmetry: f32,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Reflect, PartialEq)]
 pub struct CartoonAppearanceRecipe {
     pub has_hood: bool,
     pub has_cape: bool,

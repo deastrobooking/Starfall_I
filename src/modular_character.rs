@@ -285,12 +285,13 @@ fn attach_children(
             .get(att.child_part)
             .ok_or(AssemblyError::MissingPart(att.child_part))?;
 
-        let p_sock = parent_prefab
-            .socket(att.parent_socket)
-            .ok_or(AssemblyError::MissingSocket {
-                part: parent_part_id,
-                socket: att.parent_socket,
-            })?;
+        let p_sock =
+            parent_prefab
+                .socket(att.parent_socket)
+                .ok_or(AssemblyError::MissingSocket {
+                    part: parent_part_id,
+                    socket: att.parent_socket,
+                })?;
         let c_sock = child_prefab
             .socket(att.child_socket)
             .ok_or(AssemblyError::MissingSocket {
@@ -401,8 +402,7 @@ pub fn bake_character_mesh(meshes: &Assets<Mesh>, parts: &[(Handle<Mesh>, Mat4)]
                 positions.push(v.to_array());
             }
         }
-        if let Some(VertexAttributeValues::Float32x3(norm)) =
-            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        if let Some(VertexAttributeValues::Float32x3(norm)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
         {
             for n in norm {
                 let n = (normal_mat * Vec3::from(*n)).normalize_or_zero();
@@ -427,7 +427,10 @@ pub fn bake_character_mesh(meshes: &Assets<Mesh>, parts: &[(Handle<Mesh>, Mat4)]
         }
     }
 
-    let mut out = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut out = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     out.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     if !normals.is_empty() {
         out.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
@@ -599,8 +602,8 @@ mod tests {
     #[test]
     fn align_socket_places_child_socket_onto_parent_socket() {
         // A parent socket with both translation and rotation.
-        let parent_socket = Transform::from_xyz(-0.3, 0.4, 0.1)
-            .with_rotation(Quat::from_rotation_z(FRAC_PI_3));
+        let parent_socket =
+            Transform::from_xyz(-0.3, 0.4, 0.1).with_rotation(Quat::from_rotation_z(FRAC_PI_3));
         // A child socket authored elsewhere, also rotated.
         let child_socket =
             Transform::from_xyz(0.0, 0.2, 0.0).with_rotation(Quat::from_rotation_x(FRAC_PI_3));
@@ -630,12 +633,11 @@ mod tests {
         let cuboid = meshes.add(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)));
         let sphere = meshes.add(Mesh::from(Sphere::new(0.5)));
 
-        let count = |h: &Handle<Mesh>| {
-            match meshes.get(h).unwrap().attribute(Mesh::ATTRIBUTE_POSITION) {
+        let count =
+            |h: &Handle<Mesh>| match meshes.get(h).unwrap().attribute(Mesh::ATTRIBUTE_POSITION) {
                 Some(VertexAttributeValues::Float32x3(p)) => p.len(),
                 _ => 0,
-            }
-        };
+            };
         let expected = count(&cuboid) + count(&sphere);
 
         let parts = [
@@ -666,12 +668,18 @@ mod tests {
         reg.insert(mk(
             "torso",
             meshes.add(Mesh::from(Capsule3d::new(0.25, 0.5))),
-            vec![Socket::new("shoulder_l", Transform::from_xyz(-0.3, 0.4, 0.0))],
+            vec![Socket::new(
+                "shoulder_l",
+                Transform::from_xyz(-0.3, 0.4, 0.0),
+            )],
         ));
         reg.insert(mk(
             "arm",
             meshes.add(Mesh::from(Capsule3d::new(0.07, 0.3))),
-            vec![Socket::new("shoulder_joint", Transform::from_xyz(0.0, 0.2, 0.0))],
+            vec![Socket::new(
+                "shoulder_joint",
+                Transform::from_xyz(0.0, 0.2, 0.0),
+            )],
         ));
         reg
     }
@@ -698,11 +706,7 @@ mod tests {
         let child_socket = reg.parts["arm"].socket("shoulder_joint").unwrap().local;
         let world_socket = arm_mat * child_socket.to_matrix();
         let parent_socket = reg.parts["torso"].socket("shoulder_l").unwrap().local;
-        assert!(approx_eq_mat(
-            world_socket,
-            parent_socket.to_matrix(),
-            1e-4
-        ));
+        assert!(approx_eq_mat(world_socket, parent_socket.to_matrix(), 1e-4));
     }
 
     #[test]

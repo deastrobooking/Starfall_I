@@ -15,7 +15,6 @@ use crate::characters::{
     despawn_cartoon_character_parts, eye_preset, hair_preset, hero_config,
     hero_config_with_overrides, outfit_preset, skin_preset,
 };
-use crate::player_mesh::attach_modular_player_mesh;
 use crate::components::armor::ArmorSet;
 use crate::components::character::{CartoonPart, JointMarker};
 use crate::components::enemy::{BossEnemy, DeadEnemy, Enemy, EnemyType, FlyingDrone};
@@ -27,6 +26,7 @@ use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
+use crate::player_mesh::attach_modular_player_mesh;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe, CameraShake,
@@ -466,6 +466,7 @@ fn spawn_players(
                 &mut materials,
                 player,
                 &character_config,
+                CharacterLoadout::from(visual_loadout),
             );
         } else {
             attach_native_playable_character(

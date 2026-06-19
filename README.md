@@ -38,7 +38,7 @@ In progress:
 - Local multiplayer is playable at the input/camera/player level, and save snapshots, HUD panels, companions, crafting, chests, hidden rewards, enemy loot pickups, camera shake, damage flash, and vehicle buffs are now keyed per player. Chapter scripting uses the party center for encounter placement, while some campaign systems remain intentionally shared.
 - Perks are functional and saved, but the chapter-select perk UI is intentionally lightweight and keyboard-only.
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
-- The robot/chassis editor exists as a simple preset and scale screen; deeper part-by-part design is still future design work.
+- Character design is the single playable-character editor, with GLB-inspired base models, modular silhouette presets, armor layers, and saved per-slot loadouts.
 
 ## Cast
 
@@ -88,12 +88,11 @@ cargo run --features dynamic
 2. Player Select
 3. Character Design
 4. Chapter Select
-5. Chassis Editor
-6. Playing
-7. Paused
-8. Game Over
+5. Playing
+6. Paused
+7. Game Over
 
-Chapter select is now the 200 x 200 mile Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the chassis editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
+Chapter select is now the 200 x 200 mile Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the character editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
 
 Character design supports outfit/accent/hair swatches, accessory toggles, and body-shape steppers for height, shoulders, chest, arms, legs, hands, feet, head, and mass. Confirming stores an editable character blueprint; body proportions feed the visible character, collider size, movement tuning, stamina, armor capacity, and health.
 
@@ -271,8 +270,7 @@ src/
   plugins/vehicle_plugin.rs       Vehicle enter/exit and driving physics
   plugins/ui_plugin.rs            Menus, HUD, discussion GUI, crafting panel, chapter/perk UI
   plugins/save_plugin.rs          Save/load and autosave
-  plugins/chassis_editor_plugin.rs Robot chassis editor flow
-  robots/                         Chassis editor data, robot presets, and factory
+  robots/                         Robot presets, style data, and factory
   lsystem/                        Procedural tree grammar and turtle interpreter
 assets/
   shaders/grass.wgsl              Wind-animated grass shader

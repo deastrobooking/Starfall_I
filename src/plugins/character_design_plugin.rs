@@ -11,15 +11,19 @@ use crate::character_parts::{
 use crate::characters::{
     accent_preset, accent_presets, eye_preset, eye_presets, hair_preset, hair_presets, hero_config,
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
-    skin_preset, skin_presets, spawn_native_playable_character,
+    skin_preset, skin_presets,
 };
 use crate::components::player::PlayerCamera;
+use crate::player_mesh::spawn_modular_player_preview;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
-    CharacterDesignData, PlayerPartLoadout, PlayerSelectState,
+    CharacterBaseModel, CharacterDesignData, CharacterDesignReturnTarget, CharacterDesignSnapshot,
+    PlayerPartLoadout, PlayerSelectState,
 };
 use crate::state::AppState;
+use std::fs;
+use std::path::PathBuf;
 
 pub struct CharacterDesignPlugin;
 
@@ -39,6 +43,7 @@ impl Plugin for CharacterDesignPlugin {
                     physique_preset_interaction,
                     body_stepper_interaction,
                     button_interaction,
+                    design_prefab_shortcuts,
                     design_zoom_and_preset_shortcuts,
                     design_keyboard_input,
                     update_swatch_borders,
@@ -220,6 +225,11 @@ fn setup_character_design(
     design_data.leg_preset = slot_loadout.legs;
     design_data.shoulder_preset = slot_loadout.shoulders;
     design_data.head_preset = slot_loadout.head;
+    design_data.base_model = if slot.part_loadout.is_some() || blueprint.is_some() {
+        CharacterBaseModel::from_name_and_loadout(hero_name, slot_loadout)
+    } else {
+        CharacterBaseModel::from_name(hero_name)
+    };
     design_data.body = blueprint
         .as_ref()
         .map(|blueprint| blueprint.body)
@@ -380,7 +390,7 @@ fn rebuild_preview_if_dirty(
         shoulders: design_data.shoulder_preset,
         head: design_data.head_preset,
     };
-    let entity = spawn_native_playable_character(
+    let entity = spawn_modular_player_preview(
         &mut commands,
         &mut meshes,
         &mut materials,
@@ -510,14 +520,14 @@ fn button_interaction(
 ) {
     for interaction in back_q.iter() {
         if *interaction == Interaction::Pressed {
-            next_state.set(AppState::PlayerSelect);
+            next_state.set(character_design_return_state(design_data.return_target));
             return;
         }
     }
     for interaction in confirm_q.iter() {
         if *interaction == Interaction::Pressed {
             save_design(&design_data, &mut select_state, &mut part_loadout);
-            next_state.set(AppState::PlayerSelect);
+            next_state.set(character_design_return_state(design_data.return_target));
             return;
         }
     }
@@ -568,10 +578,86 @@ fn design_keyboard_input(
 
     if go_confirm {
         save_design(&design_data, &mut select_state, &mut part_loadout);
-        next_state.set(AppState::PlayerSelect);
+        next_state.set(character_design_return_state(design_data.return_target));
     } else if go_back {
-        next_state.set(AppState::PlayerSelect);
+        next_state.set(character_design_return_state(design_data.return_target));
     }
+}
+
+fn character_design_return_state(target: CharacterDesignReturnTarget) -> AppState {
+    match target {
+        CharacterDesignReturnTarget::PlayerSelect => AppState::PlayerSelect,
+        CharacterDesignReturnTarget::ChapterSelect => AppState::ChapterSelect,
+    }
+}
+
+fn design_prefab_shortcuts(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut design_data: ResMut<CharacterDesignData>,
+    select_state: Res<PlayerSelectState>,
+) {
+    let export = keys.just_pressed(KeyCode::F6);
+    let import = keys.just_pressed(KeyCode::F7);
+    if export == import {
+        return;
+    }
+
+    design_data.player_index = design_data.player_index.min(select_state.slots.len() - 1);
+    let hero_name = select_state.character_name(design_data.player_index);
+    let path = character_design_prefab_path(hero_name);
+
+    if export {
+        let snapshot = CharacterDesignSnapshot::from_design_data(&design_data);
+        if let Some(parent) = path.parent() {
+            if let Err(err) = fs::create_dir_all(parent) {
+                warn!(
+                    "could not create character design prefab folder {:?}: {err}",
+                    parent
+                );
+                return;
+            }
+        }
+        match serde_json::to_string_pretty(&snapshot)
+            .map_err(|err| err.to_string())
+            .and_then(|json| fs::write(&path, json).map_err(|err| err.to_string()))
+        {
+            Ok(()) => info!("exported character design prefab to {:?}", path),
+            Err(err) => warn!("could not export character design prefab {:?}: {err}", path),
+        }
+        return;
+    }
+
+    match fs::read_to_string(&path)
+        .map_err(|err| err.to_string())
+        .and_then(|json| {
+            serde_json::from_str::<CharacterDesignSnapshot>(&json).map_err(|err| err.to_string())
+        }) {
+        Ok(mut snapshot) => {
+            snapshot.player_index = design_data.player_index;
+            snapshot.apply_to_design_data(&mut design_data);
+            info!("imported character design prefab from {:?}", path);
+        }
+        Err(err) => warn!("could not import character design prefab {:?}: {err}", path),
+    }
+}
+
+fn character_design_prefab_path(hero_name: &str) -> PathBuf {
+    let mut file_stem = String::with_capacity(hero_name.len());
+    for c in hero_name.chars() {
+        if c.is_ascii_alphanumeric() {
+            file_stem.push(c.to_ascii_lowercase());
+        } else if !file_stem.ends_with('_') {
+            file_stem.push('_');
+        }
+    }
+    if file_stem.is_empty() {
+        file_stem.push_str("character");
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("Characters")
+        .join("design_prefabs")
+        .join(format!("{file_stem}.json"))
 }
 
 fn design_zoom_and_preset_shortcuts(
@@ -888,7 +974,7 @@ fn spawn_design_ui(
                     TextColor(Color::srgb(0.92, 0.76, 0.42)),
                 ));
 
-                spawn_section_label(panel, "REFERENCE DESIGN");
+                spawn_section_label(panel, "BASE MODEL");
                 panel
                     .spawn(Node {
                         flex_direction: FlexDirection::Row,
@@ -1464,6 +1550,7 @@ impl ReferenceDesignPreset {
     fn apply(self, design_data: &mut CharacterDesignData) {
         match self {
             ReferenceDesignPreset::Amp => {
+                design_data.base_model = CharacterBaseModel::AmpSiege;
                 design_data.skin_idx = 3;
                 design_data.outfit_idx = 0;
                 design_data.accent_idx = 1;
@@ -1483,6 +1570,7 @@ impl ReferenceDesignPreset {
                 design_data.has_visor = true;
             }
             ReferenceDesignPreset::Antonio => {
+                design_data.base_model = CharacterBaseModel::AntonioRift;
                 design_data.skin_idx = 4;
                 design_data.outfit_idx = 7;
                 design_data.accent_idx = 3;
@@ -1502,6 +1590,7 @@ impl ReferenceDesignPreset {
                 design_data.has_visor = true;
             }
             ReferenceDesignPreset::Chroma => {
+                design_data.base_model = CharacterBaseModel::ChromaTrace;
                 design_data.skin_idx = 2;
                 design_data.outfit_idx = 6;
                 design_data.accent_idx = 6;
@@ -1521,6 +1610,7 @@ impl ReferenceDesignPreset {
                 design_data.has_visor = true;
             }
             ReferenceDesignPreset::Daria => {
+                design_data.base_model = CharacterBaseModel::DariaFlares;
                 design_data.skin_idx = 1;
                 design_data.outfit_idx = 5;
                 design_data.accent_idx = 4;
@@ -1540,6 +1630,7 @@ impl ReferenceDesignPreset {
                 design_data.has_visor = true;
             }
             ReferenceDesignPreset::Vincenzo => {
+                design_data.base_model = CharacterBaseModel::VincenzoDeep;
                 design_data.skin_idx = 0;
                 design_data.outfit_idx = 6;
                 design_data.accent_idx = 6;

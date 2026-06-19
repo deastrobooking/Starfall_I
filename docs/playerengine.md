@@ -52,7 +52,7 @@ mechanic after MM7 should assume that a hero has:
 - A data-driven identity layer: `CharacterBlueprint` remains the durable record
   for proportions, palette, rig recipe, cosmetic selections, equipment visuals,
   and future prefab choices.
-- A preview/runtime parity rule: main-menu character previews, chassis editor
+- A preview/runtime parity rule: main-menu character previews, character designer
   previews, live players, and save-loaded players must instantiate the same rig
   and attachment path.
 
@@ -584,8 +584,8 @@ Acceptance:
 - IK never pulls the character root through walls or terrain.
 - Controller/local-co-op readability remains intact in split screen and boss
   mode.
-- Existing robot/chassis part swaps still attach through `JointKind` sockets and
-  do not break IK.
+- Existing robot and armor part swaps still attach through `JointKind` sockets
+  and do not break IK.
 - Character designer previews show the same skeleton, IK settings, and socket
   bindings as runtime players, with non-gameplay preview controls allowed.
 

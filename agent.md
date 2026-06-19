@@ -129,9 +129,9 @@ together.
   `src/plugins/ui_plugin.rs`. Feed new interactables into that panel when they
   need immediate player-facing prompts.
 - Core app states are `MainMenu`, `PlayerSelect`, `CharacterDesign`,
-  `ChapterSelect`, `ChassisEditor`, `RobotGarage`, `Playing`, `Paused`, and
-  `GameOver`. `ChassisEditor` and `RobotGarage` are both entered from
-  `ChapterSelect` via [E] and [G] and return to `ChapterSelect`.
+  `ChapterSelect`, `RobotGarage`, `Playing`, `Paused`, and `GameOver`.
+  `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect`
+  via [E] and [G] and return to `ChapterSelect`.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
   `docs/improvements.md`, `docs/naming.md`, and
   `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md` and
@@ -185,8 +185,9 @@ together.
   `PlayerPartLoadout`; `swap_character_parts` system; robot spawn functions.
 - **Rounded robot factory** — `src/robots/factory.rs` fully rewritten with
   Capsule3d/Sphere/Cylinder geometry.
-- **Chassis Editor** (`AppState::ChassisEditor`) — live 3D spinning preview, Q/W/E/R
-  slot toggles, 1-5 accent presets, +/- scale.
+- **Character Design editor** (`AppState::CharacterDesign`) — single playable
+  character editor with GLB-inspired base models, live preview, part presets,
+  color controls, and saved loadouts.
 - **Perk Tree UI + Upgrade Shop UI** — per-branch/per-track colored rows with rank bars
   in chapter select; live update systems; A–H spend perks, Z–N purchase upgrades.
 - **Robot Garage** (`AppState::RobotGarage`) — assembly form browser, auto pet selection,

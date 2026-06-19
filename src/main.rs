@@ -36,6 +36,10 @@ mod settlement_economy;
 mod state;
 mod upgrades;
 
+use character_blueprint::{BodyRecipe, CartoonAppearanceRecipe};
+use character_parts::{
+    ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
+};
 use commands::{CommandOverlayState, CommandRegistry};
 use events::EventsPlugin;
 use final_war::FinalWarRegistry;
@@ -43,15 +47,16 @@ use hacking::HackingRegistry;
 use modular_character::ModularCharacterPlugin;
 use perks::PerkTree;
 use plugins::{
-    ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChassisEditorPlugin,
-    ChestPlugin, CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, HackingPlugin,
-    InputPlugin, PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin,
+    ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
+    CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, HackingPlugin, InputPlugin,
+    PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin,
     WeaponPlugin, WorldPlugin,
 };
 use raids::RaidRegistry;
 use resources::{
-    CameraShake, CharacterDesignData, GameSettings, LocalPlayerConfig, PlaySessionTransition,
-    PlayerPartLoadout, PlayerScore, PlayerSelectState, WaveInfo, WorldRouteRegistry,
+    CameraShake, CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData,
+    CharacterDesignSnapshot, GameSettings, LocalPlayerConfig, PlaySessionTransition,
+    PlayerPartLoadout, PlayerScore, PlayerSelectState, ShopCatalog, WaveInfo, WorldRouteRegistry,
     WorldSiteRegistry,
 };
 use robot_pets::RobotPetCollection;
@@ -95,11 +100,13 @@ fn main() {
         .init_resource::<LocalPlayerConfig>()
         .init_resource::<PlayerSelectState>()
         .init_resource::<CharacterDesignData>()
+        .init_resource::<CharacterBaseModelCatalog>()
         .init_resource::<PerkTree>()
         .init_resource::<RobotPetCollection>()
         .init_resource::<SettlementEconomy>()
         .init_resource::<UpgradeLedger>()
         .init_resource::<PlayerPartLoadout>()
+        .init_resource::<ShopCatalog>()
         .init_resource::<WorldSiteRegistry>()
         .init_resource::<WorldRouteRegistry>()
         .init_resource::<RaidRegistry>()
@@ -107,6 +114,17 @@ fn main() {
         .init_resource::<CommandOverlayState>()
         .init_resource::<HackingRegistry>()
         .init_resource::<FinalWarRegistry>()
+        .register_type::<BodyRecipe>()
+        .register_type::<CartoonAppearanceRecipe>()
+        .register_type::<BodyPreset>()
+        .register_type::<ArmPreset>()
+        .register_type::<LegPreset>()
+        .register_type::<ShoulderPreset>()
+        .register_type::<HeadPreset>()
+        .register_type::<CharacterLoadout>()
+        .register_type::<CharacterBaseModel>()
+        .register_type::<PlayerPartLoadout>()
+        .register_type::<CharacterDesignSnapshot>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
         .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
@@ -132,7 +150,6 @@ fn main() {
             DiscoverablePlugin,
             RadioPlugin,
             VehiclePlugin,
-            ChassisEditorPlugin,
             RobotGaragePlugin,
             ModularCharacterPlugin,
         ));

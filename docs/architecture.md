@@ -54,7 +54,6 @@ src/
     discoverable_plugin.rs  Beacon spawn, collection trigger, secret cave charting, relic puzzle runtime, fragment assembly
     radio_plugin.rs         RadioChatter queue drain → UiMessage
     vehicle_plugin.rs       Vehicle enter/exit; GroundMode (Motorcycle/Tank/GiantMech) and AirMode (Jet/Ship) driven by assembly or blueprint
-    chassis_editor_plugin.rs Robot chassis color/part editor; live 3-D preview; saves to PlayerPartLoadout
     robot_garage_plugin.rs  Assembly form browser; auto-selects eligible pets; MechCommandLink gating
   lsystem/                  L-system string rewriting + 3-D turtle for procedural trees
   robots/                   Robot style presets (designer.rs, factory.rs presets.rs)
@@ -69,7 +68,7 @@ MainMenu ──► PlayerSelect ◄───────────────
             CharacterDesign ────────────────────────────────────────┘
                   │
                   ▼
-            ChapterSelect ──[E]──► ChassisEditor ──► ChapterSelect
+            ChapterSelect ──[E]──► CharacterDesign ──► ChapterSelect
                   │
                   ├──[G]──► RobotGarage ──► ChapterSelect
                   │
@@ -80,7 +79,7 @@ MainMenu ──► PlayerSelect ◄───────────────
              GameOver ──► MainMenu
 ```
 
-`ChassisEditor` and `RobotGarage` are both entered from `ChapterSelect` and return to it on Esc/confirm. Neither transitions to `Playing` directly.
+`CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect` and return to it on Esc/confirm. Neither transitions to `Playing` directly.
 
 ## Core Data Flow
 

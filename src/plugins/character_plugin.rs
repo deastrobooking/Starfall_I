@@ -8,11 +8,13 @@ use crate::character_parts::{
 };
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
-    CartoonPose, CharacterIkPose, IkTarget, JointKind, JointMarker, SkeletonRig,
+    CartoonPose, CharacterIkPose, HandEngine, HandGrip, HandPoseState, HandSide, IkTarget,
+    JointKind, JointMarker, SkeletonRig,
 };
 use crate::components::player::{
     DodgeState, EdgeGrabState, FlightMode, GrappleHookMode, GrappleHookState, JetpackState,
-    ParryState, PlayerMovement, PlayerState, PlayerStateMachine, TraversalMode, TraversalModeState,
+    ParryState, PlayerInput, PlayerMovement, PlayerState, PlayerStateMachine, TraversalMode,
+    TraversalModeState,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
 use crate::state::AppState;
@@ -93,11 +95,51 @@ fn swap_character_parts(
             }
         }
 
-        spawn_body(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.body);
-        spawn_arms(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.arms);
-        spawn_legs(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.legs);
-        spawn_shoulders(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.shoulders);
-        spawn_head(&mut commands, &mut meshes, &mut materials, root, visual_cfg, lift, loadout.head);
+        spawn_body(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            root,
+            visual_cfg,
+            lift,
+            loadout.body,
+        );
+        spawn_arms(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            root,
+            visual_cfg,
+            lift,
+            loadout.arms,
+        );
+        spawn_legs(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            root,
+            visual_cfg,
+            lift,
+            loadout.legs,
+        );
+        spawn_shoulders(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            root,
+            visual_cfg,
+            lift,
+            loadout.shoulders,
+        );
+        spawn_head(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            root,
+            visual_cfg,
+            lift,
+            loadout.head,
+        );
     }
 }
 
@@ -117,6 +159,7 @@ struct PoseSample {
     dodge_direction_local: Vec3,
     grapple_attach_local: Option<Vec3>,
     ik: CharacterIkPose,
+    hands: HandEngine,
     wall_clasp_time: f32,
 }
 
@@ -230,6 +273,25 @@ struct IkPoseInput {
     dodge_direction_local: Vec3,
     grapple_attach_local: Option<Vec3>,
     wall_clasp_time: f32,
+}
+
+#[derive(Clone, Copy)]
+struct HandEngineInput {
+    pose: CartoonPose,
+    phase: f32,
+    scale: f32,
+    visual_ground_lift: f32,
+    fire: bool,
+    aim: bool,
+    melee_light: bool,
+    melee_heavy: bool,
+    sabre_active: bool,
+    sabre_slashing: bool,
+    parrying: bool,
+    hanging: bool,
+    wall_sliding: bool,
+    traversal_mode: TraversalMode,
+    grapple_attach_local: Option<Vec3>,
 }
 
 fn build_character_ik_pose(input: IkPoseInput) -> CharacterIkPose {
@@ -347,6 +409,182 @@ fn build_character_ik_pose(input: IkPoseInput) -> CharacterIkPose {
     pose
 }
 
+fn build_hand_engine(input: HandEngineInput) -> HandEngine {
+    let scale = input.scale.max(0.1);
+    let lift = input.visual_ground_lift;
+    let wave = input.phase.sin();
+
+    if input.hanging || input.pose == CartoonPose::Hang {
+        let grip_y = 0.58 * scale + lift;
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Climb, 0.92, 0.08)
+                .with_target(Vec3::new(-0.34 * scale, grip_y, -0.42 * scale), 0.98)
+                .with_twist(-0.24),
+            right: HandPoseState::new(HandGrip::Climb, 0.92, 0.08)
+                .with_target(Vec3::new(0.34 * scale, grip_y, -0.42 * scale), 0.98)
+                .with_twist(0.24),
+        };
+    }
+
+    if input.wall_sliding || input.pose == CartoonPose::WallSlide {
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Climb, 0.86, 0.10)
+                .with_target(
+                    Vec3::new(
+                        -0.42 * scale + wave * 0.018 * scale,
+                        0.16 * scale + lift,
+                        -0.44 * scale,
+                    ),
+                    0.86,
+                )
+                .with_twist(-0.18),
+            right: HandPoseState::new(HandGrip::Balance, 0.30, 0.62)
+                .with_target(
+                    Vec3::new(0.34 * scale, -0.16 * scale + lift, -0.18 * scale),
+                    0.36,
+                )
+                .with_twist(0.38),
+        };
+    }
+
+    if matches!(
+        input.pose,
+        CartoonPose::Grapple | CartoonPose::Swing | CartoonPose::Zip
+    ) {
+        let target = input
+            .grapple_attach_local
+            .map(|target| {
+                let dir = normalized_or_zero(target);
+                let reach_y = (0.14 * scale + lift + dir.y.clamp(-0.2, 0.8) * 0.45 * scale)
+                    .clamp(-0.18 * scale + lift, 0.72 * scale + lift);
+                let reach_z = (dir.z * 0.62 * scale).clamp(-0.72 * scale, 0.18 * scale);
+                let reach_x = (dir.x * 0.48 * scale).clamp(-0.55 * scale, 0.55 * scale);
+                Vec3::new(reach_x.max(0.12 * scale), reach_y, reach_z)
+            })
+            .unwrap_or(Vec3::new(0.30 * scale, 0.28 * scale + lift, -0.58 * scale));
+        let pull_weight = match input.pose {
+            CartoonPose::Swing => 0.92,
+            CartoonPose::Zip => 0.84,
+            _ => 0.74,
+        };
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Brace, 0.58, 0.24)
+                .with_target(
+                    Vec3::new(-0.24 * scale, 0.02 * scale + lift, -0.20 * scale),
+                    0.52,
+                )
+                .with_twist(-0.20),
+            right: HandPoseState::new(HandGrip::Grapple, 0.82, 0.12)
+                .with_target(target, pull_weight)
+                .with_twist(0.30),
+        };
+    }
+
+    if input.parrying || input.pose == CartoonPose::Parry {
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Brace, 0.72, 0.16)
+                .with_target(
+                    Vec3::new(-0.24 * scale, 0.16 * scale + lift, -0.36 * scale),
+                    0.78,
+                )
+                .with_twist(-0.42),
+            right: HandPoseState::new(HandGrip::Brace, 0.78, 0.14)
+                .with_target(
+                    Vec3::new(0.24 * scale, 0.14 * scale + lift, -0.40 * scale),
+                    0.82,
+                )
+                .with_twist(0.42),
+        };
+    }
+
+    if input.sabre_active || input.sabre_slashing || input.pose == CartoonPose::SabreSlash {
+        let slash = (input.phase * 1.25).sin();
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Brace, 0.44, 0.32)
+                .with_target(
+                    Vec3::new(-0.22 * scale, 0.02 * scale + lift, -0.26 * scale),
+                    0.42,
+                )
+                .with_twist(-0.12),
+            right: HandPoseState::new(HandGrip::Sabre, 0.88, 0.08)
+                .with_target(
+                    Vec3::new(
+                        0.34 * scale + slash * 0.08 * scale,
+                        0.12 * scale + lift,
+                        -0.48 * scale,
+                    ),
+                    if input.sabre_slashing { 0.82 } else { 0.62 },
+                )
+                .with_twist(0.60)
+                .with_recoil(slash.abs() * 0.35),
+        };
+    }
+
+    if input.melee_light || input.melee_heavy || input.pose == CartoonPose::Attack {
+        let punch = (input.phase * 1.7).sin().max(0.0);
+        let heavy = input.melee_heavy;
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Brace, 0.50, 0.24)
+                .with_target(
+                    Vec3::new(-0.22 * scale, 0.03 * scale + lift, -0.24 * scale),
+                    0.34,
+                )
+                .with_twist(-0.16),
+            right: HandPoseState::new(HandGrip::Fist, 0.96, 0.04)
+                .with_target(
+                    Vec3::new(
+                        0.26 * scale,
+                        (0.05 + punch * 0.08) * scale + lift,
+                        (-0.32 - punch * if heavy { 0.28 } else { 0.18 }) * scale,
+                    ),
+                    if heavy { 0.82 } else { 0.70 },
+                )
+                .with_twist(0.24)
+                .with_recoil(punch * 0.22),
+        };
+    }
+
+    if input.fire || input.aim {
+        let recoil = if input.fire { 0.45 } else { 0.0 };
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Brace, 0.44, 0.26)
+                .with_target(
+                    Vec3::new(-0.16 * scale, 0.07 * scale + lift, -0.42 * scale),
+                    0.46,
+                )
+                .with_twist(-0.12),
+            right: HandPoseState::new(HandGrip::Trigger, 0.70, 0.12)
+                .with_target(
+                    Vec3::new(0.22 * scale, 0.10 * scale + lift, -0.52 * scale),
+                    0.68,
+                )
+                .with_twist(0.18)
+                .with_recoil(recoil),
+        };
+    }
+
+    if input.traversal_mode == TraversalMode::Hoverboard || input.pose == CartoonPose::Hoverboard {
+        return HandEngine {
+            left: HandPoseState::new(HandGrip::Balance, 0.18, 0.72).with_twist(-0.32),
+            right: HandPoseState::new(HandGrip::Balance, 0.18, 0.72).with_twist(0.32),
+        };
+    }
+
+    HandEngine {
+        left: HandPoseState::new(HandGrip::Relaxed, 0.20 + wave * 0.03, 0.20),
+        right: HandPoseState::new(HandGrip::Relaxed, 0.20 - wave * 0.03, 0.20),
+    }
+}
+
+fn apply_hand_engine_to_ik(ik: &mut CharacterIkPose, hands: HandEngine) {
+    if let Some(target) = hands.left.ik_target(HandSide::Left) {
+        ik.left_hand = Some(target);
+    }
+    if let Some(target) = hands.right.ik_target(HandSide::Right) {
+        ik.right_hand = Some(target);
+    }
+}
+
 fn root_local_vector(transform: &Transform, vector: Vec3) -> Vec3 {
     transform.rotation.inverse() * vector
 }
@@ -379,10 +617,14 @@ fn cartoon_animation_system(
             Option<&GrappleHookState>,
             Option<&DodgeState>,
             Option<&ParryState>,
+            Option<&PlayerInput>,
             Option<&BeamSabre>,
             Option<&MeleeCombo>,
-            Option<&mut CharacterIkPose>,
         ),
+        (Without<CartoonPart>, Without<JointMarker>),
+    >,
+    mut root_pose_state: Query<
+        (Option<&mut HandEngine>, Option<&mut CharacterIkPose>),
         (Without<CartoonPart>, Without<JointMarker>),
     >,
     mut joints: Query<(&JointMarker, &mut Transform), Without<CartoonPart>>,
@@ -404,9 +646,9 @@ fn cartoon_animation_system(
         grapple,
         dodge,
         parry,
+        player_input,
         sabre,
         melee,
-        root_ik_pose,
     ) in roots.iter_mut()
     {
         let delta = transform.translation - animator.last_position;
@@ -495,7 +737,7 @@ fn cartoon_animation_system(
         animator.phase += dt * phase_rate;
 
         let hanging = edge_grab.map(|e| e.is_hanging).unwrap_or(false);
-        let ik = build_character_ik_pose(IkPoseInput {
+        let mut ik = build_character_ik_pose(IkPoseInput {
             pose: animator.pose,
             phase: animator.phase,
             scale,
@@ -508,8 +750,33 @@ fn cartoon_animation_system(
             grapple_attach_local,
             wall_clasp_time,
         });
-        if let Some(mut root_ik_pose) = root_ik_pose {
-            *root_ik_pose = ik;
+        let hands = build_hand_engine(HandEngineInput {
+            pose: animator.pose,
+            phase: animator.phase,
+            scale,
+            visual_ground_lift,
+            fire: player_input.map(|input| input.fire).unwrap_or(false),
+            aim: player_input.map(|input| input.aim).unwrap_or(false),
+            melee_light: player_input.map(|input| input.melee_light).unwrap_or(false),
+            melee_heavy: player_input.map(|input| input.melee_heavy).unwrap_or(false),
+            sabre_active: sabre.map(|s| s.unlocked && s.active).unwrap_or(false),
+            sabre_slashing,
+            parrying: parry.map(|p| p.is_parrying).unwrap_or(false),
+            hanging,
+            wall_sliding: current_state == Some(PlayerState::WallSliding),
+            traversal_mode: traversal
+                .map(|t| t.active)
+                .unwrap_or(TraversalMode::Grapple),
+            grapple_attach_local,
+        });
+        apply_hand_engine_to_ik(&mut ik, hands);
+        if let Ok((hand_engine, root_ik_pose)) = root_pose_state.get_mut(entity) {
+            if let Some(mut hand_engine) = hand_engine {
+                *hand_engine = hands;
+            }
+            if let Some(mut root_ik_pose) = root_ik_pose {
+                *root_ik_pose = ik;
+            }
         }
 
         samples.insert(
@@ -529,6 +796,7 @@ fn cartoon_animation_system(
                 dodge_direction_local,
                 grapple_attach_local,
                 ik,
+                hands,
                 wall_clasp_time,
             },
         );
@@ -2132,6 +2400,59 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
         }
         _ => {}
     }
+
+    apply_hand_grip_pose(part, transform, sample);
+}
+
+fn apply_hand_grip_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSample) {
+    let side = match part.kind {
+        CartoonPartKind::LeftHand => HandSide::Left,
+        CartoonPartKind::RightHand => HandSide::Right,
+        _ => return,
+    };
+    let hand = sample.hands.pose(side);
+    let side_sign = side.sign();
+    let curl = hand.curl.clamp(0.0, 1.0);
+    let spread = hand.spread.clamp(0.0, 1.0);
+
+    let squash = 1.0 - curl * 0.16;
+    let knuckle = 1.0 + curl * 0.13;
+    let fan = 1.0 + spread * 0.11;
+    transform.scale *= Vec3::new(fan, squash, knuckle);
+    transform.translation.z -= hand.recoil * 0.035 * sample.scale;
+    transform.rotation *= Quat::from_rotation_x(-curl * 0.22 + hand.recoil * 0.10)
+        * Quat::from_rotation_y(side_sign * spread * 0.12)
+        * Quat::from_rotation_z(side_sign * hand.twist * 0.34);
+
+    match hand.grip {
+        HandGrip::Relaxed => {
+            transform.rotation *= Quat::from_rotation_z(side_sign * 0.04);
+        }
+        HandGrip::Open | HandGrip::Balance => {
+            transform.scale.x *= 1.06;
+            transform.rotation *= Quat::from_rotation_y(side_sign * 0.10);
+        }
+        HandGrip::Fist => {
+            transform.scale.y *= 0.90;
+            transform.scale.z *= 1.08;
+        }
+        HandGrip::Trigger => {
+            transform.scale.x *= 0.96;
+            transform.rotation *= Quat::from_rotation_x(-0.08);
+        }
+        HandGrip::Sabre => {
+            transform.scale.y *= 0.92;
+            transform.rotation *= Quat::from_rotation_z(side_sign * 0.18);
+        }
+        HandGrip::Grapple | HandGrip::Climb => {
+            transform.scale.z *= 1.12;
+            transform.rotation *= Quat::from_rotation_x(-0.12);
+        }
+        HandGrip::Brace => {
+            transform.scale.x *= 1.03;
+            transform.rotation *= Quat::from_rotation_y(side_sign * 0.14);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2176,5 +2497,65 @@ mod tests {
 
         assert!(solution.knee_pitch > 0.35);
         assert!(solution.ankle_pitch < 0.0);
+    }
+
+    fn hand_input() -> HandEngineInput {
+        HandEngineInput {
+            pose: CartoonPose::Idle,
+            phase: 0.0,
+            scale: 1.0,
+            visual_ground_lift: 0.0,
+            fire: false,
+            aim: false,
+            melee_light: false,
+            melee_heavy: false,
+            sabre_active: false,
+            sabre_slashing: false,
+            parrying: false,
+            hanging: false,
+            wall_sliding: false,
+            traversal_mode: TraversalMode::Grapple,
+            grapple_attach_local: None,
+        }
+    }
+
+    #[test]
+    fn hand_engine_aim_uses_trigger_and_support_hand() {
+        let mut input = hand_input();
+        input.aim = true;
+
+        let hands = build_hand_engine(input);
+
+        assert_eq!(hands.right.grip, HandGrip::Trigger);
+        assert_eq!(hands.left.grip, HandGrip::Brace);
+        assert!(hands.right.ik_target(HandSide::Right).is_some());
+    }
+
+    #[test]
+    fn hand_engine_grapple_overrides_sabre_hold() {
+        let mut input = hand_input();
+        input.sabre_active = true;
+        let sabre = build_hand_engine(input);
+
+        input.pose = CartoonPose::Grapple;
+        input.grapple_attach_local = Some(Vec3::new(0.3, 0.4, -1.0));
+        let grapple = build_hand_engine(input);
+
+        assert_eq!(sabre.right.grip, HandGrip::Sabre);
+        assert_eq!(grapple.right.grip, HandGrip::Grapple);
+        assert!(grapple.right.weight > sabre.right.weight);
+    }
+
+    #[test]
+    fn hand_engine_hoverboard_opens_balance_hands() {
+        let mut input = hand_input();
+        input.traversal_mode = TraversalMode::Hoverboard;
+
+        let hands = build_hand_engine(input);
+
+        assert_eq!(hands.left.grip, HandGrip::Balance);
+        assert_eq!(hands.right.grip, HandGrip::Balance);
+        assert!(hands.left.spread > 0.6);
+        assert!(hands.right.spread > 0.6);
     }
 }

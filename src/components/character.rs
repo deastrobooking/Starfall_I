@@ -195,6 +195,114 @@ pub struct CharacterIkPose {
     pub look_at: Option<Vec3>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HandSide {
+    Left,
+    Right,
+}
+
+impl HandSide {
+    pub fn wrist_joint(self) -> JointKind {
+        match self {
+            HandSide::Left => JointKind::LeftWrist,
+            HandSide::Right => JointKind::RightWrist,
+        }
+    }
+
+    pub fn sign(self) -> f32 {
+        match self {
+            HandSide::Left => -1.0,
+            HandSide::Right => 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum HandGrip {
+    #[default]
+    Relaxed,
+    Open,
+    Fist,
+    Trigger,
+    Sabre,
+    Grapple,
+    Climb,
+    Brace,
+    Balance,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HandPoseState {
+    pub grip: HandGrip,
+    pub curl: f32,
+    pub spread: f32,
+    pub target: Option<Vec3>,
+    pub weight: f32,
+    pub twist: f32,
+    pub recoil: f32,
+}
+
+impl Default for HandPoseState {
+    fn default() -> Self {
+        Self {
+            grip: HandGrip::Relaxed,
+            curl: 0.20,
+            spread: 0.18,
+            target: None,
+            weight: 0.0,
+            twist: 0.0,
+            recoil: 0.0,
+        }
+    }
+}
+
+impl HandPoseState {
+    pub fn new(grip: HandGrip, curl: f32, spread: f32) -> Self {
+        Self {
+            grip,
+            curl: curl.clamp(0.0, 1.0),
+            spread: spread.clamp(0.0, 1.0),
+            ..default()
+        }
+    }
+
+    pub fn with_target(mut self, target: Vec3, weight: f32) -> Self {
+        self.target = Some(target);
+        self.weight = weight.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_twist(mut self, twist: f32) -> Self {
+        self.twist = twist.clamp(-1.0, 1.0);
+        self
+    }
+
+    pub fn with_recoil(mut self, recoil: f32) -> Self {
+        self.recoil = recoil.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn ik_target(self, side: HandSide) -> Option<IkTarget> {
+        self.target
+            .map(|target| IkTarget::new(side.wrist_joint(), target, self.weight))
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct HandEngine {
+    pub left: HandPoseState,
+    pub right: HandPoseState,
+}
+
+impl HandEngine {
+    pub fn pose(self, side: HandSide) -> HandPoseState {
+        match side {
+            HandSide::Left => self.left,
+            HandSide::Right => self.right,
+        }
+    }
+}
+
 #[derive(Component, Debug, Clone)]
 pub struct CartoonPart {
     pub root: Entity,
@@ -294,6 +402,26 @@ mod tests {
         assert_eq!(
             IkTarget::new(JointKind::RightWrist, Vec3::ZERO, -2.0).weight,
             0.0
+        );
+    }
+
+    #[test]
+    fn hand_pose_state_clamps_shape_and_target_weight() {
+        let pose = HandPoseState::new(HandGrip::Fist, 2.0, -1.0)
+            .with_target(Vec3::new(1.0, 2.0, 3.0), 4.0)
+            .with_twist(3.0)
+            .with_recoil(2.0);
+
+        assert_eq!(pose.curl, 1.0);
+        assert_eq!(pose.spread, 0.0);
+        assert_eq!(pose.weight, 1.0);
+        assert_eq!(pose.twist, 1.0);
+        assert_eq!(pose.recoil, 1.0);
+        assert_eq!(
+            pose.ik_target(HandSide::Right)
+                .expect("right hand target")
+                .joint,
+            JointKind::RightWrist
         );
     }
 }

@@ -8,7 +8,6 @@ pub enum AppState {
     PlayerSelect,
     CharacterDesign,
     ChapterSelect,
-    ChassisEditor,
     RobotGarage,
     Playing,
     Paused,

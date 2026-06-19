@@ -81,7 +81,7 @@ resource has not changed:
 
 Hint bar format:
 ```
-1-9 0 Q W R T / click = travel  |  A-H Perks  |  Z-N Tech  |  Y-P/J Weapons  |  M Economy  |  E Editor  |  G Garage  |  Esc Back
+1-9 0 Q W R T / click = travel  |  A-H Perks  |  Z-N Tech  |  Y-P/J Weapons  |  M Economy  |  E Character Editor  |  G Garage  |  Esc Back
 ```
 
 ### Colorblind-friendly shape layer (recommended next step)

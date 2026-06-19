@@ -30,9 +30,9 @@ use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::{save_current_session, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
-    ChapterProgress, CharacterDesignData, CurrentChapter, GameSettings, LocalPlayerConfig,
-    PlaySessionTransition, PlayerGuidance, PlayerSelectState, UiMessage, WaveInfo,
-    WorldSiteRegistry, HERO_ROSTER,
+    ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
+    GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerGuidance, PlayerSelectState,
+    ShopCatalog, ShopCategory, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
@@ -218,6 +218,7 @@ enum PauseAction {
     Save,
     Title,
     Controls,
+    Shop,
     Settings,
     Back,
 }
@@ -227,6 +228,7 @@ struct PausePagePanel(PausePage);
 enum PausePage {
     Main,
     Controls,
+    Shop,
     Settings,
 }
 #[derive(Resource)]
@@ -503,7 +505,11 @@ fn gamepad_button_event_is_start_or_confirm(event: &GamepadButtonStateChangedEve
         )
 }
 
-fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
+fn setup_pause_menu(
+    mut commands: Commands,
+    mut menu: ResMut<PauseMenuState>,
+    shop: Res<ShopCatalog>,
+) {
     menu.page = PausePage::Main;
     menu.resume_lockout = 0.20;
     menu.resume_armed = false;
@@ -568,6 +574,11 @@ fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
                         "CONTROLS / TIPS",
                         PauseAction::Controls,
                         Color::srgb(0.22, 0.24, 0.52),
+                    ),
+                    (
+                        "SHOP / OUTFITS",
+                        PauseAction::Shop,
+                        Color::srgb(0.22, 0.38, 0.44),
                     ),
                     (
                         "SETTINGS",
@@ -635,6 +646,59 @@ fn setup_pause_menu(mut commands: Commands, mut menu: ResMut<PauseMenuState>) {
             root.spawn((
                 Node {
                     flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::FlexStart,
+                    row_gap: Val::Px(8.0),
+                    max_width: Val::Px(920.0),
+                    padding: UiRect::all(Val::Px(18.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.030, 0.034, 0.042, 0.92)),
+                Visibility::Hidden,
+                PausePagePanel(PausePage::Shop),
+            ))
+            .with_children(|page| {
+                page.spawn((
+                    Text::new("SHOP / GARAGE BROWSER"),
+                    TextFont {
+                        font_size: 30.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.9, 0.95, 1.0)),
+                ));
+                page.spawn((
+                    Text::new("Browse base outfits, armor shells, weapons, and vehicle frames. Purchase/equip actions will wire into this catalog next."),
+                    TextFont {
+                        font_size: 15.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                ));
+                for category in ShopCategory::ALL {
+                    page.spawn((
+                        Text::new(format!("{}:", category.label().to_uppercase())),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.94, 0.76, 0.36)),
+                    ));
+                    for item in shop.items_for(category).take(4) {
+                        page.spawn((
+                            Text::new(format_shop_item_row(item)),
+                            TextFont {
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.86, 0.90, 1.0)),
+                        ));
+                    }
+                }
+                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+            });
+
+            root.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
                     row_gap: Val::Px(10.0),
                     ..default()
@@ -694,6 +758,25 @@ fn spawn_pause_button(
                 TextColor(Color::WHITE),
             ));
         });
+}
+
+fn format_shop_item_row(item: &crate::resources::ShopItem) -> String {
+    let preview = item
+        .preview_loadout
+        .map(|loadout| {
+            format!(
+                " preview: {} / {} / {} / {}",
+                loadout.arms.label(),
+                loadout.legs.label(),
+                loadout.shoulders.label(),
+                loadout.head.label()
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "{}  {} cr | {}{}",
+        item.name, item.price_credits, item.summary, preview
+    )
 }
 
 fn update_pause_menu_page_visibility(
@@ -841,6 +924,9 @@ fn pause_menu_action_system(
         PauseAction::Controls => {
             menu.page = PausePage::Controls;
         }
+        PauseAction::Shop => {
+            menu.page = PausePage::Shop;
+        }
         PauseAction::Settings => {
             menu.page = PausePage::Settings;
         }
@@ -940,7 +1026,7 @@ fn setup_chapter_select(
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
             p.spawn((
-                Text::new("1-9 0 Q W R T / click = travel   |   A-H Perks   |   Z-N Tech   |   Y-P/J Weapons   |   M Economy   |   E Editor   |   G Garage   |   Esc Back"),
+                Text::new("1-9 0 Q W R T / click = travel   |   A-H Perks   |   Z-N Tech   |   Y-P/J Weapons   |   M Economy   |   E Character Editor   |   G Garage   |   Esc Back"),
                 TextFont {
                     font_size: 14.5,
                     ..default()
@@ -1673,13 +1759,14 @@ fn chapter_select_input(
     mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     progress: Res<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
+    mut design_data: ResMut<CharacterDesignData>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let mut controller_left = false;
     let mut controller_right = false;
     let mut controller_play = false;
     let mut controller_back = false;
-    let mut controller_chassis = false;
+    let mut controller_editor = false;
     let mut controller_garage = false;
     for event in button_events.read() {
         if event.state != ButtonState::Pressed {
@@ -1690,7 +1777,7 @@ fn chapter_select_input(
             GamepadButton::DPadRight | GamepadButton::RightTrigger => controller_right = true,
             GamepadButton::South | GamepadButton::Start => controller_play = true,
             GamepadButton::East => controller_back = true,
-            GamepadButton::North => controller_chassis = true,
+            GamepadButton::North => controller_editor = true,
             GamepadButton::West | GamepadButton::Select => controller_garage = true,
             _ => {}
         }
@@ -1706,7 +1793,7 @@ fn chapter_select_input(
             || gp.just_pressed(GamepadButton::South)
             || gp.just_pressed(GamepadButton::Start);
         controller_back = controller_back || gp.just_pressed(GamepadButton::East);
-        controller_chassis = controller_chassis || gp.just_pressed(GamepadButton::North);
+        controller_editor = controller_editor || gp.just_pressed(GamepadButton::North);
         controller_garage = controller_garage
             || gp.just_pressed(GamepadButton::West)
             || gp.just_pressed(GamepadButton::Select);
@@ -1721,7 +1808,7 @@ fn chapter_select_input(
         || native.just_pressed(NativeButton::South)
         || native.just_pressed(NativeButton::Start);
     controller_back = controller_back || native.just_pressed(NativeButton::East);
-    controller_chassis = controller_chassis || native.just_pressed(NativeButton::North);
+    controller_editor = controller_editor || native.just_pressed(NativeButton::North);
     controller_garage = controller_garage
         || native.just_pressed(NativeButton::West)
         || native.just_pressed(NativeButton::Select);
@@ -1756,8 +1843,10 @@ fn chapter_select_input(
         next_state.set(AppState::Playing);
         return;
     }
-    if controller_chassis {
-        next_state.set(AppState::ChassisEditor);
+    if controller_editor {
+        design_data.player_index = 0;
+        design_data.return_target = CharacterDesignReturnTarget::ChapterSelect;
+        next_state.set(AppState::CharacterDesign);
         return;
     }
     if controller_garage {
@@ -1798,7 +1887,9 @@ fn chapter_select_input(
         }
     }
     if keyboard.just_pressed(KeyCode::KeyE) {
-        next_state.set(AppState::ChassisEditor);
+        design_data.player_index = 0;
+        design_data.return_target = CharacterDesignReturnTarget::ChapterSelect;
+        next_state.set(AppState::CharacterDesign);
     }
     if keyboard.just_pressed(KeyCode::KeyG) {
         next_state.set(AppState::RobotGarage);
@@ -2478,6 +2569,7 @@ fn player_select_update(
             || (native_for_p1 && native.just_pressed(NativeButton::North));
         if customize_pressed && !slot.ready {
             design_data.player_index = 0;
+            design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
             next_state.set(AppState::CharacterDesign);
             return;
         }
@@ -2548,6 +2640,7 @@ fn player_select_update(
                 && !slot.ready
             {
                 design_data.player_index = i as usize;
+                design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
                 next_state.set(AppState::CharacterDesign);
                 return;
             }

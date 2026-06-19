@@ -868,6 +868,6 @@ The party still shares one active vehicle mode at a time. 3-D mech/ship controll
 
 ## Robot / Chassis System
 
-**Module:** `src/robots/` | **Plugins:** `ChassisEditorPlugin`, `RobotGaragePlugin`
+**Module:** `src/robots/` | **Plugins:** `RobotGaragePlugin`
 
-`RobotStyle` in `designer.rs` defines colors and part config. `factory.rs` spawns the physical entity using Capsule3d/Sphere/Cylinder geometry. `presets.rs` has named robot builds (`amp()` is the default player chassis). The chassis editor (`ChassisEditorPlugin`) lets the player restyle their robot and swap humanoid/robot part slots before entering a chapter; the chosen `PlayerPartLoadout` is saved to disk.
+`RobotStyle` in `designer.rs` defines colors and part config. `factory.rs` spawns the physical entity using Capsule3d/Sphere/Cylinder geometry. `presets.rs` has named robot builds (`amp()` is the default player chassis). Playable-character loadouts are now edited through `CharacterDesignPlugin`, while the robot garage handles pet assembly and advanced vehicle/mech forms.

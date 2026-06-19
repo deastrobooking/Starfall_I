@@ -332,9 +332,10 @@ impl Default for PlayerChassis {
     }
 }
 
-/// Per-slot preset choices, persisted between the chassis editor and gameplay.
+/// Per-slot preset choices, persisted between the character editor and gameplay.
 /// Applied to `CharacterLoadout` when the player character spawns.
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Reflect)]
+#[reflect(Resource)]
 pub struct PlayerPartLoadout {
     pub body: BodyPreset,
     pub arms: ArmPreset,
@@ -480,6 +481,269 @@ impl From<CharacterLoadout> for PlayerPartLoadout {
             shoulders: loadout.shoulders,
             head: loadout.head,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Reflect)]
+pub enum CharacterBaseModel {
+    AmpSiege,
+    AntonioRift,
+    #[default]
+    ChromaTrace,
+    DariaFlares,
+    VincenzoDeep,
+}
+
+impl CharacterBaseModel {
+    pub const ALL: [Self; 5] = [
+        Self::AmpSiege,
+        Self::AntonioRift,
+        Self::ChromaTrace,
+        Self::DariaFlares,
+        Self::VincenzoDeep,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AmpSiege => "AMP Siege",
+            Self::AntonioRift => "Antonio Rift",
+            Self::ChromaTrace => "Chroma Trace",
+            Self::DariaFlares => "Daria Flares",
+            Self::VincenzoDeep => "Vincenzo Deep",
+        }
+    }
+
+    pub fn hero_hint(self) -> &'static str {
+        match self {
+            Self::AmpSiege => "Joseph",
+            Self::AntonioRift => "Antonio",
+            Self::ChromaTrace => "Nova",
+            Self::DariaFlares => "Gabriella",
+            Self::VincenzoDeep => "Vincenzo",
+        }
+    }
+
+    pub const fn loadout(self) -> PlayerPartLoadout {
+        match self {
+            Self::AmpSiege => PlayerPartLoadout::amp_reference(),
+            Self::AntonioRift => PlayerPartLoadout::antonio_reference(),
+            Self::ChromaTrace => PlayerPartLoadout::chroma_reference(),
+            Self::DariaFlares => PlayerPartLoadout::daria_reference(),
+            Self::VincenzoDeep => PlayerPartLoadout::vincenzo_reference(),
+        }
+    }
+
+    pub fn body_recipe(self) -> BodyRecipe {
+        reference_body_recipe(self.hero_hint())
+    }
+
+    pub fn appearance(self) -> CartoonAppearanceRecipe {
+        reference_appearance_recipe(self.hero_hint())
+    }
+
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "AMP" | "Amp" | "Angelo" | "Joseph" => Self::AmpSiege,
+            "Antonio" | "Fortuna" => Self::AntonioRift,
+            "Daria" | "Gabriella" | "Aurora" => Self::DariaFlares,
+            "Chroma" | "Nova" => Self::ChromaTrace,
+            "Vincenzo" => Self::VincenzoDeep,
+            _ => Self::default(),
+        }
+    }
+
+    pub fn from_loadout(loadout: PlayerPartLoadout) -> Self {
+        if loadout == PlayerPartLoadout::amp_reference() {
+            Self::AmpSiege
+        } else if loadout == PlayerPartLoadout::antonio_reference() {
+            Self::AntonioRift
+        } else if loadout == PlayerPartLoadout::daria_reference() {
+            Self::DariaFlares
+        } else if loadout == PlayerPartLoadout::vincenzo_reference() {
+            Self::VincenzoDeep
+        } else {
+            Self::ChromaTrace
+        }
+    }
+
+    pub fn from_name_and_loadout(name: &str, loadout: PlayerPartLoadout) -> Self {
+        let named = Self::from_name(name);
+        if loadout == named.loadout() {
+            named
+        } else {
+            Self::from_loadout(loadout)
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone)]
+pub struct CharacterBaseModelCatalog {
+    pub models: Vec<CharacterBaseModel>,
+}
+
+impl Default for CharacterBaseModelCatalog {
+    fn default() -> Self {
+        Self {
+            models: CharacterBaseModel::ALL.to_vec(),
+        }
+    }
+}
+
+impl CharacterBaseModelCatalog {
+    pub fn by_label(&self, label: &str) -> Option<CharacterBaseModel> {
+        self.models
+            .iter()
+            .copied()
+            .find(|model| model.label() == label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShopCategory {
+    Outfits,
+    Armor,
+    Weapons,
+    Vehicles,
+}
+
+impl ShopCategory {
+    pub const ALL: [Self; 4] = [Self::Outfits, Self::Armor, Self::Weapons, Self::Vehicles];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Outfits => "Outfits",
+            Self::Armor => "Armor",
+            Self::Weapons => "Weapons",
+            Self::Vehicles => "Vehicles",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ShopItem {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub category: ShopCategory,
+    pub summary: &'static str,
+    pub price_credits: u32,
+    pub preview_loadout: Option<PlayerPartLoadout>,
+}
+
+impl ShopItem {
+    pub const fn new(
+        id: &'static str,
+        name: &'static str,
+        category: ShopCategory,
+        summary: &'static str,
+        price_credits: u32,
+        preview_loadout: Option<PlayerPartLoadout>,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            category,
+            summary,
+            price_credits,
+            preview_loadout,
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone)]
+pub struct ShopCatalog {
+    pub items: Vec<ShopItem>,
+}
+
+impl Default for ShopCatalog {
+    fn default() -> Self {
+        Self {
+            items: vec![
+                ShopItem::new(
+                    "outfit_amp_siege_base",
+                    "AMP Siege Base",
+                    ShopCategory::Outfits,
+                    "Wide mecha-human frame with armored arms, heavy boots, and plate shoulders.",
+                    1250,
+                    Some(PlayerPartLoadout::amp_reference()),
+                ),
+                ShopItem::new(
+                    "outfit_antonio_rift_base",
+                    "Antonio Rift Base",
+                    ShopCategory::Outfits,
+                    "Long talon arms, swept rift boots, asymmetric cloak silhouette.",
+                    1400,
+                    Some(PlayerPartLoadout::antonio_reference()),
+                ),
+                ShopItem::new(
+                    "outfit_daria_flare_base",
+                    "Daria Flare Base",
+                    ShopCategory::Outfits,
+                    "Catlike helmet, shoulder fins, cannon arm, and athletic greaves.",
+                    1400,
+                    Some(PlayerPartLoadout::daria_reference()),
+                ),
+                ShopItem::new(
+                    "armor_chroma_boot_kit",
+                    "Chroma Boot Kit",
+                    ShopCategory::Armor,
+                    "Segmented foot shells, toe spurs, knee guards, and rear shin thrusters.",
+                    620,
+                    Some(PlayerPartLoadout::chroma_reference()),
+                ),
+                ShopItem::new(
+                    "armor_aegis_helmet",
+                    "Aegis Helmet Shell",
+                    ShopCategory::Armor,
+                    "Enclosed visor shell for high-speed patrol routes and mountain combat.",
+                    780,
+                    Some(PlayerPartLoadout::amp_reference()),
+                ),
+                ShopItem::new(
+                    "weapon_solar_sabre",
+                    "Solar Sabre",
+                    ShopCategory::Weapons,
+                    "Close-range beam blade package with matching braced gauntlet poses.",
+                    900,
+                    None,
+                ),
+                ShopItem::new(
+                    "weapon_nova_missile_matrix",
+                    "Nova Missile Matrix",
+                    ShopCategory::Weapons,
+                    "Shoulder and wrist targeting upgrade for heavy robot patrol fights.",
+                    1150,
+                    None,
+                ),
+                ShopItem::new(
+                    "vehicle_hoverboard_race",
+                    "Hoverboard Race Deck",
+                    ShopCategory::Vehicles,
+                    "Wide speed-road board tuned for ramps, loops, and mountain-scale tricks.",
+                    1000,
+                    None,
+                ),
+                ShopItem::new(
+                    "vehicle_giant_mech_frame",
+                    "Giant Mech Frame",
+                    ShopCategory::Vehicles,
+                    "Robot-pet assembly target for future driver-scale combat routes.",
+                    2200,
+                    None,
+                ),
+            ],
+        }
+    }
+}
+
+impl ShopCatalog {
+    pub fn items_for(&self, category: ShopCategory) -> impl Iterator<Item = &ShopItem> {
+        self.items
+            .iter()
+            .filter(move |item| item.category == category)
+    }
+
+    pub fn category_count(&self, category: ShopCategory) -> usize {
+        self.items_for(category).count()
     }
 }
 
@@ -702,11 +966,20 @@ pub struct RadioLine {
 }
 
 // ── Character Design State ────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CharacterDesignReturnTarget {
+    #[default]
+    PlayerSelect,
+    ChapterSelect,
+}
+
 /// Transient resource holding the in-progress customization for one player slot.
 /// Set `player_index` before transitioning to `AppState::CharacterDesign`.
 #[derive(Resource, Debug)]
 pub struct CharacterDesignData {
     pub player_index: usize,
+    pub return_target: CharacterDesignReturnTarget,
+    pub base_model: CharacterBaseModel,
     pub skin_idx: usize,
     pub outfit_idx: usize,
     pub accent_idx: usize,
@@ -735,6 +1008,8 @@ impl Default for CharacterDesignData {
         let loadout = PlayerPartLoadout::vincenzo_reference();
         Self {
             player_index: 0,
+            return_target: CharacterDesignReturnTarget::PlayerSelect,
+            base_model: CharacterBaseModel::VincenzoDeep,
             skin_idx: 0,
             outfit_idx: 6,
             accent_idx: 6,
@@ -757,6 +1032,82 @@ impl Default for CharacterDesignData {
             dirty: false,
             preview_entity: None,
         }
+    }
+}
+
+pub const CHARACTER_DESIGN_SNAPSHOT_VERSION: u32 = 1;
+
+/// Serializable, reflected editor payload for one character design.
+///
+/// This intentionally excludes transient preview entities so the same struct can
+/// back save slots, in-game prefab files, and a future reflected inspector.
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq)]
+pub struct CharacterDesignSnapshot {
+    pub schema_version: u32,
+    pub player_index: usize,
+    #[serde(default)]
+    pub base_model: CharacterBaseModel,
+    pub skin_idx: usize,
+    pub outfit_idx: usize,
+    pub accent_idx: usize,
+    pub hair_idx: usize,
+    pub eye_idx: usize,
+    pub part_loadout: PlayerPartLoadout,
+    pub body: BodyRecipe,
+    pub appearance: CartoonAppearanceRecipe,
+}
+
+impl CharacterDesignSnapshot {
+    pub fn from_design_data(data: &CharacterDesignData) -> Self {
+        Self {
+            schema_version: CHARACTER_DESIGN_SNAPSHOT_VERSION,
+            player_index: data.player_index,
+            base_model: data.base_model,
+            skin_idx: data.skin_idx,
+            outfit_idx: data.outfit_idx,
+            accent_idx: data.accent_idx,
+            hair_idx: data.hair_idx,
+            eye_idx: data.eye_idx,
+            part_loadout: PlayerPartLoadout {
+                body: data.body_preset,
+                arms: data.arm_preset,
+                legs: data.leg_preset,
+                shoulders: data.shoulder_preset,
+                head: data.head_preset,
+            },
+            body: data.body.validated(),
+            appearance: CartoonAppearanceRecipe {
+                has_hood: data.has_hood,
+                has_cape: data.has_cape,
+                has_gloves: data.has_gloves,
+                has_boots: data.has_boots,
+                has_shoulder_pads: data.has_shoulder_pads,
+                has_visor: data.has_visor,
+            },
+        }
+    }
+
+    pub fn apply_to_design_data(&self, data: &mut CharacterDesignData) {
+        data.player_index = self.player_index;
+        data.base_model = self.base_model;
+        data.skin_idx = self.skin_idx;
+        data.outfit_idx = self.outfit_idx;
+        data.accent_idx = self.accent_idx;
+        data.hair_idx = self.hair_idx;
+        data.eye_idx = self.eye_idx;
+        data.body_preset = self.part_loadout.body;
+        data.arm_preset = self.part_loadout.arms;
+        data.leg_preset = self.part_loadout.legs;
+        data.shoulder_preset = self.part_loadout.shoulders;
+        data.head_preset = self.part_loadout.head;
+        data.body = self.body.validated();
+        data.has_hood = self.appearance.has_hood;
+        data.has_cape = self.appearance.has_cape;
+        data.has_gloves = self.appearance.has_gloves;
+        data.has_boots = self.appearance.has_boots;
+        data.has_shoulder_pads = self.appearance.has_shoulder_pads;
+        data.has_visor = self.appearance.has_visor;
+        data.dirty = true;
     }
 }
 
@@ -1360,6 +1711,105 @@ mod tests {
         assert!(!appearance.has_cape);
         assert!(appearance.has_visor);
         assert!(appearance.has_shoulder_pads);
+    }
+
+    #[test]
+    fn character_design_snapshot_round_trips_editable_state() {
+        let mut design = CharacterDesignData {
+            player_index: 2,
+            return_target: CharacterDesignReturnTarget::PlayerSelect,
+            base_model: CharacterBaseModel::AntonioRift,
+            skin_idx: 3,
+            outfit_idx: 4,
+            accent_idx: 5,
+            hair_idx: 6,
+            eye_idx: 7,
+            body_preset: BodyPreset::RiftMantle,
+            arm_preset: ArmPreset::RiftTalons,
+            leg_preset: LegPreset::RiftBoots,
+            shoulder_preset: ShoulderPreset::RiftCloak,
+            head_preset: HeadPreset::RiftCowl,
+            body: BodyRecipe {
+                arm_length: 1.22,
+                leg_length: 1.41,
+                asymmetry: 0.2,
+                ..BodyRecipe::default()
+            },
+            has_hood: true,
+            has_cape: true,
+            has_gloves: false,
+            has_boots: true,
+            has_shoulder_pads: true,
+            has_visor: false,
+            spin_angle: 1.0,
+            preview_distance: 4.0,
+            dirty: false,
+            preview_entity: None,
+        };
+        let snapshot = CharacterDesignSnapshot::from_design_data(&design);
+        let json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
+        let decoded: CharacterDesignSnapshot =
+            serde_json::from_str(&json).expect("snapshot should deserialize");
+
+        design = CharacterDesignData::default();
+        decoded.apply_to_design_data(&mut design);
+
+        assert_eq!(design.player_index, 2);
+        assert_eq!(design.base_model, CharacterBaseModel::AntonioRift);
+        assert_eq!(design.body_preset, BodyPreset::RiftMantle);
+        assert_eq!(design.arm_preset, ArmPreset::RiftTalons);
+        assert_eq!(design.leg_preset, LegPreset::RiftBoots);
+        assert_eq!(design.shoulder_preset, ShoulderPreset::RiftCloak);
+        assert_eq!(design.head_preset, HeadPreset::RiftCowl);
+        assert!((design.body.leg_length - 1.41).abs() < f32::EPSILON);
+        assert!(design.has_hood);
+        assert!(!design.has_gloves);
+        assert!(design.dirty);
+    }
+
+    #[test]
+    fn character_base_models_map_to_editable_loadouts() {
+        let catalog = CharacterBaseModelCatalog::default();
+        let daria = catalog
+            .by_label("Daria Flares")
+            .expect("daria base model should exist");
+
+        assert_eq!(catalog.models.len(), CharacterBaseModel::ALL.len());
+        assert_eq!(daria.loadout(), PlayerPartLoadout::daria_reference());
+        assert_eq!(
+            CharacterBaseModel::from_loadout(PlayerPartLoadout::amp_reference()),
+            CharacterBaseModel::AmpSiege
+        );
+        assert_eq!(
+            CharacterBaseModel::from_name_and_loadout(
+                "Nova",
+                PlayerPartLoadout::chroma_reference()
+            ),
+            CharacterBaseModel::ChromaTrace
+        );
+        assert_eq!(
+            CharacterBaseModel::from_name_and_loadout(
+                "Vincenzo",
+                PlayerPartLoadout::chroma_reference()
+            ),
+            CharacterBaseModel::VincenzoDeep
+        );
+    }
+
+    #[test]
+    fn shop_catalog_covers_core_customization_categories() {
+        let catalog = ShopCatalog::default();
+
+        for category in ShopCategory::ALL {
+            assert!(
+                catalog.category_count(category) > 0,
+                "{} should have at least one shop item",
+                category.label()
+            );
+        }
+        assert!(catalog
+            .items_for(ShopCategory::Outfits)
+            .any(|item| item.preview_loadout.is_some()));
     }
 
     #[test]

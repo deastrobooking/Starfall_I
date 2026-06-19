@@ -8,7 +8,7 @@ use crate::character_parts::{
 };
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
-    CartoonRole, CharacterIkPose, JointKind, JointMarker, SkeletonRig,
+    CartoonRole, CharacterIkPose, HandEngine, JointKind, JointMarker, SkeletonRig,
 };
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
@@ -92,7 +92,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.95, 0.78, 0.12),
             hair: Color::srgb(0.06, 0.04, 0.02), // jet black
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 1.0,
             has_hat: false,
             has_hood: true,
@@ -119,7 +123,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.10, 0.92, 0.98),
             hair: Color::srgb(0.70, 0.52, 0.18), // sandy blonde
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 0.92,
             has_hat: false,
             has_hood: true,
@@ -146,7 +154,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.78, 0.86, 0.92),
             hair: Color::srgb(0.28, 0.16, 0.06), // medium brown
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 0.94,
             has_hat: false,
             has_hood: true,
@@ -173,7 +185,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.92, 0.90, 0.84),
             hair: Color::srgb(0.52, 0.48, 0.44), // gray-silver (veteran)
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 1.18,
             has_hat: false,
             has_hood: true,
@@ -200,7 +216,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(1.0, 0.68, 0.95),
             hair: Color::srgb(0.52, 0.08, 0.12), // deep crimson
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 0.98,
             has_hat: false,
             has_hood: true,
@@ -227,7 +247,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.10, 1.0, 0.88),
             hair: Color::srgb(0.06, 0.06, 0.28), // deep blue-black (sci-fi)
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 0.94,
             has_hat: false,
             has_hood: true,
@@ -254,7 +278,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(0.78, 1.0, 0.62),
             hair: Color::srgb(0.68, 0.52, 0.14), // warm golden-blonde
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 1.02,
             has_hat: false,
             has_hood: true,
@@ -281,7 +309,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(1.0, 0.92, 0.30),
             hair: Color::srgb(0.40, 0.08, 0.04), // dark auburn
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 0.96,
             has_hat: false,
             has_hood: true,
@@ -308,7 +340,11 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             accent: Color::srgb(1.0, 0.86, 0.2),
             hair: Color::srgb(0.06, 0.04, 0.02),
             scale: 2.0,
-            body: BodyRecipe { arm_length: 1.30, leg_length: 1.30, ..BodyRecipe::default() },
+            body: BodyRecipe {
+                arm_length: 1.30,
+                leg_length: 1.30,
+                ..BodyRecipe::default()
+            },
             body_width: 1.0,
             has_hat: false,
             has_hood: true,
@@ -754,6 +790,7 @@ pub fn attach_player_gameplay_rig(
         ViewVisibility::default(),
         skeleton,
         CharacterIkPose::default(),
+        HandEngine::default(),
     ));
 }
 
@@ -1915,7 +1952,10 @@ fn warm_floor(lin: LinearRgba, k: f32) -> LinearRgba {
 
 /// Soft, matte, hand-painted material for skin / cloth / hair, with a touch of
 /// subsurface light-bleed. Kept in lock-step with `soft_mat()` in character_parts.rs.
-pub fn char_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
+pub fn char_mat(
+    materials: &mut Assets<StandardMaterial>,
+    color: Color,
+) -> Handle<StandardMaterial> {
     let lin = color.to_linear();
     materials.add(StandardMaterial {
         base_color: color,
