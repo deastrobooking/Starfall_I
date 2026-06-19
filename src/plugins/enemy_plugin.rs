@@ -10,8 +10,10 @@ use crate::components::enemy::{
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
 use crate::components::player::{ParryState, Player, PlayerIndex, PlayerStats};
-use crate::components::world::WorldLoot;
-use crate::damage::{DamageInfo, DamageType, Damageable, Health};
+use crate::components::world::{NpcRoadVehicle, WorldLoot};
+use crate::damage::{
+    apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
+};
 use crate::events::*;
 use crate::hacking::{Hackable, HackedUnit};
 use crate::rendering::PbrBundle;
@@ -696,6 +698,7 @@ fn enemy_projectile_update_system(
         &mut ParryState,
         &ArmorSet,
     )>,
+    mut road_vehicle_q: Query<(&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle)>,
     mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
     mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
@@ -718,10 +721,31 @@ fn enemy_projectile_update_system(
             }
         }
 
+        let mut hit_vehicle = false;
+        for (vehicle_transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
+            if !health.is_alive() {
+                continue;
+            }
+            if transform
+                .translation
+                .distance(vehicle_transform.translation)
+                <= projectile.hit_radius + vehicle.hit_radius
+            {
+                hit_vehicle = true;
+                impact = true;
+                if matches!(projectile.kind, EnemyProjectileKind::Laser) {
+                    let info = DamageInfo::new(projectile.damage, DamageType::Laser);
+                    apply_damage(&mut health, &mut damageable, &info);
+                }
+                break;
+            }
+        }
+
         if impact {
             match projectile.kind {
                 EnemyProjectileKind::Laser => {
-                    if let Some((player_entity, player_index)) = hit_player {
+                    if let Some((player_entity, player_index)) = hit_player.filter(|_| !hit_vehicle)
+                    {
                         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
                             player_damage_q.get_mut(player_entity)
                         {
@@ -758,9 +782,37 @@ fn enemy_projectile_update_system(
                         &mut damaged_ev,
                         &mut parry_ev,
                     );
+                    damage_road_vehicles_in_radius(
+                        transform.translation,
+                        radius,
+                        projectile.damage,
+                        DamageType::Fire,
+                        &mut road_vehicle_q,
+                    );
                 }
             }
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn damage_road_vehicles_in_radius(
+    center: Vec3,
+    radius: f32,
+    base_damage: f32,
+    damage_type: DamageType,
+    road_vehicle_q: &mut Query<(&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle)>,
+) {
+    for (transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
+        if !health.is_alive() {
+            continue;
+        }
+        let dist = center.distance(transform.translation);
+        if dist <= radius + vehicle.hit_radius {
+            let falloff_radius = (radius + vehicle.hit_radius).max(0.01);
+            let damage = area_damage_falloff(base_damage, dist, falloff_radius).max(1.0);
+            let info = DamageInfo::new(damage, damage_type);
+            apply_damage(&mut health, &mut damageable, &info);
         }
     }
 }

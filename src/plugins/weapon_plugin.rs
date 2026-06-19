@@ -4,6 +4,7 @@ use crate::components::armor::ArmorSet;
 use crate::components::enemy::{DeadEnemy, Enemy};
 use crate::components::player::*;
 use crate::components::weapon::*;
+use crate::components::world::NpcRoadVehicle;
 use crate::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
 };
@@ -1073,6 +1074,16 @@ fn projectile_update_system(
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         (Without<Projectile>, Without<HackedUnit>),
     >,
+    mut road_vehicle_q: Query<
+        (
+            Entity,
+            &Transform,
+            &mut Health,
+            &mut Damageable,
+            &NpcRoadVehicle,
+        ),
+        (Without<Projectile>, Without<Enemy>),
+    >,
     mut enemy_damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut enemy_killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
@@ -1098,6 +1109,13 @@ fn projectile_update_system(
                     &mut enemy_damaged_ev,
                     &mut enemy_killed_ev,
                 );
+                damage_road_vehicles_in_radius(
+                    &proj_transform.translation,
+                    proj.explosion_radius,
+                    proj.damage,
+                    proj.damage_type,
+                    &mut road_vehicle_q,
+                );
             }
             commands.entity(proj_entity).despawn();
             continue;
@@ -1113,6 +1131,13 @@ fn projectile_update_system(
                     &mut enemy_q,
                     &mut enemy_damaged_ev,
                     &mut enemy_killed_ev,
+                );
+                damage_road_vehicles_in_radius(
+                    &proj_transform.translation,
+                    proj.explosion_radius,
+                    proj.damage,
+                    proj.damage_type,
+                    &mut road_vehicle_q,
                 );
             }
             commands.entity(proj_entity).despawn();
@@ -1161,6 +1186,34 @@ fn projectile_update_system(
             }
         }
 
+        if !hit {
+            for (_, v_transform, mut v_health, mut v_damageable, vehicle) in
+                road_vehicle_q.iter_mut()
+            {
+                if !v_health.is_alive() {
+                    continue;
+                }
+                let dist = proj_transform.translation.distance(v_transform.translation);
+                if dist < vehicle.hit_radius {
+                    if proj.is_explosive {
+                        explosion = Some((
+                            proj_transform.translation,
+                            proj.explosion_radius,
+                            proj.damage,
+                            proj.damage_type,
+                        ));
+                    } else {
+                        let info = DamageInfo::new(proj.damage, proj.damage_type);
+                        apply_damage(&mut v_health, &mut v_damageable, &info);
+                    }
+                    if !proj.piercing {
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         if let Some((pos, radius, dmg, damage_type)) = explosion {
             explode(
                 &pos,
@@ -1171,6 +1224,7 @@ fn projectile_update_system(
                 &mut enemy_damaged_ev,
                 &mut enemy_killed_ev,
             );
+            damage_road_vehicles_in_radius(&pos, radius, dmg, damage_type, &mut road_vehicle_q);
         }
         if hit {
             commands.entity(proj_entity).despawn();
@@ -1212,6 +1266,36 @@ fn explode(
                     position: e_transform.translation,
                 });
             }
+        }
+    }
+}
+
+fn damage_road_vehicles_in_radius(
+    center: &Vec3,
+    radius: f32,
+    base_damage: f32,
+    damage_type: DamageType,
+    road_vehicle_q: &mut Query<
+        (
+            Entity,
+            &Transform,
+            &mut Health,
+            &mut Damageable,
+            &NpcRoadVehicle,
+        ),
+        (Without<Projectile>, Without<Enemy>),
+    >,
+) {
+    for (_, transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
+        if !health.is_alive() {
+            continue;
+        }
+        let dist = center.distance(transform.translation);
+        if dist <= radius + vehicle.hit_radius {
+            let damage =
+                area_damage_falloff(base_damage, dist, radius + vehicle.hit_radius).max(1.0);
+            let info = DamageInfo::new(damage, damage_type);
+            apply_damage(&mut health, &mut damageable, &info);
         }
     }
 }

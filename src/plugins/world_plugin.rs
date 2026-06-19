@@ -208,6 +208,10 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
+                npc_road_vehicle_system.run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
                 (
                     raid_counteroffensive_start_system,
                     raid_tick_system,
@@ -1570,6 +1574,72 @@ fn board_boost_pad_system(
             break;
         }
     }
+}
+
+fn npc_road_vehicle_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut vehicle_q: Query<(Entity, &mut Transform, &mut NpcRoadVehicle, &Health)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut transform, mut vehicle, health) in vehicle_q.iter_mut() {
+        if vehicle.path.len() < 2 {
+            continue;
+        }
+
+        if !health.is_alive() {
+            vehicle.wreck_timer -= dt;
+            transform.translation.y -= dt * 0.16;
+            transform.rotate_local_z(dt * 0.42);
+            if vehicle.wreck_timer <= 0.0 {
+                commands.entity(entity).despawn();
+            }
+            continue;
+        }
+
+        advance_road_vehicle(&mut vehicle, dt);
+        if let Some((position, yaw)) = road_vehicle_pose(&vehicle) {
+            let route_dir = Quat::from_rotation_y(yaw) * Vec3::Z;
+            let right = Vec3::new(route_dir.z, 0.0, -route_dir.x).normalize_or_zero();
+            let bob = (time.elapsed_secs() * 5.3 + vehicle.progress * 0.017).sin() * 0.04;
+            transform.translation = position + right * vehicle.lane_offset + Vec3::Y * bob;
+            transform.rotation = Quat::from_rotation_y(yaw);
+        }
+    }
+}
+
+fn advance_road_vehicle(vehicle: &mut NpcRoadVehicle, dt: f32) {
+    let mut remaining = vehicle.speed.max(0.0) * dt;
+    let len = vehicle.path.len();
+    while remaining > 0.0 && len >= 2 {
+        let start = vehicle.path[vehicle.segment % len];
+        let end = vehicle.path[(vehicle.segment + 1) % len];
+        let segment_len = start.distance(end).max(0.01);
+        let available = segment_len - vehicle.progress;
+        if remaining <= available {
+            vehicle.progress += remaining;
+            break;
+        }
+
+        remaining -= available;
+        vehicle.segment = (vehicle.segment + 1) % len;
+        vehicle.progress = 0.0;
+    }
+}
+
+fn road_vehicle_pose(vehicle: &NpcRoadVehicle) -> Option<(Vec3, f32)> {
+    let len = vehicle.path.len();
+    if len < 2 {
+        return None;
+    }
+    let start = vehicle.path[vehicle.segment % len];
+    let end = vehicle.path[(vehicle.segment + 1) % len];
+    let delta = end - start;
+    let segment_len = delta.length().max(0.01);
+    let t = (vehicle.progress / segment_len).clamp(0.0, 1.0);
+    let position = start.lerp(end, t);
+    let yaw = delta.x.atan2(delta.z);
+    Some((position, yaw))
 }
 
 fn laser_turret_system(
@@ -5033,17 +5103,31 @@ fn terrain_domain_warp(
 }
 
 fn distance_to_segment_xz(px: f32, pz: f32, ax: f32, az: f32, bx: f32, bz: f32) -> f32 {
+    let (_, distance) = project_point_to_segment_xz(px, pz, ax, az, bx, bz);
+    distance
+}
+
+fn project_point_to_segment_xz(
+    px: f32,
+    pz: f32,
+    ax: f32,
+    az: f32,
+    bx: f32,
+    bz: f32,
+) -> (Vec2, f32) {
     let vx = bx - ax;
     let vz = bz - az;
     let len_sq = vx * vx + vz * vz;
     if len_sq <= f32::EPSILON {
-        return ((px - ax).powi(2) + (pz - az).powi(2)).sqrt();
+        let point = Vec2::new(ax, az);
+        return (point, Vec2::new(px - ax, pz - az).length());
     }
 
     let t = (((px - ax) * vx + (pz - az) * vz) / len_sq).clamp(0.0, 1.0);
     let sx = ax + vx * t;
     let sz = az + vz * t;
-    ((px - sx).powi(2) + (pz - sz).powi(2)).sqrt()
+    let point = Vec2::new(sx, sz);
+    (point, Vec2::new(px - sx, pz - sz).length())
 }
 
 fn mountain_route_influence(x: f32, z: f32) -> f32 {
@@ -5057,6 +5141,117 @@ fn mountain_route_influence(x: f32, z: f32) -> f32 {
         }
     }
     influence
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RouteProjection {
+    point: Vec2,
+    distance: f32,
+}
+
+fn nearest_mountain_route_point(x: f32, z: f32) -> Option<RouteProjection> {
+    let mut best: Option<RouteProjection> = None;
+    for route in mountain_routes() {
+        for pair in route.windows(2) {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let (point, distance) = project_point_to_segment_xz(x, z, ax, az, bx, bz);
+            if best.is_none_or(|projection| distance < projection.distance) {
+                best = Some(RouteProjection { point, distance });
+            }
+        }
+    }
+    best
+}
+
+fn distance_to_mountain_route_network(x: f32, z: f32) -> f32 {
+    nearest_mountain_route_point(x, z)
+        .map(|projection| projection.distance)
+        .unwrap_or(f32::MAX)
+}
+
+const SPEED_ROAD_CHUNK_LEN: f32 = 720.0;
+const SPEED_ROAD_CLEARANCE: f32 = 4.6;
+const SPEED_ROAD_WIDTH: f32 = 38.0;
+const SPEED_ROAD_TRAFFIC_LANE_OFFSET: f32 = 9.5;
+const SPEED_ROAD_PATROL_VEHICLE_COUNT: usize = 18;
+
+fn speed_road_segment_subdivision_count(length: f32) -> usize {
+    (length / SPEED_ROAD_CHUNK_LEN).ceil().max(1.0) as usize
+}
+
+fn mountain_speed_road_segment_count() -> usize {
+    mountain_routes()
+        .iter()
+        .flat_map(|route| route.windows(2))
+        .map(|pair| {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            speed_road_segment_subdivision_count(Vec2::new(bx - ax, bz - az).length())
+        })
+        .sum()
+}
+
+fn settlement_speed_ring_radius_for_layout(
+    kind: MapSettlementKind,
+    layout: SettlementTerrainLayout,
+) -> f32 {
+    match kind {
+        MapSettlementKind::City => (layout.platform_radius + 92.0).max(230.0),
+        MapSettlementKind::Village => (layout.platform_radius + 54.0).max(116.0),
+        MapSettlementKind::Harbor => (layout.platform_radius + 64.0).max(138.0),
+        MapSettlementKind::Outpost => (layout.platform_radius + 50.0).max(104.0),
+    }
+}
+
+fn settlement_speed_ring_radius(seed: u64, settlement: MapSettlement) -> f32 {
+    let layout =
+        settlement_layout_profile(seed, settlement, settlement_plaza_radius(settlement.kind));
+    settlement_speed_ring_radius_for_layout(settlement.kind, layout)
+}
+
+fn distance_to_speed_road_network(x: f32, z: f32, seed: u64) -> f32 {
+    let mut best = distance_to_mountain_route_network(x, z);
+    let point = Vec2::new(x, z);
+
+    for settlement in map_settlements().iter().copied() {
+        let center = Vec2::new(settlement.x, settlement.z);
+        let ring_radius = settlement_speed_ring_radius(seed, settlement);
+        best = best.min((point.distance(center) - ring_radius).abs());
+
+        if let Some(route_projection) = nearest_mountain_route_point(settlement.x, settlement.z) {
+            let to_route = route_projection.point - center;
+            if to_route.length_squared() > 0.01 {
+                let spur_start = center + to_route.normalize() * ring_radius;
+                best = best.min(distance_to_segment_xz(
+                    x,
+                    z,
+                    spur_start.x,
+                    spur_start.y,
+                    route_projection.point.x,
+                    route_projection.point.y,
+                ));
+            }
+        }
+    }
+
+    best
+}
+
+fn speed_road_loop_gate_count() -> usize {
+    let route_gate_count = mountain_routes()
+        .iter()
+        .enumerate()
+        .flat_map(|(ri, route)| {
+            route.windows(2).enumerate().filter(move |(si, pair)| {
+                let (ax, az) = pair[0];
+                let (bx, bz) = pair[1];
+                Vec2::new(bx - ax, bz - az).length() > 1_500.0 && (ri + *si) % 2 == 0
+            })
+        })
+        .count();
+
+    route_gate_count + map_settlements().len()
 }
 
 fn everest_heightmap_relief(x: f32, z: f32, seed: u64) -> f32 {
@@ -5362,6 +5557,7 @@ fn spawn_everest_range_biomes(
     spawn_range_waylines(commands, meshes, pal, seed);
     spawn_mountain_path_network(commands, meshes, pal, seed);
     spawn_mountain_route_bridges(commands, meshes, pal, seed + 83, seed);
+    spawn_speed_road_network(commands, meshes, pal, seed + 1_241, seed);
     spawn_range_outposts(commands, meshes, pal, seed);
     spawn_dragon_lair_silhouettes(commands, meshes, pal, seed);
 }
@@ -6962,6 +7158,12 @@ fn spawn_mountain_path_network(
                     },
                     WorldGeometry,
                     WalkableSurface,
+                    bevy_rapier3d::prelude::RigidBody::Fixed,
+                    bevy_rapier3d::prelude::Collider::cuboid(
+                        slab_width * 0.5,
+                        0.24,
+                        slab_len * 0.5,
+                    ),
                 ));
 
                 if step % 3 == 1 {
@@ -7231,6 +7433,765 @@ fn spawn_mountain_route_bridges(
             }
         }
     }
+}
+
+fn spawn_speed_road_network(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let deck_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        for (si, pair) in route.windows(2).enumerate() {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let delta = Vec2::new(bx - ax, bz - az);
+            let segment_len = delta.length();
+            if segment_len <= 20.0 {
+                continue;
+            }
+
+            let chunk_count = speed_road_segment_subdivision_count(segment_len);
+            let width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
+            for chunk in 0..chunk_count {
+                let t0 = chunk as f32 / chunk_count as f32;
+                let t1 = (chunk + 1) as f32 / chunk_count as f32;
+                let start = speed_road_terrain_point(
+                    ax + (bx - ax) * t0,
+                    az + (bz - az) * t0,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE,
+                );
+                let end = speed_road_terrain_point(
+                    ax + (bx - ax) * t1,
+                    az + (bz - az) * t1,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE,
+                );
+                spawn_speed_road_deck_between(
+                    commands,
+                    meshes,
+                    pal,
+                    &deck_mesh,
+                    start,
+                    end,
+                    width,
+                    true,
+                    chunk % 3 == 1 || chunk_count <= 2,
+                    seed + ri as u64 * 7_001 + si as u64 * 503 + chunk as u64 * 19,
+                    terrain_seed,
+                );
+            }
+
+            if segment_len > 1_500.0 && (ri + si) % 2 == 0 {
+                let t = 0.48 + seeded(seed, ri as u64 * 179 + si as u64 * 23) * 0.10;
+                let x = ax + (bx - ax) * t;
+                let z = az + (bz - az) * t;
+                let center =
+                    speed_road_terrain_point(x, z, terrain_seed, SPEED_ROAD_CLEARANCE + 1.0);
+                spawn_speed_loop_gate(
+                    commands,
+                    meshes,
+                    pal,
+                    center,
+                    delta.x.atan2(delta.y),
+                    22.0 + (ri % 2) as f32 * 5.0,
+                    width,
+                    seed + ri as u64 * 811 + si as u64 * 97,
+                );
+            }
+        }
+    }
+
+    spawn_mountain_wrap_ramps(
+        commands,
+        meshes,
+        pal,
+        &deck_mesh,
+        seed + 30_000,
+        terrain_seed,
+    );
+    spawn_route_sweeper_curves(
+        commands,
+        meshes,
+        pal,
+        &deck_mesh,
+        seed + 41_000,
+        terrain_seed,
+    );
+    spawn_hoverboard_trick_ramps(commands, meshes, pal, seed + 52_000, terrain_seed);
+
+    for (si, settlement) in map_settlements().iter().copied().enumerate() {
+        let plaza_radius = settlement_plaza_radius(settlement.kind);
+        let layout = settlement_layout_profile(terrain_seed, settlement, plaza_radius);
+        let ring_radius = settlement_speed_ring_radius_for_layout(settlement.kind, layout);
+        spawn_settlement_speed_ring(
+            commands,
+            meshes,
+            pal,
+            &deck_mesh,
+            settlement,
+            layout,
+            ring_radius,
+            seed + si as u64 * 2_003,
+            terrain_seed,
+        );
+        spawn_settlement_speed_spur(
+            commands,
+            meshes,
+            pal,
+            &deck_mesh,
+            settlement,
+            layout,
+            ring_radius,
+            seed + si as u64 * 2_311,
+            terrain_seed,
+        );
+    }
+
+    spawn_npc_road_vehicles(commands, meshes, pal, seed + 63_000, terrain_seed);
+}
+
+fn speed_road_terrain_point(x: f32, z: f32, terrain_seed: u64, clearance: f32) -> Vec3 {
+    Vec3::new(x, terrain_surface_y(x, z, terrain_seed) + clearance, z)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_speed_road_deck_between(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    mut start: Vec3,
+    mut end: Vec3,
+    width: f32,
+    boost_overlay: bool,
+    include_ramps: bool,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let mut delta = end - start;
+    let horizontal_len = Vec2::new(delta.x, delta.z).length();
+    if horizontal_len <= 4.0 {
+        return;
+    }
+
+    let midpoint = start.lerp(end, 0.5);
+    let mid_ground = terrain_surface_y(midpoint.x, midpoint.z, terrain_seed);
+    let needed_lift = (mid_ground + SPEED_ROAD_CLEARANCE + 1.0 - midpoint.y).max(0.0);
+    start.y += needed_lift;
+    end.y += needed_lift;
+    delta = end - start;
+
+    let length = delta.length();
+    let yaw = delta.x.atan2(delta.z);
+    let pitch = (delta.y / horizontal_len).atan().clamp(-0.34, 0.34);
+    let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+    let center = start + delta * 0.5;
+    let deck_thickness = 0.86;
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(deck_mesh.clone()),
+            material: MeshMaterial3d(pal.highway.clone()),
+            transform: Transform::from_translation(center)
+                .with_rotation(rot)
+                .with_scale(Vec3::new(width, deck_thickness, length)),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.5),
+    ));
+
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(deck_mesh.clone()),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(
+                    center + rot * Vec3::new(side * width * 0.52, 0.86, 0.0),
+                )
+                .with_rotation(rot)
+                .with_scale(Vec3::new(0.52, 1.35, length * 0.96)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    if boost_overlay {
+        spawn_boost_road_span(
+            commands,
+            meshes,
+            pal,
+            center + Vec3::Y * 0.58,
+            yaw,
+            pitch,
+            length * 0.90,
+            width * 0.72,
+            include_ramps,
+            seed,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_speed_ring(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    settlement: MapSettlement,
+    layout: SettlementTerrainLayout,
+    ring_radius: f32,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let segment_count = match settlement.kind {
+        MapSettlementKind::City => 18,
+        MapSettlementKind::Harbor => 14,
+        _ => 12,
+    };
+    let width = match settlement.kind {
+        MapSettlementKind::City => 34.0,
+        MapSettlementKind::Harbor => 31.0,
+        MapSettlementKind::Village => 28.0,
+        MapSettlementKind::Outpost => 26.0,
+    };
+
+    for segment in 0..segment_count {
+        let a0 = segment as f32 * TAU / segment_count as f32;
+        let a1 = (segment + 1) as f32 * TAU / segment_count as f32;
+        let start = settlement_speed_ring_point(settlement, layout, ring_radius, a0, terrain_seed);
+        let end = settlement_speed_ring_point(settlement, layout, ring_radius, a1, terrain_seed);
+        spawn_speed_road_deck_between(
+            commands,
+            meshes,
+            pal,
+            deck_mesh,
+            start,
+            end,
+            width,
+            true,
+            false,
+            seed + segment as u64 * 31,
+            terrain_seed,
+        );
+    }
+
+    let gate_angle = std::f32::consts::FRAC_PI_2 - settlement.facing_yaw;
+    let gate_pos =
+        settlement_speed_ring_point(settlement, layout, ring_radius, gate_angle, terrain_seed);
+    let tangent = Vec2::new(-gate_angle.sin(), gate_angle.cos()).normalize_or_zero();
+    let yaw = tangent.x.atan2(tangent.y);
+    spawn_speed_loop_gate(
+        commands,
+        meshes,
+        pal,
+        gate_pos + Vec3::Y * 0.72,
+        yaw,
+        if matches!(settlement.kind, MapSettlementKind::City) {
+            27.0
+        } else {
+            20.0
+        },
+        width,
+        seed + 997,
+    );
+}
+
+fn settlement_speed_ring_point(
+    settlement: MapSettlement,
+    layout: SettlementTerrainLayout,
+    ring_radius: f32,
+    angle: f32,
+    terrain_seed: u64,
+) -> Vec3 {
+    let x = settlement.x + angle.cos() * ring_radius;
+    let z = settlement.z + angle.sin() * ring_radius;
+    let y =
+        layout.floor_y_at(x, z, terrain_seed) + if layout.is_sky_district() { 3.2 } else { 2.4 };
+    Vec3::new(x, y, z)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_settlement_speed_spur(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    settlement: MapSettlement,
+    layout: SettlementTerrainLayout,
+    ring_radius: f32,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let Some(route_projection) = nearest_mountain_route_point(settlement.x, settlement.z) else {
+        return;
+    };
+    let center = Vec2::new(settlement.x, settlement.z);
+    let to_route = route_projection.point - center;
+    if to_route.length_squared() <= 0.01 {
+        return;
+    }
+
+    let dir = to_route.normalize();
+    let start_angle = dir.y.atan2(dir.x);
+    let start =
+        settlement_speed_ring_point(settlement, layout, ring_radius, start_angle, terrain_seed);
+    let end = speed_road_terrain_point(
+        route_projection.point.x,
+        route_projection.point.y,
+        terrain_seed,
+        SPEED_ROAD_CLEARANCE + 0.6,
+    );
+    let total_len = Vec2::new(end.x - start.x, end.z - start.z).length();
+    let chunk_count = speed_road_segment_subdivision_count(total_len).max(1);
+
+    for chunk in 0..chunk_count {
+        let t0 = chunk as f32 / chunk_count as f32;
+        let t1 = (chunk + 1) as f32 / chunk_count as f32;
+        spawn_speed_road_deck_between(
+            commands,
+            meshes,
+            pal,
+            deck_mesh,
+            start.lerp(end, t0),
+            start.lerp(end, t1),
+            SPEED_ROAD_WIDTH * 0.86,
+            true,
+            chunk == 0 || chunk + 1 == chunk_count,
+            seed + chunk as u64 * 41,
+            terrain_seed,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_route_sweeper_curves(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        for vi in 1..route.len().saturating_sub(1) {
+            let (px, pz) = route[vi - 1];
+            let (cx, cz) = route[vi];
+            let (nx, nz) = route[vi + 1];
+            let into = Vec2::new(cx - px, cz - pz).normalize_or_zero();
+            let out = Vec2::new(nx - cx, nz - cz).normalize_or_zero();
+            if into.length_squared() <= 0.01 || out.length_squared() <= 0.01 {
+                continue;
+            }
+            let turn_strength = (1.0 - into.dot(out)).clamp(0.0, 2.0);
+            if turn_strength < 0.10 {
+                continue;
+            }
+
+            let p0 = Vec2::new(cx, cz) - into * 230.0;
+            let p2 = Vec2::new(cx, cz) + out * 230.0;
+            let outside = Vec2::new(-into.y - out.y, into.x + out.x).normalize_or_zero();
+            let control = Vec2::new(cx, cz)
+                + outside * (95.0 + turn_strength * 95.0)
+                + (out - into).normalize_or_zero() * 36.0;
+            let steps = 7usize;
+            let mut last =
+                speed_road_terrain_point(p0.x, p0.y, terrain_seed, SPEED_ROAD_CLEARANCE + 1.2);
+
+            for step in 1..=steps {
+                let t = step as f32 / steps as f32;
+                let curve = quadratic_bezier_xz(p0, control, p2, t);
+                let next = speed_road_terrain_point(
+                    curve.x,
+                    curve.y,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE + 1.2,
+                );
+                spawn_speed_road_deck_between(
+                    commands,
+                    meshes,
+                    pal,
+                    deck_mesh,
+                    last,
+                    next,
+                    SPEED_ROAD_WIDTH * (1.04 + turn_strength * 0.08),
+                    true,
+                    step == 2 || step == steps - 1,
+                    seed + ri as u64 * 1_009 + vi as u64 * 67 + step as u64,
+                    terrain_seed,
+                );
+                last = next;
+            }
+        }
+    }
+}
+
+fn quadratic_bezier_xz(a: Vec2, control: Vec2, b: Vec2, t: f32) -> Vec2 {
+    let inv = 1.0 - t;
+    a * inv * inv + control * 2.0 * inv * t + b * t * t
+}
+
+fn speed_road_sweeper_curve_count() -> usize {
+    mountain_routes()
+        .iter()
+        .map(|route| route.len().saturating_sub(2))
+        .sum()
+}
+
+fn spawn_hoverboard_trick_ramps(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let mut spawned = 0usize;
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        for (si, pair) in route.windows(2).enumerate() {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let delta = Vec2::new(bx - ax, bz - az);
+            let len = delta.length();
+            if len < 1_250.0 {
+                continue;
+            }
+            let yaw = delta.x.atan2(delta.y);
+            let dir = Vec3::new(delta.x, 0.0, delta.y).normalize_or_zero();
+            let right = Vec3::new(dir.z, 0.0, -dir.x).normalize_or_zero();
+            for (slot, t) in [0.32_f32, 0.68].into_iter().enumerate() {
+                if spawned >= hoverboard_trick_ramp_count() {
+                    return;
+                }
+                if (ri + si + slot) % 2 == 1 {
+                    continue;
+                }
+                let x = ax + (bx - ax) * t;
+                let z = az + (bz - az) * t;
+                let lane = if slot == 0 { -1.0 } else { 1.0 };
+                let center = speed_road_terrain_point(
+                    x + right.x * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET,
+                    z + right.z * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE + 1.05,
+                );
+                spawn_board_boost_ramp(
+                    commands, meshes, pal, center, yaw, dir, 18.0, 54.0, 18.0, 7.2, 2.35,
+                );
+                spawn_speed_loop_gate(
+                    commands,
+                    meshes,
+                    pal,
+                    center + dir * 42.0 + Vec3::Y * 2.4,
+                    yaw,
+                    18.0 + seeded(seed, spawned as u64 * 17) * 7.0,
+                    24.0,
+                    seed + spawned as u64 * 97,
+                );
+                spawned += 1;
+            }
+        }
+    }
+}
+
+fn hoverboard_trick_ramp_count() -> usize {
+    16
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_mountain_wrap_ramps(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let mut spawned = 0usize;
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        for vertex in route
+            .iter()
+            .copied()
+            .enumerate()
+            .skip(1)
+            .take(route.len().saturating_sub(2))
+        {
+            if spawned >= 8 {
+                return;
+            }
+            let (vi, (x, z)) = vertex;
+            if (ri + vi) % 2 != 0 || terrain_surface_y(x, z, terrain_seed) < 90.0 {
+                continue;
+            }
+
+            let radius = 88.0 + seeded(seed, ri as u64 * 211 + vi as u64 * 17) * 46.0;
+            let height = 28.0 + seeded(seed, ri as u64 * 227 + vi as u64 * 19) * 28.0;
+            let start_angle = seeded(seed, ri as u64 * 239 + vi as u64 * 23) * TAU;
+            spawn_helical_speed_ramp(
+                commands,
+                meshes,
+                pal,
+                deck_mesh,
+                Vec2::new(x, z),
+                radius,
+                SPEED_ROAD_WIDTH * 0.82,
+                1.08,
+                height * 1.28,
+                start_angle,
+                seed + ri as u64 * 997 + vi as u64 * 71,
+                terrain_seed,
+            );
+            spawned += 1;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_helical_speed_ramp(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    center: Vec2,
+    radius: f32,
+    width: f32,
+    turns: f32,
+    height: f32,
+    start_angle: f32,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let steps = (turns * 14.0).ceil().clamp(8.0, 18.0) as usize;
+    let angle_span = turns * TAU;
+    for step in 0..steps {
+        let t0 = step as f32 / steps as f32;
+        let t1 = (step + 1) as f32 / steps as f32;
+        let a0 = start_angle + angle_span * t0;
+        let a1 = start_angle + angle_span * t1;
+        let point = |angle: f32, t: f32| {
+            let x = center.x + angle.cos() * radius;
+            let z = center.y + angle.sin() * radius;
+            let y = terrain_surface_y(x, z, terrain_seed) + SPEED_ROAD_CLEARANCE + 1.4 + height * t;
+            Vec3::new(x, y, z)
+        };
+
+        spawn_speed_road_deck_between(
+            commands,
+            meshes,
+            pal,
+            deck_mesh,
+            point(a0, t0),
+            point(a1, t1),
+            width,
+            true,
+            step == 0 || step + 1 == steps,
+            seed + step as u64 * 29,
+            terrain_seed,
+        );
+    }
+}
+
+fn spawn_speed_loop_gate(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    center: Vec3,
+    yaw: f32,
+    radius: f32,
+    width: f32,
+    seed: u64,
+) {
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let yaw_rot = Quat::from_rotation_y(yaw);
+    let forward = yaw_rot * Vec3::Z;
+    let segments = 18usize;
+    let arc_len = TAU * radius / segments as f32 * 1.07;
+    let segment_width = (width * 0.36).clamp(7.0, 10.0);
+
+    for segment in 0..segments {
+        let a0 = segment as f32 * TAU / segments as f32;
+        let a1 = (segment + 1) as f32 * TAU / segments as f32;
+        let angle = (a0 + a1) * 0.5 - std::f32::consts::FRAC_PI_2;
+        let local = Vec3::new(0.0, radius + angle.sin() * radius, angle.cos() * radius);
+        let pos = center + yaw_rot * local;
+        let rot = yaw_rot * Quat::from_rotation_x(angle + std::f32::consts::FRAC_PI_2);
+        let transform = Transform::from_translation(pos)
+            .with_rotation(rot)
+            .with_scale(Vec3::new(segment_width, 0.62, arc_len));
+
+        if angle.sin() < -0.20 {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(unit_cube.clone()),
+                    material: MeshMaterial3d(pal.boost_ramp.clone()),
+                    transform,
+                    ..default()
+                },
+                WorldGeometry,
+                WalkableSurface,
+                bevy_rapier3d::prelude::RigidBody::Fixed,
+                bevy_rapier3d::prelude::Collider::cuboid(segment_width * 0.5, 0.31, arc_len * 0.5),
+            ));
+        } else {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(unit_cube.clone()),
+                    material: MeshMaterial3d(if segment % 2 == 0 {
+                        pal.boost_lane.clone()
+                    } else {
+                        pal.guide_glow.clone()
+                    }),
+                    transform,
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    spawn_board_boost_pad(
+        commands,
+        meshes,
+        pal,
+        center + Vec3::Y * 0.34,
+        yaw,
+        0.0,
+        forward,
+        width * 0.54,
+        radius * 1.45,
+        3.35,
+        5.0,
+        0.75,
+        1.65,
+    );
+
+    for end in [-1.0_f32, 1.0] {
+        let ramp_dir = if end > 0.0 { forward } else { -forward };
+        let ramp_yaw = if end > 0.0 {
+            yaw
+        } else {
+            yaw + std::f32::consts::PI
+        };
+        spawn_board_boost_ramp(
+            commands,
+            meshes,
+            pal,
+            center + forward * end * radius * 1.16 + Vec3::Y * 0.80,
+            ramp_yaw,
+            ramp_dir,
+            width * 0.48,
+            radius * 1.05,
+            7.0 + seeded(seed, end.to_bits() as u64) * 2.0,
+            5.2,
+            1.15,
+        );
+    }
+}
+
+fn spawn_npc_road_vehicles(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+) {
+    let vehicle_mesh = meshes.add(Cuboid::new(8.2, 2.5, 13.2));
+    let mut spawned = 0usize;
+
+    for (ri, route) in mountain_routes().iter().enumerate() {
+        if route.len() < 2 {
+            continue;
+        }
+        let path = road_vehicle_route_path(route, terrain_seed);
+        if path.len() < 2 {
+            continue;
+        }
+
+        for lane in [-1.0_f32, 1.0] {
+            if spawned >= SPEED_ROAD_PATROL_VEHICLE_COUNT {
+                return;
+            }
+            let speed = 34.0 + seeded(seed, spawned as u64 * 13 + 1) * 18.0;
+            let initial_distance = seeded(seed, spawned as u64 * 13 + 2) * 1_800.0;
+            let lane_offset = lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET;
+            let mut vehicle = NpcRoadVehicle {
+                path: path.clone(),
+                segment: spawned % path.len(),
+                progress: 0.0,
+                speed,
+                lane_offset,
+                hit_radius: 7.5,
+                wreck_timer: 5.0,
+            };
+            advance_road_vehicle(&mut vehicle, initial_distance / speed.max(0.01));
+            let (position, yaw) =
+                road_vehicle_pose(&vehicle).unwrap_or((path[0], route_heading_yaw(route)));
+            let route_dir = Quat::from_rotation_y(yaw) * Vec3::Z;
+            let right = Vec3::new(route_dir.z, 0.0, -route_dir.x).normalize_or_zero();
+            let color_mat = match (ri + spawned) % 4 {
+                0 => pal.brushed_metal.clone(),
+                1 => pal.industrial_metal.clone(),
+                2 => pal.city_metal_panel.clone(),
+                _ => pal.crystal_aurora.clone(),
+            };
+
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(vehicle_mesh.clone()),
+                    material: MeshMaterial3d(color_mat),
+                    transform: Transform::from_translation(position + right * lane_offset)
+                        .with_rotation(Quat::from_rotation_y(yaw)),
+                    ..default()
+                },
+                WorldGeometry,
+                vehicle,
+                Health::new(85.0),
+                Damageable::default(),
+                bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+                bevy_rapier3d::prelude::Collider::cuboid(4.1, 1.25, 6.6),
+            ));
+            spawned += 1;
+        }
+    }
+}
+
+fn road_vehicle_route_path(route: &[(f32, f32)], terrain_seed: u64) -> Vec<Vec3> {
+    let mut path: Vec<Vec3> = route
+        .iter()
+        .map(|&(x, z)| speed_road_terrain_point(x, z, terrain_seed, SPEED_ROAD_CLEARANCE + 2.0))
+        .collect();
+
+    for &(x, z) in route
+        .iter()
+        .rev()
+        .skip(1)
+        .take(route.len().saturating_sub(2))
+    {
+        path.push(speed_road_terrain_point(
+            x,
+            z,
+            terrain_seed,
+            SPEED_ROAD_CLEARANCE + 2.0,
+        ));
+    }
+
+    path
+}
+
+fn route_heading_yaw(route: &[(f32, f32)]) -> f32 {
+    if route.len() < 2 {
+        return 0.0;
+    }
+    let (ax, az) = route[0];
+    let (bx, bz) = route[1];
+    (bx - ax).atan2(bz - az)
 }
 
 fn spawn_range_outposts(
@@ -10769,7 +11730,7 @@ fn spawn_boost_road_span(
             let pad_center = lane_center + rot * Vec3::new(0.0, 0.0, local_z) + Vec3::Y * 0.08;
             spawn_board_boost_pad(
                 commands, meshes, pal, pad_center, lane_yaw, pitch, lane_dir, pad_width, pad_len,
-                2.75, 2.35, 0.0, 1.35,
+                3.15, 3.10, 0.0, 1.70,
             );
         }
 
@@ -10912,9 +11873,9 @@ fn spawn_board_boost_ramp(
             half_width: width * 0.5,
             half_length: length * 0.5,
             speed_mult: 3.15,
-            impulse,
+            impulse: impulse.max(3.9),
             lift,
-            duration: 1.55,
+            duration: 1.85,
             cooldown: 0.20,
             cooldown_timer: 0.0,
             force_hoverboard: true,
@@ -14207,6 +15168,73 @@ mod tests {
     fn mountain_route_influence_marks_path_corridors() {
         assert!(mountain_route_influence(3200.0, 920.0) > 0.85);
         assert!(mountain_route_influence(9900.0, -1000.0) < 0.20);
+    }
+
+    #[test]
+    fn mountain_speed_roads_cover_authored_routes() {
+        assert!(mountain_speed_road_segment_count() >= 70);
+
+        for &(x, z) in ROUTE_CORE_EVEREST {
+            assert!(
+                distance_to_speed_road_network(x, z, 42) < 3.0,
+                "core Everest route node should sit on the speed-road network"
+            );
+        }
+    }
+
+    #[test]
+    fn settlement_speed_roads_create_access_rings_and_spurs() {
+        for settlement in map_settlements().iter().copied() {
+            let ring_radius = settlement_speed_ring_radius(42, settlement);
+            let ring_access =
+                distance_to_speed_road_network(settlement.x + ring_radius, settlement.z, 42);
+            assert!(
+                ring_access < 8.0,
+                "{} should have a nearby speed-road ring",
+                settlement.name
+            );
+
+            let projection = nearest_mountain_route_point(settlement.x, settlement.z)
+                .expect("settlement speed spurs need a route trunk");
+            let to_route = projection.point - Vec2::new(settlement.x, settlement.z);
+            assert!(to_route.length() > ring_radius);
+            let spur_mid =
+                Vec2::new(settlement.x, settlement.z) + to_route.normalize() * ring_radius * 1.35;
+            assert!(
+                distance_to_speed_road_network(spur_mid.x, spur_mid.y, 42) < 8.0,
+                "{} should connect its ring back to the mountain trunk",
+                settlement.name
+            );
+        }
+    }
+
+    #[test]
+    fn speed_roads_include_loop_gates_for_routes_and_settlements() {
+        assert!(speed_road_loop_gate_count() >= map_settlements().len() + 6);
+    }
+
+    #[test]
+    fn speed_roads_are_wide_enough_for_patrol_traffic() {
+        assert!(SPEED_ROAD_WIDTH >= 36.0);
+        assert!(SPEED_ROAD_TRAFFIC_LANE_OFFSET * 2.0 < SPEED_ROAD_WIDTH);
+        assert_eq!(SPEED_ROAD_PATROL_VEHICLE_COUNT, 18);
+    }
+
+    #[test]
+    fn mountain_routes_generate_sweeper_curves_and_trick_ramps() {
+        assert!(speed_road_sweeper_curve_count() >= 20);
+        assert!(hoverboard_trick_ramp_count() >= 16);
+    }
+
+    #[test]
+    fn road_vehicle_paths_return_along_authored_routes() {
+        let path = road_vehicle_route_path(ROUTE_CORE_AURORA, 42);
+        assert_eq!(
+            path.len(),
+            ROUTE_CORE_AURORA.len() + ROUTE_CORE_AURORA.len().saturating_sub(2)
+        );
+        assert_eq!(path.first().map(|p| (p.x, p.z)), Some(ROUTE_CORE_AURORA[0]));
+        assert_eq!(path.last().map(|p| (p.x, p.z)), Some(ROUTE_CORE_AURORA[1]));
     }
 
     #[test]

@@ -1696,10 +1696,31 @@ fn player_movement(
             }
         }
 
-        let target_h_vel = input * speed * input_strength;
+        let mut target_h_vel = input * speed * input_strength;
+        if traversal.active == TraversalMode::Hoverboard
+            && movement.is_grounded
+            && input_strength > 0.05
+        {
+            let current_speed = movement.ground_velocity.length();
+            let target_speed = target_h_vel.length();
+            let boosted_cap = movement.sprint_speed
+                * traversal.hoverboard_speed_mult
+                * board_boost.speed_mult.max(1.0)
+                * 1.62;
+            let cruise_cap = boosted_cap.max(movement.sprint_speed * 2.35);
+            if current_speed > target_speed {
+                target_h_vel = input * current_speed.min(cruise_cap);
+            } else if sprinting {
+                target_h_vel += input * 0.16;
+            }
+        }
         let mut h_vel = if movement.is_grounded {
             let accel = if input.length_squared() > 0.01 {
-                movement.ground_accel
+                if traversal.active == TraversalMode::Hoverboard {
+                    movement.ground_accel * 0.82
+                } else {
+                    movement.ground_accel
+                }
             } else {
                 movement.ground_decel
             };

@@ -115,6 +115,18 @@ pub struct BoardBoostPad {
     pub force_hoverboard: bool,
 }
 
+/// Civilian or patrol vehicle riding the generated speed-road network.
+#[derive(Component, Debug, Clone)]
+pub struct NpcRoadVehicle {
+    pub path: Vec<Vec3>,
+    pub segment: usize,
+    pub progress: f32,
+    pub speed: f32,
+    pub lane_offset: f32,
+    pub hit_radius: f32,
+    pub wreck_timer: f32,
+}
+
 /// Defensive world turret that tracks players and fires a hitscan-style beam.
 #[derive(Component, Debug, Clone)]
 pub struct LaserTurret {

@@ -249,8 +249,8 @@ impl Default for TraversalModeState {
     fn default() -> Self {
         Self {
             active: TraversalMode::Grapple,
-            hoverboard_speed_mult: 1.45,
-            hoverboard_air_control_mult: 1.2,
+            hoverboard_speed_mult: 1.65,
+            hoverboard_air_control_mult: 1.45,
         }
     }
 }
@@ -739,5 +739,13 @@ mod tests {
     fn traversal_mode_labels_are_stable() {
         assert_eq!(TraversalMode::Grapple.label(), "Grapple");
         assert_eq!(TraversalMode::Hoverboard.label(), "Hoverboard");
+    }
+
+    #[test]
+    fn hoverboard_tuning_supports_fast_air_control() {
+        let traversal = TraversalModeState::default();
+
+        assert!(traversal.hoverboard_speed_mult >= 1.6);
+        assert!(traversal.hoverboard_air_control_mult >= 1.4);
     }
 }
