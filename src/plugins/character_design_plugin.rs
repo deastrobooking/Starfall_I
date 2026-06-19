@@ -5,7 +5,9 @@ use bevy::prelude::*;
 use crate::character_blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
-use crate::character_parts::CharacterLoadout;
+use crate::character_parts::{
+    ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
+};
 use crate::characters::{
     accent_preset, accent_presets, eye_preset, eye_presets, hair_preset, hair_presets, hero_config,
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
@@ -26,6 +28,7 @@ impl Plugin for CharacterDesignPlugin {
                 (
                     spin_preview,
                     rebuild_preview_if_dirty,
+                    design_preset_interaction,
                     swatch_interaction,
                     accessory_interaction,
                     part_preset_interaction,
@@ -34,6 +37,7 @@ impl Plugin for CharacterDesignPlugin {
                     button_interaction,
                     design_keyboard_input,
                     update_swatch_borders,
+                    update_design_preset_colors,
                     update_toggle_colors,
                     update_part_preset_text,
                     update_physique_preset_colors,
@@ -65,6 +69,16 @@ struct ConfirmButton;
 struct SwatchButton {
     category: SwatchCategory,
     index: usize,
+}
+
+#[derive(Component, Clone, Copy)]
+struct DesignPresetButton(ReferenceDesignPreset);
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum ReferenceDesignPreset {
+    Amp,
+    Chroma,
+    Vincenzo,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -350,6 +364,19 @@ fn rebuild_preview_if_dirty(
 
 // ── Swatch clicks ─────────────────────────────────────────────────────────────
 
+fn design_preset_interaction(
+    interaction_q: Query<(&Interaction, &DesignPresetButton), Changed<Interaction>>,
+    mut design_data: ResMut<CharacterDesignData>,
+) {
+    for (interaction, preset) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        preset.0.apply(&mut design_data);
+        design_data.dirty = true;
+    }
+}
+
 fn swatch_interaction(
     interaction_q: Query<(&Interaction, &SwatchButton), Changed<Interaction>>,
     mut design_data: ResMut<CharacterDesignData>,
@@ -593,6 +620,28 @@ fn update_swatch_borders(
     }
 }
 
+fn update_design_preset_colors(
+    design_data: Res<CharacterDesignData>,
+    mut button_q: Query<(&DesignPresetButton, &mut BackgroundColor, &mut BorderColor)>,
+) {
+    if !design_data.is_changed() {
+        return;
+    }
+    for (button, mut bg, mut border) in button_q.iter_mut() {
+        let selected = button.0.matches(&design_data);
+        *bg = BackgroundColor(if selected {
+            Color::srgb(0.38, 0.30, 0.18)
+        } else {
+            Color::srgb(0.090, 0.094, 0.104)
+        });
+        *border = BorderColor::all(if selected {
+            Color::srgb(0.94, 0.72, 0.36)
+        } else {
+            Color::srgba(0.28, 0.27, 0.30, 0.84)
+        });
+    }
+}
+
 fn update_toggle_colors(
     design_data: Res<CharacterDesignData>,
     mut toggle_q: Query<(&AccessoryToggle, &mut BackgroundColor, &mut BorderColor)>,
@@ -764,6 +813,25 @@ fn spawn_design_ui(
                     },
                     TextColor(Color::srgb(0.92, 0.76, 0.42)),
                 ));
+
+                spawn_section_label(panel, "REFERENCE DESIGN");
+                panel
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(7.0),
+                        row_gap: Val::Px(7.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for preset in [
+                            ReferenceDesignPreset::Amp,
+                            ReferenceDesignPreset::Chroma,
+                            ReferenceDesignPreset::Vincenzo,
+                        ] {
+                            spawn_design_preset_button(row, preset, design_data);
+                        }
+                    });
 
                 spawn_section_label(panel, "PALETTE");
 
@@ -976,6 +1044,44 @@ fn spawn_section_label(parent: &mut ChildSpawnerCommands, label: &str) {
         },
         TextColor(Color::srgb(0.58, 0.61, 0.66)),
     ));
+}
+
+fn spawn_design_preset_button(
+    parent: &mut ChildSpawnerCommands,
+    preset: ReferenceDesignPreset,
+    design_data: &CharacterDesignData,
+) {
+    let selected = preset.matches(design_data);
+    parent
+        .spawn((
+            Button,
+            Node {
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(if selected {
+                Color::srgb(0.38, 0.30, 0.18)
+            } else {
+                Color::srgb(0.090, 0.094, 0.104)
+            }),
+            BorderColor::all(if selected {
+                Color::srgb(0.94, 0.72, 0.36)
+            } else {
+                Color::srgba(0.28, 0.27, 0.30, 0.84)
+            }),
+            DesignPresetButton(preset),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(preset.label()),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.92, 0.91, 0.86)),
+            ));
+        });
 }
 
 fn spawn_part_preset_row(
@@ -1266,6 +1372,194 @@ fn part_slot_value_label(design_data: &CharacterDesignData, slot: DesignerPartSl
         DesignerPartSlot::Head => design_data.head_preset.label(),
     };
     label.to_string()
+}
+
+impl ReferenceDesignPreset {
+    fn label(self) -> &'static str {
+        match self {
+            ReferenceDesignPreset::Amp => "AMP",
+            ReferenceDesignPreset::Chroma => "Chroma",
+            ReferenceDesignPreset::Vincenzo => "Vincenzo",
+        }
+    }
+
+    fn apply(self, design_data: &mut CharacterDesignData) {
+        match self {
+            ReferenceDesignPreset::Amp => {
+                design_data.skin_idx = 3;
+                design_data.outfit_idx = 0;
+                design_data.accent_idx = 1;
+                design_data.hair_idx = 6;
+                design_data.eye_idx = 5;
+                design_data.body_preset = BodyPreset::HeavyPlate;
+                design_data.arm_preset = ArmPreset::HeavyArms;
+                design_data.leg_preset = LegPreset::HeavyLegs;
+                design_data.shoulder_preset = ShoulderPreset::PlateEpaulettes;
+                design_data.head_preset = HeadPreset::FullHelm;
+                design_data.body = Self::amp_body();
+                design_data.has_hood = false;
+                design_data.has_cape = false;
+                design_data.has_gloves = true;
+                design_data.has_boots = true;
+                design_data.has_shoulder_pads = true;
+                design_data.has_visor = true;
+            }
+            ReferenceDesignPreset::Chroma => {
+                design_data.skin_idx = 2;
+                design_data.outfit_idx = 6;
+                design_data.accent_idx = 6;
+                design_data.hair_idx = 7;
+                design_data.eye_idx = 5;
+                design_data.body_preset = BodyPreset::ChromaFrame;
+                design_data.arm_preset = ArmPreset::ChromaBlades;
+                design_data.leg_preset = LegPreset::ChromaStriders;
+                design_data.shoulder_preset = ShoulderPreset::ChromaMantle;
+                design_data.head_preset = HeadPreset::ChromaCrown;
+                design_data.body = Self::chroma_body();
+                design_data.has_hood = false;
+                design_data.has_cape = false;
+                design_data.has_gloves = true;
+                design_data.has_boots = true;
+                design_data.has_shoulder_pads = true;
+                design_data.has_visor = true;
+            }
+            ReferenceDesignPreset::Vincenzo => {
+                design_data.skin_idx = 0;
+                design_data.outfit_idx = 0;
+                design_data.accent_idx = 0;
+                design_data.hair_idx = 0;
+                design_data.eye_idx = 0;
+                design_data.body_preset = BodyPreset::ScoutVest;
+                design_data.arm_preset = ArmPreset::ScoutArms;
+                design_data.leg_preset = LegPreset::ScoutLegs;
+                design_data.shoulder_preset = ShoulderPreset::DomePauldrons;
+                design_data.head_preset = HeadPreset::OpenFace;
+                design_data.body = Self::vincenzo_body();
+                design_data.has_hood = true;
+                design_data.has_cape = true;
+                design_data.has_gloves = true;
+                design_data.has_boots = true;
+                design_data.has_shoulder_pads = true;
+                design_data.has_visor = false;
+            }
+        }
+        design_data.body.validate();
+    }
+
+    fn matches(self, design_data: &CharacterDesignData) -> bool {
+        match self {
+            ReferenceDesignPreset::Amp => {
+                design_data.body_preset == BodyPreset::HeavyPlate
+                    && design_data.arm_preset == ArmPreset::HeavyArms
+                    && design_data.leg_preset == LegPreset::HeavyLegs
+                    && design_data.shoulder_preset == ShoulderPreset::PlateEpaulettes
+                    && design_data.head_preset == HeadPreset::FullHelm
+                    && body_recipe_matches(&design_data.body, Self::amp_body())
+            }
+            ReferenceDesignPreset::Chroma => {
+                design_data.body_preset == BodyPreset::ChromaFrame
+                    && design_data.arm_preset == ArmPreset::ChromaBlades
+                    && design_data.leg_preset == LegPreset::ChromaStriders
+                    && design_data.shoulder_preset == ShoulderPreset::ChromaMantle
+                    && design_data.head_preset == HeadPreset::ChromaCrown
+                    && body_recipe_matches(&design_data.body, Self::chroma_body())
+            }
+            ReferenceDesignPreset::Vincenzo => {
+                design_data.body_preset == BodyPreset::ScoutVest
+                    && design_data.arm_preset == ArmPreset::ScoutArms
+                    && design_data.leg_preset == LegPreset::ScoutLegs
+                    && design_data.shoulder_preset == ShoulderPreset::DomePauldrons
+                    && design_data.head_preset == HeadPreset::OpenFace
+                    && body_recipe_matches(&design_data.body, Self::vincenzo_body())
+            }
+        }
+    }
+
+    fn amp_body() -> BodyRecipe {
+        BodyRecipe {
+            height: 1.12,
+            shoulder_width: 1.34,
+            chest_size: 1.30,
+            arm_length: 1.22,
+            leg_length: 1.22,
+            hand_size: 1.24,
+            foot_size: 1.36,
+            head_size: 0.90,
+            neck_length: 0.90,
+            torso_curve: 0.04,
+            hip_width: 1.20,
+            spine_posture: 0.10,
+            mass: 1.45,
+            muscle: 1.36,
+            body_fat: 1.00,
+            asymmetry: 0.04,
+        }
+        .validated()
+    }
+
+    fn chroma_body() -> BodyRecipe {
+        BodyRecipe {
+            height: 1.10,
+            shoulder_width: 1.02,
+            chest_size: 0.94,
+            arm_length: 1.22,
+            leg_length: 1.40,
+            hand_size: 1.04,
+            foot_size: 1.20,
+            head_size: 1.16,
+            neck_length: 1.06,
+            torso_curve: -0.06,
+            hip_width: 0.92,
+            spine_posture: -0.06,
+            mass: 0.88,
+            muscle: 1.00,
+            body_fat: 0.86,
+            asymmetry: 0.12,
+        }
+        .validated()
+    }
+
+    fn vincenzo_body() -> BodyRecipe {
+        BodyRecipe {
+            height: 1.18,
+            shoulder_width: 1.00,
+            chest_size: 0.96,
+            arm_length: 1.30,
+            leg_length: 1.45,
+            hand_size: 1.02,
+            foot_size: 1.18,
+            head_size: 0.92,
+            neck_length: 1.08,
+            torso_curve: 0.10,
+            hip_width: 0.92,
+            spine_posture: -0.12,
+            mass: 0.86,
+            muscle: 1.08,
+            body_fat: 0.82,
+            asymmetry: 0.08,
+        }
+        .validated()
+    }
+}
+
+fn body_recipe_matches(body: &BodyRecipe, target: BodyRecipe) -> bool {
+    let body = body.validated();
+    (body.height - target.height).abs() < 0.01
+        && (body.shoulder_width - target.shoulder_width).abs() < 0.01
+        && (body.chest_size - target.chest_size).abs() < 0.01
+        && (body.arm_length - target.arm_length).abs() < 0.01
+        && (body.leg_length - target.leg_length).abs() < 0.01
+        && (body.hand_size - target.hand_size).abs() < 0.01
+        && (body.foot_size - target.foot_size).abs() < 0.01
+        && (body.head_size - target.head_size).abs() < 0.01
+        && (body.neck_length - target.neck_length).abs() < 0.01
+        && (body.torso_curve - target.torso_curve).abs() < 0.01
+        && (body.hip_width - target.hip_width).abs() < 0.01
+        && (body.spine_posture - target.spine_posture).abs() < 0.01
+        && (body.mass - target.mass).abs() < 0.01
+        && (body.muscle - target.muscle).abs() < 0.01
+        && (body.body_fat - target.body_fat).abs() < 0.01
+        && (body.asymmetry - target.asymmetry).abs() < 0.01
 }
 
 impl PhysiquePreset {

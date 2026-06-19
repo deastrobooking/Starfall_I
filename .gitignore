@@ -1,3 +1,4 @@
 target/
 starfall_i_save.json
 .DS_Store
+assets/Characters/*.glb
