@@ -44,6 +44,7 @@ struct ChassisEditorData {
     legs: LegPreset,
     shoulders: ShoulderPreset,
     head: HeadPreset,
+    preview_scale: f32,
 }
 
 // ── Marker components ─────────────────────────────────────────────────────────
@@ -78,15 +79,18 @@ fn setup_editor(
     mut data: ResMut<ChassisEditorData>,
     loadout: Res<PlayerPartLoadout>,
     select_state: Res<PlayerSelectState>,
+    chassis: Res<PlayerChassis>,
     mut cam_q: Query<&mut Transform, With<Camera3d>>,
 ) {
     // Restore last saved loadout so editor opens with previous choices.
-    data.body = loadout.body;
-    data.arms = loadout.arms;
-    data.legs = loadout.legs;
-    data.shoulders = loadout.shoulders;
-    data.head = loadout.head;
+    let slot_loadout = select_state.slots[0].part_loadout.unwrap_or(*loadout);
+    data.body = slot_loadout.body;
+    data.arms = slot_loadout.arms;
+    data.legs = slot_loadout.legs;
+    data.shoulders = slot_loadout.shoulders;
+    data.head = slot_loadout.head;
     data.spin_angle = 0.0;
+    data.preview_scale = chassis.0.scale.clamp(0.5, 2.0);
 
     // Position camera the same as the character design preview.
     if let Ok(mut t) = cam_q.single_mut() {
@@ -126,7 +130,10 @@ fn setup_editor(
         config,
         Vec3::ZERO,
     );
-    commands.entity(preview).insert(ChassisPreviewRoot);
+    commands.entity(preview).insert((
+        ChassisPreviewRoot,
+        Transform::from_scale(Vec3::splat(data.preview_scale)),
+    ));
     data.preview_entity = Some(preview);
 
     // UI panel (right 42% of screen, transparent left side shows 3D)
@@ -300,8 +307,9 @@ fn editor_keyboard_input(
     mut data: ResMut<ChassisEditorData>,
     mut chassis: ResMut<PlayerChassis>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
+    mut select_state: ResMut<PlayerSelectState>,
     mut next_state: ResMut<NextState<AppState>>,
-    _preview_q: Query<Entity, With<ChassisPreviewRoot>>,
+    mut preview_q: Query<&mut Transform, With<ChassisPreviewRoot>>,
     mut loadout_q: Query<&mut CharacterLoadout>,
 ) {
     let mut toggle_body = keyboard.just_pressed(KeyCode::KeyQ);
@@ -421,14 +429,24 @@ fn editor_keyboard_input(
     if scale_down {
         chassis.0.scale = (chassis.0.scale - 0.1).max(0.5);
     }
+    if scale_up || scale_down {
+        data.preview_scale = chassis.0.scale;
+        for mut transform in preview_q.iter_mut() {
+            transform.scale = Vec3::splat(data.preview_scale);
+        }
+    }
 
     // Confirm — save to PlayerPartLoadout
     if confirm {
-        part_loadout.body = data.body;
-        part_loadout.arms = data.arms;
-        part_loadout.legs = data.legs;
-        part_loadout.shoulders = data.shoulders;
-        part_loadout.head = data.head;
+        let loadout = PlayerPartLoadout {
+            body: data.body,
+            arms: data.arms,
+            legs: data.legs,
+            shoulders: data.shoulders,
+            head: data.head,
+        };
+        *part_loadout = loadout;
+        select_state.slots[0].part_loadout = Some(loadout);
         next_state.set(AppState::ChapterSelect);
     }
 

@@ -112,6 +112,8 @@ pub struct SaveData {
     #[serde(default)]
     pub character_blueprints: Vec<Option<CharacterBlueprint>>,
     #[serde(default)]
+    pub part_loadouts: Vec<Option<PlayerPartLoadout>>,
+    #[serde(default)]
     pub players: Vec<PlayerSaveData>,
     #[serde(default)]
     pub robot_pets: RobotPetCollection,
@@ -226,6 +228,7 @@ impl Default for SaveData {
             perk_points_unspent: 0,
             perk_ranks: Vec::new(),
             character_blueprints: vec![None, None, None, None],
+            part_loadouts: vec![None, None, None, None],
             players: Vec::new(),
             robot_pets: RobotPetCollection::default(),
             settlement_economy: SettlementEconomy::default(),
@@ -424,6 +427,7 @@ fn build_save_data(
             .iter()
             .map(|slot| slot.blueprint.clone())
             .collect(),
+        part_loadouts: select.slots.iter().map(|slot| slot.part_loadout).collect(),
         players,
         robot_pets: robot_pets.clone(),
         settlement_economy: settlement_economy.clone(),
@@ -467,6 +471,28 @@ fn hydrate_character_blueprints(
 ) {
     for (slot, blueprint) in select.slots.iter_mut().zip(blueprints) {
         slot.blueprint = blueprint;
+    }
+}
+
+fn hydrate_part_loadouts(
+    select: &mut PlayerSelectState,
+    loadouts: Vec<Option<PlayerPartLoadout>>,
+    legacy_loadout: PlayerPartLoadout,
+) {
+    if loadouts.is_empty() {
+        let fallback = if legacy_loadout == PlayerPartLoadout::default() {
+            None
+        } else {
+            Some(legacy_loadout)
+        };
+        for slot in &mut select.slots {
+            slot.part_loadout = fallback;
+        }
+        return;
+    }
+
+    for (slot, loadout) in select.slots.iter_mut().zip(loadouts) {
+        slot.part_loadout = loadout;
     }
 }
 
@@ -549,6 +575,7 @@ fn hydrate_progress_from_disk(
         part_loadout.legs = data.part_loadout_legs;
         part_loadout.shoulders = data.part_loadout_shoulders;
         part_loadout.head = data.part_loadout_head;
+        hydrate_part_loadouts(&mut select, data.part_loadouts, *part_loadout);
         weapon_ranks.ranks = data.weapon_ranks;
         if world_site_registry.sites.is_empty() {
             world_site_registry.sites = initial_world_sites();
@@ -575,11 +602,9 @@ fn load_save_on_enter(
     mut wave: ResMut<WaveInfo>,
     mut progress: ResMut<ChapterProgress>,
     mut perks: ResMut<PerkTree>,
-    mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
     mut settlement_economy: ResMut<SettlementEconomy>,
     mut upgrades: ResMut<UpgradeLedger>,
-    mut part_loadout: ResMut<PlayerPartLoadout>,
     mut weapon_ranks: ResMut<WeaponRanks>,
     mut world_site_registry: ResMut<WorldSiteRegistry>,
     mut world_route_registry: ResMut<WorldRouteRegistry>,
@@ -611,12 +636,10 @@ fn load_save_on_enter(
         progress.campaign_complete = data.campaign_complete;
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
-        hydrate_character_blueprints(&mut select, data.character_blueprints);
-        part_loadout.body = data.part_loadout_body;
-        part_loadout.arms = data.part_loadout_arms;
-        part_loadout.legs = data.part_loadout_legs;
-        part_loadout.shoulders = data.part_loadout_shoulders;
-        part_loadout.head = data.part_loadout_head;
+        // Character customization is hydrated at startup and may have been edited
+        // in the lobby immediately before entering gameplay. Do not overwrite it
+        // here with the previous disk save, or fresh editor changes will be lost
+        // before the next autosave/manual save.
         weapon_ranks.ranks = data.weapon_ranks;
         if world_site_registry.sites.is_empty() {
             world_site_registry.sites = initial_world_sites();
@@ -793,6 +816,13 @@ mod tests {
         };
         let mut select = PlayerSelectState::default();
         select.slots[0].blueprint = Some(test_blueprint("P1", 1.0));
+        select.slots[0].part_loadout = Some(PlayerPartLoadout {
+            body: BodyPreset::DariaCore,
+            arms: ArmPreset::DariaCannon,
+            legs: LegPreset::DariaGreaves,
+            shoulders: ShoulderPreset::DariaFlares,
+            head: HeadPreset::DariaHelm,
+        });
         select.slots[2].blueprint = Some(test_blueprint("P3", 1.12));
         let mut robot_pets = RobotPetCollection::default();
         robot_pets.add_part(RobotPartKind::CircuitBoard, 6);
@@ -879,6 +909,16 @@ mod tests {
         assert_eq!(data.part_loadout_legs, LegPreset::JetLegs);
         assert_eq!(data.part_loadout_shoulders, ShoulderPreset::SpikedPauldrons);
         assert_eq!(data.part_loadout_head, HeadPreset::CombatHelmet);
+        assert_eq!(
+            data.part_loadouts[0],
+            Some(PlayerPartLoadout {
+                body: BodyPreset::DariaCore,
+                arms: ArmPreset::DariaCannon,
+                legs: LegPreset::DariaGreaves,
+                shoulders: ShoulderPreset::DariaFlares,
+                head: HeadPreset::DariaHelm,
+            })
+        );
     }
 
     #[test]
@@ -904,6 +944,24 @@ mod tests {
             character_blueprints: vec![
                 Some(test_blueprint("Vincenzo", 1.0)),
                 Some(test_blueprint("Antonio", 1.08)),
+                None,
+                None,
+            ],
+            part_loadouts: vec![
+                Some(PlayerPartLoadout {
+                    body: BodyPreset::RiftMantle,
+                    arms: ArmPreset::RiftTalons,
+                    legs: LegPreset::RiftBoots,
+                    shoulders: ShoulderPreset::RiftCloak,
+                    head: HeadPreset::RiftCowl,
+                }),
+                Some(PlayerPartLoadout {
+                    body: BodyPreset::ChromaFrame,
+                    arms: ArmPreset::ChromaBlades,
+                    legs: LegPreset::ChromaStriders,
+                    shoulders: ShoulderPreset::ChromaMantle,
+                    head: HeadPreset::ChromaCrown,
+                }),
                 None,
                 None,
             ],
@@ -977,8 +1035,31 @@ mod tests {
         assert_eq!(loaded.part_loadout_body, BodyPreset::VoidArmor);
         assert_eq!(loaded.part_loadout_arms, ArmPreset::ClawArms);
         assert_eq!(loaded.part_loadout_legs, LegPreset::HeavyLegs);
-        assert_eq!(loaded.part_loadout_shoulders, ShoulderPreset::PlateEpaulettes);
+        assert_eq!(
+            loaded.part_loadout_shoulders,
+            ShoulderPreset::PlateEpaulettes
+        );
         assert_eq!(loaded.part_loadout_head, HeadPreset::VoidMask);
+        assert_eq!(
+            loaded.part_loadouts[0],
+            Some(PlayerPartLoadout {
+                body: BodyPreset::RiftMantle,
+                arms: ArmPreset::RiftTalons,
+                legs: LegPreset::RiftBoots,
+                shoulders: ShoulderPreset::RiftCloak,
+                head: HeadPreset::RiftCowl,
+            })
+        );
+        assert_eq!(
+            loaded.part_loadouts[1],
+            Some(PlayerPartLoadout {
+                body: BodyPreset::ChromaFrame,
+                arms: ArmPreset::ChromaBlades,
+                legs: LegPreset::ChromaStriders,
+                shoulders: ShoulderPreset::ChromaMantle,
+                head: HeadPreset::ChromaCrown,
+            })
+        );
         assert_eq!(loaded.raids.len(), 1);
         assert_eq!(loaded.raids[0].id, RaidId(7));
         assert_eq!(loaded.raids[0].phase, RaidPhase::Warning);

@@ -332,7 +332,7 @@ impl Default for PlayerChassis {
 
 /// Per-slot preset choices, persisted between the chassis editor and gameplay.
 /// Applied to `CharacterLoadout` when the player character spawns.
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerPartLoadout {
     pub body: BodyPreset,
     pub arms: ArmPreset,
@@ -451,6 +451,7 @@ pub struct CharacterDesignData {
     pub has_shoulder_pads: bool,
     pub has_visor: bool,
     pub spin_angle: f32,
+    pub preview_distance: f32,
     pub dirty: bool,
     pub preview_entity: Option<Entity>,
 }
@@ -477,6 +478,7 @@ impl Default for CharacterDesignData {
             has_shoulder_pads: false,
             has_visor: false,
             spin_angle: 0.0,
+            preview_distance: 3.2,
             dirty: false,
             preview_entity: None,
         }
@@ -505,6 +507,7 @@ pub struct PlayerSlotConfig {
     pub has_boots: Option<bool>,
     pub has_shoulder_pads: Option<bool>,
     pub has_visor: Option<bool>,
+    pub part_loadout: Option<PlayerPartLoadout>,
     pub blueprint: Option<CharacterBlueprint>,
 }
 
@@ -526,6 +529,7 @@ impl Default for PlayerSlotConfig {
             has_boots: None,
             has_shoulder_pads: None,
             has_visor: None,
+            part_loadout: None,
             blueprint: None,
         }
     }

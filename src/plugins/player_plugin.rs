@@ -568,13 +568,14 @@ fn spawn_players(
             character_config,
             spawn_pos,
         );
-        // Apply chassis-editor slot choices — overrides the default humanoid loadout.
+        // Apply per-slot designer choices, falling back to the legacy shared chassis loadout.
+        let visual_loadout = slot.part_loadout.unwrap_or(*part_loadout);
         commands.entity(player).insert(CharacterLoadout {
-            body: part_loadout.body,
-            arms: part_loadout.arms,
-            legs: part_loadout.legs,
-            shoulders: part_loadout.shoulders,
-            head: part_loadout.head,
+            body: visual_loadout.body,
+            arms: visual_loadout.arms,
+            legs: visual_loadout.legs,
+            shoulders: visual_loadout.shoulders,
+            head: visual_loadout.head,
         });
 
         let viewport = player_viewport(i, active, win_w, win_h);

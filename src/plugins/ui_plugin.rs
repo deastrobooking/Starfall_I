@@ -2201,14 +2201,23 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
         }
         select.slots[0].joined = true;
     } else {
-        let blueprints: Vec<_> = select
-            .slots
-            .iter()
-            .map(|slot| slot.blueprint.clone())
-            .collect();
+        let saved_slots = select.slots.clone();
         *select = PlayerSelectState::default();
-        for (slot, blueprint) in select.slots.iter_mut().zip(blueprints) {
-            slot.blueprint = blueprint;
+        for (slot, saved) in select.slots.iter_mut().zip(saved_slots) {
+            slot.character_index = saved.character_index;
+            slot.skin_idx = saved.skin_idx;
+            slot.outfit_idx = saved.outfit_idx;
+            slot.accent_idx = saved.accent_idx;
+            slot.hair_idx = saved.hair_idx;
+            slot.eye_idx = saved.eye_idx;
+            slot.has_hood = saved.has_hood;
+            slot.has_cape = saved.has_cape;
+            slot.has_gloves = saved.has_gloves;
+            slot.has_boots = saved.has_boots;
+            slot.has_shoulder_pads = saved.has_shoulder_pads;
+            slot.has_visor = saved.has_visor;
+            slot.part_loadout = saved.part_loadout;
+            slot.blueprint = saved.blueprint;
         }
         select.slots[0].joined = true;
     }

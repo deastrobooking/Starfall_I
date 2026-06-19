@@ -35,6 +35,7 @@ impl Plugin for CharacterDesignPlugin {
                     physique_preset_interaction,
                     body_stepper_interaction,
                     button_interaction,
+                    design_zoom_and_preset_shortcuts,
                     design_keyboard_input,
                     update_swatch_borders,
                     update_design_preset_colors,
@@ -162,6 +163,10 @@ enum BodyField {
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
+fn design_preview_camera_transform(distance: f32) -> Transform {
+    Transform::from_xyz(0.0, 0.5, -distance).looking_at(Vec3::new(0.0, -0.1, 0.0), Vec3::Y)
+}
+
 fn setup_character_design(
     mut commands: Commands,
     mut design_data: ResMut<CharacterDesignData>,
@@ -200,11 +205,12 @@ fn setup_character_design(
         base.eye_color,
         &eye_presets(),
     );
-    design_data.body_preset = part_loadout.body;
-    design_data.arm_preset = part_loadout.arms;
-    design_data.leg_preset = part_loadout.legs;
-    design_data.shoulder_preset = part_loadout.shoulders;
-    design_data.head_preset = part_loadout.head;
+    let slot_loadout = slot.part_loadout.unwrap_or(*part_loadout);
+    design_data.body_preset = slot_loadout.body;
+    design_data.arm_preset = slot_loadout.arms;
+    design_data.leg_preset = slot_loadout.legs;
+    design_data.shoulder_preset = slot_loadout.shoulders;
+    design_data.head_preset = slot_loadout.head;
     design_data.body = blueprint
         .as_ref()
         .map(|blueprint| blueprint.body)
@@ -236,12 +242,13 @@ fn setup_character_design(
         .or(blueprint_appearance.map(|appearance| appearance.has_visor))
         .unwrap_or(base.has_visor);
     design_data.spin_angle = 0.0;
+    design_data.preview_distance = 3.2;
     design_data.dirty = true;
     design_data.preview_entity = None;
 
     // Reposition the menu camera for a character preview angle
     if let Ok(mut t) = cam_q.single_mut() {
-        *t = Transform::from_xyz(0.0, 0.5, -3.2).looking_at(Vec3::new(0.0, -0.1, 0.0), Vec3::Y);
+        *t = design_preview_camera_transform(design_data.preview_distance);
     }
 
     // Key fill light (warm)
@@ -545,6 +552,43 @@ fn design_keyboard_input(
     }
 }
 
+fn design_zoom_and_preset_shortcuts(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut design_data: ResMut<CharacterDesignData>,
+    mut cam_q: Query<&mut Transform, With<Camera3d>>,
+) {
+    let preset = if keys.just_pressed(KeyCode::Digit1) {
+        Some(ReferenceDesignPreset::Amp)
+    } else if keys.just_pressed(KeyCode::Digit2) {
+        Some(ReferenceDesignPreset::Antonio)
+    } else if keys.just_pressed(KeyCode::Digit3) {
+        Some(ReferenceDesignPreset::Chroma)
+    } else if keys.just_pressed(KeyCode::Digit4) {
+        Some(ReferenceDesignPreset::Daria)
+    } else if keys.just_pressed(KeyCode::Digit5) {
+        Some(ReferenceDesignPreset::Vincenzo)
+    } else {
+        None
+    };
+
+    if let Some(preset) = preset {
+        preset.apply(&mut design_data);
+        design_data.dirty = true;
+    }
+
+    let zoom_in = keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd);
+    let zoom_out = keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract);
+    if zoom_in == zoom_out {
+        return;
+    }
+
+    let delta = if zoom_in { -0.25 } else { 0.25 };
+    design_data.preview_distance = (design_data.preview_distance + delta).clamp(1.8, 6.0);
+    if let Ok(mut transform) = cam_q.single_mut() {
+        *transform = design_preview_camera_transform(design_data.preview_distance);
+    }
+}
+
 fn save_design(
     design_data: &CharacterDesignData,
     select_state: &mut PlayerSelectState,
@@ -589,11 +633,15 @@ fn save_design(
     slot.has_visor = Some(design_data.has_visor);
     slot.blueprint = Some(blueprint);
 
-    part_loadout.body = design_data.body_preset;
-    part_loadout.arms = design_data.arm_preset;
-    part_loadout.legs = design_data.leg_preset;
-    part_loadout.shoulders = design_data.shoulder_preset;
-    part_loadout.head = design_data.head_preset;
+    let loadout = PlayerPartLoadout {
+        body: design_data.body_preset,
+        arms: design_data.arm_preset,
+        legs: design_data.leg_preset,
+        shoulders: design_data.shoulder_preset,
+        head: design_data.head_preset,
+    };
+    slot.part_loadout = Some(loadout);
+    *part_loadout = loadout;
 }
 
 // ── Highlight active swatches ─────────────────────────────────────────────────
