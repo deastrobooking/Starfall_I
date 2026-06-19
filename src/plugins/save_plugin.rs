@@ -480,7 +480,7 @@ fn hydrate_part_loadouts(
     legacy_loadout: PlayerPartLoadout,
 ) {
     if loadouts.is_empty() {
-        let fallback = if legacy_loadout == PlayerPartLoadout::default() {
+        let fallback = if legacy_loadout.is_legacy_stock() {
             None
         } else {
             Some(legacy_loadout)
@@ -492,7 +492,7 @@ fn hydrate_part_loadouts(
     }
 
     for (slot, loadout) in select.slots.iter_mut().zip(loadouts) {
-        slot.part_loadout = loadout;
+        slot.part_loadout = loadout.filter(|loadout| !loadout.is_legacy_stock());
     }
 }
 

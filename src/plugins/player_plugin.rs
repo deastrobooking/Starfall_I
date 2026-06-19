@@ -7,7 +7,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::chapters::chapter_map_location;
 use crate::character_blueprint::{
-    BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
+    CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
 use crate::character_parts::CharacterLoadout;
 use crate::characters::{
@@ -27,9 +27,9 @@ use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfil
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
-    CameraShake, ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig,
-    PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
-    WorldRouteRegistry, WorldRouteState,
+    reference_body_recipe, CameraShake, ChapterProgress, CurrentChapter, DungeonCrawlState,
+    LocalPlayerConfig, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState,
+    PlayerSlotConfig, WorldRouteRegistry, WorldRouteState,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -258,136 +258,12 @@ fn authored_player_defaults(
 
 fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> CharacterBlueprint {
     let base = hero_config(name);
-    let mut body = match name {
-        "Vincenzo" => BodyRecipe {
-            height: 1.14,
-            shoulder_width: 1.08,
-            chest_size: 1.04,
-            arm_length: 1.08,
-            leg_length: 1.18,
-            hand_size: 1.02,
-            foot_size: 1.02,
-            head_size: 0.94,
-            mass: 1.05,
-            muscle: 1.10,
-            spine_posture: 0.08,
-            ..BodyRecipe::default()
-        },
-        "Antonio" => BodyRecipe {
-            height: 1.12,
-            shoulder_width: 0.98,
-            chest_size: 0.96,
-            arm_length: 1.07,
-            leg_length: 1.22,
-            hand_size: 0.98,
-            foot_size: 1.00,
-            head_size: 0.93,
-            mass: 0.92,
-            muscle: 1.00,
-            spine_posture: 0.04,
-            ..BodyRecipe::default()
-        },
-        "Angelo" => BodyRecipe {
-            height: 1.10,
-            shoulder_width: 1.00,
-            chest_size: 1.00,
-            arm_length: 1.10,
-            leg_length: 1.17,
-            hand_size: 1.02,
-            foot_size: 1.01,
-            head_size: 0.95,
-            mass: 0.96,
-            muscle: 1.04,
-            spine_posture: -0.02,
-            ..BodyRecipe::default()
-        },
-        "Joseph" => BodyRecipe {
-            height: 1.11,
-            shoulder_width: 1.16,
-            chest_size: 1.10,
-            arm_length: 1.06,
-            leg_length: 1.14,
-            hand_size: 1.05,
-            foot_size: 1.05,
-            head_size: 0.96,
-            mass: 1.12,
-            muscle: 1.18,
-            spine_posture: 0.09,
-            ..BodyRecipe::default()
-        },
-        "Gabriella" => BodyRecipe {
-            height: 1.13,
-            shoulder_width: 1.02,
-            chest_size: 1.02,
-            arm_length: 1.10,
-            leg_length: 1.20,
-            hand_size: 1.00,
-            foot_size: 1.01,
-            head_size: 0.94,
-            mass: 0.98,
-            muscle: 1.02,
-            spine_posture: 0.05,
-            ..BodyRecipe::default()
-        },
-        "Nova" => BodyRecipe {
-            height: 1.12,
-            shoulder_width: 0.96,
-            chest_size: 0.96,
-            arm_length: 1.08,
-            leg_length: 1.23,
-            hand_size: 0.98,
-            foot_size: 0.99,
-            head_size: 0.93,
-            mass: 0.92,
-            muscle: 0.98,
-            spine_posture: 0.03,
-            ..BodyRecipe::default()
-        },
-        "Aurora" => BodyRecipe {
-            height: 1.12,
-            shoulder_width: 1.06,
-            chest_size: 1.03,
-            arm_length: 1.07,
-            leg_length: 1.18,
-            hand_size: 1.03,
-            foot_size: 1.03,
-            head_size: 0.95,
-            mass: 1.04,
-            muscle: 1.06,
-            spine_posture: 0.07,
-            ..BodyRecipe::default()
-        },
-        "Fortuna" => BodyRecipe {
-            height: 1.11,
-            shoulder_width: 0.98,
-            chest_size: 0.98,
-            arm_length: 1.09,
-            leg_length: 1.21,
-            hand_size: 1.01,
-            foot_size: 1.00,
-            head_size: 0.94,
-            mass: 0.94,
-            muscle: 1.00,
-            spine_posture: 0.02,
-            ..BodyRecipe::default()
-        },
-        _ => BodyRecipe {
-            height: 1.12,
-            shoulder_width: 1.04,
-            chest_size: 1.02,
-            arm_length: 1.07,
-            leg_length: 1.18,
-            foot_size: 1.02,
-            head_size: 0.94,
-            mass: 1.00,
-            muscle: 1.06,
-            ..BodyRecipe::default()
-        },
-    };
-    body.leg_length = (body.leg_length + 0.16).min(1.42);
-    body.hip_width = (body.hip_width * 1.05).min(1.24);
-    body.foot_size = (body.foot_size * 1.06).min(1.18);
-    body.muscle = (body.muscle * 1.03).min(1.40);
+    let mut body = reference_body_recipe(name);
+    body.leg_length = (body.leg_length + 0.03).min(1.45);
+    body.hip_width = (body.hip_width * 1.03).min(1.28);
+    body.foot_size = (body.foot_size * 1.04).min(1.36);
+    body.muscle = (body.muscle * 1.02).min(1.40);
+    body.asymmetry = body.asymmetry.max(0.06);
 
     let palette = CharacterPaletteRecipe {
         skin: slot.skin_idx.map(skin_preset).unwrap_or(base.skin),
@@ -568,15 +444,11 @@ fn spawn_players(
             character_config,
             spawn_pos,
         );
-        // Apply per-slot designer choices, falling back to the legacy shared chassis loadout.
-        let visual_loadout = slot.part_loadout.unwrap_or(*part_loadout);
-        commands.entity(player).insert(CharacterLoadout {
-            body: visual_loadout.body,
-            arms: visual_loadout.arms,
-            legs: visual_loadout.legs,
-            shoulders: visual_loadout.shoulders,
-            head: visual_loadout.head,
-        });
+        let visual_loadout =
+            PlayerPartLoadout::resolve_for_hero(character_name, slot.part_loadout, *part_loadout);
+        commands
+            .entity(player)
+            .insert(CharacterLoadout::from(visual_loadout));
 
         let viewport = player_viewport(i, active, win_w, win_h);
 
@@ -2519,6 +2391,18 @@ mod tests {
         let (_, strength) = movement_input_from_axes(Vec3::NEG_Z, Vec3::X, Vec2::new(1.0, 1.0));
 
         assert_eq!(strength, 1.0);
+    }
+
+    #[test]
+    fn upgraded_vincenzo_blueprint_uses_reference_silhouette() {
+        let slot = PlayerSlotConfig::default();
+        let blueprint = upgraded_player_blueprint("Vincenzo", &slot);
+
+        assert!(blueprint.body.leg_length >= 1.45);
+        assert!(blueprint.body.arm_length >= 1.30);
+        assert!(blueprint.body.mass < 0.90);
+        assert!(blueprint.cartoon_appearance.has_visor);
+        assert!(blueprint.cartoon_appearance.has_shoulder_pads);
     }
 
     #[test]

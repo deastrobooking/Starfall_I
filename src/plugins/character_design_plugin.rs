@@ -13,8 +13,11 @@ use crate::characters::{
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
     skin_preset, skin_presets, spawn_cartoon_character,
 };
+use crate::components::player::PlayerCamera;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
-use crate::resources::{CharacterDesignData, PlayerPartLoadout, PlayerSelectState};
+use crate::resources::{
+    reference_body_recipe, CharacterDesignData, PlayerPartLoadout, PlayerSelectState,
+};
 use crate::state::AppState;
 
 pub struct CharacterDesignPlugin;
@@ -172,13 +175,14 @@ fn setup_character_design(
     mut design_data: ResMut<CharacterDesignData>,
     select_state: Res<PlayerSelectState>,
     part_loadout: Res<PlayerPartLoadout>,
-    mut cam_q: Query<&mut Transform, With<Camera3d>>,
+    mut cam_q: Query<&mut Transform, (With<Camera3d>, Without<PlayerCamera>)>,
 ) {
     design_data.player_index = design_data.player_index.min(select_state.slots.len() - 1);
 
     // Pre-populate design data from current slot overrides (or hero defaults)
     let slot = &select_state.slots[design_data.player_index];
-    let base = hero_config(select_state.character_name(design_data.player_index));
+    let hero_name = select_state.character_name(design_data.player_index);
+    let base = hero_config(hero_name);
     let blueprint = slot.blueprint.as_ref();
     design_data.skin_idx =
         palette_index_from_saved(slot.skin_idx, blueprint, "skin", base.skin, &skin_presets());
@@ -205,7 +209,8 @@ fn setup_character_design(
         base.eye_color,
         &eye_presets(),
     );
-    let slot_loadout = slot.part_loadout.unwrap_or(*part_loadout);
+    let slot_loadout =
+        PlayerPartLoadout::resolve_for_hero(hero_name, slot.part_loadout, *part_loadout);
     design_data.body_preset = slot_loadout.body;
     design_data.arm_preset = slot_loadout.arms;
     design_data.leg_preset = slot_loadout.legs;
@@ -214,7 +219,7 @@ fn setup_character_design(
     design_data.body = blueprint
         .as_ref()
         .map(|blueprint| blueprint.body)
-        .unwrap_or_default()
+        .unwrap_or_else(|| reference_body_recipe(hero_name))
         .validated();
     let blueprint_appearance = blueprint.map(|blueprint| blueprint.cartoon_appearance);
     design_data.has_hood = slot
@@ -247,7 +252,7 @@ fn setup_character_design(
     design_data.preview_entity = None;
 
     // Reposition the menu camera for a character preview angle
-    if let Ok(mut t) = cam_q.single_mut() {
+    for mut t in cam_q.iter_mut() {
         *t = design_preview_camera_transform(design_data.preview_distance);
     }
 
@@ -555,7 +560,7 @@ fn design_keyboard_input(
 fn design_zoom_and_preset_shortcuts(
     keys: Res<ButtonInput<KeyCode>>,
     mut design_data: ResMut<CharacterDesignData>,
-    mut cam_q: Query<&mut Transform, With<Camera3d>>,
+    mut cam_q: Query<&mut Transform, (With<Camera3d>, Without<PlayerCamera>)>,
 ) {
     let preset = if keys.just_pressed(KeyCode::Digit1) {
         Some(ReferenceDesignPreset::Amp)
@@ -576,7 +581,9 @@ fn design_zoom_and_preset_shortcuts(
         design_data.dirty = true;
     }
 
-    let zoom_in = keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd);
+    let zoom_in = keys.just_pressed(KeyCode::Equal)
+        || keys.just_pressed(KeyCode::NumpadAdd)
+        || keys.just_pressed(KeyCode::NumpadEqual);
     let zoom_out = keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract);
     if zoom_in == zoom_out {
         return;
@@ -584,7 +591,7 @@ fn design_zoom_and_preset_shortcuts(
 
     let delta = if zoom_in { -0.25 } else { 0.25 };
     design_data.preview_distance = (design_data.preview_distance + delta).clamp(1.8, 6.0);
-    if let Ok(mut transform) = cam_q.single_mut() {
+    for mut transform in cam_q.iter_mut() {
         *transform = design_preview_camera_transform(design_data.preview_distance);
     }
 }
@@ -1517,22 +1524,22 @@ impl ReferenceDesignPreset {
             }
             ReferenceDesignPreset::Vincenzo => {
                 design_data.skin_idx = 0;
-                design_data.outfit_idx = 0;
-                design_data.accent_idx = 0;
-                design_data.hair_idx = 0;
-                design_data.eye_idx = 0;
-                design_data.body_preset = BodyPreset::ScoutVest;
-                design_data.arm_preset = ArmPreset::ScoutArms;
-                design_data.leg_preset = LegPreset::ScoutLegs;
-                design_data.shoulder_preset = ShoulderPreset::DomePauldrons;
-                design_data.head_preset = HeadPreset::OpenFace;
+                design_data.outfit_idx = 6;
+                design_data.accent_idx = 6;
+                design_data.hair_idx = 7;
+                design_data.eye_idx = 5;
+                design_data.body_preset = BodyPreset::ChromaFrame;
+                design_data.arm_preset = ArmPreset::ChromaBlades;
+                design_data.leg_preset = LegPreset::ChromaStriders;
+                design_data.shoulder_preset = ShoulderPreset::ChromaMantle;
+                design_data.head_preset = HeadPreset::ChromaCrown;
                 design_data.body = Self::vincenzo_body();
-                design_data.has_hood = true;
-                design_data.has_cape = true;
+                design_data.has_hood = false;
+                design_data.has_cape = false;
                 design_data.has_gloves = true;
                 design_data.has_boots = true;
                 design_data.has_shoulder_pads = true;
-                design_data.has_visor = false;
+                design_data.has_visor = true;
             }
         }
         design_data.body.validate();
@@ -1573,124 +1580,34 @@ impl ReferenceDesignPreset {
                     && body_recipe_matches(&design_data.body, Self::daria_body())
             }
             ReferenceDesignPreset::Vincenzo => {
-                design_data.body_preset == BodyPreset::ScoutVest
-                    && design_data.arm_preset == ArmPreset::ScoutArms
-                    && design_data.leg_preset == LegPreset::ScoutLegs
-                    && design_data.shoulder_preset == ShoulderPreset::DomePauldrons
-                    && design_data.head_preset == HeadPreset::OpenFace
+                design_data.body_preset == BodyPreset::ChromaFrame
+                    && design_data.arm_preset == ArmPreset::ChromaBlades
+                    && design_data.leg_preset == LegPreset::ChromaStriders
+                    && design_data.shoulder_preset == ShoulderPreset::ChromaMantle
+                    && design_data.head_preset == HeadPreset::ChromaCrown
                     && body_recipe_matches(&design_data.body, Self::vincenzo_body())
             }
         }
     }
 
     fn amp_body() -> BodyRecipe {
-        BodyRecipe {
-            height: 1.12,
-            shoulder_width: 1.34,
-            chest_size: 1.30,
-            arm_length: 1.22,
-            leg_length: 1.22,
-            hand_size: 1.24,
-            foot_size: 1.36,
-            head_size: 0.90,
-            neck_length: 0.90,
-            torso_curve: 0.04,
-            hip_width: 1.20,
-            spine_posture: 0.10,
-            mass: 1.45,
-            muscle: 1.36,
-            body_fat: 1.00,
-            asymmetry: 0.04,
-        }
-        .validated()
+        reference_body_recipe("AMP")
     }
 
     fn antonio_body() -> BodyRecipe {
-        BodyRecipe {
-            height: 1.12,
-            shoulder_width: 1.04,
-            chest_size: 0.96,
-            arm_length: 1.28,
-            leg_length: 1.30,
-            hand_size: 1.10,
-            foot_size: 1.22,
-            head_size: 1.08,
-            neck_length: 1.04,
-            torso_curve: 0.16,
-            hip_width: 0.88,
-            spine_posture: -0.14,
-            mass: 0.92,
-            muscle: 1.04,
-            body_fat: 0.84,
-            asymmetry: 0.22,
-        }
-        .validated()
+        reference_body_recipe("Antonio")
     }
 
     fn chroma_body() -> BodyRecipe {
-        BodyRecipe {
-            height: 1.10,
-            shoulder_width: 1.02,
-            chest_size: 0.94,
-            arm_length: 1.22,
-            leg_length: 1.40,
-            hand_size: 1.04,
-            foot_size: 1.20,
-            head_size: 1.16,
-            neck_length: 1.06,
-            torso_curve: -0.06,
-            hip_width: 0.92,
-            spine_posture: -0.06,
-            mass: 0.88,
-            muscle: 1.00,
-            body_fat: 0.86,
-            asymmetry: 0.12,
-        }
-        .validated()
+        reference_body_recipe("Chroma")
     }
 
     fn daria_body() -> BodyRecipe {
-        BodyRecipe {
-            height: 1.16,
-            shoulder_width: 1.22,
-            chest_size: 1.02,
-            arm_length: 1.26,
-            leg_length: 1.36,
-            hand_size: 1.22,
-            foot_size: 1.30,
-            head_size: 1.00,
-            neck_length: 1.08,
-            torso_curve: -0.08,
-            hip_width: 0.90,
-            spine_posture: 0.02,
-            mass: 0.94,
-            muscle: 1.16,
-            body_fat: 0.82,
-            asymmetry: 0.24,
-        }
-        .validated()
+        reference_body_recipe("Daria")
     }
 
     fn vincenzo_body() -> BodyRecipe {
-        BodyRecipe {
-            height: 1.18,
-            shoulder_width: 1.00,
-            chest_size: 0.96,
-            arm_length: 1.30,
-            leg_length: 1.45,
-            hand_size: 1.02,
-            foot_size: 1.18,
-            head_size: 0.92,
-            neck_length: 1.08,
-            torso_curve: 0.10,
-            hip_width: 0.92,
-            spine_posture: -0.12,
-            mass: 0.86,
-            muscle: 1.08,
-            body_fat: 0.82,
-            asymmetry: 0.08,
-        }
-        .validated()
+        reference_body_recipe("Vincenzo")
     }
 }
 

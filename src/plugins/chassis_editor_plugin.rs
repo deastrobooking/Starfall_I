@@ -12,6 +12,7 @@ use crate::character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use crate::characters::{hero_config, spawn_cartoon_character};
+use crate::components::player::PlayerCamera;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{PlayerChassis, PlayerPartLoadout, PlayerSelectState};
 use crate::robots::presets::{amp, atlas, theta, valor, volt};
@@ -80,10 +81,15 @@ fn setup_editor(
     loadout: Res<PlayerPartLoadout>,
     select_state: Res<PlayerSelectState>,
     chassis: Res<PlayerChassis>,
-    mut cam_q: Query<&mut Transform, With<Camera3d>>,
+    mut cam_q: Query<&mut Transform, (With<Camera3d>, Without<PlayerCamera>)>,
 ) {
     // Restore last saved loadout so editor opens with previous choices.
-    let slot_loadout = select_state.slots[0].part_loadout.unwrap_or(*loadout);
+    let hero_name = select_state.character_name(0);
+    let slot_loadout = PlayerPartLoadout::resolve_for_hero(
+        hero_name,
+        select_state.slots[0].part_loadout,
+        *loadout,
+    );
     data.body = slot_loadout.body;
     data.arms = slot_loadout.arms;
     data.legs = slot_loadout.legs;
@@ -93,7 +99,7 @@ fn setup_editor(
     data.preview_scale = chassis.0.scale.clamp(0.5, 2.0);
 
     // Position camera the same as the character design preview.
-    if let Ok(mut t) = cam_q.single_mut() {
+    for mut t in cam_q.iter_mut() {
         *t = Transform::from_xyz(0.0, 0.5, -3.2).looking_at(Vec3::new(0.0, -0.1, 0.0), Vec3::Y);
     }
 
@@ -121,7 +127,6 @@ fn setup_editor(
     ));
 
     // 3D character preview
-    let hero_name = select_state.character_name(0);
     let config = hero_config(hero_name);
     let preview = spawn_cartoon_character(
         &mut commands,
@@ -317,8 +322,9 @@ fn editor_keyboard_input(
     let mut toggle_legs = keyboard.just_pressed(KeyCode::KeyE);
     let mut toggle_shoulders = keyboard.just_pressed(KeyCode::KeyR);
     let mut toggle_head = keyboard.just_pressed(KeyCode::KeyT);
-    let mut scale_up =
-        keyboard.just_pressed(KeyCode::Equal) || keyboard.just_pressed(KeyCode::NumpadAdd);
+    let mut scale_up = keyboard.just_pressed(KeyCode::Equal)
+        || keyboard.just_pressed(KeyCode::NumpadAdd)
+        || keyboard.just_pressed(KeyCode::NumpadEqual);
     let mut scale_down =
         keyboard.just_pressed(KeyCode::Minus) || keyboard.just_pressed(KeyCode::NumpadSubtract);
     let mut confirm =

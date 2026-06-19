@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::chapters::{Biome, ChapterId};
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
-use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
+use crate::character_parts::{
+    ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
+};
 use crate::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
@@ -341,6 +343,222 @@ pub struct PlayerPartLoadout {
     pub head: HeadPreset,
 }
 
+impl PlayerPartLoadout {
+    pub const fn new(
+        body: BodyPreset,
+        arms: ArmPreset,
+        legs: LegPreset,
+        shoulders: ShoulderPreset,
+        head: HeadPreset,
+    ) -> Self {
+        Self {
+            body,
+            arms,
+            legs,
+            shoulders,
+            head,
+        }
+    }
+
+    pub const fn legacy_stock() -> Self {
+        Self::new(
+            BodyPreset::StandardMech,
+            ArmPreset::MechArms,
+            LegPreset::MechLegs,
+            ShoulderPreset::DomePauldrons,
+            HeadPreset::OpenFace,
+        )
+    }
+
+    pub const fn amp_reference() -> Self {
+        Self::new(
+            BodyPreset::HeavyPlate,
+            ArmPreset::HeavyArms,
+            LegPreset::HeavyLegs,
+            ShoulderPreset::PlateEpaulettes,
+            HeadPreset::FullHelm,
+        )
+    }
+
+    pub const fn antonio_reference() -> Self {
+        Self::new(
+            BodyPreset::RiftMantle,
+            ArmPreset::RiftTalons,
+            LegPreset::RiftBoots,
+            ShoulderPreset::RiftCloak,
+            HeadPreset::RiftCowl,
+        )
+    }
+
+    pub const fn chroma_reference() -> Self {
+        Self::new(
+            BodyPreset::ChromaFrame,
+            ArmPreset::ChromaBlades,
+            LegPreset::ChromaStriders,
+            ShoulderPreset::ChromaMantle,
+            HeadPreset::ChromaCrown,
+        )
+    }
+
+    pub const fn daria_reference() -> Self {
+        Self::new(
+            BodyPreset::DariaCore,
+            ArmPreset::DariaCannon,
+            LegPreset::DariaGreaves,
+            ShoulderPreset::DariaFlares,
+            HeadPreset::DariaHelm,
+        )
+    }
+
+    pub const fn vincenzo_reference() -> Self {
+        Self::chroma_reference()
+    }
+
+    pub fn reference_for_name(name: &str) -> Self {
+        match name {
+            "AMP" | "Amp" | "Angelo" | "Joseph" => Self::amp_reference(),
+            "Antonio" | "Fortuna" => Self::antonio_reference(),
+            "Daria" | "Gabriella" | "Aurora" => Self::daria_reference(),
+            "Chroma" | "Nova" | "Vincenzo" => Self::chroma_reference(),
+            _ => Self::vincenzo_reference(),
+        }
+    }
+
+    pub fn resolve_for_hero(name: &str, slot_loadout: Option<Self>, shared_loadout: Self) -> Self {
+        if let Some(loadout) = slot_loadout.filter(|loadout| !loadout.is_legacy_stock()) {
+            return loadout;
+        }
+        if !shared_loadout.is_legacy_stock() {
+            return shared_loadout;
+        }
+        Self::reference_for_name(name)
+    }
+
+    pub fn is_legacy_stock(self) -> bool {
+        self == Self::legacy_stock()
+    }
+}
+
+impl From<PlayerPartLoadout> for CharacterLoadout {
+    fn from(loadout: PlayerPartLoadout) -> Self {
+        Self {
+            body: loadout.body,
+            arms: loadout.arms,
+            legs: loadout.legs,
+            shoulders: loadout.shoulders,
+            head: loadout.head,
+        }
+    }
+}
+
+impl From<CharacterLoadout> for PlayerPartLoadout {
+    fn from(loadout: CharacterLoadout) -> Self {
+        Self {
+            body: loadout.body,
+            arms: loadout.arms,
+            legs: loadout.legs,
+            shoulders: loadout.shoulders,
+            head: loadout.head,
+        }
+    }
+}
+
+pub fn reference_body_recipe(name: &str) -> BodyRecipe {
+    let body = match name {
+        "AMP" | "Amp" | "Angelo" | "Joseph" => BodyRecipe {
+            height: 1.12,
+            shoulder_width: 1.34,
+            chest_size: 1.30,
+            arm_length: 1.22,
+            leg_length: 1.22,
+            hand_size: 1.24,
+            foot_size: 1.36,
+            head_size: 0.90,
+            neck_length: 0.90,
+            torso_curve: 0.04,
+            hip_width: 1.20,
+            spine_posture: 0.10,
+            mass: 1.45,
+            muscle: 1.36,
+            body_fat: 1.00,
+            asymmetry: 0.04,
+        },
+        "Antonio" | "Fortuna" => BodyRecipe {
+            height: 1.12,
+            shoulder_width: 1.04,
+            chest_size: 0.96,
+            arm_length: 1.28,
+            leg_length: 1.30,
+            hand_size: 1.10,
+            foot_size: 1.22,
+            head_size: 1.08,
+            neck_length: 1.04,
+            torso_curve: 0.16,
+            hip_width: 0.88,
+            spine_posture: -0.14,
+            mass: 0.92,
+            muscle: 1.04,
+            body_fat: 0.84,
+            asymmetry: 0.22,
+        },
+        "Daria" | "Gabriella" | "Aurora" => BodyRecipe {
+            height: 1.16,
+            shoulder_width: 1.22,
+            chest_size: 1.02,
+            arm_length: 1.26,
+            leg_length: 1.36,
+            hand_size: 1.22,
+            foot_size: 1.30,
+            head_size: 1.00,
+            neck_length: 1.08,
+            torso_curve: -0.08,
+            hip_width: 0.90,
+            spine_posture: 0.02,
+            mass: 0.94,
+            muscle: 1.16,
+            body_fat: 0.82,
+            asymmetry: 0.24,
+        },
+        "Chroma" | "Nova" => BodyRecipe {
+            height: 1.10,
+            shoulder_width: 1.02,
+            chest_size: 0.94,
+            arm_length: 1.22,
+            leg_length: 1.40,
+            hand_size: 1.04,
+            foot_size: 1.20,
+            head_size: 1.16,
+            neck_length: 1.06,
+            torso_curve: -0.06,
+            hip_width: 0.92,
+            spine_posture: -0.06,
+            mass: 0.88,
+            muscle: 1.00,
+            body_fat: 0.86,
+            asymmetry: 0.12,
+        },
+        _ => BodyRecipe {
+            height: 1.18,
+            shoulder_width: 1.00,
+            chest_size: 0.96,
+            arm_length: 1.30,
+            leg_length: 1.45,
+            hand_size: 1.02,
+            foot_size: 1.18,
+            head_size: 0.92,
+            neck_length: 1.08,
+            torso_curve: 0.10,
+            hip_width: 0.92,
+            spine_posture: -0.12,
+            mass: 0.86,
+            muscle: 1.08,
+            body_fat: 0.82,
+            asymmetry: 0.08,
+        },
+    };
+    body.validated()
+}
+
 // ── Chapter Progress (saveable) ───────────────────────────────────────────────
 #[derive(Resource, Debug, Default, Clone)]
 pub struct ChapterProgress {
@@ -458,25 +676,26 @@ pub struct CharacterDesignData {
 
 impl Default for CharacterDesignData {
     fn default() -> Self {
+        let loadout = PlayerPartLoadout::vincenzo_reference();
         Self {
             player_index: 0,
             skin_idx: 0,
-            outfit_idx: 0,
-            accent_idx: 0,
-            hair_idx: 0,
-            eye_idx: 0,
-            body_preset: BodyPreset::default(),
-            arm_preset: ArmPreset::default(),
-            leg_preset: LegPreset::default(),
-            shoulder_preset: ShoulderPreset::default(),
-            head_preset: HeadPreset::default(),
-            body: BodyRecipe::default(),
-            has_hood: true,
-            has_cape: true,
+            outfit_idx: 6,
+            accent_idx: 6,
+            hair_idx: 7,
+            eye_idx: 5,
+            body_preset: loadout.body,
+            arm_preset: loadout.arms,
+            leg_preset: loadout.legs,
+            shoulder_preset: loadout.shoulders,
+            head_preset: loadout.head,
+            body: reference_body_recipe("Vincenzo"),
+            has_hood: false,
+            has_cape: false,
             has_gloves: true,
             has_boots: true,
-            has_shoulder_pads: false,
-            has_visor: false,
+            has_shoulder_pads: true,
+            has_visor: true,
             spin_angle: 0.0,
             preview_distance: 3.2,
             dirty: false,
@@ -1020,6 +1239,38 @@ mod tests {
         assert!(guidance.title.is_empty());
         assert!(guidance.body.is_empty());
         assert!(guidance.action.is_empty());
+    }
+
+    #[test]
+    fn reference_loadout_replaces_legacy_stock_default() {
+        let resolved =
+            PlayerPartLoadout::resolve_for_hero("Vincenzo", None, PlayerPartLoadout::default());
+
+        assert_eq!(resolved, PlayerPartLoadout::vincenzo_reference());
+        assert_eq!(resolved.body, BodyPreset::ChromaFrame);
+        assert_eq!(resolved.head, HeadPreset::ChromaCrown);
+    }
+
+    #[test]
+    fn explicit_custom_loadout_still_wins_over_reference() {
+        let custom = PlayerPartLoadout::antonio_reference();
+        let resolved = PlayerPartLoadout::resolve_for_hero(
+            "Vincenzo",
+            Some(custom),
+            PlayerPartLoadout::default(),
+        );
+
+        assert_eq!(resolved, custom);
+    }
+
+    #[test]
+    fn vincenzo_reference_body_uses_glb_traced_proportions() {
+        let body = reference_body_recipe("Vincenzo");
+
+        assert!(body.leg_length >= 1.45);
+        assert!(body.arm_length >= 1.30);
+        assert!(body.mass < 0.90);
+        assert!(body.asymmetry > 0.0);
     }
 
     #[test]

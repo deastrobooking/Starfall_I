@@ -297,7 +297,7 @@ impl HeadPreset {
 // ── Loadout types ─────────────────────────────────────────────────────────────
 
 /// Per-slot preset selection. Mutate to trigger `swap_character_parts`.
-#[derive(Component, Clone, Default)]
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CharacterLoadout {
     pub body: BodyPreset,
     pub arms: ArmPreset,
