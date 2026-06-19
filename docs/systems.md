@@ -122,6 +122,8 @@ The current runtime consumes the first practical slice of that model:
 
 Confirmed blueprints are kept on each player-select slot, saved into `starfall_i_save.json`, and restored on load. When a player has not authored a custom body yet, the runtime now creates an upgraded default hero blueprint so movement stats, collider proportions, visible body shape, and animation stride all use the same data path.
 
+The Hero Atelier editor shows the active GLB-inspired base model, marks when that model has custom edits, and exposes prefab export/import buttons for `assets/Characters/design_prefabs/*.json`. Base model selection remains visible while the player tweaks proportions or swaps individual body, arm, leg, shoulder, and helmet presets.
+
 `CartoonCharacter` carries stride/agility metadata derived from `BodyRecipe`, and `CharacterPlugin` uses it to tune walk/run phase speed and limb swing. The character renderer also applies a visual ground lift so oversized cartoon feet sit on the terrain instead of dipping below the player capsule.
 
 The full procedural mesh/rig/timeline editor is still future work; the saved schema is intentionally larger than the current renderer so it can grow without replacing save data.

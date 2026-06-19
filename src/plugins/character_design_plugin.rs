@@ -43,10 +43,12 @@ impl Plugin for CharacterDesignPlugin {
                     physique_preset_interaction,
                     body_stepper_interaction,
                     button_interaction,
+                    prefab_action_interaction,
                     design_prefab_shortcuts,
                     design_zoom_and_preset_shortcuts,
                     design_keyboard_input,
                     update_swatch_borders,
+                    update_base_model_status_text,
                     update_design_preset_colors,
                     update_toggle_colors,
                     update_part_preset_text,
@@ -128,6 +130,18 @@ struct PartPresetButton {
 
 #[derive(Component, Clone, Copy)]
 struct PartPresetText(DesignerPartSlot);
+
+#[derive(Component)]
+struct BaseModelStatusText;
+
+#[derive(Component, Clone, Copy)]
+struct PrefabActionButton(PrefabAction);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PrefabAction {
+    Export,
+    Import,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum DesignerPartSlot {
@@ -596,45 +610,77 @@ fn design_prefab_shortcuts(
     mut design_data: ResMut<CharacterDesignData>,
     select_state: Res<PlayerSelectState>,
 ) {
-    let export = keys.just_pressed(KeyCode::F6);
-    let import = keys.just_pressed(KeyCode::F7);
-    if export == import {
+    let action = if keys.just_pressed(KeyCode::F6) {
+        Some(PrefabAction::Export)
+    } else if keys.just_pressed(KeyCode::F7) {
+        Some(PrefabAction::Import)
+    } else {
+        None
+    };
+    let Some(action) = action else {
         return;
-    }
+    };
 
+    run_prefab_action(action, &mut design_data, &select_state);
+}
+
+fn prefab_action_interaction(
+    interaction_q: Query<(&Interaction, &PrefabActionButton), Changed<Interaction>>,
+    mut design_data: ResMut<CharacterDesignData>,
+    select_state: Res<PlayerSelectState>,
+) {
+    for (interaction, action) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        run_prefab_action(action.0, &mut design_data, &select_state);
+    }
+}
+
+fn run_prefab_action(
+    action: PrefabAction,
+    design_data: &mut CharacterDesignData,
+    select_state: &PlayerSelectState,
+) {
     design_data.player_index = design_data.player_index.min(select_state.slots.len() - 1);
     let hero_name = select_state.character_name(design_data.player_index);
     let path = character_design_prefab_path(hero_name);
 
-    if export {
-        let snapshot = CharacterDesignSnapshot::from_design_data(&design_data);
-        if let Some(parent) = path.parent() {
-            if let Err(err) = fs::create_dir_all(parent) {
-                warn!(
-                    "could not create character design prefab folder {:?}: {err}",
-                    parent
-                );
-                return;
-            }
-        }
-        match serde_json::to_string_pretty(&snapshot)
-            .map_err(|err| err.to_string())
-            .and_then(|json| fs::write(&path, json).map_err(|err| err.to_string()))
-        {
-            Ok(()) => info!("exported character design prefab to {:?}", path),
-            Err(err) => warn!("could not export character design prefab {:?}: {err}", path),
-        }
-        return;
+    match action {
+        PrefabAction::Export => export_design_prefab(design_data, &path),
+        PrefabAction::Import => import_design_prefab(design_data, &path),
     }
+}
 
-    match fs::read_to_string(&path)
+fn export_design_prefab(design_data: &CharacterDesignData, path: &PathBuf) {
+    let snapshot = CharacterDesignSnapshot::from_design_data(design_data);
+    if let Some(parent) = path.parent() {
+        if let Err(err) = fs::create_dir_all(parent) {
+            warn!(
+                "could not create character design prefab folder {:?}: {err}",
+                parent
+            );
+            return;
+        }
+    }
+    match serde_json::to_string_pretty(&snapshot)
+        .map_err(|err| err.to_string())
+        .and_then(|json| fs::write(path, json).map_err(|err| err.to_string()))
+    {
+        Ok(()) => info!("exported character design prefab to {:?}", path),
+        Err(err) => warn!("could not export character design prefab {:?}: {err}", path),
+    }
+}
+
+fn import_design_prefab(design_data: &mut CharacterDesignData, path: &PathBuf) {
+    match fs::read_to_string(path)
         .map_err(|err| err.to_string())
         .and_then(|json| {
             serde_json::from_str::<CharacterDesignSnapshot>(&json).map_err(|err| err.to_string())
         }) {
         Ok(mut snapshot) => {
             snapshot.player_index = design_data.player_index;
-            snapshot.apply_to_design_data(&mut design_data);
+            snapshot.apply_to_design_data(design_data);
             info!("imported character design prefab from {:?}", path);
         }
         Err(err) => warn!("could not import character design prefab {:?}: {err}", path),
@@ -743,13 +789,7 @@ fn save_design(
     slot.has_visor = Some(design_data.has_visor);
     slot.blueprint = Some(blueprint);
 
-    let loadout = PlayerPartLoadout {
-        body: design_data.body_preset,
-        arms: design_data.arm_preset,
-        legs: design_data.leg_preset,
-        shoulders: design_data.shoulder_preset,
-        head: design_data.head_preset,
-    };
+    let loadout = current_design_loadout(design_data);
     slot.part_loadout = Some(loadout);
     *part_loadout = loadout;
 }
@@ -777,6 +817,18 @@ fn update_swatch_borders(
         } else {
             Color::srgba(0.08, 0.08, 0.09, 0.82)
         });
+    }
+}
+
+fn update_base_model_status_text(
+    design_data: Res<CharacterDesignData>,
+    mut status_q: Query<&mut Text, With<BaseModelStatusText>>,
+) {
+    if !design_data.is_changed() {
+        return;
+    }
+    for mut text in status_q.iter_mut() {
+        *text = Text::new(base_model_status_text(&design_data));
     }
 }
 
@@ -973,6 +1025,15 @@ fn spawn_design_ui(
                     },
                     TextColor(Color::srgb(0.92, 0.76, 0.42)),
                 ));
+                panel.spawn((
+                    Text::new(base_model_status_text(design_data)),
+                    TextFont {
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.72, 0.78, 0.84)),
+                    BaseModelStatusText,
+                ));
 
                 spawn_section_label(panel, "BASE MODEL");
                 panel
@@ -993,6 +1054,20 @@ fn spawn_design_ui(
                         ] {
                             spawn_design_preset_button(row, preset, design_data);
                         }
+                    });
+
+                spawn_section_label(panel, "PREFABS");
+                panel
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(8.0),
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        spawn_prefab_button(row, "EXPORT PREFAB", PrefabAction::Export);
+                        spawn_prefab_button(row, "IMPORT PREFAB", PrefabAction::Import);
                     });
 
                 spawn_section_label(panel, "PALETTE");
@@ -1218,6 +1293,8 @@ fn spawn_design_preset_button(
         .spawn((
             Button,
             Node {
+                min_width: Val::Px(116.0),
+                justify_content: JustifyContent::Center,
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
@@ -1242,6 +1319,33 @@ fn spawn_design_preset_button(
                     ..default()
                 },
                 TextColor(Color::srgb(0.92, 0.91, 0.86)),
+            ));
+        });
+}
+
+fn spawn_prefab_button(parent: &mut ChildSpawnerCommands, label: &str, action: PrefabAction) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_width: Val::Px(132.0),
+                justify_content: JustifyContent::Center,
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.08, 0.12, 0.15)),
+            BorderColor::all(Color::srgba(0.25, 0.46, 0.58, 0.86)),
+            PrefabActionButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.78, 0.90, 0.96)),
             ));
         });
 }
@@ -1536,14 +1640,60 @@ fn part_slot_value_label(design_data: &CharacterDesignData, slot: DesignerPartSl
     label.to_string()
 }
 
+fn current_design_loadout(design_data: &CharacterDesignData) -> PlayerPartLoadout {
+    PlayerPartLoadout {
+        body: design_data.body_preset,
+        arms: design_data.arm_preset,
+        legs: design_data.leg_preset,
+        shoulders: design_data.shoulder_preset,
+        head: design_data.head_preset,
+    }
+}
+
+fn base_model_status_text(design_data: &CharacterDesignData) -> String {
+    let edited_state = if base_model_has_custom_edits(design_data) {
+        "custom edit"
+    } else {
+        "reference"
+    };
+    format!(
+        "Model: {} ({})\nParts: {} / {} / {} / {} / {}",
+        design_data.base_model.label(),
+        edited_state,
+        design_data.body_preset.label(),
+        design_data.arm_preset.label(),
+        design_data.leg_preset.label(),
+        design_data.shoulder_preset.label(),
+        design_data.head_preset.label()
+    )
+}
+
+fn base_model_has_custom_edits(design_data: &CharacterDesignData) -> bool {
+    current_design_loadout(design_data) != design_data.base_model.loadout()
+        || !body_recipe_matches(&design_data.body, design_data.base_model.body_recipe())
+        || reference_appearance_recipe(design_data.base_model.hero_hint())
+            != CartoonAppearanceRecipe {
+                has_hood: design_data.has_hood,
+                has_cape: design_data.has_cape,
+                has_gloves: design_data.has_gloves,
+                has_boots: design_data.has_boots,
+                has_shoulder_pads: design_data.has_shoulder_pads,
+                has_visor: design_data.has_visor,
+            }
+}
+
 impl ReferenceDesignPreset {
     fn label(self) -> &'static str {
+        self.base_model().label()
+    }
+
+    fn base_model(self) -> CharacterBaseModel {
         match self {
-            ReferenceDesignPreset::Amp => "AMP",
-            ReferenceDesignPreset::Antonio => "Antonio",
-            ReferenceDesignPreset::Chroma => "Chroma",
-            ReferenceDesignPreset::Daria => "Daria",
-            ReferenceDesignPreset::Vincenzo => "Vincenzo",
+            ReferenceDesignPreset::Amp => CharacterBaseModel::AmpSiege,
+            ReferenceDesignPreset::Antonio => CharacterBaseModel::AntonioRift,
+            ReferenceDesignPreset::Chroma => CharacterBaseModel::ChromaTrace,
+            ReferenceDesignPreset::Daria => CharacterBaseModel::DariaFlares,
+            ReferenceDesignPreset::Vincenzo => CharacterBaseModel::VincenzoDeep,
         }
     }
 
@@ -1654,48 +1804,7 @@ impl ReferenceDesignPreset {
     }
 
     fn matches(self, design_data: &CharacterDesignData) -> bool {
-        match self {
-            ReferenceDesignPreset::Amp => {
-                design_data.body_preset == BodyPreset::HeavyPlate
-                    && design_data.arm_preset == ArmPreset::HeavyArms
-                    && design_data.leg_preset == LegPreset::HeavyLegs
-                    && design_data.shoulder_preset == ShoulderPreset::PlateEpaulettes
-                    && design_data.head_preset == HeadPreset::FullHelm
-                    && body_recipe_matches(&design_data.body, Self::amp_body())
-            }
-            ReferenceDesignPreset::Antonio => {
-                design_data.body_preset == BodyPreset::RiftMantle
-                    && design_data.arm_preset == ArmPreset::RiftTalons
-                    && design_data.leg_preset == LegPreset::RiftBoots
-                    && design_data.shoulder_preset == ShoulderPreset::RiftCloak
-                    && design_data.head_preset == HeadPreset::RiftCowl
-                    && body_recipe_matches(&design_data.body, Self::antonio_body())
-            }
-            ReferenceDesignPreset::Chroma => {
-                design_data.body_preset == BodyPreset::ChromaFrame
-                    && design_data.arm_preset == ArmPreset::ChromaBlades
-                    && design_data.leg_preset == LegPreset::ChromaStriders
-                    && design_data.shoulder_preset == ShoulderPreset::ChromaMantle
-                    && design_data.head_preset == HeadPreset::ChromaCrown
-                    && body_recipe_matches(&design_data.body, Self::chroma_body())
-            }
-            ReferenceDesignPreset::Daria => {
-                design_data.body_preset == BodyPreset::DariaCore
-                    && design_data.arm_preset == ArmPreset::DariaCannon
-                    && design_data.leg_preset == LegPreset::DariaGreaves
-                    && design_data.shoulder_preset == ShoulderPreset::DariaFlares
-                    && design_data.head_preset == HeadPreset::DariaHelm
-                    && body_recipe_matches(&design_data.body, Self::daria_body())
-            }
-            ReferenceDesignPreset::Vincenzo => {
-                design_data.body_preset == BodyPreset::ChromaFrame
-                    && design_data.arm_preset == ArmPreset::ChromaBlades
-                    && design_data.leg_preset == LegPreset::ChromaStriders
-                    && design_data.shoulder_preset == ShoulderPreset::ChromaMantle
-                    && design_data.head_preset == HeadPreset::ChromaCrown
-                    && body_recipe_matches(&design_data.body, Self::vincenzo_body())
-            }
-        }
+        design_data.base_model == self.base_model()
     }
 
     fn amp_body() -> BodyRecipe {
@@ -1856,4 +1965,33 @@ fn physique_matches(body: &BodyRecipe, preset: PhysiquePreset) -> bool {
         && (body.leg_length - target.leg_length).abs() < 0.01
         && (body.mass - target.mass).abs() < 0.01
         && (body.muscle - target.muscle).abs() < 0.01
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_model_selection_survives_custom_edits() {
+        let mut design_data = CharacterDesignData::default();
+        ReferenceDesignPreset::Daria.apply(&mut design_data);
+        design_data.body.height += 0.12;
+        design_data.leg_preset = LegPreset::RiftBoots;
+
+        assert!(ReferenceDesignPreset::Daria.matches(&design_data));
+        assert!(base_model_has_custom_edits(&design_data));
+    }
+
+    #[test]
+    fn base_model_status_identifies_reference_and_custom_states() {
+        let mut design_data = CharacterDesignData::default();
+        ReferenceDesignPreset::Antonio.apply(&mut design_data);
+        assert!(base_model_status_text(&design_data).contains("reference"));
+
+        design_data.head_preset = HeadPreset::DariaHelm;
+        let status = base_model_status_text(&design_data);
+        assert!(status.contains("Antonio Rift"));
+        assert!(status.contains("custom edit"));
+        assert!(status.contains("Daria Helm"));
+    }
 }
