@@ -77,7 +77,9 @@ struct DesignPresetButton(ReferenceDesignPreset);
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum ReferenceDesignPreset {
     Amp,
+    Antonio,
     Chroma,
+    Daria,
     Vincenzo,
 }
 
@@ -826,7 +828,9 @@ fn spawn_design_ui(
                     .with_children(|row| {
                         for preset in [
                             ReferenceDesignPreset::Amp,
+                            ReferenceDesignPreset::Antonio,
                             ReferenceDesignPreset::Chroma,
+                            ReferenceDesignPreset::Daria,
                             ReferenceDesignPreset::Vincenzo,
                         ] {
                             spawn_design_preset_button(row, preset, design_data);
@@ -1378,7 +1382,9 @@ impl ReferenceDesignPreset {
     fn label(self) -> &'static str {
         match self {
             ReferenceDesignPreset::Amp => "AMP",
+            ReferenceDesignPreset::Antonio => "Antonio",
             ReferenceDesignPreset::Chroma => "Chroma",
+            ReferenceDesignPreset::Daria => "Daria",
             ReferenceDesignPreset::Vincenzo => "Vincenzo",
         }
     }
@@ -1404,6 +1410,25 @@ impl ReferenceDesignPreset {
                 design_data.has_shoulder_pads = true;
                 design_data.has_visor = true;
             }
+            ReferenceDesignPreset::Antonio => {
+                design_data.skin_idx = 4;
+                design_data.outfit_idx = 7;
+                design_data.accent_idx = 3;
+                design_data.hair_idx = 6;
+                design_data.eye_idx = 5;
+                design_data.body_preset = BodyPreset::RiftMantle;
+                design_data.arm_preset = ArmPreset::RiftTalons;
+                design_data.leg_preset = LegPreset::RiftBoots;
+                design_data.shoulder_preset = ShoulderPreset::RiftCloak;
+                design_data.head_preset = HeadPreset::RiftCowl;
+                design_data.body = Self::antonio_body();
+                design_data.has_hood = true;
+                design_data.has_cape = true;
+                design_data.has_gloves = true;
+                design_data.has_boots = true;
+                design_data.has_shoulder_pads = true;
+                design_data.has_visor = true;
+            }
             ReferenceDesignPreset::Chroma => {
                 design_data.skin_idx = 2;
                 design_data.outfit_idx = 6;
@@ -1416,6 +1441,25 @@ impl ReferenceDesignPreset {
                 design_data.shoulder_preset = ShoulderPreset::ChromaMantle;
                 design_data.head_preset = HeadPreset::ChromaCrown;
                 design_data.body = Self::chroma_body();
+                design_data.has_hood = false;
+                design_data.has_cape = false;
+                design_data.has_gloves = true;
+                design_data.has_boots = true;
+                design_data.has_shoulder_pads = true;
+                design_data.has_visor = true;
+            }
+            ReferenceDesignPreset::Daria => {
+                design_data.skin_idx = 1;
+                design_data.outfit_idx = 5;
+                design_data.accent_idx = 4;
+                design_data.hair_idx = 5;
+                design_data.eye_idx = 6;
+                design_data.body_preset = BodyPreset::DariaCore;
+                design_data.arm_preset = ArmPreset::DariaCannon;
+                design_data.leg_preset = LegPreset::DariaGreaves;
+                design_data.shoulder_preset = ShoulderPreset::DariaFlares;
+                design_data.head_preset = HeadPreset::DariaHelm;
+                design_data.body = Self::daria_body();
                 design_data.has_hood = false;
                 design_data.has_cape = false;
                 design_data.has_gloves = true;
@@ -1456,6 +1500,14 @@ impl ReferenceDesignPreset {
                     && design_data.head_preset == HeadPreset::FullHelm
                     && body_recipe_matches(&design_data.body, Self::amp_body())
             }
+            ReferenceDesignPreset::Antonio => {
+                design_data.body_preset == BodyPreset::RiftMantle
+                    && design_data.arm_preset == ArmPreset::RiftTalons
+                    && design_data.leg_preset == LegPreset::RiftBoots
+                    && design_data.shoulder_preset == ShoulderPreset::RiftCloak
+                    && design_data.head_preset == HeadPreset::RiftCowl
+                    && body_recipe_matches(&design_data.body, Self::antonio_body())
+            }
             ReferenceDesignPreset::Chroma => {
                 design_data.body_preset == BodyPreset::ChromaFrame
                     && design_data.arm_preset == ArmPreset::ChromaBlades
@@ -1463,6 +1515,14 @@ impl ReferenceDesignPreset {
                     && design_data.shoulder_preset == ShoulderPreset::ChromaMantle
                     && design_data.head_preset == HeadPreset::ChromaCrown
                     && body_recipe_matches(&design_data.body, Self::chroma_body())
+            }
+            ReferenceDesignPreset::Daria => {
+                design_data.body_preset == BodyPreset::DariaCore
+                    && design_data.arm_preset == ArmPreset::DariaCannon
+                    && design_data.leg_preset == LegPreset::DariaGreaves
+                    && design_data.shoulder_preset == ShoulderPreset::DariaFlares
+                    && design_data.head_preset == HeadPreset::DariaHelm
+                    && body_recipe_matches(&design_data.body, Self::daria_body())
             }
             ReferenceDesignPreset::Vincenzo => {
                 design_data.body_preset == BodyPreset::ScoutVest
@@ -1497,6 +1557,28 @@ impl ReferenceDesignPreset {
         .validated()
     }
 
+    fn antonio_body() -> BodyRecipe {
+        BodyRecipe {
+            height: 1.12,
+            shoulder_width: 1.04,
+            chest_size: 0.96,
+            arm_length: 1.28,
+            leg_length: 1.30,
+            hand_size: 1.10,
+            foot_size: 1.22,
+            head_size: 1.08,
+            neck_length: 1.04,
+            torso_curve: 0.16,
+            hip_width: 0.88,
+            spine_posture: -0.14,
+            mass: 0.92,
+            muscle: 1.04,
+            body_fat: 0.84,
+            asymmetry: 0.22,
+        }
+        .validated()
+    }
+
     fn chroma_body() -> BodyRecipe {
         BodyRecipe {
             height: 1.10,
@@ -1515,6 +1597,28 @@ impl ReferenceDesignPreset {
             muscle: 1.00,
             body_fat: 0.86,
             asymmetry: 0.12,
+        }
+        .validated()
+    }
+
+    fn daria_body() -> BodyRecipe {
+        BodyRecipe {
+            height: 1.16,
+            shoulder_width: 1.22,
+            chest_size: 1.02,
+            arm_length: 1.26,
+            leg_length: 1.36,
+            hand_size: 1.22,
+            foot_size: 1.30,
+            head_size: 1.00,
+            neck_length: 1.08,
+            torso_curve: -0.08,
+            hip_width: 0.90,
+            spine_posture: 0.02,
+            mass: 0.94,
+            muscle: 1.16,
+            body_fat: 0.82,
+            asymmetry: 0.24,
         }
         .validated()
     }
