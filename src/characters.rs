@@ -725,14 +725,16 @@ pub fn spawn_skeleton_rig(
     rig
 }
 
-pub fn attach_native_playable_character(
+/// Insert the gameplay/animation scaffolding shared by every playable-character
+/// visual: the skeleton rig (weapon/IK attach points), the [`CartoonCharacter`]
+/// descriptor, animator and IK pose. This is the non-visual half of
+/// [`attach_native_playable_character`]; alternative visual systems (e.g. the
+/// modular player mesh) can call it directly and then attach their own meshes.
+pub fn attach_player_gameplay_rig(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
     root: Entity,
-    config: CartoonCharacterConfig,
+    config: &CartoonCharacterConfig,
     root_position: Vec3,
-    loadout: CharacterLoadout,
 ) {
     let body = config.body.validated();
     let visual_ground_lift = visual_ground_lift(&body, config.scale);
@@ -753,6 +755,20 @@ pub fn attach_native_playable_character(
         skeleton,
         CharacterIkPose::default(),
     ));
+}
+
+pub fn attach_native_playable_character(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    config: CartoonCharacterConfig,
+    root_position: Vec3,
+    loadout: CharacterLoadout,
+) {
+    let body = config.body.validated();
+    let visual_ground_lift = visual_ground_lift(&body, config.scale);
+    attach_player_gameplay_rig(commands, root, &config, root_position);
 
     let s = config.scale;
     let bw = config.body_width * (body.shoulder_width * 0.62 + body.chest_size * 0.38);
@@ -1899,7 +1915,7 @@ fn warm_floor(lin: LinearRgba, k: f32) -> LinearRgba {
 
 /// Soft, matte, hand-painted material for skin / cloth / hair, with a touch of
 /// subsurface light-bleed. Kept in lock-step with `soft_mat()` in character_parts.rs.
-fn char_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
+pub fn char_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
     let lin = color.to_linear();
     materials.add(StandardMaterial {
         base_color: color,
@@ -1914,7 +1930,7 @@ fn char_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<St
 
 /// Brightly glowing crystal material for eyes, badge gems, visor, buckle —
 /// a blooming core under a glassy clearcoat so it reads like a polished gem.
-fn emissive_mat(
+pub fn emissive_mat(
     materials: &mut Assets<StandardMaterial>,
     color: Color,
     strength: f32,

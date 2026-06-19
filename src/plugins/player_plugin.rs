@@ -11,9 +11,11 @@ use crate::character_blueprint::{
 };
 use crate::character_parts::CharacterLoadout;
 use crate::characters::{
-    accent_preset, attach_native_playable_character, despawn_cartoon_character_parts, eye_preset,
-    hair_preset, hero_config, hero_config_with_overrides, outfit_preset, skin_preset,
+    accent_preset, attach_native_playable_character, attach_player_gameplay_rig,
+    despawn_cartoon_character_parts, eye_preset, hair_preset, hero_config,
+    hero_config_with_overrides, outfit_preset, skin_preset,
 };
+use crate::player_mesh::attach_modular_player_mesh;
 use crate::components::armor::ArmorSet;
 use crate::components::character::{CartoonPart, JointMarker};
 use crate::components::enemy::{BossEnemy, DeadEnemy, Enemy, EnemyType, FlyingDrone};
@@ -34,6 +36,11 @@ use crate::resources::{
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
+
+/// Route the player's visual through the new native modular humanoid
+/// ([`crate::player_mesh`]) instead of the legacy `character_parts` meshes.
+/// Flip to `false` to fall back to the original system.
+const USE_MODULAR_PLAYER_MESH: bool = true;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct PlayerPlugin;
@@ -449,15 +456,28 @@ fn spawn_players(
         character_config.emissive_eyes = character_config.has_visor;
         let visual_loadout =
             PlayerPartLoadout::resolve_for_hero(character_name, slot.part_loadout, *part_loadout);
-        attach_native_playable_character(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            player,
-            character_config,
-            spawn_pos,
-            CharacterLoadout::from(visual_loadout),
-        );
+        if USE_MODULAR_PLAYER_MESH {
+            // New native modular humanoid (built on the socket-assembly system).
+            // Keep the gameplay rig so weapon/IK attach points still work.
+            attach_player_gameplay_rig(&mut commands, player, &character_config, spawn_pos);
+            attach_modular_player_mesh(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                player,
+                &character_config,
+            );
+        } else {
+            attach_native_playable_character(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                player,
+                character_config,
+                spawn_pos,
+                CharacterLoadout::from(visual_loadout),
+            );
+        }
 
         let viewport = player_viewport(i, active, win_w, win_h);
 

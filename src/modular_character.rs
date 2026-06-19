@@ -219,6 +219,44 @@ pub fn spawn_character(
     Ok(root)
 }
 
+/// Assemble a character as a child of an existing `parent` entity, returning the
+/// assembly's own root entity (the one bound to the recipe's root slot).
+///
+/// Unlike [`spawn_character`], the parent here is some pre-existing entity that
+/// owns its own transform/components (e.g. a physics-driven player). The whole
+/// rig is parented under it via `local`, so it inherits the parent's world
+/// transform and moves with it.
+pub fn spawn_character_under(
+    commands: &mut Commands,
+    registry: &PartRegistry,
+    recipe: &CharacterRecipe,
+    parent: Entity,
+    local: Transform,
+) -> Result<Entity, AssemblyError> {
+    let root_prefab = registry
+        .get(recipe.root_part)
+        .ok_or(AssemblyError::MissingPart(recipe.root_part))?;
+
+    let root = commands
+        .spawn((
+            Mesh3d(root_prefab.mesh.clone()),
+            MeshMaterial3d(root_prefab.material.clone()),
+            local,
+            CharacterRoot,
+            BodySlot(recipe.root_slot),
+            SlotPart(recipe.root_part),
+            CharacterAssembly {
+                recipe: recipe.clone(),
+            },
+        ))
+        .id();
+    commands.entity(root).insert(CharacterMember(root));
+    commands.entity(parent).add_child(root);
+
+    attach_children(commands, registry, recipe, root)?;
+    Ok(root)
+}
+
 /// Spawn every attachment of `recipe` under an already-existing `root` entity
 /// (which must hold the root slot/part). Shared by initial spawn and swapping.
 fn attach_children(

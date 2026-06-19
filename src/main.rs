@@ -24,6 +24,7 @@ mod hero_roster;
 mod lsystem;
 mod modular_character;
 mod perks;
+mod player_mesh;
 mod plugins;
 mod procedural_meshes;
 mod raids;
