@@ -1072,7 +1072,12 @@ fn projectile_update_system(
     mut proj_q: Query<(Entity, &mut Transform, &mut Projectile)>,
     mut enemy_q: Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
-        (Without<Projectile>, Without<HackedUnit>),
+        (
+            With<Enemy>,
+            Without<Projectile>,
+            Without<HackedUnit>,
+            Without<NpcRoadVehicle>,
+        ),
     >,
     mut road_vehicle_q: Query<
         (
@@ -1082,7 +1087,12 @@ fn projectile_update_system(
             &mut Damageable,
             &NpcRoadVehicle,
         ),
-        (Without<Projectile>, Without<Enemy>),
+        (
+            With<NpcRoadVehicle>,
+            Without<Projectile>,
+            Without<Enemy>,
+            Without<HackedUnit>,
+        ),
     >,
     mut enemy_damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut enemy_killed_ev: MessageWriter<EnemyKilledEvent>,
@@ -1239,7 +1249,12 @@ fn explode(
     damage_type: DamageType,
     enemy_q: &mut Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
-        (Without<Projectile>, Without<HackedUnit>),
+        (
+            With<Enemy>,
+            Without<Projectile>,
+            Without<HackedUnit>,
+            Without<NpcRoadVehicle>,
+        ),
     >,
     damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
     killed_ev: &mut MessageWriter<EnemyKilledEvent>,
@@ -1283,7 +1298,12 @@ fn damage_road_vehicles_in_radius(
             &mut Damageable,
             &NpcRoadVehicle,
         ),
-        (Without<Projectile>, Without<Enemy>),
+        (
+            With<NpcRoadVehicle>,
+            Without<Projectile>,
+            Without<Enemy>,
+            Without<HackedUnit>,
+        ),
     >,
 ) {
     for (_, transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {

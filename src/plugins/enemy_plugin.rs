@@ -691,14 +691,24 @@ fn enemy_projectile_update_system(
         (Entity, &Transform, &PlayerIndex),
         (With<Player>, Without<EnemyProjectile>),
     >,
-    mut player_damage_q: Query<(
-        &mut Health,
-        &mut Damageable,
-        &mut PlayerStats,
-        &mut ParryState,
-        &ArmorSet,
-    )>,
-    mut road_vehicle_q: Query<(&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle)>,
+    mut player_damage_q: Query<
+        (
+            &mut Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut ParryState,
+            &ArmorSet,
+        ),
+        With<Player>,
+    >,
+    mut road_vehicle_q: Query<
+        (&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle),
+        (
+            With<NpcRoadVehicle>,
+            Without<Player>,
+            Without<EnemyProjectile>,
+        ),
+    >,
     mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
     mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
@@ -801,7 +811,14 @@ fn damage_road_vehicles_in_radius(
     radius: f32,
     base_damage: f32,
     damage_type: DamageType,
-    road_vehicle_q: &mut Query<(&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle)>,
+    road_vehicle_q: &mut Query<
+        (&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle),
+        (
+            With<NpcRoadVehicle>,
+            Without<Player>,
+            Without<EnemyProjectile>,
+        ),
+    >,
 ) {
     for (transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
         if !health.is_alive() {
