@@ -11,12 +11,13 @@ use crate::character_parts::{
 use crate::characters::{
     accent_preset, accent_presets, eye_preset, eye_presets, hair_preset, hair_presets, hero_config,
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
-    skin_preset, skin_presets, spawn_cartoon_character,
+    skin_preset, skin_presets, spawn_native_playable_character,
 };
 use crate::components::player::PlayerCamera;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{
-    reference_body_recipe, CharacterDesignData, PlayerPartLoadout, PlayerSelectState,
+    is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
+    CharacterDesignData, PlayerPartLoadout, PlayerSelectState,
 };
 use crate::state::AppState;
 
@@ -183,7 +184,10 @@ fn setup_character_design(
     let slot = &select_state.slots[design_data.player_index];
     let hero_name = select_state.character_name(design_data.player_index);
     let base = hero_config(hero_name);
-    let blueprint = slot.blueprint.as_ref();
+    let blueprint = slot
+        .blueprint
+        .as_ref()
+        .filter(|blueprint| !is_stale_reference_blueprint(hero_name, blueprint));
     design_data.skin_idx =
         palette_index_from_saved(slot.skin_idx, blueprint, "skin", base.skin, &skin_presets());
     design_data.outfit_idx = palette_index_from_saved(
@@ -221,31 +225,45 @@ fn setup_character_design(
         .map(|blueprint| blueprint.body)
         .unwrap_or_else(|| reference_body_recipe(hero_name))
         .validated();
+    let reference_appearance = reference_appearance_recipe(hero_name);
+    let preserve_slot_appearance = slot
+        .part_loadout
+        .is_some_and(|loadout| !loadout.is_stale_native_default())
+        || blueprint.is_some();
     let blueprint_appearance = blueprint.map(|blueprint| blueprint.cartoon_appearance);
-    design_data.has_hood = slot
-        .has_hood
-        .or(blueprint_appearance.map(|appearance| appearance.has_hood))
-        .unwrap_or(base.has_hood);
-    design_data.has_cape = slot
-        .has_cape
-        .or(blueprint_appearance.map(|appearance| appearance.has_cape))
-        .unwrap_or(base.has_cape);
-    design_data.has_gloves = slot
-        .has_gloves
-        .or(blueprint_appearance.map(|appearance| appearance.has_gloves))
-        .unwrap_or(base.has_gloves);
-    design_data.has_boots = slot
-        .has_boots
-        .or(blueprint_appearance.map(|appearance| appearance.has_boots))
-        .unwrap_or(base.has_boots);
-    design_data.has_shoulder_pads = slot
-        .has_shoulder_pads
-        .or(blueprint_appearance.map(|appearance| appearance.has_shoulder_pads))
-        .unwrap_or(base.has_shoulder_pads);
-    design_data.has_visor = slot
-        .has_visor
-        .or(blueprint_appearance.map(|appearance| appearance.has_visor))
-        .unwrap_or(base.has_visor);
+    if preserve_slot_appearance {
+        design_data.has_hood = slot
+            .has_hood
+            .or(blueprint_appearance.map(|appearance| appearance.has_hood))
+            .unwrap_or(reference_appearance.has_hood);
+        design_data.has_cape = slot
+            .has_cape
+            .or(blueprint_appearance.map(|appearance| appearance.has_cape))
+            .unwrap_or(reference_appearance.has_cape);
+        design_data.has_gloves = slot
+            .has_gloves
+            .or(blueprint_appearance.map(|appearance| appearance.has_gloves))
+            .unwrap_or(reference_appearance.has_gloves);
+        design_data.has_boots = slot
+            .has_boots
+            .or(blueprint_appearance.map(|appearance| appearance.has_boots))
+            .unwrap_or(reference_appearance.has_boots);
+        design_data.has_shoulder_pads = slot
+            .has_shoulder_pads
+            .or(blueprint_appearance.map(|appearance| appearance.has_shoulder_pads))
+            .unwrap_or(reference_appearance.has_shoulder_pads);
+        design_data.has_visor = slot
+            .has_visor
+            .or(blueprint_appearance.map(|appearance| appearance.has_visor))
+            .unwrap_or(reference_appearance.has_visor);
+    } else {
+        design_data.has_hood = reference_appearance.has_hood;
+        design_data.has_cape = reference_appearance.has_cape;
+        design_data.has_gloves = reference_appearance.has_gloves;
+        design_data.has_boots = reference_appearance.has_boots;
+        design_data.has_shoulder_pads = reference_appearance.has_shoulder_pads;
+        design_data.has_visor = reference_appearance.has_visor;
+    }
     design_data.spin_angle = 0.0;
     design_data.preview_distance = 3.2;
     design_data.dirty = true;
@@ -355,23 +373,22 @@ fn rebuild_preview_if_dirty(
     config.eye_color = eye_preset(design_data.eye_idx);
     config.emissive_eyes = config.emissive_eyes || design_data.has_visor;
 
-    let entity = spawn_cartoon_character(
+    let loadout = CharacterLoadout {
+        body: design_data.body_preset,
+        arms: design_data.arm_preset,
+        legs: design_data.leg_preset,
+        shoulders: design_data.shoulder_preset,
+        head: design_data.head_preset,
+    };
+    let entity = spawn_native_playable_character(
         &mut commands,
         &mut meshes,
         &mut materials,
         config,
         Vec3::ZERO,
+        loadout,
     );
-    commands.entity(entity).insert((
-        PreviewRoot,
-        CharacterLoadout {
-            body: design_data.body_preset,
-            arms: design_data.arm_preset,
-            legs: design_data.leg_preset,
-            shoulders: design_data.shoulder_preset,
-            head: design_data.head_preset,
-        },
-    ));
+    commands.entity(entity).insert(PreviewRoot);
     design_data.preview_entity = Some(entity);
     design_data.dirty = false;
 }

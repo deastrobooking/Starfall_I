@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::chapters::{Biome, ChapterId};
-use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
+use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint};
 use crate::character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
@@ -334,13 +334,19 @@ impl Default for PlayerChassis {
 
 /// Per-slot preset choices, persisted between the chassis editor and gameplay.
 /// Applied to `CharacterLoadout` when the player character spawns.
-#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerPartLoadout {
     pub body: BodyPreset,
     pub arms: ArmPreset,
     pub legs: LegPreset,
     pub shoulders: ShoulderPreset,
     pub head: HeadPreset,
+}
+
+impl Default for PlayerPartLoadout {
+    fn default() -> Self {
+        Self::vincenzo_reference()
+    }
 }
 
 impl PlayerPartLoadout {
@@ -365,6 +371,16 @@ impl PlayerPartLoadout {
             BodyPreset::StandardMech,
             ArmPreset::MechArms,
             LegPreset::MechLegs,
+            ShoulderPreset::DomePauldrons,
+            HeadPreset::OpenFace,
+        )
+    }
+
+    pub const fn legacy_vincenzo_scout() -> Self {
+        Self::new(
+            BodyPreset::ScoutVest,
+            ArmPreset::ScoutArms,
+            LegPreset::ScoutLegs,
             ShoulderPreset::DomePauldrons,
             HeadPreset::OpenFace,
         )
@@ -425,10 +441,10 @@ impl PlayerPartLoadout {
     }
 
     pub fn resolve_for_hero(name: &str, slot_loadout: Option<Self>, shared_loadout: Self) -> Self {
-        if let Some(loadout) = slot_loadout.filter(|loadout| !loadout.is_legacy_stock()) {
+        if let Some(loadout) = slot_loadout.filter(|loadout| !loadout.is_stale_native_default()) {
             return loadout;
         }
-        if !shared_loadout.is_legacy_stock() {
+        if !shared_loadout.is_stale_native_default() {
             return shared_loadout;
         }
         Self::reference_for_name(name)
@@ -436,6 +452,10 @@ impl PlayerPartLoadout {
 
     pub fn is_legacy_stock(self) -> bool {
         self == Self::legacy_stock()
+    }
+
+    pub fn is_stale_native_default(self) -> bool {
+        self.is_legacy_stock() || self == Self::legacy_vincenzo_scout()
     }
 }
 
@@ -557,6 +577,42 @@ pub fn reference_body_recipe(name: &str) -> BodyRecipe {
         },
     };
     body.validated()
+}
+
+pub fn reference_appearance_recipe(name: &str) -> CartoonAppearanceRecipe {
+    match name {
+        "Antonio" | "Fortuna" => CartoonAppearanceRecipe {
+            has_hood: true,
+            has_cape: true,
+            has_gloves: true,
+            has_boots: true,
+            has_shoulder_pads: true,
+            has_visor: true,
+        },
+        _ => CartoonAppearanceRecipe {
+            has_hood: false,
+            has_cape: false,
+            has_gloves: true,
+            has_boots: true,
+            has_shoulder_pads: true,
+            has_visor: true,
+        },
+    }
+}
+
+pub fn is_stale_reference_blueprint(name: &str, blueprint: &CharacterBlueprint) -> bool {
+    let body = blueprint.body.validated();
+    let appearance = blueprint.cartoon_appearance;
+    let blueprint_name_matches = blueprint.name == name || blueprint.name == "Vincenzo";
+
+    blueprint_name_matches
+        && matches!(name, "Vincenzo" | "Chroma" | "Nova")
+        && (body.leg_length < 1.42
+            || body.arm_length < 1.20
+            || body.mass > 0.95
+            || !appearance.has_visor
+            || appearance.has_hood
+            || appearance.has_cape)
 }
 
 // ── Chapter Progress (saveable) ───────────────────────────────────────────────
@@ -1243,12 +1299,35 @@ mod tests {
 
     #[test]
     fn reference_loadout_replaces_legacy_stock_default() {
-        let resolved =
-            PlayerPartLoadout::resolve_for_hero("Vincenzo", None, PlayerPartLoadout::default());
+        let resolved = PlayerPartLoadout::resolve_for_hero(
+            "Vincenzo",
+            None,
+            PlayerPartLoadout::legacy_stock(),
+        );
 
         assert_eq!(resolved, PlayerPartLoadout::vincenzo_reference());
         assert_eq!(resolved.body, BodyPreset::ChromaFrame);
         assert_eq!(resolved.head, HeadPreset::ChromaCrown);
+    }
+
+    #[test]
+    fn default_part_loadout_is_reference_not_legacy() {
+        assert_eq!(
+            PlayerPartLoadout::default(),
+            PlayerPartLoadout::vincenzo_reference()
+        );
+        assert!(!PlayerPartLoadout::default().is_legacy_stock());
+    }
+
+    #[test]
+    fn legacy_vincenzo_scout_loadout_is_migrated_to_reference() {
+        let resolved = PlayerPartLoadout::resolve_for_hero(
+            "Vincenzo",
+            Some(PlayerPartLoadout::legacy_vincenzo_scout()),
+            PlayerPartLoadout::legacy_stock(),
+        );
+
+        assert_eq!(resolved, PlayerPartLoadout::vincenzo_reference());
     }
 
     #[test]
@@ -1257,7 +1336,7 @@ mod tests {
         let resolved = PlayerPartLoadout::resolve_for_hero(
             "Vincenzo",
             Some(custom),
-            PlayerPartLoadout::default(),
+            PlayerPartLoadout::legacy_stock(),
         );
 
         assert_eq!(resolved, custom);
@@ -1271,6 +1350,16 @@ mod tests {
         assert!(body.arm_length >= 1.30);
         assert!(body.mass < 0.90);
         assert!(body.asymmetry > 0.0);
+    }
+
+    #[test]
+    fn vincenzo_reference_appearance_drops_retired_hood_and_cape() {
+        let appearance = reference_appearance_recipe("Vincenzo");
+
+        assert!(!appearance.has_hood);
+        assert!(!appearance.has_cape);
+        assert!(appearance.has_visor);
+        assert!(appearance.has_shoulder_pads);
     }
 
     #[test]

@@ -16,9 +16,9 @@ use crate::hacking::HackingRegistry;
 use crate::perks::PerkTree;
 use crate::raids::{RaidRecord, RaidRegistry};
 use crate::resources::{
-    initial_world_routes, initial_world_sites, ChapterProgress, GameSettings,
-    PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo, WorldRouteRegistry,
-    WorldRouteSaveRecord, WorldSiteRegistry, WorldSiteSaveRecord,
+    initial_world_routes, initial_world_sites, is_stale_reference_blueprint, ChapterProgress,
+    GameSettings, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo,
+    WorldRouteRegistry, WorldRouteSaveRecord, WorldSiteRegistry, WorldSiteSaveRecord,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::SettlementEconomy;
@@ -469,8 +469,11 @@ fn hydrate_character_blueprints(
     select: &mut PlayerSelectState,
     blueprints: Vec<Option<CharacterBlueprint>>,
 ) {
-    for (slot, blueprint) in select.slots.iter_mut().zip(blueprints) {
-        slot.blueprint = blueprint;
+    for index in 0..select.slots.len() {
+        let name = select.character_name(index);
+        let blueprint = blueprints.get(index).cloned().flatten();
+        select.slots[index].blueprint =
+            blueprint.filter(|blueprint| !is_stale_reference_blueprint(name, blueprint));
     }
 }
 
@@ -480,7 +483,7 @@ fn hydrate_part_loadouts(
     legacy_loadout: PlayerPartLoadout,
 ) {
     if loadouts.is_empty() {
-        let fallback = if legacy_loadout.is_legacy_stock() {
+        let fallback = if legacy_loadout.is_stale_native_default() {
             None
         } else {
             Some(legacy_loadout)
@@ -492,7 +495,7 @@ fn hydrate_part_loadouts(
     }
 
     for (slot, loadout) in select.slots.iter_mut().zip(loadouts) {
-        slot.part_loadout = loadout.filter(|loadout| !loadout.is_legacy_stock());
+        slot.part_loadout = loadout.filter(|loadout| !loadout.is_stale_native_default());
     }
 }
 

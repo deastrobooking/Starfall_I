@@ -11,7 +11,7 @@ use crate::character_blueprint::{
 };
 use crate::character_parts::CharacterLoadout;
 use crate::characters::{
-    accent_preset, attach_cartoon_character, despawn_cartoon_character_parts, eye_preset,
+    accent_preset, attach_native_playable_character, despawn_cartoon_character_parts, eye_preset,
     hair_preset, hero_config, hero_config_with_overrides, outfit_preset, skin_preset,
 };
 use crate::components::armor::ArmorSet;
@@ -27,9 +27,9 @@ use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfil
 use crate::perks::PerkTree;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
-    reference_body_recipe, CameraShake, ChapterProgress, CurrentChapter, DungeonCrawlState,
-    LocalPlayerConfig, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState,
-    PlayerSlotConfig, WorldRouteRegistry, WorldRouteState,
+    is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe, CameraShake,
+    ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig, PlaySessionTransition,
+    PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig, WorldRouteRegistry, WorldRouteState,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
@@ -278,18 +278,27 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
         hair: slot.hair_idx.map(hair_preset).unwrap_or(base.hair),
         eye: slot.eye_idx.map(eye_preset).unwrap_or(base.eye_color),
     };
-    let appearance = CartoonAppearanceRecipe {
-        has_hood: slot.has_hood.unwrap_or(true),
-        has_cape: slot.has_cape.unwrap_or(true),
-        has_gloves: slot.has_gloves.unwrap_or(true),
-        has_boots: slot.has_boots.unwrap_or(true),
-        has_shoulder_pads: slot.has_shoulder_pads.unwrap_or(matches!(
-            name,
-            "Vincenzo" | "Joseph" | "Gabriella" | "Aurora"
-        )),
-        has_visor: slot
-            .has_visor
-            .unwrap_or(matches!(name, "Vincenzo" | "Antonio" | "Nova")),
+    let reference_appearance = reference_appearance_recipe(name);
+    let preserve_slot_appearance = slot
+        .part_loadout
+        .is_some_and(|loadout| !loadout.is_stale_native_default())
+        || slot
+            .blueprint
+            .as_ref()
+            .is_some_and(|blueprint| !is_stale_reference_blueprint(name, blueprint));
+    let appearance = if preserve_slot_appearance {
+        CartoonAppearanceRecipe {
+            has_hood: slot.has_hood.unwrap_or(reference_appearance.has_hood),
+            has_cape: slot.has_cape.unwrap_or(reference_appearance.has_cape),
+            has_gloves: slot.has_gloves.unwrap_or(reference_appearance.has_gloves),
+            has_boots: slot.has_boots.unwrap_or(reference_appearance.has_boots),
+            has_shoulder_pads: slot
+                .has_shoulder_pads
+                .unwrap_or(reference_appearance.has_shoulder_pads),
+            has_visor: slot.has_visor.unwrap_or(reference_appearance.has_visor),
+        }
+    } else {
+        reference_appearance
     };
 
     CharacterBlueprint::hero(name, body, palette, appearance)
@@ -333,7 +342,9 @@ fn spawn_players(
         let character_name = select.character_name(i as usize);
         let runtime_blueprint = slot
             .blueprint
-            .clone()
+            .as_ref()
+            .filter(|blueprint| !is_stale_reference_blueprint(character_name, blueprint))
+            .cloned()
             .unwrap_or_else(|| upgraded_player_blueprint(character_name, slot));
         let hero_profile = hero_power_profile(character_name);
         let hero_powers = hero_profile.amplified_powers(&robot_pets);
@@ -436,19 +447,17 @@ fn spawn_players(
         );
         character_config = character_config.with_blueprint(&runtime_blueprint);
         character_config.emissive_eyes = character_config.has_visor;
-        attach_cartoon_character(
+        let visual_loadout =
+            PlayerPartLoadout::resolve_for_hero(character_name, slot.part_loadout, *part_loadout);
+        attach_native_playable_character(
             &mut commands,
             &mut meshes,
             &mut materials,
             player,
             character_config,
             spawn_pos,
+            CharacterLoadout::from(visual_loadout),
         );
-        let visual_loadout =
-            PlayerPartLoadout::resolve_for_hero(character_name, slot.part_loadout, *part_loadout);
-        commands
-            .entity(player)
-            .insert(CharacterLoadout::from(visual_loadout));
 
         let viewport = player_viewport(i, active, win_w, win_h);
 
@@ -2401,6 +2410,8 @@ mod tests {
         assert!(blueprint.body.leg_length >= 1.45);
         assert!(blueprint.body.arm_length >= 1.30);
         assert!(blueprint.body.mass < 0.90);
+        assert!(!blueprint.cartoon_appearance.has_hood);
+        assert!(!blueprint.cartoon_appearance.has_cape);
         assert!(blueprint.cartoon_appearance.has_visor);
         assert!(blueprint.cartoon_appearance.has_shoulder_pads);
     }

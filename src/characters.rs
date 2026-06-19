@@ -3,7 +3,8 @@ use std::f32::consts::PI;
 
 use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
 use crate::character_parts::{
-    spawn_cartoon_glove, spawn_cartoon_shoe, CharacterLoadout, CharacterVisualConfig, PartSlotTag,
+    spawn_arms, spawn_body, spawn_cartoon_glove, spawn_cartoon_shoe, spawn_head, spawn_legs,
+    spawn_shoulders, CharacterLoadout, CharacterVisualConfig, PartSlotTag,
 };
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
@@ -513,6 +514,27 @@ pub fn spawn_cartoon_character(
     root
 }
 
+pub fn spawn_native_playable_character(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    config: CartoonCharacterConfig,
+    position: Vec3,
+    loadout: CharacterLoadout,
+) -> Entity {
+    let root = commands
+        .spawn((
+            Transform::from_translation(position),
+            GlobalTransform::default(),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+    attach_native_playable_character(commands, meshes, materials, root, config, position, loadout);
+    root
+}
+
 pub fn spawn_skeleton_rig(
     commands: &mut Commands,
     root: Entity,
@@ -701,6 +723,106 @@ pub fn spawn_skeleton_rig(
     );
 
     rig
+}
+
+pub fn attach_native_playable_character(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    config: CartoonCharacterConfig,
+    root_position: Vec3,
+    loadout: CharacterLoadout,
+) {
+    let body = config.body.validated();
+    let visual_ground_lift = visual_ground_lift(&body, config.scale);
+    let skeleton = spawn_skeleton_rig(commands, root, config.scale, &body);
+    commands.entity(root).insert((
+        CartoonCharacter {
+            name: config.name.to_string(),
+            role: config.role,
+            scale: config.scale,
+            stride: body.stride_multiplier(),
+            agility: body.agility_multiplier(),
+            visual_ground_lift,
+        },
+        CartoonAnimator::new(root_position),
+        Visibility::Visible,
+        InheritedVisibility::default(),
+        ViewVisibility::default(),
+        skeleton,
+        CharacterIkPose::default(),
+    ));
+
+    let s = config.scale;
+    let bw = config.body_width * (body.shoulder_width * 0.62 + body.chest_size * 0.38);
+    let visual_cfg = CharacterVisualConfig {
+        scale: s,
+        body_width: bw,
+        hip_width: config.body_width * body.hip_width,
+        arm_length: body.arm_length,
+        leg_length: body.leg_length,
+        hand_scale: body.hand_size,
+        foot_scale: body.foot_size,
+        outfit: config.outfit,
+        accent: config.accent,
+        skin: config.skin,
+        hair: config.hair,
+        eye: config.eye_color,
+        has_hood: config.has_hood,
+        has_cape: config.has_cape,
+        has_gloves: config.has_gloves,
+        has_boots: config.has_boots,
+        has_visor: config.has_visor,
+        visual_ground_lift,
+    };
+
+    spawn_body(
+        commands,
+        meshes,
+        materials,
+        root,
+        &visual_cfg,
+        visual_ground_lift,
+        loadout.body,
+    );
+    spawn_arms(
+        commands,
+        meshes,
+        materials,
+        root,
+        &visual_cfg,
+        visual_ground_lift,
+        loadout.arms,
+    );
+    spawn_legs(
+        commands,
+        meshes,
+        materials,
+        root,
+        &visual_cfg,
+        visual_ground_lift,
+        loadout.legs,
+    );
+    spawn_shoulders(
+        commands,
+        meshes,
+        materials,
+        root,
+        &visual_cfg,
+        visual_ground_lift,
+        loadout.shoulders,
+    );
+    spawn_head(
+        commands,
+        meshes,
+        materials,
+        root,
+        &visual_cfg,
+        visual_ground_lift,
+        loadout.head,
+    );
+    commands.entity(root).insert((loadout, visual_cfg));
 }
 
 pub fn attach_cartoon_character(
@@ -1482,7 +1604,7 @@ pub fn attach_cartoon_character(
     };
     commands
         .entity(root)
-        .insert((CharacterLoadout::default(), visual_cfg));
+        .insert((CharacterLoadout::legacy_stock(), visual_cfg));
 
     if visual_ground_lift > 0.001 {
         commands.queue(move |world: &mut World| {

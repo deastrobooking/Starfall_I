@@ -68,7 +68,6 @@ impl PartSlotTag {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum BodyPreset {
     /// Standard mech — reactor core, side vents, hip guards.
-    #[default]
     StandardMech,
     /// Siege Armor — thick wide chassis, large dome chest plate, reinforced hips.
     HeavyPlate,
@@ -77,6 +76,7 @@ pub enum BodyPreset {
     /// Void Weave — emissive edge strips, glowing chest grid, dark body.
     VoidArmor,
     /// Chroma Trace — slim GLB-traced core with offset plates and luminous ribs.
+    #[default]
     ChromaFrame,
     /// Antonio Rift - narrow deep torso with swept cloak shards and offset plates.
     RiftMantle,
@@ -99,13 +99,13 @@ impl BodyPreset {
 
     pub fn cycle(self) -> Self {
         match self {
-            BodyPreset::StandardMech => BodyPreset::HeavyPlate,
-            BodyPreset::HeavyPlate => BodyPreset::ScoutVest,
-            BodyPreset::ScoutVest => BodyPreset::VoidArmor,
-            BodyPreset::VoidArmor => BodyPreset::ChromaFrame,
+            BodyPreset::HeavyPlate => BodyPreset::ChromaFrame,
             BodyPreset::ChromaFrame => BodyPreset::RiftMantle,
             BodyPreset::RiftMantle => BodyPreset::DariaCore,
-            BodyPreset::DariaCore => BodyPreset::StandardMech,
+            BodyPreset::DariaCore => BodyPreset::HeavyPlate,
+            BodyPreset::StandardMech | BodyPreset::ScoutVest | BodyPreset::VoidArmor => {
+                BodyPreset::ChromaFrame
+            }
         }
     }
 }
@@ -114,7 +114,6 @@ impl BodyPreset {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum ArmPreset {
     /// Standard mech — shoulder ball, forearm armor, accent stripe.
-    #[default]
     MechArms,
     /// Titan Arms — oversized tubes, knuckle guard fist, elbow spike.
     HeavyArms,
@@ -123,6 +122,7 @@ pub enum ArmPreset {
     /// Predator Claws — standard upper arm, tri-claw finger spread.
     ClawArms,
     /// Chroma Blades — asymmetric wrist blades and compact color-blocked arms.
+    #[default]
     ChromaBlades,
     /// Rift Talons - long cloak-side fingers and narrow forearm guards.
     RiftTalons,
@@ -145,13 +145,13 @@ impl ArmPreset {
 
     pub fn cycle(self) -> Self {
         match self {
-            ArmPreset::MechArms => ArmPreset::HeavyArms,
-            ArmPreset::HeavyArms => ArmPreset::ScoutArms,
-            ArmPreset::ScoutArms => ArmPreset::ClawArms,
-            ArmPreset::ClawArms => ArmPreset::ChromaBlades,
+            ArmPreset::HeavyArms => ArmPreset::ChromaBlades,
             ArmPreset::ChromaBlades => ArmPreset::RiftTalons,
             ArmPreset::RiftTalons => ArmPreset::DariaCannon,
-            ArmPreset::DariaCannon => ArmPreset::MechArms,
+            ArmPreset::DariaCannon => ArmPreset::HeavyArms,
+            ArmPreset::MechArms | ArmPreset::ScoutArms | ArmPreset::ClawArms => {
+                ArmPreset::ChromaBlades
+            }
         }
     }
 }
@@ -160,7 +160,6 @@ impl ArmPreset {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum LegPreset {
     /// Standard mech — thigh, knee, shin, ankle thrusters.
-    #[default]
     MechLegs,
     /// Siege Legs — wide plates, large knee guard, heavy boot block.
     HeavyLegs,
@@ -169,6 +168,7 @@ pub enum LegPreset {
     /// Rocket Legs — standard frame + rear shin nozzles.
     JetLegs,
     /// Chroma Striders — tall narrow legs with one bold traced shin plate.
+    #[default]
     ChromaStriders,
     /// Rift Boots - long split boots with swept forward toes.
     RiftBoots,
@@ -191,13 +191,13 @@ impl LegPreset {
 
     pub fn cycle(self) -> Self {
         match self {
-            LegPreset::MechLegs => LegPreset::HeavyLegs,
-            LegPreset::HeavyLegs => LegPreset::ScoutLegs,
-            LegPreset::ScoutLegs => LegPreset::JetLegs,
-            LegPreset::JetLegs => LegPreset::ChromaStriders,
+            LegPreset::HeavyLegs => LegPreset::ChromaStriders,
             LegPreset::ChromaStriders => LegPreset::RiftBoots,
             LegPreset::RiftBoots => LegPreset::DariaGreaves,
-            LegPreset::DariaGreaves => LegPreset::MechLegs,
+            LegPreset::DariaGreaves => LegPreset::HeavyLegs,
+            LegPreset::MechLegs | LegPreset::ScoutLegs | LegPreset::JetLegs => {
+                LegPreset::ChromaStriders
+            }
         }
     }
 }
@@ -206,13 +206,13 @@ impl LegPreset {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum ShoulderPreset {
     /// Dome pauldrons — classic domed shoulder caps with accent ring.
-    #[default]
     DomePauldrons,
     /// Spiked pauldrons — dome base with upward spike.
     SpikedPauldrons,
     /// Plate spaulders — wide flat disc with edge strip.
     PlateEpaulettes,
     /// Chroma Mantle — offset shoulder pods plus the ragged back silhouette.
+    #[default]
     ChromaMantle,
     /// Rift Cloak - Antonio-style asymmetric feather mantle.
     RiftCloak,
@@ -237,13 +237,13 @@ impl ShoulderPreset {
 
     pub fn cycle(self) -> Self {
         match self {
-            ShoulderPreset::DomePauldrons => ShoulderPreset::SpikedPauldrons,
-            ShoulderPreset::SpikedPauldrons => ShoulderPreset::PlateEpaulettes,
             ShoulderPreset::PlateEpaulettes => ShoulderPreset::ChromaMantle,
             ShoulderPreset::ChromaMantle => ShoulderPreset::RiftCloak,
             ShoulderPreset::RiftCloak => ShoulderPreset::DariaFlares,
-            ShoulderPreset::DariaFlares => ShoulderPreset::None,
-            ShoulderPreset::None => ShoulderPreset::DomePauldrons,
+            ShoulderPreset::DariaFlares => ShoulderPreset::PlateEpaulettes,
+            ShoulderPreset::DomePauldrons
+            | ShoulderPreset::SpikedPauldrons
+            | ShoulderPreset::None => ShoulderPreset::ChromaMantle,
         }
     }
 }
@@ -252,7 +252,6 @@ impl ShoulderPreset {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum HeadPreset {
     /// Natural humanoid face — exposed head, hair, glowing eyes.
-    #[default]
     OpenFace,
     /// Angular tactical shell with forehead brow and eye-slit visor.
     CombatHelmet,
@@ -261,6 +260,7 @@ pub enum HeadPreset {
     /// Dark oversized skull with two glowing void eye sockets.
     VoidMask,
     /// Chroma Crown — oversized crown shell and visor traced from Chroma.glb.
+    #[default]
     ChromaCrown,
     /// Rift Cowl - Antonio-style tilted hood and narrow mask.
     RiftCowl,
@@ -283,13 +283,13 @@ impl HeadPreset {
 
     pub fn cycle(self) -> Self {
         match self {
-            HeadPreset::OpenFace => HeadPreset::CombatHelmet,
-            HeadPreset::CombatHelmet => HeadPreset::FullHelm,
-            HeadPreset::FullHelm => HeadPreset::VoidMask,
-            HeadPreset::VoidMask => HeadPreset::ChromaCrown,
+            HeadPreset::FullHelm => HeadPreset::ChromaCrown,
             HeadPreset::ChromaCrown => HeadPreset::RiftCowl,
             HeadPreset::RiftCowl => HeadPreset::DariaHelm,
-            HeadPreset::DariaHelm => HeadPreset::OpenFace,
+            HeadPreset::DariaHelm => HeadPreset::FullHelm,
+            HeadPreset::OpenFace | HeadPreset::CombatHelmet | HeadPreset::VoidMask => {
+                HeadPreset::ChromaCrown
+            }
         }
     }
 }
@@ -297,13 +297,57 @@ impl HeadPreset {
 // ── Loadout types ─────────────────────────────────────────────────────────────
 
 /// Per-slot preset selection. Mutate to trigger `swap_character_parts`.
-#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CharacterLoadout {
     pub body: BodyPreset,
     pub arms: ArmPreset,
     pub legs: LegPreset,
     pub shoulders: ShoulderPreset,
     pub head: HeadPreset,
+}
+
+impl Default for CharacterLoadout {
+    fn default() -> Self {
+        Self::chroma_reference()
+    }
+}
+
+impl CharacterLoadout {
+    pub const fn new(
+        body: BodyPreset,
+        arms: ArmPreset,
+        legs: LegPreset,
+        shoulders: ShoulderPreset,
+        head: HeadPreset,
+    ) -> Self {
+        Self {
+            body,
+            arms,
+            legs,
+            shoulders,
+            head,
+        }
+    }
+
+    pub const fn chroma_reference() -> Self {
+        Self::new(
+            BodyPreset::ChromaFrame,
+            ArmPreset::ChromaBlades,
+            LegPreset::ChromaStriders,
+            ShoulderPreset::ChromaMantle,
+            HeadPreset::ChromaCrown,
+        )
+    }
+
+    pub const fn legacy_stock() -> Self {
+        Self::new(
+            BodyPreset::StandardMech,
+            ArmPreset::MechArms,
+            LegPreset::MechLegs,
+            ShoulderPreset::DomePauldrons,
+            HeadPreset::OpenFace,
+        )
+    }
 }
 
 /// Cached visual parameters for part re-spawning.

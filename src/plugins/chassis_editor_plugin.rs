@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use crate::character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
-use crate::characters::{hero_config, spawn_cartoon_character};
+use crate::characters::{hero_config, spawn_native_playable_character};
 use crate::components::player::PlayerCamera;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{PlayerChassis, PlayerPartLoadout, PlayerSelectState};
@@ -128,12 +128,13 @@ fn setup_editor(
 
     // 3D character preview
     let config = hero_config(hero_name);
-    let preview = spawn_cartoon_character(
+    let preview = spawn_native_playable_character(
         &mut commands,
         &mut meshes,
         &mut materials,
         config,
         Vec3::ZERO,
+        CharacterLoadout::from(slot_loadout),
     );
     commands.entity(preview).insert((
         ChassisPreviewRoot,
