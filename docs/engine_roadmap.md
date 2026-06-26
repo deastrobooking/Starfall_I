@@ -14,6 +14,27 @@
 > parts that make the game feel insane: movement, combat, camera, hitstop,
 > determinism, controller latency, and ability logic.
 
+## Game intent fit
+
+Starfall I is not an abstract engine lab. Engine work should serve the playable
+promise first:
+
+- **Family/couch co-op first.** One to four local players, shared/split camera,
+  controller ownership, identity readability, and fair off-screen behavior are
+  core engine requirements, not polish extras.
+- **Fast traversal across a real heightmap.** The signature feel is star-tech
+  movement: swing, jetpack/hover, dash, parkour, roads, bridges, and mountain
+  routes that invite fast travel. Travel surfaces must be terrain-aware: visual
+  mesh, collider, grade, jump clearance, and heightmap elevation should agree.
+- **Readable action-RPG combat.** Combat should land between Mario readability
+  and Secret-of-Mana pacing: simple to parse in co-op, but precise enough for
+  frame data, hitstop, cancels, knockback, and character identity.
+- **RPG/world systems support the action.** Settlements, raids, pets, chapter
+  select, hacking, and save-backed world state are there to create reasons to
+  move and fight, not to turn EC# into a detached strategy engine.
+- **Extract only after Starfall proves the need.** The reusable "20 games"
+  engine is a payoff of making Starfall feel excellent first.
+
 ## Guiding principles
 
 1. **Substrate-first, then feel, then content/extraction.** Make the loop
@@ -33,33 +54,40 @@
 
 ## Engine version policy
 
-- **Stay on Bevy 0.18.1 + Rapier 0.34** for the EC0–EC3 foundation.
-- Bevy 0.19's wins (skinned-mesh culling, big-scene rendering, contiguous
-  queries) pay off at EC4 (skinning) and EC6+ (SIMD). Revisit 0.19 only once a
-  physics backend (Rapier or Avian) ships a verified 0.19 build. Do **not** block
-  the foundation on the engine upgrade.
+- **Stay on Bevy 0.18.1 + Rapier 0.34** for the EC0-EC3 foundation.
+- Bevy 0.19 is available: the official news post announced it on June 19, 2026,
+  and GitHub's `v0.19.0` release tag is marked latest. Its relevant wins are
+  real, but they pay off after the foundation:
+  - EC4/visuals: improved skinned-mesh culling, contact shadows, and richer
+    authored scene workflows.
+  - EC5/tools/UI: text input, app settings, diagnostics overlay, and Feathers/BSN
+    improvements.
+  - EC6+/world scale: big-scene rendering improvements and contiguous query
+    access.
+- Upgrade only on a branch after physics-backend parity is verified and a manual
+  smoke path exists. Do **not** block the foundation on the engine upgrade.
 
 ---
 
-## Maturity scorecard (2026-06-25 review)
+## Maturity scorecard (2026-06-26 intent/status review)
 
 | Subsystem | Maturity | Key gap |
 |---|---|---|
-| 4-player camera (split↔shared, threat-aware) | Premium | Off-screen indicators; in-game drop-in/out |
-| Multi-controller input | Strong | No ring-buffer/command history; no remap |
-| Character motor (swing/jetpack/edge-grab/dodge/buffer/coyote) | Strong (~65%) | Frame-rate dependent; no wall-run |
+| 4-player camera (split↔shared, threat-aware) | Premium | Off-screen indicators; in-game drop-in/out; per-player identity polish |
+| Multi-controller input | Strong | Fixed input buffer exists, but motor/combat do not consume it yet; no remap/replay history |
+| Character motor (swing/jetpack/edge-grab/dodge/buffer/coyote) | Strong (~70%) | Default path still frame-rate dependent; fixed motor experimental; no wall-run |
 | Movement tuning (`PlayerMovement`/`MovementProfile`) | Data-driven | — |
 | State machines | Clean | — |
 | Animation (procedural, motor-driven, 2-bone IK) | Elegant but rigid | No authored clips / no skinning |
 | Combat | Functional (~30% data) | No frame data, cancel windows, hitstop; knockback unused; no hit/hurt layers |
-| Loop / timing | Absent | No fixed tick, input buffer, interpolation; ad-hoc order |
-| Profiling | Absent | No Tracy / diagnostics / overlay |
+| Loop / timing | Foundation in place | Fixed tick + input buffer + default-off fixed motor exist; no interpolation/full gameplay migration |
+| Profiling | Basic EC0 | Tracy feature, diagnostics, F9 overlay; no deep per-system budgets/hot-loop traces |
 
 ---
 
 ## Milestones
 
-### EC0 — Instrumentation & ordering *(safety net — in progress)*
+### EC0 — Instrumentation & ordering *(safety net — landed; assignment polish remains)*
 **Goal:** Be able to measure the frame, and establish explicit system ordering.
 - `tracy` cargo feature → `bevy/trace_tracy` (`cargo run --release --features tracy`).
 - `FrameTimeDiagnosticsPlugin` + `EntityCountDiagnosticsPlugin`.
@@ -89,7 +117,8 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   input command buffer (`src/input_buffer.rs`: latch every render frame in
   `RunFixedMainLoop::BeforeFixedMainLoop`, consume once per `FixedUpdate` tick →
   `PlayerInputBuffers::fixed(idx)`). **Additive** — motor still reads `PlayerInput`
-  in `Update`, so behavior is unchanged; 3 new tests, 125 total green.
+  in `Update`, so behavior is unchanged; 3 tests cover the buffer, and the local
+  suite was green when this landed.
 - *EC1b (implemented behind a default-off toggle — needs hardware feel-testing)* —
   `SimConfig.fixed_motor` (env `STARFALL_FIXED_MOTOR=1` or **F10** at runtime).
   OFF = the original `Update` chain, byte-identical (default). ON = the sim
@@ -98,10 +127,11 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   and `flush_motor_translation` applies the sum to the Rapier controller once per
   frame in `PostUpdate` before `PhysicsSet::SyncBackend` (Rapier steps per-frame,
   so ticks must be coalesced). Smoke-tested: ON path boots + runs with no panic;
-  125 tests green. **Still to do in EC1b polish:** `PreviousTransform` render
-  interpolation (expect minor judder >`FIXED_HZ` fps until then); switch the motor
-  to read the EC1a `FixedInput` buffer instead of `PlayerInput` directly; move
-  Rapier itself into `FixedUpdate` if per-frame coalescing proves insufficient.
+  local suite was green at landing. **Still to do in EC1b polish:**
+  `PreviousTransform` render interpolation (expect minor judder >`FIXED_HZ` fps
+  until then); switch the motor to read the EC1a `FixedInput` buffer instead of
+  `PlayerInput` directly; move Rapier itself into `FixedUpdate` if per-frame
+  coalescing proves insufficient.
 
 ### EC2 — Collision layers + frame-data combat
 **Goal:** Fighting-game precision inside the action RPG.
@@ -119,6 +149,9 @@ gameplay logic; hits produce hitstop + knockback + shake.
 ### EC3 — Motor to "feels amazing"
 **Goal:** Lock in Spider-Man + Mega Man feel on the deterministic base.
 - Wall-run, swing apex control, dash-snap, combat lock-on, PvP soft pushboxes.
+- Heightmap-aware travel surfaces: roads, bridges, mountain paths, and speed
+  loops sample terrain elevation, smooth grades/curves, and keep visual mesh,
+  collider, and jump-clearance checks aligned.
 - Folds into the `MM#` motion roadmap.
 **Acceptance:** the movement prototype feels great in a focused test arena.
 
@@ -159,7 +192,8 @@ thin glue.
 
 ## What to explicitly NOT do yet
 - ❌ Hand-written assembly / SIMD (wait for EC0 profiler evidence).
-- ❌ Bevy 0.19 upgrade (wait for physics-backend parity; revisit at EC4).
+- ❌ Bevy 0.19 upgrade during EC0-EC3 (wait for physics-backend parity plus a
+  migration branch/manual smoke path; revisit at EC4).
 - ❌ Workspace split before EC7 (premature; boundaries unproven).
 - ❌ `bevy_silk` cloth (cape is an EC4 vertex-shader job reusing `grass.wgsl`).
 - ❌ Rollback netcode now (EC6 deterministic logs first).
@@ -169,3 +203,5 @@ thin glue.
   genuinely different (racing/builder/shooter)? Decides how general the EC7
   crates (`forge_play`, `forge_world`) must be.
 - **Sim tick rate:** 64 vs 120 Hz — settle with EC0 profiler data in EC1.
+- **Roadmap link hygiene:** `docs/playerengine.md` is the active `MM#` roadmap;
+  remove or redirect stale references to `docs/motion_mechanics_roadmap.md`.

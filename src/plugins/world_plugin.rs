@@ -70,6 +70,13 @@ struct DebugColliderBox {
     size: Vec3,
 }
 
+/// Rapier normally multiplies collider shapes by `GlobalTransform` scale.
+/// Scaled unit-cube roads/bridges below already specify collider half-extents
+/// in world units, so this prevents invisible oversized blockers.
+fn world_space_collider_scale() -> bevy_rapier3d::prelude::ColliderScale {
+    bevy_rapier3d::prelude::ColliderScale::Absolute(Vec3::ONE)
+}
+
 // ── Grass wind material ───────────────────────────────────────────────────────
 
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
@@ -6681,6 +6688,7 @@ fn spawn_rope_bridge_between(
             deck_thickness * 0.5,
             horizontal_len * 0.5,
         ),
+        world_space_collider_scale(),
     ));
 
     let plank_count = (horizontal_len / 18.0).ceil().clamp(8.0, 28.0) as usize;
@@ -7164,6 +7172,7 @@ fn spawn_mountain_path_network(
                         0.24,
                         slab_len * 0.5,
                     ),
+                    world_space_collider_scale(),
                 ));
 
                 if step % 3 == 1 {
@@ -7311,6 +7320,7 @@ fn spawn_mountain_route_bridges(
                 WalkableSurface,
                 bevy_rapier3d::prelude::RigidBody::Fixed,
                 bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.55, horizontal_len * 0.5),
+                world_space_collider_scale(),
             ));
 
             spawn_boost_road_span(
@@ -7394,6 +7404,7 @@ fn spawn_mountain_route_bridges(
                     WorldGeometry,
                     bevy_rapier3d::prelude::RigidBody::Fixed,
                     bevy_rapier3d::prelude::Collider::cuboid(width * 0.36, tower_h * 0.5, 2.4),
+                    world_space_collider_scale(),
                 ));
                 commands.spawn((
                     PbrBundle {
@@ -7606,6 +7617,7 @@ fn spawn_speed_road_deck_between(
         WalkableSurface,
         bevy_rapier3d::prelude::RigidBody::Fixed,
         bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.5),
+        world_space_collider_scale(),
     ));
 
     for side in [-1.0_f32, 1.0] {
@@ -8038,6 +8050,7 @@ fn spawn_speed_loop_gate(
                 WalkableSurface,
                 bevy_rapier3d::prelude::RigidBody::Fixed,
                 bevy_rapier3d::prelude::Collider::cuboid(segment_width * 0.5, 0.31, arc_len * 0.5),
+                world_space_collider_scale(),
             ));
         } else {
             commands.spawn((
@@ -12143,6 +12156,7 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
             },
             bevy_rapier3d::prelude::RigidBody::Fixed,
             bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.75, len * 0.5),
+            world_space_collider_scale(),
         ));
 
         spawn_boost_road_span(
@@ -15218,6 +15232,14 @@ mod tests {
         assert!(SPEED_ROAD_WIDTH >= 36.0);
         assert!(SPEED_ROAD_TRAFFIC_LANE_OFFSET * 2.0 < SPEED_ROAD_WIDTH);
         assert_eq!(SPEED_ROAD_PATROL_VEHICLE_COUNT, 18);
+    }
+
+    #[test]
+    fn scaled_travel_colliders_keep_world_space_extents() {
+        assert_eq!(
+            world_space_collider_scale(),
+            bevy_rapier3d::prelude::ColliderScale::Absolute(Vec3::ONE)
+        );
     }
 
     #[test]
