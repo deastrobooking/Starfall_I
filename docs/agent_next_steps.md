@@ -204,7 +204,7 @@ Goal: make the core hero feel reliable before adding many more levels.
 - Tune acceleration, step/snap, wall slide, wall jump, climb, dodge, parry,
   jetpack, beam saber, and hand-combat values through `PlayerMovement` and
   combat data.
-- Use `docs/motion_mechanics_roadmap.md` as the milestone guide for humanoid
+- Use `docs/playerengine.md` as the milestone guide for humanoid
   traversal upgrades: wall/ledge/mantle suite, grounded athletic movement,
   flight kit, combat traversal, environment physics, and boss/world integration.
 - Add controller diagnostics overlay showing player assignment, stick values,
@@ -333,7 +333,7 @@ avoid ambiguity across the three living roadmaps:
 | Prefix | Roadmap | File |
 |--------|---------|------|
 | `M#` | Engine / campaign strategy | `docs/engine_upgrade_milestones.md` |
-| `MM#` | Motion mechanics / traversal | `docs/motion_mechanics_roadmap.md` |
+| `MM#` | Motion mechanics / traversal | `docs/playerengine.md` |
 | `AI#` | Enemy AI behavior | `docs/ai_enemy_mechanics_roadmap.md` (future) |
 | `EC#` | Engine core (fixed-tick, combat substrate, profiling) | `docs/engine_roadmap.md` |
 

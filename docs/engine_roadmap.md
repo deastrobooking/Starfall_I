@@ -203,5 +203,3 @@ thin glue.
   genuinely different (racing/builder/shooter)? Decides how general the EC7
   crates (`forge_play`, `forge_world`) must be.
 - **Sim tick rate:** 64 vs 120 Hz — settle with EC0 profiler data in EC1.
-- **Roadmap link hygiene:** `docs/playerengine.md` is the active `MM#` roadmap;
-  remove or redirect stale references to `docs/motion_mechanics_roadmap.md`.

@@ -84,7 +84,7 @@ Wall slide is the default wall-contact behavior while falling; it now behaves as
 Procedural character poses now distinguish idle, walk, run, jump, fall, flight,
 one-hand wall slide, hang, combat, Star Sabre slash, and grapple wind-up. The
 long-form roadmap for turning this into a full humanoid traversal/combat system
-lives in `docs/motion_mechanics_roadmap.md`.
+lives in `docs/playerengine.md`.
 
 Grapple hook foundation: `GrappleHookState` is a single-hook state component
 with Ready/Windup/Searching/Swinging/Zipping/Recovering/Cooldown modes, cable

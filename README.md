@@ -29,7 +29,7 @@ Implemented:
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
-- Player mechanics MVP foundation now includes a single star-tech grappling hook state, `G` / Select+RB input, and a procedural grapple wind-up pose; hook targeting, mountain pull, swing physics, and hook combat are planned in `docs/motion_mechanics_roadmap.md` (milestones MM1–MM10).
+- Player mechanics MVP foundation now includes a single star-tech grappling hook state, `G` / Select+RB input, and a procedural grapple wind-up pose; hook targeting, mountain pull, swing physics, and hook combat are planned in `docs/playerengine.md` (milestones MM1–MM10).
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
 - RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
 
@@ -223,7 +223,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 - [Architecture Overview](docs/architecture.md)
 - [Gameplay Systems Reference](docs/systems.md)
 - [Improvement Notes](docs/improvements.md)
-- [Motion Mechanics Roadmap](docs/motion_mechanics_roadmap.md)
+- [Motion Mechanics Roadmap](docs/playerengine.md)
 - [Naming Guide](docs/naming.md)
 - [Agent Next Steps](docs/agent_next_steps.md)
 - [Engine Upgrade Milestones](docs/engine_upgrade_milestones.md) — campaign/engine milestones `M#`; also defines the `MM#` / `AI#` naming convention

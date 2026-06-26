@@ -5177,14 +5177,51 @@ fn distance_to_mountain_route_network(x: f32, z: f32) -> f32 {
         .unwrap_or(f32::MAX)
 }
 
-const SPEED_ROAD_CHUNK_LEN: f32 = 720.0;
+const SPEED_ROAD_CHUNK_LEN: f32 = 360.0;
 const SPEED_ROAD_CLEARANCE: f32 = 4.6;
 const SPEED_ROAD_WIDTH: f32 = 38.0;
+const SPEED_ROAD_TERRAIN_SAMPLE_SPACING: f32 = 90.0;
+const SPEED_ROAD_EDGE_SAMPLE_FRACTION: f32 = 0.42;
 const SPEED_ROAD_TRAFFIC_LANE_OFFSET: f32 = 9.5;
 const SPEED_ROAD_PATROL_VEHICLE_COUNT: usize = 18;
 
 fn speed_road_segment_subdivision_count(length: f32) -> usize {
     (length / SPEED_ROAD_CHUNK_LEN).ceil().max(1.0) as usize
+}
+
+fn speed_road_required_terrain_lift(
+    start: Vec3,
+    end: Vec3,
+    width: f32,
+    terrain_seed: u64,
+    clearance: f32,
+) -> f32 {
+    let delta_xz = Vec2::new(end.x - start.x, end.z - start.z);
+    let horizontal_len = delta_xz.length();
+    if horizontal_len <= f32::EPSILON {
+        return 0.0;
+    }
+
+    let dir = delta_xz / horizontal_len;
+    let right = Vec2::new(dir.y, -dir.x);
+    let samples = (horizontal_len / SPEED_ROAD_TERRAIN_SAMPLE_SPACING)
+        .ceil()
+        .clamp(1.0, 16.0) as usize;
+    let edge_offset = width * SPEED_ROAD_EDGE_SAMPLE_FRACTION;
+    let mut needed_lift: f32 = 0.0;
+
+    for i in 0..=samples {
+        let t = i as f32 / samples as f32;
+        let center = Vec2::new(start.x + delta_xz.x * t, start.z + delta_xz.y * t);
+        let road_y = start.y + (end.y - start.y) * t;
+        for offset in [0.0_f32, -edge_offset, edge_offset] {
+            let sample = center + right * offset;
+            needed_lift = needed_lift
+                .max(terrain_surface_y(sample.x, sample.y, terrain_seed) + clearance - road_y);
+        }
+    }
+
+    needed_lift.max(0.0)
 }
 
 fn mountain_speed_road_segment_count() -> usize {
@@ -7590,9 +7627,13 @@ fn spawn_speed_road_deck_between(
         return;
     }
 
-    let midpoint = start.lerp(end, 0.5);
-    let mid_ground = terrain_surface_y(midpoint.x, midpoint.z, terrain_seed);
-    let needed_lift = (mid_ground + SPEED_ROAD_CLEARANCE + 1.0 - midpoint.y).max(0.0);
+    let needed_lift = speed_road_required_terrain_lift(
+        start,
+        end,
+        width,
+        terrain_seed,
+        SPEED_ROAD_CLEARANCE + 1.0,
+    );
     start.y += needed_lift;
     end.y += needed_lift;
     delta = end - start;
@@ -8176,26 +8217,75 @@ fn spawn_npc_road_vehicles(
 }
 
 fn road_vehicle_route_path(route: &[(f32, f32)], terrain_seed: u64) -> Vec<Vec3> {
-    let mut path: Vec<Vec3> = route
-        .iter()
-        .map(|&(x, z)| speed_road_terrain_point(x, z, terrain_seed, SPEED_ROAD_CLEARANCE + 2.0))
-        .collect();
-
-    for &(x, z) in route
-        .iter()
-        .rev()
-        .skip(1)
-        .take(route.len().saturating_sub(2))
-    {
-        path.push(speed_road_terrain_point(
-            x,
-            z,
-            terrain_seed,
-            SPEED_ROAD_CLEARANCE + 2.0,
-        ));
-    }
-
+    let mut path = Vec::new();
+    append_speed_road_path_samples(
+        &mut path,
+        route.iter().copied(),
+        terrain_seed,
+        SPEED_ROAD_CLEARANCE + 2.0,
+    );
+    append_speed_road_path_samples(
+        &mut path,
+        route.iter().rev().copied(),
+        terrain_seed,
+        SPEED_ROAD_CLEARANCE + 2.0,
+    );
     path
+}
+
+fn append_speed_road_path_samples<I>(
+    path: &mut Vec<Vec3>,
+    points: I,
+    terrain_seed: u64,
+    clearance: f32,
+) where
+    I: IntoIterator<Item = (f32, f32)>,
+{
+    let points: Vec<(f32, f32)> = points.into_iter().collect();
+    for pair in points.windows(2) {
+        let (ax, az) = pair[0];
+        let (bx, bz) = pair[1];
+        let delta = Vec2::new(bx - ax, bz - az);
+        let chunk_count = speed_road_segment_subdivision_count(delta.length());
+        for chunk in 0..chunk_count {
+            let t0 = chunk as f32 / chunk_count as f32;
+            let t1 = (chunk + 1) as f32 / chunk_count as f32;
+            let mut start = speed_road_terrain_point(
+                ax + (bx - ax) * t0,
+                az + (bz - az) * t0,
+                terrain_seed,
+                clearance,
+            );
+            let mut end = speed_road_terrain_point(
+                ax + (bx - ax) * t1,
+                az + (bz - az) * t1,
+                terrain_seed,
+                clearance,
+            );
+            let lift = speed_road_required_terrain_lift(
+                start,
+                end,
+                SPEED_ROAD_WIDTH,
+                terrain_seed,
+                clearance,
+            );
+            start.y += lift;
+            end.y += lift;
+            push_speed_road_path_point(path, start);
+            push_speed_road_path_point(path, end);
+        }
+    }
+}
+
+fn push_speed_road_path_point(path: &mut Vec<Vec3>, point: Vec3) {
+    if let Some(last) = path.last_mut() {
+        let same_xz = Vec2::new(last.x - point.x, last.z - point.z).length_squared() < 0.01;
+        if same_xz {
+            last.y = last.y.max(point.y);
+            return;
+        }
+    }
+    path.push(point);
 }
 
 fn route_heading_yaw(route: &[(f32, f32)]) -> f32 {
@@ -15235,6 +15325,49 @@ mod tests {
     }
 
     #[test]
+    fn speed_road_lift_keeps_sampled_decks_above_heightmap() {
+        let terrain_seed = 42;
+        for pair in ROUTE_CORE_EVEREST.windows(2) {
+            let (ax, az) = pair[0];
+            let (bx, bz) = pair[1];
+            let delta = Vec2::new(bx - ax, bz - az);
+            let chunk_count = speed_road_segment_subdivision_count(delta.length());
+            for chunk in 0..chunk_count {
+                let t0 = chunk as f32 / chunk_count as f32;
+                let t1 = (chunk + 1) as f32 / chunk_count as f32;
+                let mut start = speed_road_terrain_point(
+                    ax + (bx - ax) * t0,
+                    az + (bz - az) * t0,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE,
+                );
+                let mut end = speed_road_terrain_point(
+                    ax + (bx - ax) * t1,
+                    az + (bz - az) * t1,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE,
+                );
+                let lift = speed_road_required_terrain_lift(
+                    start,
+                    end,
+                    SPEED_ROAD_WIDTH,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE + 1.0,
+                );
+                start.y += lift;
+                end.y += lift;
+                assert_speed_road_clearance_samples(
+                    start,
+                    end,
+                    SPEED_ROAD_WIDTH,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE + 0.98,
+                );
+            }
+        }
+    }
+
+    #[test]
     fn scaled_travel_colliders_keep_world_space_extents() {
         assert_eq!(
             world_space_collider_scale(),
@@ -15251,12 +15384,52 @@ mod tests {
     #[test]
     fn road_vehicle_paths_return_along_authored_routes() {
         let path = road_vehicle_route_path(ROUTE_CORE_AURORA, 42);
-        assert_eq!(
-            path.len(),
-            ROUTE_CORE_AURORA.len() + ROUTE_CORE_AURORA.len().saturating_sub(2)
-        );
+        assert!(path.len() > ROUTE_CORE_AURORA.len() * 2);
         assert_eq!(path.first().map(|p| (p.x, p.z)), Some(ROUTE_CORE_AURORA[0]));
-        assert_eq!(path.last().map(|p| (p.x, p.z)), Some(ROUTE_CORE_AURORA[1]));
+        assert_eq!(path.last().map(|p| (p.x, p.z)), Some(ROUTE_CORE_AURORA[0]));
+
+        let max_horizontal_step = path
+            .windows(2)
+            .map(|pair| Vec2::new(pair[1].x - pair[0].x, pair[1].z - pair[0].z).length())
+            .fold(0.0_f32, f32::max);
+        assert!(max_horizontal_step <= SPEED_ROAD_CHUNK_LEN + 1.0);
+
+        for point in path {
+            let ground = terrain_surface_y(point.x, point.z, 42);
+            assert!(point.y >= ground + SPEED_ROAD_CLEARANCE + 1.9);
+        }
+    }
+
+    fn assert_speed_road_clearance_samples(
+        start: Vec3,
+        end: Vec3,
+        width: f32,
+        terrain_seed: u64,
+        min_clearance: f32,
+    ) {
+        let delta_xz = Vec2::new(end.x - start.x, end.z - start.z);
+        let horizontal_len = delta_xz.length();
+        let dir = delta_xz / horizontal_len.max(0.001);
+        let right = Vec2::new(dir.y, -dir.x);
+        let samples = (horizontal_len / SPEED_ROAD_TERRAIN_SAMPLE_SPACING)
+            .ceil()
+            .clamp(1.0, 16.0) as usize;
+        let edge_offset = width * SPEED_ROAD_EDGE_SAMPLE_FRACTION;
+        for i in 0..=samples {
+            let t = i as f32 / samples as f32;
+            let center = Vec2::new(start.x + delta_xz.x * t, start.z + delta_xz.y * t);
+            let road_y = start.y + (end.y - start.y) * t;
+            for offset in [0.0_f32, -edge_offset, edge_offset] {
+                let sample = center + right * offset;
+                let ground = terrain_surface_y(sample.x, sample.y, terrain_seed);
+                assert!(
+                    road_y >= ground + min_clearance,
+                    "speed road sample sank below terrain clearance at ({:.1}, {:.1})",
+                    sample.x,
+                    sample.y
+                );
+            }
+        }
     }
 
     #[test]

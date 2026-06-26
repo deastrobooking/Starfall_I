@@ -16,8 +16,10 @@ baseline is Bevy `0.18.1` with `bevy_rapier3d` `0.34`.
   Rapier trimesh construction.
 - Current validation baseline: `cargo fmt`, `cargo check`, and `cargo test`
   passed after the Bevy 0.18 migration. Automated tests are still thin.
-- Upgrade policy: future engine upgrades are milestone-gated. Do not chase every
-  release automatically.
+- Upgrade policy: future engine upgrades are milestone-gated. Bevy 0.19 is
+  available, but EC0-EC3 stay on Bevy `0.18.1` + Rapier `0.34` until physics
+  backend parity and a manual smoke path are verified. Do not chase every release
+  automatically.
 
 ## Local And CI Gates
 
@@ -79,7 +81,7 @@ To prevent label collision across the three living roadmaps, use these prefixes 
 | Prefix | Roadmap | File |
 |--------|---------|------|
 | `M#` | Engine / campaign strategy milestones | `docs/engine_upgrade_milestones.md` (this file) |
-| `MM#` | Motion mechanics / traversal milestones | `docs/motion_mechanics_roadmap.md` |
+| `MM#` | Motion mechanics / traversal milestones | `docs/playerengine.md` |
 | `AI#` | Enemy AI behavior milestones | `docs/ai_enemy_mechanics_roadmap.md` (future) |
 | `EC#` | Engine core (fixed-tick, combat substrate, profiling, extraction) | `docs/engine_roadmap.md` |
 
