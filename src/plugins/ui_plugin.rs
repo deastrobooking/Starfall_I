@@ -92,7 +92,7 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 pause_input_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::Paused))),
             )
             .add_systems(
                 Update,
@@ -106,53 +106,53 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (toggle_controller_diag, update_controller_diag)
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::Paused))),
             )
             .add_systems(
                 Update,
                 (toggle_command_overlay, update_command_overlay)
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::Paused))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::Paused))),
             )
             .add_systems(
                 Update,
                 hud_update_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
                 puzzle_objective_hud_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
                 message_timer_system.run_if(
                     in_state(AppState::Playing)
-                        .or(in_state(AppState::Paused))
-                        .or(in_state(AppState::GameOver)),
+                        .or_else(in_state(AppState::Paused))
+                        .or_else(in_state(AppState::GameOver)),
                 ),
             )
             .add_systems(
                 Update,
                 ui_message_listener.run_if(
                     in_state(AppState::Playing)
-                        .or(in_state(AppState::Paused))
-                        .or(in_state(AppState::GameOver)),
+                        .or_else(in_state(AppState::Paused))
+                        .or_else(in_state(AppState::GameOver)),
                 ),
             )
             .add_systems(
                 Update,
                 damage_vignette_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
                 crafting_panel_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
                 discussion_panel_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
@@ -161,7 +161,7 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 boss_alert_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
                 Update,
@@ -170,7 +170,7 @@ impl Plugin for UiPlugin {
                     chapter_completed_ui_system,
                     boss_defeated_ui_system,
                 )
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::GameOver))),
+                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(Update, game_over_input.run_if(in_state(AppState::GameOver)))
             .add_systems(

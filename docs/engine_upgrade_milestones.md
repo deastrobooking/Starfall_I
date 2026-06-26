@@ -14,7 +14,8 @@ baseline is Bevy `0.19.0` with Avian `0.7`.
   for Bevy bundle shapes, and the migration touched hierarchy/despawn,
   camera/HDR, cursor options, render imports, ambient lighting, image data, and
   Rapier-to-Avian physics compatibility layer.
-- Current validation baseline: `cargo check`, targeted road/terrain/collider
+- Current validation baseline: `cargo check`,
+  `cargo clippy --all-targets -- -D warnings`, targeted road/terrain/collider
   tests, and full `cargo test` pass on the Bevy 0.19 + Avian branch. Manual
   macOS smoke validation is still required before merge.
 - Upgrade policy: track current stable Bevy deliberately, because an open-source
@@ -940,8 +941,9 @@ Primary files: `src/final_war.rs`, `src/plugins/world_plugin.rs`,
   world-space scaled travel colliders.
 - Updated Bevy 0.19 API changes for text font sizes, HDR import path,
   light shadow-map fields, and mutable asset handles.
-- Verified with `cargo check`, targeted road/terrain/collider tests, and full
-  `cargo test`. Manual macOS controller/play smoke remains before merge.
+- Verified with `cargo check`, `cargo clippy --all-targets -- -D warnings`,
+  targeted road/terrain/collider tests, and full `cargo test`. Manual macOS
+  controller/play smoke remains before merge.
 
 ### 2026-06-07: Bevy 0.18 Baseline
 

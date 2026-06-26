@@ -58,8 +58,8 @@ promise first:
   the active engine release keeps us near docs, examples, bug fixes, community
   answers, and plugin momentum.
 - Current local engine branch baseline is Bevy `0.19.0` + Avian `0.7`. Local
-  compile and automated test gates pass; manual macOS controller/play smoke is
-  still required before merging the engine branch.
+  compile, strict clippy, and automated test gates pass; manual macOS
+  controller/play smoke is still required before merging the engine branch.
 - Bevy 0.19 is available: the official news post announced it on June 19, 2026,
   and GitHub's `v0.19.0` release tag is marked latest. Its relevant wins matter
   now, not only later:
@@ -116,11 +116,11 @@ playable Starfall loop.
   instead of hiding it inside gameplay work.
 - Fix migration changes by subsystem: app/plugins, schedules, rendering,
   UI/text, asset loading, physics/colliders, input, diagnostics, and tests.
-**Acceptance:** `cargo check`, targeted road/terrain/controller tests, and a
-manual macOS smoke route pass. Main stays on the last green engine baseline until
-the branch passes.
-**Status:** local compile/test gates pass on Bevy `0.19.0` + Avian `0.7`; manual
-smoke remains before merge.
+**Acceptance:** `cargo check`, strict clippy, targeted road/terrain/controller
+tests, full `cargo test`, and a manual macOS smoke route pass. Main stays on the
+last green engine baseline until the branch passes.
+**Status:** local compile, clippy, and test gates pass on Bevy `0.19.0` + Avian
+`0.7`; manual smoke remains before merge.
 
 ### EC1 — Fixed-tick simulation core *(the keystone)*
 **Goal:** Deterministic, frame-rate-independent simulation.

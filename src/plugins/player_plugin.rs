@@ -1,5 +1,5 @@
-use bevy::camera::{PerspectiveProjection, Projection, Viewport};
 use bevy::camera::Hdr;
+use bevy::camera::{PerspectiveProjection, Projection, Viewport};
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -23,11 +23,11 @@ use crate::components::weapon::*;
 use crate::components::world::{BoatPassenger, WorldAnchor, WorldRouteMarker};
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
+use crate::game_loop::{fixed_motor_off, fixed_motor_on, SimConfig};
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
 use crate::physics::prelude::*;
 use crate::player_mesh::attach_modular_player_mesh;
-use crate::game_loop::{fixed_motor_off, fixed_motor_on, SimConfig};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe, CameraShake,

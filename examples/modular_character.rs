@@ -153,7 +153,10 @@ fn setup(
         id: "head_round",
         mesh: meshes.add(Mesh::from(Sphere::new(0.18))),
         material: skin.clone(),
-        sockets: vec![Socket::new("neck_joint", Transform::from_xyz(0.0, -0.18, 0.0))],
+        sockets: vec![Socket::new(
+            "neck_joint",
+            Transform::from_xyz(0.0, -0.18, 0.0),
+        )],
     });
 
     // Three upper-arm variants for hot-swapping. Each is authored pointing down
@@ -186,7 +189,10 @@ fn setup(
         id: "leg",
         mesh: meshes.add(Mesh::from(Capsule3d::new(0.09, 0.4))),
         material: metal.clone(),
-        sockets: vec![Socket::new("hip_joint", Transform::from_xyz(0.0, 0.28, 0.0))],
+        sockets: vec![Socket::new(
+            "hip_joint",
+            Transform::from_xyz(0.0, 0.28, 0.0),
+        )],
     });
 
     let recipe = demo_recipe();
@@ -201,6 +207,7 @@ fn setup(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn controls(
     keys: Res<ButtonInput<KeyCode>>,
     mut swaps: MessageWriter<SwapPart>,

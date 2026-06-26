@@ -1996,16 +1996,19 @@ struct Palette {
 }
 
 fn repeating_texture(asset_server: &AssetServer, path: &'static str) -> Handle<Image> {
-    asset_server.load_with_settings(path, |settings: &mut ImageLoaderSettings| {
-        *settings = ImageLoaderSettings {
-            sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
-                address_mode_u: ImageAddressMode::Repeat,
-                address_mode_v: ImageAddressMode::Repeat,
+    asset_server
+        .load_builder()
+        .with_settings(|settings: &mut ImageLoaderSettings| {
+            *settings = ImageLoaderSettings {
+                sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                    address_mode_u: ImageAddressMode::Repeat,
+                    address_mode_v: ImageAddressMode::Repeat,
+                    ..default()
+                }),
                 ..default()
-            }),
-            ..default()
-        };
-    })
+            };
+        })
+        .load(path)
 }
 
 impl Palette {
@@ -6533,7 +6536,7 @@ fn spawn_tamborn_tree_skyscraper(
             }
             let a = yaw + pod as f32 * TAU / pods as f32 + level as f32 * 0.37;
             let dir = Vec3::new(a.cos(), 0.0, a.sin());
-            let mat = if (level + pod + seed) % 2 == 0 {
+            let mat = if (level + pod + seed).is_multiple_of(2) {
                 pal.small_window_warm.clone()
             } else {
                 pal.small_window_cool.clone()
@@ -6921,7 +6924,7 @@ fn spawn_giant_mana_tree(
         seed + 700,
     );
 
-    if seed % 5 == 0 {
+    if seed.is_multiple_of(5) {
         commands.spawn((
             PointLightBundle {
                 point_light: PointLight {
@@ -12984,7 +12987,7 @@ fn spawn_river_bridge(
     let deck_len = 74.0 + style as f32 * 8.0;
     let deck_width = 11.0;
     let deck_height = 0.72;
-    let yaw = if style % 2 == 0 { 0.08 } else { -0.11 };
+    let yaw = if style.is_multiple_of(2) { 0.08 } else { -0.11 };
     let rot = Quat::from_rotation_y(yaw);
     let deck_mat = if style == 1 {
         pal.bridge_deck.clone()
@@ -13731,7 +13734,7 @@ fn spawn_trees(
                     2 + idx % 3,
                     seed + idx * 47,
                 ),
-                TreeKind::Pine if idx % 4 == 0 => spawn_vine_curtain(
+                TreeKind::Pine if idx.is_multiple_of(4) => spawn_vine_curtain(
                     commands,
                     meshes,
                     pal,
@@ -13742,7 +13745,7 @@ fn spawn_trees(
                     2,
                     seed + idx * 53,
                 ),
-                TreeKind::Dead if idx % 2 == 0 => spawn_vine_curtain(
+                TreeKind::Dead if idx.is_multiple_of(2) => spawn_vine_curtain(
                     commands,
                     meshes,
                     pal,
@@ -15175,7 +15178,7 @@ fn spawn_magic_crystals(
             let wz = zz + oz;
             let wy = terrain_surface_y(wx, wz, seed);
 
-            let mat = if !is_dragon && (zi + i as usize) % 4 == 0 {
+            let mat = if !is_dragon && (zi + i as usize).is_multiple_of(4) {
                 pal.crystal_emerald.clone()
             } else if is_dragon {
                 pal.crystal_dragon.clone()
@@ -15217,7 +15220,7 @@ fn spawn_magic_crystals(
             }
             // Point light every other crystal
             if i % 2 == 0 {
-                let light_col = if !is_dragon && (zi + i as usize) % 4 == 0 {
+                let light_col = if !is_dragon && (zi + i as usize).is_multiple_of(4) {
                     Color::srgb(0.18, 1.0, 0.55)
                 } else if is_dragon {
                     Color::srgb(1.0, 0.35, 0.08)
@@ -15319,8 +15322,8 @@ mod tests {
 
     #[test]
     fn speed_roads_are_wide_enough_for_patrol_traffic() {
-        assert!(SPEED_ROAD_WIDTH >= 36.0);
-        assert!(SPEED_ROAD_TRAFFIC_LANE_OFFSET * 2.0 < SPEED_ROAD_WIDTH);
+        const { assert!(SPEED_ROAD_WIDTH >= 36.0) };
+        const { assert!(SPEED_ROAD_TRAFFIC_LANE_OFFSET * 2.0 < SPEED_ROAD_WIDTH) };
         assert_eq!(SPEED_ROAD_PATROL_VEHICLE_COUNT, 18);
     }
 

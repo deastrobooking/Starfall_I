@@ -27,8 +27,9 @@ impl Plugin for CharacterPlugin {
             Update,
             (
                 bind_parts_to_skeleton,
-                cartoon_animation_system
-                    .run_if(in_state(AppState::Playing).or(in_state(AppState::CharacterDesign))),
+                cartoon_animation_system.run_if(
+                    in_state(AppState::Playing).or_else(in_state(AppState::CharacterDesign)),
+                ),
                 swap_character_parts,
             )
                 .chain(),

@@ -10,10 +10,10 @@
 
 #![allow(dead_code)]
 
-#[path = "../src/procedural_meshes.rs"]
-mod procedural_meshes;
 #[path = "../src/modular_character.rs"]
 mod modular_character;
+#[path = "../src/procedural_meshes.rs"]
+mod procedural_meshes;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
@@ -39,7 +39,11 @@ fn sr(name: &'static str, x: f32, y: f32, z: f32, q: Quat) -> Socket {
 }
 fn scl(c: Color, f: f32) -> Color {
     let s = c.to_srgba();
-    Color::srgb((s.red * f).min(1.0), (s.green * f).min(1.0), (s.blue * f).min(1.0))
+    Color::srgb(
+        (s.red * f).min(1.0),
+        (s.green * f).min(1.0),
+        (s.blue * f).min(1.0),
+    )
 }
 fn mix(a: Color, b: Color, t: f32) -> Color {
     let x = a.to_srgba();
@@ -112,14 +116,102 @@ fn roster() -> Vec<Hero> {
         belt: true,
     };
     vec![
-        h("Vincenzo", Color::srgb(0.09, 0.28, 0.80), Color::srgb(0.95, 0.78, 0.12), Color::srgb(0.93, 0.70, 0.48), Color::srgb(0.08, 0.18, 0.72), false, 1.0, true, true, false),
-        h("Antonio", Color::srgb(0.16, 0.48, 0.82), Color::srgb(0.10, 0.92, 0.98), Color::srgb(0.90, 0.74, 0.56), Color::srgb(0.08, 0.52, 0.86), false, 0.92, false, true, false),
-        h("Angelo", Color::srgb(0.08, 0.52, 0.20), Color::srgb(0.78, 0.86, 0.92), Color::srgb(0.88, 0.68, 0.48), Color::srgb(0.12, 0.52, 0.22), false, 0.94, false, true, false),
-        h("Joseph", Color::srgb(0.75, 0.12, 0.08), Color::srgb(0.92, 0.90, 0.84), Color::srgb(0.76, 0.54, 0.36), Color::srgb(0.65, 0.38, 0.08), false, 1.18, true, true, false),
-        h("Gabriella", Color::srgb(0.48, 0.12, 0.72), Color::srgb(1.0, 0.68, 0.95), Color::srgb(0.91, 0.69, 0.50), Color::srgb(0.42, 0.08, 0.58), false, 0.98, true, true, false),
-        h("Nova", Color::srgb(0.10, 0.18, 0.82), Color::srgb(0.10, 1.0, 0.88), Color::srgb(0.84, 0.64, 0.50), Color::srgb(0.04, 0.82, 0.92), true, 0.94, false, true, true),
-        h("Aurora", Color::srgb(0.16, 0.58, 0.42), Color::srgb(0.78, 1.0, 0.62), Color::srgb(0.90, 0.72, 0.55), Color::srgb(0.14, 0.62, 0.28), false, 1.02, true, true, false),
-        h("Fortuna", Color::srgb(0.68, 0.22, 0.10), Color::srgb(1.0, 0.92, 0.30), Color::srgb(0.92, 0.70, 0.52), Color::srgb(0.68, 0.48, 0.06), false, 0.96, false, true, false),
+        h(
+            "Vincenzo",
+            Color::srgb(0.09, 0.28, 0.80),
+            Color::srgb(0.95, 0.78, 0.12),
+            Color::srgb(0.93, 0.70, 0.48),
+            Color::srgb(0.08, 0.18, 0.72),
+            false,
+            1.0,
+            true,
+            true,
+            false,
+        ),
+        h(
+            "Antonio",
+            Color::srgb(0.16, 0.48, 0.82),
+            Color::srgb(0.10, 0.92, 0.98),
+            Color::srgb(0.90, 0.74, 0.56),
+            Color::srgb(0.08, 0.52, 0.86),
+            false,
+            0.92,
+            false,
+            true,
+            false,
+        ),
+        h(
+            "Angelo",
+            Color::srgb(0.08, 0.52, 0.20),
+            Color::srgb(0.78, 0.86, 0.92),
+            Color::srgb(0.88, 0.68, 0.48),
+            Color::srgb(0.12, 0.52, 0.22),
+            false,
+            0.94,
+            false,
+            true,
+            false,
+        ),
+        h(
+            "Joseph",
+            Color::srgb(0.75, 0.12, 0.08),
+            Color::srgb(0.92, 0.90, 0.84),
+            Color::srgb(0.76, 0.54, 0.36),
+            Color::srgb(0.65, 0.38, 0.08),
+            false,
+            1.18,
+            true,
+            true,
+            false,
+        ),
+        h(
+            "Gabriella",
+            Color::srgb(0.48, 0.12, 0.72),
+            Color::srgb(1.0, 0.68, 0.95),
+            Color::srgb(0.91, 0.69, 0.50),
+            Color::srgb(0.42, 0.08, 0.58),
+            false,
+            0.98,
+            true,
+            true,
+            false,
+        ),
+        h(
+            "Nova",
+            Color::srgb(0.10, 0.18, 0.82),
+            Color::srgb(0.10, 1.0, 0.88),
+            Color::srgb(0.84, 0.64, 0.50),
+            Color::srgb(0.04, 0.82, 0.92),
+            true,
+            0.94,
+            false,
+            true,
+            true,
+        ),
+        h(
+            "Aurora",
+            Color::srgb(0.16, 0.58, 0.42),
+            Color::srgb(0.78, 1.0, 0.62),
+            Color::srgb(0.90, 0.72, 0.55),
+            Color::srgb(0.14, 0.62, 0.28),
+            false,
+            1.02,
+            true,
+            true,
+            false,
+        ),
+        h(
+            "Fortuna",
+            Color::srgb(0.68, 0.22, 0.10),
+            Color::srgb(1.0, 0.92, 0.30),
+            Color::srgb(0.92, 0.70, 0.52),
+            Color::srgb(0.68, 0.48, 0.06),
+            false,
+            0.96,
+            false,
+            true,
+            false,
+        ),
     ]
 }
 
@@ -133,47 +225,158 @@ fn build_registry(
     let primary = matte(materials, hero.outfit);
     let suit = matte(materials, scl(hero.outfit, 0.55));
     let accent = matte(materials, hero.accent);
-    let steel = metal(materials, mix(Color::srgb(0.60, 0.63, 0.70), hero.accent, 0.30));
+    let steel = metal(
+        materials,
+        mix(Color::srgb(0.60, 0.63, 0.70), hero.accent, 0.30),
+    );
     let skin = matte(materials, hero.skin);
-    let glw = glow(materials, hero.eye, if hero.emissive_eyes { 6.0 } else { 3.0 });
+    let glw = glow(
+        materials,
+        hero.eye,
+        if hero.emissive_eyes { 6.0 } else { 3.0 },
+    );
 
     let mut reg = PartRegistry::default();
     let mut add = |id, mesh, material, sockets| {
-        reg.insert(PartPrefab { id, mesh, material, sockets })
+        reg.insert(PartPrefab {
+            id,
+            mesh,
+            material,
+            sockets,
+        })
     };
 
-    add("torso", organic(meshes, Vec3::new(0.145 * w, 0.175, 0.097)), suit.clone(), vec![
-        s("neck", 0.0, 0.18, 0.0),
-        sr("shoulder_l", -0.135 * w, 0.13, 0.0, Quat::from_rotation_z(-0.12)),
-        sr("shoulder_r", 0.135 * w, 0.13, 0.0, Quat::from_rotation_z(0.12)),
-        s("pauldron_l", -0.16 * w, 0.155, 0.0),
-        s("pauldron_r", 0.16 * w, 0.155, 0.0),
-        s("hip_l", -0.072 * w, -0.165, 0.0),
-        s("hip_r", 0.072 * w, -0.165, 0.0),
-        s("chest", 0.0, 0.05, -0.092),
-        s("back", 0.0, 0.10, 0.088),
-        s("belt", 0.0, -0.15, -0.04),
-    ]);
-    add("chest_plate", plate(meshes, Vec3::new(0.125 * w, 0.135, 0.03)), primary.clone(), vec![s("mount", 0.0, 0.0, 0.028)]);
-    add("cape", plate(meshes, Vec3::new(0.13 * w, 0.24, 0.014)), accent.clone(), vec![s("mount", 0.0, 0.22, 0.0)]);
-    add("buckle", gem(meshes, Vec3::new(0.045, 0.035, 0.03)), glw.clone(), vec![s("mount", 0.0, 0.0, 0.03)]);
-    add("head", organic(meshes, Vec3::new(0.088, 0.10, 0.094)), skin.clone(), vec![
-        s("neck_joint", 0.0, -0.085, 0.0),
-        s("crown", 0.0, 0.06, 0.012),
-        s("face", 0.0, 0.005, -0.094),
-        s("face_l", -0.036, 0.012, -0.09),
-        s("face_r", 0.036, 0.012, -0.09),
-    ]);
-    add("helmet", plate(meshes, Vec3::new(0.10, 0.072, 0.10)), primary.clone(), vec![s("rim", 0.0, -0.03, 0.0)]);
-    add("visor", gem(meshes, Vec3::new(0.072, 0.022, 0.022)), glw.clone(), vec![s("mount", 0.0, 0.0, 0.015)]);
-    add("eye", gem(meshes, Vec3::new(0.017, 0.022, 0.013)), glw.clone(), vec![s("mount", 0.0, 0.0, 0.01)]);
-    add("pauldron", plate(meshes, Vec3::new(0.085 * w, 0.06, 0.09)), primary.clone(), vec![s("cap", 0.0, -0.03, 0.0)]);
-    add("arm_upper", organic(meshes, Vec3::new(0.04 * l, 0.105, 0.042 * l)), suit.clone(), vec![s("shoulder", 0.0, 0.10, 0.0), s("elbow", 0.0, -0.10, 0.0)]);
-    add("arm_lower", organic(meshes, Vec3::new(0.034 * l, 0.095, 0.036 * l)), suit.clone(), vec![s("elbow", 0.0, 0.09, 0.0), s("wrist", 0.0, -0.09, 0.0)]);
-    add("hand", organic(meshes, Vec3::new(0.044 * l, 0.055, 0.032 * l)), if hero.gauntlets { steel.clone() } else { skin.clone() }, vec![s("wrist", 0.0, 0.052, 0.0)]);
-    add("thigh", organic(meshes, Vec3::new(0.06 * l, 0.105, 0.062 * l)), suit.clone(), vec![s("hip", 0.0, 0.095, 0.0), s("knee", 0.0, -0.095, 0.0)]);
-    add("shin", organic(meshes, Vec3::new(0.05 * l, 0.125, 0.052 * l)), if hero.boots { steel.clone() } else { suit.clone() }, vec![s("knee", 0.0, 0.12, 0.0), s("ankle", 0.0, -0.12, 0.0)]);
-    add("foot", plate(meshes, Vec3::new(0.052, 0.04, 0.10)), if hero.boots { steel.clone() } else { accent.clone() }, vec![s("ankle", 0.0, 0.04, 0.05)]);
+    add(
+        "torso",
+        organic(meshes, Vec3::new(0.145 * w, 0.175, 0.097)),
+        suit.clone(),
+        vec![
+            s("neck", 0.0, 0.18, 0.0),
+            sr(
+                "shoulder_l",
+                -0.135 * w,
+                0.13,
+                0.0,
+                Quat::from_rotation_z(-0.12),
+            ),
+            sr(
+                "shoulder_r",
+                0.135 * w,
+                0.13,
+                0.0,
+                Quat::from_rotation_z(0.12),
+            ),
+            s("pauldron_l", -0.16 * w, 0.155, 0.0),
+            s("pauldron_r", 0.16 * w, 0.155, 0.0),
+            s("hip_l", -0.072 * w, -0.165, 0.0),
+            s("hip_r", 0.072 * w, -0.165, 0.0),
+            s("chest", 0.0, 0.05, -0.092),
+            s("back", 0.0, 0.10, 0.088),
+            s("belt", 0.0, -0.15, -0.04),
+        ],
+    );
+    add(
+        "chest_plate",
+        plate(meshes, Vec3::new(0.125 * w, 0.135, 0.03)),
+        primary.clone(),
+        vec![s("mount", 0.0, 0.0, 0.028)],
+    );
+    add(
+        "cape",
+        plate(meshes, Vec3::new(0.13 * w, 0.24, 0.014)),
+        accent.clone(),
+        vec![s("mount", 0.0, 0.22, 0.0)],
+    );
+    add(
+        "buckle",
+        gem(meshes, Vec3::new(0.045, 0.035, 0.03)),
+        glw.clone(),
+        vec![s("mount", 0.0, 0.0, 0.03)],
+    );
+    add(
+        "head",
+        organic(meshes, Vec3::new(0.088, 0.10, 0.094)),
+        skin.clone(),
+        vec![
+            s("neck_joint", 0.0, -0.085, 0.0),
+            s("crown", 0.0, 0.06, 0.012),
+            s("face", 0.0, 0.005, -0.094),
+            s("face_l", -0.036, 0.012, -0.09),
+            s("face_r", 0.036, 0.012, -0.09),
+        ],
+    );
+    add(
+        "helmet",
+        plate(meshes, Vec3::new(0.10, 0.072, 0.10)),
+        primary.clone(),
+        vec![s("rim", 0.0, -0.03, 0.0)],
+    );
+    add(
+        "visor",
+        gem(meshes, Vec3::new(0.072, 0.022, 0.022)),
+        glw.clone(),
+        vec![s("mount", 0.0, 0.0, 0.015)],
+    );
+    add(
+        "eye",
+        gem(meshes, Vec3::new(0.017, 0.022, 0.013)),
+        glw.clone(),
+        vec![s("mount", 0.0, 0.0, 0.01)],
+    );
+    add(
+        "pauldron",
+        plate(meshes, Vec3::new(0.085 * w, 0.06, 0.09)),
+        primary.clone(),
+        vec![s("cap", 0.0, -0.03, 0.0)],
+    );
+    add(
+        "arm_upper",
+        organic(meshes, Vec3::new(0.04 * l, 0.105, 0.042 * l)),
+        suit.clone(),
+        vec![s("shoulder", 0.0, 0.10, 0.0), s("elbow", 0.0, -0.10, 0.0)],
+    );
+    add(
+        "arm_lower",
+        organic(meshes, Vec3::new(0.034 * l, 0.095, 0.036 * l)),
+        suit.clone(),
+        vec![s("elbow", 0.0, 0.09, 0.0), s("wrist", 0.0, -0.09, 0.0)],
+    );
+    add(
+        "hand",
+        organic(meshes, Vec3::new(0.044 * l, 0.055, 0.032 * l)),
+        if hero.gauntlets {
+            steel.clone()
+        } else {
+            skin.clone()
+        },
+        vec![s("wrist", 0.0, 0.052, 0.0)],
+    );
+    add(
+        "thigh",
+        organic(meshes, Vec3::new(0.06 * l, 0.105, 0.062 * l)),
+        suit.clone(),
+        vec![s("hip", 0.0, 0.095, 0.0), s("knee", 0.0, -0.095, 0.0)],
+    );
+    add(
+        "shin",
+        organic(meshes, Vec3::new(0.05 * l, 0.125, 0.052 * l)),
+        if hero.boots {
+            steel.clone()
+        } else {
+            suit.clone()
+        },
+        vec![s("knee", 0.0, 0.12, 0.0), s("ankle", 0.0, -0.12, 0.0)],
+    );
+    add(
+        "foot",
+        plate(meshes, Vec3::new(0.052, 0.04, 0.10)),
+        if hero.boots {
+            steel.clone()
+        } else {
+            accent.clone()
+        },
+        vec![s("ankle", 0.0, 0.04, 0.05)],
+    );
     reg
 }
 
@@ -189,8 +392,20 @@ fn build_recipe(hero: &Hero) -> CharacterRecipe {
         a("torso", "neck", "head", "head", "neck_joint"),
         a("head", "crown", "helmet", "helmet", "rim"),
         a("torso", "chest", "chest_plate", "chest_plate", "mount"),
-        a("torso", "shoulder_l", "arm_upper_l", "arm_upper", "shoulder"),
-        a("torso", "shoulder_r", "arm_upper_r", "arm_upper", "shoulder"),
+        a(
+            "torso",
+            "shoulder_l",
+            "arm_upper_l",
+            "arm_upper",
+            "shoulder",
+        ),
+        a(
+            "torso",
+            "shoulder_r",
+            "arm_upper_r",
+            "arm_upper",
+            "shoulder",
+        ),
         a("arm_upper_l", "elbow", "arm_lower_l", "arm_lower", "elbow"),
         a("arm_upper_r", "elbow", "arm_lower_r", "arm_lower", "elbow"),
         a("arm_lower_l", "wrist", "hand_l", "hand", "wrist"),
@@ -218,7 +433,11 @@ fn build_recipe(hero: &Hero) -> CharacterRecipe {
     if hero.belt {
         at.push(a("torso", "belt", "buckle", "buckle", "mount"));
     }
-    CharacterRecipe { root_slot: "torso", root_part: "torso", attachments: at }
+    CharacterRecipe {
+        root_slot: "torso",
+        root_part: "torso",
+        attachments: at,
+    }
 }
 
 fn main() {
@@ -246,12 +465,20 @@ fn setup(
             .looking_at(Vec3::new(0.0, 0.85, 0.0), Vec3::Y),
     ));
     commands.spawn((
-        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: true, ..default() },
+        DirectionalLight {
+            illuminance: 9000.0,
+            shadow_maps_enabled: true,
+            ..default()
+        },
         Transform::from_xyz(4.0, 8.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     // Fill light from the opposite side.
     commands.spawn((
-        DirectionalLight { illuminance: 3500.0, shadow_maps_enabled: false, ..default() },
+        DirectionalLight {
+            illuminance: 3500.0,
+            shadow_maps_enabled: false,
+            ..default()
+        },
         Transform::from_xyz(-5.0, 4.0, -3.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     // Ground.

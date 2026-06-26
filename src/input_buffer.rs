@@ -205,8 +205,14 @@ mod tests {
 
         // One fixed tick consumes both edges.
         let tick = buf.consume();
-        assert!(tick.edges.jump, "jump edge from frame 1 must survive to the tick");
-        assert!(tick.edges.melee_light, "melee edge from frame 2 must survive");
+        assert!(
+            tick.edges.jump,
+            "jump edge from frame 1 must survive to the tick"
+        );
+        assert!(
+            tick.edges.melee_light,
+            "melee edge from frame 2 must survive"
+        );
 
         // A second tick with no new input sees no edges (no double-fire).
         let next = buf.consume();

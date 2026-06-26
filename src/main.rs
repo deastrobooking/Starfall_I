@@ -5,9 +5,9 @@
 // for correctness-oriented lints while allowing those ECS-heavy shapes.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+use crate::physics::prelude::*;
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
-use crate::physics::prelude::*;
 
 mod chapters;
 mod character_blueprint;
@@ -19,11 +19,11 @@ mod damage;
 mod discussion;
 mod events;
 mod final_war;
+mod game_loop;
 mod hacking;
 mod hero_roster;
-mod lsystem;
-mod game_loop;
 mod input_buffer;
+mod lsystem;
 mod modular_character;
 mod perks;
 mod physics;

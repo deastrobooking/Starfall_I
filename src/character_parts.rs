@@ -1193,6 +1193,7 @@ fn spawn_body_chroma_frame(
     );
 }
 
+#[allow(clippy::approx_constant)]
 fn spawn_body_rift_mantle(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
