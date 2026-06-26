@@ -31,11 +31,11 @@
       "level": 1,
       "experience": 0,
       "credits": 0,
-      "health_current": 100.0,
+      "health_current": 69.39999,
       "health_max": 100.0,
       "stamina": 100.0,
       "max_stamina": 100.0,
-      "armor": 100.0,
+      "armor": 28.59997,
       "max_armor": 100.0
     }
   ],
@@ -222,7 +222,7 @@
     "faction_pressures": [
       {
         "faction": "DimensionalAlien",
-        "pressure": 672
+        "pressure": 714
       },
       {
         "faction": "DragonRoyalty",
@@ -233,8 +233,8 @@
         "pressure": 0
       }
     ],
-    "pressure_tick_timer": 9.560154,
-    "coordinated_raid_timer": 9.829122
+    "pressure_tick_timer": 9.541961,
+    "coordinated_raid_timer": 9.827456
   },
   "save_version": 2,
   "campaign_complete": false

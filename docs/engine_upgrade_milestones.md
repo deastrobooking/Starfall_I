@@ -81,8 +81,9 @@ To prevent label collision across the three living roadmaps, use these prefixes 
 | `M#` | Engine / campaign strategy milestones | `docs/engine_upgrade_milestones.md` (this file) |
 | `MM#` | Motion mechanics / traversal milestones | `docs/motion_mechanics_roadmap.md` |
 | `AI#` | Enemy AI behavior milestones | `docs/ai_enemy_mechanics_roadmap.md` (future) |
+| `EC#` | Engine core (fixed-tick, combat substrate, profiling, extraction) | `docs/engine_roadmap.md` |
 
-Examples: "M7 Connected Platformer Route Network", "MM3 Zip And Mountain Pull", "AI2 Patrol Behavior".
+Examples: "M7 Connected Platformer Route Network", "MM3 Zip And Mountain Pull", "AI2 Patrol Behavior", "EC1 Fixed-Tick Simulation Core".
 
 ## Milestones
 

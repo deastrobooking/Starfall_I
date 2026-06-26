@@ -222,7 +222,7 @@
     "faction_pressures": [
       {
         "faction": "DimensionalAlien",
-        "pressure": 672
+        "pressure": 693
       },
       {
         "faction": "DragonRoyalty",
@@ -233,8 +233,8 @@
         "pressure": 0
       }
     ],
-    "pressure_tick_timer": 9.560154,
-    "coordinated_raid_timer": 9.829122
+    "pressure_tick_timer": 9.547734,
+    "coordinated_raid_timer": 9.817917
   },
   "save_version": 2,
   "campaign_complete": false

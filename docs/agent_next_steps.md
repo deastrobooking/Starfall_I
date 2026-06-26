@@ -335,8 +335,9 @@ avoid ambiguity across the three living roadmaps:
 | `M#` | Engine / campaign strategy | `docs/engine_upgrade_milestones.md` |
 | `MM#` | Motion mechanics / traversal | `docs/motion_mechanics_roadmap.md` |
 | `AI#` | Enemy AI behavior | `docs/ai_enemy_mechanics_roadmap.md` (future) |
+| `EC#` | Engine core (fixed-tick, combat substrate, profiling) | `docs/engine_roadmap.md` |
 
-Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol".
+Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol", "EC1 Fixed-Tick Core".
 
 ## Work Rules For Future Agents
 
@@ -347,7 +348,7 @@ Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol".
 - Do not hide save migrations. Use `serde(default)` and tests.
 - Do not add a new engine version casually. Follow
   `docs/engine_upgrade_milestones.md`.
-- Use `M#` / `MM#` / `AI#` prefixes when referencing milestones; do not mix them.
+- Use `M#` / `MM#` / `AI#` / `EC#` prefixes when referencing milestones; do not mix them.
 - Keep star-beam, high-fantasy sci-fi, kid-friendly tone. Avoid realistic
   firearm language and grim presentation.
 - Update docs when changing controls, save scope, world scale, map flow, boss

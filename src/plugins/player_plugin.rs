@@ -27,6 +27,7 @@ use crate::events::*;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
 use crate::player_mesh::attach_modular_player_mesh;
+use crate::game_loop::{fixed_motor_off, fixed_motor_on, SimConfig};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe, CameraShake,
@@ -108,6 +109,7 @@ impl Plugin for PlayerPlugin {
             .add_systems(OnEnter(AppState::Playing), (spawn_players, grab_cursor))
             .add_systems(OnEnter(AppState::MainMenu), cleanup_players_for_menu)
             .add_systems(OnExit(AppState::Playing), release_cursor)
+            // EC1b OFF path (default): the original single chain, unchanged.
             .add_systems(
                 Update,
                 (
@@ -124,7 +126,38 @@ impl Plugin for PlayerPlugin {
                     dungeon_crawl_party_pull_system,
                 )
                     .chain()
-                    .run_if(in_state(AppState::Playing)),
+                    .run_if(in_state(AppState::Playing))
+                    .run_if(fixed_motor_off),
+            )
+            // EC1b ON path: presentation/look stays per-frame in Update…
+            .add_systems(
+                Update,
+                (
+                    dedupe_player_entities,
+                    player_look,
+                    camera_shake_system,
+                    update_camera_post_processing,
+                    shared_encounter_camera_mode_system,
+                    shared_encounter_party_pull_system,
+                    dungeon_crawl_party_pull_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing))
+                    .run_if(fixed_motor_on),
+            )
+            // …and the simulation (traversal → grapple → motor → impact) runs at
+            // the fixed tick. Translation is flushed to Rapier in PostUpdate.
+            .add_systems(
+                FixedUpdate,
+                (
+                    traversal_mode_switch_update,
+                    grapple_hook_update,
+                    player_movement,
+                    grapple_hook_impact_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing))
+                    .run_if(fixed_motor_on),
             )
             .add_systems(
                 Update,
@@ -148,6 +181,15 @@ impl Plugin for PlayerPlugin {
                     .after(PhysicsSet::Writeback)
                     .before(TransformSystems::Propagate)
                     .run_if(in_state(AppState::Playing)),
+            )
+            // EC1b: flush accumulated fixed-tick translation to Rapier once per
+            // frame, before the physics step reads it.
+            .add_systems(
+                PostUpdate,
+                flush_motor_translation
+                    .before(PhysicsSet::SyncBackend)
+                    .run_if(in_state(AppState::Playing))
+                    .run_if(fixed_motor_on),
             );
     }
 }
@@ -1220,11 +1262,24 @@ fn traversal_mode_switch_update(
 }
 
 // ── Movement & Physics ────────────────────────────────────────────────────────
+/// Flush per-tick accumulated translation (EC1b fixed-motor mode) onto the Rapier
+/// controller once per frame, then clear it. Rapier steps per-frame, so this is
+/// where many fixed ticks (or zero) collapse into a single move-and-slide input.
+fn flush_motor_translation(
+    mut q: Query<(&mut KinematicCharacterController, &mut PlayerMovement), With<Player>>,
+) {
+    for (mut controller, mut movement) in q.iter_mut() {
+        controller.translation = Some(movement.motor_accum);
+        movement.motor_accum = Vec3::ZERO;
+    }
+}
+
 fn player_movement(
     time: Res<Time>,
     dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
     player_config: Res<LocalPlayerConfig>,
+    sim: Res<SimConfig>,
     mut player_q: Query<
         (
             &mut KinematicCharacterController,
@@ -1275,7 +1330,11 @@ fn player_movement(
             jetpack.mode = FlightMode::Grounded;
             grapple.begin_recovery();
             edge_grab.is_hanging = false;
-            controller.translation = Some(Vec3::ZERO);
+            if sim.fixed_motor {
+                movement.motor_accum += Vec3::ZERO;
+            } else {
+                controller.translation = Some(Vec3::ZERO);
+            }
             state.force(PlayerState::Idle);
             continue;
         }
@@ -1429,9 +1488,13 @@ fn player_movement(
                 started_jump = true;
                 state.force(PlayerState::Jetpack);
             } else if pi.interact {
-                controller.translation = Some(
-                    Vec3::Y * edge_grab.climb_boost * dt * 60.0 + edge_grab.wall_normal * 0.25,
-                );
+                let climb =
+                    Vec3::Y * edge_grab.climb_boost * dt * 60.0 + edge_grab.wall_normal * 0.25;
+                if sim.fixed_motor {
+                    movement.motor_accum += climb;
+                } else {
+                    controller.translation = Some(climb);
+                }
                 movement.is_grounded = false;
                 edge_grab.is_hanging = false;
                 edge_grab.cooldown_timer = edge_grab.grab_cooldown;
@@ -1447,7 +1510,11 @@ fn player_movement(
                 movement.velocity.y = -0.12;
                 state.transition(PlayerState::Jetpack);
             } else {
-                controller.translation = Some(Vec3::ZERO);
+                if sim.fixed_motor {
+                    movement.motor_accum += Vec3::ZERO;
+                } else {
+                    controller.translation = Some(Vec3::ZERO);
+                }
                 state.force(PlayerState::Hanging);
                 continue;
             }
@@ -1494,7 +1561,11 @@ fn player_movement(
             edge_grab.hang_timer = 0.0;
             movement.velocity = Vec3::ZERO;
             movement.ground_velocity = Vec3::ZERO;
-            controller.translation = Some(Vec3::ZERO);
+            if sim.fixed_motor {
+                movement.motor_accum += Vec3::ZERO;
+            } else {
+                controller.translation = Some(Vec3::ZERO);
+            }
             state.force(PlayerState::Hanging);
             continue;
         }
@@ -1668,7 +1739,11 @@ fn player_movement(
         }
 
         let translation = (h_vel + Vec3::new(0.0, movement.velocity.y, 0.0)) * dt * 60.0;
-        controller.translation = Some(translation);
+        if sim.fixed_motor {
+            movement.motor_accum += translation;
+        } else {
+            controller.translation = Some(translation);
+        }
 
         if movement.is_grounded && !dodge.is_dodging {
             if input_strength > 0.05 {

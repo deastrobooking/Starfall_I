@@ -22,6 +22,8 @@ mod final_war;
 mod hacking;
 mod hero_roster;
 mod lsystem;
+mod game_loop;
+mod input_buffer;
 mod modular_character;
 mod perks;
 mod player_mesh;
@@ -127,6 +129,10 @@ fn main() {
         .register_type::<CharacterDesignSnapshot>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
+        // EC0: engine-core loop scaffolding (GameSet ordering + profiling overlay).
+        .add_plugins(game_loop::GameLoopPlugin)
+        // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
+        .add_plugins(input_buffer::InputBufferPlugin)
         .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
         // Game plugins
         .add_plugins((

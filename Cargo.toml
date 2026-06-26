@@ -23,6 +23,8 @@ objc2 = "0.6.4"
 [features]
 # Use dynamic linking for faster incremental dev builds:  cargo run --features dynamic
 dynamic = ["bevy/dynamic_linking"]
+# EC0: profile with Tracy:  cargo run --release --features tracy  (then open the Tracy client)
+tracy = ["bevy/trace_tracy"]
 
 [profile.dev]
 opt-level = 1
