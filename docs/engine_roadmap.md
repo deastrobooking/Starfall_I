@@ -43,7 +43,7 @@ promise first:
 2. **Non-destructive.** The existing motor, camera, state machines, and content
    stay. We slide a deterministic, profiled, frame-data substrate *underneath*
    them — migrations, not rewrites.
-3. **Physics for queries, custom motor for feel.** Rapier handles colliders,
+3. **Physics for queries, custom motor for feel.** Avian handles colliders,
    shape/ray casts, moving platforms, props, ragdolls. The custom motor owns
    acceleration, swing, dash, buffering, coyote time, lock-on, hitstop.
 4. **Measure before optimizing.** Profiling lands first (EC0). Assembly/SIMD are
@@ -54,18 +54,23 @@ promise first:
 
 ## Engine version policy
 
-- **Stay on Bevy 0.18.1 + Rapier 0.34** for the EC0-EC3 foundation.
+- **Track current stable Bevy deliberately.** In open source, staying close to
+  the active engine release keeps us near docs, examples, bug fixes, community
+  answers, and plugin momentum.
+- Current local engine branch baseline is Bevy `0.19.0` + Avian `0.7`. Local
+  compile and automated test gates pass; manual macOS controller/play smoke is
+  still required before merging the engine branch.
 - Bevy 0.19 is available: the official news post announced it on June 19, 2026,
-  and GitHub's `v0.19.0` release tag is marked latest. Its relevant wins are
-  real, but they pay off after the foundation:
-  - EC4/visuals: improved skinned-mesh culling, contact shadows, and richer
-    authored scene workflows.
-  - EC5/tools/UI: text input, app settings, diagnostics overlay, and Feathers/BSN
-    improvements.
-  - EC6+/world scale: big-scene rendering improvements and contiguous query
-    access.
-- Upgrade only on a branch after physics-backend parity is verified and a manual
-  smoke path exists. Do **not** block the foundation on the engine upgrade.
+  and GitHub's `v0.19.0` release tag is marked latest. Its relevant wins matter
+  now, not only later:
+  - Visual/world scale: big-scene rendering improvements, contact shadows,
+    improved skinned-mesh culling, and contiguous query access.
+  - Tools/UI: text input, app settings, diagnostics overlay, Feathers/BSN
+    improvements, and richer authored scene workflows.
+- Upgrade on an isolated branch. If physics-backend parity is not ready,
+  document the exact blocker and choose deliberately: wait for compatibility,
+  evaluate an alternative backend, or park the branch. Do not mix the engine bump
+  with feel tuning.
 
 ---
 
@@ -100,6 +105,23 @@ is configured; budgets documented (sim < 2–4 ms, motor < 0.5 ms, combat < 0.5 
 **Status:** perf overlay + Tracy flag + `GameSet` scaffold landed via `GameLoopPlugin`
 (`src/game_loop.rs`). Per-system `.in_set()` assignment completes in EC1.
 
+### EC0.5 — Current Bevy tracking *(open-source freshness gate)*
+**Goal:** Move the project to the current stable Bevy line without breaking the
+playable Starfall loop.
+- Create `codex/engine-upgrade-0.19`.
+- Read the official 0.18→0.19 migration guide, 0.19 release notes, and
+  physics-backend compatibility notes before changing code.
+- Update Bevy and the physics backend together when a compatible path exists.
+  If physics parity is blocked, capture the blocker and the fallback decision
+  instead of hiding it inside gameplay work.
+- Fix migration changes by subsystem: app/plugins, schedules, rendering,
+  UI/text, asset loading, physics/colliders, input, diagnostics, and tests.
+**Acceptance:** `cargo check`, targeted road/terrain/controller tests, and a
+manual macOS smoke route pass. Main stays on the last green engine baseline until
+the branch passes.
+**Status:** local compile/test gates pass on Bevy `0.19.0` + Avian `0.7`; manual
+smoke remains before merge.
+
 ### EC1 — Fixed-tick simulation core *(the keystone)*
 **Goal:** Deterministic, frame-rate-independent simulation.
 - Move motor / combat / enemy-AI / physics-read into `FixedUpdate` (start 64 Hz,
@@ -124,19 +146,19 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   OFF = the original `Update` chain, byte-identical (default). ON = the sim
   sub-chain (`traversal → grapple → motor → impact`) runs in `FixedUpdate` at
   `FIXED_HZ`; per-tick translation accumulates in `PlayerMovement.motor_accum`
-  and `flush_motor_translation` applies the sum to the Rapier controller once per
-  frame in `PostUpdate` before `PhysicsSet::SyncBackend` (Rapier steps per-frame,
-  so ticks must be coalesced). Smoke-tested: ON path boots + runs with no panic;
+  and `flush_motor_translation` applies the sum to the compatibility controller
+  once per frame in `PostUpdate` before `PhysicsCompatSet::CharacterController`.
+  Smoke-tested: ON path boots + runs with no panic;
   local suite was green at landing. **Still to do in EC1b polish:**
   `PreviousTransform` render interpolation (expect minor judder >`FIXED_HZ` fps
   until then); switch the motor to read the EC1a `FixedInput` buffer instead of
-  `PlayerInput` directly; move Rapier itself into `FixedUpdate` if per-frame
-  coalescing proves insufficient.
+  `PlayerInput` directly; revisit Avian stepping if per-frame coalescing proves
+  insufficient.
 
 ### EC2 — Collision layers + frame-data combat
 **Goal:** Fighting-game precision inside the action RPG.
 - Physics layers: `body / hurtbox / hitbox / pushbox / grapple-sensor /
-  interaction` (Rapier `CollisionGroups`/`SolverGroups`).
+  interaction` (Avian collision layers/groups).
 - `MoveDef` data assets: startup/active/recovery frames, cancel windows, hitstop,
   self-freeze, knockback, meter cost, armor, movement lock. The hardcoded
   `LIGHT_COMBO` tuples become data.
@@ -159,8 +181,8 @@ gameplay logic; hits produce hitstop + knockback + shake.
 **Goal:** Authored clips + procedural layering; decide skinning.
 - Keep the procedural motor-driven layer; add Bevy `AnimationGraph` authored
   clips blended on top; layered IK (head look, hand-to-target, foot placement).
-- Decide skinned-mesh vs. rigid-part. **If skinning is adopted, that is the
-  trigger to evaluate the Bevy 0.19 upgrade** (skinned-mesh culling).
+- Decide skinned-mesh vs. rigid-part. If Bevy 0.19 has landed by then, lean on
+  its improved skinned-mesh culling for production characters.
 - Aligns with `MM7–MM9`.
 **Acceptance:** base locomotion uses authored clips; procedural IK corrects to
 ground/targets; motor state drives blend weights.
@@ -192,8 +214,8 @@ thin glue.
 
 ## What to explicitly NOT do yet
 - ❌ Hand-written assembly / SIMD (wait for EC0 profiler evidence).
-- ❌ Bevy 0.19 upgrade during EC0-EC3 (wait for physics-backend parity plus a
-  migration branch/manual smoke path; revisit at EC4).
+- ❌ Ungated engine bumps on main (current-Bevy tracking happens on a branch and
+  lands only after compile/test/smoke validation).
 - ❌ Workspace split before EC7 (premature; boundaries unproven).
 - ❌ `bevy_silk` cloth (cape is an EC4 vertex-shader job reusing `grass.wgsl`).
 - ❌ Rollback netcode now (EC6 deterministic logs first).

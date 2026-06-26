@@ -19,12 +19,13 @@ For the current agent-facing execution order, use `docs/agent_next_steps.md`.
 - Companions now carry an owner index, spawn defaults per active player, follow/heal that owner, and assign recruited allies to the player who collected the beacon.
 - Crafting queues now carry an owner index, chests reward the nearest player, and vehicle buffs apply only to the activating player.
 - Kill rewards are shared across active players.
-- The stale Rapier compatibility comment in `Cargo.toml` now matches the pinned dependency.
+- The stale physics compatibility comment in `Cargo.toml` was removed when the
+  engine branch moved to Avian.
 - The legacy `heavy_water_save.json` root save artifact was removed; the active runtime save remains `starfall_i_save.json` and is ignored.
 - Chapter definitions are cached through a `OnceLock` catalog, so chapter lookup no longer rebuilds the 14-chapter vector every time the director or UI asks for data.
 - `Esc` / controller Start now transitions between `Playing` and `Paused` with a lightweight overlay, and HUD setup is idempotent when resuming.
 - Character customization now writes editable `CharacterBlueprint` data with body proportions, procedural part/material/socket/rig/animation/movement recipe sections, body-shape steppers in the designer, save/load support, and gameplay-linked movement/stat tuning.
-- Pause now freezes Rapier physics, exposes save and save-and-title actions, shows control hints, and cleans up preserved play-session entities when returning to the title.
+- Pause now pauses the Avian physics clock, exposes save and save-and-title actions, shows control hints, and cleans up preserved play-session entities when returning to the title.
 - Chapter 1 now has a north-coast ocean route, an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat vehicle.
 - The Chapter 1 starter/lab area now reserves a clearer ground zone so opaque or translucent world props are less likely to block early walking routes.
 - Default heroes now spawn through upgraded runtime blueprints, body-derived stride/agility animation tuning, and a visual foot-grounding lift so the live player path matches the newer character design system more closely.
@@ -41,7 +42,7 @@ For the current agent-facing execution order, use `docs/agent_next_steps.md`.
 - Damage events now carry player ownership, so split-screen camera shake and damage vignette feedback target the damaged player.
 - Chapter encounter placement now uses the party center, and airship deck placement uses `PlayerIndex` slots instead of query order.
 - Dev armor element cycling no longer calls `get_single_mut`; keyboard cycling targets P1 only.
-- Engine dependencies are upgraded to Bevy 0.18.1 and bevy_rapier3d 0.34.0, with buffered gameplay events migrated to Bevy messages and the changed 0.18 hierarchy, camera, cursor, render-import, ambient-light, and Rapier trimesh APIs handled.
+- Engine dependencies are upgraded through Bevy 0.19.0 with Avian 0.7 on the current engine branch, with buffered gameplay events migrated to Bevy messages and the changed hierarchy, camera, cursor, render-import, ambient-light, text, and physics APIs handled.
 - Engine milestone guidance now lives in `docs/engine_upgrade_milestones.md`, `agent.md` points future agents there, and GitHub Actions mirrors the local format/check/clippy/test gates.
 - The multiplayer ownership policy is now documented in architecture/systems docs, and the first save tests cover per-player records, legacy hydration, `player_index` lookup, sorted save output, and clamped runtime application.
 - Default player visuals now move away from tiny voxel/chibi blocks toward taller Dreamcast-anime sci-fantasy heroes with capsule limbs, layered armor, expressive eyes/hair, and glow accents.
@@ -246,7 +247,7 @@ The crate currently carries a broad `#[allow(dead_code)]` at the crate root that
 ### 22. Heightfield vs trimesh collider evaluation
 **Files:** `src/plugins/world_plugin.rs`, `Cargo.toml`
 
-The terrain currently uses a Rapier `TriMesh` collider built from the generated mesh triangles. For a 200-mile heightmap, a trimesh with many subdivisions can be slow to query and expensive to build. Rapier also supports `HeightField` colliders, which are O(1) to query and use less memory.
+The terrain currently uses a triangle-mesh collider built from the generated mesh triangles. For a 200-mile heightmap, a trimesh with many subdivisions can be slow to query and expensive to build. Avian also supports heightfield-style collider workflows worth evaluating for this terrain scale.
 
 **Fix (evaluate, don't blindly apply):** profile the current trimesh collider build time and query cost. If it is a measurable bottleneck, test switching the main terrain collider to `HeightField` using the same `terrain_surface_y()` sampling grid. Document the outcome either way.
 
@@ -276,4 +277,4 @@ All character recipes, world colors, and lighting values are currently hardcoded
 
 The giant 200x200 mile Everest terrain map, its biomes, and cities load massively heavy loops inside `world_plugin.rs`. Spawning this synchronously or computing collision for all distant terrain risks massive lag spikes.
 
-**Fix:** Adopt level-of-detail (LOD), frustum culling overrides, or spatial chunking so Rapier and Bevy graphics pipelines only load/compute the active gameplay vicinity while streaming distant blocks asynchronously. Use benchmarking utilities (like `bevy_tracy`) to lock in optimization budgets.
+**Fix:** Adopt level-of-detail (LOD), frustum culling overrides, or spatial chunking so Avian and Bevy graphics pipelines only load/compute the active gameplay vicinity while streaming distant blocks asynchronously. Use benchmarking utilities (like `bevy_tracy`) to lock in optimization budgets.

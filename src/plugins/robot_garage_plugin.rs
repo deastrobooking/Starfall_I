@@ -102,14 +102,14 @@ fn setup_garage(
             // Title
             root.spawn((
                 Text::new("ROBOT GARAGE"),
-                TextFont { font_size: 36.0, ..default() },
+                TextFont { font_size: FontSize::Px(36.0), ..default() },
                 TextColor(header_color),
             ));
 
             // Parts inventory panel
             root.spawn((
                 Text::new(""),
-                TextFont { font_size: 15.0, ..default() },
+                TextFont { font_size: FontSize::Px(15.0), ..default() },
                 TextColor(Color::srgb(0.75, 0.90, 0.75)),
                 PartsInventoryText,
             ));
@@ -132,12 +132,12 @@ fn setup_garage(
                 .with_children(|col| {
                     col.spawn((
                         Text::new("── YOUR ROBOT PETS ──"),
-                        TextFont { font_size: 14.0, ..default() },
+                        TextFont { font_size: FontSize::Px(14.0), ..default() },
                         TextColor(dim_color),
                     ));
                     col.spawn((
                         Text::new(""),
-                        TextFont { font_size: 15.0, ..default() },
+                        TextFont { font_size: FontSize::Px(15.0), ..default() },
                         TextColor(body_color),
                         PetRosterText,
                     ));
@@ -153,12 +153,12 @@ fn setup_garage(
                 .with_children(|col| {
                     col.spawn((
                         Text::new("── ASSEMBLY FORM ──"),
-                        TextFont { font_size: 14.0, ..default() },
+                        TextFont { font_size: FontSize::Px(14.0), ..default() },
                         TextColor(dim_color),
                     ));
                     col.spawn((
                         Text::new(""),
-                        TextFont { font_size: 15.0, ..default() },
+                        TextFont { font_size: FontSize::Px(15.0), ..default() },
                         TextColor(body_color),
                         FormBrowserText,
                     ));
@@ -168,7 +168,7 @@ fn setup_garage(
             // Active assembly status
             root.spawn((
                 Text::new(""),
-                TextFont { font_size: 16.0, ..default() },
+                TextFont { font_size: FontSize::Px(16.0), ..default() },
                 TextColor(Color::srgb(1.0, 0.92, 0.42)),
                 AssemblyStatusText,
             ));
@@ -176,7 +176,7 @@ fn setup_garage(
             // Action feedback
             root.spawn((
                 Text::new(""),
-                TextFont { font_size: 15.0, ..default() },
+                TextFont { font_size: FontSize::Px(15.0), ..default() },
                 TextColor(Color::srgb(1.0, 0.55, 0.55)),
                 ActionFeedbackText,
             ));
@@ -186,7 +186,7 @@ fn setup_garage(
                 Text::new(
                     "[A/←][D/→] / D-pad / LB/RB  Browse    [Enter/A]  Assemble    [X]  Disassemble    [Esc/B]  Back",
                 ),
-                TextFont { font_size: 14.0, ..default() },
+                TextFont { font_size: FontSize::Px(14.0), ..default() },
                 TextColor(dim_color),
             ));
         });

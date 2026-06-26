@@ -1,6 +1,8 @@
 # Starfall I — Architecture Overview
 
-Bevy 0.18 + Rapier 3D. Plugin-per-feature structure; all game logic lives in `src/plugins/`.
+Bevy 0.19 + Avian 3D, with a local physics compatibility shim in
+`src/physics.rs`. Plugin-per-feature structure; all game logic lives in
+`src/plugins/`.
 
 ## Module Map
 
@@ -127,7 +129,10 @@ Party-shared exceptions:
 ## Key Design Choices
 
 - **Editable character recipes, not baked meshes**: `CharacterBlueprint` stores body sliders, procedural part recipes, materials, sockets, rig metadata, animation profiles, movement profiles, and gameplay stats. The current cartoon renderer consumes the body/material portions, while the data model leaves room for fuller mesh, rig, and editor tooling.
-- **KinematicPositionBased physics**: Player is a Rapier kinematic capsule; movement is computed manually each frame via `KinematicCharacterController.translation`. This gives full control over wall jumps, edge grabs, and jetpack without fighting Rapier's dynamic solver.
+- **Kinematic controller physics**: Player movement is computed manually each
+  frame through the local `KinematicCharacterController` compatibility component,
+  then applied with Avian move-and-slide. This gives full control over wall
+  jumps, edge grabs, and jetpack without fighting a dynamic solver.
 - **State machines on components**: Both `PlayerStateMachine` and `EnemyStateMachine` use allow-list transition tables so illegal state jumps are caught at the call site. `force()` bypasses the table for death/reset paths.
 - **Chapter director replaces wave loop**: `CurrentChapter` + `ChapterPlugin` replaces the old `WaveInfo`-driven loop. `WaveInfo` is kept alive only for legacy loot and save compatibility.
 - **Cached chapter catalog**: `chapters/mod.rs` builds the 14 chapter definitions once through `OnceLock`; `get_chapter()` clones from that catalog instead of rebuilding scripts every frame.

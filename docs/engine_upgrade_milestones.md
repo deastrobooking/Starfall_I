@@ -1,25 +1,25 @@
 # Starfall I Engine Upgrade And Milestone Runbook
 
 This runbook is the durable guide for future Codex and engineer work on
-Starfall I engine upgrades and production milestones. The current stable
-baseline is Bevy `0.18.1` with `bevy_rapier3d` `0.34`.
+Starfall I engine upgrades and production milestones. The current local engine
+baseline is Bevy `0.19.0` with Avian `0.7`.
 
 ## Baseline
 
-- Engine stack: Rust 2021, Bevy `0.18.1`, `bevy_rapier3d` `0.34`, `serde`,
+- Engine stack: Rust 2021, Bevy `0.19.0`, Avian `0.7`, `serde`,
   `serde_json`, `rand`, and `noise`.
 - Current Bevy message model: gameplay communication uses `Message`,
   `MessageReader`, `MessageWriter`, and `App::add_message`.
 - Current compatibility debt: `src/rendering.rs` provides local bundle aliases
   for Bevy bundle shapes, and the migration touched hierarchy/despawn,
   camera/HDR, cursor options, render imports, ambient lighting, image data, and
-  Rapier trimesh construction.
-- Current validation baseline: `cargo fmt`, `cargo check`, and `cargo test`
-  passed after the Bevy 0.18 migration. Automated tests are still thin.
-- Upgrade policy: future engine upgrades are milestone-gated. Bevy 0.19 is
-  available, but EC0-EC3 stay on Bevy `0.18.1` + Rapier `0.34` until physics
-  backend parity and a manual smoke path are verified. Do not chase every release
-  automatically.
+  Rapier-to-Avian physics compatibility layer.
+- Current validation baseline: `cargo check`, targeted road/terrain/collider
+  tests, and full `cargo test` pass on the Bevy 0.19 + Avian branch. Manual
+  macOS smoke validation is still required before merge.
+- Upgrade policy: track current stable Bevy deliberately, because an open-source
+  project benefits from current docs, examples, fixes, and plugin momentum.
+  Engine branches still land only after local gates and manual smoke validation.
 
 ## Local And CI Gates
 
@@ -55,21 +55,22 @@ Manual macOS smoke validation is required for engine bumps:
 ## Future Engine Upgrade Procedure
 
 1. Create a branch named `codex/engine-upgrade-<version>`.
-2. Read the official Bevy migration guide, Bevy release notes, Rapier/Bevy
+2. Target the current stable Bevy line unless there is a documented blocker.
+3. Read the official Bevy migration guide, Bevy release notes, physics-backend
    compatibility notes, and any affected crate release notes.
-3. Update `Cargo.toml` and regenerate `Cargo.lock`.
-4. Fix compile/API changes by subsystem, keeping changes scoped:
+4. Update `Cargo.toml` and regenerate `Cargo.lock`.
+5. Fix compile/API changes by subsystem, keeping changes scoped:
    - app/bootstrap/plugins
    - events/messages
    - rendering/materials/cameras
    - hierarchy/despawn/children
    - input/window/cursor
-   - physics/colliders/Rapier config
+   - physics/colliders/backend config
    - UI/text/layout
    - save/progression tests
-5. Run the local gates and the manual macOS smoke checklist.
-6. Update this runbook with a short migration note.
-7. Push the branch and merge only after local and CI gates pass.
+6. Run the local gates and the manual macOS smoke checklist.
+7. Update this runbook with a short migration note.
+8. Push the branch and merge only after local and CI gates pass.
 
 If the upgrade requires a risky architecture choice, stop and document the
 decision before changing broad gameplay code.
@@ -91,13 +92,14 @@ Examples: "M7 Connected Platformer Route Network", "MM3 Zip And Mountain Pull", 
 
 ### M0: Baseline And Documentation
 
-Goal: make the Bevy 0.18 migration a clean, discoverable baseline.
+Goal: make the current engine migration a clean, discoverable baseline.
 
-- Record Bevy `0.18.1` and Rapier `0.34` in active docs.
+- Record Bevy `0.19.0` and Avian `0.7` in active docs.
 - Keep `agent.md` as the concise Codex handoff and point it here for details.
 - Keep `README.md`, `docs/architecture.md`, `docs/systems.md`, and
   `docs/improvements.md` aligned with the current engine.
-- Remove stale Bevy `0.15` and Rapier `0.28` references from active docs.
+- Remove stale Bevy/Rapier baseline references from active docs unless they are
+  clearly historical migration notes.
 
 Acceptance:
 
@@ -153,10 +155,10 @@ Goal: pay down migration debt without broad rewrites.
 
 - Keep local render bundle shims in `src/rendering.rs` only while they reduce
   churn. Replace them gradually when touching nearby spawn code.
-- Prefer Bevy 0.18-native APIs for new work: messages, current hierarchy
+- Prefer current Bevy APIs for new work: messages, current hierarchy
   components, current camera/HDR patterns, current cursor resources, and
   current UI/text layout types.
-- Keep Rapier collider creation fallibility explicit; generated geometry may
+- Keep physics collider creation fallibility explicit; generated geometry may
   use `expect` only when the mesh generation invariant is documented.
 - Keep `cargo clippy --all-targets -- -D warnings` passing. Bevy system
   signature allowances belong at crate level; do not hide correctness warnings.
@@ -164,7 +166,7 @@ Goal: pay down migration debt without broad rewrites.
 Acceptance:
 
 - Every future engine upgrade ends with a short migration note in this file.
-- New code follows current Bevy/Rapier APIs instead of extending compatibility
+- New code follows current Bevy/Avian APIs instead of extending compatibility
   debt.
 
 ### M4: Full Roadmap After Foundation
@@ -927,6 +929,19 @@ Primary files: `src/final_war.rs`, `src/plugins/world_plugin.rs`,
 `src/plugins/radio_plugin.rs`.
 
 ## Migration Notes
+
+### 2026-06-26: Bevy 0.19 + Avian Branch
+
+- Upgraded Bevy to `0.19.0`.
+- Replaced `bevy_rapier3d` with Avian `0.7` because Rapier `0.34` still tracks
+  Bevy `0.18`.
+- Added `src/physics.rs` as a compatibility shim for existing collider
+  constructors, kinematic character controller fields, pause behavior, and
+  world-space scaled travel colliders.
+- Updated Bevy 0.19 API changes for text font sizes, HDR import path,
+  light shadow-map fields, and mutable asset handles.
+- Verified with `cargo check`, targeted road/terrain/collider tests, and full
+  `cargo test`. Manual macOS controller/play smoke remains before merge.
 
 ### 2026-06-07: Bevy 0.18 Baseline
 

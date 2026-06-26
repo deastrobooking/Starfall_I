@@ -1020,7 +1020,7 @@ fn spawn_design_ui(
                 panel.spawn((
                     Text::new(format!("HERO ATELIER\n{}", hero_name.to_uppercase())),
                     TextFont {
-                        font_size: 25.0,
+                        font_size: FontSize::Px(25.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.92, 0.76, 0.42)),
@@ -1028,7 +1028,7 @@ fn spawn_design_ui(
                 panel.spawn((
                     Text::new(base_model_status_text(design_data)),
                     TextFont {
-                        font_size: 12.0,
+                        font_size: FontSize::Px(12.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.72, 0.78, 0.84)),
@@ -1239,7 +1239,7 @@ fn spawn_design_ui(
                             btn.spawn((
                                 Text::new("BACK"),
                                 TextFont {
-                                    font_size: 18.0,
+                                    font_size: FontSize::Px(18.0),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -1261,7 +1261,7 @@ fn spawn_design_ui(
                             btn.spawn((
                                 Text::new("CONFIRM"),
                                 TextFont {
-                                    font_size: 18.0,
+                                    font_size: FontSize::Px(18.0),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -1276,7 +1276,7 @@ fn spawn_section_label(parent: &mut ChildSpawnerCommands, label: &str) {
     parent.spawn((
         Text::new(label),
         TextFont {
-            font_size: 13.0,
+            font_size: FontSize::Px(13.0),
             ..default()
         },
         TextColor(Color::srgb(0.58, 0.61, 0.66)),
@@ -1315,7 +1315,7 @@ fn spawn_design_preset_button(
             button.spawn((
                 Text::new(preset.label()),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: FontSize::Px(13.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.92, 0.91, 0.86)),
@@ -1342,7 +1342,7 @@ fn spawn_prefab_button(parent: &mut ChildSpawnerCommands, label: &str, action: P
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 12.0,
+                    font_size: FontSize::Px(12.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.78, 0.90, 0.96)),
@@ -1376,7 +1376,7 @@ fn spawn_part_preset_row(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 10.0,
+                    font_size: FontSize::Px(10.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.50, 0.54, 0.60)),
@@ -1384,7 +1384,7 @@ fn spawn_part_preset_row(
             button.spawn((
                 Text::new(part_slot_value_label(design_data, slot)),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.90, 0.77, 0.48)),
@@ -1423,7 +1423,7 @@ fn spawn_physique_preset_button(
             button.spawn((
                 Text::new(preset.label()),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: FontSize::Px(13.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.92, 0.91, 0.86)),
@@ -1441,7 +1441,7 @@ fn spawn_swatch_row(
     parent.spawn((
         Text::new(label),
         TextFont {
-            font_size: 11.0,
+            font_size: FontSize::Px(11.0),
             ..default()
         },
         TextColor(Color::srgb(0.52, 0.55, 0.60)),
@@ -1506,7 +1506,7 @@ fn spawn_toggle(
             btn.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: FontSize::Px(13.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.92, 0.91, 0.86)),
@@ -1532,7 +1532,7 @@ fn spawn_body_row(
             row.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 10.0,
+                    font_size: FontSize::Px(10.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.56, 0.58, 0.64)),
@@ -1545,7 +1545,7 @@ fn spawn_body_row(
             row.spawn((
                 Text::new(format!("{:.2}", body_field_value(body, field))),
                 TextFont {
-                    font_size: 12.0,
+                    font_size: FontSize::Px(12.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.90, 0.86, 0.76)),
@@ -1579,7 +1579,7 @@ fn spawn_step_button(parent: &mut ChildSpawnerCommands, field: BodyField, delta:
             btn.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 16.0,
+                    font_size: FontSize::Px(16.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),

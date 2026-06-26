@@ -57,7 +57,7 @@ pub struct FixedTickCount(pub u64);
 /// **Default OFF** → the motor runs in `Update` exactly as before (shipping path
 /// is unchanged). Toggle at runtime with **F10**, or start with the env var
 /// `STARFALL_FIXED_MOTOR=1`. When ON, the motor's simulation systems run in
-/// `FixedUpdate` and their translation is flushed to Rapier once per frame.
+/// `FixedUpdate` and their translation is flushed to physics once per frame.
 #[derive(Resource)]
 pub struct SimConfig {
     pub fixed_motor: bool,
@@ -161,7 +161,7 @@ fn setup_perf_overlay(mut commands: Commands) {
                 PerfOverlayText,
                 Text::new("PERF (F9)"),
                 TextFont {
-                    font_size: 12.0,
+                    font_size: FontSize::Px(12.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.60, 1.0, 0.72)),

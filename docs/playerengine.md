@@ -42,7 +42,7 @@ Starfall's long-term character system is a full skeletal modular character
 pipeline, not a collection of independent pose-swapped meshes. Every player
 mechanic after MM7 should assume that a hero has:
 
-- A gameplay root: the Rapier kinematic capsule and `PlayerMovement` remain the
+- A gameplay root: the Avian-backed kinematic capsule and `PlayerMovement` remain the
   authoritative world position, velocity, collision body, and save/load anchor.
 - A visual skeleton: `SkeletonRig` and `JointKind` own visual pose, FK, IK,
   motion response, sockets, and attachment transforms.
@@ -85,7 +85,8 @@ Non-goals for MM7-MM11:
 
 ## Current Baseline
 
-- Players are Rapier kinematic capsules driven through `PlayerMovement`.
+- Players are Avian-backed kinematic capsules driven through `PlayerMovement`
+  and the local `KinematicCharacterController` compatibility component.
 - Current mechanics include analog walking/sprinting, stamina, coyote time, jump
   buffering, early jump release, apex float, stronger fall gravity, wall slide,
   wall jump charges, intentional hang/climb, dodge, parry, jetpack lift,
@@ -209,7 +210,7 @@ Implementation status as of 2026-06-09:
 
 - Use kinematic-friendly swing math first: cable direction, desired cable
   length, radial correction, tangential momentum preservation, and damping.
-- Only introduce Rapier joints if the kinematic solution proves insufficient.
+- Only introduce physics joints if the kinematic solution proves insufficient.
 - Add pump/steer inputs, release impulse, swing length tuning, and coyote-style
   release forgiveness.
 - Add visual line, attach spark, and release trail.
@@ -450,7 +451,8 @@ Acceptance:
 - Robot part swaps attach to the correct joints and survive character designer
   preview reloads.
 - No gameplay system reads a joint entity as authoritative player position; root
-  movement and collision remain owned by `PlayerMovement` and Rapier.
+  movement and collision remain owned by `PlayerMovement` and Avian-backed
+  controller physics.
 
 ### MM8: Procedural Animation, IK, And AAA Motion Response
 
@@ -489,8 +491,8 @@ Implementation status as of 2026-06-09:
 - A first analytical two-bone leg IK helper blends hip/knee/ankle rotation and
   ankle translation toward foot targets. Wrist targets for wall slide, hang,
   swing, zip, and grapple are also blended in root-local skeleton space.
-- The first MM8 slice is visual-only and does not move the Rapier player root.
-  True Rapier foot raycasts, authored ledge/socket wrist targets, foot locking,
+- The first MM8 slice is visual-only and does not move the physics player root.
+  True Avian foot raycasts, authored ledge/socket wrist targets, foot locking,
   and slope-normal ankle roll remain the next MM8 implementation bridge.
 
 #### MM8.1 IK Target Components
@@ -523,7 +525,7 @@ that IK resolves into joint rotations, not mesh transforms.
 #### MM8.2 Foot Placement
 
 - Sample walkable ground under `LeftAnkle` and `RightAnkle`.
-- Prefer Rapier raycasts against `WalkableSurface`/world geometry when available;
+- Prefer Avian raycasts against `WalkableSurface`/world geometry when available;
   a procedural terrain-height fallback is acceptable for early visual-only IK.
 - Adjust ankle targets up/down within a short range so feet sit on slopes.
 - Use an analytical two-bone leg solve for hip/knee/ankle rotation. Clamp

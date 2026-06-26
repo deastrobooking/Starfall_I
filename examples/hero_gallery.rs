@@ -246,12 +246,12 @@ fn setup(
             .looking_at(Vec3::new(0.0, 0.85, 0.0), Vec3::Y),
     ));
     commands.spawn((
-        DirectionalLight { illuminance: 9000.0, shadows_enabled: true, ..default() },
+        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: true, ..default() },
         Transform::from_xyz(4.0, 8.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     // Fill light from the opposite side.
     commands.spawn((
-        DirectionalLight { illuminance: 3500.0, shadows_enabled: false, ..default() },
+        DirectionalLight { illuminance: 3500.0, shadow_maps_enabled: false, ..default() },
         Transform::from_xyz(-5.0, 4.0, -3.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     // Ground.

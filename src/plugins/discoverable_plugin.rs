@@ -454,7 +454,7 @@ fn set_node_material(
     node_kind: PuzzleNodeKind,
     active: bool,
 ) {
-    if let Some(mat) = materials.get_mut(&material.0) {
+    if let Some(mut mat) = materials.get_mut(&material.0) {
         let (base_color, emissive) = match (node_kind, active) {
             (PuzzleNodeKind::SwitchPylon, false) => (
                 Color::srgb(0.16, 0.24, 0.85),

@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
-use bevy_rapier3d::prelude::*;
+use crate::physics::prelude::*;
 
 mod chapters;
 mod character_blueprint;
@@ -26,6 +26,7 @@ mod game_loop;
 mod input_buffer;
 mod modular_character;
 mod perks;
+mod physics;
 mod player_mesh;
 mod plugins;
 mod procedural_meshes;
@@ -90,7 +91,8 @@ fn main() {
                 }),
         )
         // Physics
-        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugins(PhysicsPlugins::default())
+        .add_plugins(PhysicsCompatPlugin)
         // State
         .init_state::<AppState>()
         // Global resources

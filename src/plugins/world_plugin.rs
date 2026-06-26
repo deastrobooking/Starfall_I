@@ -70,11 +70,11 @@ struct DebugColliderBox {
     size: Vec3,
 }
 
-/// Rapier normally multiplies collider shapes by `GlobalTransform` scale.
+/// Physics backends normally multiply collider shapes by `GlobalTransform` scale.
 /// Scaled unit-cube roads/bridges below already specify collider half-extents
 /// in world units, so this prevents invisible oversized blockers.
-fn world_space_collider_scale() -> bevy_rapier3d::prelude::ColliderScale {
-    bevy_rapier3d::prelude::ColliderScale::Absolute(Vec3::ONE)
+fn world_space_collider_scale() -> crate::physics::prelude::ColliderScale {
+    crate::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
 }
 
 // ── Grass wind material ───────────────────────────────────────────────────────
@@ -352,7 +352,7 @@ fn update_day_night(
     }
 
     for sky_mat in sky_q.iter() {
-        if let Some(material) = materials.get_mut(&sky_mat.0) {
+        if let Some(mut material) = materials.get_mut(&sky_mat.0) {
             material.base_color = sky;
             let lin = sky.to_linear();
             material.emissive = LinearRgba::new(
@@ -1313,7 +1313,7 @@ fn collider_debug_toggle_system(
     mesh_collider_q: Query<
         (Entity, &Mesh3d),
         (
-            With<bevy_rapier3d::prelude::Collider>,
+            With<crate::physics::prelude::Collider>,
             With<WorldGeometry>,
             Without<ColliderDebugSource>,
             Without<ColliderDebugVisual>,
@@ -1322,7 +1322,7 @@ fn collider_debug_toggle_system(
     box_collider_q: Query<
         (Entity, &DebugColliderBox),
         (
-            With<bevy_rapier3d::prelude::Collider>,
+            With<crate::physics::prelude::Collider>,
             With<WorldGeometry>,
             Without<Mesh3d>,
             Without<ColliderDebugSource>,
@@ -2650,7 +2650,7 @@ fn spawn_lighting(
             directional_light: DirectionalLight {
                 color: Color::srgb(1.0, 0.92, 0.76),
                 illuminance: 28_000.0,
-                shadows_enabled: true,
+                shadow_maps_enabled: true,
                 ..default()
             },
             ..default()
@@ -2663,7 +2663,7 @@ fn spawn_lighting(
             directional_light: DirectionalLight {
                 color: Color::srgb(0.62, 0.76, 1.0),
                 illuminance: 8_000.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             ..default()
@@ -2738,7 +2738,7 @@ fn spawn_lighting(
                 color: Color::srgb(0.0, 0.72, 1.0),
                 intensity: 620_000.0,
                 range: 550.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(-80.0, 220.0, 60.0),
@@ -2754,7 +2754,7 @@ fn spawn_lighting(
                 color: Color::srgb(1.0, 0.52, 0.12),
                 intensity: 260_000.0,
                 range: 450.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(120.0, 160.0, -80.0),
@@ -2776,8 +2776,8 @@ fn spawn_ground_plane(commands: &mut Commands) {
         WorldGeometry,
         WalkableSurface,
         DebugColliderBox { size },
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
     ));
 }
 
@@ -2863,7 +2863,7 @@ fn spawn_chapter_map_locations(
                         38_000.0
                     },
                     range: if location.id.0 == 6 { 110.0 } else { 62.0 },
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(
@@ -3093,8 +3093,8 @@ fn spawn_secret_cave_solid(
             ..default()
         },
         WorldGeometry,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
     ));
     if walkable {
         entity.insert(WalkableSurface);
@@ -3270,7 +3270,7 @@ fn spawn_secret_cave_system(
                         },
                         intensity: 5_500.0,
                         range: 16.0,
-                        shadows_enabled: false,
+                        shadow_maps_enabled: false,
                         ..default()
                     },
                     transform: Transform::from_translation(crystal_pos + Vec3::Y * shard_h * 0.45),
@@ -3310,12 +3310,12 @@ fn spawn_secret_cave_system(
                 transform: Transform::from_translation(base).with_rotation(rotation),
                 ..default()
             },
-            bevy_rapier3d::prelude::Collider::cuboid(
+            crate::physics::prelude::Collider::cuboid(
                 platform_size.x * 0.5,
                 platform_size.y * 0.5,
                 platform_size.z * 0.5,
             ),
-            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+            crate::physics::prelude::RigidBody::KinematicPositionBased,
             WorldGeometry,
             WalkableSurface,
             MovingPlatform {
@@ -3338,7 +3338,7 @@ fn spawn_secret_cave_system(
                 },
                 intensity: 18_000.0,
                 range: 38.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(chamber + Vec3::Y * 4.0),
@@ -3704,7 +3704,7 @@ fn spawn_great_scientist_temple(
                     color: scientist_temple_light_color(spec.theme),
                     intensity: 24_000.0,
                     range: 44.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_translation(origin + rot * local),
@@ -3789,8 +3789,8 @@ fn spawn_scientist_temple_gate(
                 closed,
                 open,
             },
-            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
-            bevy_rapier3d::prelude::Collider::cuboid(2.9, 4.2, 0.55),
+            crate::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::physics::prelude::Collider::cuboid(2.9, 4.2, 0.55),
         ));
     }
 
@@ -4080,7 +4080,7 @@ fn spawn_dragon_lair_dungeon(
                     color: light_color,
                     intensity: 18_000.0,
                     range: 38.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_translation(origin + rot * local),
@@ -4158,7 +4158,7 @@ fn spawn_ch6_crown_dungeon_extras(
                 color: Color::srgb(0.50, 0.90, 1.0),
                 intensity: 8_000.0,
                 range: 14.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
@@ -4244,7 +4244,7 @@ fn spawn_ch7_ember_dungeon_extras(
                 color: Color::srgb(1.0, 0.42, 0.05),
                 intensity: 9_000.0,
                 range: 14.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
@@ -4329,7 +4329,7 @@ fn spawn_ch8_fangroot_dungeon_extras(
                 color: Color::srgb(0.35, 0.90, 0.20),
                 intensity: 8_500.0,
                 range: 14.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
@@ -4414,7 +4414,7 @@ fn spawn_ch9_garden_dungeon_extras(
                 color: Color::srgb(1.0, 0.50, 0.88),
                 intensity: 8_000.0,
                 range: 14.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
@@ -4499,7 +4499,7 @@ fn spawn_ch10_granite_dungeon_extras(
                 color: Color::srgb(0.95, 0.65, 0.15),
                 intensity: 9_500.0,
                 range: 16.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
@@ -4584,7 +4584,7 @@ fn spawn_ch11_icebreaker_dungeon_extras(
                 color: Color::srgb(0.75, 0.88, 1.0),
                 intensity: 10_000.0,
                 range: 16.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(key_pos + Vec3::Y * 1.5),
@@ -4677,8 +4677,8 @@ fn spawn_dungeon_crawl_gate(
                 closed,
                 open,
             },
-            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
-            bevy_rapier3d::prelude::Collider::cuboid(2.55, 3.7, 0.5),
+            crate::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::physics::prelude::Collider::cuboid(2.55, 3.7, 0.5),
         ));
     }
 
@@ -4733,8 +4733,8 @@ fn spawn_dungeon_pillar(
             ..default()
         },
         WorldGeometry,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(2.4, 1.4),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(2.4, 1.4),
     ));
 }
 
@@ -4784,8 +4784,8 @@ fn spawn_dungeon_moving_bridge(
                 transform: Transform::from_translation(start).with_rotation(rot),
                 ..default()
             },
-            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
-            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::physics::prelude::RigidBody::KinematicPositionBased,
             WorldGeometry,
             WalkableSurface,
             MovingPlatform {
@@ -4831,8 +4831,8 @@ fn spawn_dungeon_turrets(
                     damage: 7.0 + chapter as f32 * 0.35,
                     beam_material: beam_mat.clone(),
                 },
-                bevy_rapier3d::prelude::RigidBody::Fixed,
-                bevy_rapier3d::prelude::Collider::cylinder(0.7, 0.8),
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cylinder(0.7, 0.8),
             ))
             .id();
         commands.entity(turret).with_children(|parent| {
@@ -5572,7 +5572,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(tri_idx));
 
-    let terrain_collider = bevy_rapier3d::prelude::Collider::trimesh(col_verts, col_tris)
+    let terrain_collider = crate::physics::prelude::Collider::trimesh(col_verts, col_tris)
         .expect("generated terrain mesh must produce a valid trimesh collider");
 
     commands.spawn((
@@ -5584,7 +5584,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
+        crate::physics::prelude::RigidBody::Fixed,
         terrain_collider,
     ));
 }
@@ -6218,7 +6218,7 @@ fn spawn_bio_city_tamborn(
                 color: Color::srgb(0.34, 1.0, 0.64),
                 intensity: 36_000.0,
                 range: 260.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(center + Vec3::Y * 134.0),
@@ -6421,7 +6421,7 @@ fn spawn_mother_tree_tamborn(
                     color: Color::srgb(0.35, 1.0, 0.52),
                     intensity,
                     range,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_translation(base + Vec3::Y * light_y),
@@ -6649,8 +6649,8 @@ fn spawn_tamborn_platform(
         WorldGeometry,
         WalkableSurface,
         Name::new(name),
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(thickness * 0.5, radius),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(thickness * 0.5, radius),
     ));
 }
 
@@ -6719,8 +6719,8 @@ fn spawn_rope_bridge_between(
         WorldGeometry,
         WalkableSurface,
         Name::new("Tamborn Rope Bridge"),
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
             width * 0.5,
             deck_thickness * 0.5,
             horizontal_len * 0.5,
@@ -6928,7 +6928,7 @@ fn spawn_giant_mana_tree(
                     color: Color::srgb(0.35, 1.0, 0.48),
                     intensity: 6_500.0 * scale.clamp(0.8, 3.0),
                     range: 18.0 * scale.clamp(1.0, 3.4),
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_translation(base + Vec3::Y * (trunk_h * 0.22)),
@@ -7203,8 +7203,8 @@ fn spawn_mountain_path_network(
                     },
                     WorldGeometry,
                     WalkableSurface,
-                    bevy_rapier3d::prelude::RigidBody::Fixed,
-                    bevy_rapier3d::prelude::Collider::cuboid(
+                    crate::physics::prelude::RigidBody::Fixed,
+                    crate::physics::prelude::Collider::cuboid(
                         slab_width * 0.5,
                         0.24,
                         slab_len * 0.5,
@@ -7262,7 +7262,7 @@ fn spawn_mountain_path_network(
                             color: Color::srgb(0.38, 0.96, 1.0),
                             intensity: 14_000.0,
                             range: 72.0,
-                            shadows_enabled: false,
+                            shadow_maps_enabled: false,
                             ..default()
                         },
                         transform: Transform::from_xyz(mx, y + 7.5, mz),
@@ -7355,8 +7355,8 @@ fn spawn_mountain_route_bridges(
                 },
                 WorldGeometry,
                 WalkableSurface,
-                bevy_rapier3d::prelude::RigidBody::Fixed,
-                bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.55, horizontal_len * 0.5),
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cuboid(width * 0.5, 0.55, horizontal_len * 0.5),
                 world_space_collider_scale(),
             ));
 
@@ -7439,8 +7439,8 @@ fn spawn_mountain_route_bridges(
                         ..default()
                     },
                     WorldGeometry,
-                    bevy_rapier3d::prelude::RigidBody::Fixed,
-                    bevy_rapier3d::prelude::Collider::cuboid(width * 0.36, tower_h * 0.5, 2.4),
+                    crate::physics::prelude::RigidBody::Fixed,
+                    crate::physics::prelude::Collider::cuboid(width * 0.36, tower_h * 0.5, 2.4),
                     world_space_collider_scale(),
                 ));
                 commands.spawn((
@@ -7470,7 +7470,7 @@ fn spawn_mountain_route_bridges(
                             },
                             intensity: 8_500.0,
                             range: 42.0,
-                            shadows_enabled: false,
+                            shadow_maps_enabled: false,
                             ..default()
                         },
                         transform: Transform::from_xyz(anchor.x, anchor.y + 5.0, anchor.z),
@@ -7656,8 +7656,8 @@ fn spawn_speed_road_deck_between(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.5),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.5),
         world_space_collider_scale(),
     ));
 
@@ -8089,8 +8089,8 @@ fn spawn_speed_loop_gate(
                 },
                 WorldGeometry,
                 WalkableSurface,
-                bevy_rapier3d::prelude::RigidBody::Fixed,
-                bevy_rapier3d::prelude::Collider::cuboid(segment_width * 0.5, 0.31, arc_len * 0.5),
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cuboid(segment_width * 0.5, 0.31, arc_len * 0.5),
                 world_space_collider_scale(),
             ));
         } else {
@@ -8208,8 +8208,8 @@ fn spawn_npc_road_vehicles(
                 vehicle,
                 Health::new(85.0),
                 Damageable::default(),
-                bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
-                bevy_rapier3d::prelude::Collider::cuboid(4.1, 1.25, 6.6),
+                crate::physics::prelude::RigidBody::KinematicPositionBased,
+                crate::physics::prelude::Collider::cuboid(4.1, 1.25, 6.6),
             ));
             spawned += 1;
         }
@@ -8341,8 +8341,8 @@ fn spawn_range_outpost(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 1.0, depth * 0.5),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(width * 0.5, 1.0, depth * 0.5),
     ));
 
     for side in [-1.0_f32, 1.0] {
@@ -8395,7 +8395,7 @@ fn spawn_range_outpost(
                 color: Color::srgb(0.36, 0.86, 1.0),
                 intensity: 35_000.0,
                 range: 90.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(location.x, base_y + 18.0, location.z),
@@ -8568,8 +8568,8 @@ fn spawn_exploration_settlement(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(0.28, plaza_radius),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(0.28, plaza_radius),
     ));
 
     spawn_settlement_roads(commands, meshes, pal, seed, settlement, origin, rot, layout);
@@ -8617,8 +8617,8 @@ fn spawn_settlement_sky_foundation(
             zone: WorldZone::SkyPlatform,
             height: platform_height,
         },
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(platform_height * 0.5, layout.platform_radius),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(platform_height * 0.5, layout.platform_radius),
     ));
 
     commands.spawn((
@@ -8680,7 +8680,7 @@ fn spawn_settlement_sky_foundation(
                 color: Color::srgb(0.35, 0.90, 1.0),
                 intensity: 42_000.0,
                 range: 150.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(gate.x, origin.y + 12.0, gate.z),
@@ -8718,8 +8718,8 @@ fn spawn_settlement_ramp_span(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, thickness * 0.5, length * 0.5),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(width * 0.5, thickness * 0.5, length * 0.5),
     ));
 
     for side in [-1.0_f32, 1.0] {
@@ -9062,8 +9062,8 @@ fn spawn_settlement_building_pad(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
             (width + pad_extra) * 0.5,
             pad_height * 0.5,
             (depth + pad_extra) * 0.5,
@@ -9225,7 +9225,7 @@ fn spawn_settlement_landmark(
                 },
                 intensity: 38_000.0,
                 range: 120.0 + seeded(seed, settlement.anchor_id.len() as u64) * 80.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(marker.x, ground + landmark_height + 6.0, marker.z),
@@ -9370,7 +9370,7 @@ fn spawn_settlement_discussion_npc(
                 color: Color::srgb(0.50, 0.92, 1.0),
                 intensity: 9_000.0,
                 range: 28.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(pos.x, ground + 4.4, pos.z),
@@ -9406,8 +9406,8 @@ fn spawn_settlement_build_terminal(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(0.17, 3.4),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(0.17, 3.4),
     ));
 
     commands.spawn((
@@ -9456,7 +9456,7 @@ fn spawn_settlement_build_terminal(
                 color: Color::srgb(0.36, 0.96, 1.0),
                 intensity: 18_000.0,
                 range: 42.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(base.x, base.y + 4.1, base.z),
@@ -9556,8 +9556,8 @@ fn spawn_settlement_build_module(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
             pad_size.x * 0.5,
             pad_size.y * 0.5,
             pad_size.z * 0.5,
@@ -9756,7 +9756,7 @@ fn spawn_settlement_build_module(
                 color: Color::srgb(0.32, 0.88, 1.0),
                 intensity: 8_000.0 + tier as f32 * 3_000.0,
                 range: 28.0 + tier as f32 * 8.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(base + Vec3::Y * 6.5),
@@ -9955,7 +9955,7 @@ fn spawn_settlement_mountain_inset(
                 color: Color::srgb(0.30, 0.86, 1.0),
                 intensity: 20_000.0,
                 range: 70.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(gate_base + Vec3::Y * 15.0),
@@ -10031,8 +10031,8 @@ fn spawn_mountain_inset_piece(
 
     if collider {
         commands.entity(entity).insert((
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
 }
@@ -10114,7 +10114,7 @@ fn spawn_city_guardian_ships(
                         color: Color::srgb(0.40, 0.88, 1.0),
                         intensity: 18_000.0,
                         range: 60.0,
-                        shadows_enabled: false,
+                        shadow_maps_enabled: false,
                         ..default()
                     },
                     transform: Transform::from_xyz(0.0, 1.4, 0.0),
@@ -10287,7 +10287,7 @@ fn spawn_city_spy_drones(
                         color: Color::srgb(1.0, 0.18, 0.08),
                         intensity: 7_500.0,
                         range: 22.0,
-                        shadows_enabled: false,
+                        shadow_maps_enabled: false,
                         ..default()
                     },
                     transform: Transform::from_xyz(2.4, 0.2, 0.0),
@@ -10636,7 +10636,7 @@ fn spawn_hidden_reward_room(
                 color: Color::srgb(1.0, 0.76, 0.36),
                 intensity: 18_000.0,
                 range: 24.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(center + Vec3::Y * 3.2),
@@ -10702,7 +10702,7 @@ fn spawn_hidden_room_puzzle_dressing(
                 color: Color::srgb(0.45, 0.9, 1.0),
                 intensity: 6_500.0,
                 range: 12.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_translation(center + rotation * Vec3::new(0.0, 1.8, -3.2)),
@@ -10740,8 +10740,8 @@ fn spawn_hidden_room_piece(
 
     if collider {
         commands.entity(entity).insert((
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
     if walkable {
@@ -11074,8 +11074,8 @@ fn spawn_moving_brick(
             transform: Transform::from_translation(start),
             ..default()
         },
-        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
-        bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::physics::prelude::RigidBody::KinematicPositionBased,
         WorldGeometry,
         WalkableSurface,
         MovingPlatform {
@@ -11106,8 +11106,8 @@ fn spawn_rotating_elevator(
             transform: Transform::from_translation(center + Vec3::X * radius),
             ..default()
         },
-        bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
-        bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
+        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::physics::prelude::RigidBody::KinematicPositionBased,
         WorldGeometry,
         WalkableSurface,
         RotatingElevator {
@@ -11137,8 +11137,8 @@ fn spawn_sling_pad(
             transform: Transform::from_translation(position),
             ..default()
         },
-        bevy_rapier3d::prelude::Collider::cylinder(0.11, radius),
-        bevy_rapier3d::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(0.11, radius),
+        crate::physics::prelude::RigidBody::Fixed,
         WorldGeometry,
         WalkableSurface,
         SlingShotPad {
@@ -11174,8 +11174,8 @@ fn spawn_course_block(
 
     if collider {
         commands.entity(entity).insert((
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
     if walkable {
@@ -11629,7 +11629,7 @@ fn spawn_rooftop_details(
                     color: beacon_color,
                     intensity: 6_000.0,
                     range: 18.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(x, top + mast_h + 0.5, z),
@@ -11983,8 +11983,8 @@ fn spawn_board_boost_ramp(
             cooldown_timer: 0.0,
             force_hoverboard: true,
         },
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.36, length * 0.5),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(width * 0.5, 0.36, length * 0.5),
     ));
 }
 
@@ -12005,8 +12005,8 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             zone: WorldZone::Highway,
             height: 0.8,
         },
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(road_half, 0.4, 9.0),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(road_half, 0.4, 9.0),
     ));
 
     // North-south cross
@@ -12023,8 +12023,8 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             zone: WorldZone::Highway,
             height: 0.8,
         },
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(9.0, 0.4, road_half),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(9.0, 0.4, road_half),
     ));
 
     spawn_boost_road_span(
@@ -12064,8 +12064,8 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
                 ..default()
             },
             WorldGeometry,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(1.25, 4.0, 1.25),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(1.25, 4.0, 1.25),
         ));
     }
 }
@@ -12182,8 +12182,8 @@ fn spawn_sky_platforms(
                 zone: WorldZone::SkyPlatform,
                 height: 3.0,
             },
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cylinder(1.5, size),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cylinder(1.5, size),
         ));
     }
 }
@@ -12244,8 +12244,8 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
                 zone: WorldZone::SkyPlatform,
                 height: 1.5,
             },
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, 0.75, len * 0.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(width * 0.5, 0.75, len * 0.5),
             world_space_collider_scale(),
         ));
 
@@ -12376,7 +12376,7 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
                         color: Color::srgb(0.36, 0.92, 1.0),
                         intensity: 9_000.0,
                         range: 46.0,
-                        shadows_enabled: false,
+                        shadow_maps_enabled: false,
                         ..default()
                     },
                     transform: Transform::from_translation(anchor + Vec3::Y * 7.0),
@@ -12459,8 +12459,8 @@ fn spawn_moving_platforms(
                 phase,
                 size,
             },
-            bevy_rapier3d::prelude::RigidBody::KinematicPositionBased,
-            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
 
         for point in [start, end] {
@@ -12519,8 +12519,8 @@ fn spawn_laser_turrets(
                     damage: 7.0 + seeded(seed, i as u64 + 90) * 5.0,
                     beam_material: pal.window_cool.clone(),
                 },
-                bevy_rapier3d::prelude::RigidBody::Fixed,
-                bevy_rapier3d::prelude::Collider::cylinder(0.6, 0.9),
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cylinder(0.6, 0.9),
             ))
             .id();
 
@@ -12570,8 +12570,8 @@ fn spawn_spaceports(
                 zone: WorldZone::Spaceport,
                 height: 2.0,
             },
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cylinder(1.0, 50.0),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cylinder(1.0, 50.0),
         ));
     }
 }
@@ -12853,7 +12853,7 @@ fn spawn_neon_lights(commands: &mut Commands, seed: u64) {
                     color: neon_colors[ci],
                     intensity: 20_000.0,
                     range: 25.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(x, y, z),
@@ -12877,7 +12877,7 @@ fn spawn_street_lights(commands: &mut Commands, seed: u64) {
                     color: Color::srgb(0.9, 0.85, 0.7),
                     intensity: 8_000.0,
                     range: 18.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(x, 7.0, z),
@@ -13001,8 +13001,8 @@ fn spawn_river_bridge(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
             deck_len * 0.5,
             deck_height * 0.5,
             deck_width * 0.5,
@@ -13081,8 +13081,8 @@ fn spawn_chapter_one_ocean_island(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(15.0, 0.07, 157.0),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(15.0, 0.07, 157.0),
     ));
 
     for (z, label_offset) in [(574.0_f32, -18.0_f32), (826.0, 18.0)] {
@@ -13095,8 +13095,8 @@ fn spawn_chapter_one_ocean_island(
             },
             WorldGeometry,
             WalkableSurface,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(12.0, 0.21, 19.0),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(12.0, 0.21, 19.0),
         ));
         commands.spawn((
             PbrBundle {
@@ -13119,8 +13119,8 @@ fn spawn_chapter_one_ocean_island(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(0.36, 74.0),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(0.36, 74.0),
     ));
     commands.spawn((
         PbrBundle {
@@ -13782,8 +13782,8 @@ fn spawn_building(
         WorldGeometry,
         WalkableSurface,
         Building { zone, height },
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(width * 0.5, height * 0.5, depth * 0.5),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(width * 0.5, height * 0.5, depth * 0.5),
     ));
 }
 
@@ -13992,8 +13992,8 @@ fn spawn_tower(
             ..default()
         },
         WorldGeometry,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(body_h * 0.5, radius),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(body_h * 0.5, radius),
     ));
     commands.spawn((
         PbrBundle {
@@ -14034,8 +14034,8 @@ fn spawn_castle_block(
 
     if collider {
         commands.entity(entity).insert((
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
     if walkable {
@@ -14193,7 +14193,7 @@ fn spawn_castle_bridge_and_gate(
                     color: Color::srgb(0.38, 0.96, 1.0),
                     intensity: 12_000.0,
                     range: 54.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(cx, floor + 6.6, z),
@@ -14436,7 +14436,7 @@ fn spawn_aurora_keep_rooms(
                     color: Color::srgb(0.55, 0.85, 1.0),
                     intensity: 9_000.0,
                     range: 18.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(x, floor + 4.8, z),
@@ -14489,8 +14489,8 @@ fn spawn_aurora_castle(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(4.0, 92.0),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(4.0, 92.0),
     ));
     // Mesa trim ring
     commands.spawn((
@@ -14522,8 +14522,8 @@ fn spawn_aurora_castle(
             },
             WorldGeometry,
             WalkableSurface,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
         ));
         // Gold parapet atop each wall
         commands.spawn((
@@ -14718,7 +14718,7 @@ fn spawn_aurora_castle(
                     color: *col,
                     intensity,
                     range: 70.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(lx, ly, lz),
@@ -14792,8 +14792,8 @@ fn spawn_collosar_castle(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(3.0, 82.0),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(3.0, 82.0),
     ));
     // Rocky outcrop ring around platform (jagged stone spires)
     for i in 0..10u32 {
@@ -14815,8 +14815,8 @@ fn spawn_collosar_castle(
                 ..default()
             },
             WorldGeometry,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cylinder(rh * 0.5, rh * 0.1),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cylinder(rh * 0.5, rh * 0.1),
         ));
     }
 
@@ -14838,8 +14838,8 @@ fn spawn_collosar_castle(
             },
             WorldGeometry,
             WalkableSurface,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
         ));
     }
     // Battlements (notched crenellations along north/south walls)
@@ -14874,8 +14874,8 @@ fn spawn_collosar_castle(
                 ..default()
             },
             WorldGeometry,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cylinder(46.0, 11.0),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cylinder(46.0, 11.0),
         ));
         // Fang-like spire cap
         commands.spawn((
@@ -14934,8 +14934,8 @@ fn spawn_collosar_castle(
         },
         WorldGeometry,
         WalkableSurface,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cuboid(29.0, keep_h * 0.5, 24.0),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(29.0, keep_h * 0.5, 24.0),
     ));
 
     // ── Collosar's Sanctum Spire ───────────────────────────────────────────
@@ -14948,8 +14948,8 @@ fn spawn_collosar_castle(
             ..default()
         },
         WorldGeometry,
-        bevy_rapier3d::prelude::RigidBody::Fixed,
-        bevy_rapier3d::prelude::Collider::cylinder(67.5, 16.0),
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(67.5, 16.0),
     ));
     commands.spawn((
         PbrBundle {
@@ -14997,8 +14997,8 @@ fn spawn_collosar_castle(
             },
             WorldGeometry,
             WalkableSurface,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(20.0, 1.75, 3.5),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(20.0, 1.75, 3.5),
         ));
     }
 
@@ -15031,8 +15031,8 @@ fn spawn_collosar_castle(
                 ..default()
             },
             WorldGeometry,
-            bevy_rapier3d::prelude::RigidBody::Fixed,
-            bevy_rapier3d::prelude::Collider::cuboid(3.0, 11.0, 3.0),
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(3.0, 11.0, 3.0),
         ));
     }
     commands.spawn((
@@ -15071,7 +15071,7 @@ fn spawn_collosar_castle(
                     color: Color::srgb(1.0, 0.38, 0.06),
                     intensity,
                     range: 90.0,
-                    shadows_enabled: false,
+                    shadow_maps_enabled: false,
                     ..default()
                 },
                 transform: Transform::from_xyz(lx, ly, lz),
@@ -15135,7 +15135,7 @@ fn spawn_collosar_castle(
                 color: Color::srgb(0.6, 0.8, 1.0),
                 intensity: 320_000.0,
                 range: 420.0,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             transform: Transform::from_xyz(ex_x, ev_ground + 5.0, ex_z),
@@ -15230,7 +15230,7 @@ fn spawn_magic_crystals(
                             color: light_col,
                             intensity: 14_000.0,
                             range: 24.0,
-                            shadows_enabled: false,
+                            shadow_maps_enabled: false,
                             ..default()
                         },
                         transform: Transform::from_xyz(wx, wy + h + 1.0, wz),
@@ -15371,7 +15371,7 @@ mod tests {
     fn scaled_travel_colliders_keep_world_space_extents() {
         assert_eq!(
             world_space_collider_scale(),
-            bevy_rapier3d::prelude::ColliderScale::Absolute(Vec3::ONE)
+            crate::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
         );
     }
 

@@ -3,7 +3,6 @@ use bevy::prelude::*;
 
 use bevy::input::gamepad::{GamepadAxis, GamepadButton, GamepadButtonStateChangedEvent};
 use bevy::input::ButtonState;
-use bevy_rapier3d::prelude::RapierConfiguration;
 
 use crate::chapters::{
     all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
@@ -25,6 +24,7 @@ use crate::damage::Health;
 use crate::discussion::DiscussionState;
 use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
+use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::{save_current_session, SaveParams};
@@ -402,8 +402,8 @@ fn setup_main_menu(mut commands: Commands) {
         BackgroundColor(Color::srgba(0.01, 0.01, 0.05, 1.0)),
         MainMenuRoot,
     )).with_children(|p| {
-        p.spawn((Text::new("STARFALL I"), TextFont { font_size: 72.0, ..default() }, TextColor(Color::srgb(1.0, 0.9, 0.25))));
-        p.spawn((Text::new("Eight siblings, Scallarians, dragon royalty, and star-powered science."), TextFont { font_size: 24.0, ..default() }, TextColor(Color::srgb(0.65, 0.8, 1.0))));
+        p.spawn((Text::new("STARFALL I"), TextFont { font_size: FontSize::Px(72.0), ..default() }, TextColor(Color::srgb(1.0, 0.9, 0.25))));
+        p.spawn((Text::new("Eight siblings, Scallarians, dragon royalty, and star-powered science."), TextFont { font_size: FontSize::Px(24.0), ..default() }, TextColor(Color::srgb(0.65, 0.8, 1.0))));
         p.spawn(Node { height: Val::Px(40.0), ..default() });
         p.spawn((
             Button,
@@ -411,19 +411,19 @@ fn setup_main_menu(mut commands: Commands) {
             BackgroundColor(Color::srgb(0.0, 0.4, 0.8)),
             StartButton,
         )).with_children(|btn| {
-            btn.spawn((Text::new("BEGIN CHAPTER"), TextFont { font_size: 28.0, ..default() }, TextColor(Color::WHITE)));
+            btn.spawn((Text::new("BEGIN CHAPTER"), TextFont { font_size: FontSize::Px(28.0), ..default() }, TextColor(Color::WHITE)));
         });
         p.spawn(Node { height: Val::Px(30.0), ..default() });
         p.spawn((
             Text::new("Controller: scanning..."),
-            TextFont { font_size: 16.0, ..default() },
+            TextFont { font_size: FontSize::Px(16.0), ..default() },
             TextColor(Color::srgb(0.60, 0.82, 1.0)),
             ControllerStatusText,
         ));
         p.spawn(Node { height: Val::Px(16.0), ..default() });
         p.spawn((
             Text::new("WASD / Left Stick Move  |  Mouse / Right Stick Look  |  A/Space Jump  |  Start/Esc Pause\nLMB/RT Star Beam  |  V/B Mana Combos  |  T Star Sabre  |  D-pad Traversal Modes"),
-            TextFont { font_size: 14.0, ..default() }, TextColor(Color::srgb(0.5, 0.5, 0.7)),
+            TextFont { font_size: FontSize::Px(14.0), ..default() }, TextColor(Color::srgb(0.5, 0.5, 0.7)),
         ));
     });
 }
@@ -533,7 +533,7 @@ fn setup_pause_menu(
             root.spawn((
                 Text::new("PAUSED"),
                 TextFont {
-                    font_size: 58.0,
+                    font_size: FontSize::Px(58.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.95, 1.0)),
@@ -541,7 +541,7 @@ fn setup_pause_menu(
             root.spawn((
                 Text::new("Any active player can pause. Save and title actions affect the party."),
                 TextFont {
-                    font_size: 19.0,
+                    font_size: FontSize::Px(19.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.85, 1.0)),
@@ -593,7 +593,7 @@ fn setup_pause_menu(
                         "Quick keys: [S/F5] Save   [T] Save & Title   [F9] Collider Debug",
                     ),
                     TextFont {
-                        font_size: 15.0,
+                        font_size: FontSize::Px(15.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.86, 0.90, 1.0)),
@@ -615,7 +615,7 @@ fn setup_pause_menu(
                 page.spawn((
                     Text::new("CONTROLS / TIPS"),
                     TextFont {
-                        font_size: 30.0,
+                        font_size: FontSize::Px(30.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.9, 0.95, 1.0)),
@@ -625,7 +625,7 @@ fn setup_pause_menu(
                         "Move: WASD / Left Stick     Look: Mouse / Right Stick     Jump: Space / South\nDodge: Q / East     Parry: F / North     Grapple: G / Select+RB     D-pad: Grapple / Hover Jet / Flight / Hoverboard\nFire: LMB / RT     Aim: RMB / LT     Weapons: 1-6 / RB     Special Tools: 7-0 or Select + DPad\nSelect+D-pad: Vehicle / Interact / Weapon Prev / Map     Traversal: wall slide, wall-jump, ledge hang, zip, swing, glide, hover, air dash, hoverboard.",
                     ),
                     TextFont {
-                        font_size: 16.0,
+                        font_size: FontSize::Px(16.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
@@ -635,7 +635,7 @@ fn setup_pause_menu(
                         "Boat: board near a dock, steer along the wake, and dock at the city or island before disembarking. Hidden rooms can contain puzzle props, rewards, armor, XP, and special ability upgrades.",
                     ),
                     TextFont {
-                        font_size: 15.0,
+                        font_size: FontSize::Px(15.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.86, 0.90, 1.0)),
@@ -660,7 +660,7 @@ fn setup_pause_menu(
                 page.spawn((
                     Text::new("SHOP / GARAGE BROWSER"),
                     TextFont {
-                        font_size: 30.0,
+                        font_size: FontSize::Px(30.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.9, 0.95, 1.0)),
@@ -668,7 +668,7 @@ fn setup_pause_menu(
                 page.spawn((
                     Text::new("Browse base outfits, armor shells, weapons, and vehicle frames. Purchase/equip actions will wire into this catalog next."),
                     TextFont {
-                        font_size: 15.0,
+                        font_size: FontSize::Px(15.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
@@ -677,7 +677,7 @@ fn setup_pause_menu(
                     page.spawn((
                         Text::new(format!("{}:", category.label().to_uppercase())),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: FontSize::Px(16.0),
                             ..default()
                         },
                         TextColor(Color::srgb(0.94, 0.76, 0.36)),
@@ -686,7 +686,7 @@ fn setup_pause_menu(
                         page.spawn((
                             Text::new(format_shop_item_row(item)),
                             TextFont {
-                                font_size: 14.0,
+                                font_size: FontSize::Px(14.0),
                                 ..default()
                             },
                             TextColor(Color::srgb(0.86, 0.90, 1.0)),
@@ -709,18 +709,18 @@ fn setup_pause_menu(
             .with_children(|page| {
                 page.spawn((
                     Text::new("SETTINGS"),
-                    TextFont { font_size: 30.0, ..default() },
+                    TextFont { font_size: FontSize::Px(30.0), ..default() },
                     TextColor(Color::srgb(0.9, 0.95, 1.0)),
                 ));
                 page.spawn((
                     Text::new("Difficulty: [1] Easy  [2] Normal  [3] Hard"),
-                    TextFont { font_size: 16.0, ..default() },
+                    TextFont { font_size: FontSize::Px(16.0), ..default() },
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
                     DifficultyText,
                 ));
                 page.spawn((
                     Text::new("Music: [- +]  SFX: [[ ]]  Rumble: [R]"),
-                    TextFont { font_size: 16.0, ..default() },
+                    TextFont { font_size: FontSize::Px(16.0), ..default() },
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
                     VolumeText,
                 ));
@@ -752,7 +752,7 @@ fn spawn_pause_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 21.0,
+                    font_size: FontSize::Px(21.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -801,16 +801,12 @@ fn despawn_pause_menu(mut commands: Commands, q: Query<Entity, With<PauseRoot>>)
     }
 }
 
-fn freeze_physics_on_pause(mut rapier_q: Query<&mut RapierConfiguration>) {
-    for mut rapier in rapier_q.iter_mut() {
-        rapier.physics_pipeline_active = false;
-    }
+fn freeze_physics_on_pause(mut physics_time: ResMut<Time<Physics>>) {
+    physics_time.pause();
 }
 
-fn resume_physics_after_pause(mut rapier_q: Query<&mut RapierConfiguration>) {
-    for mut rapier in rapier_q.iter_mut() {
-        rapier.physics_pipeline_active = true;
-    }
+fn resume_physics_after_pause(mut physics_time: ResMut<Time<Physics>>) {
+    physics_time.unpause();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1020,7 +1016,7 @@ fn setup_chapter_select(
             p.spawn((
                 Text::new("EVEREST RANGE - 200 MILE FAST TRAVEL"),
                 TextFont {
-                    font_size: 40.0,
+                    font_size: FontSize::Px(40.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
@@ -1028,7 +1024,7 @@ fn setup_chapter_select(
             p.spawn((
                 Text::new("1-9 0 Q W R T / click = travel   |   A-H Perks   |   Z-N Tech   |   Y-P/J Weapons   |   M Economy   |   E Character Editor   |   G Garage   |   Esc Back"),
                 TextFont {
-                    font_size: 14.5,
+                    font_size: FontSize::Px(14.5),
                     ..default()
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.85)),
@@ -1090,7 +1086,7 @@ fn setup_chapter_select(
                                 region
                             )),
                             TextFont {
-                                font_size: 13.5,
+                                font_size: FontSize::Px(13.5),
                                 ..default()
                             },
                             TextColor(color),
@@ -1116,7 +1112,7 @@ fn setup_chapter_select(
                 // Header
                 pp.spawn((
                     Text::new(format_perk_header(&perks)),
-                    TextFont { font_size: 13.5, ..default() },
+                    TextFont { font_size: FontSize::Px(13.5), ..default() },
                     TextColor(Color::srgb(0.6, 0.82, 1.0)),
                     PerkPointsHeader,
                 ));
@@ -1135,7 +1131,7 @@ fn setup_chapter_select(
                         let branch_color = branch_color(def.branch);
                         pp.spawn((
                             Text::new(format_perk_row(key, def, &perks)),
-                            TextFont { font_size: 12.5, ..default() },
+                            TextFont { font_size: FontSize::Px(12.5), ..default() },
                             TextColor(branch_color),
                             PerkRowText(perk_id),
                         ));
@@ -1159,7 +1155,7 @@ fn setup_chapter_select(
                 // Header
                 up.spawn((
                     Text::new(format_upgrade_header(&upgrades)),
-                    TextFont { font_size: 13.5, ..default() },
+                    TextFont { font_size: FontSize::Px(13.5), ..default() },
                     TextColor(Color::srgb(0.5, 1.0, 0.65)),
                     UpgradeReserveHeader,
                 ));
@@ -1168,7 +1164,7 @@ fn setup_chapter_select(
                     let track_color = track_color(def.track);
                     up.spawn((
                         Text::new(format_upgrade_row(&def, &upgrades, &robot_pets)),
-                        TextFont { font_size: 12.0, ..default() },
+                        TextFont { font_size: FontSize::Px(12.0), ..default() },
                         TextColor(track_color),
                         UpgradeRowText(def.id),
                     ));
@@ -1190,7 +1186,7 @@ fn setup_chapter_select(
             .with_children(|wp| {
                 wp.spawn((
                     Text::new(format_weapon_rank_header(&robot_pets)),
-                    TextFont { font_size: 13.5, ..default() },
+                    TextFont { font_size: FontSize::Px(13.5), ..default() },
                     TextColor(Color::srgb(0.82, 0.62, 1.0)),
                     WeaponRankHeader,
                 ));
@@ -1199,7 +1195,7 @@ fn setup_chapter_select(
                         Text::new(format_weapon_rank_row(
                             key, slot, *weapon_type, &weapon_ranks, &robot_pets,
                         )),
-                        TextFont { font_size: 12.0, ..default() },
+                        TextFont { font_size: FontSize::Px(12.0), ..default() },
                         TextColor(Color::srgb(0.72, 0.55, 0.96)),
                         WeaponRankRowText(slot),
                     ));
@@ -1222,7 +1218,7 @@ fn setup_chapter_select(
             .with_children(|ep| {
                 ep.spawn((
                     Text::new(format_economy_header(&economy)),
-                    TextFont { font_size: 13.5, ..default() },
+                    TextFont { font_size: FontSize::Px(13.5), ..default() },
                     TextColor(Color::srgb(0.4, 0.95, 0.9)),
                     EconomyPanelHeader,
                 ));
@@ -1233,7 +1229,7 @@ fn setup_chapter_select(
                             &economy,
                             &world_site_registry,
                         )),
-                        TextFont { font_size: 12.0, ..default() },
+                        TextFont { font_size: FontSize::Px(12.0), ..default() },
                         TextColor(Color::srgb(0.55, 0.85, 0.8)),
                         EconomyPanelSiteRow(idx),
                     ));
@@ -1408,7 +1404,7 @@ fn spawn_fast_travel_map(
                     marker.spawn((
                         Text::new(chapter_key_hint(location.id.0)),
                         TextFont {
-                            font_size: 10.5,
+                            font_size: FontSize::Px(10.5),
                             ..default()
                         },
                         TextColor(if unlocked {
@@ -1422,7 +1418,7 @@ fn spawn_fast_travel_map(
                 map.spawn((
                     Text::new(format!("{} {}", location.id.0, chapter.title)),
                     TextFont {
-                        font_size: 10.0,
+                        font_size: FontSize::Px(10.0),
                         ..default()
                     },
                     TextColor(if unlocked {
@@ -1474,7 +1470,7 @@ fn spawn_fast_travel_map(
                     marker.spawn((
                         Text::new("T"),
                         TextFont {
-                            font_size: 10.0,
+                            font_size: FontSize::Px(10.0),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -1484,7 +1480,7 @@ fn spawn_fast_travel_map(
                 map.spawn((
                     Text::new(temple.label),
                     TextFont {
-                        font_size: 8.6,
+                        font_size: FontSize::Px(8.6),
                         ..default()
                     },
                     TextColor(if collected {
@@ -1551,7 +1547,7 @@ fn spawn_fast_travel_map(
                             MapSettlementKind::Outpost => "O",
                         }),
                         TextFont {
-                            font_size: 9.0,
+                            font_size: FontSize::Px(9.0),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -1561,7 +1557,7 @@ fn spawn_fast_travel_map(
                 map.spawn((
                     Text::new(settlement.name),
                     TextFont {
-                        font_size: 8.2,
+                        font_size: FontSize::Px(8.2),
                         ..default()
                     },
                     TextColor(if visited {
@@ -1618,7 +1614,7 @@ fn spawn_fast_travel_map(
                     badge.spawn((
                         Text::new(site_icon),
                         TextFont {
-                            font_size: 9.0,
+                            font_size: FontSize::Px(9.0),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -1628,7 +1624,7 @@ fn spawn_fast_travel_map(
                 map.spawn((
                     Text::new(site.name),
                     TextFont {
-                        font_size: 7.5,
+                        font_size: FontSize::Px(7.5),
                         ..default()
                     },
                     TextColor(if site.is_liberated() {
@@ -1716,7 +1712,7 @@ fn spawn_map_region_band(
             band.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 8.0,
+                    font_size: FontSize::Px(8.0),
                     ..default()
                 },
                 TextColor(Color::srgba(1.0, 1.0, 1.0, 0.55)),
@@ -2331,14 +2327,14 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
             // Title
             root.spawn((
                 Text::new("SELECT YOUR CREW"),
-                TextFont { font_size: 54.0, ..default() },
+                TextFont { font_size: FontSize::Px(54.0), ..default() },
                 TextColor(Color::srgb(1.0, 0.9, 0.25)),
             ));
 
             // Prompt line (updated dynamically)
             root.spawn((
                 Text::new("All players ready to begin"),
-                TextFont { font_size: 18.0, ..default() },
+                TextFont { font_size: FontSize::Px(18.0), ..default() },
                 TextColor(Color::srgb(0.55, 0.65, 0.85)),
                 PlayerSelectPrompt,
             ));
@@ -2369,7 +2365,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         // "P1" header
                         card.spawn((
                             Text::new(format!("P{}", i + 1)),
-                            TextFont { font_size: 30.0, ..default() },
+                            TextFont { font_size: FontSize::Px(30.0), ..default() },
                             TextColor(slot_label_color(i)),
                         ));
 
@@ -2381,7 +2377,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         };
                         card.spawn((
                             Text::new(char_text),
-                            TextFont { font_size: 19.0, ..default() },
+                            TextFont { font_size: FontSize::Px(19.0), ..default() },
                             TextColor(Color::WHITE),
                             PlayerSlotCharText(i),
                         ));
@@ -2390,7 +2386,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         let ctrl_text = if i == 0 { "KEYBOARD + GAMEPAD 1" } else { "waiting..." };
                         card.spawn((
                             Text::new(ctrl_text),
-                            TextFont { font_size: 13.0, ..default() },
+                            TextFont { font_size: FontSize::Px(13.0), ..default() },
                             TextColor(Color::srgb(0.55, 0.55, 0.75)),
                             PlayerSlotInputText(i),
                         ));
@@ -2399,7 +2395,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         let status = if i == 0 { "[ ENTER / A ] Ready" } else { "Press any btn to join" };
                         card.spawn((
                             Text::new(status),
-                            TextFont { font_size: 15.0, ..default() },
+                            TextFont { font_size: FontSize::Px(15.0), ..default() },
                             TextColor(Color::srgb(0.65, 0.65, 0.4)),
                             PlayerSlotStatusText(i),
                         ));
@@ -2410,7 +2406,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
             // Footer hints
             root.spawn((
                 Text::new("P1: ← → / left stick chars  |  Enter/A = ready  |  C/Y = customize  |  ESC = back\nP2-P4: controller 2+ joins  |  D-pad/stick = chars  |  A = ready  |  Y = customize  |  B = leave"),
-                TextFont { font_size: 14.0, ..default() },
+                TextFont { font_size: FontSize::Px(14.0), ..default() },
                 TextColor(Color::srgb(0.38, 0.38, 0.5)),
             ));
         });
@@ -2788,7 +2784,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new("Wave 1"),
                     TextFont {
-                        font_size: 20.0,
+                        font_size: FontSize::Px(20.0),
                         ..default()
                     },
                     TextColor(Color::srgb(1.0, 0.4, 0.2)),
@@ -2797,7 +2793,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new("Enemies: 0"),
                     TextFont {
-                        font_size: 16.0,
+                        font_size: FontSize::Px(16.0),
                         ..default()
                     },
                     TextColor(Color::srgb(1.0, 0.7, 0.3)),
@@ -2806,7 +2802,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 22.0,
+                        font_size: FontSize::Px(22.0),
                         ..default()
                     },
                     TextColor(Color::srgb(1.0, 0.2, 0.1)),
@@ -2862,7 +2858,7 @@ fn setup_hud(
                 msg.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 22.0,
+                        font_size: FontSize::Px(22.0),
                         ..default()
                     },
                     TextColor(Color::srgb(1.0, 0.9, 0.3)),
@@ -2890,7 +2886,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 15.0,
+                        font_size: FontSize::Px(15.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.95, 0.82, 0.36)),
@@ -2899,7 +2895,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 13.0,
+                        font_size: FontSize::Px(13.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.86, 0.92, 1.0)),
@@ -2908,7 +2904,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 12.0,
+                        font_size: FontSize::Px(12.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.52, 0.94, 1.0)),
@@ -2947,7 +2943,7 @@ fn setup_hud(
                         row.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: 16.0,
+                                font_size: FontSize::Px(16.0),
                                 ..default()
                             },
                             TextColor(Color::srgb(0.52, 0.94, 1.0)),
@@ -2956,7 +2952,7 @@ fn setup_hud(
                         row.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: 14.0,
+                                font_size: FontSize::Px(14.0),
                                 ..default()
                             },
                             TextColor(Color::srgb(0.95, 0.78, 0.38)),
@@ -2966,7 +2962,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 20.0,
+                        font_size: FontSize::Px(20.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.93, 0.96, 1.0)),
@@ -2975,7 +2971,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 13.0,
+                        font_size: FontSize::Px(13.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.58, 0.70, 0.84)),
@@ -3001,7 +2997,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 16.0,
+                        font_size: FontSize::Px(16.0),
                         ..default()
                     },
                     TextColor(Color::srgb(1.0, 0.92, 0.30)),
@@ -3010,7 +3006,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 13.0,
+                        font_size: FontSize::Px(13.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
@@ -3042,7 +3038,7 @@ fn setup_hud(
                         slot.spawn((
                             Text::new(*name),
                             TextFont {
-                                font_size: 11.0,
+                                font_size: FontSize::Px(11.0),
                                 ..default()
                             },
                             TextColor(Color::srgb(0.7, 0.8, 1.0)),
@@ -3071,7 +3067,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new("[C] CRAFTING  –  press 1-5 to craft"),
                     TextFont {
-                        font_size: 15.0,
+                        font_size: FontSize::Px(15.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.0, 0.9, 1.0)),
@@ -3079,7 +3075,7 @@ fn setup_hud(
                 panel.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 13.0,
+                        font_size: FontSize::Px(13.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.85, 0.85, 0.85)),
@@ -3163,7 +3159,7 @@ fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8) {
             panel.spawn((
                 Text::new(format!("P{}", player_index + 1)),
                 TextFont {
-                    font_size: 15.0,
+                    font_size: FontSize::Px(15.0),
                     ..default()
                 },
                 TextColor(slot_label_color(player_index)),
@@ -3243,7 +3239,7 @@ fn spawn_player_hud_text(
     parent.spawn((
         Text::new(text),
         TextFont {
-            font_size,
+            font_size: FontSize::Px(font_size),
             ..default()
         },
         TextColor(Color::srgb(0.78, 0.82, 0.94)),
@@ -3269,7 +3265,7 @@ fn spawn_bar(
             row.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.8)),
@@ -3956,7 +3952,7 @@ fn setup_game_over(mut commands: Commands) {
             p.spawn((
                 Text::new("SYSTEM FAILURE"),
                 TextFont {
-                    font_size: 64.0,
+                    font_size: FontSize::Px(64.0),
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.2, 0.1)),
@@ -3964,7 +3960,7 @@ fn setup_game_over(mut commands: Commands) {
             p.spawn((
                 Text::new("Press R / [A] — Return to Title"),
                 TextFont {
-                    font_size: 24.0,
+                    font_size: FontSize::Px(24.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.7, 0.7, 0.8)),
@@ -4059,7 +4055,7 @@ fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) 
             root.spawn((
                 Text::new("VICTORY"),
                 TextFont {
-                    font_size: 82.0,
+                    font_size: FontSize::Px(82.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.72, 1.0, 0.52)),
@@ -4067,7 +4063,7 @@ fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) 
             root.spawn((
                 Text::new("THE EVEREST RANGE IS FREE!"),
                 TextFont {
-                    font_size: 28.0,
+                    font_size: FontSize::Px(28.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.95, 0.72)),
@@ -4079,7 +4075,7 @@ fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) 
                     chapter_count
                 )),
                 TextFont {
-                    font_size: 20.0,
+                    font_size: FontSize::Px(20.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.76, 0.92, 0.80)),
@@ -4087,7 +4083,7 @@ fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) 
             root.spawn((
                 Text::new("Press [Enter / A] to return to the main menu\nPress [N] for New Game+"),
                 TextFont {
-                    font_size: 17.0,
+                    font_size: FontSize::Px(17.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.78, 0.88, 1.0)),
@@ -4220,7 +4216,7 @@ fn final_push_unlock_system(
                 parent.spawn((
                     Text::new("★ FINAL PUSH UNLOCKED — All sites must be reclaimed!"),
                     TextFont {
-                        font_size: 20.0,
+                        font_size: FontSize::Px(20.0),
                         ..default()
                     },
                     TextColor(Color::srgb(1.0, 0.88, 0.25)),
@@ -4257,7 +4253,7 @@ fn setup_controller_diag(mut commands: Commands) {
                 ControllerDiagText,
                 Text::new("Controller Diagnostics"),
                 TextFont {
-                    font_size: 11.0,
+                    font_size: FontSize::Px(11.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.80, 0.95, 1.0)),
@@ -4422,7 +4418,7 @@ fn setup_command_overlay(mut commands: Commands) {
                 CommandOverlayText,
                 Text::new("Command Assets"),
                 TextFont {
-                    font_size: 11.0,
+                    font_size: FontSize::Px(11.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.70, 1.0, 0.80)),

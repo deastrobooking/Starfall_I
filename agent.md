@@ -8,8 +8,8 @@ detailed engine upgrade and milestone process, use
 ## Project North Star
 
 Starfall I is a family-friendly cartoon action platformer RPG built in Rust with
-Bevy `0.18.1` and Rapier 3D through `bevy_rapier3d` `0.34`. The fantasy is 1-4
-local players controlling a family of star-powered heroes through open 3D
+Bevy `0.19.0` and Avian `0.7`. The fantasy is 1-4 local players controlling a
+family of star-powered heroes through open 3D
 chapters, secret caves, dragon domains, airship rematches, RPG loot, crafting,
 companions, vehicles, and expressive star-beam combat.
 
@@ -20,7 +20,7 @@ together.
 
 ## Current Baseline
 
-- Current pushed baseline: Bevy `0.18.1`, `bevy_rapier3d` `0.34`, Rust 2021.
+- Current local engine baseline: Bevy `0.19.0`, Avian `0.7`, Rust 2021.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
@@ -111,9 +111,9 @@ together.
   paths, and treat controller smoke testing as required for movement changes.
 - Roadmap labels are intentionally namespaced: Engine M# refers to
   `docs/engine_upgrade_milestones.md`; Motion MM# refers to
-  `docs/motion_mechanics_roadmap.md`; future enemy behavior planning should use
-  Enemy AI AI# labels.
-- Humanoid traversal planning lives in `docs/motion_mechanics_roadmap.md`.
+  `docs/playerengine.md`; future enemy behavior planning should use Enemy AI
+  AI# labels.
+- Humanoid traversal planning lives in `docs/playerengine.md`.
   Current first hook slice: `GrappleHookState` is the single star-tech
   grappling hook source of truth, `PlayerInput` maps `G` / Select+RB, and
   `CartoonPose::Grapple` gives the wind-up a visible body silhouette. Hook
@@ -135,7 +135,7 @@ together.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
   `docs/improvements.md`, `docs/naming.md`, and
   `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md` and
-  `docs/motion_mechanics_roadmap.md`.
+  `docs/playerengine.md`.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
 
@@ -177,7 +177,7 @@ together.
     `DimensionalAlien`.
 13. Update docs when changing architecture, controls, content flow, save scope,
     engine policy, or production priorities.
-14. Minimize the use of `unwrap()` and `expect()` for system inputs, procedural generation outputs (e.g. Rapier colliders in world generation), and file loading. Handle edge cases with clean defaults, error logging, and explicit failure paths.
+14. Minimize the use of `unwrap()` and `expect()` for system inputs, procedural generation outputs (e.g. generated physics colliders in world generation), and file loading. Handle edge cases with clean defaults, error logging, and explicit failure paths.
 
 ## Completed Feature Milestones (recent)
 

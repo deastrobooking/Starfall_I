@@ -77,7 +77,7 @@ pub struct PlayerMovement {
     /// Last horizontal velocity while grounded (for air momentum)
     pub ground_velocity: Vec3,
     /// EC1b: when the motor runs in `FixedUpdate`, per-tick translation is summed
-    /// here and flushed to the Rapier controller once per frame (Rapier steps
+    /// here and flushed to the physics controller once per frame (physics steps
     /// per-frame, so we must not overwrite/double-apply). Unused in `Update` mode.
     pub motor_accum: Vec3,
 }

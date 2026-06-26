@@ -45,7 +45,7 @@ fn setup_radio_panel(mut commands: Commands) {
                 p.spawn((
                     Text::new(""),
                     TextFont {
-                        font_size: 16.0,
+                        font_size: FontSize::Px(16.0),
                         ..default()
                     },
                     TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),

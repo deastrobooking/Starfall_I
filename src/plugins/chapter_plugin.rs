@@ -5,7 +5,6 @@
 //! `chapter_director_system` advances through the script.
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::{Collider, RigidBody};
 
 use crate::chapters::{chapter_map_location, get_chapter, ChapterId, EncounterStep};
 use crate::components::discoverable::{
@@ -19,6 +18,7 @@ use crate::components::world::{
     BoatPassenger, LaserTurret, MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry,
 };
 use crate::events::*;
+use crate::physics::prelude::{Collider, RigidBody};
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
 use crate::rendering::PbrBundle;
 use crate::resources::{

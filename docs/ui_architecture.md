@@ -98,9 +98,8 @@ without changing the color logic.
 `setup_pause_menu` spawns `PauseRoot` with two pages: `PausePage::Main` and
 `PausePage::Controls`.
 
-`freeze_physics_on_pause` sets `RapierConfiguration.physics_pipeline_active = false`
-on enter, halting all gravity and collision. `resume_physics_after_pause`
-restores it on exit.
+`freeze_physics_on_pause` pauses Avian's `Time<Physics>` clock on enter,
+halting physics advancement. `resume_physics_after_pause` unpauses it on exit.
 
 `PauseMenuState` tracks:
 - `page: PausePage` — current visible page

@@ -1,9 +1,8 @@
 use bevy::camera::{PerspectiveProjection, Projection, Viewport};
+use bevy::camera::Hdr;
 use bevy::prelude::*;
-use bevy::render::view::Hdr;
 use bevy::transform::TransformSystems;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use bevy_rapier3d::prelude::*;
 
 use crate::chapters::chapter_map_location;
 use crate::character_blueprint::{
@@ -26,6 +25,7 @@ use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
+use crate::physics::prelude::*;
 use crate::player_mesh::attach_modular_player_mesh;
 use crate::game_loop::{fixed_motor_off, fixed_motor_on, SimConfig};
 use crate::rendering::Camera3dBundle;
@@ -146,7 +146,7 @@ impl Plugin for PlayerPlugin {
                     .run_if(fixed_motor_on),
             )
             // …and the simulation (traversal → grapple → motor → impact) runs at
-            // the fixed tick. Translation is flushed to Rapier in PostUpdate.
+            // the fixed tick. Translation is flushed to the physics controller in PostUpdate.
             .add_systems(
                 FixedUpdate,
                 (
@@ -178,16 +178,16 @@ impl Plugin for PlayerPlugin {
             .add_systems(
                 PostUpdate,
                 player_camera_follow_system
-                    .after(PhysicsSet::Writeback)
+                    .after(PhysicsCompatSet::CharacterController)
                     .before(TransformSystems::Propagate)
                     .run_if(in_state(AppState::Playing)),
             )
-            // EC1b: flush accumulated fixed-tick translation to Rapier once per
+            // EC1b: flush accumulated fixed-tick translation once per
             // frame, before the physics step reads it.
             .add_systems(
                 PostUpdate,
                 flush_motor_translation
-                    .before(PhysicsSet::SyncBackend)
+                    .before(PhysicsCompatSet::CharacterController)
                     .run_if(in_state(AppState::Playing))
                     .run_if(fixed_motor_on),
             );
@@ -1262,8 +1262,8 @@ fn traversal_mode_switch_update(
 }
 
 // ── Movement & Physics ────────────────────────────────────────────────────────
-/// Flush per-tick accumulated translation (EC1b fixed-motor mode) onto the Rapier
-/// controller once per frame, then clear it. Rapier steps per-frame, so this is
+/// Flush per-tick accumulated translation (EC1b fixed-motor mode) onto the
+/// controller once per frame, then clear it. Physics steps per-frame, so this is
 /// where many fixed ticks (or zero) collapse into a single move-and-slide input.
 fn flush_motor_translation(
     mut q: Query<(&mut KinematicCharacterController, &mut PlayerMovement), With<Player>>,

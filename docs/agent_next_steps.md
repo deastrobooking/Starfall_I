@@ -2,14 +2,15 @@
 
 This is the durable next-work guide for future Codex sessions. Use
 `agent.md` for the short memory handoff, this file for production priorities,
-and `docs/engine_upgrade_milestones.md` for Bevy/Rapier upgrade procedure.
+and `docs/engine_upgrade_milestones.md` for Bevy/physics-backend upgrade procedure.
 
 ## Current Software Review
 
 The project is in a strong prototype-to-production transition state:
 
-- The engine baseline is current for this branch: Bevy `0.18.1`,
-  `bevy_rapier3d` `0.34`, Bevy messages, and local render bundle helpers.
+- The engine baseline is current for this branch: Bevy `0.19.0`, Avian `0.7`,
+  Bevy messages, the local physics compatibility shim, and local render bundle
+  helpers.
 - The game loop is broad but playable: local player select, character design,
   chapter select, open-world play, pause/save, combat, boss mode, dungeon
   gates, Great Scientist temple subquests, robot pets, tech upgrades, and fast
@@ -250,7 +251,7 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
 
 - Add an explicit schema version or magic header to `SaveData` to make future save-format upgrades reliable, checking the version on load and surfacing corrupt saves gracefully.
 - Tie multiplayer gamepad assignment to persistent `GamepadConnectionEvent` tracking rather than sorting by volatile `Entity::index()`, which loses deterministic tracking across reconnects.
-- Audit `unwrap`/`expect` usage (especially Rapier trimesh in `src/plugins/world_plugin.rs` and save path lookups) providing fallback behaviors or explicit typed errors instead of silent panics.
+- Audit `unwrap`/`expect` usage (especially generated physics colliders in `src/plugins/world_plugin.rs` and save path lookups) providing fallback behaviors or explicit typed errors instead of silent panics.
 - Unclutter `src/main.rs` by migrating plugin-specific `init_resource` calls and localized configurations into their respective plugin `build()` configurations.
 - Move towards platform-agnostic save paths via standard library/directory hooks instead of writing `starfall_i_save.json` to the current working directory.
 
@@ -310,14 +311,14 @@ Primary files:
 Goal: Ensure the 200-mile Everest range runs flawlessly at true 60fps, even in 4-player split-screen with dense combat encounters.
 
 - Establish level-of-detail (LOD) generation and distance culling for cities, rendering, and terrain meshes.
-- Stream biomes and distant geometry asynchronously so the 200-mile world does not indefinitely bog down the Rapier physics solver.
+- Stream biomes and distant geometry asynchronously so the 200-mile world does not indefinitely bog down the physics solver.
 - Refactor heavy queries and giant systems (e.g. `world_plugin.rs`) hitting `clippy::too_many_arguments` to use focused Bevy `SystemParam` structs.
 - Implement object pooling for projectiles, enemies, and common SFX.
 
 Verification:
 
 - Profiling tooling (like `bevy_tracy` or frame-time diagnostics) displays 60+ FPS on medium-spec machines during 4-player split-screen boss fights.
-- Walking between distant biomes results in no massive stutter frames while meshes generate or Rapier loads geometry.
+- Walking between distant biomes results in no massive stutter frames while meshes generate or physics loads geometry.
 
 Primary files:
 

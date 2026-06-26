@@ -1,8 +1,8 @@
 # Starfall I
 
-A Bevy 0.18 action platformer RPG prototype about a family of star-powered heroes defending Earth from the dimension-hopping Scallarians, dragon royalty, and Dr. Bile's mirror humans.
+A Bevy 0.19 action platformer RPG prototype about a family of star-powered heroes defending Earth from the dimension-hopping Scallarians, dragon royalty, and Dr. Bile's mirror humans.
 
-The current build keeps the existing open 3D world, chapter director, RPG stats, loot, crafting, armor, companions, and Bevy/Rapier physics stack, then rethemes the game around cartoon star beams, energy tools, wall jumps, ledge hanging, and Mario-style platforming layered over Secret of Mana-style combat pacing.
+The current build keeps the existing open 3D world, chapter director, RPG stats, loot, crafting, armor, companions, and Bevy/Avian physics stack, then rethemes the game around cartoon star beams, energy tools, wall jumps, ledge hanging, and Mario-style platforming layered over Secret of Mana-style combat pacing.
 
 ## Current Build
 
