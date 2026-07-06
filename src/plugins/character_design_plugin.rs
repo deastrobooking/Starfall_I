@@ -559,6 +559,12 @@ fn design_keyboard_input(
     mut part_loadout: ResMut<PlayerPartLoadout>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
+    // F6 opens the Human Character Studio (full mesh-generator design tool).
+    if keys.just_pressed(KeyCode::F6) {
+        next_state.set(AppState::CharacterStudio);
+        return;
+    }
+
     let mut go_back = keys.just_pressed(KeyCode::Escape);
     let mut go_confirm =
         keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
@@ -1018,7 +1024,7 @@ fn spawn_design_ui(
             ))
             .with_children(|panel| {
                 panel.spawn((
-                    Text::new(format!("HERO ATELIER\n{}", hero_name.to_uppercase())),
+                    Text::new(format!("ROBOT BUILDER  [F6 HUMAN STUDIO]\n{}", hero_name.to_uppercase())),
                     TextFont {
                         font_size: FontSize::Px(25.0),
                         ..default()

@@ -12,6 +12,7 @@ use bevy::window::WindowResolution;
 mod chapters;
 mod character_blueprint;
 mod character_parts;
+mod character_studio;
 mod characters;
 mod commands;
 mod components;
@@ -160,10 +161,15 @@ fn main() {
             VehiclePlugin,
             RobotGaragePlugin,
             ModularCharacterPlugin,
+            character_studio::CharacterStudioPlugin,
         ));
 
     if std::env::var_os("STARFALL_AUTOSTART").is_some() {
         app.insert_state(AppState::Playing);
+    }
+    // Boot straight into the Character Studio for design-tool iteration.
+    if std::env::var_os("STARFALL_STUDIO").is_some() {
+        app.insert_state(AppState::CharacterStudio);
     }
 
     app.run();

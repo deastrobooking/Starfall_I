@@ -7,6 +7,9 @@ pub enum AppState {
     MainMenu,
     PlayerSelect,
     CharacterDesign,
+    /// Human character generator studio — in-game mesh generation from preset
+    /// templates (bodies, faces, clothes, super suits, mecha armor).
+    CharacterStudio,
     ChapterSelect,
     RobotGarage,
     Playing,

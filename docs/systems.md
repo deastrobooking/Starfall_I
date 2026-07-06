@@ -120,6 +120,43 @@ Parry: 0.2s window on press; absorbs the next hit; 1.0s cooldown.
 
 Stamina regens at 10/sec while not dodging.
 
+## Character Studio (Human Generator)
+
+**Plugin:** `CharacterStudioPlugin` (`src/character_studio/`) | **State:** `AppState::CharacterStudio`
+
+The first pillar of the in-game asset-designer suite: a human character
+generator with a Blender-like turntable viewport, built entirely from math
+preset templates — no external model files. Entered from the **Robot Builder**
+(the renamed hero armor designer on `AppState::CharacterDesign`) with **F6**;
+dev boot: `STARFALL_STUDIO=1 cargo run`.
+
+Pipeline (single source of truth, per the design doc):
+
+```
+keys/presets/randomize → CharacterSpec → PresetGenerators → CharacterPatch → generated meshes
+```
+
+- `spec.rs` — `CharacterSpec { sex, body, face, style }`; 15 normalized morph
+  fields (height/muscle/weight/shoulders/waist/hips/limbs + 8 face params),
+  serialized as JSON (F5 save / F8 load → `assets/presets/humans/`).
+- `generators.rs` — `PresetGenerator` trait; Body/Face/Skin/Hair/Outfit
+  generators emit **named morphs** ("body_muscle", "face_jaw_wide", …), named
+  material colours, and outfit slot contents into a `CharacterPatch`. Named
+  morphs are the forward-compat seam: when a rigged shape-keyed `.glb` base
+  exists, the same names bind to Bevy `MorphWeights` with no editor changes.
+- `human_mesh.rs` — anthropometric mesh generator (lofted superellipse columns
+  + ovoids; hip 0.52 H, shoulder 0.815 H, head 0.928 H): male/female bases,
+  jaw/chin/nose/brow/cheek/eye/mouth face features, 5 hair styles, and three
+  outfit layer systems — **Clothes** (shirt/sleeves/pants/shoes overlays),
+  **Super Suit** (skin-tight recolor + emissive emblem/belt/trim), **Mecha
+  Armor** (Megaman-style helmet + crest, chest core, shoulder spheres, right
+  **buster cannon**, oversized boots).
+- Presets: 1 Male · 2 Female · 3 Athletic · 4 Heavy · 5 Slim · 6 Soft Face ·
+  7 Sharp Face · R randomize · Z undo (64 deep). Orbit A/D W/S, zoom +/-.
+
+Because every vertex is generated in-engine, direct `.glb` export of authored
+characters is a planned follow-up (mesh data → glTF JSON + BIN writer).
+
 ## Character Authoring
 
 **Files:** `src/character_blueprint.rs`, `src/characters.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
