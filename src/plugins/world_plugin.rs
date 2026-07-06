@@ -5183,7 +5183,8 @@ fn distance_to_mountain_route_network(x: f32, z: f32) -> f32 {
 
 const SPEED_ROAD_CHUNK_LEN: f32 = 360.0;
 const SPEED_ROAD_CLEARANCE: f32 = 4.6;
-const SPEED_ROAD_WIDTH: f32 = 38.0;
+// Sized for vehicles: two NPC cars + a player vehicle pass comfortably.
+const SPEED_ROAD_WIDTH: f32 = 52.0;
 const SPEED_ROAD_TERRAIN_SAMPLE_SPACING: f32 = 90.0;
 const SPEED_ROAD_EDGE_SAMPLE_FRACTION: f32 = 0.42;
 const SPEED_ROAD_TRAFFIC_LANE_OFFSET: f32 = 9.5;
@@ -7568,7 +7569,43 @@ fn spawn_speed_road_network(
                     seed + ri as u64 * 811 + si as u64 * 97,
                 );
             }
+
+            // Full vertical loop beside long straights: classic drivable
+            // 360°, offset laterally so the straight lane stays clear for
+            // NPC traffic. Riders steer into it for the stunt line.
+            if segment_len > 2_200.0 && (ri + si) % 3 == 0 {
+                let t = 0.35;
+                let dirv = delta / segment_len;
+                let sidev = Vec2::new(dirv.y, -dirv.x);
+                let loop_w = width * 0.85;
+                let entry = Vec2::new(ax + (bx - ax) * t, az + (bz - az) * t)
+                    + sidev * (width * 0.5 + loop_w * 0.62);
+                let base = speed_road_terrain_point(
+                    entry.x,
+                    entry.y,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE + 0.6,
+                );
+                let dir3 = Vec3::new(dirv.x, 0.0, dirv.y);
+                let radius = 24.0;
+                let steps = 22;
+                let mut prev = base;
+                for step in 1..=steps {
+                    let phi = step as f32 / steps as f32 * TAU;
+                    let point = base
+                        + dir3 * (radius * phi.sin())
+                        + Vec3::Y * (radius * (1.0 - phi.cos()));
+                    spawn_banked_deck_segment(
+                        commands, pal, &deck_mesh, prev, point, loop_w, 0.0, false,
+                    );
+                    prev = point;
+                }
+            }
         }
+
+        // Round every interior corner of this route with a banked fillet.
+        let fillet_width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
+        spawn_route_corner_fillets(commands, pal, &deck_mesh, route, fillet_width, terrain_seed);
     }
 
     spawn_mountain_wrap_ramps(
@@ -7714,21 +7751,9 @@ fn spawn_speed_road_deck_between(
         world_space_collider_scale(),
     ));
 
-    for side in [-1.0_f32, 1.0] {
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(deck_mesh.clone()),
-                material: MeshMaterial3d(pal.brushed_metal.clone()),
-                transform: Transform::from_translation(
-                    center + rot * Vec3::new(side * width * 0.52, 0.86, 0.0),
-                )
-                .with_rotation(rot)
-                .with_scale(Vec3::new(0.52, 1.35, length * 0.96)),
-                ..default()
-            },
-            WorldGeometry,
-        ));
-    }
+    // Guardrails: tall enough to catch vehicles/boards, WITH colliders so
+    // nothing slides off the outside of the road network.
+    spawn_deck_guardrails(commands, pal, deck_mesh, center, rot, width, length);
 
     if boost_overlay {
         spawn_boost_road_span(
@@ -7743,6 +7768,135 @@ fn spawn_speed_road_deck_between(
             include_ramps,
             seed,
         );
+    }
+}
+
+/// Shared guardrail spawner: one rail per side, collidable.
+#[allow(clippy::too_many_arguments)]
+fn spawn_deck_guardrails(
+    commands: &mut Commands,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    center: Vec3,
+    rot: Quat,
+    width: f32,
+    length: f32,
+) {
+    let rail_h = 2.6;
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(deck_mesh.clone()),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(
+                    center + rot * Vec3::new(side * width * 0.505, rail_h * 0.5 + 0.35, 0.0),
+                )
+                .with_rotation(rot)
+                .with_scale(Vec3::new(0.65, rail_h, length * 0.99)),
+                ..default()
+            },
+            WorldGeometry,
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(0.325, rail_h * 0.5, length * 0.495),
+            world_space_collider_scale(),
+        ));
+    }
+}
+
+/// A single deck chunk with full yaw/pitch/**roll** rotation — the building
+/// block for banked corner fillets and vertical loops. Pitch is NOT clamped
+/// (loops go vertical). `rails` adds collidable guardrails.
+#[allow(clippy::too_many_arguments)]
+fn spawn_banked_deck_segment(
+    commands: &mut Commands,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    start: Vec3,
+    end: Vec3,
+    width: f32,
+    roll: f32,
+    rails: bool,
+) {
+    let delta = end - start;
+    let length = delta.length();
+    if length < 0.5 {
+        return;
+    }
+    let horizontal_len = Vec2::new(delta.x, delta.z).length().max(0.001);
+    let yaw = delta.x.atan2(delta.z);
+    let pitch = (delta.y / horizontal_len).atan();
+    let rot = Quat::from_rotation_y(yaw)
+        * Quat::from_rotation_x(-pitch)
+        * Quat::from_rotation_z(roll);
+    let center = start + delta * 0.5;
+    let deck_thickness = 0.86;
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(deck_mesh.clone()),
+            material: MeshMaterial3d(pal.highway.clone()),
+            transform: Transform::from_translation(center)
+                .with_rotation(rot)
+                .with_scale(Vec3::new(width, deck_thickness, length * 1.04)),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
+            width * 0.5,
+            deck_thickness * 0.5,
+            length * 0.52,
+        ),
+        world_space_collider_scale(),
+    ));
+    if rails {
+        spawn_deck_guardrails(commands, pal, deck_mesh, center, rot, width, length);
+    }
+}
+
+/// Banked corner fillets: rounds every interior route waypoint with a
+/// quadratic-arc of short decks, rolled toward the inside of the turn, so
+/// route corners drive like road curves instead of sharp wall joints.
+fn spawn_route_corner_fillets(
+    commands: &mut Commands,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    route: &[(f32, f32)],
+    width: f32,
+    terrain_seed: u64,
+) {
+    for w in route.windows(3) {
+        let a = Vec2::new(w[0].0, w[0].1);
+        let b = Vec2::new(w[1].0, w[1].1);
+        let c = Vec2::new(w[2].0, w[2].1);
+        let d1 = (b - a).normalize_or_zero();
+        let d2 = (c - b).normalize_or_zero();
+        if d1.dot(d2) > 0.985 {
+            continue; // effectively straight — no fillet needed
+        }
+        let turn = d1.perp_dot(d2);
+        let setback = ((b - a).length().min((c - b).length()) * 0.25).min(220.0);
+        let p0 = b - d1 * setback;
+        let p2 = b + d2 * setback;
+        let samples = 7usize;
+        let pts: Vec<Vec3> = (0..=samples)
+            .map(|i| {
+                let t = i as f32 / samples as f32;
+                // Quadratic Bézier with the waypoint as control point.
+                let q = p0.lerp(b, t).lerp(b.lerp(p2, t), t);
+                // Sit a hair above the straight decks to avoid z-fighting at
+                // the overlap.
+                speed_road_terrain_point(q.x, q.y, terrain_seed, SPEED_ROAD_CLEARANCE)
+                    + Vec3::Y * 0.12
+            })
+            .collect();
+        let roll = turn.signum() * 0.15; // bank into the turn
+        for i in 0..samples {
+            spawn_banked_deck_segment(
+                commands, pal, deck_mesh, pts[i], pts[i + 1], width, roll, true,
+            );
+        }
     }
 }
 
@@ -7764,10 +7918,10 @@ fn spawn_settlement_speed_ring(
         _ => 12,
     };
     let width = match settlement.kind {
-        MapSettlementKind::City => 34.0,
-        MapSettlementKind::Harbor => 31.0,
-        MapSettlementKind::Village => 28.0,
-        MapSettlementKind::Outpost => 26.0,
+        MapSettlementKind::City => 46.0,
+        MapSettlementKind::Harbor => 42.0,
+        MapSettlementKind::Village => 38.0,
+        MapSettlementKind::Outpost => 36.0,
     };
 
     for segment in 0..segment_count {
@@ -13754,6 +13908,13 @@ fn spawn_trees(
             let z = p.offset.z + oz;
             let y = terrain_surface_y(x, z, terrain_seed);
             let pos = Vec3::new(x, y, z);
+
+            // Keep the vehicle corridor clear: no trees on or beside the
+            // speed-road network (they were the objects vehicles crashed into).
+            if distance_to_speed_road_network(x, z, terrain_seed) < SPEED_ROAD_WIDTH * 0.5 + 10.0 {
+                idx += 1;
+                continue;
+            }
 
             let tree = spawn_tree(commands, meshes, p.template, pos, rot, sc);
             commands.entity(tree).insert(NatureSway {

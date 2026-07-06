@@ -108,7 +108,20 @@ longitudinal profile (`SPEED_ROAD_MAX_GRADE = 0.22`, `grade_limit_profile`) —
 sampled at chunk boundaries and relaxed so routes crest ridges on sustained
 viaduct approaches instead of spiking up every bump; shared boundary heights
 keep chunk seams flush. Non-route decks (rings/spurs) keep classic lift; all
-profiled decks absorb ≤2.5 units of intra-chunk bumps. Buildings are reactive to
+profiled decks absorb ≤2.5 units of intra-chunk bumps.
+
+Road system v3 (vehicle-grade): decks widened for traffic
+(`SPEED_ROAD_WIDTH = 52`; rings City 46 / Harbor 42 / Village 38 / Outpost 36).
+**Collidable guardrails** on both edges of every deck (2.6 tall,
+`spawn_deck_guardrails`) — players and vehicles can no longer slide off the
+network. **Banked corner fillets** (`spawn_route_corner_fillets`): every
+interior route waypoint is rounded with a quadratic-arc of short decks rolled
+0.15 rad into the turn, so corners drive like curves instead of sharp joints.
+**Vertical loops**: long straights (>2200) spawn a drivable 360° loop
+(radius 24, 22 segments, `spawn_banked_deck_segment` — full yaw/pitch/roll,
+unclamped pitch) offset beside the lane so NPC traffic passes underneath.
+**Clear corridor**: tree scatter skips anything within road half-width + 10 of
+the network — the props vehicles used to crash into. Buildings are reactive to
 the network: if the road centerline crosses a footprint, `spawn_building` emits
 a **tunnel gateway** (two flank towers + header deck above a 10-unit clearance,
 30-unit passage, oriented via the road distance-field gradient) or skips the
