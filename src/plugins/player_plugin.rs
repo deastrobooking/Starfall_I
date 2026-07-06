@@ -465,6 +465,7 @@ fn spawn_players(
                 BoardBoostState::default(),
                 GrappleHookState::default(),
                 EdgeGrabState::new(),
+                ClimbState::default(),
                 dodge_state,
                 ParryState::new(),
                 PlayerStateMachine::default(),
@@ -599,10 +600,10 @@ pub fn apply_scientist_temple_progress(
 pub fn apply_ancient_flight_core(movement: &mut PlayerMovement, jetpack: &mut JetpackState) {
     movement.air_accel = movement.air_accel.max(1.92);
     movement.max_fall_speed = movement.max_fall_speed.max(2.55);
-    jetpack.max_fuel = jetpack.max_fuel.max(360.0);
+    jetpack.max_fuel = jetpack.max_fuel.max(1200.0);
     jetpack.fuel = jetpack.max_fuel;
     jetpack.force = jetpack.force.max(0.085);
-    jetpack.regen_rate = jetpack.regen_rate.max(46.0);
+    jetpack.regen_rate = jetpack.regen_rate.max(60.0);
     jetpack.max_vertical_vel = jetpack.max_vertical_vel.max(0.52);
     jetpack.glide_fall_speed = jetpack.glide_fall_speed.min(0.62);
     jetpack.boost_forward_speed = jetpack.boost_forward_speed.max(1.18);
@@ -789,6 +790,7 @@ fn player_camera_follow_system(
             Option<&GrappleHookState>,
             Option<&JetpackState>,
             Option<&TraversalModeState>,
+            Option<&ClimbState>,
         ),
         (With<Player>, Without<PlayerCamera>),
     >,
@@ -831,7 +833,7 @@ fn player_camera_follow_system(
 
     let max_trauma = player_q
         .iter()
-        .map(|(index, _, _, _, _, _, _)| shake.trauma_for(index.0))
+        .map(|(index, _, _, _, _, _, _, _)| shake.trauma_for(index.0))
         .fold(0.0_f32, f32::max);
     let shake_offset = camera_shake_offset(max_trauma);
 
@@ -840,7 +842,7 @@ fn player_camera_follow_system(
         let party_focus = average_positions(
             &player_q
                 .iter()
-                .map(|(_, transform, _, _, _, _, _)| transform.translation)
+                .map(|(_, transform, _, _, _, _, _, _)| transform.translation)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or(dungeon.focus);
@@ -853,10 +855,10 @@ fn player_camera_follow_system(
 
     let lead_camera = player_q
         .iter()
-        .min_by_key(|(index, _, _, _, _, _, _)| index.0)
-        .map(|(_, _, camera_ref, _, _, _, _)| camera_ref.0);
+        .min_by_key(|(index, _, _, _, _, _, _, _)| index.0)
+        .map(|(_, _, camera_ref, _, _, _, _, _)| camera_ref.0);
 
-    for (index, player_transform, camera_ref, movement, grapple, jetpack, traversal) in
+    for (index, player_transform, camera_ref, movement, grapple, jetpack, traversal, climb) in
         player_q.iter()
     {
         referenced.push(camera_ref.0);
@@ -885,16 +887,24 @@ fn player_camera_follow_system(
                     }
                 })
                 .unwrap_or(0.0);
+            // Climbing: pull well back and lift so the face above (and drop
+            // below) stays readable while scaling walls.
+            let climb_pullback = climb
+                .map(|c| if c.is_climbing { 4.6 } else { 0.0 })
+                .unwrap_or(0.0);
             local_ind_transform.translation += player_transform.rotation
                 * Vec3::new(
                     0.0,
-                    flight_lift + speed_pullback * 0.18,
-                    hook_pullback + board_pullback + speed_pullback,
+                    flight_lift + speed_pullback * 0.18 + climb_pullback * 0.45,
+                    hook_pullback + board_pullback + speed_pullback + climb_pullback,
                 );
             if let Projection::Perspective(ref mut perspective) = *projection {
-                let target_fov =
-                    (58.0 + speed_pullback * 4.0 + hook_pullback * 1.2 + board_pullback * 1.6)
-                        .to_radians();
+                let target_fov = (58.0
+                    + speed_pullback * 4.0
+                    + hook_pullback * 1.2
+                    + board_pullback * 1.6
+                    + climb_pullback * 2.2)
+                    .to_radians();
                 perspective.fov += (target_fov - perspective.fov) * (1.0 - (-dt * 8.0).exp());
             }
             let is_lead = Some(camera_entity) == lead_camera;
@@ -1291,6 +1301,7 @@ fn player_movement(
             &TraversalModeState,
             &mut BoardBoostState,
             &mut EdgeGrabState,
+            &mut ClimbState,
             &mut DodgeState,
             &Transform,
             &mut PlayerStateMachine,
@@ -1311,6 +1322,7 @@ fn player_movement(
         traversal,
         mut board_boost,
         mut edge_grab,
+        mut climb,
         dodge,
         transform,
         mut state,
@@ -1330,6 +1342,7 @@ fn player_movement(
             jetpack.mode = FlightMode::Grounded;
             grapple.begin_recovery();
             edge_grab.is_hanging = false;
+            climb.is_climbing = false;
             if sim.fixed_motor {
                 movement.motor_accum += Vec3::ZERO;
             } else {
@@ -1362,6 +1375,7 @@ fn player_movement(
             movement.wall_jump_charges = movement.max_wall_jump_charges;
             movement.wall_jump_lock_timer = 0.0;
             jetpack.fuel = (jetpack.fuel + jetpack.regen_rate * dt).min(jetpack.max_fuel);
+            climb.energy = (climb.energy + climb.regen_per_sec * dt).min(climb.max_energy);
             movement.velocity.y = movement.velocity.y.max(0.0);
             jetpack.mode = FlightMode::Grounded;
             edge_grab.is_hanging = false;
@@ -1516,6 +1530,84 @@ fn player_movement(
                     controller.translation = Some(Vec3::ZERO);
                 }
                 state.force(PlayerState::Hanging);
+                continue;
+            }
+        }
+
+        // ── Free climbing (mountains + buildings) ─────────────────────────────
+        // Start: push firmly forward into a vertical surface with energy in the
+        // climb bar. The wall-jump path below stays fully available mid-climb
+        // (jump buffer → leap off the face), so climbing adds to — never
+        // replaces — the double-jump-off-buildings verb.
+        if !climb.is_climbing
+            && !edge_grab.is_hanging
+            && !dodge.is_dodging
+            && has_wall_contact
+            && input.dot(-edge_grab.wall_normal) > 0.35
+            && climb.energy > climb.min_start_energy
+            && edge_grab.cooldown_timer <= 0.0
+            && !matches!(
+                grapple.mode,
+                GrappleHookMode::Swinging | GrappleHookMode::Zipping
+            )
+        {
+            climb.is_climbing = true;
+            movement.velocity = Vec3::ZERO;
+            movement.ground_velocity = Vec3::ZERO;
+        }
+
+        if climb.is_climbing {
+            let wall_lost = !has_wall_contact;
+            let bail = pi.dodge || pi.move_axis.y < -0.6 && movement.is_grounded;
+            let exhausted = climb.energy <= 0.0;
+
+            if movement.jump_buffer_timer > 0.0 && movement.wall_jump_charges > 0 {
+                // Leap off the face — identical to the wall jump so the feel
+                // and charge economy stay consistent.
+                let jump_dir = (edge_grab.wall_normal + input * 0.25)
+                    .with_y(0.0)
+                    .normalize_or_zero();
+                climb.is_climbing = false;
+                movement.velocity.y = edge_grab.wall_jump_vertical;
+                movement.ground_velocity = jump_dir * edge_grab.wall_jump_push;
+                movement.wall_jump_charges = movement.wall_jump_charges.saturating_sub(1);
+                movement.wall_jump_lock_timer = movement.wall_jump_lock_time;
+                movement.jump_buffer_timer = 0.0;
+                movement.coyote_timer = 0.0;
+                edge_grab.cooldown_timer = edge_grab.grab_cooldown;
+                state.force(PlayerState::Jetpack);
+            } else if wall_lost {
+                // Crested the top: vault up-and-over so ledges feel generous.
+                climb.is_climbing = false;
+                movement.velocity.y = climb.vault_boost;
+                movement.ground_velocity = -edge_grab.wall_normal * 0.30;
+                state.force(PlayerState::Jetpack);
+            } else if bail || exhausted {
+                climb.is_climbing = false;
+                edge_grab.cooldown_timer = edge_grab.grab_cooldown;
+                movement.velocity.y = movement.velocity.y.min(0.0);
+                state.force(PlayerState::Jetpack);
+            } else {
+                climb.energy = (climb.energy - climb.drain_per_sec * dt).max(0.0);
+                movement.is_grounded = false;
+                movement.velocity = Vec3::ZERO;
+                movement.ground_velocity = Vec3::ZERO;
+                jetpack.is_active = false;
+
+                // Move in the wall plane: stick Y climbs/descends, stick X
+                // shimmies along the face; a light inward pull keeps contact.
+                let up = Vec3::Y;
+                let lateral = up.cross(edge_grab.wall_normal).normalize_or_zero();
+                let climb_vel = up * pi.move_axis.y * climb.climb_speed
+                    + lateral * -pi.move_axis.x * climb.lateral_speed
+                    - edge_grab.wall_normal * 0.06;
+                let translation = climb_vel * dt * 60.0;
+                if sim.fixed_motor {
+                    movement.motor_accum += translation;
+                } else {
+                    controller.translation = Some(translation);
+                }
+                state.force(PlayerState::Climbing);
                 continue;
             }
         }

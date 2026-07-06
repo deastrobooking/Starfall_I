@@ -86,7 +86,7 @@ promise first:
 | Animation (procedural, motor-driven, 2-bone IK) | Elegant but rigid | No authored clips / no skinning |
 | Combat | Functional (~30% data) | No frame data, cancel windows, hitstop; knockback unused; no hit/hurt layers |
 | Loop / timing | Foundation in place | Fixed tick + input buffer + default-off fixed motor exist; no interpolation/full gameplay migration |
-| Profiling | Basic EC0 | Tracy feature, diagnostics, F9 overlay; no deep per-system budgets/hot-loop traces |
+| Profiling | Basic EC0 | Tracy feature, diagnostics, F11 overlay; no deep per-system budgets/hot-loop traces |
 
 ---
 
@@ -96,7 +96,7 @@ promise first:
 **Goal:** Be able to measure the frame, and establish explicit system ordering.
 - `tracy` cargo feature → `bevy/trace_tracy` (`cargo run --release --features tracy`).
 - `FrameTimeDiagnosticsPlugin` + `EntityCountDiagnosticsPlugin`.
-- In-game perf overlay (FPS / frame ms / entity count), F9 toggle, matching the
+- In-game perf overlay (FPS / frame ms / entity count), F11 toggle, matching the
   `ControllerDiagState` (F8) pattern.
 - `GameSet` ordering skeleton: `SampleInput → BuildCommands → Motor → Combat →
   PhysicsRead → Animation → Camera → Presentation`, configured centrally.

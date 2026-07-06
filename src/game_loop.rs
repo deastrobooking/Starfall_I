@@ -159,7 +159,7 @@ fn setup_perf_overlay(mut commands: Commands) {
         .with_children(|root| {
             root.spawn((
                 PerfOverlayText,
-                Text::new("PERF (F9)"),
+                Text::new("PERF (F11)"),
                 TextFont {
                     font_size: FontSize::Px(12.0),
                     ..default()
@@ -174,7 +174,8 @@ fn toggle_perf_overlay(
     mut state: ResMut<PerfOverlay>,
     mut root_q: Query<&mut Visibility, With<PerfOverlayRoot>>,
 ) {
-    if !keyboard.just_pressed(KeyCode::F9) {
+    // F11: F9 is collider debug (world_plugin), F10 is the fixed-motor toggle.
+    if !keyboard.just_pressed(KeyCode::F11) {
         return;
     }
     state.visible = !state.visible;
@@ -213,7 +214,7 @@ fn update_perf_overlay(
     // Budgets (EC0): 60 FPS = 16.67 ms/frame; sim < 2–4 ms target (EC1 splits this out).
     for mut text in &mut text_q {
         *text = Text::new(format!(
-            "PERF (F9)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\nsim:   {} ticks @{:.0}Hz",
+            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\nsim:   {} ticks @{:.0}Hz",
             ticks.0, FIXED_HZ
         ));
     }

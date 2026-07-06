@@ -337,8 +337,19 @@ fn apply_kinematic_character_controllers(
         }
 
         output.effective_translation = transform.translation - start;
-        output.grounded =
-            character_grounded(entity, collider, &transform, &controller, &move_and_slide);
+        // A character that just moved up (jump/jetpack launch) must not be
+        // re-grounded by the generous snap probe: at 120–144 Hz the first jump
+        // frame rises less than `snap_to_ground` (0.28), which used to re-latch
+        // `grounded`, refresh coyote, and swallow the jump entirely.
+        let rising = output.effective_translation.dot(controller.up) > 1e-4;
+        output.grounded = character_grounded(
+            entity,
+            collider,
+            &transform,
+            &controller,
+            &move_and_slide,
+            rising,
+        );
     }
 }
 
@@ -348,13 +359,20 @@ fn character_grounded(
     transform: &Transform,
     controller: &KinematicCharacterController,
     move_and_slide: &MoveAndSlide,
+    rising: bool,
 ) -> bool {
-    let snap_distance = controller
-        .snap_to_ground
-        .map(CharacterLength::absolute)
-        .unwrap_or(0.12)
-        .max(controller.offset.absolute())
-        .max(0.05);
+    // Rising: only a thin contact skin counts as grounded. Falling/level: the
+    // full snap distance keeps slope/stair walking stable.
+    let snap_distance = if rising {
+        controller.offset.absolute().max(0.02)
+    } else {
+        controller
+            .snap_to_ground
+            .map(CharacterLength::absolute)
+            .unwrap_or(0.12)
+            .max(controller.offset.absolute())
+            .max(0.05)
+    };
     let down = Dir3::new(-controller.up).unwrap_or(Dir3::NEG_Y);
     let filter = SpatialQueryFilter::from_excluded_entities([entity]);
     move_and_slide

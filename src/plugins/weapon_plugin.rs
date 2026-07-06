@@ -1173,7 +1173,13 @@ fn projectile_update_system(
                     hit = true;
                     break;
                 } else {
-                    let info = DamageInfo::new(proj.damage, proj.damage_type);
+                    let push = (e_transform.translation - proj_transform.translation)
+                        .with_y(0.0)
+                        .normalize_or_zero()
+                        + Vec3::Y * 0.2;
+                    let info = DamageInfo::new(proj.damage, proj.damage_type)
+                        .with_knockback(2.2)
+                        .with_hit_direction(push);
                     let result = apply_damage(&mut e_health, &mut e_damageable, &info);
                     enemy_damaged_ev.write(EnemyDamagedEvent {
                         entity: e_entity,
@@ -1266,7 +1272,15 @@ fn explode(
         let dist = center.distance(e_transform.translation);
         if dist <= radius {
             let damage = area_damage_falloff(base_damage, dist, radius).max(1.0);
-            let info = DamageInfo::new(damage, damage_type);
+            let blast = (e_transform.translation - *center)
+                .with_y(0.0)
+                .normalize_or_zero()
+                + Vec3::Y * 0.35;
+            // Blast knockback falls off with distance like the damage does.
+            let force = 4.5 * (1.0 - (dist / radius).clamp(0.0, 1.0)) + 1.0;
+            let info = DamageInfo::new(damage, damage_type)
+                .with_knockback(force)
+                .with_hit_direction(blast);
             let result = apply_damage(&mut e_health, &mut e_damageable, &info);
             damaged_ev.write(EnemyDamagedEvent {
                 entity: e_entity,
@@ -1409,7 +1423,7 @@ fn melee_combo_system(
         };
 
         if do_light && combo.light_index < LIGHT_COMBO.len() {
-            let (name, base_damage, _knockback, duration) = LIGHT_COMBO[combo.light_index];
+            let (name, base_damage, knockback, duration) = LIGHT_COMBO[combo.light_index];
             let damage =
                 base_damage * combo.damage_multiplier * armor_damage_mult * blade_damage_mult;
             let radius = (if dungeon.active { 4.1 } else { 3.0 }) + blade_reach_bonus;
@@ -1424,6 +1438,7 @@ fn melee_combo_system(
                 arc_cos,
                 damage,
                 melee_damage_type,
+                knockback,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,
@@ -1447,7 +1462,7 @@ fn melee_combo_system(
                 });
             }
         } else if do_heavy && combo.heavy_index < HEAVY_COMBO.len() {
-            let (name, base_damage, _knockback, duration) = HEAVY_COMBO[combo.heavy_index];
+            let (name, base_damage, knockback, duration) = HEAVY_COMBO[combo.heavy_index];
             let damage =
                 base_damage * combo.damage_multiplier * armor_damage_mult * blade_damage_mult;
             let radius = (if dungeon.active { 5.7 } else { 4.5 }) + blade_reach_bonus * 1.3;
@@ -1462,6 +1477,7 @@ fn melee_combo_system(
                 arc_cos,
                 damage,
                 melee_damage_type,
+                knockback,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,
@@ -1504,6 +1520,7 @@ fn spawn_melee_flash(commands: &mut Commands, assets: &ProjectileAssets, positio
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_melee_hit(
     origin: Vec3,
     forward: Vec3,
@@ -1512,6 +1529,7 @@ fn execute_melee_hit(
     arc_cos: f32,
     damage: f32,
     damage_type: DamageType,
+    knockback: f32,
     enemy_q: &mut Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         Without<HackedUnit>,
@@ -1529,7 +1547,10 @@ fn execute_melee_hit(
         let in_arc = to_enemy.length() <= radius + offset
             && to_enemy.normalize_or_zero().dot(forward) >= arc_cos;
         if in_arc || hit_center.distance(e_transform.translation) <= radius {
-            let info = DamageInfo::new(damage, damage_type);
+            let push = to_enemy.normalize_or_zero() + Vec3::Y * 0.25;
+            let info = DamageInfo::new(damage, damage_type)
+                .with_knockback(knockback)
+                .with_hit_direction(push);
             let result = apply_damage(&mut health, &mut damageable, &info);
             damaged_ev.write(EnemyDamagedEvent {
                 entity: e_entity,
@@ -1631,6 +1652,7 @@ fn beam_sabre_update_system(
                         arc_cos,
                         sabre.slash_damage * armor_damage_mult,
                         blade_damage_type,
+                        3.0,
                         &mut enemy_q,
                         &mut damaged_ev,
                         &mut killed_ev,
@@ -1664,6 +1686,7 @@ fn beam_sabre_update_system(
                 arc_cos,
                 sabre.slash_damage * armor_damage_mult,
                 blade_damage_type,
+                3.0,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,

@@ -219,6 +219,11 @@ fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
     if input.hanging {
         return CartoonPose::Hang;
     }
+    if input.state == Some(PlayerState::Climbing) {
+        // Free-climb reuses the hang pose family; the hand engine already
+        // supplies HandGrip::Climb for wall contact.
+        return CartoonPose::Hang;
+    }
     if input.wall_sliding || input.state == Some(PlayerState::WallSliding) {
         return CartoonPose::WallSlide;
     }

@@ -15,7 +15,9 @@ use crate::components::discoverable::{
 };
 use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::Inventory;
-use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats};
+use crate::components::player::{
+    ClimbState, JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats,
+};
 use crate::components::weapon::{
     BeamSabre, SpecialWeaponInventory, WeaponInventory, WeaponRanks, WeaponType, MAX_WEAPON_RANK,
 };
@@ -274,6 +276,7 @@ enum PlayerHudBarKind {
     Armor,
     Stamina,
     Jetpack,
+    Climb,
 }
 
 #[derive(Component)]
@@ -3196,6 +3199,13 @@ fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8) {
                 PlayerHudBarKind::Jetpack,
                 Color::srgb(0.0, 0.9, 0.9),
             );
+            spawn_bar(
+                panel,
+                player_index,
+                "CL",
+                PlayerHudBarKind::Climb,
+                Color::srgb(0.95, 0.55, 0.15),
+            );
             spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Credits, "¢ 0", 13.0);
             spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Level, "LVL 1", 13.0);
             spawn_player_hud_text(
@@ -3300,6 +3310,7 @@ fn hud_update_system(
             &Health,
             &PlayerStats,
             &JetpackState,
+            &ClimbState,
             &WeaponInventory,
             &SpecialWeaponInventory,
             &ArmorSet,
@@ -3316,7 +3327,7 @@ fn hud_update_system(
         Query<&mut Text, With<EnemyCountText>>,
     )>,
 ) {
-    for (index, health, stats, jetpack, weapons, special, armor, sabre) in player_q.iter() {
+    for (index, health, stats, jetpack, climb, weapons, special, armor, sabre) in player_q.iter() {
         for (mut node, bar) in bar_q
             .iter_mut()
             .filter(|(_, bar)| bar.player_index == index.0)
@@ -3326,6 +3337,7 @@ fn hud_update_system(
                 PlayerHudBarKind::Armor => stats.armor / stats.max_armor,
                 PlayerHudBarKind::Stamina => stats.stamina / stats.max_stamina,
                 PlayerHudBarKind::Jetpack => jetpack.fuel / jetpack.max_fuel,
+                PlayerHudBarKind::Climb => climb.energy / climb.max_energy,
             };
             node.width = Val::Percent((percent * 100.0).clamp(0.0, 100.0));
         }

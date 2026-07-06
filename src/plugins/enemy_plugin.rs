@@ -12,7 +12,8 @@ use crate::components::inventory::Inventory;
 use crate::components::player::{ParryState, Player, PlayerIndex, PlayerStats};
 use crate::components::world::{NpcRoadVehicle, WorldLoot};
 use crate::damage::{
-    apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
+    apply_damage, area_damage_falloff, DamageInfo, DamageResistance, DamageType, Damageable,
+    Health,
 };
 use crate::events::*;
 use crate::hacking::{Hackable, HackedUnit};
@@ -48,6 +49,7 @@ impl Plugin for EnemyPlugin {
                 Update,
                 (
                     enemy_ai_system,
+                    apply_enemy_knockback,
                     flying_drone_attack_system,
                     dragon_boss_system,
                     enemy_projectile_update_system,
@@ -197,6 +199,55 @@ fn preset_for_type(enemy_type: EnemyType, faction: Option<Faction>) -> &'static 
     }
 }
 
+/// Faction/type-flavoured damage mitigation so weapon choice matters:
+/// dragons shrug off fire, exiles resist the cold-blue laser family,
+/// scallarian flesh soaks plasma, and drone chassis deflect kinetic rounds.
+fn enemy_damageable(enemy: &Enemy, faction: Option<Faction>) -> Damageable {
+    let res = |damage_type, reduction| DamageResistance {
+        damage_type,
+        reduction,
+    };
+    let mut resistances = Vec::new();
+    match faction.unwrap_or_default() {
+        Faction::DragonRoyalty => {
+            resistances.push(res(DamageType::Fire, 0.6));
+            resistances.push(res(DamageType::Melee, 0.15));
+        }
+        Faction::DragonExile => {
+            resistances.push(res(DamageType::Fire, 0.3));
+            resistances.push(res(DamageType::Laser, 0.25));
+        }
+        Faction::CorruptedHuman => resistances.push(res(DamageType::Rift, 0.4)),
+        Faction::WizardScientist => resistances.push(res(DamageType::Electric, 0.5)),
+        _ => resistances.push(res(DamageType::Plasma, 0.25)),
+    }
+    if matches!(enemy.enemy_type, EnemyType::Drone | EnemyType::SpyDrone) {
+        resistances.push(res(DamageType::Kinetic, 0.3));
+    }
+    Damageable::with_defense(enemy.config.defense, resistances)
+}
+
+/// Drain the knockback impulse accumulated by `apply_damage` into a decaying
+/// shove on the enemy transform — hits finally move their target.
+fn apply_enemy_knockback(
+    time: Res<Time>,
+    mut enemy_q: Query<(&mut Transform, &mut Damageable), (With<Enemy>, Without<Player>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut damageable) in enemy_q.iter_mut() {
+        if damageable.pending_knockback.length_squared() < 1e-4 {
+            continue;
+        }
+        // Shove scales with the impulse; exponential decay over ~0.25 s.
+        transform.translation += damageable.pending_knockback * dt * 2.4;
+        let decay = (-dt * 9.0).exp();
+        damageable.pending_knockback *= decay;
+        if damageable.pending_knockback.length_squared() < 1e-4 {
+            damageable.pending_knockback = Vec3::ZERO;
+        }
+    }
+}
+
 pub fn spawn_enemy_entity(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -222,11 +273,12 @@ pub fn spawn_enemy_entity(
         ),
         position,
     );
+    let damageable = enemy_damageable(&enemy_data, faction);
     commands.entity(root).insert((
         enemy_data,
         EnemyStateMachine::default(),
         Health::new(max_hp),
-        Damageable::default(),
+        damageable,
         faction.unwrap_or_default(),
     ));
     if enemy_type == EnemyType::Drone {
@@ -282,12 +334,13 @@ pub fn spawn_named_enemy(
         enemy_config(enemy_type, Some(faction), name, visual_scale),
         position,
     );
+    let damageable = enemy_damageable(&enemy_data, Some(faction));
     let mut e = commands.entity(root);
     e.insert((
         enemy_data,
         EnemyStateMachine::default(),
         Health::new(max_hp),
-        Damageable::default(),
+        damageable,
         faction,
         NamedCharacter {
             id: name,

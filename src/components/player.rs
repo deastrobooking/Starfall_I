@@ -189,11 +189,13 @@ pub struct JetpackState {
 impl Default for JetpackState {
     fn default() -> Self {
         Self {
-            fuel: 200.0,
-            max_fuel: 200.0,
+            // Sized for traversing the Everest-scale ranges: ~40 s of continuous
+            // thrust (was 10 s) with quicker recovery between climbs.
+            fuel: 800.0,
+            max_fuel: 800.0,
             force: 0.06,
             fuel_cost_per_sec: 20.0,
-            regen_rate: 30.0,
+            regen_rate: 45.0,
             max_vertical_vel: 0.35,
             is_active: false,
             mode: FlightMode::Grounded,
@@ -205,6 +207,46 @@ impl Default for JetpackState {
             air_dash_cooldown: 0.55,
             air_dash_cooldown_timer: 0.0,
             slam_speed: 1.35,
+        }
+    }
+}
+
+// ── Climbing ──────────────────────────────────────────────────────────────────
+/// Free-climbing up vertical surfaces (mountains, buildings). Push forward into
+/// a wall to start; drains its own energy bar (shown in the HUD like jetpack
+/// fuel) and hands off to the wall-jump system when the player leaps away, so
+/// climbing never costs the double-jump-off-buildings verb.
+#[derive(Component, Debug, Clone)]
+pub struct ClimbState {
+    pub is_climbing: bool,
+    /// The climb bar. Sized for scaling real mountain faces.
+    pub energy: f32,
+    pub max_energy: f32,
+    pub drain_per_sec: f32,
+    /// Regen while grounded (not clinging).
+    pub regen_per_sec: f32,
+    /// Vertical climb rate (same unit scale as `walk_speed`).
+    pub climb_speed: f32,
+    /// Sideways shimmy rate along the wall.
+    pub lateral_speed: f32,
+    /// Minimum energy required to start a climb (prevents micro-grabs).
+    pub min_start_energy: f32,
+    /// Upward+forward boost applied when the wall ends mid-climb (ledge vault).
+    pub vault_boost: f32,
+}
+
+impl Default for ClimbState {
+    fn default() -> Self {
+        Self {
+            is_climbing: false,
+            energy: 420.0,
+            max_energy: 420.0,
+            drain_per_sec: 26.0,
+            regen_per_sec: 55.0,
+            climb_speed: 0.30,
+            lateral_speed: 0.22,
+            min_start_energy: 30.0,
+            vault_boost: 0.5,
         }
     }
 }
@@ -551,6 +593,7 @@ pub enum PlayerState {
     Jetpack,
     WallSliding,
     Hanging,
+    Climbing,
     Grappling,
 }
 
@@ -577,6 +620,7 @@ impl PlayerStateMachine {
                     | Jetpack
                     | WallSliding
                     | Hanging
+                    | Climbing
                     | Grappling
             ),
             Moving => matches!(
@@ -589,6 +633,7 @@ impl PlayerStateMachine {
                     | Jetpack
                     | WallSliding
                     | Hanging
+                    | Climbing
                     | Grappling
             ),
             Sprinting => matches!(
@@ -601,6 +646,7 @@ impl PlayerStateMachine {
                     | Jetpack
                     | WallSliding
                     | Hanging
+                    | Climbing
                     | Grappling
             ),
             Dodging => matches!(next, Idle | Moving | Sprinting | Stunned | Dead),
@@ -609,13 +655,20 @@ impl PlayerStateMachine {
             Dead => false,
             Jetpack => matches!(
                 next,
-                Idle | Moving | Stunned | Dead | WallSliding | Hanging | Grappling
+                Idle | Moving | Stunned | Dead | WallSliding | Hanging | Climbing | Grappling
             ),
             WallSliding => matches!(
                 next,
+                Idle | Moving | Jetpack | Hanging | Climbing | Stunned | Dead | Grappling
+            ),
+            Hanging => matches!(
+                next,
+                Idle | Moving | Jetpack | Climbing | Stunned | Dead | Grappling
+            ),
+            Climbing => matches!(
+                next,
                 Idle | Moving | Jetpack | Hanging | Stunned | Dead | Grappling
             ),
-            Hanging => matches!(next, Idle | Moving | Jetpack | Stunned | Dead | Grappling),
             Grappling => matches!(
                 next,
                 Idle | Moving
@@ -627,6 +680,7 @@ impl PlayerStateMachine {
                     | Jetpack
                     | WallSliding
                     | Hanging
+                    | Climbing
             ),
         };
         if allowed {

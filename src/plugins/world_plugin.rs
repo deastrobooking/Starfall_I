@@ -1852,6 +1852,7 @@ fn generate_city(
     }
 
     let seed = settings.world_seed;
+    let _ = ROAD_NETWORK_SEED.set(seed);
     let m = &mut *mats;
 
     let pal = Palette::build(m, &asset_server);
@@ -7507,20 +7508,32 @@ fn spawn_speed_road_network(
 
             let chunk_count = speed_road_segment_subdivision_count(segment_len);
             let width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
+
+            // Grade-limited longitudinal profile for the WHOLE segment: sample
+            // terrain at every chunk boundary, then relax so the road holds an
+            // engineered grade over ridges instead of climbing every bump.
+            // Shared boundary heights also keep chunk seams flush.
+            let mut profile: Vec<f32> = (0..=chunk_count)
+                .map(|i| {
+                    let t = i as f32 / chunk_count as f32;
+                    terrain_surface_y(ax + (bx - ax) * t, az + (bz - az) * t, terrain_seed)
+                        + SPEED_ROAD_CLEARANCE
+                })
+                .collect();
+            grade_limit_profile(&mut profile, segment_len / chunk_count as f32);
+
             for chunk in 0..chunk_count {
                 let t0 = chunk as f32 / chunk_count as f32;
                 let t1 = (chunk + 1) as f32 / chunk_count as f32;
-                let start = speed_road_terrain_point(
+                let start = Vec3::new(
                     ax + (bx - ax) * t0,
+                    profile[chunk],
                     az + (bz - az) * t0,
-                    terrain_seed,
-                    SPEED_ROAD_CLEARANCE,
                 );
-                let end = speed_road_terrain_point(
+                let end = Vec3::new(
                     ax + (bx - ax) * t1,
+                    profile[chunk + 1],
                     az + (bz - az) * t1,
-                    terrain_seed,
-                    SPEED_ROAD_CLEARANCE,
                 );
                 spawn_speed_road_deck_between(
                     commands,
@@ -7534,6 +7547,7 @@ fn spawn_speed_road_network(
                     chunk % 3 == 1 || chunk_count <= 2,
                     seed + ri as u64 * 7_001 + si as u64 * 503 + chunk as u64 * 19,
                     terrain_seed,
+                    false,
                 );
             }
 
@@ -7610,6 +7624,32 @@ fn speed_road_terrain_point(x: f32, z: f32, terrain_seed: u64, clearance: f32) -
     Vec3::new(x, terrain_surface_y(x, z, terrain_seed) + clearance, z)
 }
 
+/// Maximum sustained road grade (rise per horizontal unit, ≈12.5°). Real
+/// mountain roads hold an engineered grade instead of hugging every ridge.
+const SPEED_ROAD_MAX_GRADE: f32 = 0.22;
+
+/// Grade-limit a longitudinal road profile. `heights[i]` starts as
+/// terrain-following deck heights at evenly spaced stations `dx` apart; the
+/// relaxation raises stations near peaks so no span exceeds
+/// [`SPEED_ROAD_MAX_GRADE`]. The result: roads crest ridges on long viaduct
+/// approaches (reactive to the mountain) rather than spiking up every bump —
+/// and consecutive chunks share boundary heights, so deck seams stay flush.
+fn grade_limit_profile(heights: &mut [f32], dx: f32) {
+    if heights.len() < 2 || dx <= f32::EPSILON {
+        return;
+    }
+    let max_step = SPEED_ROAD_MAX_GRADE * dx;
+    // Forward+backward passes propagate each peak's influence both ways.
+    for _ in 0..2 {
+        for i in 1..heights.len() {
+            heights[i] = heights[i].max(heights[i - 1] - max_step);
+        }
+        for i in (0..heights.len() - 1).rev() {
+            heights[i] = heights[i].max(heights[i + 1] - max_step);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_speed_road_deck_between(
     commands: &mut Commands,
@@ -7623,6 +7663,7 @@ fn spawn_speed_road_deck_between(
     include_ramps: bool,
     seed: u64,
     terrain_seed: u64,
+    apply_terrain_lift: bool,
 ) {
     let mut delta = end - start;
     let horizontal_len = Vec2::new(delta.x, delta.z).length();
@@ -7637,6 +7678,15 @@ fn spawn_speed_road_deck_between(
         terrain_seed,
         SPEED_ROAD_CLEARANCE + 1.0,
     );
+    // Grade-profiled callers already engineered the longitudinal heights; only
+    // absorb small intra-chunk bumps so the whole deck never spikes upward
+    // (that spiking is what made roads ride up every mountain and float over
+    // city streets as invisible ceilings).
+    let needed_lift = if apply_terrain_lift {
+        needed_lift
+    } else {
+        needed_lift.min(2.5)
+    };
     start.y += needed_lift;
     end.y += needed_lift;
     delta = end - start;
@@ -7737,6 +7787,7 @@ fn spawn_settlement_speed_ring(
             false,
             seed + segment as u64 * 31,
             terrain_seed,
+            true,
         );
     }
 
@@ -7824,6 +7875,7 @@ fn spawn_settlement_speed_spur(
             chunk == 0 || chunk + 1 == chunk_count,
             seed + chunk as u64 * 41,
             terrain_seed,
+            true,
         );
     }
 }
@@ -7883,6 +7935,7 @@ fn spawn_route_sweeper_curves(
                     step == 2 || step == steps - 1,
                     seed + ri as u64 * 1_009 + vi as u64 * 67 + step as u64,
                     terrain_seed,
+            true,
                 );
                 last = next;
             }
@@ -8050,6 +8103,7 @@ fn spawn_helical_speed_ramp(
             step == 0 || step + 1 == steps,
             seed + step as u64 * 29,
             terrain_seed,
+            true,
         );
     }
 }
@@ -13765,6 +13819,21 @@ fn spawn_trees(
 }
 
 // ── Building helper ───────────────────────────────────────────────────────────
+
+/// World seed used by [`spawn_building`] to test footprints against the speed
+/// road network. Set once during world spawn; defaults to the standard seed so
+/// isolated callers (tests) still match the shipped world.
+static ROAD_NETWORK_SEED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+fn road_network_seed() -> u64 {
+    *ROAD_NETWORK_SEED.get_or_init(|| 42_195)
+}
+
+/// Vehicle/board headroom inside a building tunnel gateway.
+const BUILDING_TUNNEL_CLEARANCE: f32 = 10.0;
+/// Drivable opening width through a tunnel building.
+const BUILDING_TUNNEL_PASSAGE: f32 = 30.0;
+
 fn spawn_building(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -13775,6 +13844,91 @@ fn spawn_building(
     depth: f32,
     zone: WorldZone,
 ) {
+    let seed = road_network_seed();
+    let road_dist = distance_to_speed_road_network(position.x, position.z, seed);
+    let half_diag = Vec2::new(width, depth).length() * 0.5;
+
+    if road_dist < half_diag.max(SPEED_ROAD_WIDTH * 0.5) {
+        // Road runs through this footprint. Estimate the road tangent from the
+        // distance-field gradient (tangent is perpendicular to gradient) so the
+        // gateway opening lines up with the route.
+        let e = 6.0;
+        let gx = distance_to_speed_road_network(position.x + e, position.z, seed)
+            - distance_to_speed_road_network(position.x - e, position.z, seed);
+        let gz = distance_to_speed_road_network(position.x, position.z + e, seed)
+            - distance_to_speed_road_network(position.x, position.z - e, seed);
+        let grad = Vec2::new(gx, gz).normalize_or_zero();
+
+        let across = width.max(depth);
+        let too_small = across < BUILDING_TUNNEL_PASSAGE + 12.0
+            || height < BUILDING_TUNNEL_CLEARANCE + 4.0
+            || grad.length_squared() < 0.5;
+        if too_small {
+            // Can't straddle the road — the building yields to the route.
+            return;
+        }
+
+        // Local X axis along the gradient (across the road).
+        let yaw = (-grad.x).atan2(grad.y);
+        let rot = Quat::from_rotation_y(yaw);
+        let ground_y = position.y - height * 0.5;
+        let along = width.min(depth).max(14.0);
+        let flank_w = (across - BUILDING_TUNNEL_PASSAGE) * 0.5;
+        let flank_center = BUILDING_TUNNEL_PASSAGE * 0.5 + flank_w * 0.5;
+
+        // Two flank towers on either side of the road.
+        for side in [-1.0f32, 1.0] {
+            let offset = rot * Vec3::new(side * flank_center, 0.0, 0.0);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(flank_w, height, along))),
+                    material: MeshMaterial3d(mat.clone()),
+                    transform: Transform::from_translation(position + offset).with_rotation(rot),
+                    ..default()
+                },
+                WorldGeometry,
+                WalkableSurface,
+                Building { zone, height },
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cuboid(
+                    flank_w * 0.5,
+                    height * 0.5,
+                    along * 0.5,
+                ),
+            ));
+        }
+
+        // Header deck bridging the passage above vehicle clearance — the
+        // tunnel through the building.
+        let header_h = height - BUILDING_TUNNEL_CLEARANCE;
+        if header_h > 1.0 {
+            let header_w = BUILDING_TUNNEL_PASSAGE + flank_w * 0.2;
+            let header_y = ground_y + BUILDING_TUNNEL_CLEARANCE + header_h * 0.5;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(header_w, header_h, along))),
+                    material: MeshMaterial3d(mat),
+                    transform: Transform::from_xyz(position.x, header_y, position.z)
+                        .with_rotation(rot),
+                    ..default()
+                },
+                WorldGeometry,
+                WalkableSurface,
+                Building {
+                    zone,
+                    height: header_h,
+                },
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cuboid(
+                    header_w * 0.5,
+                    header_h * 0.5,
+                    along * 0.5,
+                ),
+            ));
+        }
+        return;
+    }
+
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(Cuboid::new(width, height, depth))),

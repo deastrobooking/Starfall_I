@@ -21,14 +21,33 @@ use bevy::prelude::*;
 use crate::character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
-use crate::characters::{char_mat, emissive_mat, CartoonCharacterConfig};
+use crate::characters::{emissive_mat, CartoonCharacterConfig};
 use crate::modular_character::{
     spawn_character_under, Attachment, CharacterRecipe, PartPrefab, PartRegistry, Socket,
 };
 use crate::procedural_meshes::superellipsoid_mesh;
 
 /// Torso centre height in normalized figure space (feet = 0, head top ≈ 1.0).
-const TORSO_CENTER_Y: f32 = 0.65;
+/// Raised alongside the Mœbius leg elongation so longer legs still land the feet
+/// on the capsule bottom.
+const TORSO_CENTER_Y: f32 = 0.68;
+
+// ── Mœbius × Mana silhouette (style constants) ────────────────────────────────
+//
+// Full-humanoid fantasy-sci silhouette in the spirit of Mœbius (Jean Giraud)
+// line-art heroes and Secret of Mana's luminous fantasy: elongated legs, a long
+// lean line through the figure, slimmer limbs, and a slightly smaller head
+// (~7.5 head-heights instead of the stockier ~6). Applied globally on top of
+// every per-preset/per-profile proportion so hero identity is preserved.
+
+/// Leg segment elongation (thigh + shin).
+const ELEGANT_LEG: f32 = 1.14;
+/// Arm segment elongation (upper + forearm).
+const ELEGANT_ARM: f32 = 1.07;
+/// Limb cross-section slimming — long thin lines, not bulk.
+const ELEGANT_SLIM: f32 = 0.90;
+/// Head/helmet reduction — reads as taller, more heroic figure.
+const ELEGANT_HEAD: f32 = 0.93;
 
 // ── Mesh primitives ────────────────────────────────────────────────────────────
 
@@ -72,16 +91,38 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
     )
 }
 
-/// Metallic-armor material (steel tinted toward the accent), distinct from the
-/// matte `char_mat` cloth used elsewhere.
+/// Metallic-armor material (brass tinted toward the accent), distinct from the
+/// matte cloth used elsewhere.
 fn metal_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
     materials.add(StandardMaterial {
         base_color: color,
-        perceptual_roughness: 0.36,
-        metallic: 0.55,
-        reflectance: 0.42,
+        perceptual_roughness: 0.42,
+        metallic: 0.45,
+        reflectance: 0.38,
         ..default()
     })
+}
+
+/// Painterly flat cloth for the hero (Mœbius/Mana look): very matte, low
+/// reflectance, and a lifted self-emissive floor so colours stay luminous and
+/// flat in shadow instead of going muddy. Local to the hero builder — enemies
+/// keep the shared `char_mat` look.
+fn cloth_mat(materials: &mut Assets<StandardMaterial>, color: Color) -> Handle<StandardMaterial> {
+    let lin = color.to_linear();
+    materials.add(StandardMaterial {
+        base_color: color,
+        emissive: LinearRgba::new(lin.red * 0.22, lin.green * 0.22, lin.blue * 0.22, 1.0),
+        perceptual_roughness: 0.92,
+        metallic: 0.0,
+        reflectance: 0.06,
+        ..default()
+    })
+}
+
+/// Mœbius shadows go indigo, not black: darken a colour by pulling it toward a
+/// deep blue-violet rather than scaling to grey.
+fn indigo_shade(color: Color, t: f32) -> Color {
+    mix(scl(color, 0.72), Color::srgb(0.16, 0.14, 0.34), t)
 }
 
 // ── Hero design (component spec derived from config) ────────────────────────────
@@ -301,7 +342,7 @@ impl HeroDesign {
             * body_width
             * profile_width
             * (body.shoulder_width * 0.72 + body.chest_size * 0.28);
-        let limb = (0.88 + 0.34 * (w - 1.0)) * (arm_bulk * 0.55 + leg_bulk * 0.45);
+        let limb = (0.88 + 0.34 * (w - 1.0)) * (arm_bulk * 0.55 + leg_bulk * 0.45) * ELEGANT_SLIM;
         let chest_core_scale = match profile {
             GlbReferenceProfile::Amp => 1.20,
             GlbReferenceProfile::Antonio => 0.72,
@@ -389,20 +430,20 @@ impl HeroDesign {
                 ShoulderPreset::DariaFlares => 0.92,
                 _ => 1.0,
             },
-            head_width,
-            head_height,
-            helmet_width,
-            helmet_height,
+            head_width: head_width * ELEGANT_HEAD,
+            head_height: head_height * ELEGANT_HEAD,
+            helmet_width: helmet_width * ELEGANT_HEAD,
+            helmet_height: helmet_height * ELEGANT_HEAD,
             helmet_brow_scale,
             jaw_guard_scale,
-            visor_width,
+            visor_width: visor_width * ELEGANT_HEAD,
             shoulder_width,
             shoulder_height,
-            upper_arm_length: upper_arm_length * body.arm_length,
-            forearm_length: forearm_length * body.arm_length,
+            upper_arm_length: upper_arm_length * body.arm_length * ELEGANT_ARM,
+            forearm_length: forearm_length * body.arm_length * ELEGANT_ARM,
             hand_scale: hand_scale * body.hand_size,
-            thigh_length: thigh_length * body.leg_length,
-            shin_length: shin_length * body.leg_length,
+            thigh_length: thigh_length * body.leg_length * ELEGANT_LEG,
+            shin_length: shin_length * body.leg_length * ELEGANT_LEG,
             foot_length: foot_length * body.foot_size,
             chest_core_scale,
             crest_width: profile_crest,
@@ -463,15 +504,20 @@ struct Palette {
 }
 
 impl Palette {
+    /// Mœbius × Mana harmonization: hero hue identity is preserved (outfit,
+    /// accent, skin come from config) but the relationships are curated —
+    /// indigo shadows on the under-suit, cream-lifted trim, warm brass instead
+    /// of grey steel, and flat luminous cloth throughout.
     fn build(materials: &mut Assets<StandardMaterial>, cfg: &CartoonCharacterConfig) -> Self {
         let outfit = cfg.outfit;
-        let steel = mix(Color::srgb(0.60, 0.63, 0.70), cfg.accent, 0.30);
+        let cream = Color::srgb(0.96, 0.92, 0.82);
+        let brass = mix(Color::srgb(0.74, 0.62, 0.42), cfg.accent, 0.25);
         Palette {
-            primary: char_mat(materials, outfit),
-            suit: char_mat(materials, scl(outfit, 0.55)),
-            accent: char_mat(materials, cfg.accent),
-            metal: metal_mat(materials, steel),
-            skin: char_mat(materials, cfg.skin),
+            primary: cloth_mat(materials, mix(outfit, cream, 0.10)),
+            suit: cloth_mat(materials, indigo_shade(outfit, 0.38)),
+            accent: cloth_mat(materials, mix(cfg.accent, cream, 0.22)),
+            metal: metal_mat(materials, brass),
+            skin: cloth_mat(materials, cfg.skin),
             glow: emissive_mat(
                 materials,
                 cfg.eye_color,

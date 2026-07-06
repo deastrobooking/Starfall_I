@@ -63,16 +63,17 @@ The panel hides while a discussion is active so the dialogue UI can own the bott
 
 ## Player Movement
 
-**Plugin:** `PlayerPlugin` | **Component:** `PlayerMovement`, `EdgeGrabState`, `JetpackState`
+**Plugin:** `PlayerPlugin` | **Component:** `PlayerMovement`, `EdgeGrabState`, `ClimbState`, `JetpackState`
 
 | State | Trigger | Notes |
 |---|---|---|
 | Idle | No input, grounded | Default ground state |
 | Moving | WASD / left stick | Smoothed acceleration toward `walk_speed = 0.38` |
 | Sprinting | Shift / LB + move | Drains stamina 15/sec |
-| Jetpack | Hold Space / South while airborne | Burns `fuel_cost_per_sec = 20`/sec; regens on ground |
+| Jetpack | Hold Space / South while airborne | Burns `fuel_cost_per_sec = 20`/sec from an 800-unit tank (~40 s thrust, sized for the Everest ranges); regens 45/sec on ground |
 | WallSliding | Pushing into wall while falling | One-hand wall clasp; drains light stamina and caps fall speed at `wall_slide_speed = 0.28` |
 | Hanging | Interact while falling into a wall | Max hang time 2.5s; drains stamina 12/sec |
+| Climbing | Push firmly forward into a vertical surface | Free-climb mountains/buildings on its own HUD energy bar (`CL`, 420 units, drains 26/sec, regens 55/sec grounded). Stick climbs/descends/shimmies; buffered jump mid-climb performs a full wall jump (charges preserved); topping out vaults up-and-over; camera auto-pulls back + widens FOV while climbing |
 | Grappling | `G` / Select+RB | First MVP slice: hook wind-up pose and cooldown only; targeting and pull physics come next |
 
 Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity. The local `KinematicCharacterController` compatibility component feeds Avian move-and-slide and uses explicit movement-profile fields for offset, step height/width, and snap-to-ground distance so small lips and authored traversal props are easier to tune consistently.
@@ -93,6 +94,25 @@ raycast work. The current milestone only plays the wind-up/cooldown animation
 path; M2 adds target raycasts and M3-M4 add zip/swing physics.
 
 Climb-up: `E` / D-pad Down while hanging. Boosts player upward `climb_boost * dt * 60`.
+
+Free climbing (2026-07): pressing the stick firmly into a wall (`input · -wall_normal > 0.35`)
+starts a climb when the `CL` bar has ≥30 energy. While climbing the motor moves
+in the wall plane (stick Y up/down, stick X shimmy) with a light inward pull to
+hold contact. Exits: buffered jump → standard wall jump (uses/keeps the same
+charge economy, so the double-jump-off-buildings verb is untouched); losing the
+wall → ledge vault (`vault_boost` up + over); dodge, stick-down on ground, or an
+empty bar → release. Grapple swing/zip suppresses climb starts.
+
+Speed roads (2026-07): mountain-route decks are built from a grade-limited
+longitudinal profile (`SPEED_ROAD_MAX_GRADE = 0.22`, `grade_limit_profile`) —
+sampled at chunk boundaries and relaxed so routes crest ridges on sustained
+viaduct approaches instead of spiking up every bump; shared boundary heights
+keep chunk seams flush. Non-route decks (rings/spurs) keep classic lift; all
+profiled decks absorb ≤2.5 units of intra-chunk bumps. Buildings are reactive to
+the network: if the road centerline crosses a footprint, `spawn_building` emits
+a **tunnel gateway** (two flank towers + header deck above a 10-unit clearance,
+30-unit passage, oriented via the road distance-field gradient) or skips the
+building entirely when too small to straddle.
 
 Dodge: invulnerable during the `dodge_duration = 0.3s` window; costs 20 stamina; 0.5s cooldown.
 
@@ -440,11 +460,26 @@ Incoming DamageInfo
     │
     └── Enemy path (apply_damage direct)
           ├── Check invulnerability / alive
-          ├── resistance_multiplier() — sums DamageResistance components
-          └── health.apply_damage(final)
+          ├── resistance_multiplier() — sums Damageable.resistances entries
+          ├── toughness scaling — 100 / (100 + Damageable.defense)
+          ├── health.apply_damage(final)
+          └── pending_knockback += hit_direction × knockback_force
 ```
 
 `area_damage_falloff(base, distance, radius)` returns `base * (1 - distance/radius)` for explosive splash.
+
+**Resistances & defense (2026-06):** enemies spawn with faction-flavoured
+resistances and their `EnemyConfig.defense` via
+`enemy_plugin::enemy_damageable()` — DragonRoyalty resists Fire 0.6/Melee 0.15,
+DragonExile Fire 0.3/Laser 0.25, CorruptedHuman Rift 0.4, WizardScientist
+Electric 0.5, Scallarians Plasma 0.25, drone chassis +Kinetic 0.3. Weapon choice
+now matters per faction.
+
+**Knockback (2026-06):** `apply_damage` accumulates an impulse in
+`Damageable.pending_knockback`; `enemy_plugin::apply_enemy_knockback` drains it
+as an exponentially-decaying shove (~0.25 s). Wired: projectiles (2.2),
+explosions (falloff-scaled 1.0–5.5), melee combos (authored table values),
+sabre slashes (3.0). Player-receiving knockback is not yet drained (EC2).
 
 ---
 

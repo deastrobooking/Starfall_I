@@ -52,6 +52,11 @@ impl DamageInfo {
         self.knockback_force = force;
         self
     }
+
+    pub fn with_hit_direction(mut self, direction: Vec3) -> Self {
+        self.hit_direction = Some(direction);
+        self
+    }
 }
 
 // ── Damage Result ─────────────────────────────────────────────────────────────
@@ -71,6 +76,13 @@ pub struct Damageable {
     pub is_invulnerable: bool,
     pub invulnerability_timer: f32,
     pub resistances: Vec<DamageResistance>,
+    /// Flat toughness: incoming damage is scaled by `100 / (100 + defense)`.
+    /// 0 = no reduction (default). Populated from `EnemyConfig.defense` at spawn.
+    pub defense: f32,
+    /// Knockback impulse accumulated by [`apply_damage`] and drained by the
+    /// victim's reaction system (enemies: `apply_enemy_knockback`). Kept here so
+    /// every damage path gains knockback without extra plumbing.
+    pub pending_knockback: Vec3,
 }
 
 impl Default for Damageable {
@@ -79,6 +91,19 @@ impl Default for Damageable {
             is_invulnerable: false,
             invulnerability_timer: 0.0,
             resistances: Vec::new(),
+            defense: 0.0,
+            pending_knockback: Vec3::ZERO,
+        }
+    }
+}
+
+impl Damageable {
+    /// Damageable with toughness and elemental resistances (enemy spawn path).
+    pub fn with_defense(defense: f32, resistances: Vec<DamageResistance>) -> Self {
+        Self {
+            defense,
+            resistances,
+            ..Self::default()
         }
     }
 }
@@ -139,8 +164,17 @@ pub fn apply_damage(
     }
 
     let multiplier = resistance_multiplier(damageable, info.damage_type);
-    let final_damage = (info.amount * multiplier).max(1.0);
+    // Flat-toughness scaling: 0 defense → 1.0, 50 → 0.67, 100 → 0.5.
+    let toughness = 100.0 / (100.0 + damageable.defense.max(0.0));
+    let final_damage = (info.amount * multiplier * toughness).max(1.0);
     let actual = health.apply_damage(final_damage);
+
+    // Accumulate knockback for the victim's reaction system to drain.
+    if info.knockback_force > 0.0 {
+        if let Some(dir) = info.hit_direction {
+            damageable.pending_knockback += dir.normalize_or_zero() * info.knockback_force;
+        }
+    }
 
     DamageResult {
         damage_amount: actual,
