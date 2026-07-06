@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use std::f32::consts::TAU;
 
 use super::generators::{CharacterPatch, CharacterSlot, SlotContent};
-use super::spec::{HairStyle, Sex};
+use super::spec::{ArmorStyle, BottomStyle, FootStyle, HairStyle, Sex, TopStyle};
 use crate::procedural_meshes::superellipsoid_mesh;
 
 // ── Lofted column primitive ───────────────────────────────────────────────────
@@ -167,7 +167,7 @@ impl Proportions {
             limb,
             muscle,
             weight,
-            head_r: 0.0655 * h * if female { 0.97 } else { 1.0 },
+            head_r: 0.0695 * h * if female { 0.97 } else { 1.0 },
             female,
         }
     }
@@ -281,7 +281,6 @@ pub fn spawn_human(
 
     let mecha = matches!(patch.slots.get(&CharacterSlot::Torso), Some(SlotContent::Mecha));
     let suit = matches!(patch.slots.get(&CharacterSlot::Torso), Some(SlotContent::Suit));
-    let cloth = matches!(patch.slots.get(&CharacterSlot::Torso), Some(SlotContent::Cloth));
     // Skin-tight layers recolor the body segments themselves.
     let body_mat = if suit { &mats.suit } else if mecha { &mats.secondary } else { &mats.skin };
 
@@ -341,6 +340,15 @@ pub fn spawn_human(
         body_mat,
         Transform::from_xyz(0.0, (p.waist_y + p.shoulder_y) * 0.5, 0.0),
     );
+    // Trapezius wedge: fills the neck→shoulder gap so the silhouette flows.
+    part(
+        ovoid(
+            Vec3::new(p.shoulder_hw * 0.72, 0.030 * p.h * (1.0 + p.muscle * 0.5), p.chest_depth * 0.70),
+            1.1,
+        ),
+        body_mat,
+        Transform::from_xyz(0.0, p.shoulder_y + 0.008 * p.h, p.chest_depth * 0.08),
+    );
     if p.female {
         for side in [-1.0f32, 1.0] {
             part(
@@ -352,6 +360,41 @@ pub fn spawn_human(
                 Transform::from_xyz(side * p.shoulder_hw * 0.38, p.chest_y, -p.chest_depth * 0.72),
             );
         }
+    } else {
+        // Pectoral plates give the male chest a front plane instead of a tube.
+        for side in [-1.0f32, 1.0] {
+            part(
+                ovoid(
+                    Vec3::new(
+                        p.shoulder_hw * 0.42,
+                        0.045 * p.h * (0.85 + p.muscle * 0.5),
+                        p.chest_depth * 0.30,
+                    ),
+                    1.15,
+                ),
+                body_mat,
+                Transform::from_xyz(
+                    side * p.shoulder_hw * 0.40,
+                    p.chest_y + 0.01 * p.h,
+                    -p.chest_depth * 0.78,
+                ),
+            );
+        }
+    }
+    // Glutes: the pelvis reads human from behind instead of a cut cylinder.
+    for side in [-1.0f32, 1.0] {
+        part(
+            ovoid(
+                Vec3::new(p.hip_hw * 0.52, 0.052 * p.h, p.chest_depth * 0.42),
+                1.0,
+            ),
+            body_mat,
+            Transform::from_xyz(
+                side * p.hip_hw * 0.42,
+                p.hip_y - 0.015 * p.h,
+                p.chest_depth * 0.55,
+            ),
+        );
     }
 
     // Neck + head.
@@ -433,24 +476,53 @@ pub fn spawn_human(
             body_mat,
             Transform::from_xyz(x, (elbow_y + wrist_y) * 0.5, 0.0),
         );
-        // Hand: gloved in suit/mecha, skin otherwise.
-        let hand_mat = match patch.slots.get(&CharacterSlot::Hands) {
+        // Hand: gloved in suit, armored gauntlet in mecha, skin otherwise.
+        let hand_content = patch.slots.get(&CharacterSlot::Hands).copied();
+        let hand_mat = match hand_content {
             Some(SlotContent::Suit) => &mats.primary,
             Some(SlotContent::Mecha) => &mats.metal,
             _ => &mats.skin,
         };
-        let hand_scale = if mecha { 1.8 } else { 1.0 };
+        // Wrist: a short connector loft so the forearm flows into the palm
+        // instead of butt-joining it.
+        let wrist_len = 0.020 * p.h;
         part(
-            ovoid(
-                Vec3::new(
-                    fore_r * 1.0 * hand_scale,
-                    0.052 * p.h * 0.55 * hand_scale,
-                    fore_r * 0.62 * hand_scale,
-                ),
-                1.15,
+            lofted_column(
+                Vec2::new(fore_r * 0.72, fore_r * 0.52),
+                Vec2::splat(fore_r * 0.82),
+                wrist_len * 1.4,
+                0.0,
+                1.8,
+                3,
+                12,
             ),
             hand_mat,
-            Transform::from_xyz(x, wrist_y - 0.028 * p.h * hand_scale, 0.0),
+            Transform::from_xyz(x, wrist_y - wrist_len * 0.4, 0.0),
+        );
+        // Gauntlet cuff flares over the wrist seam.
+        if matches!(hand_content, Some(SlotContent::Mecha)) {
+            part(
+                lofted_column(
+                    Vec2::splat(fore_r * 1.5),
+                    Vec2::splat(fore_r * 1.15),
+                    fore_len * 0.4,
+                    0.0,
+                    1.4,
+                    3,
+                    14,
+                ),
+                &mats.metal,
+                Transform::from_xyz(x, wrist_y + fore_len * 0.12, 0.0),
+            );
+        }
+        let hand_scale = if mecha { 1.6 } else { 1.0 };
+        spawn_hand(
+            &mut part,
+            &p,
+            hand_mat,
+            side,
+            Vec3::new(x, wrist_y - wrist_len * 0.9, 0.0),
+            hand_scale,
         );
     }
 
@@ -487,12 +559,15 @@ pub fn spawn_human(
             body_mat,
             Transform::from_xyz(x, (p.knee_y + p.ankle_y) * 0.5, 0.0),
         );
-        // Foot / footwear.
-        let (foot_mat, foot_scale) = match patch.slots.get(&CharacterSlot::Feet) {
-            Some(SlotContent::Cloth) => (&mats.dark, 1.12),
-            Some(SlotContent::Suit) => (&mats.secondary, 1.08),
-            Some(SlotContent::Mecha) => (&mats.metal, 1.9),
-            _ => (&mats.skin, 1.0),
+        // Foot / footwear (wardrobe-aware; armor overrides).
+        let armor = patch.wardrobe.armor;
+        let feet_style = patch.wardrobe.feet;
+        let (foot_mat, foot_scale) = match (armor, feet_style) {
+            (ArmorStyle::MechaArmor, _) => (&mats.metal, 1.9),
+            (ArmorStyle::SuperSuit, _) => (&mats.secondary, 1.08),
+            (_, FootStyle::Barefoot) => (&mats.skin, 1.0),
+            (_, FootStyle::Shoes) => (&mats.dark, 1.10),
+            (_, FootStyle::Boots | FootStyle::TallBoots) => (&mats.secondary, 1.16),
         };
         part(
             ovoid(
@@ -510,6 +585,30 @@ pub fn spawn_human(
                 -0.028 * p.h * foot_scale,
             ),
         );
+        // Boot shafts.
+        if armor == ArmorStyle::None {
+            let shaft_top = match feet_style {
+                FootStyle::Boots => Some(p.ankle_y + (p.knee_y - p.ankle_y) * 0.34),
+                FootStyle::TallBoots => Some(p.knee_y * 0.96),
+                _ => None,
+            };
+            if let Some(top) = shaft_top {
+                let hshaft = top - p.ankle_y * 0.4;
+                part(
+                    lofted_column(
+                        Vec2::splat(shin_r * 1.32),
+                        Vec2::splat(shin_r * 1.22),
+                        hshaft,
+                        0.10,
+                        1.9,
+                        4,
+                        14,
+                    ),
+                    &mats.secondary,
+                    Transform::from_xyz(x, p.ankle_y * 0.4 + hshaft * 0.5, 0.0),
+                );
+            }
+        }
         if legs_mecha {
             // Oversized boot cuff.
             part(
@@ -529,8 +628,10 @@ pub fn spawn_human(
     }
 
     // ── Outfit overlays ──────────────────────────────────────────────────────
-    if cloth {
-        spawn_clothes(&mut part, &p, &mats, upper_r, arm_len, elbow_y, thigh_r, leg_x);
+    if patch.wardrobe.armor == ArmorStyle::None {
+        spawn_wardrobe(
+            &mut part, patch, &p, &mats, upper_r, fore_r, arm_len, fore_len, thigh_r, leg_x,
+        );
     }
     if suit {
         spawn_super_suit(&mut part, &p, &mats);
@@ -540,6 +641,82 @@ pub fn spawn_human(
     }
 
     root
+}
+
+// ── Hand ──────────────────────────────────────────────────────────────────────
+
+/// A real hand: palm slab + four fingers (individual lengths, slight relaxed
+/// curl toward the body) + opposable thumb angled forward. Hands hang at the
+/// sides with the palm facing the thigh (thin axis = X), fingers pointing
+/// down. `scale > 1` produces the chunky mecha gauntlet.
+fn spawn_hand(
+    part: &mut impl FnMut(Mesh, &Handle<StandardMaterial>, Transform),
+    p: &Proportions,
+    mat: &Handle<StandardMaterial>,
+    side: f32,
+    wrist: Vec3,
+    scale: f32,
+) {
+    // Human hand ≈ 0.105 · height; palm ~55 %, fingers ~45 %.
+    let hand_len = 0.105 * p.h * scale * if p.female { 0.94 } else { 1.0 };
+    let palm_len = hand_len * 0.55;
+    let finger_len = hand_len * 0.45;
+    let palm_w = hand_len * 0.42; // across (front-back, Z)
+    let palm_t = hand_len * 0.14; // thickness (toward thigh, X)
+
+    // Palm slab, top edge meeting the wrist.
+    part(
+        ovoid(
+            Vec3::new(palm_t * 0.5, palm_len * 0.5, palm_w * 0.5),
+            1.35,
+        ),
+        mat,
+        Transform::from_translation(wrist + Vec3::new(0.0, -palm_len * 0.45, 0.0)),
+    );
+
+    // Four fingers along the palm's bottom edge (front→back: index…pinky),
+    // curled a touch toward the body for a relaxed pose.
+    let finger_r = palm_w * 0.115 * if scale > 1.2 { 1.5 } else { 1.0 };
+    let lengths = [0.94f32, 1.0, 0.94, 0.76];
+    let knuckle_y = wrist.y - palm_len * 0.92;
+    for (i, len_mul) in lengths.into_iter().enumerate() {
+        let z = -palm_w * 0.5 + palm_w * (0.14 + 0.24 * i as f32);
+        let len = finger_len * len_mul;
+        let curl = Quat::from_rotation_z(-side * 0.16); // fingertips toward thigh
+        part(
+            lofted_column(
+                Vec2::splat(finger_r * 0.82),
+                Vec2::splat(finger_r),
+                len,
+                0.06,
+                2.0,
+                3,
+                10,
+            ),
+            mat,
+            Transform::from_xyz(wrist.x, knuckle_y - len * 0.5, wrist.z + z)
+                .with_rotation(curl),
+        );
+    }
+
+    // Thumb: rises from the palm's front edge, angled forward and outward.
+    let thumb_len = finger_len * 0.82;
+    part(
+        lofted_column(
+            Vec2::splat(finger_r * 1.15),
+            Vec2::splat(finger_r * 1.3),
+            thumb_len,
+            0.05,
+            2.0,
+            3,
+            10,
+        ),
+        mat,
+        Transform::from_translation(
+            wrist + Vec3::new(0.0, -palm_len * 0.42, -palm_w * 0.62),
+        )
+        .with_rotation(Quat::from_rotation_x(0.85) * Quat::from_rotation_z(-side * 0.20)),
+    );
 }
 
 // ── Head + face ───────────────────────────────────────────────────────────────
@@ -561,48 +738,65 @@ fn spawn_head(
         &mats.skin,
         Transform::from_translation(head_c),
     );
-    // Jaw + chin.
-    let jaw_w = spread(m(patch, "face_jaw_wide"), 0.62, 0.16);
-    let chin = spread(m(patch, "face_chin_long"), 1.0, 0.35);
+    // Jaw + chin — pulled up into the skull so the head reads as one form
+    // (retro-RPG: soft rounded face, no bolted-on lower box).
+    let jaw_w = spread(m(patch, "face_jaw_wide"), 0.66, 0.14);
+    let chin = spread(m(patch, "face_chin_long"), 1.0, 0.30);
     part(
         ovoid(
-            Vec3::new(hr * jaw_w * cheek, hr * 0.46 * chin, hr * 0.62),
-            1.05,
+            Vec3::new(hr * jaw_w * cheek, hr * 0.50 * chin, hr * 0.72),
+            1.0,
         ),
         &mats.skin,
-        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.62, -hr * 0.12)),
+        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.50, -hr * 0.06)),
     );
-    // Nose.
+    // Chin cap.
+    part(
+        ovoid(Vec3::new(hr * 0.22 * jaw_w.max(0.4), hr * 0.14 * chin, hr * 0.16), 1.0),
+        &mats.skin,
+        Transform::from_translation(head_c + Vec3::new(0.0, -hr * (0.78 + 0.10 * chin), -hr * 0.42)),
+    );
+    // Nose — small and soft, retro-RPG style.
     let nose_len = spread(m(patch, "face_nose_long"), 1.0, 0.4);
     let nose_w = spread(m(patch, "face_nose_wide"), 1.0, 0.4);
     part(
         ovoid(
-            Vec3::new(hr * 0.11 * nose_w, hr * 0.20 * nose_len, hr * 0.14),
-            1.3,
+            Vec3::new(hr * 0.075 * nose_w, hr * 0.13 * nose_len, hr * 0.095),
+            1.1,
         ),
         &mats.skin,
-        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.16, face_z - hr * 0.06)),
+        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.18, face_z - hr * 0.045)),
     );
-    // Brow bar.
+    // Twin eyebrows (angled) — the old single bar read as a visor.
     let brow = spread(m(patch, "face_brow_heavy"), 1.0, 0.5);
-    part(
-        ovoid(Vec3::new(hr * 0.52, hr * 0.07 * brow, hr * 0.10), 0.9),
-        &mats.brow,
-        Transform::from_translation(head_c + Vec3::new(0.0, hr * 0.22, face_z + hr * 0.04)),
-    );
-    // Eyes.
-    let eye = spread(m(patch, "face_eye_large"), 1.0, 0.3);
     for side in [-1.0f32, 1.0] {
-        let eye_pos = head_c + Vec3::new(side * hr * 0.30, hr * 0.06, face_z + hr * 0.07);
         part(
-            ovoid(Vec3::new(hr * 0.115 * eye, hr * 0.085 * eye, hr * 0.05), 1.0),
+            ovoid(Vec3::new(hr * 0.17, hr * 0.038 * brow, hr * 0.045), 1.1),
+            &mats.brow,
+            Transform::from_translation(
+                head_c + Vec3::new(side * hr * 0.30, hr * 0.235, face_z + hr * 0.035),
+            )
+            .with_rotation(Quat::from_rotation_z(side * 0.10)),
+        );
+    }
+    // Eyes — large and expressive (retro-RPG), with iris + pupil depth.
+    let eye = spread(m(patch, "face_eye_large"), 1.12, 0.32);
+    for side in [-1.0f32, 1.0] {
+        let eye_pos = head_c + Vec3::new(side * hr * 0.29, hr * 0.05, face_z + hr * 0.05);
+        part(
+            ovoid(Vec3::new(hr * 0.145 * eye, hr * 0.115 * eye, hr * 0.055), 1.0),
             &mats.eye_white,
             Transform::from_translation(eye_pos),
         );
         part(
-            ovoid(Vec3::splat(hr * 0.048 * eye), 1.0),
+            ovoid(Vec3::new(hr * 0.070 * eye, hr * 0.078 * eye, hr * 0.030), 1.0),
             &mats.iris,
-            Transform::from_translation(eye_pos + Vec3::new(0.0, 0.0, -hr * 0.035)),
+            Transform::from_translation(eye_pos + Vec3::new(0.0, 0.0, -hr * 0.038)),
+        );
+        part(
+            ovoid(Vec3::splat(hr * 0.030 * eye), 1.0),
+            &mats.dark,
+            Transform::from_translation(eye_pos + Vec3::new(0.0, 0.0, -hr * 0.058)),
         );
     }
     // Mouth.
@@ -612,12 +806,14 @@ fn spawn_head(
         &mats.brow,
         Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.52, face_z - hr * 0.02)),
     );
-    // Ears.
+    // Ears — small and tucked.
     for side in [-1.0f32, 1.0] {
         part(
-            ovoid(Vec3::new(hr * 0.07, hr * 0.16, hr * 0.10), 1.0),
+            ovoid(Vec3::new(hr * 0.055, hr * 0.115, hr * 0.075), 1.0),
             &mats.skin,
-            Transform::from_translation(head_c + Vec3::new(side * hr * 0.85 * cheek, 0.0, 0.0)),
+            Transform::from_translation(
+                head_c + Vec3::new(side * hr * 0.80 * cheek, -hr * 0.02, hr * 0.04),
+            ),
         );
     }
 
@@ -683,49 +879,179 @@ fn spawn_head(
 // ── Outfit layers ─────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_clothes(
+fn spawn_wardrobe(
     part: &mut impl FnMut(Mesh, &Handle<StandardMaterial>, Transform),
+    patch: &CharacterPatch,
     p: &Proportions,
     mats: &StudioMats,
     upper_r: f32,
+    fore_r: f32,
     arm_len: f32,
-    elbow_y: f32,
+    fore_len: f32,
     thigh_r: f32,
     leg_x: f32,
 ) {
-    // Shirt: torso overlay + short sleeves.
-    part(
+    let w = patch.wardrobe;
+    let arm_x = p.shoulder_hw + upper_r * 0.35;
+    let elbow_y = p.shoulder_y - arm_len;
+    let wrist_y = elbow_y - fore_len;
+
+    // ── Tops ─────────────────────────────────────────────────────────────────
+    let torso_overlay = |hem_y: f32, flare: f32| {
         lofted_column(
-            Vec2::new(p.waist_hw * 1.14, p.chest_depth * 1.05),
+            Vec2::new(p.waist_hw * 1.14 * flare, p.chest_depth * 1.05 * flare),
             Vec2::new(p.shoulder_hw * 1.02, p.chest_depth * 1.12),
-            (p.shoulder_y - p.waist_y) * 1.06,
+            (p.shoulder_y - hem_y) * 1.02,
             0.03,
             2.0,
             5,
             22,
-        ),
-        &mats.primary,
-        Transform::from_xyz(0.0, (p.waist_y + p.shoulder_y) * 0.5, 0.0),
-    );
-    for side in [-1.0f32, 1.0] {
-        let x = side * (p.shoulder_hw + upper_r * 0.35);
-        part(
-            lofted_column(
-                Vec2::splat(upper_r * 1.30),
-                Vec2::splat(upper_r * 1.55),
-                arm_len * 0.55,
-                0.0,
-                2.0,
-                3,
-                14,
-            ),
-            &mats.primary,
-            Transform::from_xyz(x, p.shoulder_y - arm_len * 0.28, 0.0),
-        );
-        let _ = elbow_y;
+        )
+    };
+    let short_sleeves = |part: &mut dyn FnMut(Mesh, &Handle<StandardMaterial>, Transform),
+                         mat: &Handle<StandardMaterial>| {
+        for side in [-1.0f32, 1.0] {
+            part(
+                lofted_column(
+                    Vec2::splat(upper_r * 1.30),
+                    Vec2::splat(upper_r * 1.55),
+                    arm_len * 0.55,
+                    0.0,
+                    2.0,
+                    3,
+                    14,
+                ),
+                mat,
+                Transform::from_xyz(side * arm_x, p.shoulder_y - arm_len * 0.28, 0.0),
+            );
+        }
+    };
+    let long_sleeves = |part: &mut dyn FnMut(Mesh, &Handle<StandardMaterial>, Transform),
+                        mat: &Handle<StandardMaterial>| {
+        for side in [-1.0f32, 1.0] {
+            part(
+                lofted_column(
+                    Vec2::splat(fore_r * 1.28),
+                    Vec2::splat(upper_r * 1.45),
+                    p.shoulder_y - wrist_y - 0.01 * p.h,
+                    0.02,
+                    2.0,
+                    4,
+                    14,
+                ),
+                mat,
+                Transform::from_xyz(side * arm_x, (p.shoulder_y + wrist_y) * 0.5, 0.0),
+            );
+        }
+    };
+
+    match w.top {
+        TopStyle::None => {}
+        TopStyle::TShirt => {
+            part(
+                torso_overlay(p.waist_y, 1.0),
+                &mats.primary,
+                Transform::from_xyz(0.0, (p.waist_y + p.shoulder_y) * 0.5, 0.0),
+            );
+            short_sleeves(part, &mats.primary);
+        }
+        TopStyle::LongShirt => {
+            part(
+                torso_overlay(p.waist_y, 1.0),
+                &mats.primary,
+                Transform::from_xyz(0.0, (p.waist_y + p.shoulder_y) * 0.5, 0.0),
+            );
+            long_sleeves(part, &mats.primary);
+        }
+        TopStyle::Tunic => {
+            let hem = p.hip_y - 0.04 * p.h;
+            part(
+                torso_overlay(hem, 1.08),
+                &mats.primary,
+                Transform::from_xyz(0.0, (hem + p.shoulder_y) * 0.5, 0.0),
+            );
+            short_sleeves(part, &mats.primary);
+            // Belt over the tunic.
+            part(
+                lofted_column(
+                    Vec2::new(p.waist_hw * 1.20, p.chest_depth * 1.10),
+                    Vec2::new(p.waist_hw * 1.20, p.chest_depth * 1.10),
+                    0.026 * p.h,
+                    0.0,
+                    1.7,
+                    2,
+                    18,
+                ),
+                &mats.dark,
+                Transform::from_xyz(0.0, p.waist_y, 0.0),
+            );
+        }
+        TopStyle::Jacket => {
+            part(
+                torso_overlay(p.waist_y - 0.02 * p.h, 1.06),
+                &mats.primary,
+                Transform::from_xyz(0.0, (p.waist_y + p.shoulder_y) * 0.5, 0.0),
+            );
+            long_sleeves(part, &mats.primary);
+            // Collar + open-front placket in the secondary colour.
+            part(
+                lofted_column(
+                    Vec2::new(p.head_r * 0.78, p.head_r * 0.74),
+                    Vec2::new(p.head_r * 0.92, p.head_r * 0.86),
+                    0.030 * p.h,
+                    0.0,
+                    1.8,
+                    2,
+                    14,
+                ),
+                &mats.secondary,
+                Transform::from_xyz(0.0, p.shoulder_y + 0.012 * p.h, 0.0),
+            );
+            part(
+                ovoid(
+                    Vec3::new(0.014 * p.h, (p.shoulder_y - p.waist_y) * 0.52, 0.008 * p.h),
+                    1.4,
+                ),
+                &mats.secondary,
+                Transform::from_xyz(0.0, (p.waist_y + p.shoulder_y) * 0.5, -p.chest_depth * 1.14),
+            );
+        }
+        TopStyle::Robe => {
+            // Full-length robe: shoulders to shins, flared hem, full sleeves.
+            let hem = p.knee_y * 0.55;
+            part(
+                lofted_column(
+                    Vec2::new(p.hip_hw * 1.55, p.chest_depth * 1.55),
+                    Vec2::new(p.shoulder_hw * 1.02, p.chest_depth * 1.14),
+                    p.shoulder_y - hem,
+                    0.02,
+                    2.0,
+                    6,
+                    22,
+                ),
+                &mats.primary,
+                Transform::from_xyz(0.0, (hem + p.shoulder_y) * 0.5, 0.0),
+            );
+            long_sleeves(part, &mats.primary);
+            // Sash.
+            part(
+                lofted_column(
+                    Vec2::new(p.waist_hw * 1.30, p.chest_depth * 1.24),
+                    Vec2::new(p.waist_hw * 1.30, p.chest_depth * 1.24),
+                    0.024 * p.h,
+                    0.0,
+                    1.7,
+                    2,
+                    18,
+                ),
+                &mats.secondary,
+                Transform::from_xyz(0.0, p.waist_y, 0.0),
+            );
+        }
     }
-    // Pants: hips → shins.
-    part(
+
+    // ── Bottoms ──────────────────────────────────────────────────────────────
+    let hip_overlay = || {
         lofted_column(
             Vec2::new(p.hip_hw * 1.10, p.chest_depth * 1.02),
             Vec2::new(p.waist_hw * 1.12, p.chest_depth * 0.96),
@@ -734,25 +1060,72 @@ fn spawn_clothes(
             2.0,
             3,
             18,
-        ),
-        &mats.secondary,
-        Transform::from_xyz(0.0, (p.hip_y + p.waist_y) * 0.5, 0.0),
-    );
-    for side in [-1.0f32, 1.0] {
-        let x = side * leg_x;
-        part(
-            lofted_column(
-                Vec2::splat(thigh_r * 0.95),
-                Vec2::new(thigh_r * 1.12, thigh_r * 1.16),
-                p.hip_y - p.knee_y * 0.82,
-                0.0,
-                2.0,
-                4,
-                16,
-            ),
-            &mats.secondary,
-            Transform::from_xyz(x, (p.hip_y + p.knee_y * 0.82) * 0.5, 0.0),
-        );
+        )
+    };
+    let leg_sleeve = |bottom_y: f32, taper: f32| {
+        lofted_column(
+            Vec2::splat(thigh_r * taper),
+            Vec2::new(thigh_r * 1.12, thigh_r * 1.16),
+            p.hip_y - bottom_y,
+            0.0,
+            2.0,
+            4,
+            16,
+        )
+    };
+    match w.bottom {
+        BottomStyle::Underwear => {}
+        BottomStyle::Shorts => {
+            part(
+                hip_overlay(),
+                &mats.secondary,
+                Transform::from_xyz(0.0, (p.hip_y + p.waist_y) * 0.5, 0.0),
+            );
+            for side in [-1.0f32, 1.0] {
+                let bottom = p.hip_y - (p.hip_y - p.knee_y) * 0.42;
+                part(
+                    leg_sleeve(bottom, 1.02),
+                    &mats.secondary,
+                    Transform::from_xyz(side * leg_x, (p.hip_y + bottom) * 0.5, 0.0),
+                );
+            }
+        }
+        BottomStyle::Pants => {
+            part(
+                hip_overlay(),
+                &mats.secondary,
+                Transform::from_xyz(0.0, (p.hip_y + p.knee_y * 0.82) * 0.5 + 0.05 * p.h, 0.0),
+            );
+            for side in [-1.0f32, 1.0] {
+                let bottom = p.knee_y * 0.55;
+                part(
+                    leg_sleeve(bottom, 0.82),
+                    &mats.secondary,
+                    Transform::from_xyz(side * leg_x, (p.hip_y + bottom) * 0.5, 0.0),
+                );
+            }
+        }
+        BottomStyle::Skirt => {
+            part(
+                hip_overlay(),
+                &mats.secondary,
+                Transform::from_xyz(0.0, (p.hip_y + p.waist_y) * 0.5, 0.0),
+            );
+            let hem = p.knee_y * 1.05;
+            part(
+                lofted_column(
+                    Vec2::new(p.hip_hw * 1.65, p.chest_depth * 1.75),
+                    Vec2::new(p.hip_hw * 1.06, p.chest_depth * 1.00),
+                    p.hip_y - hem,
+                    0.0,
+                    2.0,
+                    4,
+                    20,
+                ),
+                &mats.secondary,
+                Transform::from_xyz(0.0, (hem + p.hip_y) * 0.5, 0.0),
+            );
+        }
     }
 }
 

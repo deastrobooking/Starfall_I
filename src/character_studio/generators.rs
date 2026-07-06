@@ -9,7 +9,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use super::spec::{CharacterSpec, HairStyle, OutfitLayer, Sex};
+use super::spec::{ArmorStyle, BottomStyle, CharacterSpec, FootStyle, HairStyle, HandStyle, Sex, TopStyle, WardrobeSpec};
 
 // ── Patch ─────────────────────────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ pub struct CharacterPatch {
     /// What each outfit slot contains this build.
     pub slots: HashMap<CharacterSlot, SlotContent>,
     pub sex: Sex,
-    pub outfit: OutfitLayer,
+    pub wardrobe: WardrobeSpec,
     pub hair: HairStyle,
 }
 
@@ -74,7 +74,7 @@ pub fn build_character_patch(spec: &CharacterSpec) -> CharacterPatch {
     ];
     let mut patch = CharacterPatch {
         sex: spec.sex,
-        outfit: spec.style.outfit,
+        wardrobe: spec.style.wardrobe,
         hair: spec.style.hair,
         ..default()
     };
@@ -221,34 +221,45 @@ impl PresetGenerator for OutfitGenerator {
 
         use CharacterSlot as S;
         use SlotContent as C;
-        let fill: [(S, C); 5] = match spec.style.outfit {
-            OutfitLayer::Base => [
-                (S::Torso, C::None),
-                (S::Legs, C::None),
-                (S::Feet, C::None),
-                (S::Hands, C::None),
-                (S::Helmet, C::None),
-            ],
-            OutfitLayer::Clothes => [
-                (S::Torso, C::Cloth),
-                (S::Legs, C::Cloth),
-                (S::Feet, C::Cloth),
-                (S::Hands, C::None),
-                (S::Helmet, C::None),
-            ],
-            OutfitLayer::SuperSuit => [
+        let w = spec.style.wardrobe;
+        // Armor overrides the wardrobe visuals when active.
+        let fill: [(S, C); 5] = match w.armor {
+            ArmorStyle::SuperSuit => [
                 (S::Torso, C::Suit),
                 (S::Legs, C::Suit),
                 (S::Feet, C::Suit),
                 (S::Hands, C::Suit),
                 (S::Helmet, C::None),
             ],
-            OutfitLayer::MechaArmor => [
+            ArmorStyle::MechaArmor => [
                 (S::Torso, C::Mecha),
                 (S::Legs, C::Mecha),
                 (S::Feet, C::Mecha),
                 (S::Hands, C::Mecha),
                 (S::Helmet, C::Mecha),
+            ],
+            ArmorStyle::None => [
+                (
+                    S::Torso,
+                    if w.top == TopStyle::None { C::None } else { C::Cloth },
+                ),
+                (
+                    S::Legs,
+                    if w.bottom == BottomStyle::Underwear { C::None } else { C::Cloth },
+                ),
+                (
+                    S::Feet,
+                    if w.feet == FootStyle::Barefoot { C::None } else { C::Cloth },
+                ),
+                (
+                    S::Hands,
+                    match w.hands {
+                        HandStyle::Bare => C::None,
+                        HandStyle::Gloves => C::Suit,
+                        HandStyle::Gauntlets => C::Mecha,
+                    },
+                ),
+                (S::Helmet, C::None),
             ],
         };
         for (slot, content) in fill {
@@ -272,6 +283,13 @@ pub fn preset_male() -> CharacterSpec {
     spec.style.hair = HairStyle::Short;
     spec.style.hair_color = 1;
     spec.style.skin_tone = 2;
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::TShirt,
+        bottom: BottomStyle::Pants,
+        feet: FootStyle::Boots,
+        hands: HandStyle::Bare,
+        armor: ArmorStyle::None,
+    };
     spec
 }
 
@@ -293,6 +311,13 @@ pub fn preset_female() -> CharacterSpec {
     spec.style.hair = HairStyle::Long;
     spec.style.hair_color = 3;
     spec.style.skin_tone = 1;
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::Tunic,
+        bottom: BottomStyle::Pants,
+        feet: FootStyle::TallBoots,
+        hands: HandStyle::Bare,
+        armor: ArmorStyle::None,
+    };
     spec
 }
 
@@ -370,4 +395,15 @@ pub fn randomize(spec: &mut CharacterSpec) {
     spec.style.hair_color = rng.gen_range(0..8);
     spec.style.primary_color = rng.gen_range(0..8);
     spec.style.secondary_color = rng.gen_range(0..8);
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::ALL[rng.gen_range(1..TopStyle::ALL.len())],
+        bottom: BottomStyle::ALL[rng.gen_range(1..BottomStyle::ALL.len())],
+        feet: FootStyle::ALL[rng.gen_range(0..FootStyle::ALL.len())],
+        hands: HandStyle::ALL[rng.gen_range(0..HandStyle::ALL.len())],
+        armor: if rng.gen_bool(0.25) {
+            ArmorStyle::ALL[rng.gen_range(1..ArmorStyle::ALL.len())]
+        } else {
+            ArmorStyle::None
+        },
+    };
 }

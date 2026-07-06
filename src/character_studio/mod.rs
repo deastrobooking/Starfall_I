@@ -1,58 +1,124 @@
 //! Character Studio — the in-game human character generator.
 //!
-//! First pillar of the in-game asset-designer suite: a Blender-like viewport
-//! (orbit camera, turntable, studio lighting) driven entirely by reusable
-//! preset generators over a [`spec::CharacterSpec`] source of truth:
+//! Fully GUI-driven (no keyboard commands): every control is a clickable
+//! button that also participates in **gamepad focus navigation** — D-pad
+//! Up/Down moves between rows, Left/Right adjusts steppers/cyclers or moves
+//! between buttons in a row, South activates, East backs out. Mouse hover
+//! pulls focus, so both input methods share one highlight model. The viewport
+//! orbits with right-mouse drag / wheel zoom, or gamepad right stick +
+//! triggers.
 //!
 //! ```text
-//! keys/presets/randomize → CharacterSpec → generators → CharacterPatch → meshes
+//! buttons/presets/randomize → CharacterSpec → generators → CharacterPatch → meshes
 //! ```
 //!
-//! Everything on screen is generated in `human_mesh.rs` from math templates —
-//! no external model files — so generated characters can later be exported
-//! (e.g. `.glb`) directly from the data we build here. The sibling armor/parts
-//! tool on the roster heroes is the **Robot Builder** (`AppState::CharacterDesign`);
-//! this studio is entered from it with F6.
+//! Saved characters are **versioned**: every SAVE writes a new
+//! `human_vNNN.json` under `assets/presets/humans/`, listed live in the
+//! library panel with LOAD/DELETE buttons per version.
 
 pub mod generators;
 pub mod human_mesh;
 pub mod spec;
 
+use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use std::path::PathBuf;
 
 use crate::state::AppState;
 use generators::build_character_patch;
-use spec::{CharacterSpec, HairStyle, MorphField, OutfitLayer};
+use spec::{CharacterSpec, MorphField, StyleField};
 
 pub struct CharacterStudioPlugin;
 
 impl Plugin for CharacterStudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StudioState>()
+            .init_resource::<StudioFocus>()
+            .init_resource::<SaveLibrary>()
             .add_systems(OnEnter(AppState::CharacterStudio), setup_studio)
             .add_systems(OnExit(AppState::CharacterStudio), cleanup_studio)
             .add_systems(
                 Update,
                 (
-                    studio_input,
-                    rebuild_preview.after(studio_input),
+                    button_interaction,
+                    gamepad_navigation,
+                    rebuild_library_rows,
+                    rebuild_preview,
                     orbit_camera,
-                    update_panel_text,
+                    refresh_labels,
+                    refresh_focus_highlight,
                 )
+                    .chain()
                     .run_if(in_state(AppState::CharacterStudio)),
             );
     }
 }
 
-// ── State ─────────────────────────────────────────────────────────────────────
+// ── Actions (one dispatcher for mouse + gamepad) ──────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum StudioAction {
+    Male,
+    Female,
+    Athletic,
+    Heavy,
+    Slim,
+    SoftFace,
+    SharpFace,
+    Random,
+    Undo,
+    SaveVersion,
+    Back,
+    MorphDec(usize),
+    MorphInc(usize),
+    StylePrev(usize),
+    StyleNext(usize),
+    LoadFile(usize),
+    DeleteFile(usize),
+}
+
+/// Gamepad-focusable rows. Action groups hold several buttons (Left/Right
+/// moves the column); morph/style rows adjust with Left/Right directly.
+const ACTION_GROUPS: [&[StudioAction]; 5] = [
+    &[StudioAction::Male, StudioAction::Female],
+    &[
+        StudioAction::Athletic,
+        StudioAction::Heavy,
+        StudioAction::Slim,
+    ],
+    &[StudioAction::SoftFace, StudioAction::SharpFace],
+    &[StudioAction::Random, StudioAction::Undo],
+    &[StudioAction::SaveVersion, StudioAction::Back],
+];
+const MORPH_ROW_0: usize = ACTION_GROUPS.len(); // 5
+const STYLE_ROW_0: usize = MORPH_ROW_0 + MorphField::ALL.len(); // 20
+const FILE_ROW_0: usize = STYLE_ROW_0 + StyleField::ALL.len(); // 32
+
+fn action_label(action: StudioAction) -> &'static str {
+    match action {
+        StudioAction::Male => "MALE",
+        StudioAction::Female => "FEMALE",
+        StudioAction::Athletic => "ATHLETIC",
+        StudioAction::Heavy => "HEAVY",
+        StudioAction::Slim => "SLIM",
+        StudioAction::SoftFace => "SOFT FACE",
+        StudioAction::SharpFace => "SHARP FACE",
+        StudioAction::Random => "RANDOM",
+        StudioAction::Undo => "UNDO",
+        StudioAction::SaveVersion => "SAVE VERSION",
+        StudioAction::Back => "BACK",
+        _ => "",
+    }
+}
+
+// ── Resources / components ────────────────────────────────────────────────────
 
 #[derive(Resource)]
 pub struct StudioState {
     pub spec: CharacterSpec,
-    cursor: usize,
     undo: Vec<CharacterSpec>,
     dirty: bool,
+    labels_dirty: bool,
     yaw: f32,
     pitch: f32,
     distance: f32,
@@ -63,13 +129,13 @@ impl Default for StudioState {
     fn default() -> Self {
         Self {
             spec: generators::preset_male(),
-            cursor: 0,
             undo: Vec::new(),
             dirty: true,
+            labels_dirty: true,
             yaw: 0.35,
             pitch: 0.12,
             distance: 3.4,
-            status: String::new(),
+            status: "Welcome to the Character Studio".to_string(),
         }
     }
 }
@@ -83,6 +149,20 @@ impl StudioState {
     }
 }
 
+/// Focus cursor shared by gamepad and mouse hover.
+#[derive(Resource, Default)]
+struct StudioFocus {
+    row: usize,
+    col: usize,
+}
+
+/// Versioned character files on disk (`human_vNNN.json`).
+#[derive(Resource, Default)]
+struct SaveLibrary {
+    files: Vec<String>,
+    dirty: bool,
+}
+
 #[derive(Component)]
 struct StudioRoot;
 
@@ -93,18 +173,48 @@ struct StudioPreview;
 struct StudioCamera;
 
 #[derive(Component)]
-struct StudioPanelText;
+struct ActionButton {
+    action: StudioAction,
+    row: usize,
+    col: usize,
+}
 
-// ── Setup / teardown ──────────────────────────────────────────────────────────
+#[derive(Component)]
+struct FocusRow(usize);
+
+#[derive(Component)]
+struct MorphValueText(usize);
+
+#[derive(Component)]
+struct StyleValueText(usize);
+
+#[derive(Component)]
+struct StatusText;
+
+#[derive(Component)]
+struct LibraryPanel;
+
+const BTN_BG: Color = Color::srgba(0.14, 0.18, 0.26, 0.95);
+const BTN_BG_FOCUS: Color = Color::srgba(0.26, 0.45, 0.80, 0.95);
+const ROW_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.0);
+const ROW_BG_FOCUS: Color = Color::srgba(0.20, 0.32, 0.55, 0.35);
+
+// ── Setup ─────────────────────────────────────────────────────────────────────
 
 fn setup_studio(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: ResMut<StudioState>,
+    mut focus: ResMut<StudioFocus>,
+    mut library: ResMut<SaveLibrary>,
 ) {
     state.dirty = true;
-    state.status = "Character Studio ready".to_string();
+    state.labels_dirty = true;
+    library.files = scan_library();
+    library.dirty = true;
+    focus.row = 0;
+    focus.col = 0;
 
     commands.spawn((
         StudioRoot,
@@ -112,7 +222,6 @@ fn setup_studio(
         Camera3d::default(),
         Transform::from_xyz(0.0, 1.5, 3.4).looking_at(Vec3::new(0.0, 0.95, 0.0), Vec3::Y),
     ));
-    // Key light + cool fill, matching a studio turntable setup.
     commands.spawn((
         StudioRoot,
         DirectionalLight {
@@ -131,7 +240,6 @@ fn setup_studio(
         },
         Transform::from_xyz(-3.0, 2.0, -2.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
-    // Pedestal + floor disc.
     commands.spawn((
         StudioRoot,
         Mesh3d(meshes.add(Mesh::from(Cylinder::new(1.15, 0.08)))),
@@ -153,33 +261,286 @@ fn setup_studio(
         Transform::from_xyz(0.0, -0.09, 0.0),
     ));
 
-    // Left control panel.
+    spawn_left_panel(&mut commands, &state);
+    spawn_right_panel(&mut commands);
+}
+
+fn text(value: impl Into<String>, size: f32, color: Color) -> (Text, TextFont, TextColor) {
+    (
+        Text::new(value),
+        TextFont {
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextColor(color),
+    )
+}
+
+fn spawn_action_button(
+    parent: &mut ChildSpawnerCommands,
+    action: StudioAction,
+    row: usize,
+    col: usize,
+) {
+    parent
+        .spawn((
+            Button,
+            ActionButton { action, row, col },
+            Node {
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                margin: UiRect::all(Val::Px(2.0)),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(BTN_BG),
+        ))
+        .with_children(|b| {
+            b.spawn(text(action_label(action), 12.0, Color::srgb(0.92, 0.95, 1.0)));
+        });
+}
+
+fn spawn_small_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    action: StudioAction,
+    row: usize,
+    col: usize,
+) {
+    parent
+        .spawn((
+            Button,
+            ActionButton { action, row, col },
+            Node {
+                width: Val::Px(24.0),
+                height: Val::Px(20.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                margin: UiRect::horizontal(Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(BTN_BG),
+        ))
+        .with_children(|b| {
+            b.spawn(text(label, 12.0, Color::srgb(0.92, 0.95, 1.0)));
+        });
+}
+
+fn section_label(parent: &mut ChildSpawnerCommands, label: &str) {
+    parent
+        .spawn((
+            Node {
+                margin: UiRect::top(Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .with_children(|n| {
+            n.spawn(text(label, 11.0, Color::srgb(0.55, 0.75, 1.0)));
+        });
+}
+
+fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
     commands
         .spawn((
             StudioRoot,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(10.0),
-                top: Val::Px(10.0),
-                bottom: Val::Px(10.0),
-                width: Val::Px(330.0),
-                padding: UiRect::all(Val::Px(10.0)),
+                left: Val::Px(8.0),
+                top: Val::Px(8.0),
+                bottom: Val::Px(8.0),
+                width: Val::Px(340.0),
+                padding: UiRect::all(Val::Px(8.0)),
                 flex_direction: FlexDirection::Column,
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.86)),
+            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.90)),
         ))
         .with_children(|panel| {
+            panel.spawn(text("CHARACTER STUDIO", 16.0, Color::srgb(0.65, 0.85, 1.0)));
+            {
+                let (t, f, c) = text("", 11.0, Color::srgb(0.95, 0.85, 0.4));
+                panel.spawn((StatusText, t, f, c));
+            }
+
+            section_label(panel, "PRESETS");
+            for (g, actions) in ACTION_GROUPS.iter().enumerate() {
+                panel
+                    .spawn((
+                        FocusRow(g),
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            padding: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(ROW_BG),
+                    ))
+                    .with_children(|row| {
+                        for (c, action) in actions.iter().enumerate() {
+                            spawn_action_button(row, *action, g, c);
+                        }
+                    });
+            }
+
+            section_label(panel, "BODY & FACE");
+            for (i, field) in MorphField::ALL.iter().enumerate() {
+                let row_idx = MORPH_ROW_0 + i;
+                panel
+                    .spawn((
+                        FocusRow(row_idx),
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::SpaceBetween,
+                            padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(ROW_BG),
+                    ))
+                    .with_children(|row| {
+                        row.spawn(Node {
+                            width: Val::Px(110.0),
+                            ..default()
+                        })
+                        .with_children(|n| {
+                            n.spawn(text(field.label(), 12.0, Color::srgb(0.85, 0.90, 0.96)));
+                        });
+                        row.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|controls| {
+                            spawn_small_button(
+                                controls,
+                                "-",
+                                StudioAction::MorphDec(i),
+                                row_idx,
+                                0,
+                            );
+                            controls
+                                .spawn(Node {
+                                    width: Val::Px(96.0),
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                })
+                                .with_children(|n| {
+                                    let (t, f, c) = text(
+                                        morph_bar(field.get(&state.spec)),
+                                        12.0,
+                                        Color::srgb(0.60, 0.95, 0.75),
+                                    );
+                                    n.spawn((MorphValueText(i), t, f, c));
+                                });
+                            spawn_small_button(
+                                controls,
+                                "+",
+                                StudioAction::MorphInc(i),
+                                row_idx,
+                                1,
+                            );
+                        });
+                    });
+            }
+
+            section_label(panel, "STYLE & WARDROBE");
+            for (i, field) in StyleField::ALL.iter().enumerate() {
+                let row_idx = STYLE_ROW_0 + i;
+                panel
+                    .spawn((
+                        FocusRow(row_idx),
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::SpaceBetween,
+                            padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(ROW_BG),
+                    ))
+                    .with_children(|row| {
+                        row.spawn(Node {
+                            width: Val::Px(110.0),
+                            ..default()
+                        })
+                        .with_children(|n| {
+                            n.spawn(text(field.label(), 12.0, Color::srgb(0.85, 0.90, 0.96)));
+                        });
+                        row.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|controls| {
+                            spawn_small_button(
+                                controls,
+                                "<",
+                                StudioAction::StylePrev(i),
+                                row_idx,
+                                0,
+                            );
+                            controls
+                                .spawn(Node {
+                                    width: Val::Px(96.0),
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                })
+                                .with_children(|n| {
+                                    let (t, f, c) = text(
+                                        field.value_label(&state.spec),
+                                        12.0,
+                                        Color::srgb(0.95, 0.85, 0.55),
+                                    );
+                                    n.spawn((StyleValueText(i), t, f, c));
+                                });
+                            spawn_small_button(
+                                controls,
+                                ">",
+                                StudioAction::StyleNext(i),
+                                row_idx,
+                                1,
+                            );
+                        });
+                    });
+            }
+        });
+}
+
+fn spawn_right_panel(commands: &mut Commands) {
+    commands
+        .spawn((
+            StudioRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(8.0),
+                top: Val::Px(8.0),
+                width: Val::Px(250.0),
+                max_height: Val::Percent(85.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                flex_direction: FlexDirection::Column,
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.90)),
+        ))
+        .with_children(|panel| {
+            panel.spawn(text("SAVED VERSIONS", 14.0, Color::srgb(0.65, 0.85, 1.0)));
             panel.spawn((
-                StudioPanelText,
-                Text::new(""),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
+                LibraryPanel,
+                Node {
+                    flex_direction: FlexDirection::Column,
                     ..default()
                 },
-                TextColor(Color::srgb(0.86, 0.92, 0.98)),
             ));
         });
+}
+
+fn morph_bar(v: f32) -> String {
+    let filled = (v * 10.0).round() as usize;
+    (0..10)
+        .map(|b| if b < filled { '#' } else { '-' })
+        .collect::<String>()
+        + &format!(" {v:.2}")
 }
 
 fn cleanup_studio(
@@ -192,7 +553,375 @@ fn cleanup_studio(
     }
 }
 
-// ── Rebuild pipeline ──────────────────────────────────────────────────────────
+// ── Action dispatch ───────────────────────────────────────────────────────────
+
+fn apply_action(
+    action: StudioAction,
+    state: &mut StudioState,
+    library: &mut SaveLibrary,
+    next_state: &mut NextState<AppState>,
+) {
+    let mark = |state: &mut StudioState, msg: String| {
+        state.dirty = true;
+        state.labels_dirty = true;
+        state.status = msg;
+    };
+    match action {
+        StudioAction::Male => {
+            state.push_undo();
+            state.spec = generators::preset_male();
+            mark(state, "Preset: Male".into());
+        }
+        StudioAction::Female => {
+            state.push_undo();
+            state.spec = generators::preset_female();
+            mark(state, "Preset: Female".into());
+        }
+        StudioAction::Athletic => {
+            state.push_undo();
+            generators::apply_athletic(&mut state.spec);
+            mark(state, "Preset: Athletic".into());
+        }
+        StudioAction::Heavy => {
+            state.push_undo();
+            generators::apply_heavy(&mut state.spec);
+            mark(state, "Preset: Heavy".into());
+        }
+        StudioAction::Slim => {
+            state.push_undo();
+            generators::apply_slim(&mut state.spec);
+            mark(state, "Preset: Slim".into());
+        }
+        StudioAction::SoftFace => {
+            state.push_undo();
+            generators::apply_soft_face(&mut state.spec);
+            mark(state, "Preset: Soft Face".into());
+        }
+        StudioAction::SharpFace => {
+            state.push_undo();
+            generators::apply_sharp_face(&mut state.spec);
+            mark(state, "Preset: Sharp Face".into());
+        }
+        StudioAction::Random => {
+            state.push_undo();
+            let mut spec = state.spec;
+            generators::randomize(&mut spec);
+            state.spec = spec;
+            mark(state, "Randomized".into());
+        }
+        StudioAction::Undo => {
+            if let Some(prev) = state.undo.pop() {
+                state.spec = prev;
+                mark(state, "Undo".into());
+            } else {
+                state.status = "Nothing to undo".into();
+                state.labels_dirty = true;
+            }
+        }
+        StudioAction::SaveVersion => match save_new_version(&state.spec, &library.files) {
+            Ok(name) => {
+                library.files = scan_library();
+                library.dirty = true;
+                state.status = format!("Saved {name}");
+                state.labels_dirty = true;
+            }
+            Err(err) => {
+                state.status = format!("Save failed: {err}");
+                state.labels_dirty = true;
+            }
+        },
+        StudioAction::Back => next_state.set(AppState::CharacterDesign),
+        StudioAction::MorphDec(i) | StudioAction::MorphInc(i) => {
+            let dir = if matches!(action, StudioAction::MorphInc(_)) {
+                1.0
+            } else {
+                -1.0
+            };
+            let field = MorphField::ALL[i];
+            state.push_undo();
+            let v = field.get(&state.spec) + dir * 0.05;
+            field.set(&mut state.spec, v);
+            mark(
+                state,
+                format!("{} = {:.2}", field.label(), field.get(&state.spec)),
+            );
+        }
+        StudioAction::StylePrev(i) | StudioAction::StyleNext(i) => {
+            let dir = if matches!(action, StudioAction::StyleNext(_)) {
+                1
+            } else {
+                -1
+            };
+            let field = StyleField::ALL[i];
+            state.push_undo();
+            field.cycle(&mut state.spec, dir);
+            mark(
+                state,
+                format!("{}: {}", field.label(), field.value_label(&state.spec)),
+            );
+        }
+        StudioAction::LoadFile(i) => {
+            if let Some(name) = library.files.get(i).cloned() {
+                match load_version(&name) {
+                    Ok(spec) => {
+                        state.push_undo();
+                        state.spec = spec;
+                        mark(state, format!("Loaded {name}"));
+                    }
+                    Err(err) => {
+                        state.status = format!("Load failed: {err}");
+                        state.labels_dirty = true;
+                    }
+                }
+            }
+        }
+        StudioAction::DeleteFile(i) => {
+            if let Some(name) = library.files.get(i).cloned() {
+                let _ = std::fs::remove_file(preset_dir().join(&name));
+                library.files = scan_library();
+                library.dirty = true;
+                state.status = format!("Deleted {name}");
+                state.labels_dirty = true;
+            }
+        }
+    }
+}
+
+// ── Mouse ─────────────────────────────────────────────────────────────────────
+
+fn button_interaction(
+    mut interactions: Query<(&Interaction, &ActionButton), Changed<Interaction>>,
+    mut state: ResMut<StudioState>,
+    mut library: ResMut<SaveLibrary>,
+    mut focus: ResMut<StudioFocus>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    for (interaction, button) in interactions.iter_mut() {
+        match interaction {
+            Interaction::Hovered => {
+                focus.row = button.row;
+                focus.col = button.col;
+            }
+            Interaction::Pressed => {
+                focus.row = button.row;
+                focus.col = button.col;
+                apply_action(button.action, &mut state, &mut library, &mut next_state);
+            }
+            Interaction::None => {}
+        }
+    }
+}
+
+// ── Gamepad ───────────────────────────────────────────────────────────────────
+
+fn gamepad_navigation(
+    gamepads: Query<&Gamepad>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut focus: ResMut<StudioFocus>,
+    mut state: ResMut<StudioState>,
+    mut library: ResMut<SaveLibrary>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    let mut up = keys.just_pressed(KeyCode::ArrowUp);
+    let mut down = keys.just_pressed(KeyCode::ArrowDown);
+    let mut left = keys.just_pressed(KeyCode::ArrowLeft);
+    let mut right = keys.just_pressed(KeyCode::ArrowRight);
+    let mut confirm = keys.just_pressed(KeyCode::Enter);
+    let mut back = keys.just_pressed(KeyCode::Escape);
+
+    for gp in gamepads.iter() {
+        up |= gp.just_pressed(GamepadButton::DPadUp);
+        down |= gp.just_pressed(GamepadButton::DPadDown);
+        left |= gp.just_pressed(GamepadButton::DPadLeft);
+        right |= gp.just_pressed(GamepadButton::DPadRight);
+        confirm |= gp.just_pressed(GamepadButton::South);
+        back |= gp.just_pressed(GamepadButton::East);
+    }
+
+    if back {
+        next_state.set(AppState::CharacterDesign);
+        return;
+    }
+
+    let total_rows = FILE_ROW_0 + library.files.len();
+    if up {
+        focus.row = (focus.row + total_rows - 1) % total_rows;
+        focus.col = 0;
+    }
+    if down {
+        focus.row = (focus.row + 1) % total_rows;
+        focus.col = 0;
+    }
+
+    let row = focus.row;
+    if row < MORPH_ROW_0 {
+        // Action group: Left/Right move between buttons, South activates.
+        let count = ACTION_GROUPS[row].len();
+        if left {
+            focus.col = (focus.col + count - 1) % count;
+        }
+        if right {
+            focus.col = (focus.col + 1) % count;
+        }
+        if confirm {
+            apply_action(
+                ACTION_GROUPS[row][focus.col.min(count - 1)],
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        }
+    } else if row < STYLE_ROW_0 {
+        let i = row - MORPH_ROW_0;
+        if left {
+            apply_action(
+                StudioAction::MorphDec(i),
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        }
+        if right || confirm {
+            apply_action(
+                StudioAction::MorphInc(i),
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        }
+    } else if row < FILE_ROW_0 {
+        let i = row - STYLE_ROW_0;
+        if left {
+            apply_action(
+                StudioAction::StylePrev(i),
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        }
+        if right || confirm {
+            apply_action(
+                StudioAction::StyleNext(i),
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        }
+    } else {
+        let i = row - FILE_ROW_0;
+        if left {
+            focus.col = 0;
+        }
+        if right {
+            focus.col = 1;
+        }
+        if confirm {
+            let action = if focus.col == 0 {
+                StudioAction::LoadFile(i)
+            } else {
+                StudioAction::DeleteFile(i)
+            };
+            apply_action(action, &mut state, &mut library, &mut next_state);
+        }
+    }
+}
+
+// ── Save library UI ───────────────────────────────────────────────────────────
+
+fn rebuild_library_rows(
+    mut commands: Commands,
+    mut library: ResMut<SaveLibrary>,
+    panel_q: Query<Entity, With<LibraryPanel>>,
+    children_q: Query<&Children>,
+) {
+    if !library.dirty {
+        return;
+    }
+    library.dirty = false;
+    let Ok(panel) = panel_q.single() else {
+        return;
+    };
+    if let Ok(children) = children_q.get(panel) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+    let files = library.files.clone();
+    commands.entity(panel).with_children(|list| {
+        if files.is_empty() {
+            list.spawn(text(
+                "(no saved versions yet)",
+                11.0,
+                Color::srgb(0.6, 0.6, 0.65),
+            ));
+        }
+        for (i, name) in files.iter().enumerate() {
+            let row_idx = FILE_ROW_0 + i;
+            list.spawn((
+                FocusRow(row_idx),
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    padding: UiRect::axes(Val::Px(2.0), Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(ROW_BG),
+            ))
+            .with_children(|row| {
+                row.spawn(text(
+                    name.trim_end_matches(".json"),
+                    11.0,
+                    Color::srgb(0.85, 0.90, 0.96),
+                ));
+                row.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    ..default()
+                })
+                .with_children(|buttons| {
+                    buttons
+                        .spawn((
+                            Button,
+                            ActionButton {
+                                action: StudioAction::LoadFile(i),
+                                row: row_idx,
+                                col: 0,
+                            },
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                margin: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(BTN_BG),
+                        ))
+                        .with_children(|b| {
+                            b.spawn(text("LOAD", 10.0, Color::srgb(0.7, 1.0, 0.8)));
+                        });
+                    buttons
+                        .spawn((
+                            Button,
+                            ActionButton {
+                                action: StudioAction::DeleteFile(i),
+                                row: row_idx,
+                                col: 1,
+                            },
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                margin: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(BTN_BG),
+                        ))
+                        .with_children(|b| {
+                            b.spawn(text("DEL", 10.0, Color::srgb(1.0, 0.55, 0.5)));
+                        });
+                });
+            });
+        }
+    });
+}
+
+// ── Rebuild preview ───────────────────────────────────────────────────────────
 
 fn rebuild_preview(
     mut commands: Commands,
@@ -219,182 +948,45 @@ fn rebuild_preview(
     commands.entity(root).insert(StudioPreview);
 }
 
-// ── Input ─────────────────────────────────────────────────────────────────────
-
-fn studio_input(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<StudioState>,
-    mut next_state: ResMut<NextState<AppState>>,
-) {
-    if keys.just_pressed(KeyCode::Escape) {
-        next_state.set(AppState::CharacterDesign);
-        return;
-    }
-
-    let fields = MorphField::ALL;
-    if keys.just_pressed(KeyCode::ArrowUp) {
-        state.cursor = (state.cursor + fields.len() - 1) % fields.len();
-    }
-    if keys.just_pressed(KeyCode::ArrowDown) {
-        state.cursor = (state.cursor + 1) % fields.len();
-    }
-    let step = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-        0.15
-    } else {
-        0.05
-    };
-    let field = fields[state.cursor];
-    let adjust = |state: &mut StudioState, dir: f32| {
-        state.push_undo();
-        let v = field.get(&state.spec) + dir * step;
-        field.set(&mut state.spec, v);
-        state.dirty = true;
-        state.status = format!("{} = {:.2}", field.label(), field.get(&state.spec));
-    };
-    if keys.just_pressed(KeyCode::ArrowLeft) {
-        adjust(&mut state, -1.0);
-    }
-    if keys.just_pressed(KeyCode::ArrowRight) {
-        adjust(&mut state, 1.0);
-    }
-
-    // Presets.
-    let preset =
-        |state: &mut StudioState, label: &str, apply: &dyn Fn(&mut CharacterSpec)| {
-            state.push_undo();
-            apply(&mut state.spec);
-            state.dirty = true;
-            state.status = format!("Preset: {label}");
-        };
-    if keys.just_pressed(KeyCode::Digit1) {
-        preset(&mut state, "Male", &|s| *s = generators::preset_male());
-    }
-    if keys.just_pressed(KeyCode::Digit2) {
-        preset(&mut state, "Female", &|s| *s = generators::preset_female());
-    }
-    if keys.just_pressed(KeyCode::Digit3) {
-        preset(&mut state, "Athletic", &generators::apply_athletic);
-    }
-    if keys.just_pressed(KeyCode::Digit4) {
-        preset(&mut state, "Heavy", &generators::apply_heavy);
-    }
-    if keys.just_pressed(KeyCode::Digit5) {
-        preset(&mut state, "Slim", &generators::apply_slim);
-    }
-    if keys.just_pressed(KeyCode::Digit6) {
-        preset(&mut state, "Soft Face", &generators::apply_soft_face);
-    }
-    if keys.just_pressed(KeyCode::Digit7) {
-        preset(&mut state, "Sharp Face", &generators::apply_sharp_face);
-    }
-
-    // Style cyclers.
-    let cycle = |state: &mut StudioState, label: &str, apply: &dyn Fn(&mut CharacterSpec)| {
-        state.push_undo();
-        apply(&mut state.spec);
-        state.dirty = true;
-        state.status = label.to_string();
-    };
-    if keys.just_pressed(KeyCode::KeyO) {
-        cycle(&mut state, "Outfit layer", &|s| {
-            let all = OutfitLayer::ALL;
-            let i = all.iter().position(|o| *o == s.style.outfit).unwrap_or(0);
-            s.style.outfit = all[(i + 1) % all.len()];
-        });
-    }
-    if keys.just_pressed(KeyCode::KeyH) {
-        cycle(&mut state, "Hair style", &|s| {
-            let all = HairStyle::ALL;
-            let i = all.iter().position(|h| *h == s.style.hair).unwrap_or(0);
-            s.style.hair = all[(i + 1) % all.len()];
-        });
-    }
-    if keys.just_pressed(KeyCode::KeyC) {
-        cycle(&mut state, "Hair color", &|s| {
-            s.style.hair_color = (s.style.hair_color + 1) % 8;
-        });
-    }
-    if keys.just_pressed(KeyCode::KeyK) {
-        cycle(&mut state, "Skin tone", &|s| {
-            s.style.skin_tone = (s.style.skin_tone + 1) % 8;
-        });
-    }
-    if keys.just_pressed(KeyCode::KeyI) {
-        cycle(&mut state, "Eye color", &|s| {
-            s.style.eye_color = (s.style.eye_color + 1) % 6;
-        });
-    }
-    if keys.just_pressed(KeyCode::KeyP) {
-        cycle(&mut state, "Primary color", &|s| {
-            s.style.primary_color = (s.style.primary_color + 1) % 8;
-        });
-    }
-    if keys.just_pressed(KeyCode::KeyL) {
-        cycle(&mut state, "Secondary color", &|s| {
-            s.style.secondary_color = (s.style.secondary_color + 1) % 8;
-        });
-    }
-
-    if keys.just_pressed(KeyCode::KeyR) {
-        state.push_undo();
-        let mut spec = state.spec;
-        generators::randomize(&mut spec);
-        state.spec = spec;
-        state.dirty = true;
-        state.status = "Randomized".to_string();
-    }
-    if keys.just_pressed(KeyCode::KeyZ) {
-        if let Some(prev) = state.undo.pop() {
-            state.spec = prev;
-            state.dirty = true;
-            state.status = "Undo".to_string();
-        }
-    }
-    if keys.just_pressed(KeyCode::F5) {
-        match save_spec(&state.spec) {
-            Ok(path) => state.status = format!("Saved {}", path.display()),
-            Err(err) => state.status = format!("Save failed: {err}"),
-        }
-    }
-    if keys.just_pressed(KeyCode::F8) {
-        match load_spec() {
-            Ok(spec) => {
-                state.push_undo();
-                state.spec = spec;
-                state.dirty = true;
-                state.status = "Loaded".to_string();
-            }
-            Err(err) => state.status = format!("Load failed: {err}"),
-        }
-    }
-}
-
-// ── Camera ────────────────────────────────────────────────────────────────────
+// ── Camera (mouse drag / wheel + gamepad right stick / triggers) ──────────────
 
 fn orbit_camera(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut motion: MessageReader<MouseMotion>,
+    mut wheel: MessageReader<MouseWheel>,
+    gamepads: Query<&Gamepad>,
     mut state: ResMut<StudioState>,
     mut cam_q: Query<&mut Transform, With<StudioCamera>>,
 ) {
     let dt = time.delta_secs();
-    if keys.pressed(KeyCode::KeyA) {
-        state.yaw += 1.6 * dt;
+
+    // Right-drag orbits; wheel zooms.
+    let mut drag = Vec2::ZERO;
+    for ev in motion.read() {
+        if mouse_buttons.pressed(MouseButton::Right) {
+            drag += ev.delta;
+        }
     }
-    if keys.pressed(KeyCode::KeyD) {
-        state.yaw -= 1.6 * dt;
+    state.yaw -= drag.x * 0.008;
+    state.pitch = (state.pitch + drag.y * 0.006).clamp(-0.4, 1.2);
+    for ev in wheel.read() {
+        state.distance = (state.distance - ev.y * 0.25).clamp(1.2, 8.0);
     }
-    if keys.pressed(KeyCode::KeyW) {
-        state.pitch = (state.pitch + 1.0 * dt).min(1.2);
-    }
-    if keys.pressed(KeyCode::KeyS) {
-        state.pitch = (state.pitch - 1.0 * dt).max(-0.4);
-    }
-    if keys.pressed(KeyCode::Equal) {
-        state.distance = (state.distance - 2.4 * dt).max(1.2);
-    }
-    if keys.pressed(KeyCode::Minus) {
-        state.distance = (state.distance + 2.4 * dt).min(8.0);
+
+    // Gamepad right stick orbits; triggers zoom.
+    for gp in gamepads.iter() {
+        let rx = gp.get(GamepadAxis::RightStickX).unwrap_or(0.0);
+        let ry = gp.get(GamepadAxis::RightStickY).unwrap_or(0.0);
+        if rx.abs() > 0.15 {
+            state.yaw -= rx * 1.8 * dt;
+        }
+        if ry.abs() > 0.15 {
+            state.pitch = (state.pitch + ry * 1.2 * dt).clamp(-0.4, 1.2);
+        }
+        let zoom_in = gp.get(GamepadAxis::RightZ).unwrap_or(0.0);
+        let zoom_out = gp.get(GamepadAxis::LeftZ).unwrap_or(0.0);
+        state.distance = (state.distance - (zoom_in - zoom_out) * 1.8 * dt).clamp(1.2, 8.0);
     }
 
     let focus = Vec3::new(0.0, 0.95, 0.0);
@@ -405,49 +997,62 @@ fn orbit_camera(
     }
 }
 
-// ── Panel ─────────────────────────────────────────────────────────────────────
+// ── Label + focus refresh ─────────────────────────────────────────────────────
 
-fn update_panel_text(
-    state: Res<StudioState>,
-    mut text_q: Query<&mut Text, With<StudioPanelText>>,
+fn refresh_labels(
+    mut state: ResMut<StudioState>,
+    mut morph_q: Query<(&mut Text, &MorphValueText), Without<StyleValueText>>,
+    mut style_q: Query<(&mut Text, &StyleValueText), Without<MorphValueText>>,
+    mut status_q: Query<
+        &mut Text,
+        (
+            With<StatusText>,
+            Without<MorphValueText>,
+            Without<StyleValueText>,
+        ),
+    >,
 ) {
-    let spec = &state.spec;
-    let mut body = String::new();
-    body.push_str("CHARACTER STUDIO\n");
-    body.push_str("mesh generator · preset templates\n\n");
-    body.push_str(&format!(
-        "Sex {}   Outfit {}\nHair {} · Skin {} · Eyes {}\nPrimary {} · Secondary {}\n\n",
-        spec.sex.label(),
-        spec.style.outfit.label(),
-        spec.style.hair.label(),
-        spec.style.skin_tone,
-        spec.style.eye_color,
-        spec.style.primary_color,
-        spec.style.secondary_color,
-    ));
-    for (i, field) in MorphField::ALL.iter().enumerate() {
-        let cursor = if i == state.cursor { ">" } else { " " };
-        let v = field.get(spec);
-        let filled = (v * 10.0).round() as usize;
-        let bar: String = (0..10).map(|b| if b < filled { '#' } else { '-' }).collect();
-        body.push_str(&format!("{cursor} {:<12} [{bar}] {v:.2}\n", field.label()));
+    if !state.labels_dirty {
+        return;
     }
-    body.push_str(
-        "\nUp/Dn select  Lt/Rt adjust (Shift big)\n\
-         1 Male 2 Female 3 Athl 4 Heavy 5 Slim\n\
-         6 Soft 7 Sharp face   R randomize  Z undo\n\
-         O outfit  H hair  C hair-col  K skin\n\
-         I eyes  P primary  L secondary\n\
-         A/D W/S orbit  +/- zoom\n\
-         F5 save  F8 load  Esc back to Robot Builder\n\n",
-    );
-    body.push_str(&state.status);
-    for mut text in text_q.iter_mut() {
-        *text = Text::new(body.clone());
+    state.labels_dirty = false;
+    for (mut text, marker) in morph_q.iter_mut() {
+        let field = MorphField::ALL[marker.0];
+        *text = Text::new(morph_bar(field.get(&state.spec)));
+    }
+    for (mut text, marker) in style_q.iter_mut() {
+        let field = StyleField::ALL[marker.0];
+        *text = Text::new(field.value_label(&state.spec));
+    }
+    for mut text in status_q.iter_mut() {
+        *text = Text::new(state.status.clone());
     }
 }
 
-// ── Save / load ───────────────────────────────────────────────────────────────
+fn refresh_focus_highlight(
+    focus: Res<StudioFocus>,
+    mut rows: Query<(&FocusRow, &mut BackgroundColor), Without<ActionButton>>,
+    mut buttons: Query<(&ActionButton, &mut BackgroundColor, &Interaction), Without<FocusRow>>,
+) {
+    for (row, mut bg) in rows.iter_mut() {
+        *bg = BackgroundColor(if row.0 == focus.row {
+            ROW_BG_FOCUS
+        } else {
+            ROW_BG
+        });
+    }
+    for (button, mut bg, interaction) in buttons.iter_mut() {
+        let focused = button.row == focus.row && button.col == focus.col;
+        let hovered = matches!(interaction, Interaction::Hovered | Interaction::Pressed);
+        *bg = BackgroundColor(if focused || hovered {
+            BTN_BG_FOCUS
+        } else {
+            BTN_BG
+        });
+    }
+}
+
+// ── Versioned save files ──────────────────────────────────────────────────────
 
 fn preset_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -456,17 +1061,40 @@ fn preset_dir() -> PathBuf {
         .join("humans")
 }
 
-fn save_spec(spec: &CharacterSpec) -> Result<PathBuf, String> {
-    let dir = preset_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join("studio_human.json");
-    let json = serde_json::to_string_pretty(spec).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(path)
+fn scan_library() -> Vec<String> {
+    let mut files: Vec<String> = std::fs::read_dir(preset_dir())
+        .map(|dir| {
+            dir.filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.ends_with(".json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
 }
 
-fn load_spec() -> Result<CharacterSpec, String> {
-    let path = preset_dir().join("studio_human.json");
-    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+/// Never overwrites: each save allocates the next `human_vNNN.json`.
+fn save_new_version(spec: &CharacterSpec, existing: &[String]) -> Result<String, String> {
+    let dir = preset_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let next = existing
+        .iter()
+        .filter_map(|n| {
+            n.strip_prefix("human_v")
+                .and_then(|s| s.strip_suffix(".json"))
+                .and_then(|s| s.parse::<u32>().ok())
+        })
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let name = format!("human_v{next:03}.json");
+    let json = serde_json::to_string_pretty(spec).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(&name), json).map_err(|e| e.to_string())?;
+    Ok(name)
+}
+
+fn load_version(name: &str) -> Result<CharacterSpec, String> {
+    let json = std::fs::read_to_string(preset_dir().join(name)).map_err(|e| e.to_string())?;
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }

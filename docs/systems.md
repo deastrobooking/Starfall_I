@@ -151,8 +151,23 @@ keys/presets/randomize → CharacterSpec → PresetGenerators → CharacterPatch
   **Super Suit** (skin-tight recolor + emissive emblem/belt/trim), **Mecha
   Armor** (Megaman-style helmet + crest, chest core, shoulder spheres, right
   **buster cannon**, oversized boots).
-- Presets: 1 Male · 2 Female · 3 Athletic · 4 Heavy · 5 Slim · 6 Soft Face ·
-  7 Sharp Face · R randomize · Z undo (64 deep). Orbit A/D W/S, zoom +/-.
+**GUI (2026-07):** fully button-driven — no keyboard commands. Every control is
+a clickable widget row (preset buttons, −/+ morph steppers with value bars,
+`<`/`>` style cyclers) that also participates in **gamepad focus navigation**:
+D-pad Up/Down moves rows, Left/Right adjusts or moves within a row, South
+activates, East backs out; mouse hover pulls focus so both inputs share one
+highlight. Viewport orbit: right-mouse drag + wheel zoom, or right stick +
+triggers.
+
+**Wardrobe (2026-07):** independent slots, mix-and-match — Top (None/T-Shirt/
+Long Shirt/Tunic/Jacket/Robe), Bottom (Underwear/Shorts/Pants/Skirt), Footwear
+(Barefoot/Shoes/Boots/Tall Boots), Hands (Bare/Gloves/Gauntlets), Armor
+(None/Super Suit/Mecha Armor — armor overrides wardrobe visuals). Primary/
+secondary colours tint the whole outfit.
+
+**Versioned saves (2026-07):** SAVE VERSION never overwrites — each save writes
+the next `human_vNNN.json` to `assets/presets/humans/`; the SAVED VERSIONS
+panel lists every version with LOAD/DEL buttons (mouse or gamepad).
 
 Because every vertex is generated in-engine, direct `.glb` export of authored
 characters is a planned follow-up (mesh data → glTF JSON + BIN writer).
