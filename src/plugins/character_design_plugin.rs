@@ -1,5 +1,3 @@
-use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
-use bevy::input::ButtonState;
 use bevy::prelude::*;
 
 use crate::character_blueprint::{
@@ -15,7 +13,6 @@ use crate::characters::{
 };
 use crate::components::player::PlayerCamera;
 use crate::player_mesh::spawn_modular_player_preview;
-use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     CharacterBaseModel, CharacterDesignData, CharacterDesignReturnTarget, CharacterDesignSnapshot,
@@ -43,10 +40,9 @@ impl Plugin for CharacterDesignPlugin {
                     physique_preset_interaction,
                     body_stepper_interaction,
                     button_interaction,
+                    human_studio_interaction,
                     prefab_action_interaction,
-                    design_prefab_shortcuts,
-                    design_zoom_and_preset_shortcuts,
-                    design_keyboard_input,
+                    preview_zoom_interaction,
                     update_swatch_borders,
                     update_base_model_status_text,
                     update_design_preset_colors,
@@ -76,6 +72,12 @@ struct BackButton;
 
 #[derive(Component)]
 struct ConfirmButton;
+
+#[derive(Component)]
+struct HumanStudioButton;
+
+#[derive(Component, Clone, Copy)]
+struct PreviewZoomButton(f32);
 
 #[derive(Component, Clone, Copy)]
 struct SwatchButton {
@@ -547,87 +549,13 @@ fn button_interaction(
     }
 }
 
-// ── Keyboard / gamepad input ──────────────────────────────────────────────────
-
-fn design_keyboard_input(
-    keys: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
-    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
-    design_data: Res<CharacterDesignData>,
-    mut select_state: ResMut<PlayerSelectState>,
-    mut part_loadout: ResMut<PlayerPartLoadout>,
-    mut next_state: ResMut<NextState<AppState>>,
-) {
-    // F6 opens the Human Character Studio (full mesh-generator design tool).
-    if keys.just_pressed(KeyCode::F6) {
-        next_state.set(AppState::CharacterStudio);
-        return;
-    }
-
-    let mut go_back = keys.just_pressed(KeyCode::Escape);
-    let mut go_confirm =
-        keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
-
-    let mut event_back = false;
-    let mut event_confirm = false;
-    for event in button_events.read() {
-        if event.state != ButtonState::Pressed {
-            continue;
-        }
-        match event.button {
-            GamepadButton::East => event_back = true,
-            GamepadButton::South | GamepadButton::Start => event_confirm = true,
-            _ => {}
-        }
-    }
-
-    for gp in gamepads.iter() {
-        if gp.just_pressed(GamepadButton::East) {
-            go_back = true;
-        }
-        if gp.just_pressed(GamepadButton::South) || gp.just_pressed(GamepadButton::Start) {
-            go_confirm = true;
-        }
-    }
-    go_back = go_back || event_back || native.just_pressed(NativeButton::East);
-    go_confirm = go_confirm
-        || event_confirm
-        || native.just_pressed(NativeButton::South)
-        || native.just_pressed(NativeButton::Start);
-
-    if go_confirm {
-        save_design(&design_data, &mut select_state, &mut part_loadout);
-        next_state.set(character_design_return_state(design_data.return_target));
-    } else if go_back {
-        next_state.set(character_design_return_state(design_data.return_target));
-    }
-}
+// ── Button-only window actions ────────────────────────────────────────────────
 
 fn character_design_return_state(target: CharacterDesignReturnTarget) -> AppState {
     match target {
         CharacterDesignReturnTarget::PlayerSelect => AppState::PlayerSelect,
         CharacterDesignReturnTarget::ChapterSelect => AppState::ChapterSelect,
     }
-}
-
-fn design_prefab_shortcuts(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut design_data: ResMut<CharacterDesignData>,
-    select_state: Res<PlayerSelectState>,
-) {
-    let action = if keys.just_pressed(KeyCode::F6) {
-        Some(PrefabAction::Export)
-    } else if keys.just_pressed(KeyCode::F7) {
-        Some(PrefabAction::Import)
-    } else {
-        None
-    };
-    let Some(action) = action else {
-        return;
-    };
-
-    run_prefab_action(action, &mut design_data, &select_state);
 }
 
 fn prefab_action_interaction(
@@ -640,6 +568,34 @@ fn prefab_action_interaction(
             continue;
         }
         run_prefab_action(action.0, &mut design_data, &select_state);
+    }
+}
+
+fn human_studio_interaction(
+    interaction_q: Query<&Interaction, (Changed<Interaction>, With<HumanStudioButton>)>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    for interaction in interaction_q.iter() {
+        if *interaction == Interaction::Pressed {
+            next_state.set(AppState::CharacterStudio);
+            return;
+        }
+    }
+}
+
+fn preview_zoom_interaction(
+    interaction_q: Query<(&Interaction, &PreviewZoomButton), Changed<Interaction>>,
+    mut design_data: ResMut<CharacterDesignData>,
+    mut cam_q: Query<&mut Transform, (With<Camera3d>, Without<PlayerCamera>)>,
+) {
+    for (interaction, zoom) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        design_data.preview_distance = (design_data.preview_distance + zoom.0).clamp(1.8, 6.0);
+        for mut transform in cam_q.iter_mut() {
+            *transform = design_preview_camera_transform(design_data.preview_distance);
+        }
     }
 }
 
@@ -710,45 +666,6 @@ fn character_design_prefab_path(hero_name: &str) -> PathBuf {
         .join("Characters")
         .join("design_prefabs")
         .join(format!("{file_stem}.json"))
-}
-
-fn design_zoom_and_preset_shortcuts(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut design_data: ResMut<CharacterDesignData>,
-    mut cam_q: Query<&mut Transform, (With<Camera3d>, Without<PlayerCamera>)>,
-) {
-    let preset = if keys.just_pressed(KeyCode::Digit1) {
-        Some(ReferenceDesignPreset::Amp)
-    } else if keys.just_pressed(KeyCode::Digit2) {
-        Some(ReferenceDesignPreset::Antonio)
-    } else if keys.just_pressed(KeyCode::Digit3) {
-        Some(ReferenceDesignPreset::Chroma)
-    } else if keys.just_pressed(KeyCode::Digit4) {
-        Some(ReferenceDesignPreset::Daria)
-    } else if keys.just_pressed(KeyCode::Digit5) {
-        Some(ReferenceDesignPreset::Vincenzo)
-    } else {
-        None
-    };
-
-    if let Some(preset) = preset {
-        preset.apply(&mut design_data);
-        design_data.dirty = true;
-    }
-
-    let zoom_in = keys.just_pressed(KeyCode::Equal)
-        || keys.just_pressed(KeyCode::NumpadAdd)
-        || keys.just_pressed(KeyCode::NumpadEqual);
-    let zoom_out = keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract);
-    if zoom_in == zoom_out {
-        return;
-    }
-
-    let delta = if zoom_in { -0.25 } else { 0.25 };
-    design_data.preview_distance = (design_data.preview_distance + delta).clamp(1.8, 6.0);
-    for mut transform in cam_q.iter_mut() {
-        *transform = design_preview_camera_transform(design_data.preview_distance);
-    }
 }
 
 fn save_design(
@@ -1024,7 +941,7 @@ fn spawn_design_ui(
             ))
             .with_children(|panel| {
                 panel.spawn((
-                    Text::new(format!("ROBOT BUILDER  [F6 HUMAN STUDIO]\n{}", hero_name.to_uppercase())),
+                    Text::new(format!("CHARACTER BUILDER\n{}", hero_name.to_uppercase())),
                     TextFont {
                         font_size: FontSize::Px(25.0),
                         ..default()
@@ -1040,6 +957,20 @@ fn spawn_design_ui(
                     TextColor(Color::srgb(0.72, 0.78, 0.84)),
                     BaseModelStatusText,
                 ));
+
+                panel
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(8.0),
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        spawn_human_studio_button(row);
+                        spawn_preview_zoom_button(row, "ZOOM IN", -0.25);
+                        spawn_preview_zoom_button(row, "ZOOM OUT", 0.25);
+                    });
 
                 spawn_section_label(panel, "BASE MODEL");
                 panel
@@ -1343,6 +1274,60 @@ fn spawn_prefab_button(parent: &mut ChildSpawnerCommands, label: &str, action: P
             BackgroundColor(Color::srgb(0.08, 0.12, 0.15)),
             BorderColor::all(Color::srgba(0.25, 0.46, 0.58, 0.86)),
             PrefabActionButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.78, 0.90, 0.96)),
+            ));
+        });
+}
+
+fn spawn_human_studio_button(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_width: Val::Px(132.0),
+                justify_content: JustifyContent::Center,
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.10, 0.10, 0.15)),
+            BorderColor::all(Color::srgba(0.34, 0.38, 0.64, 0.86)),
+            HumanStudioButton,
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new("HUMAN STUDIO"),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.80, 0.86, 1.0)),
+            ));
+        });
+}
+
+fn spawn_preview_zoom_button(parent: &mut ChildSpawnerCommands, label: &str, delta: f32) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_width: Val::Px(92.0),
+                justify_content: JustifyContent::Center,
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.09, 0.105, 0.12)),
+            BorderColor::all(Color::srgba(0.26, 0.38, 0.42, 0.86)),
+            PreviewZoomButton(delta),
         ))
         .with_children(|button| {
             button.spawn((

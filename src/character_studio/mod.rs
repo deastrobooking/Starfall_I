@@ -1,11 +1,8 @@
 //! Character Studio — the in-game human character generator.
 //!
 //! Fully GUI-driven (no keyboard commands): every control is a clickable
-//! button that also participates in **gamepad focus navigation** — D-pad
-//! Up/Down moves between rows, Left/Right adjusts steppers/cyclers or moves
-//! between buttons in a row, South activates, East backs out. Mouse hover
-//! pulls focus, so both input methods share one highlight model. The viewport
-//! orbits with right-mouse drag / wheel zoom, or gamepad right stick +
+//! button. Mouse hover pulls focus into the shared highlight model. The
+//! viewport orbits with right-mouse drag / wheel zoom, or gamepad right stick +
 //! triggers.
 //!
 //! ```text
@@ -41,7 +38,6 @@ impl Plugin for CharacterStudioPlugin {
                 Update,
                 (
                     button_interaction,
-                    gamepad_navigation,
                     rebuild_library_rows,
                     rebuild_preview,
                     orbit_camera,
@@ -54,7 +50,7 @@ impl Plugin for CharacterStudioPlugin {
     }
 }
 
-// ── Actions (one dispatcher for mouse + gamepad) ──────────────────────────────
+// ── Actions (one dispatcher for GUI buttons) ─────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum StudioAction {
@@ -77,8 +73,8 @@ enum StudioAction {
     DeleteFile(usize),
 }
 
-/// Gamepad-focusable rows. Action groups hold several buttons (Left/Right
-/// moves the column); morph/style rows adjust with Left/Right directly.
+/// Focusable rows. Action groups hold several buttons, while morph/style rows
+/// expose their own decrement/increment buttons.
 const ACTION_GROUPS: [&[StudioAction]; 5] = [
     &[StudioAction::Male, StudioAction::Female],
     &[
@@ -149,7 +145,7 @@ impl StudioState {
     }
 }
 
-/// Focus cursor shared by gamepad and mouse hover.
+/// Focus cursor shared by GUI button hover/click.
 #[derive(Resource, Default)]
 struct StudioFocus {
     row: usize,
@@ -295,7 +291,11 @@ fn spawn_action_button(
             BackgroundColor(BTN_BG),
         ))
         .with_children(|b| {
-            b.spawn(text(action_label(action), 12.0, Color::srgb(0.92, 0.95, 1.0)));
+            b.spawn(text(
+                action_label(action),
+                12.0,
+                Color::srgb(0.92, 0.95, 1.0),
+            ));
         });
 }
 
@@ -708,120 +708,6 @@ fn button_interaction(
                 apply_action(button.action, &mut state, &mut library, &mut next_state);
             }
             Interaction::None => {}
-        }
-    }
-}
-
-// ── Gamepad ───────────────────────────────────────────────────────────────────
-
-fn gamepad_navigation(
-    gamepads: Query<&Gamepad>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut focus: ResMut<StudioFocus>,
-    mut state: ResMut<StudioState>,
-    mut library: ResMut<SaveLibrary>,
-    mut next_state: ResMut<NextState<AppState>>,
-) {
-    let mut up = keys.just_pressed(KeyCode::ArrowUp);
-    let mut down = keys.just_pressed(KeyCode::ArrowDown);
-    let mut left = keys.just_pressed(KeyCode::ArrowLeft);
-    let mut right = keys.just_pressed(KeyCode::ArrowRight);
-    let mut confirm = keys.just_pressed(KeyCode::Enter);
-    let mut back = keys.just_pressed(KeyCode::Escape);
-
-    for gp in gamepads.iter() {
-        up |= gp.just_pressed(GamepadButton::DPadUp);
-        down |= gp.just_pressed(GamepadButton::DPadDown);
-        left |= gp.just_pressed(GamepadButton::DPadLeft);
-        right |= gp.just_pressed(GamepadButton::DPadRight);
-        confirm |= gp.just_pressed(GamepadButton::South);
-        back |= gp.just_pressed(GamepadButton::East);
-    }
-
-    if back {
-        next_state.set(AppState::CharacterDesign);
-        return;
-    }
-
-    let total_rows = FILE_ROW_0 + library.files.len();
-    if up {
-        focus.row = (focus.row + total_rows - 1) % total_rows;
-        focus.col = 0;
-    }
-    if down {
-        focus.row = (focus.row + 1) % total_rows;
-        focus.col = 0;
-    }
-
-    let row = focus.row;
-    if row < MORPH_ROW_0 {
-        // Action group: Left/Right move between buttons, South activates.
-        let count = ACTION_GROUPS[row].len();
-        if left {
-            focus.col = (focus.col + count - 1) % count;
-        }
-        if right {
-            focus.col = (focus.col + 1) % count;
-        }
-        if confirm {
-            apply_action(
-                ACTION_GROUPS[row][focus.col.min(count - 1)],
-                &mut state,
-                &mut library,
-                &mut next_state,
-            );
-        }
-    } else if row < STYLE_ROW_0 {
-        let i = row - MORPH_ROW_0;
-        if left {
-            apply_action(
-                StudioAction::MorphDec(i),
-                &mut state,
-                &mut library,
-                &mut next_state,
-            );
-        }
-        if right || confirm {
-            apply_action(
-                StudioAction::MorphInc(i),
-                &mut state,
-                &mut library,
-                &mut next_state,
-            );
-        }
-    } else if row < FILE_ROW_0 {
-        let i = row - STYLE_ROW_0;
-        if left {
-            apply_action(
-                StudioAction::StylePrev(i),
-                &mut state,
-                &mut library,
-                &mut next_state,
-            );
-        }
-        if right || confirm {
-            apply_action(
-                StudioAction::StyleNext(i),
-                &mut state,
-                &mut library,
-                &mut next_state,
-            );
-        }
-    } else {
-        let i = row - FILE_ROW_0;
-        if left {
-            focus.col = 0;
-        }
-        if right {
-            focus.col = 1;
-        }
-        if confirm {
-            let action = if focus.col == 0 {
-                StudioAction::LoadFile(i)
-            } else {
-                StudioAction::DeleteFile(i)
-            };
-            apply_action(action, &mut state, &mut library, &mut next_state);
         }
     }
 }

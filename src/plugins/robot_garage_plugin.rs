@@ -1,13 +1,7 @@
 //! Robot Garage — assemble robot pets into vehicles and mechs.
-//!
-//! Accessible from the chapter-select screen via [G].
-//! Keys A/D browse assembly forms; Enter assembles; X disassembles; Esc returns.
 
-use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
-use bevy::input::ButtonState;
 use bevy::prelude::*;
 
-use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::robot_pets::{RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError};
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
@@ -21,7 +15,7 @@ impl Plugin for RobotGaragePlugin {
             .add_systems(OnExit(AppState::RobotGarage), teardown_garage)
             .add_systems(
                 Update,
-                (garage_keyboard_input, update_garage_display)
+                (garage_button_input, update_garage_display)
                     .run_if(in_state(AppState::RobotGarage)),
             );
     }
@@ -63,6 +57,16 @@ struct AssemblyStatusText;
 
 #[derive(Component)]
 struct ActionFeedbackText;
+#[derive(Component, Clone, Copy)]
+struct GarageButton(GarageAction);
+#[derive(Clone, Copy)]
+enum GarageAction {
+    PreviousForm,
+    NextForm,
+    Assemble,
+    Disassemble,
+    Back,
+}
 
 // ── Setup ──────────────────────────────────────────────────────────────────────
 
@@ -102,14 +106,20 @@ fn setup_garage(
             // Title
             root.spawn((
                 Text::new("ROBOT GARAGE"),
-                TextFont { font_size: FontSize::Px(36.0), ..default() },
+                TextFont {
+                    font_size: FontSize::Px(36.0),
+                    ..default()
+                },
                 TextColor(header_color),
             ));
 
             // Parts inventory panel
             root.spawn((
                 Text::new(""),
-                TextFont { font_size: FontSize::Px(15.0), ..default() },
+                TextFont {
+                    font_size: FontSize::Px(15.0),
+                    ..default()
+                },
                 TextColor(Color::srgb(0.75, 0.90, 0.75)),
                 PartsInventoryText,
             ));
@@ -132,12 +142,18 @@ fn setup_garage(
                 .with_children(|col| {
                     col.spawn((
                         Text::new("── YOUR ROBOT PETS ──"),
-                        TextFont { font_size: FontSize::Px(14.0), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
                         TextColor(dim_color),
                     ));
                     col.spawn((
                         Text::new(""),
-                        TextFont { font_size: FontSize::Px(15.0), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(15.0),
+                            ..default()
+                        },
                         TextColor(body_color),
                         PetRosterText,
                     ));
@@ -153,12 +169,18 @@ fn setup_garage(
                 .with_children(|col| {
                     col.spawn((
                         Text::new("── ASSEMBLY FORM ──"),
-                        TextFont { font_size: FontSize::Px(14.0), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
                         TextColor(dim_color),
                     ));
                     col.spawn((
                         Text::new(""),
-                        TextFont { font_size: FontSize::Px(15.0), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(15.0),
+                            ..default()
+                        },
                         TextColor(body_color),
                         FormBrowserText,
                     ));
@@ -168,7 +190,10 @@ fn setup_garage(
             // Active assembly status
             root.spawn((
                 Text::new(""),
-                TextFont { font_size: FontSize::Px(16.0), ..default() },
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
                 TextColor(Color::srgb(1.0, 0.92, 0.42)),
                 AssemblyStatusText,
             ));
@@ -176,19 +201,28 @@ fn setup_garage(
             // Action feedback
             root.spawn((
                 Text::new(""),
-                TextFont { font_size: FontSize::Px(15.0), ..default() },
+                TextFont {
+                    font_size: FontSize::Px(15.0),
+                    ..default()
+                },
                 TextColor(Color::srgb(1.0, 0.55, 0.55)),
                 ActionFeedbackText,
             ));
 
-            // Controls hint
-            root.spawn((
-                Text::new(
-                    "[A/←][D/→] / D-pad / LB/RB  Browse    [Enter/A]  Assemble    [X]  Disassemble    [Esc/B]  Back",
-                ),
-                TextFont { font_size: FontSize::Px(14.0), ..default() },
-                TextColor(dim_color),
-            ));
+            root.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(10.0),
+                row_gap: Val::Px(10.0),
+                ..default()
+            })
+            .with_children(|row| {
+                spawn_garage_button(row, "PREVIOUS FORM", GarageAction::PreviousForm);
+                spawn_garage_button(row, "NEXT FORM", GarageAction::NextForm);
+                spawn_garage_button(row, "ASSEMBLE", GarageAction::Assemble);
+                spawn_garage_button(row, "DISASSEMBLE", GarageAction::Disassemble);
+                spawn_garage_button(row, "BACK", GarageAction::Back);
+            });
         });
 
     // Immediately push initial content (avoids one frame blank).
@@ -203,107 +237,95 @@ fn teardown_garage(mut commands: Commands, q: Query<Entity, With<GarageRoot>>) {
     }
 }
 
-// ── Input ──────────────────────────────────────────────────────────────────────
+// ── Button Input ──────────────────────────────────────────────────────────────
 
-fn garage_keyboard_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
-    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
+fn spawn_garage_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    action: GarageAction,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_width: Val::Px(136.0),
+                height: Val::Px(38.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::horizontal(Val::Px(12.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.08, 0.14, 0.20)),
+            BorderColor::all(Color::srgb(0.24, 0.48, 0.66)),
+            GarageButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+fn garage_button_input(
+    interaction_q: Query<(&Interaction, &GarageButton), (Changed<Interaction>, With<Button>)>,
     mut data: ResMut<GarageData>,
     mut robot_pets: ResMut<RobotPetCollection>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let form_count = RobotAssemblyForm::ALL.len();
-    let mut browse_left =
-        keyboard.just_pressed(KeyCode::ArrowLeft) || keyboard.just_pressed(KeyCode::KeyA);
-    let mut browse_right =
-        keyboard.just_pressed(KeyCode::ArrowRight) || keyboard.just_pressed(KeyCode::KeyD);
-    let mut assemble =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    let mut disassemble = keyboard.just_pressed(KeyCode::KeyX);
-    let mut back = keyboard.just_pressed(KeyCode::Escape) || keyboard.just_pressed(KeyCode::KeyG);
-
-    for event in button_events.read() {
-        if event.state != ButtonState::Pressed {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
             continue;
         }
-        match event.button {
-            GamepadButton::DPadLeft | GamepadButton::LeftTrigger => browse_left = true,
-            GamepadButton::DPadRight | GamepadButton::RightTrigger => browse_right = true,
-            GamepadButton::South | GamepadButton::Start => assemble = true,
-            GamepadButton::West => disassemble = true,
-            GamepadButton::East => back = true,
-            _ => {}
+        match button.0 {
+            GarageAction::PreviousForm => {
+                data.form_index = (data.form_index + form_count - 1) % form_count;
+                data.last_result = None;
+            }
+            GarageAction::NextForm => {
+                data.form_index = (data.form_index + 1) % form_count;
+                data.last_result = None;
+            }
+            GarageAction::Assemble => assemble_current_form(&mut data, &mut robot_pets),
+            GarageAction::Disassemble => {
+                robot_pets.disassemble();
+                data.last_result = Some(GarageActionResult::Disassembled);
+            }
+            GarageAction::Back => {
+                next_state.set(AppState::ChapterSelect);
+                return;
+            }
         }
     }
+}
 
-    for gp in gamepads.iter() {
-        browse_left = browse_left
-            || gp.just_pressed(GamepadButton::DPadLeft)
-            || gp.just_pressed(GamepadButton::LeftTrigger);
-        browse_right = browse_right
-            || gp.just_pressed(GamepadButton::DPadRight)
-            || gp.just_pressed(GamepadButton::RightTrigger);
-        assemble = assemble
-            || gp.just_pressed(GamepadButton::South)
-            || gp.just_pressed(GamepadButton::Start);
-        disassemble = disassemble || gp.just_pressed(GamepadButton::West);
-        back = back || gp.just_pressed(GamepadButton::East);
+fn assemble_current_form(data: &mut GarageData, robot_pets: &mut RobotPetCollection) {
+    if robot_pets.active_assembly.is_some() {
+        data.last_result = Some(GarageActionResult::AlreadyAssembled);
+        return;
     }
+    let form = RobotAssemblyForm::ALL[data.form_index];
+    let pet_ids: Vec<String> = robot_pets
+        .pets
+        .iter()
+        .filter(|p| p.can_support(form))
+        .take(form.required_pets())
+        .map(|p| p.id.clone())
+        .collect();
 
-    browse_left = browse_left
-        || native.just_pressed(NativeButton::DPadLeft)
-        || native.just_pressed(NativeButton::LeftShoulder);
-    browse_right = browse_right
-        || native.just_pressed(NativeButton::DPadRight)
-        || native.just_pressed(NativeButton::RightShoulder);
-    assemble = assemble
-        || native.just_pressed(NativeButton::South)
-        || native.just_pressed(NativeButton::Start);
-    disassemble = disassemble || native.just_pressed(NativeButton::West);
-    back = back || native.just_pressed(NativeButton::East);
-
-    if browse_left {
-        data.form_index = (data.form_index + form_count - 1) % form_count;
-        data.last_result = None;
-    }
-    if browse_right {
-        data.form_index = (data.form_index + 1) % form_count;
-        data.last_result = None;
-    }
-
-    if assemble {
-        if robot_pets.active_assembly.is_some() {
-            data.last_result = Some(GarageActionResult::AlreadyAssembled);
-        } else {
-            let form = RobotAssemblyForm::ALL[data.form_index];
-            let pet_ids: Vec<String> = robot_pets
-                .pets
-                .iter()
-                .filter(|p| p.can_support(form))
-                .take(form.required_pets())
-                .map(|p| p.id.clone())
-                .collect();
-
-            let result = robot_pets.assemble(form, &pet_ids);
-            data.last_result = Some(match result {
-                Ok(_) => GarageActionResult::Assembled,
-                Err(RobotPetError::NotEnoughPets) => GarageActionResult::NotEnoughPets,
-                Err(RobotPetError::MissingParts) => GarageActionResult::NotEnoughParts,
-                Err(_) => GarageActionResult::NotEnoughPets,
-            });
-        }
-    }
-
-    if disassemble {
-        robot_pets.disassemble();
-        data.last_result = Some(GarageActionResult::Disassembled);
-    }
-
-    if back {
-        next_state.set(AppState::ChapterSelect);
-    }
+    let result = robot_pets.assemble(form, &pet_ids);
+    data.last_result = Some(match result {
+        Ok(_) => GarageActionResult::Assembled,
+        Err(RobotPetError::NotEnoughPets) => GarageActionResult::NotEnoughPets,
+        Err(RobotPetError::MissingParts) => GarageActionResult::NotEnoughParts,
+        Err(_) => GarageActionResult::NotEnoughPets,
+    });
 }
 
 // ── Display update ─────────────────────────────────────────────────────────────
@@ -483,7 +505,7 @@ fn format_form_browser(
     let status = if locked_by_upgrade {
         "LOCKED — requires Mech Command Link rank 1".to_string()
     } else if robot_pets.active_assembly.as_ref().map(|a| a.form) == Some(form) {
-        "ASSEMBLED — press [X] to disassemble".to_string()
+        "ASSEMBLED".to_string()
     } else if !enough_pets && !can_afford {
         format!(
             "NEED {} more pets + parts",
@@ -499,7 +521,7 @@ fn format_form_browser(
     } else if !can_afford {
         "NEED MORE PARTS".to_string()
     } else {
-        "READY — press [Enter] to assemble".to_string()
+        "READY".to_string()
     };
 
     // Browse all forms as a mini-list with current highlighted
@@ -557,8 +579,6 @@ fn format_feedback(result: Option<GarageActionResult>) -> &'static str {
         Some(GarageActionResult::Disassembled) => "Assembly disbanded.",
         Some(GarageActionResult::NotEnoughPets) => "Not enough eligible pets for this form.",
         Some(GarageActionResult::NotEnoughParts) => "Missing parts — collect more in missions.",
-        Some(GarageActionResult::AlreadyAssembled) => {
-            "Already assembled — press [X] to disband first."
-        }
+        Some(GarageActionResult::AlreadyAssembled) => "Already assembled.",
     }
 }

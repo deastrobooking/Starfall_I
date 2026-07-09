@@ -1,7 +1,7 @@
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 use bevy::prelude::*;
 
-use bevy::input::gamepad::{GamepadAxis, GamepadButton, GamepadButtonStateChangedEvent};
+use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
 use bevy::input::ButtonState;
 
 use crate::chapters::{
@@ -177,8 +177,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, game_over_input.run_if(in_state(AppState::GameOver)))
             .add_systems(
                 Update,
-                (menu_start_button, main_menu_controller_status_system)
-                    .run_if(in_state(AppState::MainMenu)),
+                menu_start_button.run_if(in_state(AppState::MainMenu)),
             )
             .add_systems(
                 Update,
@@ -187,11 +186,11 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    chapter_select_input,
+                    chapter_select_action_buttons,
                     chapter_select_fast_travel_buttons,
-                    chapter_select_perk_input,
-                    chapter_select_upgrade_input,
-                    chapter_select_weapon_rank_input,
+                    chapter_select_perk_buttons,
+                    chapter_select_upgrade_buttons,
+                    chapter_select_weapon_rank_buttons,
                     chapter_select_perk_panel_update,
                     chapter_select_upgrade_panel_update,
                     chapter_select_weapon_rank_panel_update,
@@ -262,8 +261,32 @@ struct VolumeText;
 struct FinalPushText;
 #[derive(Component)]
 struct StartButton;
+#[derive(Component, Clone, Copy)]
+struct SettingsButton(SettingsAction);
+#[derive(Clone, Copy)]
+enum SettingsAction {
+    Difficulty(DifficultyChoice),
+    MusicDown,
+    MusicUp,
+    SfxDown,
+    SfxUp,
+    ToggleRumble,
+}
+#[derive(Clone, Copy)]
+enum DifficultyChoice {
+    Easy,
+    Normal,
+    Hard,
+}
 #[derive(Component)]
-struct ControllerStatusText;
+struct GameOverMenuButton;
+#[derive(Component, Clone, Copy)]
+struct VictoryMenuButton(VictoryAction);
+#[derive(Clone, Copy)]
+enum VictoryAction {
+    MainMenu,
+    NewGamePlus,
+}
 #[derive(Component)]
 struct PlayerHudBar {
     player_index: u8,
@@ -395,62 +418,73 @@ fn cleanup_play_ui_for_menu(
 }
 
 fn setup_main_menu(mut commands: Commands) {
-    commands.spawn((
-        Node {
-            width: Val::Percent(100.0), height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center, justify_content: JustifyContent::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.01, 0.01, 0.05, 1.0)),
-        MainMenuRoot,
-    )).with_children(|p| {
-        p.spawn((Text::new("STARFALL I"), TextFont { font_size: FontSize::Px(72.0), ..default() }, TextColor(Color::srgb(1.0, 0.9, 0.25))));
-        p.spawn((Text::new("Eight siblings, Scallarians, dragon royalty, and star-powered science."), TextFont { font_size: FontSize::Px(24.0), ..default() }, TextColor(Color::srgb(0.65, 0.8, 1.0))));
-        p.spawn(Node { height: Val::Px(40.0), ..default() });
-        p.spawn((
-            Button,
-            Node { padding: UiRect::all(Val::Px(16.0)), ..default() },
-            BackgroundColor(Color::srgb(0.0, 0.4, 0.8)),
-            StartButton,
-        )).with_children(|btn| {
-            btn.spawn((Text::new("BEGIN CHAPTER"), TextFont { font_size: FontSize::Px(28.0), ..default() }, TextColor(Color::WHITE)));
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(18.0),
+                padding: UiRect::all(Val::Px(32.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.01, 0.012, 0.028, 1.0)),
+            MainMenuRoot,
+        ))
+        .with_children(|p| {
+            p.spawn((
+                Text::new("STARFALL I"),
+                TextFont {
+                    font_size: FontSize::Px(72.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.9, 0.25)),
+            ));
+            p.spawn((
+                Text::new("Everest Range"),
+                TextFont {
+                    font_size: FontSize::Px(24.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.65, 0.8, 1.0)),
+            ));
+            p.spawn(Node {
+                height: Val::Px(24.0),
+                ..default()
+            });
+            p.spawn((
+                Button,
+                Node {
+                    width: Val::Px(320.0),
+                    height: Val::Px(58.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.0, 0.36, 0.72)),
+                BorderColor::all(Color::srgb(0.25, 0.72, 1.0)),
+                StartButton,
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("BEGIN CHAPTER"),
+                    TextFont {
+                        font_size: FontSize::Px(25.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
         });
-        p.spawn(Node { height: Val::Px(30.0), ..default() });
-        p.spawn((
-            Text::new("Controller: scanning..."),
-            TextFont { font_size: FontSize::Px(16.0), ..default() },
-            TextColor(Color::srgb(0.60, 0.82, 1.0)),
-            ControllerStatusText,
-        ));
-        p.spawn(Node { height: Val::Px(16.0), ..default() });
-        p.spawn((
-            Text::new("WASD / Left Stick Move  |  Mouse / Right Stick Look  |  A/Space Jump  |  Start/Esc Pause\nLMB/RT Star Beam  |  V/B Mana Combos  |  T Star Sabre  |  D-pad Traversal Modes"),
-            TextFont { font_size: FontSize::Px(14.0), ..default() }, TextColor(Color::srgb(0.5, 0.5, 0.7)),
-        ));
-    });
 }
 
 fn menu_start_button(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
-    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    if keyboard.just_pressed(KeyCode::Enter)
-        || keyboard.just_pressed(KeyCode::Space)
-        || gamepads.iter().any(gamepad_start_or_confirm_just_pressed)
-        || native.start_or_confirm_just_pressed()
-        || button_events
-            .read()
-            .any(gamepad_button_event_is_start_or_confirm)
-    {
-        next_state.set(AppState::PlayerSelect);
-        return;
-    }
-
     for interaction in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
             next_state.set(AppState::PlayerSelect);
@@ -458,60 +492,11 @@ fn menu_start_button(
     }
 }
 
-fn main_menu_controller_status_system(
-    gamepads: Query<(&Name, &Gamepad)>,
-    native: Res<NativeControllerState>,
-    mut text_q: Query<&mut Text, With<ControllerStatusText>>,
-) {
-    let Ok(mut text) = text_q.single_mut() else {
-        return;
-    };
-    let mut connected = gamepads.iter();
-    if let Some((name, gamepad)) = connected.next() {
-        let lx = gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
-        let ly = gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
-        *text = Text::new(format!(
-            "Controller: {} detected   Left Stick X:{:+.2} Y:{:+.2}   Press A or Start",
-            name.as_str(),
-            lx,
-            ly
-        ));
-    } else if native.connected {
-        *text = Text::new(format!(
-            "Controller: {} detected via macOS   Left Stick X:{:+.2} Y:{:+.2}   Press A or Start",
-            native.name, native.move_axis.x, native.move_axis.y
-        ));
-    } else {
-        *text = Text::new("Controller: not detected yet. Reconnect/power on the Xbox controller, then press A or Start.");
-    }
-}
-
-fn gamepad_start_or_confirm_just_pressed(gamepad: &Gamepad) -> bool {
-    gamepad.any_just_pressed([
-        GamepadButton::Start,
-        GamepadButton::South,
-        GamepadButton::East,
-        GamepadButton::North,
-        GamepadButton::West,
-    ])
-}
-
-fn gamepad_button_event_is_start_or_confirm(event: &GamepadButtonStateChangedEvent) -> bool {
-    event.state == ButtonState::Pressed
-        && matches!(
-            event.button,
-            GamepadButton::Start
-                | GamepadButton::South
-                | GamepadButton::East
-                | GamepadButton::North
-                | GamepadButton::West
-        )
-}
-
 fn setup_pause_menu(
     mut commands: Commands,
     mut menu: ResMut<PauseMenuState>,
     shop: Res<ShopCatalog>,
+    settings: Res<GameSettings>,
 ) {
     menu.page = PausePage::Main;
     menu.resume_lockout = 0.20;
@@ -591,16 +576,6 @@ fn setup_pause_menu(
                 ] {
                     spawn_pause_button(page, label, action, color);
                 }
-                page.spawn((
-                    Text::new(
-                        "Quick keys: [S/F5] Save   [T] Save & Title   [F9] Collider Debug",
-                    ),
-                    TextFont {
-                        font_size: FontSize::Px(15.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.86, 0.90, 1.0)),
-                ));
             });
 
             root.spawn((
@@ -625,7 +600,7 @@ fn setup_pause_menu(
                 ));
                 page.spawn((
                     Text::new(
-                        "Move: WASD / Left Stick     Look: Mouse / Right Stick     Jump: Space / South\nDodge: Q / East     Parry: F / North     Grapple: G / Select+RB     D-pad: Grapple / Hover Jet / Flight / Hoverboard\nFire: LMB / RT     Aim: RMB / LT     Weapons: 1-6 / RB     Special Tools: 7-0 or Select + DPad\nSelect+D-pad: Vehicle / Interact / Weapon Prev / Map     Traversal: wall slide, wall-jump, ledge hang, zip, swing, glide, hover, air dash, hoverboard.",
+                        "Movement, aiming, star-beam combat, traversal tools, vehicle boarding, interaction, map use, weapon swaps, and special tools are available during play.\nTraversal supports wall slide, wall-jump, ledge hang, zip, swing, glide, hover, air dash, and hoverboard movement.",
                     ),
                     TextFont {
                         font_size: FontSize::Px(16.0),
@@ -716,17 +691,55 @@ fn setup_pause_menu(
                     TextColor(Color::srgb(0.9, 0.95, 1.0)),
                 ));
                 page.spawn((
-                    Text::new("Difficulty: [1] Easy  [2] Normal  [3] Hard"),
+                    Text::new(difficulty_text(&settings)),
                     TextFont { font_size: FontSize::Px(16.0), ..default() },
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
                     DifficultyText,
                 ));
+                page.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    spawn_settings_button(
+                        row,
+                        "EASY",
+                        SettingsAction::Difficulty(DifficultyChoice::Easy),
+                    );
+                    spawn_settings_button(
+                        row,
+                        "NORMAL",
+                        SettingsAction::Difficulty(DifficultyChoice::Normal),
+                    );
+                    spawn_settings_button(
+                        row,
+                        "HARD",
+                        SettingsAction::Difficulty(DifficultyChoice::Hard),
+                    );
+                });
                 page.spawn((
-                    Text::new("Music: [- +]  SFX: [[ ]]  Rumble: [R]"),
+                    Text::new(volume_text(&settings)),
                     TextFont { font_size: FontSize::Px(16.0), ..default() },
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
                     VolumeText,
                 ));
+                page.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(8.0),
+                    row_gap: Val::Px(8.0),
+                    justify_content: JustifyContent::Center,
+                    max_width: Val::Px(420.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    spawn_settings_button(row, "MUSIC -", SettingsAction::MusicDown);
+                    spawn_settings_button(row, "MUSIC +", SettingsAction::MusicUp);
+                    spawn_settings_button(row, "SFX -", SettingsAction::SfxDown);
+                    spawn_settings_button(row, "SFX +", SettingsAction::SfxUp);
+                    spawn_settings_button(row, "RUMBLE", SettingsAction::ToggleRumble);
+                });
                 spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
         });
@@ -756,6 +769,39 @@ fn spawn_pause_button(
                 Text::new(label),
                 TextFont {
                     font_size: FontSize::Px(21.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+fn spawn_settings_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    action: SettingsAction,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_width: Val::Px(92.0),
+                height: Val::Px(34.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::horizontal(Val::Px(10.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.12, 0.16, 0.22)),
+            BorderColor::all(Color::srgb(0.28, 0.42, 0.56)),
+            SettingsButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -858,23 +904,13 @@ fn pause_input_system(
             menu.resume_armed = false;
             next_state.set(AppState::Paused);
         }
-        AppState::Paused => {
-            if !raw_pause_pressed || !menu.resume_armed {
-                return;
-            }
-            transition.pausing = false;
-            transition.resuming_from_pause = true;
-            next_state.set(AppState::Playing);
-        }
+        AppState::Paused => {}
         _ => {}
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn pause_menu_action_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
     button_q: Query<(&Interaction, &PauseMenuButton), (Changed<Interaction>, With<Button>)>,
     sp: SaveParams,
     mut menu: ResMut<PauseMenuState>,
@@ -883,18 +919,6 @@ fn pause_menu_action_system(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let mut action = None;
-    if keyboard.just_pressed(KeyCode::KeyS)
-        || keyboard.just_pressed(KeyCode::F5)
-        || gamepads
-            .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::Select))
-        || native.just_pressed(NativeButton::Select)
-    {
-        action = Some(PauseAction::Save);
-    }
-    if keyboard.just_pressed(KeyCode::KeyT) {
-        action = Some(PauseAction::Title);
-    }
     for (interaction, button) in button_q.iter() {
         if *interaction == Interaction::Pressed {
             action = Some(button.0);
@@ -962,6 +986,20 @@ fn clear_play_session_transition_flags(mut transition: ResMut<PlaySessionTransit
 struct ChapterSelectRoot;
 #[derive(Component)]
 struct ChapterFastTravelButton(ChapterId);
+#[derive(Component, Clone, Copy)]
+struct ChapterSelectActionButton(ChapterSelectAction);
+#[derive(Clone, Copy)]
+enum ChapterSelectAction {
+    Back,
+    CharacterEditor,
+    RobotGarage,
+}
+#[derive(Component)]
+struct ChapterPerkButton(&'static str);
+#[derive(Component, Clone, Copy)]
+struct ChapterUpgradeButton(TechUpgradeId);
+#[derive(Component, Clone, Copy)]
+struct ChapterWeaponRankButton(usize);
 // Legacy single-block text — kept so old queries don't break; no longer spawned.
 #[derive(Component)]
 struct PerkPanelText;
@@ -1024,14 +1062,18 @@ fn setup_chapter_select(
                 },
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
             ));
-            p.spawn((
-                Text::new("1-9 0 Q W R T / click = travel   |   A-H Perks   |   Z-N Tech   |   Y-P/J Weapons   |   M Economy   |   E Character Editor   |   G Garage   |   Esc Back"),
-                TextFont {
-                    font_size: FontSize::Px(14.5),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.7, 0.7, 0.85)),
-            ));
+            p.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(10.0),
+                flex_wrap: FlexWrap::Wrap,
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                spawn_chapter_action_button(row, "BACK", ChapterSelectAction::Back);
+                spawn_chapter_action_button(row, "CUSTOMIZE", ChapterSelectAction::CharacterEditor);
+                spawn_chapter_action_button(row, "ROBOT GARAGE", ChapterSelectAction::RobotGarage);
+            });
             p.spawn(Node {
                 width: Val::Percent(100.0),
                 max_width: Val::Px(1160.0),
@@ -1081,12 +1123,8 @@ fn setup_chapter_select(
                             .unwrap_or(ch.subtitle);
                         list.spawn((
                             Text::new(format!(
-                                "{} {} Ch.{:02} — {} / {}",
-                                prefix,
-                                chapter_key_hint(ch.id.0),
-                                ch.id.0,
-                                ch.title,
-                                region
+                                "{} Ch.{:02} - {} / {}",
+                                prefix, ch.id.0, ch.title, region
                             )),
                             TextFont {
                                 font_size: FontSize::Px(13.5),
@@ -1097,7 +1135,10 @@ fn setup_chapter_select(
                     }
                 });
             });
-            p.spawn(Node { height: Val::Px(4.0), ..default() });
+            p.spawn(Node {
+                height: Val::Px(4.0),
+                ..default()
+            });
 
             // ── Perk Training panel ───────────────────────────────────────────
             p.spawn((
@@ -1115,29 +1156,42 @@ fn setup_chapter_select(
                 // Header
                 pp.spawn((
                     Text::new(format_perk_header(&perks)),
-                    TextFont { font_size: FontSize::Px(13.5), ..default() },
+                    TextFont {
+                        font_size: FontSize::Px(13.5),
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.6, 0.82, 1.0)),
                     PerkPointsHeader,
                 ));
                 // One row per perk
-                let key_map = [
-                    ("A", "heart_vitality"),
-                    ("S", "heart_regen"),
-                    ("D", "star_focus"),
-                    ("F", "star_charges"),
-                    ("G", "acro_evasion"),
-                    ("H", "acro_parry"),
-                ];
                 let defs = all_perks();
-                for (key, perk_id) in key_map {
+                for perk_id in CHAPTER_PERK_IDS {
                     if let Some(def) = defs.iter().find(|d| d.id == perk_id) {
                         let branch_color = branch_color(def.branch);
                         pp.spawn((
-                            Text::new(format_perk_row(key, def, &perks)),
-                            TextFont { font_size: FontSize::Px(12.5), ..default() },
-                            TextColor(branch_color),
-                            PerkRowText(perk_id),
-                        ));
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                justify_content: JustifyContent::FlexStart,
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                border: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.06, 0.08, 0.16, 0.72)),
+                            BorderColor::all(Color::srgba(0.18, 0.32, 0.52, 0.5)),
+                            ChapterPerkButton(perk_id),
+                        ))
+                        .with_children(|row| {
+                            row.spawn((
+                                Text::new(format_perk_row(def, &perks)),
+                                TextFont {
+                                    font_size: FontSize::Px(12.5),
+                                    ..default()
+                                },
+                                TextColor(branch_color),
+                                PerkRowText(perk_id),
+                            ));
+                        });
                     }
                 }
             });
@@ -1158,7 +1212,10 @@ fn setup_chapter_select(
                 // Header
                 up.spawn((
                     Text::new(format_upgrade_header(&upgrades)),
-                    TextFont { font_size: FontSize::Px(13.5), ..default() },
+                    TextFont {
+                        font_size: FontSize::Px(13.5),
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.5, 1.0, 0.65)),
                     UpgradeReserveHeader,
                 ));
@@ -1166,11 +1223,29 @@ fn setup_chapter_select(
                 for def in all_tech_upgrades() {
                     let track_color = track_color(def.track);
                     up.spawn((
-                        Text::new(format_upgrade_row(&def, &upgrades, &robot_pets)),
-                        TextFont { font_size: FontSize::Px(12.0), ..default() },
-                        TextColor(track_color),
-                        UpgradeRowText(def.id),
-                    ));
+                        Button,
+                        Node {
+                            width: Val::Percent(100.0),
+                            justify_content: JustifyContent::FlexStart,
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.05, 0.12, 0.07, 0.72)),
+                        BorderColor::all(Color::srgba(0.22, 0.45, 0.28, 0.5)),
+                        ChapterUpgradeButton(def.id),
+                    ))
+                    .with_children(|row| {
+                        row.spawn((
+                            Text::new(format_upgrade_row(&def, &upgrades, &robot_pets)),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(track_color),
+                            UpgradeRowText(def.id),
+                        ));
+                    });
                 }
             });
 
@@ -1189,24 +1264,51 @@ fn setup_chapter_select(
             .with_children(|wp| {
                 wp.spawn((
                     Text::new(format_weapon_rank_header(&robot_pets)),
-                    TextFont { font_size: FontSize::Px(13.5), ..default() },
+                    TextFont {
+                        font_size: FontSize::Px(13.5),
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.82, 0.62, 1.0)),
                     WeaponRankHeader,
                 ));
-                for (slot, (key, weapon_type)) in WEAPON_RANK_KEYS.iter().enumerate() {
+                for (slot, weapon_type) in WEAPON_RANK_WEAPONS.iter().enumerate() {
                     wp.spawn((
-                        Text::new(format_weapon_rank_row(
-                            key, slot, *weapon_type, &weapon_ranks, &robot_pets,
-                        )),
-                        TextFont { font_size: FontSize::Px(12.0), ..default() },
-                        TextColor(Color::srgb(0.72, 0.55, 0.96)),
-                        WeaponRankRowText(slot),
-                    ));
+                        Button,
+                        Node {
+                            width: Val::Percent(100.0),
+                            justify_content: JustifyContent::FlexStart,
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.10, 0.05, 0.14, 0.72)),
+                        BorderColor::all(Color::srgba(0.44, 0.28, 0.62, 0.5)),
+                        ChapterWeaponRankButton(slot),
+                    ))
+                    .with_children(|row| {
+                        row.spawn((
+                            Text::new(format_weapon_rank_row(
+                                slot,
+                                *weapon_type,
+                                &weapon_ranks,
+                                &robot_pets,
+                            )),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.72, 0.55, 0.96)),
+                            WeaponRankRowText(slot),
+                        ));
+                    });
                 }
             });
 
             // ── Settlement Economy panel ──────────────────────────────────────
-            p.spawn(Node { height: Val::Px(4.0), ..default() });
+            p.spawn(Node {
+                height: Val::Px(4.0),
+                ..default()
+            });
             p.spawn((
                 Node {
                     flex_direction: FlexDirection::Column,
@@ -1221,7 +1323,10 @@ fn setup_chapter_select(
             .with_children(|ep| {
                 ep.spawn((
                     Text::new(format_economy_header(&economy)),
-                    TextFont { font_size: FontSize::Px(13.5), ..default() },
+                    TextFont {
+                        font_size: FontSize::Px(13.5),
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.4, 0.95, 0.9)),
                     EconomyPanelHeader,
                 ));
@@ -1232,7 +1337,10 @@ fn setup_chapter_select(
                             &economy,
                             &world_site_registry,
                         )),
-                        TextFont { font_size: FontSize::Px(12.0), ..default() },
+                        TextFont {
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
                         TextColor(Color::srgb(0.55, 0.85, 0.8)),
                         EconomyPanelSiteRow(idx),
                     ));
@@ -1245,6 +1353,39 @@ fn despawn_chapter_select(mut commands: Commands, q: Query<Entity, With<ChapterS
     for e in q.iter() {
         commands.entity(e).despawn();
     }
+}
+
+fn spawn_chapter_action_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    action: ChapterSelectAction,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_width: Val::Px(142.0),
+                height: Val::Px(38.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::horizontal(Val::Px(12.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.08, 0.14, 0.22)),
+            BorderColor::all(Color::srgb(0.25, 0.50, 0.70)),
+            ChapterSelectActionButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
 }
 
 fn spawn_fast_travel_map(
@@ -1405,7 +1546,7 @@ fn spawn_fast_travel_map(
                 ))
                 .with_children(|marker| {
                     marker.spawn((
-                        Text::new(chapter_key_hint(location.id.0)),
+                        Text::new(location.id.0.to_string()),
                         TextFont {
                             font_size: FontSize::Px(10.5),
                             ..default()
@@ -1731,170 +1872,28 @@ fn world_to_map_top(z: f32) -> f32 {
     ((EVEREST_RANGE_HALF_EXTENT - z) / EVEREST_RANGE_WORLD_SIZE * 100.0).clamp(2.0, 98.0)
 }
 
-fn chapter_key_hint(chapter: u8) -> &'static str {
-    match chapter {
-        1 => "1",
-        2 => "2",
-        3 => "3",
-        4 => "4",
-        5 => "5",
-        6 => "6",
-        7 => "7",
-        8 => "8",
-        9 => "9",
-        10 => "0",
-        11 => "Q",
-        12 => "W",
-        13 => "R",
-        14 => "T",
-        _ => "?",
-    }
-}
-
-fn chapter_select_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
-    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
-    progress: Res<ChapterProgress>,
-    mut current: ResMut<CurrentChapter>,
+fn chapter_select_action_buttons(
+    interaction_q: Query<
+        (&Interaction, &ChapterSelectActionButton),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut design_data: ResMut<CharacterDesignData>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let mut controller_left = false;
-    let mut controller_right = false;
-    let mut controller_play = false;
-    let mut controller_back = false;
-    let mut controller_editor = false;
-    let mut controller_garage = false;
-    for event in button_events.read() {
-        if event.state != ButtonState::Pressed {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
             continue;
         }
-        match event.button {
-            GamepadButton::DPadLeft | GamepadButton::LeftTrigger => controller_left = true,
-            GamepadButton::DPadRight | GamepadButton::RightTrigger => controller_right = true,
-            GamepadButton::South | GamepadButton::Start => controller_play = true,
-            GamepadButton::East => controller_back = true,
-            GamepadButton::North => controller_editor = true,
-            GamepadButton::West | GamepadButton::Select => controller_garage = true,
-            _ => {}
-        }
-    }
-    for gp in gamepads.iter() {
-        controller_left = controller_left
-            || gp.just_pressed(GamepadButton::DPadLeft)
-            || gp.just_pressed(GamepadButton::LeftTrigger);
-        controller_right = controller_right
-            || gp.just_pressed(GamepadButton::DPadRight)
-            || gp.just_pressed(GamepadButton::RightTrigger);
-        controller_play = controller_play
-            || gp.just_pressed(GamepadButton::South)
-            || gp.just_pressed(GamepadButton::Start);
-        controller_back = controller_back || gp.just_pressed(GamepadButton::East);
-        controller_editor = controller_editor || gp.just_pressed(GamepadButton::North);
-        controller_garage = controller_garage
-            || gp.just_pressed(GamepadButton::West)
-            || gp.just_pressed(GamepadButton::Select);
-    }
-    controller_left = controller_left
-        || native.just_pressed(NativeButton::DPadLeft)
-        || native.just_pressed(NativeButton::LeftShoulder);
-    controller_right = controller_right
-        || native.just_pressed(NativeButton::DPadRight)
-        || native.just_pressed(NativeButton::RightShoulder);
-    controller_play = controller_play
-        || native.just_pressed(NativeButton::South)
-        || native.just_pressed(NativeButton::Start);
-    controller_back = controller_back || native.just_pressed(NativeButton::East);
-    controller_editor = controller_editor || native.just_pressed(NativeButton::North);
-    controller_garage = controller_garage
-        || native.just_pressed(NativeButton::West)
-        || native.just_pressed(NativeButton::Select);
-
-    let pick_unlocked_neighbor = |start: ChapterId, step: i8| -> ChapterId {
-        let mut next = start.0 as i16;
-        for _ in ChapterId::FIRST.0..=ChapterId::LAST.0 {
-            next += step as i16;
-            if next < ChapterId::FIRST.0 as i16 {
-                next = ChapterId::LAST.0 as i16;
-            } else if next > ChapterId::LAST.0 as i16 {
-                next = ChapterId::FIRST.0 as i16;
+        match button.0 {
+            ChapterSelectAction::Back => next_state.set(AppState::MainMenu),
+            ChapterSelectAction::CharacterEditor => {
+                design_data.player_index = 0;
+                design_data.return_target = CharacterDesignReturnTarget::ChapterSelect;
+                next_state.set(AppState::CharacterDesign);
             }
-            let candidate = ChapterId(next as u8);
-            if progress.is_unlocked(candidate) {
-                return candidate;
-            }
+            ChapterSelectAction::RobotGarage => next_state.set(AppState::RobotGarage),
         }
-        start
-    };
-
-    if controller_left {
-        current.id = pick_unlocked_neighbor(current.id, -1);
-        current.started = false;
-    }
-    if controller_right {
-        current.id = pick_unlocked_neighbor(current.id, 1);
-        current.started = false;
-    }
-    if controller_play && progress.is_unlocked(current.id) {
-        current.started = false;
-        next_state.set(AppState::Playing);
         return;
-    }
-    if controller_editor {
-        design_data.player_index = 0;
-        design_data.return_target = CharacterDesignReturnTarget::ChapterSelect;
-        next_state.set(AppState::CharacterDesign);
-        return;
-    }
-    if controller_garage {
-        next_state.set(AppState::RobotGarage);
-        return;
-    }
-    if controller_back {
-        next_state.set(AppState::MainMenu);
-        return;
-    }
-
-    let try_pick = |k: KeyCode, n: u8| -> Option<u8> {
-        if keyboard.just_pressed(k) {
-            Some(n)
-        } else {
-            None
-        }
-    };
-    let pick = try_pick(KeyCode::Digit1, 1)
-        .or_else(|| try_pick(KeyCode::Digit2, 2))
-        .or_else(|| try_pick(KeyCode::Digit3, 3))
-        .or_else(|| try_pick(KeyCode::Digit4, 4))
-        .or_else(|| try_pick(KeyCode::Digit5, 5))
-        .or_else(|| try_pick(KeyCode::Digit6, 6))
-        .or_else(|| try_pick(KeyCode::Digit7, 7))
-        .or_else(|| try_pick(KeyCode::Digit8, 8))
-        .or_else(|| try_pick(KeyCode::Digit9, 9))
-        .or_else(|| try_pick(KeyCode::Digit0, 10))
-        .or_else(|| try_pick(KeyCode::KeyQ, 11))
-        .or_else(|| try_pick(KeyCode::KeyW, 12))
-        .or_else(|| try_pick(KeyCode::KeyR, 13))
-        .or_else(|| try_pick(KeyCode::KeyT, 14));
-    if let Some(n) = pick {
-        if progress.is_unlocked(ChapterId(n)) {
-            current.id = ChapterId(n);
-            current.started = false;
-            next_state.set(AppState::Playing);
-        }
-    }
-    if keyboard.just_pressed(KeyCode::KeyE) {
-        design_data.player_index = 0;
-        design_data.return_target = CharacterDesignReturnTarget::ChapterSelect;
-        next_state.set(AppState::CharacterDesign);
-    }
-    if keyboard.just_pressed(KeyCode::KeyG) {
-        next_state.set(AppState::RobotGarage);
-    }
-    if keyboard.just_pressed(KeyCode::Escape) {
-        next_state.set(AppState::MainMenu);
     }
 }
 
@@ -1916,19 +1915,13 @@ fn chapter_select_fast_travel_buttons(
     }
 }
 
-fn chapter_select_perk_input(keyboard: Res<ButtonInput<KeyCode>>, mut perks: ResMut<PerkTree>) {
-    let picks = [
-        (KeyCode::KeyA, "heart_vitality"),
-        (KeyCode::KeyS, "heart_regen"),
-        (KeyCode::KeyD, "star_focus"),
-        (KeyCode::KeyF, "star_charges"),
-        (KeyCode::KeyG, "acro_evasion"),
-        (KeyCode::KeyH, "acro_parry"),
-    ];
-    for (key, perk_id) in picks {
-        if keyboard.just_pressed(key) {
-            perks.try_spend(perk_id);
-            break;
+fn chapter_select_perk_buttons(
+    interaction_q: Query<(&Interaction, &ChapterPerkButton), (Changed<Interaction>, With<Button>)>,
+    mut perks: ResMut<PerkTree>,
+) {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction == Interaction::Pressed {
+            perks.try_spend(button.0);
         }
     }
 }
@@ -1945,40 +1938,24 @@ fn chapter_select_perk_panel_update(
         *text = Text::new(format_perk_header(&perks));
     }
     let defs = all_perks();
-    let key_map = [
-        ("A", "heart_vitality"),
-        ("S", "heart_regen"),
-        ("D", "star_focus"),
-        ("F", "star_charges"),
-        ("G", "acro_evasion"),
-        ("H", "acro_parry"),
-    ];
     for (row, mut text) in row_q.iter_mut() {
-        if let Some((key, _)) = key_map.iter().find(|(_, id)| *id == row.0) {
-            if let Some(def) = defs.iter().find(|d| d.id == row.0) {
-                *text = Text::new(format_perk_row(key, def, &perks));
-            }
+        if let Some(def) = defs.iter().find(|d| d.id == row.0) {
+            *text = Text::new(format_perk_row(def, &perks));
         }
     }
 }
 
-fn chapter_select_upgrade_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
+fn chapter_select_upgrade_buttons(
+    interaction_q: Query<
+        (&Interaction, &ChapterUpgradeButton),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut upgrades: ResMut<UpgradeLedger>,
     mut robot_pets: ResMut<RobotPetCollection>,
 ) {
-    let picks = [
-        (KeyCode::KeyZ, TechUpgradeId::BeamCapacitors),
-        (KeyCode::KeyX, TechUpgradeId::NovaMissileForge),
-        (KeyCode::KeyC, TechUpgradeId::SpriteTurretLattice),
-        (KeyCode::KeyV, TechUpgradeId::ArmorPlating),
-        (KeyCode::KeyB, TechUpgradeId::RejuvenationMatrix),
-        (KeyCode::KeyN, TechUpgradeId::MechCommandLink),
-    ];
-    for (key, upgrade_id) in picks {
-        if keyboard.just_pressed(key) {
-            let _ = upgrades.try_purchase(upgrade_id, &mut robot_pets);
-            break;
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction == Interaction::Pressed {
+            let _ = upgrades.try_purchase(button.0, &mut robot_pets);
         }
     }
 }
@@ -2003,37 +1980,40 @@ fn chapter_select_upgrade_panel_update(
     }
 }
 
-fn chapter_select_weapon_rank_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
+fn chapter_select_weapon_rank_buttons(
+    interaction_q: Query<
+        (&Interaction, &ChapterWeaponRankButton),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut weapon_ranks: ResMut<WeaponRanks>,
     mut robot_pets: ResMut<RobotPetCollection>,
 ) {
-    let picks = [
-        (KeyCode::KeyY, 0usize),
-        (KeyCode::KeyU, 1),
-        (KeyCode::KeyI, 2),
-        (KeyCode::KeyO, 3),
-        (KeyCode::KeyP, 4),
-        (KeyCode::KeyJ, 5),
-    ];
-    for (key, slot) in picks {
-        if !keyboard.just_pressed(key) {
-            continue;
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction == Interaction::Pressed {
+            purchase_weapon_rank(button.0, &mut weapon_ranks, &mut robot_pets);
         }
-        let rank = weapon_ranks.ranks[slot];
-        if rank >= MAX_WEAPON_RANK {
-            break;
-        }
-        let cost = WeaponRanks::upgrade_cost(rank);
-        let recipe = [crate::robot_pets::PartCost::new(
-            RobotPartKind::CircuitBoard,
-            cost,
-        )];
-        if robot_pets.can_afford(&recipe) {
-            let _ = robot_pets.spend_parts(&recipe);
-            weapon_ranks.ranks[slot] = rank + 1;
-        }
-        break;
+    }
+}
+
+fn purchase_weapon_rank(
+    slot: usize,
+    weapon_ranks: &mut WeaponRanks,
+    robot_pets: &mut RobotPetCollection,
+) {
+    let Some(rank) = weapon_ranks.ranks.get_mut(slot) else {
+        return;
+    };
+    if *rank >= MAX_WEAPON_RANK {
+        return;
+    }
+    let cost = WeaponRanks::upgrade_cost(*rank);
+    let recipe = [crate::robot_pets::PartCost::new(
+        RobotPartKind::CircuitBoard,
+        cost,
+    )];
+    if robot_pets.can_afford(&recipe) {
+        let _ = robot_pets.spend_parts(&recipe);
+        *rank += 1;
     }
 }
 
@@ -2051,9 +2031,8 @@ fn chapter_select_weapon_rank_panel_update(
     }
     for (row, mut text) in row_q.iter_mut() {
         let slot = row.0;
-        let (key, weapon_type) = WEAPON_RANK_KEYS[slot];
+        let weapon_type = WEAPON_RANK_WEAPONS[slot];
         *text = Text::new(format_weapon_rank_row(
-            key,
             slot,
             weapon_type,
             &weapon_ranks,
@@ -2135,7 +2114,7 @@ fn format_perk_header(perks: &PerkTree) -> String {
     format!("PERK TRAINING   unspent points: {}", perks.points_unspent)
 }
 
-fn format_perk_row(key: &str, def: &crate::perks::PerkDef, perks: &PerkTree) -> String {
+fn format_perk_row(def: &crate::perks::PerkDef, perks: &PerkTree) -> String {
     let rank = perks.rank(def.id);
     let bar = rank_bar(rank, def.max_rank);
     let status = if rank >= def.max_rank {
@@ -2146,7 +2125,7 @@ fn format_perk_row(key: &str, def: &crate::perks::PerkDef, perks: &PerkTree) -> 
         "—".to_string()
     };
     format!(
-        "[{key}] {:<24} {bar}  {}/{max}  {status}",
+        "{:<24} {bar}  {}/{max}  {status}",
         def.name,
         rank,
         max = def.max_rank,
@@ -2187,9 +2166,8 @@ fn format_upgrade_row(
         format!("{}  {}", format_part_costs(&cost), afford)
     };
     format!(
-        "[{key}] {:<26} {bar}  {rank}/{max}  {status}",
+        "{:<26} {bar}  {rank}/{max}  {status}",
         def.name,
-        key = def.key_hint,
         max = def.max_rank,
     )
 }
@@ -2208,13 +2186,22 @@ fn track_color(track: crate::upgrades::TechUpgradeTrack) -> Color {
 }
 
 // ── Weapon Rank panel helpers ──────────────────────────────────────────────────
-const WEAPON_RANK_KEYS: [(&str, WeaponType); 6] = [
-    ("Y", WeaponType::Pistol),
-    ("U", WeaponType::Rifle),
-    ("I", WeaponType::Shotgun),
-    ("O", WeaponType::Rocket),
-    ("P", WeaponType::Laser),
-    ("J", WeaponType::Grenade),
+const CHAPTER_PERK_IDS: [&str; 6] = [
+    "heart_vitality",
+    "heart_regen",
+    "star_focus",
+    "star_charges",
+    "acro_evasion",
+    "acro_parry",
+];
+
+const WEAPON_RANK_WEAPONS: [WeaponType; 6] = [
+    WeaponType::Pistol,
+    WeaponType::Rifle,
+    WeaponType::Shotgun,
+    WeaponType::Rocket,
+    WeaponType::Laser,
+    WeaponType::Grenade,
 ];
 
 fn format_weapon_rank_header(robot_pets: &RobotPetCollection) -> String {
@@ -2223,7 +2210,6 @@ fn format_weapon_rank_header(robot_pets: &RobotPetCollection) -> String {
 }
 
 fn format_weapon_rank_row(
-    key: &str,
     slot: usize,
     weapon_type: WeaponType,
     ranks: &WeaponRanks,
@@ -2248,7 +2234,7 @@ fn format_weapon_rank_row(
         }
     };
     format!(
-        "[{key}] {:<24} {bar}  {rank}/{MAX_WEAPON_RANK}  {label}  {status}",
+        "{:<24} {bar}  {rank}/{MAX_WEAPON_RANK}  {label}  {status}",
         weapon_type.display_name(),
     )
 }
@@ -2271,6 +2257,21 @@ struct PlayerSlotInputText(u8);
 
 #[derive(Component)]
 struct PlayerSelectPrompt;
+#[derive(Component, Clone, Copy)]
+struct PlayerSelectButton {
+    player_index: u8,
+    action: PlayerSelectAction,
+}
+#[derive(Clone, Copy)]
+enum PlayerSelectAction {
+    PreviousCharacter,
+    NextCharacter,
+    ToggleReady,
+    Customize,
+    JoinLeave,
+    Back,
+    Begin,
+}
 
 fn slot_label_color(i: u8) -> Color {
     match i {
@@ -2330,14 +2331,20 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
             // Title
             root.spawn((
                 Text::new("SELECT YOUR CREW"),
-                TextFont { font_size: FontSize::Px(54.0), ..default() },
+                TextFont {
+                    font_size: FontSize::Px(54.0),
+                    ..default()
+                },
                 TextColor(Color::srgb(1.0, 0.9, 0.25)),
             ));
 
             // Prompt line (updated dynamically)
             root.spawn((
                 Text::new("All players ready to begin"),
-                TextFont { font_size: FontSize::Px(18.0), ..default() },
+                TextFont {
+                    font_size: FontSize::Px(18.0),
+                    ..default()
+                },
                 TextColor(Color::srgb(0.55, 0.65, 0.85)),
                 PlayerSelectPrompt,
             ));
@@ -2368,7 +2375,10 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         // "P1" header
                         card.spawn((
                             Text::new(format!("P{}", i + 1)),
-                            TextFont { font_size: FontSize::Px(30.0), ..default() },
+                            TextFont {
+                                font_size: FontSize::Px(30.0),
+                                ..default()
+                            },
                             TextColor(slot_label_color(i)),
                         ));
 
@@ -2380,38 +2390,107 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         };
                         card.spawn((
                             Text::new(char_text),
-                            TextFont { font_size: FontSize::Px(19.0), ..default() },
+                            TextFont {
+                                font_size: FontSize::Px(19.0),
+                                ..default()
+                            },
                             TextColor(Color::WHITE),
                             PlayerSlotCharText(i),
                         ));
 
-                        // Controller info (live axes)
-                        let ctrl_text = if i == 0 { "KEYBOARD + GAMEPAD 1" } else { "waiting..." };
+                        // Slot label
+                        let ctrl_text = if i == 0 { "PLAYER 1" } else { "OPEN SLOT" };
                         card.spawn((
                             Text::new(ctrl_text),
-                            TextFont { font_size: FontSize::Px(13.0), ..default() },
+                            TextFont {
+                                font_size: FontSize::Px(13.0),
+                                ..default()
+                            },
                             TextColor(Color::srgb(0.55, 0.55, 0.75)),
                             PlayerSlotInputText(i),
                         ));
 
-                        // Status / instruction
-                        let status = if i == 0 { "[ ENTER / A ] Ready" } else { "Press any btn to join" };
+                        // Status
+                        let status = if i == 0 { "Not ready" } else { "Available" };
                         card.spawn((
                             Text::new(status),
-                            TextFont { font_size: FontSize::Px(15.0), ..default() },
+                            TextFont {
+                                font_size: FontSize::Px(15.0),
+                                ..default()
+                            },
                             TextColor(Color::srgb(0.65, 0.65, 0.4)),
                             PlayerSlotStatusText(i),
                         ));
+
+                        card.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(6.0),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            spawn_player_select_button(
+                                row,
+                                "<",
+                                i,
+                                PlayerSelectAction::PreviousCharacter,
+                                38.0,
+                            );
+                            spawn_player_select_button(
+                                row,
+                                ">",
+                                i,
+                                PlayerSelectAction::NextCharacter,
+                                38.0,
+                            );
+                        });
+                        card.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(6.0),
+                            row_gap: Val::Px(6.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            if i > 0 {
+                                spawn_player_select_button(
+                                    row,
+                                    "JOIN / LEAVE",
+                                    i,
+                                    PlayerSelectAction::JoinLeave,
+                                    112.0,
+                                );
+                            }
+                            spawn_player_select_button(
+                                row,
+                                "READY",
+                                i,
+                                PlayerSelectAction::ToggleReady,
+                                86.0,
+                            );
+                            spawn_player_select_button(
+                                row,
+                                "CUSTOMIZE",
+                                i,
+                                PlayerSelectAction::Customize,
+                                112.0,
+                            );
+                        });
                     });
                 }
             });
 
-            // Footer hints
-            root.spawn((
-                Text::new("P1: ← → / left stick chars  |  Enter/A = ready  |  C/Y = customize  |  ESC = back\nP2-P4: controller 2+ joins  |  D-pad/stick = chars  |  A = ready  |  Y = customize  |  B = leave"),
-                TextFont { font_size: FontSize::Px(14.0), ..default() },
-                TextColor(Color::srgb(0.38, 0.38, 0.5)),
-            ));
+            root.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(12.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                spawn_player_select_button(row, "BACK", 0, PlayerSelectAction::Back, 132.0);
+                spawn_player_select_button(row, "BEGIN", 0, PlayerSelectAction::Begin, 132.0);
+            });
         });
 }
 
@@ -2421,12 +2500,46 @@ fn despawn_player_select(mut commands: Commands, q: Query<Entity, With<PlayerSel
     }
 }
 
+fn spawn_player_select_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    player_index: u8,
+    action: PlayerSelectAction,
+    width: f32,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(width),
+                height: Val::Px(34.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::horizontal(Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.08, 0.12, 0.22)),
+            BorderColor::all(Color::srgb(0.24, 0.40, 0.62)),
+            PlayerSelectButton {
+                player_index,
+                action,
+            },
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
 fn player_select_update(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<(Entity, &Gamepad)>,
-    native: Res<NativeControllerState>,
-    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
-    time: Res<Time>,
+    interaction_q: Query<(&Interaction, &PlayerSelectButton), (Changed<Interaction>, With<Button>)>,
     mut select: ResMut<PlayerSelectState>,
     mut config: ResMut<LocalPlayerConfig>,
     mut design_data: ResMut<CharacterDesignData>,
@@ -2467,190 +2580,62 @@ fn player_select_update(
     >,
     mut card_q: Query<(&mut BackgroundColor, &PlayerSlotCard)>,
 ) {
-    let dt = time.delta_secs();
     let roster_len = HERO_ROSTER.len();
+    select.slots[0].joined = true;
 
-    // ESC → back to main menu
-    if keyboard.just_pressed(KeyCode::Escape) {
-        next_state.set(AppState::MainMenu);
-        return;
-    }
-
-    // Sorted gamepads for stable assignment. Gameplay maps gamepad 0 to P1,
-    // so the lobby must do the same or the first controller appears dead.
-    let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
-    gps.sort_by_key(|(e, _)| e.index());
-    let p1_gp = gps.first().map(|(_, gamepad)| *gamepad);
-    let p1_entity = gps.first().map(|(entity, _)| *entity);
-    let native_for_p1 = native.connected;
-    let pressed_buttons: Vec<(Entity, GamepadButton)> = button_events
-        .read()
-        .filter(|event| event.state == ButtonState::Pressed)
-        .map(|event| (event.entity, event.button))
-        .collect();
-    let event_pressed = |entity: Entity, button: GamepadButton| {
-        pressed_buttons
-            .iter()
-            .any(|(event_entity, event_button)| *event_entity == entity && *event_button == button)
-    };
-
-    // ── P1 (always joined, keyboard + gamepad 0) ─────────────────────────────
-    {
-        let slot = &mut select.slots[0];
-        slot.joined = true;
-        slot.stick_cooldown = (slot.stick_cooldown - dt).max(0.0);
-
-        if !slot.ready && slot.stick_cooldown <= 0.0 {
-            let lx = p1_gp
-                .and_then(|gamepad| gamepad.get(GamepadAxis::LeftStickX))
-                .unwrap_or(0.0);
-            let native_lx = if native_for_p1 {
-                native.move_axis.x
-            } else {
-                0.0
-            };
-            let left = keyboard.just_pressed(KeyCode::ArrowLeft)
-                || p1_gp
-                    .map(|gamepad| gamepad.just_pressed(GamepadButton::DPadLeft))
-                    .unwrap_or(false)
-                || p1_entity
-                    .map(|entity| event_pressed(entity, GamepadButton::DPadLeft))
-                    .unwrap_or(false)
-                || (native_for_p1 && native.just_pressed(NativeButton::DPadLeft))
-                || native_lx < -0.5
-                || lx < -0.5;
-            let right = keyboard.just_pressed(KeyCode::ArrowRight)
-                || p1_gp
-                    .map(|gamepad| gamepad.just_pressed(GamepadButton::DPadRight))
-                    .unwrap_or(false)
-                || p1_entity
-                    .map(|entity| event_pressed(entity, GamepadButton::DPadRight))
-                    .unwrap_or(false)
-                || (native_for_p1 && native.just_pressed(NativeButton::DPadRight))
-                || native_lx > 0.5
-                || lx > 0.5;
-            if left {
-                slot.character_index = (slot.character_index + roster_len - 1) % roster_len;
-                slot.stick_cooldown = 0.18;
-            } else if right {
-                slot.character_index = (slot.character_index + 1) % roster_len;
-                slot.stick_cooldown = 0.18;
-            }
-        }
-        if keyboard.just_pressed(KeyCode::Enter)
-            || keyboard.just_pressed(KeyCode::Space)
-            || p1_gp
-                .map(|gamepad| {
-                    gamepad.just_pressed(GamepadButton::South)
-                        || gamepad.just_pressed(GamepadButton::Start)
-                })
-                .unwrap_or(false)
-            || p1_entity
-                .map(|entity| {
-                    event_pressed(entity, GamepadButton::South)
-                        || event_pressed(entity, GamepadButton::Start)
-                })
-                .unwrap_or(false)
-            || (native_for_p1
-                && (native.just_pressed(NativeButton::South)
-                    || native.just_pressed(NativeButton::Start)))
-        {
-            slot.ready = !slot.ready;
-        }
-        // C / Y = open character designer for P1
-        let customize_pressed = keyboard.just_pressed(KeyCode::KeyC)
-            || p1_gp
-                .map(|gamepad| gamepad.just_pressed(GamepadButton::North))
-                .unwrap_or(false)
-            || p1_entity
-                .map(|entity| event_pressed(entity, GamepadButton::North))
-                .unwrap_or(false)
-            || (native_for_p1 && native.just_pressed(NativeButton::North));
-        if customize_pressed && !slot.ready {
-            design_data.player_index = 0;
-            design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
-            next_state.set(AppState::CharacterDesign);
-            return;
-        }
-    }
-
-    // ── P2-P4 (gamepads 1+) ──────────────────────────────────────────────────
-    for i in 1u8..4 {
-        let gp_idx = i as usize;
-        let slot = &mut select.slots[i as usize];
-        slot.stick_cooldown = (slot.stick_cooldown - dt).max(0.0);
-
-        let Some((gp_entity, gp)) = gps.get(gp_idx) else {
-            slot.joined = false;
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
             continue;
-        };
+        }
 
-        let any_just = [
-            GamepadButton::South,
-            GamepadButton::East,
-            GamepadButton::North,
-            GamepadButton::West,
-            GamepadButton::Start,
-            GamepadButton::Select,
-        ]
-        .iter()
-        .any(|&b| gp.just_pressed(b) || event_pressed(*gp_entity, b));
-
-        if !slot.joined {
-            if any_just {
-                slot.joined = true;
-                slot.character_index = i as usize % roster_len;
-                slot.ready = false;
-            }
-        } else {
-            // Navigate character (not while ready)
-            if !slot.ready && slot.stick_cooldown <= 0.0 {
-                let lx = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
-                let left = gp.just_pressed(GamepadButton::DPadLeft)
-                    || event_pressed(*gp_entity, GamepadButton::DPadLeft)
-                    || lx < -0.5;
-                let right = gp.just_pressed(GamepadButton::DPadRight)
-                    || event_pressed(*gp_entity, GamepadButton::DPadRight)
-                    || lx > 0.5;
-                if left {
-                    slot.character_index = (slot.character_index + roster_len - 1) % roster_len;
-                    slot.stick_cooldown = 0.25;
-                } else if right {
-                    slot.character_index = (slot.character_index + 1) % roster_len;
-                    slot.stick_cooldown = 0.25;
-                }
-            }
-            // A = ready toggle
-            if gp.just_pressed(GamepadButton::South)
-                || event_pressed(*gp_entity, GamepadButton::South)
-            {
-                slot.ready = !slot.ready;
-            }
-            // B = leave (only if not ready)
-            if (gp.just_pressed(GamepadButton::East)
-                || event_pressed(*gp_entity, GamepadButton::East))
-                && !slot.ready
-            {
-                slot.joined = false;
-            }
-            // Y = open character designer
-            if (gp.just_pressed(GamepadButton::North)
-                || event_pressed(*gp_entity, GamepadButton::North))
-                && !slot.ready
-            {
-                design_data.player_index = i as usize;
-                design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
-                next_state.set(AppState::CharacterDesign);
+        match button.action {
+            PlayerSelectAction::Back => {
+                next_state.set(AppState::MainMenu);
                 return;
             }
+            PlayerSelectAction::Begin => {
+                if select.all_ready() {
+                    config.active = select.active_count().max(1);
+                    next_state.set(AppState::ChapterSelect);
+                    return;
+                }
+            }
+            action => {
+                let idx = button.player_index as usize;
+                let Some(slot) = select.slots.get_mut(idx) else {
+                    continue;
+                };
+                match action {
+                    PlayerSelectAction::PreviousCharacter if slot.joined && !slot.ready => {
+                        slot.character_index = (slot.character_index + roster_len - 1) % roster_len;
+                    }
+                    PlayerSelectAction::NextCharacter if slot.joined && !slot.ready => {
+                        slot.character_index = (slot.character_index + 1) % roster_len;
+                    }
+                    PlayerSelectAction::ToggleReady if slot.joined => {
+                        slot.ready = !slot.ready;
+                    }
+                    PlayerSelectAction::Customize if slot.joined && !slot.ready => {
+                        design_data.player_index = idx;
+                        design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
+                        next_state.set(AppState::CharacterDesign);
+                        return;
+                    }
+                    PlayerSelectAction::JoinLeave if idx > 0 => {
+                        if slot.joined {
+                            if !slot.ready {
+                                slot.joined = false;
+                            }
+                        } else {
+                            slot.joined = true;
+                            slot.character_index = idx % roster_len;
+                            slot.ready = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
-    }
-
-    // ── Auto-advance when all joined players are ready ────────────────────────
-    if select.all_ready() {
-        config.active = select.active_count().max(1);
-        next_state.set(AppState::ChapterSelect);
-        return;
     }
 
     // ── Update text nodes ─────────────────────────────────────────────────────
@@ -2667,45 +2652,21 @@ fn player_select_update(
         let i = marker.0 as usize;
         let s = &select.slots[i];
         *t = Text::new(if !s.joined {
-            if i == 0 {
-                "[ ENTER / A ] Ready"
-            } else {
-                "Press any btn to join"
-            }
-            .to_string()
+            "Available".to_string()
         } else if s.ready {
             "✓  READY".to_string()
-        } else if i == 0 {
-            "[ ENTER / A ] Ready".to_string()
         } else {
-            "[A] Ready    [B] Leave".to_string()
+            "Not ready".to_string()
         });
     }
 
     for (mut t, marker) in input_q.iter_mut() {
         let i = marker.0 as usize;
-        if i == 0 {
-            if let Some((_, gp)) = gps.first() {
-                let lx = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
-                let ly = gp.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
-                *t = Text::new(format!("KEYBOARD + GAMEPAD 1   X:{:+.2} Y:{:+.2}", lx, ly));
-            } else if native.connected {
-                *t = Text::new(format!(
-                    "KEYBOARD + MACOS CONTROLLER   X:{:+.2} Y:{:+.2}",
-                    native.move_axis.x, native.move_axis.y
-                ));
-            } else {
-                *t = Text::new("KEYBOARD + GAMEPAD 1");
-            }
+        let s = &select.slots[i];
+        if s.joined {
+            *t = Text::new(format!("PLAYER {}", i + 1));
         } else {
-            let gp_idx = i;
-            if let Some((_, gp)) = gps.get(gp_idx) {
-                let lx = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);
-                let ly = gp.get(GamepadAxis::LeftStickY).unwrap_or(0.0);
-                *t = Text::new(format!("GAMEPAD {}   X:{:+.2} Y:{:+.2}", i + 1, lx, ly));
-            } else {
-                *t = Text::new(format!("GAMEPAD {} — not found", i + 1));
-            }
+            *t = Text::new("OPEN SLOT");
         }
     }
 
@@ -2730,9 +2691,9 @@ fn player_select_update(
             ready,
             joined,
             if ready == joined && joined > 0 {
-                "Starting..."
+                "Begin is available"
             } else {
-                "mark ready to begin"
+                "ready the crew"
             }
         ));
     }
@@ -3970,13 +3931,29 @@ fn setup_game_over(mut commands: Commands) {
                 TextColor(Color::srgb(1.0, 0.2, 0.1)),
             ));
             p.spawn((
-                Text::new("Press R / [A] — Return to Title"),
-                TextFont {
-                    font_size: FontSize::Px(24.0),
+                Button,
+                Node {
+                    width: Val::Px(260.0),
+                    height: Val::Px(48.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(1.0)),
                     ..default()
                 },
-                TextColor(Color::srgb(0.7, 0.7, 0.8)),
-            ));
+                BackgroundColor(Color::srgb(0.34, 0.10, 0.08)),
+                BorderColor::all(Color::srgb(0.80, 0.30, 0.22)),
+                GameOverMenuButton,
+            ))
+            .with_children(|button| {
+                button.spawn((
+                    Text::new("RETURN TO TITLE"),
+                    TextFont {
+                        font_size: FontSize::Px(18.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
         });
 }
 
@@ -4019,29 +3996,23 @@ fn boss_defeated_ui_system(
 }
 
 fn game_over_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
+    interaction_q: Query<&Interaction, (Changed<Interaction>, With<GameOverMenuButton>)>,
     mut next_state: ResMut<NextState<AppState>>,
     go_root: Query<Entity, With<GameOverRoot>>,
     hud_root: Query<Entity, With<HudRoot>>,
     mut commands: Commands,
 ) {
-    let confirm = keyboard.just_pressed(KeyCode::KeyR)
-        || gamepads.iter().any(|gp| {
-            gp.just_pressed(GamepadButton::South) || gp.just_pressed(GamepadButton::Start)
-        })
-        || native.just_pressed(NativeButton::South)
-        || native.just_pressed(NativeButton::Start);
-
-    if confirm {
-        for e in go_root.iter() {
-            commands.entity(e).despawn();
+    for interaction in interaction_q.iter() {
+        if *interaction == Interaction::Pressed {
+            for e in go_root.iter() {
+                commands.entity(e).despawn();
+            }
+            for e in hud_root.iter() {
+                commands.entity(e).despawn();
+            }
+            next_state.set(AppState::MainMenu);
+            return;
         }
-        for e in hud_root.iter() {
-            commands.entity(e).despawn();
-        }
-        next_state.set(AppState::MainMenu);
     }
 }
 
@@ -4092,55 +4063,79 @@ fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) 
                 },
                 TextColor(Color::srgb(0.76, 0.92, 0.80)),
             ));
-            root.spawn((
-                Text::new("Press [Enter / A] to return to the main menu\nPress [N] for New Game+"),
+            root.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(12.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                spawn_victory_button(row, "MAIN MENU", VictoryAction::MainMenu);
+                spawn_victory_button(row, "NEW GAME+", VictoryAction::NewGamePlus);
+            });
+        });
+}
+
+fn spawn_victory_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    action: VictoryAction,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(180.0),
+                height: Val::Px(46.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.12, 0.28, 0.14)),
+            BorderColor::all(Color::srgb(0.46, 0.84, 0.42)),
+            VictoryMenuButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(17.0),
+                    font_size: FontSize::Px(16.0),
                     ..default()
                 },
-                TextColor(Color::srgb(0.78, 0.88, 1.0)),
+                TextColor(Color::WHITE),
             ));
         });
 }
 
 fn victory_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
+    interaction_q: Query<(&Interaction, &VictoryMenuButton), (Changed<Interaction>, With<Button>)>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<AppState>>,
     victory_q: Query<Entity, With<VictoryRoot>>,
     mut site_registry: ResMut<WorldSiteRegistry>,
 ) {
-    let confirm = keyboard.just_pressed(KeyCode::Enter)
-        || keyboard.just_pressed(KeyCode::NumpadEnter)
-        || gamepads
-            .iter()
-            .any(|gp| gp.just_pressed(GamepadButton::South))
-        || native.just_pressed(NativeButton::South);
-    let new_game_plus = keyboard.just_pressed(KeyCode::KeyN)
-        || gamepads
-            .iter()
-            .any(|gp| gp.just_pressed(GamepadButton::West))
-        || native.just_pressed(NativeButton::West);
-
-    if confirm || new_game_plus {
-        if new_game_plus {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if matches!(button.0, VictoryAction::NewGamePlus) {
             site_registry.sites = crate::resources::initial_world_sites();
         }
         for entity in victory_q.iter() {
             commands.entity(entity).despawn();
         }
         next_state.set(AppState::MainMenu);
+        return;
     }
 }
 
 // ── Settings Panel Input ──────────────────────────────────────────────────────
 
 fn settings_panel_input_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
     menu: Res<PauseMenuState>,
     mut settings: ResMut<GameSettings>,
+    interaction_q: Query<(&Interaction, &SettingsButton), (Changed<Interaction>, With<Button>)>,
     mut text_q: ParamSet<(
         Query<&mut Text, With<DifficultyText>>,
         Query<&mut Text, With<VolumeText>>,
@@ -4149,35 +4144,45 @@ fn settings_panel_input_system(
     if menu.page != PausePage::Settings {
         return;
     }
-    // Difficulty
-    if keyboard.just_pressed(KeyCode::Digit1) {
-        settings.difficulty_scale = 0.7;
+    let mut changed = false;
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match button.0 {
+            SettingsAction::Difficulty(DifficultyChoice::Easy) => settings.difficulty_scale = 0.7,
+            SettingsAction::Difficulty(DifficultyChoice::Normal) => settings.difficulty_scale = 1.0,
+            SettingsAction::Difficulty(DifficultyChoice::Hard) => settings.difficulty_scale = 1.3,
+            SettingsAction::MusicDown => {
+                settings.music_volume = (settings.music_volume - 0.1).clamp(0.0, 1.0);
+            }
+            SettingsAction::MusicUp => {
+                settings.music_volume = (settings.music_volume + 0.1).clamp(0.0, 1.0);
+            }
+            SettingsAction::SfxDown => {
+                settings.sfx_volume = (settings.sfx_volume - 0.1).clamp(0.0, 1.0);
+            }
+            SettingsAction::SfxUp => {
+                settings.sfx_volume = (settings.sfx_volume + 0.1).clamp(0.0, 1.0);
+            }
+            SettingsAction::ToggleRumble => settings.rumble_on_hit = !settings.rumble_on_hit,
+        }
+        changed = true;
     }
-    if keyboard.just_pressed(KeyCode::Digit2) {
-        settings.difficulty_scale = 1.0;
+    if !changed {
+        return;
     }
-    if keyboard.just_pressed(KeyCode::Digit3) {
-        settings.difficulty_scale = 1.3;
+    let diff_str = difficulty_text(&settings);
+    for mut text in text_q.p0().iter_mut() {
+        *text = Text::new(diff_str.clone());
     }
-    // Music volume: Minus / Equal
-    if keyboard.just_pressed(KeyCode::Minus) {
-        settings.music_volume = (settings.music_volume - 0.1).clamp(0.0, 1.0);
+    let vol_str = volume_text(&settings);
+    for mut text in text_q.p1().iter_mut() {
+        *text = Text::new(vol_str.clone());
     }
-    if keyboard.just_pressed(KeyCode::Equal) {
-        settings.music_volume = (settings.music_volume + 0.1).clamp(0.0, 1.0);
-    }
-    // SFX volume: [ and ]
-    if keyboard.just_pressed(KeyCode::BracketLeft) {
-        settings.sfx_volume = (settings.sfx_volume - 0.1).clamp(0.0, 1.0);
-    }
-    if keyboard.just_pressed(KeyCode::BracketRight) {
-        settings.sfx_volume = (settings.sfx_volume + 0.1).clamp(0.0, 1.0);
-    }
-    // Rumble toggle
-    if keyboard.just_pressed(KeyCode::KeyR) {
-        settings.rumble_on_hit = !settings.rumble_on_hit;
-    }
-    // Update difficulty text
+}
+
+fn difficulty_text(settings: &GameSettings) -> String {
     let difficulty_label = if settings.difficulty_scale <= 0.75 {
         "EASY"
     } else if settings.difficulty_scale <= 1.05 {
@@ -4185,22 +4190,16 @@ fn settings_panel_input_system(
     } else {
         "HARD"
     };
-    let diff_str = format!(
-        "Difficulty: [1] Easy  [2] Normal  [3] Hard  — {}",
-        difficulty_label
-    );
-    for mut text in text_q.p0().iter_mut() {
-        *text = Text::new(diff_str.clone());
-    }
-    let vol_str = format!(
-        "Music: {:.0}%  SFX: {:.0}%  Rumble: {}  (- + [ ] R to change)",
+    format!("Difficulty: {}", difficulty_label)
+}
+
+fn volume_text(settings: &GameSettings) -> String {
+    format!(
+        "Music: {:.0}%  SFX: {:.0}%  Rumble: {}",
         settings.music_volume * 100.0,
         settings.sfx_volume * 100.0,
         if settings.rumble_on_hit { "ON" } else { "OFF" },
-    );
-    for mut text in text_q.p1().iter_mut() {
-        *text = Text::new(vol_str.clone());
-    }
+    )
 }
 
 // ── Final Push Unlock ─────────────────────────────────────────────────────────
