@@ -457,8 +457,8 @@ fn setup_main_menu(mut commands: Commands) {
             p.spawn((
                 Button,
                 Node {
-                    width: Val::Px(320.0),
-                    height: Val::Px(58.0),
+                    width: Val::Px(86.0),
+                    height: Val::Px(68.0),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     border: UiRect::all(Val::Px(2.0)),
@@ -470,9 +470,9 @@ fn setup_main_menu(mut commands: Commands) {
             ))
             .with_children(|btn| {
                 btn.spawn((
-                    Text::new("BEGIN CHAPTER"),
+                    Text::new("▶"),
                     TextFont {
-                        font_size: FontSize::Px(25.0),
+                        font_size: FontSize::Px(36.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -1070,9 +1070,9 @@ fn setup_chapter_select(
                 ..default()
             })
             .with_children(|row| {
-                spawn_chapter_action_button(row, "BACK", ChapterSelectAction::Back);
-                spawn_chapter_action_button(row, "CUSTOMIZE", ChapterSelectAction::CharacterEditor);
-                spawn_chapter_action_button(row, "ROBOT GARAGE", ChapterSelectAction::RobotGarage);
+                spawn_chapter_action_button(row, "←", ChapterSelectAction::Back);
+                spawn_chapter_action_button(row, "⚙", ChapterSelectAction::CharacterEditor);
+                spawn_chapter_action_button(row, "▣", ChapterSelectAction::RobotGarage);
             });
             p.spawn(Node {
                 width: Val::Percent(100.0),
@@ -1364,7 +1364,7 @@ fn spawn_chapter_action_button(
         .spawn((
             Button,
             Node {
-                min_width: Val::Px(142.0),
+                min_width: Val::Px(52.0),
                 height: Val::Px(38.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -1380,7 +1380,7 @@ fn spawn_chapter_action_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(14.0),
+                    font_size: FontSize::Px(22.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -2431,17 +2431,17 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         .with_children(|row| {
                             spawn_player_select_button(
                                 row,
-                                "<",
+                                "‹",
                                 i,
                                 PlayerSelectAction::PreviousCharacter,
-                                38.0,
+                                40.0,
                             );
                             spawn_player_select_button(
                                 row,
-                                ">",
+                                "›",
                                 i,
                                 PlayerSelectAction::NextCharacter,
-                                38.0,
+                                40.0,
                             );
                         });
                         card.spawn(Node {
@@ -2456,25 +2456,25 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                             if i > 0 {
                                 spawn_player_select_button(
                                     row,
-                                    "JOIN / LEAVE",
+                                    "±",
                                     i,
                                     PlayerSelectAction::JoinLeave,
-                                    112.0,
+                                    42.0,
                                 );
                             }
                             spawn_player_select_button(
                                 row,
-                                "READY",
+                                "✓",
                                 i,
                                 PlayerSelectAction::ToggleReady,
-                                86.0,
+                                42.0,
                             );
                             spawn_player_select_button(
                                 row,
-                                "CUSTOMIZE",
+                                "⚙",
                                 i,
                                 PlayerSelectAction::Customize,
-                                112.0,
+                                42.0,
                             );
                         });
                     });
@@ -2488,8 +2488,8 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                 ..default()
             })
             .with_children(|row| {
-                spawn_player_select_button(row, "BACK", 0, PlayerSelectAction::Back, 132.0);
-                spawn_player_select_button(row, "BEGIN", 0, PlayerSelectAction::Begin, 132.0);
+                spawn_player_select_button(row, "←", 0, PlayerSelectAction::Back, 56.0);
+                spawn_player_select_button(row, "▶", 0, PlayerSelectAction::Begin, 56.0);
             });
         });
 }
@@ -2530,7 +2530,7 @@ fn spawn_player_select_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(13.0),
+                    font_size: FontSize::Px(22.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),

@@ -968,8 +968,8 @@ fn spawn_design_ui(
                     })
                     .with_children(|row| {
                         spawn_human_studio_button(row);
-                        spawn_preview_zoom_button(row, "ZOOM IN", -0.25);
-                        spawn_preview_zoom_button(row, "ZOOM OUT", 0.25);
+                        spawn_preview_zoom_button(row, "+", -0.25);
+                        spawn_preview_zoom_button(row, "-", 0.25);
                     });
 
                 spawn_section_label(panel, "BASE MODEL");
@@ -1003,8 +1003,8 @@ fn spawn_design_ui(
                         ..default()
                     })
                     .with_children(|row| {
-                        spawn_prefab_button(row, "EXPORT PREFAB", PrefabAction::Export);
-                        spawn_prefab_button(row, "IMPORT PREFAB", PrefabAction::Import);
+                        spawn_prefab_button(row, "↑", PrefabAction::Export);
+                        spawn_prefab_button(row, "↓", PrefabAction::Import);
                     });
 
                 spawn_section_label(panel, "PALETTE");
@@ -1164,7 +1164,10 @@ fn spawn_design_ui(
                         row.spawn((
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(18.0), Val::Px(13.0)),
+                                width: Val::Px(54.0),
+                                height: Val::Px(44.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
                                 border: UiRect::all(Val::Px(1.0)),
                                 ..default()
                             },
@@ -1174,9 +1177,9 @@ fn spawn_design_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("BACK"),
+                                Text::new("←"),
                                 TextFont {
-                                    font_size: FontSize::Px(18.0),
+                                    font_size: FontSize::Px(24.0),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -1186,7 +1189,10 @@ fn spawn_design_ui(
                         row.spawn((
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(18.0), Val::Px(13.0)),
+                                width: Val::Px(54.0),
+                                height: Val::Px(44.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
                                 border: UiRect::all(Val::Px(1.0)),
                                 ..default()
                             },
@@ -1196,9 +1202,9 @@ fn spawn_design_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("CONFIRM"),
+                                Text::new("✓"),
                                 TextFont {
-                                    font_size: FontSize::Px(18.0),
+                                    font_size: FontSize::Px(24.0),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -1265,9 +1271,10 @@ fn spawn_prefab_button(parent: &mut ChildSpawnerCommands, label: &str, action: P
         .spawn((
             Button,
             Node {
-                min_width: Val::Px(132.0),
+                width: Val::Px(44.0),
+                height: Val::Px(36.0),
+                align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
@@ -1279,7 +1286,7 @@ fn spawn_prefab_button(parent: &mut ChildSpawnerCommands, label: &str, action: P
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(12.0),
+                    font_size: FontSize::Px(20.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.78, 0.90, 0.96)),
@@ -1292,9 +1299,10 @@ fn spawn_human_studio_button(parent: &mut ChildSpawnerCommands) {
         .spawn((
             Button,
             Node {
-                min_width: Val::Px(132.0),
+                width: Val::Px(44.0),
+                height: Val::Px(36.0),
+                align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
@@ -1304,9 +1312,9 @@ fn spawn_human_studio_button(parent: &mut ChildSpawnerCommands) {
         ))
         .with_children(|button| {
             button.spawn((
-                Text::new("HUMAN STUDIO"),
+                Text::new("◎"),
                 TextFont {
-                    font_size: FontSize::Px(12.0),
+                    font_size: FontSize::Px(20.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.80, 0.86, 1.0)),
@@ -1319,9 +1327,10 @@ fn spawn_preview_zoom_button(parent: &mut ChildSpawnerCommands, label: &str, del
         .spawn((
             Button,
             Node {
-                min_width: Val::Px(92.0),
+                width: Val::Px(44.0),
+                height: Val::Px(36.0),
+                align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
@@ -1333,7 +1342,7 @@ fn spawn_preview_zoom_button(parent: &mut ChildSpawnerCommands, label: &str, del
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(12.0),
+                    font_size: FontSize::Px(20.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.78, 0.90, 0.96)),
