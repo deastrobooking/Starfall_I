@@ -1,5 +1,7 @@
 # Starfall I — Architecture Overview
 
+Current UI/road/movement/weapon audit: `docs/game_review_2026-07.md`.
+
 Bevy 0.19 + Avian 3D, with a local physics compatibility shim in
 `src/physics.rs`. Plugin-per-feature structure; all game logic lives in
 `src/plugins/`.

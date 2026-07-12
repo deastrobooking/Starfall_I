@@ -1,0 +1,78 @@
+# Starfall I — Local Co-op Gameplay Review (2026-07)
+
+This review records the code baseline for the current production push: button-first
+menus, high-speed racing roads, platformer movement, and star-tech weapons. It is
+the decision record for the next work in `docs/agent_next_steps.md`.
+
+## Executive Summary
+
+| Track | Current code baseline | Main gap |
+|---|---|---|
+| Menu UI | The main menu flow contains Bevy buttons. A shared first-pass layer now supplies deterministic initial focus, spatial arrow/WASD/D-pad navigation, mouse synchronization, focus styling, and controller-South/Enter activation. | Standard Back, held-input repeat, disabled-item skipping, per-controller ownership, and hardware validation remain before the menus are controller complete. |
+| Speed roads | Authored mountain routes generate wide decks, guardrails, boosts, banked fillets, sweeper curves, settlement rings/spurs, trick ramps, loop gates, full vertical loops, and NPC traffic. | Full loops are not yet proven drivable by the kinematic player/hoverboard. Connectivity, landing clearance, collision seams, camera behavior, respawn, and four-player performance need validation. |
+| Player movement | Acceleration, analog magnitude, coyote time, jump buffering, wall slide/jump, ledge hang/climb, free climb, dodge, parry, jetpack modes, hoverboard boost, air dash, slam, and a functional grapple targeting/drive path exist. | The mechanics need a coherent Sonic/Mario feel model: momentum, slope response, variable jump height, braking/turning, roll/spin state, stomp/bounce interactions, camera tuning, animation feedback, and deterministic tuning tests. |
+| Weapons | Six primary beams, charge/rank scaling, four special tools, projectile VFX, explosions, melee, and an unlockable Star Sabre combo/wave exist. | `Homing Star` is named as a homing weapon but currently travels in a fixed direction. Beam scale/readability, target ownership, saber presentation, missile steering, impact VFX, and split-screen performance need a production pass. |
+
+## UI Findings
+
+The main UI, character designer, and robot garage use actual `Button` components.
+`ui_plugin` automatically registers visible buttons, selects a deterministic
+top-left initial focus, navigates by screen-space direction, follows mouse hover,
+styles focus/press states, and converts Enter/Space/controller South into the
+existing `Interaction::Pressed` action path.
+
+Finish this substrate before converting screens again: add persistent disabled/
+locked states, held D-pad repeat, East/Escape Back routing, per-controller focus
+ownership where required, text plus color/icon meaning, and TV-safe layouts.
+
+## Speed-road Findings
+
+`world_plugin.rs` already owns the authored route network; terrain-sampled,
+grade-limited decks; collidable guardrails; boost spans; rounded/banked curves;
+settlement connections; helical ramps; hoverboard jumps; loop gates; selected
+360-degree loop geometry; NPC traffic; and coverage/clearance tests.
+
+Visual loops alone do not provide Sonic-style traversal. The kinematic controller
+needs an explicit road-contact frame, surface normal/gravity policy, adhesion rule,
+minimum entry speed, exit handoff, camera behavior, and safe recovery. Treat loops
+as a traversal feature, not only geometry. Before adding more pieces, extract road
+data/generation from the 15k-line world plugin and add a route/checkpoint overlay.
+
+## Movement Findings
+
+Unify the existing verbs around three readable layers:
+
+1. Ground feel: acceleration, braking, turn radius, slope acceleration, momentum
+   preservation, skid feedback, and crouch/roll/spin.
+2. Air feel: variable-height jump, early-release gravity, apex shaping, air
+   control, stomp, bounce, enemy spring, and landing recovery.
+3. Route feel: boost carry, bank/loop adhesion, trick jumps, camera look-ahead,
+   checkpoint recovery, and party tether rules.
+
+All tuning belongs in explicit movement/traversal components or data tables.
+Four-player behavior must stay keyed by `PlayerIndex`.
+
+## Weapon Findings
+
+The Star Sabre already supports unlock/toggle, chained slashes, waves, dual waves,
+piercing/AOE upgrades, and dungeon arcs. Its production presentation still needs a
+held blade/core, swing trail, afterimage, hit flash/stop, and effect budgets.
+
+Evolve `Homing Star` into the requested tracking missile: acquire valid hostile
+targets in a configurable cone/range; store player ownership and target entity;
+steer with a capped turn rate; survive target loss; expose lock state in the
+owner's HUD; and use readable trail/splash effects. Add data-driven beam visual
+profiles (width, length, core/glow color, trail, muzzle, impact), sized for
+split-screen readability rather than simply maximizing screen coverage.
+
+## Recommended Delivery Order
+
+1. Shared UI navigation substrate and controller-complete main flow.
+2. Movement characterization tests and ground/air feel tuning.
+3. Road-contact/loop traversal prototype on a small test course.
+4. Tracking missile vertical slice with ownership, HUD lock, steering, and VFX.
+5. Beam/Sabre visual profiles with four-player effect budgets.
+6. Expand the interconnected road network after loop and recovery rules work.
+
+Each slice should pass `cargo fmt --check`, `cargo check`, strict clippy, and
+`cargo test`, followed by a relevant manual 1–4 player controller smoke pass.

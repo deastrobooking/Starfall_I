@@ -1,5 +1,8 @@
 # Starfall I — Gameplay Systems Reference
 
+For the current implementation audit and next production slices covering menus,
+speed roads, movement, and weapons, see `docs/game_review_2026-07.md`.
+
 ## Local Multiplayer
 
 **Resource:** `LocalPlayerConfig` | **Files:** `src/resources.rs`, `src/plugins/input_plugin.rs`, `src/plugins/player_plugin.rs`

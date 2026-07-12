@@ -138,6 +138,12 @@ together.
   `docs/playerengine.md`.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
+- The July 2026 audit is `docs/game_review_2026-07.md`. Menus now have a shared
+  first-pass spatial focus/D-pad/confirm layer; Back, repeat, disabled-item
+  skipping, and per-controller ownership remain. Speed roads already include settlement
+  connections, boosts, ramps, loop gates, and vertical loops, but loop adhesion,
+  camera, and recovery are not production-validated. `Homing Star` currently
+  travels straight; `BeamSabre` gameplay exists but still needs a graphics pass.
 
 ## Agent Rules
 
@@ -205,9 +211,9 @@ together.
    settlements, grounded anchors, and far-zone smoke tests.
 2. Deepen dragon lairs and Great Scientist temples with keys, locks, room
    objectives, miniboss staging, mechanics trials, and unique hazards.
-3. Finish multiplayer ownership UI and save reliability.
-4. Tune player movement, physics, hand combat, beam saber, and controller
-   diagnostics.
+3. Add shared menu focus/navigation and finish multiplayer ownership UI/save reliability.
+4. Tune Sonic/Mario-inspired movement, prove loop traversal/recovery, and add
+   tracking-missile plus beam/Star Sabre presentation upgrades.
 5. Add app/plugin smoke tests, debug overlays, profiling notes, and repeatable
    manual macOS validation.
 6. Then proceed through Chapter 1 vertical slice polish, full production

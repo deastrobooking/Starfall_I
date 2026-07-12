@@ -3,6 +3,7 @@
 This is the durable next-work guide for future Codex sessions. Use
 `agent.md` for the short memory handoff, this file for production priorities,
 and `docs/engine_upgrade_milestones.md` for Bevy/physics-backend upgrade procedure.
+The current four-track audit is `docs/game_review_2026-07.md`.
 
 ## Current Software Review
 
@@ -36,11 +37,11 @@ Handle these before widening content too much:
 
 - World generation is visually richer but still centralized in one very large
   plugin. New world content should be table-driven and share terrain helpers.
-- The chapter-select perk and tech panels prove data flow, but are not final
-  controller-friendly production screens.
+- The main flow renders actions as Bevy buttons, but most activation is
+  mouse-driven. A shared focus/navigation/action layer is still required.
 - A first `PlayerGuidance` HUD prompt now covers nearby interactions and city
   spy drones; future content should feed it instead of adding one-off hint text.
-- Robot pets have durable data, recipes, and a keyboard-driven Robot Garage screen
+- Robot pets have durable data, recipes, and a button-rendered Robot Garage screen
   (`AppState::RobotGarage`) that assembles forms and drives vehicle modes at runtime.
   The garage/store still needs a controller-friendly screen, per-player passenger UX,
   store purchasing, and runtime 3-D mech/ship controllers.
@@ -109,12 +110,16 @@ Primary files:
 - `src/plugins/ui_plugin.rs`
 - `docs/systems.md`
 
-### N2: Controller-First Upgrade And Garage UI *(keyboard shell complete)*
+### N2: Shared Button Navigation And Controller-First Menus
 
-The Robot Garage (`AppState::RobotGarage`) keyboard-driven shell is now working:
-A/D browse 9 assembly forms, Enter assembles, X disassembles, assembled forms drive
-`GroundMode`/`AirMode` in the vehicle plugin, and `MechCommandLink` gates advanced
-forms. Character Design now persists playable-character part loadouts to disk. What remains:
+The visible buttons and shared first-pass spatial focus/D-pad/confirm layer exist.
+What remains:
+
+- Add held-input repeat, standard Back routing, disabled-item skipping, locked
+  styling, and per-controller focus ownership where a screen needs it.
+- Apply it to Main Menu, Player Select, Chapter Select, Pause, Game Over/Victory,
+  Robot Garage, and Character Design.
+- Preserve mouse input and keep player-select ownership explicit for four controllers.
 
 - Replace compact chapter-select tech shortcuts with tabbed controller-friendly
   screens: Weapons, Missiles, Turrets, Health/Rejuvenation, Vehicles, Mechs,
@@ -205,6 +210,8 @@ Goal: make the core hero feel reliable before adding many more levels.
 - Tune acceleration, step/snap, wall slide, wall jump, climb, dodge, parry,
   jetpack, beam saber, and hand-combat values through `PlayerMovement` and
   combat data.
+- Add explicit momentum, braking/turning, slope response, variable jump height,
+  apex shaping, roll/spin, stomp/bounce, and landing recovery mechanics.
 - Use `docs/playerengine.md` as the milestone guide for humanoid
   traversal upgrades: wall/ledge/mantle suite, grounded athletic movement,
   flight kit, combat traversal, environment physics, and boss/world integration.
@@ -227,7 +234,36 @@ Primary files:
 - `src/components/player.rs`
 - `src/components/weapon.rs`
 
-### N6: Performance And Tooling
+### N6: Racing Roads And Weapon Presentation
+
+Goal: turn the existing geometry and combat foundations into reliable features.
+
+- Prototype loop adhesion on a small test course: road contact frame, local
+  gravity/normal, minimum speed, entry/exit handoff, camera, and recovery.
+- Add route checkpoints, connectivity/landing-clearance validation, and a debug
+  overlay; extract road data/generation from `world_plugin.rs` before expansion.
+- Evolve `Homing Star` into the tracking missile with hostile target acquisition,
+  `PlayerIndex` ownership, capped steering, target-loss behavior, splash/trail,
+  and per-player HUD lock feedback.
+- Add data-driven beam visual profiles and held-blade/trail/impact presentation
+  for `BeamSabre`, with split-screen effect budgets.
+
+Verification:
+
+- Test loop entry at low, valid, and excessive speeds plus missed-jump recovery.
+- Test four simultaneous missile locks and beam/saber fire with NPC traffic.
+
+Primary files:
+
+- `src/plugins/world_plugin.rs` (then extracted road modules)
+- `src/components/world.rs`
+- `src/components/player.rs`
+- `src/plugins/player_plugin.rs`
+- `src/components/weapon.rs`
+- `src/plugins/weapon_plugin.rs`
+- `src/plugins/ui_plugin.rs`
+
+### N7: Performance And Tooling
 
 Goal: make the growing open world safe to expand.
 
@@ -245,7 +281,7 @@ Verification:
 - `cargo test`
 - Manual macOS smoke when input, rendering, terrain, or engine systems change.
 
-### N7: Codebase Hardening And Stability
+### N8: Codebase Hardening And Stability
 
 Goal: Pay down technical debt and increase stability for save data, input mapping, error handling, and app setup.
 
@@ -269,7 +305,7 @@ Primary files:
 - `src/plugins/world_plugin.rs`
 - `src/main.rs`
 
-### N8: Graphics, VFX, And Skeletal Animation Foundation
+### N9: Graphics, VFX, And Skeletal Animation Foundation
 
 Goal: Move beyond primitive capsule visuals to a full AAA cartoon aesthetic.
 
@@ -288,7 +324,7 @@ Primary files:
 - `src/plugins/character_plugin.rs`
 - `src/rendering.rs`
 
-### N9: Art Tools And Data-Driven Pipeline
+### N10: Art Tools And Data-Driven Pipeline
 
 Goal: Unblock content creators by removing hardcoded visual recipes from Rust.
 
@@ -306,7 +342,7 @@ Primary files:
 - `src/plugins/world_plugin.rs`
 - `src/character_blueprint.rs`
 
-### N10: Deep Performance And Asset Streaming
+### N11: Deep Performance And Asset Streaming
 
 Goal: Ensure the 200-mile Everest range runs flawlessly at true 60fps, even in 4-player split-screen with dense combat encounters.
 

@@ -1,5 +1,8 @@
 # Starfall Engine Core Roadmap (`EC#`)
 
+For the July 2026 audit of menu input, racing roads, movement feel, and weapons,
+see `docs/game_review_2026-07.md`.
+
 > **Track prefix:** `EC#` — *Engine Core*. The substrate that makes the game feel
 > like a tight character-action game: fixed-tick determinism, input buffering,
 > frame-data combat, profiling, and (eventually) reusable engine crates.

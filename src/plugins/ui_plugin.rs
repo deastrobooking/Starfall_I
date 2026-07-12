@@ -50,7 +50,18 @@ impl Plugin for UiPlugin {
             .init_resource::<CraftingPanelState>()
             .init_resource::<DiscussionState>()
             .init_resource::<PauseMenuState>()
+            .init_resource::<MenuFocus>()
             .add_systems(Startup, spawn_menu_camera)
+            .add_systems(
+                Update,
+                (
+                    register_menu_buttons,
+                    menu_focus_navigation,
+                    menu_focus_style,
+                )
+                    .chain()
+                    .run_if(in_menu_state),
+            )
             .add_systems(
                 OnEnter(AppState::MainMenu),
                 (cleanup_play_ui_for_menu, setup_main_menu),
@@ -261,6 +272,24 @@ struct VolumeText;
 struct FinalPushText;
 #[derive(Component)]
 struct StartButton;
+
+/// Shared marker applied automatically to every Bevy UI button while a menu is
+/// active. Individual screens keep owning their actions; this layer only owns
+/// focus, directional navigation, activation, and common interaction feedback.
+#[derive(Component)]
+struct MenuFocusable;
+
+#[derive(Component, Clone)]
+struct MenuButtonPalette {
+    background: BackgroundColor,
+    border: BorderColor,
+}
+
+#[derive(Resource, Default)]
+struct MenuFocus {
+    entity: Option<Entity>,
+    state: Option<AppState>,
+}
 #[derive(Component, Clone, Copy)]
 struct SettingsButton(SettingsAction);
 #[derive(Clone, Copy)]
@@ -374,6 +403,213 @@ struct GuidanceActionText;
 struct CraftingPanelState {
     visible: bool,
     owner: Option<u8>,
+}
+
+fn in_menu_state(state: Res<State<AppState>>) -> bool {
+    // CharacterStudio owns a specialized row/field navigator for sliders and
+    // viewport controls; do not double-dispatch its controller input here.
+    !matches!(state.get(), AppState::Playing | AppState::CharacterStudio)
+}
+
+fn register_menu_buttons(
+    mut commands: Commands,
+    buttons: Query<
+        (Entity, &BackgroundColor, &BorderColor),
+        (Added<Button>, Without<MenuFocusable>),
+    >,
+) {
+    for (entity, background, border) in buttons.iter() {
+        commands.entity(entity).insert((
+            MenuFocusable,
+            MenuButtonPalette {
+                background: *background,
+                border: *border,
+            },
+        ));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl MenuDirection {
+    fn vector(self) -> Vec2 {
+        match self {
+            Self::Up => Vec2::Y,
+            Self::Down => Vec2::NEG_Y,
+            Self::Left => Vec2::NEG_X,
+            Self::Right => Vec2::X,
+        }
+    }
+}
+
+fn menu_focus_navigation(
+    state: Res<State<AppState>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut focus: ResMut<MenuFocus>,
+    mut button_set: ParamSet<(
+        Query<
+            (Entity, &GlobalTransform, &Interaction, &InheritedVisibility),
+            (With<Button>, With<MenuFocusable>),
+        >,
+        Query<&mut Interaction, (With<Button>, With<MenuFocusable>)>,
+    )>,
+) {
+    let current_state = state.get().clone();
+    if focus.state.as_ref() != Some(&current_state) {
+        focus.state = Some(current_state);
+        focus.entity = None;
+    }
+
+    let direction = menu_direction_input(&keyboard, &gamepads, &native);
+    let confirm = keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::NumpadEnter)
+        || keyboard.just_pressed(KeyCode::Space)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::South))
+        || native.just_pressed(NativeButton::South);
+
+    let mut visible = Vec::new();
+    let mut hovered = None;
+    for (entity, transform, interaction, inherited_visibility) in button_set.p0().iter() {
+        if !inherited_visibility.get() {
+            continue;
+        }
+        let translation = transform.translation();
+        visible.push((entity, Vec2::new(translation.x, translation.y)));
+        if matches!(interaction, Interaction::Hovered | Interaction::Pressed) {
+            hovered = Some(entity);
+        }
+    }
+
+    if let Some(entity) = hovered {
+        focus.entity = Some(entity);
+    }
+
+    if !visible
+        .iter()
+        .any(|(entity, _)| Some(*entity) == focus.entity)
+    {
+        focus.entity = default_menu_focus(&visible);
+    }
+
+    if let (Some(direction), Some(current)) = (direction, focus.entity) {
+        if let Some(next) = directional_menu_focus(current, direction, &visible) {
+            focus.entity = Some(next);
+        }
+    }
+
+    if confirm {
+        if let Some(entity) = focus.entity {
+            if let Ok(mut interaction) = button_set.p1().get_mut(entity) {
+                *interaction = Interaction::Pressed;
+            }
+        }
+    }
+}
+
+fn menu_direction_input(
+    keyboard: &ButtonInput<KeyCode>,
+    gamepads: &Query<&Gamepad>,
+    native: &NativeControllerState,
+) -> Option<MenuDirection> {
+    let gamepad_just = |button| gamepads.iter().any(|gamepad| gamepad.just_pressed(button));
+    if keyboard.just_pressed(KeyCode::ArrowUp)
+        || keyboard.just_pressed(KeyCode::KeyW)
+        || gamepad_just(GamepadButton::DPadUp)
+        || native.just_pressed(NativeButton::DPadUp)
+    {
+        Some(MenuDirection::Up)
+    } else if keyboard.just_pressed(KeyCode::ArrowDown)
+        || keyboard.just_pressed(KeyCode::KeyS)
+        || gamepad_just(GamepadButton::DPadDown)
+        || native.just_pressed(NativeButton::DPadDown)
+    {
+        Some(MenuDirection::Down)
+    } else if keyboard.just_pressed(KeyCode::ArrowLeft)
+        || keyboard.just_pressed(KeyCode::KeyA)
+        || gamepad_just(GamepadButton::DPadLeft)
+        || native.just_pressed(NativeButton::DPadLeft)
+    {
+        Some(MenuDirection::Left)
+    } else if keyboard.just_pressed(KeyCode::ArrowRight)
+        || keyboard.just_pressed(KeyCode::KeyD)
+        || gamepad_just(GamepadButton::DPadRight)
+        || native.just_pressed(NativeButton::DPadRight)
+    {
+        Some(MenuDirection::Right)
+    } else {
+        None
+    }
+}
+
+fn default_menu_focus(buttons: &[(Entity, Vec2)]) -> Option<Entity> {
+    buttons
+        .iter()
+        .min_by(|(_, a), (_, b)| b.y.total_cmp(&a.y).then_with(|| a.x.total_cmp(&b.x)))
+        .map(|(entity, _)| *entity)
+}
+
+fn directional_menu_focus(
+    current: Entity,
+    direction: MenuDirection,
+    buttons: &[(Entity, Vec2)],
+) -> Option<Entity> {
+    let origin = buttons
+        .iter()
+        .find_map(|(entity, position)| (*entity == current).then_some(*position))?;
+    let axis = direction.vector();
+
+    buttons
+        .iter()
+        .filter(|(entity, _)| *entity != current)
+        .filter_map(|(entity, position)| {
+            let delta = *position - origin;
+            let forward = delta.dot(axis);
+            if forward <= 1.0 {
+                return None;
+            }
+            let perpendicular = (delta - axis * forward).length();
+            let score = forward + perpendicular * 2.5;
+            Some((*entity, score))
+        })
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(entity, _)| entity)
+}
+
+fn menu_focus_style(
+    focus: Res<MenuFocus>,
+    mut buttons: Query<
+        (
+            Entity,
+            &Interaction,
+            &MenuButtonPalette,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        (With<Button>, With<MenuFocusable>),
+    >,
+) {
+    for (entity, interaction, palette, mut background, mut border) in buttons.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            *background = BackgroundColor(Color::srgb(0.98, 0.62, 0.14));
+            *border = BorderColor::all(Color::WHITE);
+        } else if focus.entity == Some(entity) || *interaction == Interaction::Hovered {
+            *background = BackgroundColor(Color::srgb(0.12, 0.48, 0.82));
+            *border = BorderColor::all(Color::srgb(1.0, 0.9, 0.34));
+        } else {
+            *background = palette.background;
+            *border = palette.border;
+        }
+    }
 }
 
 // ── UI Fallback Camera ────────────────────────────────────────────────────────
@@ -4519,4 +4755,56 @@ fn update_command_overlay(
     }
 
     *text = Text::new(lines.join("\n"));
+}
+
+#[cfg(test)]
+mod menu_navigation_tests {
+    use super::*;
+
+    fn four_button_grid() -> (World, Vec<(Entity, Vec2)>) {
+        let mut world = World::new();
+        let top_left = world.spawn_empty().id();
+        let top_right = world.spawn_empty().id();
+        let bottom_left = world.spawn_empty().id();
+        let bottom_right = world.spawn_empty().id();
+        let buttons = vec![
+            (top_left, Vec2::new(-10.0, 10.0)),
+            (top_right, Vec2::new(10.0, 10.0)),
+            (bottom_left, Vec2::new(-10.0, -10.0)),
+            (bottom_right, Vec2::new(10.0, -10.0)),
+        ];
+        (world, buttons)
+    }
+
+    #[test]
+    fn default_focus_starts_at_top_left() {
+        let (_world, buttons) = four_button_grid();
+        assert_eq!(default_menu_focus(&buttons), Some(buttons[0].0));
+    }
+
+    #[test]
+    fn directional_focus_follows_spatial_grid() {
+        let (_world, buttons) = four_button_grid();
+        assert_eq!(
+            directional_menu_focus(buttons[0].0, MenuDirection::Right, &buttons),
+            Some(buttons[1].0)
+        );
+        assert_eq!(
+            directional_menu_focus(buttons[1].0, MenuDirection::Down, &buttons),
+            Some(buttons[3].0)
+        );
+        assert_eq!(
+            directional_menu_focus(buttons[3].0, MenuDirection::Left, &buttons),
+            Some(buttons[2].0)
+        );
+    }
+
+    #[test]
+    fn directional_focus_stays_put_at_an_edge() {
+        let (_world, buttons) = four_button_grid();
+        assert_eq!(
+            directional_menu_focus(buttons[0].0, MenuDirection::Up, &buttons),
+            None
+        );
+    }
 }

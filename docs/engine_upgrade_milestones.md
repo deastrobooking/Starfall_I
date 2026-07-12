@@ -1,5 +1,8 @@
 # Starfall I Engine Upgrade And Milestone Runbook
 
+The current UI/road/movement/weapon production audit is
+`docs/game_review_2026-07.md`; this retains the broader M# milestone history.
+
 This runbook is the durable guide for future Codex and engineer work on
 Starfall I engine upgrades and production milestones. The current local engine
 baseline is Bevy `0.19.0` with Avian `0.7`.

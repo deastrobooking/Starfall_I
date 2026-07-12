@@ -1,5 +1,7 @@
 # Full-Game Review — 2026-06 (city physics · gameplay upgrades · missing logic)
 
+Historical review. See `game_review_2026-07.md` for the current four-track audit.
+
 Three parallel audits of the whole game (post Bevy 0.19 + Avian 0.7 migration),
 plus the fixes landed the same session. Companion to `docs/engine_roadmap.md`
 (`EC#`) and the `M#`/`MM#` roadmaps.

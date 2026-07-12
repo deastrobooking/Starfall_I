@@ -28,17 +28,18 @@ Implemented:
 - Castle/dungeon crawl foundation: dragon lair gates now open into single-screen top-down hack-and-slash mode, pulling the party together and switching movement/combat to dungeon-friendly axes.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
-- Platforming movement: acceleration, sprinting, jump buffering, coyote time, wall slides, wall jumps, ledge hangs, climb-ups, dodges, parries, and jetpack lift.
-- Player mechanics MVP foundation now includes a single star-tech grappling hook state, `G` / Select+RB input, and a procedural grapple wind-up pose; hook targeting, mountain pull, swing physics, and hook combat are planned in `docs/playerengine.md` (milestones MM1–MM10).
+- Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
+- High-speed road foundation: terrain-aware mountain decks, settlement rings and spurs, collidable guardrails, boost lanes, banked curves, trick ramps, loop gates, selected full vertical loops, and NPC traffic. Full loop adhesion, camera behavior, checkpoint recovery, and multiplayer validation remain production work.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
-- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load.
+- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load. The current `Homing Star` projectile does not yet steer; target acquisition and tracking are planned.
 
 In progress:
 
 - Local multiplayer is playable at the input/camera/player level, and save snapshots, HUD panels, companions, crafting, chests, hidden rewards, enemy loot pickups, camera shake, damage flash, and vehicle buffs are now keyed per player. Chapter scripting uses the party center for encounter placement, while some campaign systems remain intentionally shared.
-- Perks are functional and saved, but the chapter-select perk UI is intentionally lightweight and keyboard-only.
+- Perks are functional and saved, with lightweight clickable chapter-select rows; controller focus navigation is still pending.
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
 - Character design is the single playable-character editor, with GLB-inspired base models, modular silhouette presets, armor layers, and saved per-slot loadouts.
+- Menu actions are rendered as Bevy buttons across the main flow. A shared first-pass focus layer now supplies deterministic initial focus, spatial arrows/WASD/D-pad navigation, mouse-hover synchronization, focused/pressed styling, and Enter/Space/controller-South activation. Standard Back, held-input repeat, disabled-item skipping, and per-controller menu ownership remain.
 
 ## Cast
 
@@ -223,6 +224,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 - [Architecture Overview](docs/architecture.md)
 - [Gameplay Systems Reference](docs/systems.md)
 - [Improvement Notes](docs/improvements.md)
+- [July 2026 Gameplay Review](docs/game_review_2026-07.md)
 - [Motion Mechanics Roadmap](docs/playerengine.md)
 - [Naming Guide](docs/naming.md)
 - [Agent Next Steps](docs/agent_next_steps.md)

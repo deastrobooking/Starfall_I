@@ -48,7 +48,19 @@ texts can short-circuit on `wave.is_changed()`.
 
 ---
 
-## 3. Chapter Select — Preparation Panels
+## 3. Button Input Status
+
+Visible menu actions are Bevy `Button` widgets. `MenuFocus` and `MenuFocusable`
+now provide automatic button registration, deterministic initial focus,
+screen-space directional selection, arrow/WASD/D-pad navigation, mouse-hover
+synchronization, shared focus/press styling, and Enter/Space/controller-South
+activation through the existing `Interaction::Pressed` handlers.
+
+Remaining work is disabled-item skipping, held-input repeat, East/Escape Back,
+per-controller focus ownership, locked styling, and hardware testing. The menus
+are navigable by one controller but are not yet controller-complete.
+
+## 4. Chapter Select — Preparation Panels
 
 `setup_chapter_select` builds the full prep screen when the player enters
 `ChapterSelect`. The screen is a Column root (`ChapterSelectRoot`) containing:
@@ -59,11 +71,11 @@ texts can short-circuit on `wave.is_changed()`.
 2. **Chapter list** — scrollable column of chapter rows; unlocked chapters
    shown brighter.
 3. **Perk Training panel** — blue border; rows marked `PerkRowText(perk_id)`,
-   header `PerkPointsHeader`. Keys A–H spend points.
+   header `PerkPointsHeader`, with clickable purchase buttons.
 4. **Tech Upgrades panel** — green border; rows marked `UpgradeRowText(id)`,
-   header `UpgradeReserveHeader`. Keys Z–N purchase upgrades.
+   header `UpgradeReserveHeader`, with clickable purchase buttons.
 5. **Weapon Rank panel** — purple border; rows marked `WeaponRankRowText(slot)`,
-   header `WeaponRankHeader`. Keys Y–P / J upgrade weapon slots 0–5.
+   header `WeaponRankHeader`, with clickable purchase buttons.
 6. **Settlement Economy panel** *(added M12)* — teal border; header
    `EconomyPanelHeader`, one row per settlement `EconomyPanelSiteRow(idx)`.
    Shows stockpile summary, site state badge (`[FREE]`/`[HELD]`/`[RAID]`),
@@ -79,10 +91,9 @@ resource has not changed:
 | Weapon ranks | `chapter_select_weapon_rank_panel_update` | `weapon_ranks.is_changed() \|\| robot_pets.is_changed()` |
 | Economy | `chapter_select_economy_panel_update` | `economy.is_changed() \|\| world_site_registry.is_changed()` |
 
-Hint bar format:
-```
-1-9 0 Q W R T / click = travel  |  A-H Perks  |  Z-N Tech  |  Y-P/J Weapons  |  M Economy  |  E Character Editor  |  G Garage  |  Esc Back
-```
+The current chapter screen is mouse-button driven. Controller focus navigation
+is the next UI milestone; dense single-key purchase shortcuts are not the target
+production interaction model.
 
 ### Colorblind-friendly shape layer (recommended next step)
 
@@ -93,7 +104,7 @@ without changing the color logic.
 
 ---
 
-## 4. Pause Menu — Physics Freeze And Input Guard
+## 5. Pause Menu — Physics Freeze And Input Guard
 
 `setup_pause_menu` spawns `PauseRoot` with two pages: `PausePage::Main` and
 `PausePage::Controls`.
@@ -117,7 +128,7 @@ visual updates a single-file change instead of a grep across setup functions.
 
 ---
 
-## 5. Live-Play Overlays
+## 6. Live-Play Overlays
 
 ### Player Guidance (`GuidancePanelRoot`)
 `PlayerGuidance` resource drives a contextual bottom-of-screen prompt showing
@@ -141,19 +152,22 @@ Runs in `Playing | Paused`.
 
 ---
 
-## 6. Recommended Optimization Directions
+## 7. Recommended Directions
 
 These are tracked as implementation targets, not architectural debt:
 
-1. **HUD change detection** — transition `hud_update_system` to gate on
+1. **Shared menu focus/navigation** — make the main flow controller-complete,
+   then validate join/ownership behavior with four controllers.
+
+2. **HUD change detection** — transition `hud_update_system` to gate on
    `Changed<Health>` / `Changed<PlayerStats>` etc. to skip bar recalculations
    on static frames. Medium impact on CPU budget in dense 4-player sessions.
 
-2. **Colorblind shapes on map** — supplement chapter-select map nodes with shape
+3. **Colorblind shapes on map** — supplement chapter-select map nodes with shape
    outlines (circle for chapters, triangle for temples, diamond for sites)
    alongside the existing colored icons.
 
-3. **UiTheme constant block** — extract panel background colors, border colors,
+4. **UiTheme constant block** — extract panel background colors, border colors,
    and font sizes from inline spawn code to a shared `const` or `Resource` so
    visual theme changes are a single edit.
 

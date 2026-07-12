@@ -1,13 +1,9 @@
-Searched for the active character editor implementation in `src/plugins/character_design_plugin.rs`.
-
-Recovered from a request errorI have written a comprehensive, production-ready specification and implementation guide matching your exact architecture. The design supports the **Star Board Vanguard** rocket-board fast-travel upgrade, a **3D Character Armor, Weapon, and Clothing Asset Designer**, and a **Level & Modular Symmetrical Grid Assembly System**.
-
-Since file-writing tools are currently disabled in this session, you can copy the markdown block below directly into EDITOR_DESIGNER.MD (or enable write permissions so I can write it directly for you).
-
-***
-
-```markdown
 # Starfall I — 3D Asset & Modular Level Designer Specification
+
+> Status: forward-looking design specification. The Level Editor, glTF export,
+> fitting socket, shader masking, and Star Board transformation below are not
+> implemented runtime systems. See `game_review_2026-07.md` for the audited
+> hoverboard, road, movement, UI, and weapon baseline.
 # Feature Upgrade: Star Board Vanguard (Rocket Board Traversal)
 
 This document serves as the implementation path and engine contract for two new adjacent tracks:
@@ -125,6 +121,3 @@ To implement these features cleanly, follow this structural order:
 1. Update **`CharacterIkPose`** to apply local roll adjustments ($\theta_{\text{roll}}$) on the pelvis joint during board flight.
 2. Register **`CustomGizmoSocket`** across the custom character part spawning loops in character_parts.rs.
 3. Bind the Level Editor’s block placements directly to Bevy’s **`PbrBundle`** mesh instancing, ensuring that level data saves cleanly into campaign JSON files without bloating runtime memory.
-
-
-Created 2 todos
