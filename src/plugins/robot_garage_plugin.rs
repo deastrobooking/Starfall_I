@@ -217,11 +217,11 @@ fn setup_garage(
                 ..default()
             })
             .with_children(|row| {
-                spawn_garage_button(row, "PREVIOUS FORM", GarageAction::PreviousForm);
-                spawn_garage_button(row, "NEXT FORM", GarageAction::NextForm);
-                spawn_garage_button(row, "ASSEMBLE", GarageAction::Assemble);
-                spawn_garage_button(row, "DISASSEMBLE", GarageAction::Disassemble);
-                spawn_garage_button(row, "BACK", GarageAction::Back);
+                spawn_garage_button(row, "‹", GarageAction::PreviousForm);
+                spawn_garage_button(row, "›", GarageAction::NextForm);
+                spawn_garage_button(row, "+", GarageAction::Assemble);
+                spawn_garage_button(row, "-", GarageAction::Disassemble);
+                spawn_garage_button(row, "←", GarageAction::Back);
             });
         });
 
@@ -248,8 +248,8 @@ fn spawn_garage_button(
         .spawn((
             Button,
             Node {
-                min_width: Val::Px(136.0),
-                height: Val::Px(38.0),
+                width: Val::Px(52.0),
+                height: Val::Px(40.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 padding: UiRect::horizontal(Val::Px(12.0)),
@@ -264,7 +264,7 @@ fn spawn_garage_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(13.0),
+                    font_size: FontSize::Px(24.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),

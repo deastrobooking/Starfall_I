@@ -1299,25 +1299,25 @@ fn spawn_human_studio_button(parent: &mut ChildSpawnerCommands) {
         .spawn((
             Button,
             Node {
-                width: Val::Px(44.0),
-                height: Val::Px(36.0),
+                width: Val::Px(54.0),
+                height: Val::Px(42.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                border: UiRect::all(Val::Px(1.0)),
+                border: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.10, 0.10, 0.15)),
-            BorderColor::all(Color::srgba(0.34, 0.38, 0.64, 0.86)),
+            BackgroundColor(Color::srgb(0.16, 0.13, 0.24)),
+            BorderColor::all(Color::srgba(0.62, 0.58, 1.0, 0.92)),
             HumanStudioButton,
         ))
         .with_children(|button| {
             button.spawn((
-                Text::new("◎"),
+                Text::new("✦"),
                 TextFont {
-                    font_size: FontSize::Px(20.0),
+                    font_size: FontSize::Px(26.0),
                     ..default()
                 },
-                TextColor(Color::srgb(0.80, 0.86, 1.0)),
+                TextColor(Color::srgb(0.90, 0.86, 1.0)),
             ));
         });
 }

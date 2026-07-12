@@ -551,28 +551,16 @@ fn setup_pause_menu(
             ))
             .with_children(|page| {
                 for (label, action, color) in [
-                    ("RESUME", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
-                    ("SAVE GAME", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
+                    ("▶", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
+                    ("↓", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
+                    ("↩", PauseAction::Title, Color::srgb(0.48, 0.18, 0.18)),
                     (
-                        "SAVE & RETURN TO TITLE",
-                        PauseAction::Title,
-                        Color::srgb(0.48, 0.18, 0.18),
-                    ),
-                    (
-                        "CONTROLS / TIPS",
+                        "?",
                         PauseAction::Controls,
                         Color::srgb(0.22, 0.24, 0.52),
                     ),
-                    (
-                        "SHOP / OUTFITS",
-                        PauseAction::Shop,
-                        Color::srgb(0.22, 0.38, 0.44),
-                    ),
-                    (
-                        "SETTINGS",
-                        PauseAction::Settings,
-                        Color::srgb(0.36, 0.28, 0.52),
-                    ),
+                    ("$", PauseAction::Shop, Color::srgb(0.22, 0.38, 0.44)),
+                    ("⚙", PauseAction::Settings, Color::srgb(0.36, 0.28, 0.52)),
                 ] {
                     spawn_pause_button(page, label, action, color);
                 }
@@ -618,7 +606,7 @@ fn setup_pause_menu(
                     },
                     TextColor(Color::srgb(0.86, 0.90, 1.0)),
                 ));
-                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+                spawn_pause_button(page, "←", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
 
             root.spawn((
@@ -671,7 +659,7 @@ fn setup_pause_menu(
                         ));
                     }
                 }
-                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+                spawn_pause_button(page, "←", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
 
             root.spawn((
@@ -740,7 +728,7 @@ fn setup_pause_menu(
                     spawn_settings_button(row, "SFX +", SettingsAction::SfxUp);
                     spawn_settings_button(row, "RUMBLE", SettingsAction::ToggleRumble);
                 });
-                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+                spawn_pause_button(page, "←", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
         });
 }
@@ -755,8 +743,8 @@ fn spawn_pause_button(
         .spawn((
             Button,
             Node {
-                width: Val::Px(320.0),
-                height: Val::Px(44.0),
+                width: Val::Px(68.0),
+                height: Val::Px(48.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
@@ -768,7 +756,7 @@ fn spawn_pause_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(21.0),
+                    font_size: FontSize::Px(26.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -2268,6 +2256,7 @@ enum PlayerSelectAction {
     NextCharacter,
     ToggleReady,
     Customize,
+    AdvancedDesign,
     JoinLeave,
     Back,
     Begin,
@@ -2476,6 +2465,13 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                                 PlayerSelectAction::Customize,
                                 42.0,
                             );
+                            spawn_player_select_button(
+                                row,
+                                "✦",
+                                i,
+                                PlayerSelectAction::AdvancedDesign,
+                                42.0,
+                            );
                         });
                     });
                 }
@@ -2619,6 +2615,12 @@ fn player_select_update(
                         design_data.player_index = idx;
                         design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
                         next_state.set(AppState::CharacterDesign);
+                        return;
+                    }
+                    PlayerSelectAction::AdvancedDesign if slot.joined && !slot.ready => {
+                        design_data.player_index = idx;
+                        design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
+                        next_state.set(AppState::CharacterStudio);
                         return;
                     }
                     PlayerSelectAction::JoinLeave if idx > 0 => {
@@ -3933,8 +3935,8 @@ fn setup_game_over(mut commands: Commands) {
             p.spawn((
                 Button,
                 Node {
-                    width: Val::Px(260.0),
-                    height: Val::Px(48.0),
+                    width: Val::Px(64.0),
+                    height: Val::Px(52.0),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     border: UiRect::all(Val::Px(1.0)),
@@ -3946,9 +3948,9 @@ fn setup_game_over(mut commands: Commands) {
             ))
             .with_children(|button| {
                 button.spawn((
-                    Text::new("RETURN TO TITLE"),
+                    Text::new("←"),
                     TextFont {
-                        font_size: FontSize::Px(18.0),
+                        font_size: FontSize::Px(28.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -4070,8 +4072,8 @@ fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) 
                 ..default()
             })
             .with_children(|row| {
-                spawn_victory_button(row, "MAIN MENU", VictoryAction::MainMenu);
-                spawn_victory_button(row, "NEW GAME+", VictoryAction::NewGamePlus);
+                spawn_victory_button(row, "←", VictoryAction::MainMenu);
+                spawn_victory_button(row, "+", VictoryAction::NewGamePlus);
             });
         });
 }
@@ -4085,7 +4087,7 @@ fn spawn_victory_button(
         .spawn((
             Button,
             Node {
-                width: Val::Px(180.0),
+                width: Val::Px(64.0),
                 height: Val::Px(46.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -4100,7 +4102,7 @@ fn spawn_victory_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(16.0),
+                    font_size: FontSize::Px(26.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
