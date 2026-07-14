@@ -178,7 +178,12 @@ buttons, `<`/`>` style cyclers) that also participates in **gamepad focus
 navigation**: D-pad Up/Down moves rows, Left/Right adjusts or moves within a
 row, South activates, East backs out; mouse hover pulls focus so both inputs
 share one highlight. Viewport orbit: right-mouse drag + wheel zoom, or right
-stick + triggers.
+stick + triggers. The modeling pass adds a reset button to every morph/style,
+an undo-safe RESET ALL action, live palette swatches, approximate physical
+height/model information, and explicit FRONT/PROFILE/BACK plus FULL BODY/FACE
+CLOSE-UP camera tools. Generated humans face -Z, so the default camera now
+opens on the actual front. Controller West resets the focused field and
+LB/RB jumps among preset, body, face, wardrobe, and saved-library sections.
 
 **Wardrobe (2026-07):** independent slots, mix-and-match — Top (None/T-Shirt/
 Long Shirt/Tunic/Jacket/Robe), Bottom (Underwear/Shorts/Pants/Skirt), Footwear
@@ -192,6 +197,12 @@ panel lists every version with LOAD/DEL buttons (mouse or gamepad).
 
 Because every vertex is generated in-engine, direct `.glb` export of authored
 characters is a planned follow-up (mesh data → glTF JSON + BIN writer).
+
+The current editor is intentionally a constrained parametric modeler, not a
+free vertex editor: this keeps characters compatible with gameplay collision,
+animation, equipment slots, and local multiplayer. See
+`docs/character_studio.md` for its workflow, architecture boundaries, and the
+recommended route toward an RPG-maker-grade creator.
 
 ## Character Authoring
 

@@ -1,4 +1,5 @@
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 
 use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
@@ -204,6 +205,7 @@ impl Plugin for UiPlugin {
                     chapter_select_perk_buttons,
                     chapter_select_upgrade_buttons,
                     chapter_select_weapon_rank_buttons,
+                    chapter_select_controller_scroll,
                     chapter_select_perk_panel_update,
                     chapter_select_upgrade_panel_update,
                     chapter_select_weapon_rank_panel_update,
@@ -1361,6 +1363,8 @@ fn clear_play_session_transition_flags(mut transition: ResMut<PlaySessionTransit
 #[derive(Component)]
 struct ChapterSelectRoot;
 #[derive(Component)]
+struct ChapterSelectScrollPanel;
+#[derive(Component)]
 struct ChapterFastTravelButton(ChapterId);
 #[derive(Component, Clone, Copy)]
 struct ChapterSelectActionButton(ChapterSelectAction);
@@ -1424,10 +1428,13 @@ fn setup_chapter_select(
                 justify_content: JustifyContent::FlexStart,
                 padding: UiRect::all(Val::Px(26.0)),
                 row_gap: Val::Px(8.0),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.02, 0.02, 0.06, 1.0)),
+            ScrollPosition::default(),
             ChapterSelectRoot,
+            ChapterSelectScrollPanel,
         ))
         .with_children(|p| {
             p.spawn((
@@ -1501,17 +1508,45 @@ fn setup_chapter_select(
                         let region = location
                             .map(|location| location.region)
                             .unwrap_or(ch.subtitle);
-                        list.spawn((
-                            Text::new(format!(
-                                "{} Ch.{:02} - {} / {}",
-                                prefix, ch.id.0, ch.title, region
-                            )),
-                            TextFont {
-                                font_size: FontSize::Px(13.5),
+                        let mut start_button = list.spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                min_height: Val::Px(25.0),
+                                justify_content: JustifyContent::FlexStart,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                border: UiRect::all(Val::Px(1.0)),
                                 ..default()
                             },
-                            TextColor(color),
+                            BackgroundColor(if unlocked {
+                                Color::srgba(0.06, 0.10, 0.18, 0.88)
+                            } else {
+                                Color::srgba(0.03, 0.035, 0.055, 0.82)
+                            }),
+                            BorderColor::all(if unlocked {
+                                Color::srgba(0.20, 0.42, 0.66, 0.72)
+                            } else {
+                                Color::srgba(0.12, 0.14, 0.20, 0.62)
+                            }),
+                            ChapterFastTravelButton(ch.id),
                         ));
+                        if !unlocked {
+                            start_button.insert(MenuButtonDisabled);
+                        }
+                        start_button.with_children(|button| {
+                            button.spawn((
+                                Text::new(format!(
+                                    "{} START CH.{:02} - {} / {}",
+                                    prefix, ch.id.0, ch.title, region
+                                )),
+                                TextFont {
+                                    font_size: FontSize::Px(12.4),
+                                    ..default()
+                                },
+                                TextColor(color),
+                            ));
+                        });
                     }
                 });
             });
@@ -2295,6 +2330,57 @@ fn chapter_select_fast_travel_buttons(
             current.started = false;
             next_state.set(AppState::Playing);
         }
+    }
+}
+
+fn chapter_select_controller_scroll(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut wheel: MessageReader<MouseWheel>,
+    mut scroll_q: Query<(&mut ScrollPosition, &ComputedNode), With<ChapterSelectScrollPanel>>,
+) {
+    let mut delta_y = 0.0;
+    for event in wheel.read() {
+        let scale = match event.unit {
+            MouseScrollUnit::Line => 34.0,
+            MouseScrollUnit::Pixel => 1.0,
+        };
+        delta_y -= event.y * scale;
+    }
+
+    let down = keyboard.pressed(KeyCode::ArrowDown)
+        || keyboard.pressed(KeyCode::KeyS)
+        || gamepads.iter().any(|gamepad| {
+            gamepad.pressed(GamepadButton::DPadDown)
+                || gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0) < -0.6
+        })
+        || native.pressed(NativeButton::DPadDown)
+        || native.move_axis.y < -0.6;
+    let up = keyboard.pressed(KeyCode::ArrowUp)
+        || keyboard.pressed(KeyCode::KeyW)
+        || gamepads.iter().any(|gamepad| {
+            gamepad.pressed(GamepadButton::DPadUp)
+                || gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0) > 0.6
+        })
+        || native.pressed(NativeButton::DPadUp)
+        || native.move_axis.y > 0.6;
+
+    if down {
+        delta_y += 22.0;
+    } else if up {
+        delta_y -= 22.0;
+    }
+
+    if delta_y == 0.0 {
+        return;
+    }
+
+    for (mut scroll_position, computed) in scroll_q.iter_mut() {
+        let max_y = ((computed.content_size().y - computed.size().y)
+            * computed.inverse_scale_factor())
+        .max(0.0);
+        scroll_position.y = (scroll_position.y + delta_y).clamp(0.0, max_y);
     }
 }
 

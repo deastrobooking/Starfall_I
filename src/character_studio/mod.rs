@@ -17,11 +17,12 @@ pub mod generators;
 pub mod human_mesh;
 pub mod spec;
 
-use bevy::input::mouse::{MouseMotion, MouseWheel};
+use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
 use std::path::PathBuf;
 
+use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::state::AppState;
 use generators::build_character_patch;
 use spec::{CharacterSpec, MorphField, StyleField};
@@ -33,6 +34,7 @@ impl Plugin for CharacterStudioPlugin {
         app.init_resource::<StudioState>()
             .init_resource::<StudioFocus>()
             .init_resource::<StudioSliderDrag>()
+            .init_resource::<StudioNavRepeat>()
             .init_resource::<SaveLibrary>()
             .add_systems(OnEnter(AppState::CharacterStudio), setup_studio)
             .add_systems(OnExit(AppState::CharacterStudio), cleanup_studio)
@@ -41,6 +43,7 @@ impl Plugin for CharacterStudioPlugin {
                 (
                     button_interaction,
                     morph_slider_interaction,
+                    studio_controller_navigation,
                     rebuild_library_rows,
                     rebuild_preview,
                     orbit_camera,
@@ -66,19 +69,35 @@ enum StudioAction {
     SharpFace,
     Random,
     Undo,
+    ResetAll,
+    ViewFront,
+    ViewProfile,
+    ViewBack,
+    ViewFull,
+    ViewFace,
     SaveVersion,
     Back,
     MorphDec(usize),
     MorphInc(usize),
+    MorphReset(usize),
     StylePrev(usize),
     StyleNext(usize),
+    StyleReset(usize),
     LoadFile(usize),
     DeleteFile(usize),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StudioNavDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 /// Focusable rows. Action groups hold several buttons, while morph/style rows
 /// expose their own decrement/increment buttons.
-const ACTION_GROUPS: [&[StudioAction]; 5] = [
+const ACTION_GROUPS: [&[StudioAction]; 7] = [
     &[StudioAction::Male, StudioAction::Female],
     &[
         StudioAction::Athletic,
@@ -86,12 +105,23 @@ const ACTION_GROUPS: [&[StudioAction]; 5] = [
         StudioAction::Slim,
     ],
     &[StudioAction::SoftFace, StudioAction::SharpFace],
-    &[StudioAction::Random, StudioAction::Undo],
+    &[
+        StudioAction::Random,
+        StudioAction::Undo,
+        StudioAction::ResetAll,
+    ],
+    &[
+        StudioAction::ViewFront,
+        StudioAction::ViewProfile,
+        StudioAction::ViewBack,
+    ],
+    &[StudioAction::ViewFull, StudioAction::ViewFace],
     &[StudioAction::SaveVersion, StudioAction::Back],
 ];
-const MORPH_ROW_0: usize = ACTION_GROUPS.len(); // 5
-const STYLE_ROW_0: usize = MORPH_ROW_0 + MorphField::ALL.len(); // 20
-const FILE_ROW_0: usize = STYLE_ROW_0 + StyleField::ALL.len(); // 32
+const ACTION_ROW_COUNT: usize = ACTION_GROUPS.len();
+const MORPH_ROW_0: usize = ACTION_ROW_COUNT;
+const STYLE_ROW_0: usize = MORPH_ROW_0 + MorphField::ALL.len();
+const FILE_ROW_0: usize = STYLE_ROW_0 + StyleField::ALL.len();
 
 fn action_label(action: StudioAction) -> &'static str {
     match action {
@@ -104,6 +134,12 @@ fn action_label(action: StudioAction) -> &'static str {
         StudioAction::SharpFace => "SHARP FACE",
         StudioAction::Random => "RANDOM",
         StudioAction::Undo => "UNDO",
+        StudioAction::ResetAll => "RESET ALL",
+        StudioAction::ViewFront => "FRONT",
+        StudioAction::ViewProfile => "PROFILE",
+        StudioAction::ViewBack => "BACK VIEW",
+        StudioAction::ViewFull => "FULL BODY",
+        StudioAction::ViewFace => "FACE CLOSE-UP",
         StudioAction::SaveVersion => "SAVE VERSION",
         StudioAction::Back => "BACK",
         _ => "",
@@ -121,6 +157,7 @@ pub struct StudioState {
     yaw: f32,
     pitch: f32,
     distance: f32,
+    focus_height: f32,
     status: String,
 }
 
@@ -131,9 +168,11 @@ impl Default for StudioState {
             undo: Vec::new(),
             dirty: true,
             labels_dirty: true,
-            yaw: 0.35,
-            pitch: 0.12,
+            // Generated humans face -Z, so PI is the true front view.
+            yaw: std::f32::consts::PI,
+            pitch: 0.05,
             distance: 3.4,
+            focus_height: 0.95,
             status: "Welcome to the Character Studio".to_string(),
         }
     }
@@ -158,6 +197,12 @@ struct StudioFocus {
 #[derive(Resource, Default)]
 struct StudioSliderDrag {
     active: Option<usize>,
+}
+
+#[derive(Resource, Default)]
+struct StudioNavRepeat {
+    direction: Option<StudioNavDirection>,
+    timer: f32,
 }
 
 /// Versioned character files on disk (`human_vNNN.json`).
@@ -206,10 +251,22 @@ struct MorphSliderThumb(usize);
 struct StyleValueText(usize);
 
 #[derive(Component)]
+struct StyleSwatch(usize);
+
+#[derive(Component)]
+struct ModelInfoText;
+
+#[derive(Component)]
 struct StatusText;
 
 #[derive(Component)]
 struct LibraryPanel;
+
+#[derive(Component)]
+struct StudioLeftPanel;
+
+#[derive(Component)]
+struct StudioRightPanel;
 
 const BTN_BG: Color = Color::srgba(0.14, 0.18, 0.26, 0.95);
 const BTN_BG_FOCUS: Color = Color::srgba(0.26, 0.45, 0.80, 0.95);
@@ -332,7 +389,7 @@ fn spawn_small_button(
             Button,
             ActionButton { action, row, col },
             Node {
-                width: Val::Px(24.0),
+                width: Val::Px(22.0),
                 height: Val::Px(20.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
@@ -360,7 +417,7 @@ fn spawn_morph_slider(
             MorphSlider { index, row, col },
             RelativeCursorPosition::default(),
             Node {
-                width: Val::Px(118.0),
+                width: Val::Px(92.0),
                 height: Val::Px(20.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::FlexStart,
@@ -426,6 +483,8 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                 ..default()
             },
             BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.90)),
+            ScrollPosition::default(),
+            StudioLeftPanel,
         ))
         .with_children(|panel| {
             panel.spawn(text("CHARACTER STUDIO", 16.0, Color::srgb(0.65, 0.85, 1.0)));
@@ -434,8 +493,15 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                 panel.spawn((StatusText, t, f, c));
             }
 
-            section_label(panel, "PRESETS");
-            for (g, actions) in ACTION_GROUPS.iter().enumerate() {
+            section_label(panel, "BASE PRESETS");
+            for (g, actions) in ACTION_GROUPS[..ACTION_ROW_COUNT].iter().enumerate() {
+                if g == 3 {
+                    section_label(panel, "EDIT");
+                } else if g == 4 {
+                    section_label(panel, "VIEWPORT");
+                } else if g == 6 {
+                    section_label(panel, "PROJECT");
+                }
                 panel
                     .spawn((
                         FocusRow(g),
@@ -470,7 +536,7 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                     ))
                     .with_children(|row| {
                         row.spawn(Node {
-                            width: Val::Px(110.0),
+                            width: Val::Px(92.0),
                             ..default()
                         })
                         .with_children(|n| {
@@ -492,7 +558,7 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                             spawn_morph_slider(controls, i, field.get(&state.spec), row_idx, 1);
                             controls
                                 .spawn(Node {
-                                    width: Val::Px(42.0),
+                                    width: Val::Px(38.0),
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 })
@@ -506,10 +572,17 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                                 });
                             spawn_small_button(
                                 controls,
+                                "R",
+                                StudioAction::MorphReset(i),
+                                row_idx,
+                                2,
+                            );
+                            spawn_small_button(
+                                controls,
                                 "+",
                                 StudioAction::MorphInc(i),
                                 row_idx,
-                                2,
+                                3,
                             );
                         });
                     });
@@ -532,7 +605,7 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                     ))
                     .with_children(|row| {
                         row.spawn(Node {
-                            width: Val::Px(110.0),
+                            width: Val::Px(92.0),
                             ..default()
                         })
                         .with_children(|n| {
@@ -553,7 +626,7 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                             );
                             controls
                                 .spawn(Node {
-                                    width: Val::Px(96.0),
+                                    width: Val::Px(76.0),
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 })
@@ -565,12 +638,33 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                                     );
                                     n.spawn((StyleValueText(i), t, f, c));
                                 });
+                            if style_field_has_swatch(*field) {
+                                controls.spawn((
+                                    StyleSwatch(i),
+                                    Node {
+                                        width: Val::Px(16.0),
+                                        height: Val::Px(16.0),
+                                        margin: UiRect::horizontal(Val::Px(2.0)),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(style_swatch_color(*field, &state.spec)),
+                                    BorderColor::all(Color::srgb(0.72, 0.78, 0.86)),
+                                ));
+                            }
+                            spawn_small_button(
+                                controls,
+                                "R",
+                                StudioAction::StyleReset(i),
+                                row_idx,
+                                1,
+                            );
                             spawn_small_button(
                                 controls,
                                 ">",
                                 StudioAction::StyleNext(i),
                                 row_idx,
-                                1,
+                                2,
                             );
                         });
                     });
@@ -594,8 +688,21 @@ fn spawn_right_panel(commands: &mut Commands) {
                 ..default()
             },
             BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.90)),
+            ScrollPosition::default(),
+            StudioRightPanel,
         ))
         .with_children(|panel| {
+            panel.spawn(text("MODEL INFO", 14.0, Color::srgb(0.65, 0.85, 1.0)));
+            panel.spawn((
+                ModelInfoText,
+                text("", 11.0, Color::srgb(0.78, 0.84, 0.92)),
+            ));
+            panel.spawn(text(
+                "CONTROLS\nD-pad / left stick: select + adjust\nA: activate   X: reset field\nLB/RB: jump sections\nRight stick: orbit   LT/RT: zoom\nMouse: drag sliders, right-drag orbit",
+                10.0,
+                Color::srgb(0.60, 0.70, 0.82),
+            ));
+            section_label(panel, "LIBRARY");
             panel.spawn(text("SAVED VERSIONS", 14.0, Color::srgb(0.65, 0.85, 1.0)));
             panel.spawn((
                 LibraryPanel,
@@ -609,6 +716,28 @@ fn spawn_right_panel(commands: &mut Commands) {
 
 fn morph_percent_label(v: f32) -> String {
     format!("{:>3}%", (v.clamp(0.0, 1.0) * 100.0).round() as u8)
+}
+
+fn style_field_has_swatch(field: StyleField) -> bool {
+    matches!(
+        field,
+        StyleField::SkinTone
+            | StyleField::EyeColor
+            | StyleField::HairColor
+            | StyleField::PrimaryColor
+            | StyleField::SecondaryColor
+    )
+}
+
+fn style_swatch_color(field: StyleField, spec: &CharacterSpec) -> Color {
+    match field {
+        StyleField::SkinTone => generators::skin_tones()[spec.style.skin_tone % 8],
+        StyleField::EyeColor => generators::eye_colors()[spec.style.eye_color % 6],
+        StyleField::HairColor => generators::hair_colors()[spec.style.hair_color % 8],
+        StyleField::PrimaryColor => generators::outfit_colors()[spec.style.primary_color % 8],
+        StyleField::SecondaryColor => generators::outfit_colors()[spec.style.secondary_color % 8],
+        _ => Color::NONE,
+    }
 }
 
 fn cleanup_studio(
@@ -686,6 +815,43 @@ fn apply_action(
                 state.labels_dirty = true;
             }
         }
+        StudioAction::ResetAll => {
+            state.push_undo();
+            state.spec = CharacterSpec::default();
+            mark(state, "Reset to neutral model".into());
+        }
+        StudioAction::ViewFront => {
+            state.yaw = std::f32::consts::PI;
+            state.pitch = 0.05;
+            state.status = "Front orthographic-style view".into();
+            state.labels_dirty = true;
+        }
+        StudioAction::ViewProfile => {
+            state.yaw = std::f32::consts::FRAC_PI_2;
+            state.pitch = 0.05;
+            state.status = "Profile view".into();
+            state.labels_dirty = true;
+        }
+        StudioAction::ViewBack => {
+            state.yaw = 0.0;
+            state.pitch = 0.05;
+            state.status = "Back view".into();
+            state.labels_dirty = true;
+        }
+        StudioAction::ViewFull => {
+            state.focus_height = 0.95;
+            state.distance = 3.4;
+            state.status = "Full-body framing".into();
+            state.labels_dirty = true;
+        }
+        StudioAction::ViewFace => {
+            state.yaw = std::f32::consts::PI;
+            state.pitch = 0.0;
+            state.focus_height = estimated_height(&state.spec) * 0.928;
+            state.distance = 1.25;
+            state.status = "Face sculpt close-up".into();
+            state.labels_dirty = true;
+        }
         StudioAction::SaveVersion => match save_new_version(&state.spec, &library.files) {
             Ok(name) => {
                 library.files = scan_library();
@@ -714,6 +880,12 @@ fn apply_action(
                 format!("{} = {:.2}", field.label(), field.get(&state.spec)),
             );
         }
+        StudioAction::MorphReset(i) => {
+            let field = MorphField::ALL[i];
+            state.push_undo();
+            field.set(&mut state.spec, 0.5);
+            mark(state, format!("{} reset to neutral", field.label()));
+        }
         StudioAction::StylePrev(i) | StudioAction::StyleNext(i) => {
             let dir = if matches!(action, StudioAction::StyleNext(_)) {
                 1
@@ -727,6 +899,12 @@ fn apply_action(
                 state,
                 format!("{}: {}", field.label(), field.value_label(&state.spec)),
             );
+        }
+        StudioAction::StyleReset(i) => {
+            let field = StyleField::ALL[i];
+            state.push_undo();
+            field.reset(&mut state.spec);
+            mark(state, format!("{} reset", field.label()));
         }
         StudioAction::LoadFile(i) => {
             if let Some(name) = library.files.get(i).cloned() {
@@ -820,6 +998,345 @@ fn morph_slider_interaction(
         state.dirty = true;
         state.labels_dirty = true;
         state.status = format!("{} = {:.2}", field.label(), field.get(&state.spec));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn studio_controller_navigation(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut wheel: MessageReader<MouseWheel>,
+    mut repeat: ResMut<StudioNavRepeat>,
+    mut focus: ResMut<StudioFocus>,
+    mut state: ResMut<StudioState>,
+    mut library: ResMut<SaveLibrary>,
+    mut next_state: ResMut<NextState<AppState>>,
+    buttons: Query<&ActionButton>,
+    mut left_panel_q: Query<(&mut ScrollPosition, &ComputedNode), With<StudioLeftPanel>>,
+    mut right_panel_q: Query<
+        (&mut ScrollPosition, &ComputedNode),
+        (With<StudioRightPanel>, Without<StudioLeftPanel>),
+    >,
+) {
+    let input = studio_nav_input(&keyboard, &gamepads, &native);
+    let direction = repeated_studio_direction(&mut repeat, input, time.delta_secs());
+    let confirm = keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::NumpadEnter)
+        || keyboard.just_pressed(KeyCode::Space)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::South))
+        || native.just_pressed(NativeButton::South);
+    let back = keyboard.just_pressed(KeyCode::Escape)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::East))
+        || native.just_pressed(NativeButton::East);
+    let reset_field = keyboard.just_pressed(KeyCode::KeyR)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::West))
+        || native.just_pressed(NativeButton::West);
+    let previous_section = gamepads
+        .iter()
+        .any(|gamepad| gamepad.just_pressed(GamepadButton::LeftTrigger))
+        || native.just_pressed(NativeButton::LeftShoulder);
+    let next_section = gamepads
+        .iter()
+        .any(|gamepad| gamepad.just_pressed(GamepadButton::RightTrigger))
+        || native.just_pressed(NativeButton::RightShoulder);
+
+    if back {
+        next_state.set(AppState::CharacterDesign);
+        return;
+    }
+
+    if previous_section || next_section {
+        let sections = [0, MORPH_ROW_0, MORPH_ROW_0 + 7, STYLE_ROW_0, FILE_ROW_0];
+        let current = sections
+            .iter()
+            .rposition(|row| *row <= focus.row)
+            .unwrap_or(0);
+        let next = if next_section {
+            (current + 1) % sections.len()
+        } else {
+            (current + sections.len() - 1) % sections.len()
+        };
+        focus.row = sections[next];
+        focus.col = 0;
+        keep_studio_focus_in_view(&focus, &mut left_panel_q, &mut right_panel_q);
+    }
+
+    if reset_field {
+        if focus.row >= MORPH_ROW_0 && focus.row < STYLE_ROW_0 {
+            apply_action(
+                StudioAction::MorphReset(focus.row - MORPH_ROW_0),
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        } else if focus.row >= STYLE_ROW_0 && focus.row < FILE_ROW_0 {
+            apply_action(
+                StudioAction::StyleReset(focus.row - STYLE_ROW_0),
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        }
+    }
+
+    if let Some(direction) = direction {
+        match direction {
+            StudioNavDirection::Up => {
+                focus.row = focus.row.saturating_sub(1);
+                focus.col = 0;
+            }
+            StudioNavDirection::Down => {
+                let max_row = FILE_ROW_0 + library.files.len().saturating_sub(1);
+                focus.row = (focus.row + 1).min(max_row);
+                focus.col = 0;
+            }
+            StudioNavDirection::Left => {
+                if focus.row >= MORPH_ROW_0 && focus.row < STYLE_ROW_0 {
+                    apply_action(
+                        StudioAction::MorphDec(focus.row - MORPH_ROW_0),
+                        &mut state,
+                        &mut library,
+                        &mut next_state,
+                    );
+                } else if focus.row >= STYLE_ROW_0 && focus.row < FILE_ROW_0 {
+                    apply_action(
+                        StudioAction::StylePrev(focus.row - STYLE_ROW_0),
+                        &mut state,
+                        &mut library,
+                        &mut next_state,
+                    );
+                } else {
+                    focus.col = focus.col.saturating_sub(1);
+                }
+            }
+            StudioNavDirection::Right => {
+                if focus.row >= MORPH_ROW_0 && focus.row < STYLE_ROW_0 {
+                    apply_action(
+                        StudioAction::MorphInc(focus.row - MORPH_ROW_0),
+                        &mut state,
+                        &mut library,
+                        &mut next_state,
+                    );
+                } else if focus.row >= STYLE_ROW_0 && focus.row < FILE_ROW_0 {
+                    apply_action(
+                        StudioAction::StyleNext(focus.row - STYLE_ROW_0),
+                        &mut state,
+                        &mut library,
+                        &mut next_state,
+                    );
+                } else {
+                    focus.col += 1;
+                }
+            }
+        }
+        keep_studio_focus_in_view(&focus, &mut left_panel_q, &mut right_panel_q);
+    }
+
+    if confirm {
+        if let Some(action) = focused_studio_action(&focus, &buttons) {
+            apply_action(action, &mut state, &mut library, &mut next_state);
+        } else if focus.row >= MORPH_ROW_0 && focus.row < STYLE_ROW_0 {
+            apply_action(
+                StudioAction::MorphInc(focus.row - MORPH_ROW_0),
+                &mut state,
+                &mut library,
+                &mut next_state,
+            );
+        }
+    }
+
+    let mut wheel_delta = 0.0;
+    for event in wheel.read() {
+        let scale = match event.unit {
+            MouseScrollUnit::Line => 26.0,
+            MouseScrollUnit::Pixel => 1.0,
+        };
+        wheel_delta -= event.y * scale;
+    }
+    if wheel_delta != 0.0 {
+        scroll_panel_by(&mut left_panel_q, wheel_delta);
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct StudioNavInput {
+    just: Option<StudioNavDirection>,
+    held: Option<StudioNavDirection>,
+}
+
+fn studio_nav_input(
+    keyboard: &ButtonInput<KeyCode>,
+    gamepads: &Query<&Gamepad>,
+    native: &NativeControllerState,
+) -> StudioNavInput {
+    let gamepad_just = |button| gamepads.iter().any(|gamepad| gamepad.just_pressed(button));
+    let gamepad_pressed = |button| gamepads.iter().any(|gamepad| gamepad.pressed(button));
+    let stick = gamepads
+        .iter()
+        .map(|gamepad| {
+            Vec2::new(
+                gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0),
+                gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0),
+            )
+        })
+        .find(|axis| axis.length_squared() > 0.36)
+        .or_else(|| (native.move_axis.length_squared() > 0.36).then_some(native.move_axis));
+
+    let just = if keyboard.just_pressed(KeyCode::ArrowUp)
+        || keyboard.just_pressed(KeyCode::KeyW)
+        || gamepad_just(GamepadButton::DPadUp)
+        || native.just_pressed(NativeButton::DPadUp)
+    {
+        Some(StudioNavDirection::Up)
+    } else if keyboard.just_pressed(KeyCode::ArrowDown)
+        || keyboard.just_pressed(KeyCode::KeyS)
+        || gamepad_just(GamepadButton::DPadDown)
+        || native.just_pressed(NativeButton::DPadDown)
+    {
+        Some(StudioNavDirection::Down)
+    } else if keyboard.just_pressed(KeyCode::ArrowLeft)
+        || keyboard.just_pressed(KeyCode::KeyA)
+        || gamepad_just(GamepadButton::DPadLeft)
+        || native.just_pressed(NativeButton::DPadLeft)
+    {
+        Some(StudioNavDirection::Left)
+    } else if keyboard.just_pressed(KeyCode::ArrowRight)
+        || keyboard.just_pressed(KeyCode::KeyD)
+        || gamepad_just(GamepadButton::DPadRight)
+        || native.just_pressed(NativeButton::DPadRight)
+    {
+        Some(StudioNavDirection::Right)
+    } else {
+        None
+    };
+
+    let held = if keyboard.pressed(KeyCode::ArrowUp)
+        || keyboard.pressed(KeyCode::KeyW)
+        || gamepad_pressed(GamepadButton::DPadUp)
+        || native.pressed(NativeButton::DPadUp)
+        || stick.is_some_and(|axis| axis.y > 0.6 && axis.y.abs() >= axis.x.abs())
+    {
+        Some(StudioNavDirection::Up)
+    } else if keyboard.pressed(KeyCode::ArrowDown)
+        || keyboard.pressed(KeyCode::KeyS)
+        || gamepad_pressed(GamepadButton::DPadDown)
+        || native.pressed(NativeButton::DPadDown)
+        || stick.is_some_and(|axis| axis.y < -0.6 && axis.y.abs() >= axis.x.abs())
+    {
+        Some(StudioNavDirection::Down)
+    } else if keyboard.pressed(KeyCode::ArrowLeft)
+        || keyboard.pressed(KeyCode::KeyA)
+        || gamepad_pressed(GamepadButton::DPadLeft)
+        || native.pressed(NativeButton::DPadLeft)
+        || stick.is_some_and(|axis| axis.x < -0.6 && axis.x.abs() > axis.y.abs())
+    {
+        Some(StudioNavDirection::Left)
+    } else if keyboard.pressed(KeyCode::ArrowRight)
+        || keyboard.pressed(KeyCode::KeyD)
+        || gamepad_pressed(GamepadButton::DPadRight)
+        || native.pressed(NativeButton::DPadRight)
+        || stick.is_some_and(|axis| axis.x > 0.6 && axis.x.abs() > axis.y.abs())
+    {
+        Some(StudioNavDirection::Right)
+    } else {
+        None
+    };
+
+    StudioNavInput { just, held }
+}
+
+fn repeated_studio_direction(
+    repeat: &mut StudioNavRepeat,
+    input: StudioNavInput,
+    dt: f32,
+) -> Option<StudioNavDirection> {
+    const INITIAL_REPEAT_DELAY: f32 = 0.34;
+    const REPEAT_INTERVAL: f32 = 0.11;
+
+    if let Some(direction) = input.just {
+        repeat.direction = Some(direction);
+        repeat.timer = INITIAL_REPEAT_DELAY;
+        return Some(direction);
+    }
+    if input.held != repeat.direction {
+        repeat.direction = input.held;
+        repeat.timer = INITIAL_REPEAT_DELAY;
+        return input.held;
+    }
+    let Some(direction) = input.held else {
+        repeat.direction = None;
+        repeat.timer = 0.0;
+        return None;
+    };
+    repeat.timer -= dt;
+    if repeat.timer <= 0.0 {
+        repeat.timer = REPEAT_INTERVAL;
+        Some(direction)
+    } else {
+        None
+    }
+}
+
+fn focused_studio_action(
+    focus: &StudioFocus,
+    buttons: &Query<&ActionButton>,
+) -> Option<StudioAction> {
+    buttons
+        .iter()
+        .filter(|button| button.row == focus.row)
+        .min_by_key(|button| button.col.abs_diff(focus.col))
+        .map(|button| button.action)
+}
+
+fn keep_studio_focus_in_view(
+    focus: &StudioFocus,
+    left_panel_q: &mut Query<(&mut ScrollPosition, &ComputedNode), With<StudioLeftPanel>>,
+    right_panel_q: &mut Query<
+        (&mut ScrollPosition, &ComputedNode),
+        (With<StudioRightPanel>, Without<StudioLeftPanel>),
+    >,
+) {
+    let target_y = if focus.row >= FILE_ROW_0 {
+        (focus.row - FILE_ROW_0) as f32 * 28.0
+    } else {
+        focus.row as f32 * 28.0
+    };
+    if focus.row >= FILE_ROW_0 {
+        set_panel_scroll(right_panel_q, target_y);
+    } else {
+        set_panel_scroll(left_panel_q, target_y);
+    }
+}
+
+fn set_panel_scroll<F: bevy::ecs::query::QueryFilter>(
+    panel_q: &mut Query<(&mut ScrollPosition, &ComputedNode), F>,
+    target_y: f32,
+) {
+    for (mut scroll_position, computed) in panel_q.iter_mut() {
+        let max_y = ((computed.content_size().y - computed.size().y)
+            * computed.inverse_scale_factor())
+        .max(0.0);
+        scroll_position.y = target_y.clamp(0.0, max_y);
+    }
+}
+
+fn scroll_panel_by<F: bevy::ecs::query::QueryFilter>(
+    panel_q: &mut Query<(&mut ScrollPosition, &ComputedNode), F>,
+    delta_y: f32,
+) {
+    for (mut scroll_position, computed) in panel_q.iter_mut() {
+        let max_y = ((computed.content_size().y - computed.size().y)
+            * computed.inverse_scale_factor())
+        .max(0.0);
+        scroll_position.y = (scroll_position.y + delta_y).clamp(0.0, max_y);
     }
 }
 
@@ -953,12 +1470,13 @@ fn orbit_camera(
     mut motion: MessageReader<MouseMotion>,
     mut wheel: MessageReader<MouseWheel>,
     gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
     mut state: ResMut<StudioState>,
     mut cam_q: Query<&mut Transform, With<StudioCamera>>,
 ) {
     let dt = time.delta_secs();
 
-    // Right-drag orbits; wheel zooms.
+    // Right-drag orbits; right-mouse wheel zooms. Plain wheel scrolls the GUI.
     let mut drag = Vec2::ZERO;
     for ev in motion.read() {
         if mouse_buttons.pressed(MouseButton::Right) {
@@ -967,8 +1485,12 @@ fn orbit_camera(
     }
     state.yaw -= drag.x * 0.008;
     state.pitch = (state.pitch + drag.y * 0.006).clamp(-0.4, 1.2);
-    for ev in wheel.read() {
-        state.distance = (state.distance - ev.y * 0.25).clamp(1.2, 8.0);
+    if mouse_buttons.pressed(MouseButton::Right) {
+        for ev in wheel.read() {
+            state.distance = (state.distance - ev.y * 0.25).clamp(1.2, 8.0);
+        }
+    } else {
+        wheel.clear();
     }
 
     // Gamepad right stick orbits; triggers zoom.
@@ -986,7 +1508,18 @@ fn orbit_camera(
         state.distance = (state.distance - (zoom_in - zoom_out) * 1.8 * dt).clamp(1.2, 8.0);
     }
 
-    let focus = Vec3::new(0.0, 0.95, 0.0);
+    if native.look_axis.x.abs() > 0.15 {
+        state.yaw -= native.look_axis.x * 1.8 * dt;
+    }
+    if native.look_axis.y.abs() > 0.15 {
+        state.pitch = (state.pitch + native.look_axis.y * 1.2 * dt).clamp(-0.4, 1.2);
+    }
+    let native_zoom_in = native.pressed(NativeButton::RightTrigger) as u8 as f32;
+    let native_zoom_out = native.pressed(NativeButton::LeftTrigger) as u8 as f32;
+    state.distance =
+        (state.distance - (native_zoom_in - native_zoom_out) * 1.8 * dt).clamp(1.2, 8.0);
+
+    let focus = Vec3::new(0.0, state.focus_height, 0.0);
     let rot = Quat::from_rotation_y(state.yaw) * Quat::from_rotation_x(-state.pitch);
     let eye = focus + rot * Vec3::new(0.0, 0.0, state.distance);
     for mut tf in cam_q.iter_mut() {
@@ -998,16 +1531,33 @@ fn orbit_camera(
 
 fn refresh_labels(
     mut state: ResMut<StudioState>,
-    mut morph_q: Query<(&mut Text, &MorphValueText), Without<StyleValueText>>,
+    mut morph_q: Query<
+        (&mut Text, &MorphValueText),
+        (Without<StyleValueText>, Without<ModelInfoText>),
+    >,
     mut fill_q: Query<(&mut Node, &MorphSliderFill), Without<MorphSliderThumb>>,
     mut thumb_q: Query<(&mut Node, &MorphSliderThumb), Without<MorphSliderFill>>,
-    mut style_q: Query<(&mut Text, &StyleValueText), Without<MorphValueText>>,
+    mut style_q: Query<
+        (&mut Text, &StyleValueText),
+        (Without<MorphValueText>, Without<ModelInfoText>),
+    >,
+    mut swatch_q: Query<(&mut BackgroundColor, &StyleSwatch)>,
+    mut model_info_q: Query<
+        &mut Text,
+        (
+            With<ModelInfoText>,
+            Without<MorphValueText>,
+            Without<StyleValueText>,
+            Without<StatusText>,
+        ),
+    >,
     mut status_q: Query<
         &mut Text,
         (
             With<StatusText>,
             Without<MorphValueText>,
             Without<StyleValueText>,
+            Without<ModelInfoText>,
         ),
     >,
 ) {
@@ -1031,9 +1581,40 @@ fn refresh_labels(
         let field = StyleField::ALL[marker.0];
         *text = Text::new(field.value_label(&state.spec));
     }
+    for (mut background, marker) in swatch_q.iter_mut() {
+        background.0 = style_swatch_color(StyleField::ALL[marker.0], &state.spec);
+    }
+    for mut text in model_info_q.iter_mut() {
+        *text = Text::new(model_info_label(&state.spec));
+    }
     for mut text in status_q.iter_mut() {
         *text = Text::new(state.status.clone());
     }
+}
+
+fn model_info_label(spec: &CharacterSpec) -> String {
+    let meters = estimated_height(spec);
+    format!(
+        "Height: {:.2} m / {:.0} in\nBuild: muscle {}  mass {}\nFace: jaw {}  eyes {}\nOutfit: {} + {}\nArmor: {}",
+        meters,
+        meters * 39.3701,
+        morph_percent_label(spec.body.muscle),
+        morph_percent_label(spec.body.weight),
+        morph_percent_label(spec.face.jaw_width),
+        morph_percent_label(spec.face.eye_size),
+        spec.style.wardrobe.top.label(),
+        spec.style.wardrobe.bottom.label(),
+        spec.style.wardrobe.armor.label(),
+    )
+}
+
+fn estimated_height(spec: &CharacterSpec) -> f32 {
+    let sex_scale = if spec.sex == spec::Sex::Female {
+        0.945
+    } else {
+        1.0
+    };
+    1.75 * (0.91 + spec.body.height * 0.18) * sex_scale
 }
 
 fn refresh_focus_highlight(

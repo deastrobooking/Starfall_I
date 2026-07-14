@@ -381,6 +381,29 @@ impl StyleField {
             }
         }
     }
+
+    /// Restore just this style slot to the default character value. Keeping
+    /// this operation field-local makes the studio's reset control useful for
+    /// experimentation without discarding the rest of a player's design.
+    pub fn reset(self, spec: &mut CharacterSpec) {
+        let defaults = CharacterSpec::default();
+        match self {
+            StyleField::Sex => spec.sex = defaults.sex,
+            StyleField::SkinTone => spec.style.skin_tone = defaults.style.skin_tone,
+            StyleField::EyeColor => spec.style.eye_color = defaults.style.eye_color,
+            StyleField::Hair => spec.style.hair = defaults.style.hair,
+            StyleField::HairColor => spec.style.hair_color = defaults.style.hair_color,
+            StyleField::Top => spec.style.wardrobe.top = defaults.style.wardrobe.top,
+            StyleField::Bottom => spec.style.wardrobe.bottom = defaults.style.wardrobe.bottom,
+            StyleField::Feet => spec.style.wardrobe.feet = defaults.style.wardrobe.feet,
+            StyleField::Hands => spec.style.wardrobe.hands = defaults.style.wardrobe.hands,
+            StyleField::Armor => spec.style.wardrobe.armor = defaults.style.wardrobe.armor,
+            StyleField::PrimaryColor => spec.style.primary_color = defaults.style.primary_color,
+            StyleField::SecondaryColor => {
+                spec.style.secondary_color = defaults.style.secondary_color
+            }
+        }
+    }
 }
 
 /// The whole character. Serialize THIS, never the generated meshes.
@@ -491,5 +514,31 @@ impl MorphField {
             MorphField::EyeSize => spec.face.eye_size = v,
             MorphField::MouthWidth => spec.face.mouth_width = v,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn morph_fields_clamp_to_the_supported_sculpt_range() {
+        let mut spec = CharacterSpec::default();
+        MorphField::Height.set(&mut spec, 2.0);
+        MorphField::JawWidth.set(&mut spec, -1.0);
+        assert_eq!(spec.body.height, 1.0);
+        assert_eq!(spec.face.jaw_width, 0.0);
+    }
+
+    #[test]
+    fn style_reset_only_changes_the_selected_slot() {
+        let mut spec = CharacterSpec::default();
+        spec.style.hair = HairStyle::Ponytail;
+        spec.style.primary_color = 6;
+
+        StyleField::Hair.reset(&mut spec);
+
+        assert_eq!(spec.style.hair, CharacterSpec::default().style.hair);
+        assert_eq!(spec.style.primary_color, 6);
     }
 }
