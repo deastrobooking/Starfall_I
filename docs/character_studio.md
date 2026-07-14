@@ -49,6 +49,63 @@ Keeping the saved format parametric is important: a player-created character
 can remain animation-, equipment-, and gameplay-compatible after the rendering
 implementation is upgraded.
 
+## MVP visual library
+
+The generated base deliberately targets a broad 1980s cel-anime language:
+larger cranium, tapered lower face, wide eyes with upper lashes and catchlights,
+small readable nose, warm cheek marks, and graphic hair silhouettes. These are
+original procedural forms and are not tied to one show or artist.
+
+Wardrobe options currently include ten top silhouettes, eight bottoms, nine
+footwear silhouettes, nine hairstyles, gloves/gauntlets, and two full armor
+overrides. Bomber, moto, denim, blazer, cargo, flare, pleat, sneaker, high-top,
+combat-boot, and heeled-boot details are generated as geometry. Clothing uses
+separate cloth, denim, leather, sole, metal, and emissive material responses.
+
+Every non-armor character receives a fitted coverage garment around the pelvis
+and upper thighs before outer clothing is generated. This is an invariant of
+the mesh builder, not a UI convention, so randomization and old presets cannot
+create an accidentally uncovered model.
+
+## External rig bridge
+
+The studio now has two preview backends. **GENERATED** is the production-safe,
+fully editable procedural character. **RIG TEST** loads `Characters/AMP.glb`
+through Bevy's world-asset scene path and applies coarse height/width/depth
+scaling from the current body specification. If that scene fails to load, the
+studio automatically restores the generated preview.
+
+The repository asset audit found that AMP has one 40-bone skin and covers all
+17 Starfall gameplay joints, but contains no animations and no morph targets.
+Antonio, Chroma, Daria, and Vincenzo currently contain static meshes without a
+skin. RIG TEST is therefore a diagnostic integration seam, not a replacement
+for the editable generated model yet.
+
+Production Blender/export bone names:
+
+```text
+SF_PELVIS  SF_SPINE  SF_CHEST  SF_NECK  SF_HEAD
+SF_SHOULDER_L  SF_ELBOW_L  SF_WRIST_L
+SF_SHOULDER_R  SF_ELBOW_R  SF_WRIST_R
+SF_HIP_L  SF_KNEE_L  SF_ANKLE_L
+SF_HIP_R  SF_KNEE_R  SF_ANKLE_R
+```
+
+`rig_bridge.rs` also accepts AMP's existing Pelvis/Spine01/Spine02,
+L_Upperarm/L_Forearm/L_Hand, R equivalents, thigh/calf/foot, and neck/head
+names. Missing or duplicate canonical targets invalidate a rig.
+
+Production shape keys must use the existing patch names:
+
+```text
+body_height body_muscle body_weight shoulders_wide waist_width hips_wide limb_length
+face_jaw_wide face_chin_long face_nose_long face_nose_wide face_brow_heavy
+face_cheek_full face_eye_large face_mouth_wide
+```
+
+This contract means a future Blender model can replace the preview renderer
+without changing `CharacterSpec` JSON or invalidating saved player designs.
+
 ## Review and next milestones
 
 The studio now has a viable modeling loop, but it is not yet a Blender-style
@@ -57,8 +114,9 @@ more visual authoring power:
 
 1. Add collapsible Body, Face, Hair, Wardrobe, and Materials tabs with named
    presets and thumbnail grids. This is the largest remaining RPG-maker UX gap.
-2. Replace the procedural preview with a rigged humanoid base containing named
-   shape keys. Bind the existing patch names first so old JSON presets load.
+2. Author a rigged humanoid base using the documented 17-bone and 15-shape-key
+   contract. The loader/validator and fallback path are complete; the current
+   AMP diagnostic asset has a valid skin but no shape keys or animation clips.
 3. Add region selection in the viewport: selecting the head, torso, arm, or leg
    should open the matching parameter group and outline that region.
 4. Add paired/asymmetric controls, including eye spacing, ear shape, hand/foot

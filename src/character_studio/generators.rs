@@ -102,7 +102,7 @@ pub fn skin_tones() -> [Color; 8] {
     ]
 }
 
-pub fn eye_colors() -> [Color; 6] {
+pub fn eye_colors() -> [Color; 8] {
     [
         Color::srgb(0.24, 0.42, 0.65), // blue
         Color::srgb(0.20, 0.45, 0.28), // green
@@ -110,10 +110,12 @@ pub fn eye_colors() -> [Color; 6] {
         Color::srgb(0.30, 0.30, 0.32), // grey
         Color::srgb(0.55, 0.38, 0.16), // amber
         Color::srgb(0.36, 0.24, 0.42), // violet
+        Color::srgb(0.10, 0.72, 0.82), // anime cyan
+        Color::srgb(0.68, 0.16, 0.22), // anime crimson
     ]
 }
 
-pub fn hair_colors() -> [Color; 8] {
+pub fn hair_colors() -> [Color; 12] {
     [
         Color::srgb(0.08, 0.06, 0.05), // black
         Color::srgb(0.24, 0.14, 0.08), // dark brown
@@ -123,10 +125,14 @@ pub fn hair_colors() -> [Color; 8] {
         Color::srgb(0.62, 0.62, 0.64), // silver
         Color::srgb(0.85, 0.32, 0.16), // ginger
         Color::srgb(0.28, 0.42, 0.72), // sci-fi blue
+        Color::srgb(0.88, 0.48, 0.62), // cel pink
+        Color::srgb(0.15, 0.62, 0.60), // teal
+        Color::srgb(0.48, 0.28, 0.66), // violet
+        Color::srgb(0.88, 0.84, 0.72), // platinum
     ]
 }
 
-pub fn outfit_colors() -> [Color; 8] {
+pub fn outfit_colors() -> [Color; 12] {
     [
         Color::srgb(0.20, 0.35, 0.68), // cobalt
         Color::srgb(0.70, 0.16, 0.14), // crimson
@@ -136,6 +142,10 @@ pub fn outfit_colors() -> [Color; 8] {
         Color::srgb(0.90, 0.90, 0.92), // white
         Color::srgb(0.16, 0.16, 0.20), // charcoal
         Color::srgb(0.10, 0.75, 0.78), // cyan
+        Color::srgb(0.92, 0.22, 0.52), // neon pink
+        Color::srgb(0.92, 0.38, 0.10), // sunset orange
+        Color::srgb(0.07, 0.12, 0.30), // academy navy
+        Color::srgb(0.58, 0.42, 0.28), // earth tan
     ]
 }
 

@@ -31,15 +31,23 @@ pub enum HairStyle {
     Short,
     Long,
     Ponytail,
+    Feathered,
+    Spiky,
+    Bob,
+    SidePonytail,
 }
 
 impl HairStyle {
-    pub const ALL: [HairStyle; 5] = [
+    pub const ALL: [HairStyle; 9] = [
         HairStyle::Bald,
         HairStyle::Buzz,
         HairStyle::Short,
         HairStyle::Long,
         HairStyle::Ponytail,
+        HairStyle::Feathered,
+        HairStyle::Spiky,
+        HairStyle::Bob,
+        HairStyle::SidePonytail,
     ];
 
     pub fn label(self) -> &'static str {
@@ -49,6 +57,10 @@ impl HairStyle {
             HairStyle::Short => "Short",
             HairStyle::Long => "Long",
             HairStyle::Ponytail => "Ponytail",
+            HairStyle::Feathered => "80s Feathered",
+            HairStyle::Spiky => "Anime Spikes",
+            HairStyle::Bob => "Anime Bob",
+            HairStyle::SidePonytail => "Side Ponytail",
         }
     }
 }
@@ -67,16 +79,24 @@ pub enum TopStyle {
     Tunic,
     Jacket,
     Robe,
+    TankTop,
+    BomberJacket,
+    MotoJacket,
+    Blazer,
 }
 
 impl TopStyle {
-    pub const ALL: [TopStyle; 6] = [
+    pub const ALL: [TopStyle; 10] = [
         TopStyle::None,
         TopStyle::TShirt,
         TopStyle::LongShirt,
         TopStyle::Tunic,
         TopStyle::Jacket,
         TopStyle::Robe,
+        TopStyle::TankTop,
+        TopStyle::BomberJacket,
+        TopStyle::MotoJacket,
+        TopStyle::Blazer,
     ];
 
     pub fn label(self) -> &'static str {
@@ -87,6 +107,10 @@ impl TopStyle {
             TopStyle::Tunic => "Tunic",
             TopStyle::Jacket => "Jacket",
             TopStyle::Robe => "Robe",
+            TopStyle::TankTop => "Tank Top",
+            TopStyle::BomberJacket => "Bomber Jacket",
+            TopStyle::MotoJacket => "Moto Jacket",
+            TopStyle::Blazer => "School Blazer",
         }
     }
 }
@@ -98,14 +122,22 @@ pub enum BottomStyle {
     #[default]
     Pants,
     Skirt,
+    Jeans,
+    CargoPants,
+    FlaredPants,
+    PleatedSkirt,
 }
 
 impl BottomStyle {
-    pub const ALL: [BottomStyle; 4] = [
+    pub const ALL: [BottomStyle; 8] = [
         BottomStyle::Underwear,
         BottomStyle::Shorts,
         BottomStyle::Pants,
         BottomStyle::Skirt,
+        BottomStyle::Jeans,
+        BottomStyle::CargoPants,
+        BottomStyle::FlaredPants,
+        BottomStyle::PleatedSkirt,
     ];
 
     pub fn label(self) -> &'static str {
@@ -114,6 +146,10 @@ impl BottomStyle {
             BottomStyle::Shorts => "Shorts",
             BottomStyle::Pants => "Pants",
             BottomStyle::Skirt => "Skirt",
+            BottomStyle::Jeans => "Jeans",
+            BottomStyle::CargoPants => "Cargo Pants",
+            BottomStyle::FlaredPants => "Flared Pants",
+            BottomStyle::PleatedSkirt => "Pleated Skirt",
         }
     }
 }
@@ -125,14 +161,24 @@ pub enum FootStyle {
     Shoes,
     Boots,
     TallBoots,
+    Sneakers,
+    HighTops,
+    Loafers,
+    CombatBoots,
+    HeeledBoots,
 }
 
 impl FootStyle {
-    pub const ALL: [FootStyle; 4] = [
+    pub const ALL: [FootStyle; 9] = [
         FootStyle::Barefoot,
         FootStyle::Shoes,
         FootStyle::Boots,
         FootStyle::TallBoots,
+        FootStyle::Sneakers,
+        FootStyle::HighTops,
+        FootStyle::Loafers,
+        FootStyle::CombatBoots,
+        FootStyle::HeeledBoots,
     ];
 
     pub fn label(self) -> &'static str {
@@ -141,6 +187,11 @@ impl FootStyle {
             FootStyle::Shoes => "Shoes",
             FootStyle::Boots => "Boots",
             FootStyle::TallBoots => "Tall Boots",
+            FootStyle::Sneakers => "Sneakers",
+            FootStyle::HighTops => "High-Tops",
+            FootStyle::Loafers => "Loafers",
+            FootStyle::CombatBoots => "Combat Boots",
+            FootStyle::HeeledBoots => "Heeled Boots",
         }
     }
 }
@@ -316,19 +367,66 @@ impl StyleField {
     }
 
     pub fn value_label(self, spec: &CharacterSpec) -> String {
+        const SKIN_NAMES: [&str; 8] = [
+            "Porcelain",
+            "Fair",
+            "Warm",
+            "Tan",
+            "Umber",
+            "Deep",
+            "Ebony",
+            "Onyx",
+        ];
+        const EYE_NAMES: [&str; 8] = [
+            "Blue", "Green", "Brown", "Grey", "Amber", "Violet", "Cyan", "Crimson",
+        ];
+        const HAIR_NAMES: [&str; 12] = [
+            "Black",
+            "Dark Brown",
+            "Brown",
+            "Blonde",
+            "Auburn",
+            "Silver",
+            "Ginger",
+            "Blue",
+            "Pink",
+            "Teal",
+            "Violet",
+            "Platinum",
+        ];
+        const OUTFIT_NAMES: [&str; 12] = [
+            "Cobalt",
+            "Crimson",
+            "Emerald",
+            "Gold",
+            "Violet",
+            "White",
+            "Charcoal",
+            "Cyan",
+            "Neon Pink",
+            "Orange",
+            "Navy",
+            "Tan",
+        ];
         match self {
             StyleField::Sex => spec.sex.label().to_string(),
-            StyleField::SkinTone => format!("Tone {}", spec.style.skin_tone + 1),
-            StyleField::EyeColor => format!("Color {}", spec.style.eye_color + 1),
+            StyleField::SkinTone => SKIN_NAMES[spec.style.skin_tone % SKIN_NAMES.len()].to_string(),
+            StyleField::EyeColor => EYE_NAMES[spec.style.eye_color % EYE_NAMES.len()].to_string(),
             StyleField::Hair => spec.style.hair.label().to_string(),
-            StyleField::HairColor => format!("Color {}", spec.style.hair_color + 1),
+            StyleField::HairColor => {
+                HAIR_NAMES[spec.style.hair_color % HAIR_NAMES.len()].to_string()
+            }
             StyleField::Top => spec.style.wardrobe.top.label().to_string(),
             StyleField::Bottom => spec.style.wardrobe.bottom.label().to_string(),
             StyleField::Feet => spec.style.wardrobe.feet.label().to_string(),
             StyleField::Hands => spec.style.wardrobe.hands.label().to_string(),
             StyleField::Armor => spec.style.wardrobe.armor.label().to_string(),
-            StyleField::PrimaryColor => format!("Color {}", spec.style.primary_color + 1),
-            StyleField::SecondaryColor => format!("Color {}", spec.style.secondary_color + 1),
+            StyleField::PrimaryColor => {
+                OUTFIT_NAMES[spec.style.primary_color % OUTFIT_NAMES.len()].to_string()
+            }
+            StyleField::SecondaryColor => {
+                OUTFIT_NAMES[spec.style.secondary_color % OUTFIT_NAMES.len()].to_string()
+            }
         }
     }
 
@@ -352,10 +450,10 @@ impl StyleField {
                 }
             }
             StyleField::SkinTone => spec.style.skin_tone = step_idx(spec.style.skin_tone, 8, dir),
-            StyleField::EyeColor => spec.style.eye_color = step_idx(spec.style.eye_color, 6, dir),
+            StyleField::EyeColor => spec.style.eye_color = step_idx(spec.style.eye_color, 8, dir),
             StyleField::Hair => spec.style.hair = step(&HairStyle::ALL, spec.style.hair, dir),
             StyleField::HairColor => {
-                spec.style.hair_color = step_idx(spec.style.hair_color, 8, dir)
+                spec.style.hair_color = step_idx(spec.style.hair_color, 12, dir)
             }
             StyleField::Top => {
                 spec.style.wardrobe.top = step(&TopStyle::ALL, spec.style.wardrobe.top, dir)
@@ -374,10 +472,10 @@ impl StyleField {
                 spec.style.wardrobe.armor = step(&ArmorStyle::ALL, spec.style.wardrobe.armor, dir)
             }
             StyleField::PrimaryColor => {
-                spec.style.primary_color = step_idx(spec.style.primary_color, 8, dir)
+                spec.style.primary_color = step_idx(spec.style.primary_color, 12, dir)
             }
             StyleField::SecondaryColor => {
-                spec.style.secondary_color = step_idx(spec.style.secondary_color, 8, dir)
+                spec.style.secondary_color = step_idx(spec.style.secondary_color, 12, dir)
             }
         }
     }
@@ -540,5 +638,42 @@ mod tests {
 
         assert_eq!(spec.style.hair, CharacterSpec::default().style.hair);
         assert_eq!(spec.style.primary_color, 6);
+    }
+
+    #[test]
+    fn legacy_wardrobe_names_and_new_mvp_styles_round_trip() {
+        let legacy = r#"{
+            "sex":"Male",
+            "body":{"height":0.5,"muscle":0.5,"weight":0.5,"shoulder_width":0.5,"waist_width":0.5,"hip_width":0.5,"limb_length":0.5},
+            "face":{"jaw_width":0.5,"chin_length":0.5,"nose_length":0.5,"nose_width":0.5,"brow_depth":0.5,"cheek_fullness":0.5,"eye_size":0.5,"mouth_width":0.5},
+            "style":{"skin_tone":0,"eye_color":0,"hair":"Short","hair_color":0,"wardrobe":{"top":"Jacket","bottom":"Pants","feet":"Boots","hands":"Bare","armor":"None"},"primary_color":0,"secondary_color":0}
+        }"#;
+        let old: CharacterSpec = serde_json::from_str(legacy).expect("legacy preset should load");
+        assert_eq!(old.style.wardrobe.top, TopStyle::Jacket);
+
+        let mut modern = old;
+        modern.style.hair = HairStyle::Feathered;
+        modern.style.wardrobe.top = TopStyle::BomberJacket;
+        modern.style.wardrobe.bottom = BottomStyle::CargoPants;
+        modern.style.wardrobe.feet = FootStyle::HighTops;
+        let json = serde_json::to_string(&modern).expect("modern preset should serialize");
+        let loaded: CharacterSpec =
+            serde_json::from_str(&json).expect("modern preset should deserialize");
+        assert_eq!(loaded.style.hair, HairStyle::Feathered);
+        assert_eq!(loaded.style.wardrobe.top, TopStyle::BomberJacket);
+        assert_eq!(loaded.style.wardrobe.bottom, BottomStyle::CargoPants);
+        assert_eq!(loaded.style.wardrobe.feet, FootStyle::HighTops);
+    }
+
+    #[test]
+    fn color_cycles_cover_the_expanded_anime_palette() {
+        let mut spec = CharacterSpec::default();
+        for _ in 0..11 {
+            StyleField::PrimaryColor.cycle(&mut spec, 1);
+        }
+        assert_eq!(spec.style.primary_color, 11);
+        assert_eq!(StyleField::PrimaryColor.value_label(&spec), "Tan");
+        StyleField::PrimaryColor.cycle(&mut spec, 1);
+        assert_eq!(spec.style.primary_color, 0);
     }
 }

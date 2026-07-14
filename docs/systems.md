@@ -186,10 +186,23 @@ opens on the actual front. Controller West resets the focused field and
 LB/RB jumps among preset, body, face, wardrobe, and saved-library sections.
 
 **Wardrobe (2026-07):** independent slots, mix-and-match — Top (None/T-Shirt/
-Long Shirt/Tunic/Jacket/Robe), Bottom (Underwear/Shorts/Pants/Skirt), Footwear
-(Barefoot/Shoes/Boots/Tall Boots), Hands (Bare/Gloves/Gauntlets), Armor
+Long Shirt/Tunic/Jacket/Robe/Tank Top/Bomber/Moto/Blazer), Bottom
+(Underwear/Shorts/Pants/Skirt/Jeans/Cargo/Flared/Pleated Skirt), Footwear
+(Barefoot/Shoes/Boots/Tall Boots/Sneakers/High-Tops/Loafers/Combat/Heeled
+Boots), Hands (Bare/Gloves/Gauntlets), Armor
 (None/Super Suit/Mecha Armor — armor overrides wardrobe visuals). Primary/
-secondary colours tint the whole outfit.
+secondary colours tint the whole outfit. A fitted base garment always encloses
+the pelvis and upper thighs, so Underwear is a real visible option and outer
+garments cannot expose skin through the glute/leg seams.
+
+**Anime MVP appearance (2026-07):** the procedural head uses a larger cranium,
+tapered jaw/chin, smaller nose, wide layered eyes, upper lash lines, iris
+catchlights, cheek color, and a dedicated lip material for a broad 1980s cel
+anime look. Feathered, spiky, bob, and side-ponytail hair join the original
+styles. Clavicles, elbows, knees, calves, and grounded shoe soles improve the
+full-body silhouette. Skin, eye, hair, cloth, denim, leather, sole, metal, and
+emissive accents use distinct roughness/reflectance treatment, and palette
+entries now have readable names across expanded anime and 80s color ranges.
 
 **Versioned saves (2026-07):** SAVE VERSION never overwrites — each save writes
 the next `human_vNNN.json` to `assets/presets/humans/`; the SAVED VERSIONS

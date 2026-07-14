@@ -15,11 +15,15 @@
 
 pub mod generators;
 pub mod human_mesh;
+pub mod rig_bridge;
 pub mod spec;
 
+use bevy::asset::LoadState;
+use bevy::gltf::GltfAssetLabel;
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
+use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use std::path::PathBuf;
 
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
@@ -46,6 +50,7 @@ impl Plugin for CharacterStudioPlugin {
                     studio_controller_navigation,
                     rebuild_library_rows,
                     rebuild_preview,
+                    fallback_failed_rig_preview,
                     orbit_camera,
                     refresh_labels,
                     refresh_focus_highlight,
@@ -75,6 +80,8 @@ enum StudioAction {
     ViewBack,
     ViewFull,
     ViewFace,
+    PreviewProcedural,
+    PreviewRigged,
     SaveVersion,
     Back,
     MorphDec(usize),
@@ -97,7 +104,7 @@ enum StudioNavDirection {
 
 /// Focusable rows. Action groups hold several buttons, while morph/style rows
 /// expose their own decrement/increment buttons.
-const ACTION_GROUPS: [&[StudioAction]; 7] = [
+const ACTION_GROUPS: [&[StudioAction]; 8] = [
     &[StudioAction::Male, StudioAction::Female],
     &[
         StudioAction::Athletic,
@@ -116,6 +123,7 @@ const ACTION_GROUPS: [&[StudioAction]; 7] = [
         StudioAction::ViewBack,
     ],
     &[StudioAction::ViewFull, StudioAction::ViewFace],
+    &[StudioAction::PreviewProcedural, StudioAction::PreviewRigged],
     &[StudioAction::SaveVersion, StudioAction::Back],
 ];
 const ACTION_ROW_COUNT: usize = ACTION_GROUPS.len();
@@ -140,6 +148,8 @@ fn action_label(action: StudioAction) -> &'static str {
         StudioAction::ViewBack => "BACK VIEW",
         StudioAction::ViewFull => "FULL BODY",
         StudioAction::ViewFace => "FACE CLOSE-UP",
+        StudioAction::PreviewProcedural => "GENERATED",
+        StudioAction::PreviewRigged => "RIG TEST",
         StudioAction::SaveVersion => "SAVE VERSION",
         StudioAction::Back => "BACK",
         _ => "",
@@ -158,6 +168,7 @@ pub struct StudioState {
     pitch: f32,
     distance: f32,
     focus_height: f32,
+    preview_backend: StudioPreviewBackend,
     status: String,
 }
 
@@ -173,9 +184,16 @@ impl Default for StudioState {
             pitch: 0.05,
             distance: 3.4,
             focus_height: 0.95,
+            preview_backend: StudioPreviewBackend::Procedural,
             status: "Welcome to the Character Studio".to_string(),
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StudioPreviewBackend {
+    Procedural,
+    RiggedAmp,
 }
 
 impl StudioState {
@@ -217,6 +235,9 @@ struct StudioRoot;
 
 #[derive(Component)]
 struct StudioPreview;
+
+#[derive(Component)]
+struct RiggedPreviewAsset(Handle<WorldAsset>);
 
 #[derive(Component)]
 struct StudioCamera;
@@ -285,6 +306,10 @@ fn setup_studio(
 ) {
     state.dirty = true;
     state.labels_dirty = true;
+    if std::env::var_os("STARFALL_STUDIO_RIG").is_some() {
+        state.preview_backend = StudioPreviewBackend::RiggedAmp;
+        state.status = "AMP rig diagnostic requested".into();
+    }
     library.files = scan_library();
     library.dirty = true;
     focus.row = 0;
@@ -500,6 +525,8 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                 } else if g == 4 {
                     section_label(panel, "VIEWPORT");
                 } else if g == 6 {
+                    section_label(panel, "PREVIEW BACKEND");
+                } else if g == 7 {
                     section_label(panel, "PROJECT");
                 }
                 panel
@@ -732,10 +759,10 @@ fn style_field_has_swatch(field: StyleField) -> bool {
 fn style_swatch_color(field: StyleField, spec: &CharacterSpec) -> Color {
     match field {
         StyleField::SkinTone => generators::skin_tones()[spec.style.skin_tone % 8],
-        StyleField::EyeColor => generators::eye_colors()[spec.style.eye_color % 6],
-        StyleField::HairColor => generators::hair_colors()[spec.style.hair_color % 8],
-        StyleField::PrimaryColor => generators::outfit_colors()[spec.style.primary_color % 8],
-        StyleField::SecondaryColor => generators::outfit_colors()[spec.style.secondary_color % 8],
+        StyleField::EyeColor => generators::eye_colors()[spec.style.eye_color % 8],
+        StyleField::HairColor => generators::hair_colors()[spec.style.hair_color % 12],
+        StyleField::PrimaryColor => generators::outfit_colors()[spec.style.primary_color % 12],
+        StyleField::SecondaryColor => generators::outfit_colors()[spec.style.secondary_color % 12],
         _ => Color::NONE,
     }
 }
@@ -851,6 +878,17 @@ fn apply_action(
             state.distance = 1.25;
             state.status = "Face sculpt close-up".into();
             state.labels_dirty = true;
+        }
+        StudioAction::PreviewProcedural => {
+            state.preview_backend = StudioPreviewBackend::Procedural;
+            mark(state, "Generated editable preview active".into());
+        }
+        StudioAction::PreviewRigged => {
+            state.preview_backend = StudioPreviewBackend::RiggedAmp;
+            mark(
+                state,
+                "AMP rig test: 17 joints mapped; shape keys not present".into(),
+            );
         }
         StudioAction::SaveVersion => match save_new_version(&state.spec, &library.files) {
             Ok(name) => {
@@ -1439,6 +1477,7 @@ fn rebuild_library_rows(
 
 fn rebuild_preview(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: ResMut<StudioState>,
@@ -1451,15 +1490,55 @@ fn rebuild_preview(
     for e in previews.iter() {
         commands.entity(e).despawn();
     }
-    let patch = build_character_patch(&state.spec);
-    let root = human_mesh::spawn_human(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &patch,
-        Transform::IDENTITY,
-    );
-    commands.entity(root).insert(StudioPreview);
+    match state.preview_backend {
+        StudioPreviewBackend::Procedural => {
+            let patch = build_character_patch(&state.spec);
+            let root = human_mesh::spawn_human(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &patch,
+                Transform::IDENTITY,
+            );
+            commands.entity(root).insert(StudioPreview);
+        }
+        StudioPreviewBackend::RiggedAmp => {
+            let height = 0.91 + state.spec.body.height * 0.18;
+            let width =
+                0.88 + state.spec.body.shoulder_width * 0.12 + state.spec.body.muscle * 0.08;
+            let depth = 0.90 + state.spec.body.weight * 0.20;
+            let scene =
+                asset_server.load(GltfAssetLabel::Scene(0).from_asset("Characters/AMP.glb"));
+            commands.spawn((
+                StudioPreview,
+                RiggedPreviewAsset(scene.clone()),
+                WorldAssetRoot(scene),
+                Transform::from_scale(Vec3::new(width, height, depth)),
+            ));
+        }
+    }
+}
+
+fn fallback_failed_rig_preview(
+    asset_server: Res<AssetServer>,
+    rigged_preview: Query<&RiggedPreviewAsset>,
+    mut state: ResMut<StudioState>,
+) {
+    if state.preview_backend != StudioPreviewBackend::RiggedAmp {
+        return;
+    }
+    let failed = rigged_preview.iter().any(|preview| {
+        matches!(
+            asset_server.load_state(preview.0.id()),
+            LoadState::Failed(_)
+        )
+    });
+    if failed {
+        state.preview_backend = StudioPreviewBackend::Procedural;
+        state.dirty = true;
+        state.labels_dirty = true;
+        state.status = "Rig asset failed to load; generated fallback restored".into();
+    }
 }
 
 // ── Camera (mouse drag / wheel + gamepad right stick / triggers) ──────────────
@@ -1585,17 +1664,21 @@ fn refresh_labels(
         background.0 = style_swatch_color(StyleField::ALL[marker.0], &state.spec);
     }
     for mut text in model_info_q.iter_mut() {
-        *text = Text::new(model_info_label(&state.spec));
+        *text = Text::new(model_info_label(&state.spec, state.preview_backend));
     }
     for mut text in status_q.iter_mut() {
         *text = Text::new(state.status.clone());
     }
 }
 
-fn model_info_label(spec: &CharacterSpec) -> String {
+fn model_info_label(spec: &CharacterSpec, backend: StudioPreviewBackend) -> String {
     let meters = estimated_height(spec);
     format!(
-        "Height: {:.2} m / {:.0} in\nBuild: muscle {}  mass {}\nFace: jaw {}  eyes {}\nOutfit: {} + {}\nArmor: {}",
+        "Backend: {}\nHeight: {:.2} m / {:.0} in\nBuild: muscle {}  mass {}\nFace: jaw {}  eyes {}\nOutfit: {} + {}\nArmor: {}",
+        match backend {
+            StudioPreviewBackend::Procedural => "Generated / fully editable",
+            StudioPreviewBackend::RiggedAmp => "AMP rig diagnostic",
+        },
         meters,
         meters * 39.3701,
         morph_percent_label(spec.body.muscle),

@@ -622,6 +622,14 @@ Acceptance:
 - The importer can reject invalid rigs with clear diagnostics instead of
   silently producing broken characters.
 
+**2026-07 first slice:** `character_studio/rig_bridge.rs` defines the canonical
+17-joint naming table, AMP aliases, 15 required morph names, duplicate/missing
+joint validation, and contract tests. Character Studio exposes GENERATED and
+RIG TEST backends; RIG TEST loads the skinned AMP scene and falls back to the
+procedural character on load failure. Asset inspection confirms AMP maps all
+17 gameplay joints but currently has no morph targets or animation clips, so
+it remains diagnostic until a Blender-authored production base is exported.
+
 ### MM10: Camera And Multiplayer Readability
 
 Goal: make high-speed movement cinematic without losing local co-op clarity.
