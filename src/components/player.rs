@@ -241,6 +241,10 @@ pub struct JetpackState {
     pub air_dash_cooldown: f32,
     pub air_dash_cooldown_timer: f32,
     pub slam_speed: f32,
+    /// Triple-tapping jump switches this persistent flight control preference.
+    pub hover_mode_enabled: bool,
+    pub jump_tap_count: u8,
+    pub jump_tap_timer: f32,
 }
 
 impl Default for JetpackState {
@@ -264,6 +268,31 @@ impl Default for JetpackState {
             air_dash_cooldown: 0.55,
             air_dash_cooldown_timer: 0.0,
             slam_speed: 1.35,
+            hover_mode_enabled: false,
+            jump_tap_count: 0,
+            jump_tap_timer: 0.0,
+        }
+    }
+}
+
+impl JetpackState {
+    pub const JUMP_TAP_WINDOW: f32 = 0.48;
+
+    /// Returns true when a triple tap changed the flight/hover preference.
+    pub fn register_jump_tap(&mut self) -> bool {
+        self.jump_tap_count = if self.jump_tap_timer > 0.0 {
+            self.jump_tap_count.saturating_add(1)
+        } else {
+            1
+        };
+        self.jump_tap_timer = Self::JUMP_TAP_WINDOW;
+        if self.jump_tap_count >= 3 {
+            self.hover_mode_enabled = !self.hover_mode_enabled;
+            self.jump_tap_count = 0;
+            self.jump_tap_timer = 0.0;
+            true
+        } else {
+            false
         }
     }
 }
@@ -863,5 +892,19 @@ mod tests {
 
         assert!(traversal.hoverboard_speed_mult >= 1.6);
         assert!(traversal.hoverboard_air_control_mult >= 1.4);
+    }
+
+    #[test]
+    fn three_jump_taps_toggle_hover_preference() {
+        let mut jetpack = JetpackState::default();
+        assert!(!jetpack.register_jump_tap());
+        assert!(!jetpack.register_jump_tap());
+        assert!(jetpack.register_jump_tap());
+        assert!(jetpack.hover_mode_enabled);
+
+        assert!(!jetpack.register_jump_tap());
+        assert!(!jetpack.register_jump_tap());
+        assert!(jetpack.register_jump_tap());
+        assert!(!jetpack.hover_mode_enabled);
     }
 }

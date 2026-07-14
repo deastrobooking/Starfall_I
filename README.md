@@ -31,7 +31,7 @@ Implemented:
 - Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, variable jump release, apex gravity, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, momentum roll, heavy-input stomp bounce, downhill acceleration, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
 - High-speed road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with real guardrail merge openings and its own support columns. Ordinary road chunks keep a clean collider surface; raised stunt ramps exist only at authored trick/loop sites. Settlement rings/spurs, boost lanes, banked curves, NPC traffic, checkpoints, recovery, and guided hoverboard adhesion are included.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
-- RPG combat with six larger-profile primary star beams, four special energy tools, Star Sabre unlock and persistent blade visual, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load. Homing Star now acquires hostile targets, steers with a capped turn rate, reacquires after target loss, leaves an energy trail, and reports SEEK/LOCK per player in the HUD.
+- RPG combat with unlimited-ammo primary beams and special tools, swept projectile collision, stronger body-centered aim assistance, arm-cannon charge shots, magic-user tracking beams, Star Sabre controller support and animated slash poses, melee combos, armor elements, XP, perks, crafting, rewards, and save/load. Homing Star acquires/reacquires hostile targets, steers with a capped turn rate, leaves an energy trail, and reports SEEK/LOCK per player in the HUD.
 
 In progress:
 
@@ -129,7 +129,7 @@ Keyboard and mouse:
 |---|---|
 | `WASD` | Move |
 | Mouse | Look |
-| `Space` | Jump, wall jump, hold for jetpack; trigger slingshots when standing on one |
+| `Space` | Jump, wall jump, hold for jetpack; triple-tap to switch flight/hover control; trigger slingshots |
 | Hold toward wall while falling | Wall slide |
 | `E` near wall while falling/hanging | Hang or climb up |
 | `E` | Interact; trigger nearby slingshots |
@@ -168,12 +168,13 @@ Controller:
 |---|---|
 | Left stick | Analog move |
 | Right stick | Look |
-| South | Jump, wall jump, hold for jetpack; trigger slingshots |
+| South | Jump, wall jump, hold for jetpack; triple-tap to switch flight/hover control; trigger slingshots |
 | East | Dodge / drop; momentum roll while moving fast on ground |
 | West | Reload active star beam |
 | North | Parry |
 | RT | Fire star beam |
 | LT | Aim |
+| LT + North | Toggle Star Sabre; RT performs its animated slash |
 | LB | Sprint |
 | RB | Next beam |
 | Select + RB | Grapple hook wind-up foundation |
@@ -187,7 +188,7 @@ Controller:
 | Select + D-Pad Left | Moon Bubble |
 | Select + D-Pad Right | Sprite Turret |
 | Start | Pause |
-| Guide / L3 + R3 | Toggle Star Sabre |
+| Guide / L3 + R3 | Alternate Star Sabre toggle |
 | R3 / L3 | Light / heavy combo; airborne heavy input stomps |
 
 ## Star Beam Loadout

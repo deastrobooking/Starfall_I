@@ -12,7 +12,7 @@
 ///
 ///  Left stick        — move
 ///  Right stick       — look (quadratic curve applied)
-///  LT  (LTrigger2)  — aim + sabre toggle
+///  LT  (LTrigger2)  — aim
 ///  RT  (RTrigger2)  — fire
 ///  LB  (LTrigger)   — sprint
 ///  RB  (RTrigger)   — weapon next
@@ -20,6 +20,7 @@
 ///  B / Circle / A   — dodge                    (East)
 ///  X / Square / Y   — reload                   (West)
 ///  Y / Triangle / X — parry                    (North)
+///  LT + Y / Triangle — toggle Star Sabre; RT swings it
 ///  L3 (left click)  — melee heavy              (LeftThumb)
 ///  R3 (right click) — melee light              (RightThumb)
 ///  Select/Back/Share/View — crafting (alone) OR special-slot modifier (+ DPad)
@@ -286,9 +287,6 @@ fn update_player_inputs(
         let right_trigger_held = btn_held(GamepadButton::RightTrigger2)
             || right_trigger_axis
             || native_held(NativeButton::RightTrigger);
-        let left_trigger_just = btn_just(GamepadButton::LeftTrigger2)
-            || native_just(NativeButton::LeftTrigger)
-            || (left_trigger_axis && !trigger_history[history_slot].left);
         let right_trigger_just = btn_just(GamepadButton::RightTrigger2)
             || native_just(NativeButton::RightTrigger)
             || (right_trigger_axis && !trigger_history[history_slot].right);
@@ -378,8 +376,8 @@ fn update_player_inputs(
 
         // ── Parry ─────────────────────────────────────────────────────────────
         pi.parry = (is_p1 && keyboard.just_pressed(KeyCode::KeyF))
-            || btn_just(GamepadButton::North)
-            || native_just(NativeButton::North);
+            || (!left_trigger_held
+                && (btn_just(GamepadButton::North) || native_just(NativeButton::North)));
 
         // ── Melee ─────────────────────────────────────────────────────────────
         pi.melee_light = (is_p1 && keyboard.just_pressed(KeyCode::KeyV))
@@ -522,7 +520,8 @@ fn update_player_inputs(
         let l3r3 = btn_just(GamepadButton::LeftThumb) && btn_held(GamepadButton::RightThumb)
             || btn_just(GamepadButton::RightThumb) && btn_held(GamepadButton::LeftThumb);
         pi.sabre_toggle = (is_p1 && keyboard.just_pressed(KeyCode::KeyT))
-            || left_trigger_just
+            || (left_trigger_held
+                && (btn_just(GamepadButton::North) || native_just(NativeButton::North)))
             || btn_just(GamepadButton::Mode)
             || l3r3
             || (native_just(NativeButton::LeftThumb) && native_held(NativeButton::RightThumb))

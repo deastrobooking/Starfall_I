@@ -158,7 +158,7 @@ impl Weapon {
     }
 
     pub fn can_fire(&self) -> bool {
-        self.fire_timer <= 0.0 && self.ammo > 0
+        self.fire_timer <= 0.0
     }
 
     pub fn reload(&mut self) {
@@ -375,7 +375,7 @@ impl SpecialWeapon {
     }
 
     pub fn can_fire(&self) -> bool {
-        self.cooldown_timer <= 0.0 && self.ammo > 0
+        self.cooldown_timer <= 0.0
     }
 
     pub fn effective_damage(&self) -> f32 {
@@ -428,6 +428,16 @@ pub struct BeamSabre {
 /// Marker on the player while the Star Sabre has not been discovered yet.
 #[derive(Component, Debug, Default)]
 pub struct BeamSabreLocked;
+
+/// Gameplay tag added when the selected character design uses an arm cannon.
+/// Only these characters build and release primary-weapon charge shots.
+#[derive(Component, Debug, Default)]
+pub struct ArmCannonUser;
+
+/// Gameplay tag for heroes whose magic stat is high enough to bend energy
+/// beams toward targets in the aiming cone.
+#[derive(Component, Debug, Default)]
+pub struct MagicBeamCaster;
 
 impl Default for BeamSabre {
     fn default() -> Self {
@@ -504,6 +514,7 @@ pub struct TrackingMissile {
     pub turn_rate_radians: f32,
     pub reacquire_timer: f32,
     pub trail_timer: f32,
+    pub magic_beam: bool,
 }
 
 impl TrackingMissile {
@@ -516,6 +527,17 @@ impl TrackingMissile {
             turn_rate_radians: 4.6,
             reacquire_timer: 0.0,
             trail_timer: 0.0,
+            magic_beam: false,
+        }
+    }
+
+    pub fn magic_beam(owner_player: u8) -> Self {
+        Self {
+            acquisition_range: 140.0,
+            acquisition_cone_cos: 0.05,
+            turn_rate_radians: 7.5,
+            magic_beam: true,
+            ..Self::new(owner_player)
         }
     }
 }

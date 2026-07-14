@@ -86,7 +86,7 @@ The panel hides while a discussion is active so the dialogue UI can own the bott
 
 Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity. The local `KinematicCharacterController` compatibility component feeds Avian move-and-slide and uses explicit movement-profile fields for offset, step height/width, and snap-to-ground distance so small lips and authored traversal props are easier to tune consistently.
 
-Analog movement preserves stick strength. Sprint requires the sprint input plus near-full stick deflection (`analog_sprint_threshold`) so light controller movement does not unexpectedly drain stamina or snap into sprint.
+Analog movement preserves stick strength. Sprint requires the sprint input plus near-full stick deflection (`analog_sprint_threshold`) so light controller movement does not unexpectedly drain stamina or snap into sprint. Three jump presses inside a 0.48-second rolling window toggle the player's persistent flight/hover preference; hover damps vertical speed and supports controlled lateral travel while ordinary flight retains thrust/glide behavior.
 
 Wall slide is the default wall-contact behavior while falling; it now behaves as a stamina-backed one-hand wall clasp, drains a small amount of stamina, refreshes wall-jump charges, slows descent, and falls back to a faster tired slide when stamina is gone. Hanging is intentional through `E` / D-pad Down. Wall jump is triggered from buffered jump input while `wall_contact_timer > 0` and airborne. It pushes away from wall normal + 25% input direction, has a short steering lockout for cleaner arcs, and carries two wall-jump charges that refresh on landing or renewed wall slide contact.
 
@@ -626,21 +626,23 @@ sabre slashes (3.0). Player-receiving knockback is not yet drained (EC2).
 
 | Slot | Name | Type | Auto | Notes |
 |---|---|---|---|---|
-| 1 | Starlight Popper | Pistol | No | 60 ammo |
-| 2 | Comet Stream | Rifle | Yes | 150 ammo, fast fire |
+| 1 | Starlight Popper | Pistol | No | Unlimited ammo |
+| 2 | Comet Stream | Rifle | Yes | Unlimited ammo, fast fire |
 | 3 | Sparkle Fan | Shotgun | No | 10 pellets, wide spread |
 | 4 | Nova Orb | Rocket | No | Explosive, r=6.5 |
-| 5 | Rainbow Ray | Laser | Yes | 220 ammo, hitscan-speed |
+| 5 | Rainbow Ray | Laser | Yes | Unlimited ammo, high-speed projectile |
 | 6 | Star Bubble Bombs | Grenade | No | Arc trajectory, r=8.5 |
 
 | Special | Slot | Cooldown | Ammo |
 |---|---|---|---|
-| Homing Star | 7 | 2.0s | 10 |
-| Tri-Star Burst | 8 | 1.5s | 15 |
-| Moon Bubble | 9 | 4.0s | 5 |
-| Sprite Turret | 0 | 10.0s | 3 |
+| Homing Star | 7 | 2.0s | Unlimited |
+| Tri-Star Burst | 8 | 1.5s | Unlimited |
+| Moon Bubble | 9 | 4.0s | Unlimited |
+| Sprite Turret | 0 | 10.0s | Unlimited |
 
-**Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T`. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise the Star Sabre's effective wave tier for combo behavior: finishers gain single waves first, mid-chain slashes gain waves next, dual waves arrive at high tier, and level-5/tier-5 finishers throw a triple spread.
+Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Projectile collision sweeps the full per-frame travel segment, preventing fast Rainbow Ray bolts from tunneling through targets. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Characters designed with `DariaCannon` arms can hold and release a charge shot. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
+
+**Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T`, controller LT+North, Guide, or L3+R3; RT/LMB performs the animated slash while active. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise the Star Sabre's effective wave tier for combo behavior: finishers gain single waves first, mid-chain slashes gain waves next, dual waves arrive at high tier, and level-5/tier-5 finishers throw a triple spread.
 
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 

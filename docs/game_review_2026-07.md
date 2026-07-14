@@ -11,7 +11,7 @@ the decision record for the next work in `docs/agent_next_steps.md`.
 | Menu UI | Shared automatic focus now supports spatial keyboard/D-pad/stick navigation, held repeat, mouse synchronization, Confirm, Back, hidden/disabled skipping, and common styles. | Per-controller independent cursors are deferred; current menus use party-shared authority. Hardware/TV-layout validation remains. |
 | Speed roads | Authored mountain routes generate interconnected decks, settlement rings/spurs, boosts, banked curves, ramps, loop geometry, NPC traffic, checkpoints, recovery, and guided hoverboard loop adhesion. | Camera roll/look-ahead, visual entry cues, collision-seam smoke tests, and four-player performance need hardware validation. |
 | Player movement | Existing traversal now adds explicit momentum roll, stomp bounce, downhill slope acceleration, route recovery, and testable per-player action state. | Animation/audio feedback, enemy-specific bounce reactions, and broad course-by-course tuning remain. |
-| Weapons | Homing Star now acquires/reacquires targets with capped steering, ownership, trail, and HUD SEEK/LOCK. Primary beam profiles are larger and the Star Sabre has a held blade visual. | Authored particles/audio, lock reticle graphics, impact variants, and split-screen effect-budget profiling remain. |
+| Weapons | Primary/special ammo is unlimited, aiming locks to enemy torsos, swept collision prevents fast-shot tunneling, arm cannons charge, magic users fire tracking beams, and the Star Sabre has controller toggle/slash support plus procedural animation. | Authored particles/audio, lock reticle graphics, impact variants, and split-screen effect-budget profiling remain. |
 
 ## UI Findings
 
@@ -65,16 +65,17 @@ Four-player behavior must stay keyed by `PlayerIndex`.
 
 ## Weapon Findings
 
-The Star Sabre already supports unlock/toggle, chained slashes, waves, dual waves,
-piercing/AOE upgrades, and dungeon arcs. Its production presentation still needs a
-held blade/core, swing trail, afterimage, hit flash/stop, and effect budgets.
+The Star Sabre supports keyboard and controller unlock/toggle, chained animated
+slashes, a persistent held blade, waves, dual waves, piercing/AOE upgrades, and
+dungeon arcs. Its production presentation still needs authored audio, afterimage,
+hit stop, and split-screen effect budgets.
 
-Evolve `Homing Star` into the requested tracking missile: acquire valid hostile
-targets in a configurable cone/range; store player ownership and target entity;
-steer with a capped turn rate; survive target loss; expose lock state in the
-owner's HUD; and use readable trail/splash effects. Add data-driven beam visual
-profiles (width, length, core/glow color, trail, muzzle, impact), sized for
-split-screen readability rather than simply maximizing screen coverage.
+`Homing Star` and high-magic primary beams now acquire valid hostile targets in a
+configurable cone/range, store player ownership and target entity, steer with a
+capped turn rate, survive target loss, and use readable trails. Primary aiming
+locks toward living enemy torsos and projectile collision sweeps between frames.
+The next presentation pass should add data-driven beam visual profiles (width,
+length, core/glow color, muzzle and impact), sized for split-screen readability.
 
 ## Recommended Delivery Order
 

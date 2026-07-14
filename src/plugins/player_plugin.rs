@@ -508,6 +508,14 @@ fn spawn_players(
         character_config.emissive_eyes = character_config.has_visor;
         let visual_loadout =
             PlayerPartLoadout::resolve_for_hero(character_name, slot.part_loadout, *part_loadout);
+        if CharacterLoadout::from(visual_loadout).arms
+            == crate::character_parts::ArmPreset::DariaCannon
+        {
+            commands.entity(player).insert(ArmCannonUser);
+        }
+        if hero_powers.magic >= 1.10 {
+            commands.entity(player).insert(MagicBeamCaster);
+        }
         if USE_MODULAR_PLAYER_MESH {
             // New native modular humanoid (built on the socket-assembly system).
             // Keep the gameplay rig so weapon/IK attach points still work.
@@ -1362,7 +1370,9 @@ fn player_movement(
             continue;
         }
 
+        jetpack.jump_tap_timer = (jetpack.jump_tap_timer - dt).max(0.0);
         if pi.jump {
+            jetpack.register_jump_tap();
             movement.jump_buffer_timer = movement.jump_buffer_time;
         } else {
             movement.jump_buffer_timer = (movement.jump_buffer_timer - dt).max(0.0);
@@ -1726,19 +1736,37 @@ fn player_movement(
         } else if wants_air_traversal && jetpack.fuel > 0.0 {
             match traversal.active {
                 TraversalMode::HoverJet => {
-                    movement.velocity.y =
-                        (movement.velocity.y + jetpack.force * 0.86).min(jetpack.max_vertical_vel);
+                    if jetpack.hover_mode_enabled {
+                        movement.velocity.y *= (1.0 - 7.5 * dt).max(0.0);
+                    } else {
+                        movement.velocity.y = (movement.velocity.y + jetpack.force * 0.86)
+                            .min(jetpack.max_vertical_vel);
+                    }
                     jetpack.fuel -= jetpack.fuel_cost_per_sec * 0.72 * dt;
                     jetpack.is_active = true;
-                    jetpack.mode = if movement.velocity.y.abs() < 0.075 {
-                        FlightMode::Hover
-                    } else {
-                        FlightMode::JetBoost
-                    };
+                    jetpack.mode =
+                        if jetpack.hover_mode_enabled || movement.velocity.y.abs() < 0.075 {
+                            FlightMode::Hover
+                        } else {
+                            FlightMode::JetBoost
+                        };
                     state.transition(PlayerState::Jetpack);
                 }
                 TraversalMode::Flight => {
-                    if pi.dodge && jetpack.air_dash_cooldown_timer <= 0.0 && jetpack.fuel >= 18.0 {
+                    if jetpack.hover_mode_enabled {
+                        movement.velocity.y *= (1.0 - 8.5 * dt).max(0.0);
+                        movement.ground_velocity = approach_vec3(
+                            movement.ground_velocity,
+                            input * jetpack.boost_forward_speed * 0.58,
+                            dt * 4.5,
+                        );
+                        jetpack.fuel -= jetpack.fuel_cost_per_sec * 0.34 * dt;
+                        jetpack.is_active = true;
+                        jetpack.mode = FlightMode::Hover;
+                    } else if pi.dodge
+                        && jetpack.air_dash_cooldown_timer <= 0.0
+                        && jetpack.fuel >= 18.0
+                    {
                         jetpack.air_dash_timer = jetpack.air_dash_duration;
                         jetpack.air_dash_cooldown_timer = jetpack.air_dash_cooldown;
                         jetpack.fuel -= 18.0;

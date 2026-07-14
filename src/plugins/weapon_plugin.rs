@@ -76,7 +76,6 @@ impl Plugin for WeaponPlugin {
                 (
                     apply_weapon_ranks_system,
                     weapon_select_system,
-                    apply_perk_ammo_caps_system,
                     weapon_fire_system,
                     weapon_reload_system,
                     charge_spark_system,
@@ -203,36 +202,50 @@ fn combat_forward(
 fn aim_assist_direction(
     raw_forward: Vec3,
     muzzle_pos: Vec3,
-    enemy_q: &Query<&Transform, (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>)>,
+    enemy_q: &Query<
+        (&GlobalTransform, &Health),
+        (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>),
+    >,
+    actively_aiming: bool,
     range_bonus: f32,
     cone_relax: f32,
     strength_bonus: f32,
 ) -> Vec3 {
-    const ASSIST_RANGE: f32 = 14.0;
-    const ASSIST_CONE_COS: f32 = 0.96; // ~15° half-angle
-    const ASSIST_STRENGTH: f32 = 0.28;
+    const ASSIST_RANGE: f32 = 90.0;
 
     let assist_range = ASSIST_RANGE + range_bonus;
-    let assist_cone_cos = (ASSIST_CONE_COS - cone_relax).clamp(0.82, 0.99);
-    let assist_strength = (ASSIST_STRENGTH + strength_bonus).clamp(0.0, 0.85);
-    let mut best_dot = assist_cone_cos;
+    let base_cone = if actively_aiming { 0.78 } else { 0.90 };
+    let assist_cone_cos = (base_cone - cone_relax).clamp(0.62, 0.96);
+    let assist_strength = if actively_aiming {
+        1.0
+    } else {
+        (0.72 + strength_bonus).clamp(0.65, 0.95)
+    };
+    let mut best_score = f32::NEG_INFINITY;
     let mut best_dir: Option<Vec3> = None;
 
-    for e_transform in enemy_q.iter() {
-        let to = e_transform.translation - muzzle_pos;
-        if to.length() > assist_range {
+    for (e_transform, health) in enemy_q.iter() {
+        if !health.is_alive() {
+            continue;
+        }
+        // Enemies are rooted at their feet; aim into the torso so the reticle
+        // and projectile collision agree visually.
+        let to = e_transform.translation() + Vec3::Y * 0.9 - muzzle_pos;
+        let distance = to.length();
+        if distance > assist_range || distance <= 0.01 {
             continue;
         }
         let to_norm = to.normalize_or_zero();
         let dot = to_norm.dot(raw_forward);
-        if dot > best_dot {
-            best_dot = dot;
+        let score = dot * 3.0 - distance / assist_range;
+        if dot >= assist_cone_cos && score > best_score {
+            best_score = score;
             best_dir = Some(to_norm);
         }
     }
 
     if let Some(target_dir) = best_dir {
-        (raw_forward * (1.0 - assist_strength) + target_dir * assist_strength).normalize()
+        (raw_forward * (1.0 - assist_strength) + target_dir * assist_strength).normalize_or_zero()
     } else {
         raw_forward
     }
@@ -314,25 +327,43 @@ fn weapon_fire_system(
     proj_assets: Res<ProjectileAssets>,
     perks: Res<PerkTree>,
     upgrades: Res<UpgradeLedger>,
+    dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
             &GlobalTransform,
+            &PlayerIndex,
             &mut WeaponInventory,
             &mut PlayerStateMachine,
             &PlayerInput,
             &PlayerCameraRef,
             &ArmorSet,
+            Option<&ArmCannonUser>,
+            Option<&MagicBeamCaster>,
         ),
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
-    enemy_q: Query<&Transform, (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>)>,
+    enemy_q: Query<
+        (&GlobalTransform, &Health),
+        (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>),
+    >,
     mut fired_ev: MessageWriter<WeaponFiredEvent>,
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
 
-    for (player_transform, mut inv, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
+    for (
+        player_transform,
+        player_index,
+        mut inv,
+        mut sm,
+        pi,
+        cam_ref,
+        armor,
+        arm_cannon,
+        magic_caster,
+    ) in player_q.iter_mut()
+    {
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
         };
@@ -341,20 +372,22 @@ fn weapon_fire_system(
         weapon.fire_timer = (weapon.fire_timer - dt).max(0.0);
 
         // ── Charge tracking ──────────────────────────────────────────────────
-        let charge_released = weapon.charge_held && !pi.fire;
-        if pi.fire {
+        let can_charge = arm_cannon.is_some();
+        let charge_released = can_charge && weapon.charge_held && !pi.fire;
+        if can_charge && pi.fire {
             weapon.charge_progress =
                 (weapon.charge_progress + dt / weapon.min_charge_time()).min(1.0);
             weapon.charge_held = true;
         } else if charge_released {
             weapon.charge_held = false;
-            if weapon.charge_progress >= 1.0 && weapon.fire_timer <= 0.0 && weapon.ammo >= 3 {
-                let raw_fwd = cam.forward().as_vec3();
+            if weapon.charge_progress >= 1.0 && weapon.fire_timer <= 0.0 {
+                let raw_fwd = combat_forward(player_transform, cam, pi, dungeon.active);
                 let pos = star_muzzle_origin(player_transform, raw_fwd);
                 let aim_fwd = aim_assist_direction(
                     raw_fwd,
                     pos,
                     &enemy_q,
+                    pi.aim,
                     upgrades.gauntlet_aim_range_bonus(),
                     upgrades.gauntlet_aim_cone_relax(),
                     upgrades.gauntlet_aim_strength_bonus(),
@@ -401,7 +434,6 @@ fn weapon_fire_system(
                     base_speed,
                 );
 
-                weapon.ammo = weapon.ammo.saturating_sub(3);
                 weapon.fire_timer = weapon.rank_effective_fire_rate() * 3.0;
                 weapon.charge_progress = 0.0;
                 sm.transition(PlayerState::Attacking);
@@ -409,6 +441,9 @@ fn weapon_fire_system(
                 continue;
             }
             weapon.charge_progress = 0.0;
+        } else if !can_charge {
+            weapon.charge_progress = 0.0;
+            weapon.charge_held = false;
         }
 
         // ── Normal fire ───────────────────────────────────────────────────────
@@ -421,7 +456,7 @@ fn weapon_fire_system(
             continue;
         }
 
-        let raw_fwd = cam.forward().as_vec3();
+        let raw_fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let pos = star_muzzle_origin(player_transform, raw_fwd);
         let right = cam.right().as_vec3();
         let up = cam.up().as_vec3();
@@ -429,6 +464,7 @@ fn weapon_fire_system(
             raw_fwd,
             pos,
             &enemy_q,
+            pi.aim,
             upgrades.gauntlet_aim_range_bonus(),
             upgrades.gauntlet_aim_cone_relax(),
             upgrades.gauntlet_aim_strength_bonus(),
@@ -471,9 +507,19 @@ fn weapon_fire_system(
             primary_fallback_damage_type(weapon.weapon_type, explosive_weapon),
         );
 
-        let (mesh_h, mat_h) = base_proj_handles(weapon.weapon_type, &proj_assets);
+        let (mesh_h, base_mat_h) = base_proj_handles(weapon.weapon_type, &proj_assets);
+        let magic_tracking = magic_caster.is_some() && !explosive_weapon;
+        let mat_h = if magic_tracking {
+            proj_assets.mat_laser.clone()
+        } else {
+            base_mat_h
+        };
+        let projectile_stretch = if magic_tracking {
+            Vec3::new(stretch.x.max(0.8), stretch.y.max(0.8), stretch.z.max(5.0))
+        } else {
+            stretch
+        };
 
-        weapon.ammo = weapon.ammo.saturating_sub(1);
         weapon.fire_timer = effective_fire_rate;
 
         for _ in 0..pellets {
@@ -492,9 +538,9 @@ fn weapon_fire_system(
             // Orient along travel direction and apply per-weapon stretch
             let proj_transform = Transform::from_translation(pos)
                 .looking_to(dir, Vec3::Y)
-                .with_scale(stretch);
+                .with_scale(projectile_stretch);
 
-            commands.spawn((
+            let mut projectile_entity = commands.spawn((
                 PbrBundle {
                     mesh: Mesh3d(mesh_h.clone()),
                     material: MeshMaterial3d(mat_h.clone()),
@@ -516,6 +562,9 @@ fn weapon_fire_system(
                     vertical_velocity: if gravity_affected { 0.2 } else { 0.0 },
                 },
             ));
+            if magic_tracking {
+                projectile_entity.insert(TrackingMissile::magic_beam(player_index.0));
+            }
         }
 
         spawn_muzzle_flash(&mut commands, &proj_assets, pos);
@@ -873,7 +922,6 @@ fn special_weapon_system(
                     let damage_type =
                         gauntlet_projectile_damage_type(&upgrades, DamageType::Explosive);
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;
-                    inv.slot7.ammo = inv.slot7.ammo.saturating_sub(1);
                     commands.spawn((
                         PbrBundle {
                             mesh: Mesh3d(proj_assets.sphere_md.clone()),
@@ -900,7 +948,7 @@ fn special_weapon_system(
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
-                        text: format!("Homing Star! [{} charges]", inv.slot7.ammo),
+                        text: "Homing Star! [unlimited]".to_string(),
                         duration: 1.5,
                     });
                 } else {
@@ -920,7 +968,6 @@ fn special_weapon_system(
                     let damage_type =
                         gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
                     inv.slot8.cooldown_timer = inv.slot8.cooldown;
-                    inv.slot8.ammo = inv.slot8.ammo.saturating_sub(1);
                     use rand::Rng;
                     let mut rng = rand::thread_rng();
                     let right = cam.right().as_vec3();
@@ -958,7 +1005,7 @@ fn special_weapon_system(
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
-                        text: format!("Tri-Star Burst! [{} charges]", inv.slot8.ammo),
+                        text: "Tri-Star Burst! [unlimited]".to_string(),
                         duration: 1.5,
                     });
                 } else {
@@ -978,7 +1025,6 @@ fn special_weapon_system(
                     let damage_type =
                         gauntlet_projectile_damage_type(&upgrades, DamageType::Explosive);
                     inv.slot9.cooldown_timer = inv.slot9.cooldown;
-                    inv.slot9.ammo = inv.slot9.ammo.saturating_sub(1);
                     commands.spawn((
                         PbrBundle {
                             mesh: Mesh3d(proj_assets.sphere_lg.clone()),
@@ -1004,7 +1050,7 @@ fn special_weapon_system(
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
-                        text: format!("Moon Bubble! [{} charges]", inv.slot9.ammo),
+                        text: "Moon Bubble! [unlimited]".to_string(),
                         duration: 1.5,
                     });
                 } else {
@@ -1024,7 +1070,6 @@ fn special_weapon_system(
                     let damage_type =
                         gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
                     inv.slot0.cooldown_timer = inv.slot0.cooldown;
-                    inv.slot0.ammo = inv.slot0.ammo.saturating_sub(1);
                     use rand::Rng;
                     let mut rng = rand::thread_rng();
                     let right = cam.right().as_vec3();
@@ -1062,7 +1107,7 @@ fn special_weapon_system(
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
-                        text: format!("Sprite Turret! [{} charges]", inv.slot0.ammo),
+                        text: "Sprite Turret! [unlimited]".to_string(),
                         duration: 1.5,
                     });
                 } else {
@@ -1101,7 +1146,7 @@ fn tracking_missile_system(
                 .get(entity)
                 .ok()
                 .filter(|(_, _, health)| health.is_alive())
-                .map(|(_, target_transform, _)| target_transform.translation())
+                .map(|(_, target_transform, _)| target_transform.translation() + Vec3::Y * 0.9)
         });
 
         let target_position = if target_position.is_some() {
@@ -1116,7 +1161,9 @@ fn tracking_missile_system(
                 target_q
                     .iter()
                     .filter(|(_, _, health)| health.is_alive())
-                    .map(|(entity, target_transform, _)| (entity, target_transform.translation())),
+                    .map(|(entity, target_transform, _)| {
+                        (entity, target_transform.translation() + Vec3::Y * 0.9)
+                    }),
             );
             missile.target = acquired.map(|(entity, _)| entity);
             acquired.map(|(_, position)| position)
@@ -1141,11 +1188,19 @@ fn tracking_missile_system(
             commands.spawn((
                 PbrBundle {
                     mesh: Mesh3d(assets.sphere_sm.clone()),
-                    material: MeshMaterial3d(assets.mat_homing_star.clone()),
+                    material: MeshMaterial3d(if missile.magic_beam {
+                        assets.mat_laser.clone()
+                    } else {
+                        assets.mat_homing_star.clone()
+                    }),
                     transform: Transform::from_translation(
                         transform.translation - projectile.direction * 0.55,
                     )
-                    .with_scale(Vec3::splat(1.35)),
+                    .with_scale(if missile.magic_beam {
+                        Vec3::new(0.75, 0.75, 3.2)
+                    } else {
+                        Vec3::splat(1.35)
+                    }),
                     ..default()
                 },
                 HitParticle {
@@ -1205,6 +1260,16 @@ fn steer_toward_direction(current: Vec3, desired: Vec3, max_radians: f32) -> Vec
     }
 }
 
+fn segment_point_distance_squared(start: Vec3, end: Vec3, point: Vec3) -> f32 {
+    let segment = end - start;
+    let length_squared = segment.length_squared();
+    if length_squared <= f32::EPSILON {
+        return start.distance_squared(point);
+    }
+    let t = ((point - start).dot(segment) / length_squared).clamp(0.0, 1.0);
+    (start + segment * t).distance_squared(point)
+}
+
 // ── Projectile Update ─────────────────────────────────────────────────────────
 fn projectile_update_system(
     mut commands: Commands,
@@ -1240,6 +1305,7 @@ fn projectile_update_system(
     let dt = time.delta_secs();
 
     for (proj_entity, mut proj_transform, mut proj) in proj_q.iter_mut() {
+        let previous_position = proj_transform.translation;
         proj_transform.translation += proj.direction * proj.speed * dt;
 
         if proj.gravity_affected {
@@ -1301,8 +1367,13 @@ fn projectile_update_system(
             if !e_health.is_alive() {
                 continue;
             }
-            let dist = proj_transform.translation.distance(e_transform.translation);
-            if dist < 1.5 {
+            let target_center = e_transform.translation + Vec3::Y * 0.9;
+            if segment_point_distance_squared(
+                previous_position,
+                proj_transform.translation,
+                target_center,
+            ) < 1.75_f32.powi(2)
+            {
                 if proj.is_explosive {
                     explosion = Some((
                         proj_transform.translation,
@@ -1349,8 +1420,12 @@ fn projectile_update_system(
                 if !v_health.is_alive() {
                     continue;
                 }
-                let dist = proj_transform.translation.distance(v_transform.translation);
-                if dist < vehicle.hit_radius {
+                if segment_point_distance_squared(
+                    previous_position,
+                    proj_transform.translation,
+                    v_transform.translation,
+                ) < vehicle.hit_radius.powi(2)
+                {
                     if proj.is_explosive {
                         explosion = Some((
                             proj_transform.translation,
@@ -2028,5 +2103,26 @@ mod tracking_missile_tests {
         assert!(steered.x > 0.0);
         assert!(steered.z > 0.0);
         assert!(Vec3::Z.angle_between(steered) <= 0.25);
+    }
+
+    #[test]
+    fn swept_collision_catches_fast_projectile_between_frames() {
+        let distance = segment_point_distance_squared(
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 1.0, 18.0),
+            Vec3::new(0.4, 1.0, 9.0),
+        );
+        assert!(distance < 1.75_f32.powi(2));
+    }
+
+    #[test]
+    fn unlimited_weapons_ignore_stale_zero_ammo_counts() {
+        let mut primary = Weapon::new(WeaponType::Pistol);
+        primary.ammo = 0;
+        assert!(primary.can_fire());
+
+        let mut special = SpecialWeapon::new(SpecialSlot::Slot7);
+        special.ammo = 0;
+        assert!(special.can_fire());
     }
 }
