@@ -11,6 +11,7 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureFormat,
 };
 use bevy::shader::ShaderRef;
+use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::sync::OnceLock;
 
@@ -4881,6 +4882,21 @@ const ROUTE_EAST_ROCKIES_PASS: &[(f32, f32)] = &[
 ];
 const ROUTE_CROWN_UNDERPASS: &[(f32, f32)] =
     &[(-2500.0, -2300.0), (-4300.0, -6100.0), (-6500.0, -8600.0)];
+// Cross-links turn the original spoke-like set of mountain roads into a
+// navigable mesh.  Every connector terminates on an existing authored node so
+// there are no almost-connected junctions or collider gaps at intersections.
+const ROUTE_LINK_AURORA_NORTH: &[(f32, f32)] =
+    &[(3200.0, 920.0), (3900.0, 2050.0), (5000.0, 3000.0)];
+const ROUTE_LINK_CORE_SOUTH: &[(f32, f32)] =
+    &[(-1250.0, -840.0), (-420.0, -1680.0), (520.0, -2300.0)];
+const ROUTE_LINK_WEST_CROWN: &[(f32, f32)] =
+    &[(-3300.0, -2750.0), (-4680.0, -4300.0), (-4300.0, -6100.0)];
+const ROUTE_LINK_EAST_SOUTH: &[(f32, f32)] =
+    &[(5200.0, -1400.0), (3900.0, -3150.0), (1600.0, -4700.0)];
+const ROUTE_LINK_NORTHWEST_AURORA: &[(f32, f32)] =
+    &[(-3300.0, 4300.0), (-900.0, 1500.0), (1300.0, 540.0)];
+const ROUTE_LINK_OUTER_NORTH: &[(f32, f32)] =
+    &[(-6200.0, 6500.0), (-7700.0, 6000.0), (-7800.0, 4200.0)];
 const MOUNTAIN_ROUTES: &[&[(f32, f32)]] = &[
     ROUTE_CORE_AURORA,
     ROUTE_CORE_EVEREST,
@@ -4890,6 +4906,12 @@ const MOUNTAIN_ROUTES: &[&[(f32, f32)]] = &[
     ROUTE_WEST_TEMPLE_PASS,
     ROUTE_EAST_ROCKIES_PASS,
     ROUTE_CROWN_UNDERPASS,
+    ROUTE_LINK_AURORA_NORTH,
+    ROUTE_LINK_CORE_SOUTH,
+    ROUTE_LINK_WEST_CROWN,
+    ROUTE_LINK_EAST_SOUTH,
+    ROUTE_LINK_NORTHWEST_AURORA,
+    ROUTE_LINK_OUTER_NORTH,
 ];
 
 struct EverestHeightmap {
@@ -5157,7 +5179,9 @@ fn distance_to_mountain_route_network(x: f32, z: f32) -> f32 {
         .unwrap_or(f32::MAX)
 }
 
-const SPEED_ROAD_CHUNK_LEN: f32 = 360.0;
+// Shorter stations let the elevation solver see narrow ridges before a deck
+// reaches them.  This is also the maximum collider/deck seam spacing.
+const SPEED_ROAD_CHUNK_LEN: f32 = 220.0;
 const SPEED_ROAD_CLEARANCE: f32 = 4.6;
 // Sized for vehicles: two NPC cars + a player vehicle pass comfortably.
 const SPEED_ROAD_WIDTH: f32 = 52.0;
@@ -5271,7 +5295,7 @@ fn speed_road_loop_gate_count() -> usize {
             route.windows(2).enumerate().filter(move |(si, pair)| {
                 let (ax, az) = pair[0];
                 let (bx, bz) = pair[1];
-                Vec2::new(bx - ax, bz - az).length() > 1_500.0 && (ri + *si) % 2 == 0
+                Vec2::new(bx - ax, bz - az).length() > 1_200.0 && (ri + *si) % 2 == 0
             })
         })
         .count();
@@ -7482,8 +7506,28 @@ fn spawn_speed_road_network(
     terrain_seed: u64,
 ) {
     let deck_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let road_profiles = speed_road_network_profiles(terrain_seed);
 
     for (ri, route) in mountain_routes().iter().enumerate() {
+        let width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
+        let profile = &road_profiles[ri];
+        for (chunk, points) in profile.windows(2).enumerate() {
+            spawn_speed_road_deck_between(
+                commands,
+                meshes,
+                pal,
+                &deck_mesh,
+                points[0],
+                points[1],
+                width,
+                true,
+                chunk % 3 == 1,
+                seed + ri as u64 * 7_001 + chunk as u64 * 19,
+                terrain_seed,
+                false,
+            );
+        }
+
         for (si, pair) in route.windows(2).enumerate() {
             let (ax, az) = pair[0];
             let (bx, bz) = pair[1];
@@ -7493,49 +7537,17 @@ fn spawn_speed_road_network(
                 continue;
             }
 
-            let chunk_count = speed_road_segment_subdivision_count(segment_len);
-            let width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
-
-            // Grade-limited longitudinal profile for the WHOLE segment: sample
-            // terrain at every chunk boundary, then relax so the road holds an
-            // engineered grade over ridges instead of climbing every bump.
-            // Shared boundary heights also keep chunk seams flush.
-            let mut profile: Vec<f32> = (0..=chunk_count)
-                .map(|i| {
-                    let t = i as f32 / chunk_count as f32;
-                    terrain_surface_y(ax + (bx - ax) * t, az + (bz - az) * t, terrain_seed)
-                        + SPEED_ROAD_CLEARANCE
-                })
-                .collect();
-            grade_limit_profile(&mut profile, segment_len / chunk_count as f32);
-
-            for chunk in 0..chunk_count {
-                let t0 = chunk as f32 / chunk_count as f32;
-                let t1 = (chunk + 1) as f32 / chunk_count as f32;
-                let start = Vec3::new(ax + (bx - ax) * t0, profile[chunk], az + (bz - az) * t0);
-                let end = Vec3::new(ax + (bx - ax) * t1, profile[chunk + 1], az + (bz - az) * t1);
-                spawn_speed_road_deck_between(
-                    commands,
-                    meshes,
-                    pal,
-                    &deck_mesh,
-                    start,
-                    end,
-                    width,
-                    true,
-                    chunk % 3 == 1 || chunk_count <= 2,
-                    seed + ri as u64 * 7_001 + si as u64 * 503 + chunk as u64 * 19,
-                    terrain_seed,
-                    false,
-                );
-            }
-
-            if segment_len > 1_500.0 && (ri + si) % 2 == 0 {
+            if segment_len > 1_200.0 && (ri + si) % 2 == 0 {
                 let t = 0.48 + seeded(seed, ri as u64 * 179 + si as u64 * 23) * 0.10;
                 let x = ax + (bx - ax) * t;
                 let z = az + (bz - az) * t;
-                let center =
-                    speed_road_terrain_point(x, z, terrain_seed, SPEED_ROAD_CLEARANCE + 1.0);
+                let center = Vec3::new(
+                    x,
+                    road_profile_height_at(profile, x, z).unwrap_or_else(|| {
+                        terrain_surface_y(x, z, terrain_seed) + SPEED_ROAD_CLEARANCE + 1.0
+                    }),
+                    z,
+                );
                 spawn_speed_loop_gate(
                     commands,
                     meshes,
@@ -7551,18 +7563,23 @@ fn spawn_speed_road_network(
             // Full vertical loop beside long straights: classic drivable
             // 360°, offset laterally so the straight lane stays clear for
             // NPC traffic. Riders steer into it for the stunt line.
-            if segment_len > 2_200.0 && (ri + si) % 3 == 0 {
+            if segment_len > 1_800.0 && (ri + si) % 2 == 0 {
                 let t = 0.35;
                 let dirv = delta / segment_len;
                 let sidev = Vec2::new(dirv.y, -dirv.x);
                 let loop_w = width * 0.85;
                 let entry = Vec2::new(ax + (bx - ax) * t, az + (bz - az) * t)
                     + sidev * (width * 0.5 + loop_w * 0.62);
-                let base = speed_road_terrain_point(
+                let road_height = road_profile_height_at(profile, entry.x, entry.y)
+                    .unwrap_or(terrain_surface_y(entry.x, entry.y, terrain_seed));
+                let base = Vec3::new(
                     entry.x,
+                    road_height.max(
+                        terrain_surface_y(entry.x, entry.y, terrain_seed)
+                            + SPEED_ROAD_CLEARANCE
+                            + 0.6,
+                    ),
                     entry.y,
-                    terrain_seed,
-                    SPEED_ROAD_CLEARANCE + 0.6,
                 );
                 let dir3 = Vec3::new(dirv.x, 0.0, dirv.y);
                 let radius = 24.0;
@@ -7612,7 +7629,14 @@ fn spawn_speed_road_network(
         seed + 41_000,
         terrain_seed,
     );
-    spawn_hoverboard_trick_ramps(commands, meshes, pal, seed + 52_000, terrain_seed);
+    spawn_hoverboard_trick_ramps(
+        commands,
+        meshes,
+        pal,
+        seed + 52_000,
+        terrain_seed,
+        &road_profiles,
+    );
 
     for (si, settlement) in map_settlements().iter().copied().enumerate() {
         let plaza_radius = settlement_plaza_radius(settlement.kind);
@@ -7642,7 +7666,7 @@ fn spawn_speed_road_network(
         );
     }
 
-    spawn_npc_road_vehicles(commands, meshes, pal, seed + 63_000, terrain_seed);
+    spawn_npc_road_vehicles(commands, meshes, pal, seed + 63_000, &road_profiles);
 }
 
 fn speed_road_terrain_point(x: f32, z: f32, terrain_seed: u64, clearance: f32) -> Vec3 {
@@ -7653,26 +7677,143 @@ fn speed_road_terrain_point(x: f32, z: f32, terrain_seed: u64, clearance: f32) -
 /// mountain roads hold an engineered grade instead of hugging every ridge.
 const SPEED_ROAD_MAX_GRADE: f32 = 0.22;
 
-/// Grade-limit a longitudinal road profile. `heights[i]` starts as
-/// terrain-following deck heights at evenly spaced stations `dx` apart; the
-/// relaxation raises stations near peaks so no span exceeds
-/// [`SPEED_ROAD_MAX_GRADE`]. The result: roads crest ridges on long viaduct
-/// approaches (reactive to the mountain) rather than spiking up every bump —
-/// and consecutive chunks share boundary heights, so deck seams stay flush.
-fn grade_limit_profile(heights: &mut [f32], dx: f32) {
-    if heights.len() < 2 || dx <= f32::EPSILON {
+/// Build one continuous, terrain-safe elevation profile for a complete route.
+///
+/// Solving the whole polyline is important: solving each authored span in
+/// isolation can leave a vertical step at a waypoint.  After the initial
+/// center samples are grade-limited, every deck footprint is sampled across
+/// its full width and lifted above any intervening ridge.  The final grade
+/// pass only raises neighboring stations, so it cannot invalidate clearance.
+fn speed_road_route_profile(
+    route: &[(f32, f32)],
+    width: f32,
+    terrain_seed: u64,
+    clearance: f32,
+) -> Vec<Vec3> {
+    let mut profile = Vec::new();
+    for pair in route.windows(2) {
+        let a = Vec2::new(pair[0].0, pair[0].1);
+        let b = Vec2::new(pair[1].0, pair[1].1);
+        let distance = a.distance(b);
+        if distance <= 4.0 {
+            continue;
+        }
+        let chunks = speed_road_segment_subdivision_count(distance);
+        for chunk in 0..=chunks {
+            if !profile.is_empty() && chunk == 0 {
+                continue;
+            }
+            let xz = a.lerp(b, chunk as f32 / chunks as f32);
+            profile.push(speed_road_terrain_point(
+                xz.x,
+                xz.y,
+                terrain_seed,
+                clearance,
+            ));
+        }
+    }
+
+    grade_limit_road_points(&mut profile);
+
+    // A lift is applied to both endpoints. Later lifts can only raise a
+    // previously checked segment, so a single ordered pass is sufficient.
+    for index in 0..profile.len().saturating_sub(1) {
+        let lift = speed_road_required_terrain_lift(
+            profile[index],
+            profile[index + 1],
+            width,
+            terrain_seed,
+            clearance,
+        );
+        profile[index].y += lift;
+        profile[index + 1].y += lift;
+    }
+    grade_limit_road_points(&mut profile);
+    profile
+}
+
+fn speed_road_network_profiles(terrain_seed: u64) -> Vec<Vec<Vec3>> {
+    let mut profiles: Vec<Vec<Vec3>> = mountain_routes()
+        .iter()
+        .enumerate()
+        .map(|(route_index, route)| {
+            speed_road_route_profile(
+                route,
+                SPEED_ROAD_WIDTH + (route_index % 3) as f32 * 2.4,
+                terrain_seed,
+                SPEED_ROAD_CLEARANCE + 1.0,
+            )
+        })
+        .collect();
+
+    // Authored connector endpoints use the exact same X/Z as their trunk
+    // junction. Share the highest solved elevation at those stations, then
+    // propagate the grade outward. Repeating covers connected chains of roads.
+    for _ in 0..8 {
+        let mut junction_heights: HashMap<(i32, i32), f32> = HashMap::new();
+        for profile in &profiles {
+            for point in profile {
+                let key = (point.x.round() as i32, point.z.round() as i32);
+                junction_heights
+                    .entry(key)
+                    .and_modify(|height| *height = height.max(point.y))
+                    .or_insert(point.y);
+            }
+        }
+        for profile in &mut profiles {
+            for point in profile.iter_mut() {
+                let key = (point.x.round() as i32, point.z.round() as i32);
+                point.y = point.y.max(junction_heights[&key]);
+            }
+            grade_limit_road_points(profile);
+        }
+    }
+    profiles
+}
+
+fn grade_limit_road_points(points: &mut [Vec3]) {
+    if points.len() < 2 {
         return;
     }
-    let max_step = SPEED_ROAD_MAX_GRADE * dx;
-    // Forward+backward passes propagate each peak's influence both ways.
     for _ in 0..2 {
-        for i in 1..heights.len() {
-            heights[i] = heights[i].max(heights[i - 1] - max_step);
+        for i in 1..points.len() {
+            let distance =
+                Vec2::new(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z).length();
+            points[i].y = points[i]
+                .y
+                .max(points[i - 1].y - SPEED_ROAD_MAX_GRADE * distance);
         }
-        for i in (0..heights.len() - 1).rev() {
-            heights[i] = heights[i].max(heights[i + 1] - max_step);
+        for i in (0..points.len() - 1).rev() {
+            let distance =
+                Vec2::new(points[i + 1].x - points[i].x, points[i + 1].z - points[i].z).length();
+            points[i].y = points[i]
+                .y
+                .max(points[i + 1].y - SPEED_ROAD_MAX_GRADE * distance);
         }
     }
+}
+
+fn road_profile_height_at(profile: &[Vec3], x: f32, z: f32) -> Option<f32> {
+    let target = Vec2::new(x, z);
+    profile
+        .windows(2)
+        .filter_map(|points| {
+            let a = Vec2::new(points[0].x, points[0].z);
+            let b = Vec2::new(points[1].x, points[1].z);
+            let delta = b - a;
+            let length_squared = delta.length_squared();
+            if length_squared <= f32::EPSILON {
+                return None;
+            }
+            let t = ((target - a).dot(delta) / length_squared).clamp(0.0, 1.0);
+            let distance_squared = target.distance_squared(a + delta * t);
+            Some((
+                distance_squared,
+                points[0].y + (points[1].y - points[0].y) * t,
+            ))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, height)| height)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7863,19 +8004,21 @@ fn spawn_route_corner_fillets(
         let p0 = b - d1 * setback;
         let p2 = b + d2 * setback;
         let samples = 7usize;
-        let pts: Vec<Vec3> = (0..=samples)
+        let curve: Vec<(f32, f32)> = (0..=samples)
             .map(|i| {
                 let t = i as f32 / samples as f32;
                 // Quadratic Bézier with the waypoint as control point.
                 let q = p0.lerp(b, t).lerp(b.lerp(p2, t), t);
-                // Sit a hair above the straight decks to avoid z-fighting at
-                // the overlap.
-                speed_road_terrain_point(q.x, q.y, terrain_seed, SPEED_ROAD_CLEARANCE)
-                    + Vec3::Y * 0.12
+                (q.x, q.y)
             })
             .collect();
+        // Curves wander outside the straight centerline corridor, so solve
+        // their entire footprint too instead of terrain-hugging only their
+        // endpoints. This prevents a rounded corner from cutting into a peak.
+        let pts =
+            speed_road_route_profile(&curve, width, terrain_seed, SPEED_ROAD_CLEARANCE + 1.12);
         let roll = turn.signum() * 0.15; // bank into the turn
-        for i in 0..samples {
+        for i in 0..pts.len().saturating_sub(1) {
             spawn_banked_deck_segment(
                 commands,
                 pal,
@@ -8055,33 +8198,31 @@ fn spawn_route_sweeper_curves(
                 + outside * (95.0 + turn_strength * 95.0)
                 + (out - into).normalize_or_zero() * 36.0;
             let steps = 7usize;
-            let mut last =
-                speed_road_terrain_point(p0.x, p0.y, terrain_seed, SPEED_ROAD_CLEARANCE + 1.2);
+            let curve: Vec<(f32, f32)> = (0..=steps)
+                .map(|step| {
+                    let point = quadratic_bezier_xz(p0, control, p2, step as f32 / steps as f32);
+                    (point.x, point.y)
+                })
+                .collect();
+            let width = SPEED_ROAD_WIDTH * (1.04 + turn_strength * 0.08);
+            let profile =
+                speed_road_route_profile(&curve, width, terrain_seed, SPEED_ROAD_CLEARANCE + 1.2);
 
-            for step in 1..=steps {
-                let t = step as f32 / steps as f32;
-                let curve = quadratic_bezier_xz(p0, control, p2, t);
-                let next = speed_road_terrain_point(
-                    curve.x,
-                    curve.y,
-                    terrain_seed,
-                    SPEED_ROAD_CLEARANCE + 1.2,
-                );
+            for (step, points) in profile.windows(2).enumerate() {
                 spawn_speed_road_deck_between(
                     commands,
                     meshes,
                     pal,
                     deck_mesh,
-                    last,
-                    next,
-                    SPEED_ROAD_WIDTH * (1.04 + turn_strength * 0.08),
+                    points[0],
+                    points[1],
+                    width,
                     true,
-                    step == 2 || step == steps - 1,
+                    step == 1 || step + 2 == profile.len(),
                     seed + ri as u64 * 1_009 + vi as u64 * 67 + step as u64,
                     terrain_seed,
-                    true,
+                    false,
                 );
-                last = next;
             }
         }
     }
@@ -8105,6 +8246,7 @@ fn spawn_hoverboard_trick_ramps(
     pal: &Palette,
     seed: u64,
     terrain_seed: u64,
+    road_profiles: &[Vec<Vec3>],
 ) {
     let mut spawned = 0usize;
     for (ri, route) in mountain_routes().iter().enumerate() {
@@ -8113,13 +8255,13 @@ fn spawn_hoverboard_trick_ramps(
             let (bx, bz) = pair[1];
             let delta = Vec2::new(bx - ax, bz - az);
             let len = delta.length();
-            if len < 1_250.0 {
+            if len < 900.0 {
                 continue;
             }
             let yaw = delta.x.atan2(delta.y);
             let dir = Vec3::new(delta.x, 0.0, delta.y).normalize_or_zero();
             let right = Vec3::new(dir.z, 0.0, -dir.x).normalize_or_zero();
-            for (slot, t) in [0.32_f32, 0.68].into_iter().enumerate() {
+            for (slot, t) in [0.26_f32, 0.50, 0.74].into_iter().enumerate() {
                 if spawned >= hoverboard_trick_ramp_count() {
                     return;
                 }
@@ -8129,11 +8271,18 @@ fn spawn_hoverboard_trick_ramps(
                 let x = ax + (bx - ax) * t;
                 let z = az + (bz - az) * t;
                 let lane = if slot == 0 { -1.0 } else { 1.0 };
-                let center = speed_road_terrain_point(
-                    x + right.x * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET,
-                    z + right.z * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET,
-                    terrain_seed,
-                    SPEED_ROAD_CLEARANCE + 1.05,
+                let ramp_x = x + right.x * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET;
+                let ramp_z = z + right.z * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET;
+                let center = Vec3::new(
+                    ramp_x,
+                    road_profile_height_at(&road_profiles[ri], ramp_x, ramp_z).unwrap_or_else(
+                        || {
+                            terrain_surface_y(ramp_x, ramp_z, terrain_seed)
+                                + SPEED_ROAD_CLEARANCE
+                                + 1.05
+                        },
+                    ) + 0.55,
+                    ramp_z,
                 );
                 spawn_board_boost_ramp(
                     commands, meshes, pal, center, yaw, dir, 18.0, 54.0, 18.0, 7.2, 2.35,
@@ -8155,7 +8304,7 @@ fn spawn_hoverboard_trick_ramps(
 }
 
 fn hoverboard_trick_ramp_count() -> usize {
-    16
+    28
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8355,7 +8504,7 @@ fn spawn_npc_road_vehicles(
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
     seed: u64,
-    terrain_seed: u64,
+    road_profiles: &[Vec<Vec3>],
 ) {
     let vehicle_mesh = meshes.add(Cuboid::new(8.2, 2.5, 13.2));
     let mut spawned = 0usize;
@@ -8364,7 +8513,7 @@ fn spawn_npc_road_vehicles(
         if route.len() < 2 {
             continue;
         }
-        let path = road_vehicle_route_path(route, terrain_seed);
+        let path = road_vehicle_path_from_profile(&road_profiles[ri]);
         if path.len() < 2 {
             continue;
         }
@@ -8418,64 +8567,22 @@ fn spawn_npc_road_vehicles(
 }
 
 fn road_vehicle_route_path(route: &[(f32, f32)], terrain_seed: u64) -> Vec<Vec3> {
-    let mut path = Vec::new();
-    append_speed_road_path_samples(
-        &mut path,
-        route.iter().copied(),
+    let forward = speed_road_route_profile(
+        route,
+        SPEED_ROAD_WIDTH,
         terrain_seed,
         SPEED_ROAD_CLEARANCE + 2.0,
     );
-    append_speed_road_path_samples(
-        &mut path,
-        route.iter().rev().copied(),
-        terrain_seed,
-        SPEED_ROAD_CLEARANCE + 2.0,
-    );
-    path
+    road_vehicle_path_from_profile(&forward)
 }
 
-fn append_speed_road_path_samples<I>(
-    path: &mut Vec<Vec3>,
-    points: I,
-    terrain_seed: u64,
-    clearance: f32,
-) where
-    I: IntoIterator<Item = (f32, f32)>,
-{
-    let points: Vec<(f32, f32)> = points.into_iter().collect();
-    for pair in points.windows(2) {
-        let (ax, az) = pair[0];
-        let (bx, bz) = pair[1];
-        let delta = Vec2::new(bx - ax, bz - az);
-        let chunk_count = speed_road_segment_subdivision_count(delta.length());
-        for chunk in 0..chunk_count {
-            let t0 = chunk as f32 / chunk_count as f32;
-            let t1 = (chunk + 1) as f32 / chunk_count as f32;
-            let mut start = speed_road_terrain_point(
-                ax + (bx - ax) * t0,
-                az + (bz - az) * t0,
-                terrain_seed,
-                clearance,
-            );
-            let mut end = speed_road_terrain_point(
-                ax + (bx - ax) * t1,
-                az + (bz - az) * t1,
-                terrain_seed,
-                clearance,
-            );
-            let lift = speed_road_required_terrain_lift(
-                start,
-                end,
-                SPEED_ROAD_WIDTH,
-                terrain_seed,
-                clearance,
-            );
-            start.y += lift;
-            end.y += lift;
-            push_speed_road_path_point(path, start);
-            push_speed_road_path_point(path, end);
-        }
+fn road_vehicle_path_from_profile(profile: &[Vec3]) -> Vec<Vec3> {
+    let ride_height = Vec3::Y * 1.8;
+    let mut path: Vec<Vec3> = profile.iter().map(|point| *point + ride_height).collect();
+    for point in profile.iter().rev().map(|point| *point + ride_height) {
+        push_speed_road_path_point(&mut path, point);
     }
+    path
 }
 
 fn push_speed_road_path_point(path: &mut Vec<Vec3>, point: Vec3) {
@@ -15568,8 +15675,35 @@ mod tests {
 
     #[test]
     fn mountain_routes_cover_multiple_passes() {
-        assert!(mountain_routes().len() >= 8);
+        assert!(mountain_routes().len() >= 14);
         assert!(mountain_routes().iter().all(|route| route.len() >= 2));
+    }
+
+    #[test]
+    fn mountain_road_cross_links_create_real_network_loops() {
+        let links = [
+            ROUTE_LINK_AURORA_NORTH,
+            ROUTE_LINK_CORE_SOUTH,
+            ROUTE_LINK_WEST_CROWN,
+            ROUTE_LINK_EAST_SOUTH,
+            ROUTE_LINK_NORTHWEST_AURORA,
+            ROUTE_LINK_OUTER_NORTH,
+        ];
+        assert_eq!(links.len(), 6);
+        for link in links {
+            let start = link[0];
+            let end = link[link.len() - 1];
+            let start_connections = mountain_routes()
+                .iter()
+                .filter(|route| route.contains(&start))
+                .count();
+            let end_connections = mountain_routes()
+                .iter()
+                .filter(|route| route.contains(&end))
+                .count();
+            assert!(start_connections >= 2);
+            assert!(end_connections >= 2);
+        }
     }
 
     #[test]
@@ -15668,6 +15802,49 @@ mod tests {
                     SPEED_ROAD_CLEARANCE + 0.98,
                 );
             }
+        }
+    }
+
+    #[test]
+    fn complete_road_profiles_clear_mountains_and_share_junction_heights() {
+        let terrain_seed = 42;
+        let profiles = speed_road_network_profiles(terrain_seed);
+        assert_eq!(profiles.len(), mountain_routes().len());
+
+        let mut station_heights: HashMap<(i32, i32), Vec<f32>> = HashMap::new();
+        for (route_index, profile) in profiles.iter().enumerate() {
+            let width = SPEED_ROAD_WIDTH + (route_index % 3) as f32 * 2.4;
+            for point in profile {
+                station_heights
+                    .entry((point.x.round() as i32, point.z.round() as i32))
+                    .or_default()
+                    .push(point.y);
+            }
+            for points in profile.windows(2) {
+                assert_speed_road_clearance_samples(
+                    points[0],
+                    points[1],
+                    width,
+                    terrain_seed,
+                    SPEED_ROAD_CLEARANCE + 0.98,
+                );
+                let horizontal =
+                    Vec2::new(points[1].x - points[0].x, points[1].z - points[0].z).length();
+                assert!(
+                    (points[1].y - points[0].y).abs() <= SPEED_ROAD_MAX_GRADE * horizontal + 0.01
+                );
+            }
+        }
+
+        let shared_stations: Vec<&Vec<f32>> = station_heights
+            .values()
+            .filter(|heights| heights.len() > 1)
+            .collect();
+        assert!(shared_stations.len() >= 12);
+        for heights in shared_stations {
+            let low = heights.iter().copied().fold(f32::INFINITY, f32::min);
+            let high = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            assert!(high - low <= 0.01, "road junction must be vertically flush");
         }
     }
 

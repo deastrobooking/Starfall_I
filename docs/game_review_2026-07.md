@@ -27,10 +27,14 @@ ownership where required, text plus color/icon meaning, and TV-safe layouts.
 
 ## Speed-road Findings
 
-`world_plugin.rs` already owns the authored route network; terrain-sampled,
-grade-limited decks; collidable guardrails; boost spans; rounded/banked curves;
-settlement connections; helical ramps; hoverboard jumps; loop gates; selected
-360-degree loop geometry; NPC traffic; and coverage/clearance tests.
+`world_plugin.rs` owns fourteen authored trunks/cross-links, including six
+cross-mountain connectors that create multiple circuits. Continuous full-width
+terrain profiles keep the deck above mountain ridges, synchronize elevations at
+shared junctions, enforce grade limits, and drive the NPC traffic paths.
+Collidable guardrails, boost spans, rounded/banked curves, settlement
+connections, helical ramps, expanded hoverboard jumps and loop gates, selected
+360-degree loop geometry, checkpoints, and terrain/grade/junction tests are in
+place.
 
 Visual loops alone do not provide Sonic-style traversal. The kinematic controller
 needs an explicit road-contact frame, surface normal/gravity policy, adhesion rule,

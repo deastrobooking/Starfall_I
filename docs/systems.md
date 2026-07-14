@@ -111,12 +111,16 @@ charge economy, so the double-jump-off-buildings verb is untouched); losing the
 wall → ledge vault (`vault_boost` up + over); dodge, stick-down on ground, or an
 empty bar → release. Grapple swing/zip suppresses climb starts.
 
-Speed roads (2026-07): mountain-route decks are built from a grade-limited
-longitudinal profile (`SPEED_ROAD_MAX_GRADE = 0.22`, `grade_limit_profile`) —
-sampled at chunk boundaries and relaxed so routes crest ridges on sustained
-viaduct approaches instead of spiking up every bump; shared boundary heights
-keep chunk seams flush. Non-route decks (rings/spurs) keep classic lift; all
-profiled decks absorb ≤2.5 units of intra-chunk bumps.
+Speed roads (2026-07): fourteen mountain trunks and cross-links form multiple
+closed racing circuits instead of isolated spokes. Decks use a continuous
+full-route profile (`speed_road_route_profile`) with stations no farther than
+220 units apart. Each station pair samples the center and both edges of the
+52+ unit road footprint, lifts over intervening terrain, and propagates a
+maximum sustained grade (`SPEED_ROAD_MAX_GRADE = 0.22`) in both directions.
+`speed_road_network_profiles` synchronizes shared junction elevations and
+re-runs grade propagation across the connected graph, keeping intersections
+vertically flush. NPC traffic consumes the same profiles as deck generation.
+Non-route settlement rings and spurs retain their local terrain-lift solver.
 
 Road system v3 (vehicle-grade): decks widened for traffic
 (`SPEED_ROAD_WIDTH = 52`; rings City 46 / Harbor 42 / Village 38 / Outpost 36).
@@ -125,9 +129,11 @@ Road system v3 (vehicle-grade): decks widened for traffic
 network. **Banked corner fillets** (`spawn_route_corner_fillets`): every
 interior route waypoint is rounded with a quadratic-arc of short decks rolled
 0.15 rad into the turn, so corners drive like curves instead of sharp joints.
-**Vertical loops**: long straights (>2200) spawn a drivable 360° loop
+**Vertical loops**: qualifying straights (>1800) spawn a drivable 360° loop
 (radius 24, 22 segments, `spawn_banked_deck_segment` — full yaw/pitch/roll,
 unclamped pitch) offset beside the lane so NPC traffic passes underneath.
+Loop gates qualify on 1200-unit spans, and up to 28 three-position trick-ramp
+candidates are distributed across spans longer than 900 units.
 **Clear corridor**: tree scatter skips anything within road half-width + 10 of
 the network — the props vehicles used to crash into. Buildings are reactive to
 the network: if the road centerline crosses a footprint, `spawn_building` emits

@@ -1,0 +1,37 @@
+{
+  "sex": "Female",
+  "body": {
+    "height": 0.298455,
+    "muscle": 0.2648146,
+    "weight": 0.5784213,
+    "shoulder_width": 0.5395139,
+    "waist_width": 0.30175966,
+    "hip_width": 0.5170568,
+    "limb_length": 0.63723457
+  },
+  "face": {
+    "jaw_width": 0.4637799,
+    "chin_length": 0.34224775,
+    "nose_length": 0.17143416,
+    "nose_width": 0.24535131,
+    "brow_depth": 0.14189586,
+    "cheek_fullness": 0.5543676,
+    "eye_size": 0.41879857,
+    "mouth_width": 0.49537975
+  },
+  "style": {
+    "skin_tone": 0,
+    "eye_color": 5,
+    "hair": "Buzz",
+    "hair_color": 5,
+    "wardrobe": {
+      "top": "Tunic",
+      "bottom": "Pants",
+      "feet": "TallBoots",
+      "hands": "Gauntlets",
+      "armor": "MechaArmor"
+    },
+    "primary_color": 5,
+    "secondary_color": 3
+  }
+}
