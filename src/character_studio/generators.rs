@@ -9,7 +9,10 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use super::spec::{ArmorStyle, BottomStyle, CharacterSpec, FootStyle, HairStyle, HandStyle, Sex, TopStyle, WardrobeSpec};
+use super::spec::{
+    ArmorStyle, BottomStyle, CharacterSpec, FootStyle, HairStyle, HandStyle, Sex, TopStyle,
+    WardrobeSpec,
+};
 
 // ── Patch ─────────────────────────────────────────────────────────────────────
 
@@ -241,15 +244,27 @@ impl PresetGenerator for OutfitGenerator {
             ArmorStyle::None => [
                 (
                     S::Torso,
-                    if w.top == TopStyle::None { C::None } else { C::Cloth },
+                    if w.top == TopStyle::None {
+                        C::None
+                    } else {
+                        C::Cloth
+                    },
                 ),
                 (
                     S::Legs,
-                    if w.bottom == BottomStyle::Underwear { C::None } else { C::Cloth },
+                    if w.bottom == BottomStyle::Underwear {
+                        C::None
+                    } else {
+                        C::Cloth
+                    },
                 ),
                 (
                     S::Feet,
-                    if w.feet == FootStyle::Barefoot { C::None } else { C::Cloth },
+                    if w.feet == FootStyle::Barefoot {
+                        C::None
+                    } else {
+                        C::Cloth
+                    },
                 ),
                 (
                     S::Hands,

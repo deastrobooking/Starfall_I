@@ -12,8 +12,7 @@ use crate::components::inventory::Inventory;
 use crate::components::player::{ParryState, Player, PlayerIndex, PlayerStats};
 use crate::components::world::{NpcRoadVehicle, WorldLoot};
 use crate::damage::{
-    apply_damage, area_damage_falloff, DamageInfo, DamageResistance, DamageType, Damageable,
-    Health,
+    apply_damage, area_damage_falloff, DamageInfo, DamageResistance, DamageType, Damageable, Health,
 };
 use crate::events::*;
 use crate::hacking::{Hackable, HackedUnit};

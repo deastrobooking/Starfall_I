@@ -115,6 +115,22 @@ pub struct BoardBoostPad {
     pub force_hoverboard: bool,
 }
 
+/// Authored traversal guide for a complete vertical speed-road loop. Geometry
+/// remains collidable scenery; this guide supplies the non-world-up adhesion
+/// frame required by the kinematic hoverboard controller.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpeedLoopGuide {
+    pub radius: f32,
+    pub yaw: f32,
+    pub entry_speed: f32,
+    pub lane_half_width: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpeedRoadCheckpoint {
+    pub radius: f32,
+}
+
 /// Civilian or patrol vehicle riding the generated speed-road network.
 #[derive(Component, Debug, Clone)]
 pub struct NpcRoadVehicle {

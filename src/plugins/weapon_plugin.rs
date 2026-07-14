@@ -24,6 +24,11 @@ pub struct HitParticle {
     pub velocity: Vec3,
 }
 
+#[derive(Component)]
+struct SabreBladeVisual {
+    owner: Entity,
+}
+
 // ── Projectile Asset Cache ────────────────────────────────────────────────────
 #[derive(Resource)]
 pub struct ProjectileAssets {
@@ -76,9 +81,11 @@ impl Plugin for WeaponPlugin {
                     weapon_reload_system,
                     charge_spark_system,
                     special_weapon_system,
+                    tracking_missile_system.before(projectile_update_system),
                     projectile_update_system,
                     melee_combo_system,
                     beam_sabre_update_system,
+                    sync_sabre_blade_visual.after(beam_sabre_update_system),
                     hit_particle_spawn_system,
                     particle_update_system,
                 )
@@ -820,7 +827,9 @@ fn special_weapon_system(
     upgrades: Res<UpgradeLedger>,
     mut player_q: Query<
         (
+            Entity,
             &GlobalTransform,
+            &PlayerIndex,
             &mut SpecialWeaponInventory,
             &PlayerInput,
             &PlayerCameraRef,
@@ -834,7 +843,9 @@ fn special_weapon_system(
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
-    for (player_transform, mut inv, pi, cam_ref, armor) in player_q.iter_mut() {
+    for (player_entity, player_transform, player_index, mut inv, pi, cam_ref, armor) in
+        player_q.iter_mut()
+    {
         inv.slot7.cooldown_timer = (inv.slot7.cooldown_timer - dt).max(0.0);
         inv.slot8.cooldown_timer = (inv.slot8.cooldown_timer - dt).max(0.0);
         inv.slot9.cooldown_timer = (inv.slot9.cooldown_timer - dt).max(0.0);
@@ -879,11 +890,12 @@ fn special_weapon_system(
                             is_explosive: true,
                             explosion_radius: 5.0 * upgrades.gauntlet_explosion_radius_mult(),
                             weapon_type: ProjectileOwner::HomingStar,
-                            owner: None,
+                            owner: Some(player_entity),
                             piercing: false,
                             gravity_affected: false,
                             vertical_velocity: 0.0,
                         },
+                        TrackingMissile::new(player_index.0),
                     ));
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
@@ -1062,6 +1074,134 @@ fn special_weapon_system(
             }
             _ => {}
         }
+    }
+}
+
+// ── Tracking Missile ──────────────────────────────────────────────────────────
+fn tracking_missile_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Res<ProjectileAssets>,
+    mut missile_q: Query<
+        (&mut Transform, &mut Projectile, &mut TrackingMissile),
+        With<TrackingMissile>,
+    >,
+    target_q: Query<
+        (Entity, &GlobalTransform, &Health),
+        (With<Enemy>, Without<Projectile>, Without<HackedUnit>),
+    >,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut projectile, mut missile) in missile_q.iter_mut() {
+        missile.reacquire_timer = (missile.reacquire_timer - dt).max(0.0);
+        missile.trail_timer -= dt;
+
+        let target_position = missile.target.and_then(|entity| {
+            target_q
+                .get(entity)
+                .ok()
+                .filter(|(_, _, health)| health.is_alive())
+                .map(|(_, target_transform, _)| target_transform.translation())
+        });
+
+        let target_position = if target_position.is_some() {
+            target_position
+        } else if missile.reacquire_timer <= 0.0 {
+            missile.reacquire_timer = 0.16;
+            let acquired = acquire_tracking_target(
+                transform.translation,
+                projectile.direction,
+                missile.acquisition_range,
+                missile.acquisition_cone_cos,
+                target_q
+                    .iter()
+                    .filter(|(_, _, health)| health.is_alive())
+                    .map(|(entity, target_transform, _)| (entity, target_transform.translation())),
+            );
+            missile.target = acquired.map(|(entity, _)| entity);
+            acquired.map(|(_, position)| position)
+        } else {
+            None
+        };
+
+        if let Some(target_position) = target_position {
+            let desired = (target_position - transform.translation).normalize_or_zero();
+            projectile.direction = steer_toward_direction(
+                projectile.direction,
+                desired,
+                missile.turn_rate_radians * dt,
+            );
+            transform.rotation = Transform::IDENTITY
+                .looking_to(projectile.direction, Vec3::Y)
+                .rotation;
+        }
+
+        if missile.trail_timer <= 0.0 {
+            missile.trail_timer = 0.055;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(assets.sphere_sm.clone()),
+                    material: MeshMaterial3d(assets.mat_homing_star.clone()),
+                    transform: Transform::from_translation(
+                        transform.translation - projectile.direction * 0.55,
+                    )
+                    .with_scale(Vec3::splat(1.35)),
+                    ..default()
+                },
+                HitParticle {
+                    lifetime: 0.24,
+                    max_lifetime: 0.24,
+                    velocity: -projectile.direction * 1.8 + Vec3::Y * 0.35,
+                },
+            ));
+        }
+    }
+}
+
+fn acquire_tracking_target(
+    origin: Vec3,
+    forward: Vec3,
+    range: f32,
+    cone_cos: f32,
+    targets: impl Iterator<Item = (Entity, Vec3)>,
+) -> Option<(Entity, Vec3)> {
+    let aim = forward.normalize_or_zero();
+    targets
+        .filter_map(|(entity, position)| {
+            let offset = position - origin;
+            let distance = offset.length();
+            if distance <= 0.01 || distance > range {
+                return None;
+            }
+            let alignment = aim.dot(offset / distance);
+            if alignment < cone_cos {
+                return None;
+            }
+            // Prefer what the player aimed at, while mildly favoring nearer
+            // threats when two targets overlap in the reticle.
+            let score = alignment * 2.0 - distance / range;
+            Some((entity, position, score))
+        })
+        .max_by(|(_, _, a), (_, _, b)| a.total_cmp(b))
+        .map(|(entity, position, _)| (entity, position))
+}
+
+fn steer_toward_direction(current: Vec3, desired: Vec3, max_radians: f32) -> Vec3 {
+    let current = current.normalize_or_zero();
+    let desired = desired.normalize_or_zero();
+    if current.length_squared() <= 0.01 {
+        return desired;
+    }
+    if desired.length_squared() <= 0.01 {
+        return current;
+    }
+    let angle = current.dot(desired).clamp(-1.0, 1.0).acos();
+    if angle <= max_radians.max(0.0) || angle <= 0.0001 {
+        desired
+    } else {
+        current
+            .lerp(desired, (max_radians / angle).clamp(0.0, 1.0))
+            .normalize_or_zero()
     }
 }
 
@@ -1736,6 +1876,62 @@ fn beam_sabre_update_system(
     }
 }
 
+fn sync_sabre_blade_visual(
+    mut commands: Commands,
+    assets: Res<ProjectileAssets>,
+    player_q: Query<(Entity, &GlobalTransform, &BeamSabre), With<Player>>,
+    mut visual_q: Query<(Entity, &SabreBladeVisual, &mut Transform), Without<Player>>,
+) {
+    let mut represented = Vec::new();
+    for (visual_entity, visual, mut transform) in visual_q.iter_mut() {
+        let Ok((_, player_transform, sabre)) = player_q.get(visual.owner) else {
+            commands.entity(visual_entity).despawn();
+            continue;
+        };
+        if !sabre.active || !sabre.unlocked {
+            commands.entity(visual_entity).despawn();
+            continue;
+        }
+        represented.push(visual.owner);
+        *transform = sabre_blade_transform(player_transform, sabre);
+    }
+
+    for (player_entity, player_transform, sabre) in player_q.iter() {
+        if !sabre.active || !sabre.unlocked || represented.contains(&player_entity) {
+            continue;
+        }
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(assets.sphere_sm.clone()),
+                material: MeshMaterial3d(assets.mat_melee_flash.clone()),
+                transform: sabre_blade_transform(player_transform, sabre),
+                ..default()
+            },
+            SabreBladeVisual {
+                owner: player_entity,
+            },
+        ));
+    }
+}
+
+fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transform {
+    let forward = player.forward().as_vec3().with_y(0.0).normalize_or_zero();
+    let right = player.right().as_vec3().with_y(0.0).normalize_or_zero();
+    let swing = if sabre.is_slashing {
+        if sabre.slash_index.is_multiple_of(2) {
+            0.72
+        } else {
+            -0.72
+        }
+    } else {
+        0.22
+    };
+    let blade_direction = (forward + right * swing + Vec3::Y * 0.12).normalize_or_zero();
+    Transform::from_translation(player.translation() + Vec3::Y * 1.15 + forward * 0.9 + right * 0.5)
+        .looking_to(blade_direction, Vec3::Y)
+        .with_scale(Vec3::new(1.8, 1.8, 18.0))
+}
+
 // ── Hit Particles ─────────────────────────────────────────────────────────────
 fn hit_particle_spawn_system(
     mut commands: Commands,
@@ -1786,5 +1982,51 @@ fn particle_update_system(
         particle.velocity.y -= 18.0 * dt;
         let t = (particle.lifetime / particle.max_lifetime).max(0.05);
         transform.scale = Vec3::splat(t);
+    }
+}
+
+#[cfg(test)]
+mod tracking_missile_tests {
+    use super::*;
+
+    #[test]
+    fn acquisition_prefers_forward_aligned_target() {
+        let mut world = World::new();
+        let centered = world.spawn_empty().id();
+        let offset = world.spawn_empty().id();
+        let acquired = acquire_tracking_target(
+            Vec3::ZERO,
+            Vec3::Z,
+            100.0,
+            0.25,
+            [
+                (offset, Vec3::new(18.0, 0.0, 30.0)),
+                (centered, Vec3::new(0.0, 0.0, 42.0)),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(acquired.map(|(entity, _)| entity), Some(centered));
+    }
+
+    #[test]
+    fn acquisition_rejects_targets_behind_missile() {
+        let mut world = World::new();
+        let behind = world.spawn_empty().id();
+        assert!(acquire_tracking_target(
+            Vec3::ZERO,
+            Vec3::Z,
+            100.0,
+            0.25,
+            [(behind, Vec3::new(0.0, 0.0, -10.0))].into_iter(),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn steering_respects_turn_rate() {
+        let steered = steer_toward_direction(Vec3::Z, Vec3::X, 0.2);
+        assert!(steered.x > 0.0);
+        assert!(steered.z > 0.0);
+        assert!(Vec3::Z.angle_between(steered) <= 0.25);
     }
 }

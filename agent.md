@@ -138,12 +138,12 @@ together.
   `docs/playerengine.md`.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
-- The July 2026 audit is `docs/game_review_2026-07.md`. Menus now have a shared
-  first-pass spatial focus/D-pad/confirm layer; Back, repeat, disabled-item
-  skipping, and per-controller ownership remain. Speed roads already include settlement
-  connections, boosts, ramps, loop gates, and vertical loops, but loop adhesion,
-  camera, and recovery are not production-validated. `Homing Star` currently
-  travels straight; `BeamSabre` gameplay exists but still needs a graphics pass.
+- The July 2026 audit is `docs/game_review_2026-07.md`. Shared menu navigation
+  now includes spatial D-pad/stick focus, repeat, Confirm, Back, and disabled
+  skipping/styles. Speed roads include checkpoints, recovery, and guided
+  hoverboard loop traversal. `Homing Star` now tracks/reacquires hostile targets
+  with per-player SEEK/LOCK HUD feedback. `BeamSabre` has a persistent blade
+  visual; authored animation/audio and hardware polish remain.
 
 ## Agent Rules
 

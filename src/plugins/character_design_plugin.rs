@@ -1003,8 +1003,8 @@ fn spawn_design_ui(
                         ..default()
                     })
                     .with_children(|row| {
-                        spawn_prefab_button(row, "↑", PrefabAction::Export);
-                        spawn_prefab_button(row, "↓", PrefabAction::Import);
+                        spawn_prefab_button(row, "EXPORT", PrefabAction::Export);
+                        spawn_prefab_button(row, "IMPORT", PrefabAction::Import);
                     });
 
                 spawn_section_label(panel, "PALETTE");
@@ -1164,7 +1164,7 @@ fn spawn_design_ui(
                         row.spawn((
                             Button,
                             Node {
-                                width: Val::Px(54.0),
+                                width: Val::Px(112.0),
                                 height: Val::Px(44.0),
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::Center,
@@ -1177,9 +1177,9 @@ fn spawn_design_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("←"),
+                                Text::new("BACK"),
                                 TextFont {
-                                    font_size: FontSize::Px(24.0),
+                                    font_size: FontSize::Px(16.0),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -1189,7 +1189,7 @@ fn spawn_design_ui(
                         row.spawn((
                             Button,
                             Node {
-                                width: Val::Px(54.0),
+                                width: Val::Px(112.0),
                                 height: Val::Px(44.0),
                                 align_items: AlignItems::Center,
                                 justify_content: JustifyContent::Center,
@@ -1202,9 +1202,9 @@ fn spawn_design_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("✓"),
+                                Text::new("CONFIRM"),
                                 TextFont {
-                                    font_size: FontSize::Px(24.0),
+                                    font_size: FontSize::Px(16.0),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -1271,7 +1271,7 @@ fn spawn_prefab_button(parent: &mut ChildSpawnerCommands, label: &str, action: P
         .spawn((
             Button,
             Node {
-                width: Val::Px(44.0),
+                width: Val::Px(100.0),
                 height: Val::Px(36.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -1286,7 +1286,7 @@ fn spawn_prefab_button(parent: &mut ChildSpawnerCommands, label: &str, action: P
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(20.0),
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.78, 0.90, 0.96)),
@@ -1299,7 +1299,7 @@ fn spawn_human_studio_button(parent: &mut ChildSpawnerCommands) {
         .spawn((
             Button,
             Node {
-                width: Val::Px(54.0),
+                width: Val::Px(160.0),
                 height: Val::Px(42.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -1312,9 +1312,9 @@ fn spawn_human_studio_button(parent: &mut ChildSpawnerCommands) {
         ))
         .with_children(|button| {
             button.spawn((
-                Text::new("✦"),
+                Text::new("HUMAN STUDIO"),
                 TextFont {
-                    font_size: FontSize::Px(26.0),
+                    font_size: FontSize::Px(15.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.90, 0.86, 1.0)),

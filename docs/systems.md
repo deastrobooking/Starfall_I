@@ -3,6 +3,11 @@
 For the current implementation audit and next production slices covering menus,
 speed roads, movement, and weapons, see `docs/game_review_2026-07.md`.
 
+July runtime additions: `MenuFocus` supplies shared controller menu navigation;
+`PlatformerMoveState` owns roll/stomp tuning; `SpeedLoopTraversalState` and
+`RoadRecoveryState` own guided loops/checkpoints; `TrackingMissile` owns Homing
+Star target/steering state; and `WeaponVisualProfile` owns primary beam scale.
+
 ## Local Multiplayer
 
 **Resource:** `LocalPlayerConfig` | **Files:** `src/resources.rs`, `src/plugins/input_plugin.rs`, `src/plugins/player_plugin.rs`

@@ -56,9 +56,15 @@ screen-space directional selection, arrow/WASD/D-pad navigation, mouse-hover
 synchronization, shared focus/press styling, and Enter/Space/controller-South
 activation through the existing `Interaction::Pressed` handlers.
 
-Remaining work is disabled-item skipping, held-input repeat, East/Escape Back,
-per-controller focus ownership, locked styling, and hardware testing. The menus
-are navigable by one controller but are not yet controller-complete.
+Player-facing actions use explicit ASCII text labels such as `START GAME`,
+`READY`, `CHARACTER EDITOR`, and `BACK`. Icon-only Unicode glyphs are avoided
+for menu actions because their availability varies with the configured Bevy
+font; button dimensions are sized for the full action names.
+
+Held input now repeats after an initial delay, left stick joins D-pad navigation,
+disabled buttons are skipped and visibly muted, and East/Escape dispatches Back
+according to `AppState` and pause page. Menus currently use party-shared focus;
+independent per-controller cursors and hardware/TV-layout testing remain.
 
 ## 4. Chapter Select — Preparation Panels
 

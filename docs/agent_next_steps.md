@@ -112,11 +112,11 @@ Primary files:
 
 ### N2: Shared Button Navigation And Controller-First Menus
 
-The visible buttons and shared first-pass spatial focus/D-pad/confirm layer exist.
-What remains:
+The visible buttons and shared focus layer now include spatial D-pad/stick input,
+repeat, Confirm, Back, and disabled skipping/styles. What remains:
 
-- Add held-input repeat, standard Back routing, disabled-item skipping, locked
-  styling, and per-controller focus ownership where a screen needs it.
+- Decide whether player select needs independent per-controller cursors or keeps
+  party-shared menu authority, then hardware-test that policy.
 - Apply it to Main Menu, Player Select, Chapter Select, Pause, Game Over/Victory,
   Robot Garage, and Character Design.
 - Preserve mouse input and keep player-select ownership explicit for four controllers.
@@ -237,6 +237,11 @@ Primary files:
 ### N6: Racing Roads And Weapon Presentation
 
 Goal: turn the existing geometry and combat foundations into reliable features.
+
+First runtime slice complete: guided loop adhesion with minimum entry speed,
+route checkpoints/recovery, tracking missile acquisition/steering/reacquisition,
+per-player SEEK/LOCK HUD feedback, larger beam profiles, and persistent Star
+Sabre blade visuals. Remaining production work:
 
 - Prototype loop adhesion on a small test course: road contact frame, local
   gravity/normal, minimum speed, entry/exit handoff, camera, and recovery.

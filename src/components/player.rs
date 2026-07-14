@@ -119,6 +119,63 @@ impl Default for PlayerMovement {
     }
 }
 
+/// Explicit Sonic/Mario-inspired ground/air action state. Keeping these values
+/// out of the main motor avoids hidden one-frame flags and makes tuning/test
+/// behavior inspectable per local player.
+#[derive(Component, Debug, Clone)]
+pub struct PlatformerMoveState {
+    pub was_grounded: bool,
+    pub rolling: bool,
+    pub roll_timer: f32,
+    pub roll_min_speed: f32,
+    pub roll_decel: f32,
+    pub roll_steer: f32,
+    pub stomp_active: bool,
+    pub stomp_speed: f32,
+    pub stomp_bounce_force: f32,
+}
+
+impl Default for PlatformerMoveState {
+    fn default() -> Self {
+        Self {
+            was_grounded: true,
+            rolling: false,
+            roll_timer: 0.0,
+            roll_min_speed: 0.48,
+            roll_decel: 1.15,
+            roll_steer: 0.34,
+            stomp_active: false,
+            stomp_speed: 1.65,
+            stomp_bounce_force: 0.72,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpeedLoopTraversalState {
+    pub guide: Option<Entity>,
+    pub progress: f32,
+    pub speed: f32,
+    pub cooldown: f32,
+}
+
+impl Default for SpeedLoopTraversalState {
+    fn default() -> Self {
+        Self {
+            guide: None,
+            progress: 0.0,
+            speed: 0.0,
+            cooldown: 0.0,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct RoadRecoveryState {
+    pub last_checkpoint: Option<Vec3>,
+    pub cooldown: f32,
+}
+
 // ── Edge Grab / Wall Jump ────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct EdgeGrabState {

@@ -91,7 +91,10 @@ fn lofted_column(
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -138,7 +141,8 @@ fn spread(v: f32, centre: f32, span: f32) -> f32 {
 impl Proportions {
     fn from_patch(patch: &CharacterPatch) -> Self {
         let female = patch.sex == Sex::Female;
-        let h = 1.75 * spread(m(patch, "body_height"), 1.0, 0.09) * if female { 0.945 } else { 1.0 };
+        let h =
+            1.75 * spread(m(patch, "body_height"), 1.0, 0.09) * if female { 0.945 } else { 1.0 };
         let muscle = m(patch, "body_muscle");
         let weight = m(patch, "body_weight");
         let limb = spread(m(patch, "limb_length"), 1.0, 0.07);
@@ -159,9 +163,11 @@ impl Proportions {
             knee_y: 0.285 * h,
             ankle_y: 0.042 * h,
             shoulder_hw: spread(m(patch, "shoulders_wide"), shoulder_base, 0.020) * h * bulk,
-            waist_hw: spread(m(patch, "waist_width"), waist_base, 0.020) * h
+            waist_hw: spread(m(patch, "waist_width"), waist_base, 0.020)
+                * h
                 * (1.0 + (weight - 0.5) * 0.55),
-            hip_hw: spread(m(patch, "hips_wide"), hip_base, 0.018) * h
+            hip_hw: spread(m(patch, "hips_wide"), hip_base, 0.018)
+                * h
                 * (1.0 + (weight - 0.5) * 0.30),
             chest_depth: 0.062 * h * bulk * if female { 0.94 } else { 1.0 },
             limb,
@@ -274,15 +280,31 @@ pub fn spawn_human(
 
     let mut part = |mesh: Mesh, mat: &Handle<StandardMaterial>, transform: Transform| {
         let e = commands
-            .spawn((Mesh3d(meshes.add(mesh)), MeshMaterial3d(mat.clone()), transform))
+            .spawn((
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(mat.clone()),
+                transform,
+            ))
             .id();
         commands.entity(root).add_child(e);
     };
 
-    let mecha = matches!(patch.slots.get(&CharacterSlot::Torso), Some(SlotContent::Mecha));
-    let suit = matches!(patch.slots.get(&CharacterSlot::Torso), Some(SlotContent::Suit));
+    let mecha = matches!(
+        patch.slots.get(&CharacterSlot::Torso),
+        Some(SlotContent::Mecha)
+    );
+    let suit = matches!(
+        patch.slots.get(&CharacterSlot::Torso),
+        Some(SlotContent::Suit)
+    );
     // Skin-tight layers recolor the body segments themselves.
-    let body_mat = if suit { &mats.suit } else if mecha { &mats.secondary } else { &mats.skin };
+    let body_mat = if suit {
+        &mats.suit
+    } else if mecha {
+        &mats.secondary
+    } else {
+        &mats.skin
+    };
 
     // ── Torso ────────────────────────────────────────────────────────────────
     let crotch_y = p.hip_y - 0.035 * p.h;
@@ -343,7 +365,11 @@ pub fn spawn_human(
     // Trapezius wedge: fills the neck→shoulder gap so the silhouette flows.
     part(
         ovoid(
-            Vec3::new(p.shoulder_hw * 0.72, 0.030 * p.h * (1.0 + p.muscle * 0.5), p.chest_depth * 0.70),
+            Vec3::new(
+                p.shoulder_hw * 0.72,
+                0.030 * p.h * (1.0 + p.muscle * 0.5),
+                p.chest_depth * 0.70,
+            ),
             1.1,
         ),
         body_mat,
@@ -357,7 +383,11 @@ pub fn spawn_human(
                     1.0,
                 ),
                 body_mat,
-                Transform::from_xyz(side * p.shoulder_hw * 0.38, p.chest_y, -p.chest_depth * 0.72),
+                Transform::from_xyz(
+                    side * p.shoulder_hw * 0.38,
+                    p.chest_y,
+                    -p.chest_depth * 0.72,
+                ),
             );
         }
     } else {
@@ -530,7 +560,10 @@ pub fn spawn_human(
     let thigh_r = p.limb_radius(0.044);
     let shin_r = p.limb_radius(0.031);
     let leg_x = p.hip_hw * 0.52;
-    let legs_mecha = matches!(patch.slots.get(&CharacterSlot::Legs), Some(SlotContent::Mecha));
+    let legs_mecha = matches!(
+        patch.slots.get(&CharacterSlot::Legs),
+        Some(SlotContent::Mecha)
+    );
     for side in [-1.0f32, 1.0] {
         let x = side * leg_x;
         part(
@@ -579,11 +612,7 @@ pub fn spawn_human(
                 1.25,
             ),
             foot_mat,
-            Transform::from_xyz(
-                x,
-                p.ankle_y * 0.55,
-                -0.028 * p.h * foot_scale,
-            ),
+            Transform::from_xyz(x, p.ankle_y * 0.55, -0.028 * p.h * foot_scale),
         );
         // Boot shafts.
         if armor == ArmorStyle::None {
@@ -666,10 +695,7 @@ fn spawn_hand(
 
     // Palm slab, top edge meeting the wrist.
     part(
-        ovoid(
-            Vec3::new(palm_t * 0.5, palm_len * 0.5, palm_w * 0.5),
-            1.35,
-        ),
+        ovoid(Vec3::new(palm_t * 0.5, palm_len * 0.5, palm_w * 0.5), 1.35),
         mat,
         Transform::from_translation(wrist + Vec3::new(0.0, -palm_len * 0.45, 0.0)),
     );
@@ -694,8 +720,7 @@ fn spawn_hand(
                 10,
             ),
             mat,
-            Transform::from_xyz(wrist.x, knuckle_y - len * 0.5, wrist.z + z)
-                .with_rotation(curl),
+            Transform::from_xyz(wrist.x, knuckle_y - len * 0.5, wrist.z + z).with_rotation(curl),
         );
     }
 
@@ -712,10 +737,8 @@ fn spawn_hand(
             10,
         ),
         mat,
-        Transform::from_translation(
-            wrist + Vec3::new(0.0, -palm_len * 0.42, -palm_w * 0.62),
-        )
-        .with_rotation(Quat::from_rotation_x(0.85) * Quat::from_rotation_z(-side * 0.20)),
+        Transform::from_translation(wrist + Vec3::new(0.0, -palm_len * 0.42, -palm_w * 0.62))
+            .with_rotation(Quat::from_rotation_x(0.85) * Quat::from_rotation_z(-side * 0.20)),
     );
 }
 
@@ -752,9 +775,14 @@ fn spawn_head(
     );
     // Chin cap.
     part(
-        ovoid(Vec3::new(hr * 0.22 * jaw_w.max(0.4), hr * 0.14 * chin, hr * 0.16), 1.0),
+        ovoid(
+            Vec3::new(hr * 0.22 * jaw_w.max(0.4), hr * 0.14 * chin, hr * 0.16),
+            1.0,
+        ),
         &mats.skin,
-        Transform::from_translation(head_c + Vec3::new(0.0, -hr * (0.78 + 0.10 * chin), -hr * 0.42)),
+        Transform::from_translation(
+            head_c + Vec3::new(0.0, -hr * (0.78 + 0.10 * chin), -hr * 0.42),
+        ),
     );
     // Nose — small and soft, retro-RPG style.
     let nose_len = spread(m(patch, "face_nose_long"), 1.0, 0.4);
@@ -784,12 +812,18 @@ fn spawn_head(
     for side in [-1.0f32, 1.0] {
         let eye_pos = head_c + Vec3::new(side * hr * 0.29, hr * 0.05, face_z + hr * 0.05);
         part(
-            ovoid(Vec3::new(hr * 0.145 * eye, hr * 0.115 * eye, hr * 0.055), 1.0),
+            ovoid(
+                Vec3::new(hr * 0.145 * eye, hr * 0.115 * eye, hr * 0.055),
+                1.0,
+            ),
             &mats.eye_white,
             Transform::from_translation(eye_pos),
         );
         part(
-            ovoid(Vec3::new(hr * 0.070 * eye, hr * 0.078 * eye, hr * 0.030), 1.0),
+            ovoid(
+                Vec3::new(hr * 0.070 * eye, hr * 0.078 * eye, hr * 0.030),
+                1.0,
+            ),
             &mats.iris,
             Transform::from_translation(eye_pos + Vec3::new(0.0, 0.0, -hr * 0.038)),
         );

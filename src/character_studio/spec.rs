@@ -345,7 +345,11 @@ impl StyleField {
         }
         match self {
             StyleField::Sex => {
-                spec.sex = if spec.sex == Sex::Male { Sex::Female } else { Sex::Male }
+                spec.sex = if spec.sex == Sex::Male {
+                    Sex::Female
+                } else {
+                    Sex::Male
+                }
             }
             StyleField::SkinTone => spec.style.skin_tone = step_idx(spec.style.skin_tone, 8, dir),
             StyleField::EyeColor => spec.style.eye_color = step_idx(spec.style.eye_color, 6, dir),

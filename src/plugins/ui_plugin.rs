@@ -19,7 +19,8 @@ use crate::components::player::{
     ClimbState, JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats,
 };
 use crate::components::weapon::{
-    BeamSabre, SpecialWeaponInventory, WeaponInventory, WeaponRanks, WeaponType, MAX_WEAPON_RANK,
+    BeamSabre, SpecialWeaponInventory, TrackingMissile, WeaponInventory, WeaponRanks, WeaponType,
+    MAX_WEAPON_RANK,
 };
 use crate::components::world::{BoatVehicle, DiscussionNpc, DungeonCrawlGate, WorldLoot};
 use crate::damage::Health;
@@ -57,6 +58,7 @@ impl Plugin for UiPlugin {
                 (
                     register_menu_buttons,
                     menu_focus_navigation,
+                    menu_back_navigation,
                     menu_focus_style,
                 )
                     .chain()
@@ -279,6 +281,9 @@ struct StartButton;
 #[derive(Component)]
 struct MenuFocusable;
 
+#[derive(Component)]
+pub(crate) struct MenuButtonDisabled;
+
 #[derive(Component, Clone)]
 struct MenuButtonPalette {
     background: BackgroundColor,
@@ -289,6 +294,8 @@ struct MenuButtonPalette {
 struct MenuFocus {
     entity: Option<Entity>,
     state: Option<AppState>,
+    repeat_direction: Option<MenuDirection>,
+    repeat_timer: f32,
 }
 #[derive(Component, Clone, Copy)]
 struct SettingsButton(SettingsAction);
@@ -449,6 +456,7 @@ impl MenuDirection {
 }
 
 fn menu_focus_navigation(
+    time: Res<Time>,
     state: Res<State<AppState>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
@@ -456,7 +464,13 @@ fn menu_focus_navigation(
     mut focus: ResMut<MenuFocus>,
     mut button_set: ParamSet<(
         Query<
-            (Entity, &GlobalTransform, &Interaction, &InheritedVisibility),
+            (
+                Entity,
+                &GlobalTransform,
+                &Interaction,
+                &InheritedVisibility,
+                Option<&MenuButtonDisabled>,
+            ),
             (With<Button>, With<MenuFocusable>),
         >,
         Query<&mut Interaction, (With<Button>, With<MenuFocusable>)>,
@@ -468,7 +482,8 @@ fn menu_focus_navigation(
         focus.entity = None;
     }
 
-    let direction = menu_direction_input(&keyboard, &gamepads, &native);
+    let direction_input = menu_direction_input(&keyboard, &gamepads, &native);
+    let direction = repeated_menu_direction(&mut focus, direction_input, time.delta_secs());
     let confirm = keyboard.just_pressed(KeyCode::Enter)
         || keyboard.just_pressed(KeyCode::NumpadEnter)
         || keyboard.just_pressed(KeyCode::Space)
@@ -479,8 +494,8 @@ fn menu_focus_navigation(
 
     let mut visible = Vec::new();
     let mut hovered = None;
-    for (entity, transform, interaction, inherited_visibility) in button_set.p0().iter() {
-        if !inherited_visibility.get() {
+    for (entity, transform, interaction, inherited_visibility, disabled) in button_set.p0().iter() {
+        if !inherited_visibility.get() || disabled.is_some() {
             continue;
         }
         let translation = transform.translation();
@@ -516,13 +531,31 @@ fn menu_focus_navigation(
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct MenuDirectionInput {
+    just: Option<MenuDirection>,
+    held: Option<MenuDirection>,
+}
+
 fn menu_direction_input(
     keyboard: &ButtonInput<KeyCode>,
     gamepads: &Query<&Gamepad>,
     native: &NativeControllerState,
-) -> Option<MenuDirection> {
+) -> MenuDirectionInput {
     let gamepad_just = |button| gamepads.iter().any(|gamepad| gamepad.just_pressed(button));
-    if keyboard.just_pressed(KeyCode::ArrowUp)
+    let gamepad_pressed = |button| gamepads.iter().any(|gamepad| gamepad.pressed(button));
+    let stick = gamepads
+        .iter()
+        .map(|gamepad| {
+            Vec2::new(
+                gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0),
+                gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0),
+            )
+        })
+        .find(|axis| axis.length_squared() > 0.36)
+        .or_else(|| (native.move_axis.length_squared() > 0.36).then_some(native.move_axis));
+
+    let just = if keyboard.just_pressed(KeyCode::ArrowUp)
         || keyboard.just_pressed(KeyCode::KeyW)
         || gamepad_just(GamepadButton::DPadUp)
         || native.just_pressed(NativeButton::DPadUp)
@@ -548,6 +581,121 @@ fn menu_direction_input(
         Some(MenuDirection::Right)
     } else {
         None
+    };
+
+    let held = if keyboard.pressed(KeyCode::ArrowUp)
+        || keyboard.pressed(KeyCode::KeyW)
+        || gamepad_pressed(GamepadButton::DPadUp)
+        || native.pressed(NativeButton::DPadUp)
+        || stick.is_some_and(|axis| axis.y > 0.6 && axis.y.abs() >= axis.x.abs())
+    {
+        Some(MenuDirection::Up)
+    } else if keyboard.pressed(KeyCode::ArrowDown)
+        || keyboard.pressed(KeyCode::KeyS)
+        || gamepad_pressed(GamepadButton::DPadDown)
+        || native.pressed(NativeButton::DPadDown)
+        || stick.is_some_and(|axis| axis.y < -0.6 && axis.y.abs() >= axis.x.abs())
+    {
+        Some(MenuDirection::Down)
+    } else if keyboard.pressed(KeyCode::ArrowLeft)
+        || keyboard.pressed(KeyCode::KeyA)
+        || gamepad_pressed(GamepadButton::DPadLeft)
+        || native.pressed(NativeButton::DPadLeft)
+        || stick.is_some_and(|axis| axis.x < -0.6 && axis.x.abs() > axis.y.abs())
+    {
+        Some(MenuDirection::Left)
+    } else if keyboard.pressed(KeyCode::ArrowRight)
+        || keyboard.pressed(KeyCode::KeyD)
+        || gamepad_pressed(GamepadButton::DPadRight)
+        || native.pressed(NativeButton::DPadRight)
+        || stick.is_some_and(|axis| axis.x > 0.6 && axis.x.abs() > axis.y.abs())
+    {
+        Some(MenuDirection::Right)
+    } else {
+        None
+    };
+
+    MenuDirectionInput { just, held }
+}
+
+fn repeated_menu_direction(
+    focus: &mut MenuFocus,
+    input: MenuDirectionInput,
+    dt: f32,
+) -> Option<MenuDirection> {
+    const INITIAL_REPEAT_DELAY: f32 = 0.34;
+    const REPEAT_INTERVAL: f32 = 0.11;
+
+    if let Some(direction) = input.just {
+        focus.repeat_direction = Some(direction);
+        focus.repeat_timer = INITIAL_REPEAT_DELAY;
+        return Some(direction);
+    }
+    if input.held != focus.repeat_direction {
+        focus.repeat_direction = input.held;
+        focus.repeat_timer = INITIAL_REPEAT_DELAY;
+        return input.held;
+    }
+    let Some(direction) = input.held else {
+        focus.repeat_direction = None;
+        focus.repeat_timer = 0.0;
+        return None;
+    };
+    focus.repeat_timer -= dt;
+    if focus.repeat_timer <= 0.0 {
+        focus.repeat_timer = REPEAT_INTERVAL;
+        Some(direction)
+    } else {
+        None
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn menu_back_navigation(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    state: Res<State<AppState>>,
+    design_data: Res<CharacterDesignData>,
+    mut pause_menu: ResMut<PauseMenuState>,
+    mut transition: ResMut<PlaySessionTransition>,
+    mut next_state: ResMut<NextState<AppState>>,
+    mut commands: Commands,
+    victory_q: Query<Entity, With<VictoryRoot>>,
+) {
+    let back = keyboard.just_pressed(KeyCode::Escape)
+        || gamepads
+            .iter()
+            .any(|gamepad| gamepad.just_pressed(GamepadButton::East))
+        || native.just_pressed(NativeButton::East);
+    if !back {
+        return;
+    }
+
+    match state.get() {
+        AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
+        AppState::PlayerSelect => next_state.set(AppState::MainMenu),
+        AppState::CharacterDesign => next_state.set(match design_data.return_target {
+            CharacterDesignReturnTarget::PlayerSelect => AppState::PlayerSelect,
+            CharacterDesignReturnTarget::ChapterSelect => AppState::ChapterSelect,
+        }),
+        AppState::ChapterSelect => next_state.set(AppState::PlayerSelect),
+        AppState::RobotGarage => next_state.set(AppState::ChapterSelect),
+        AppState::Paused if pause_menu.page != PausePage::Main => {
+            pause_menu.page = PausePage::Main;
+        }
+        AppState::Paused => {
+            transition.pausing = false;
+            transition.resuming_from_pause = true;
+            next_state.set(AppState::Playing);
+        }
+        AppState::GameOver => next_state.set(AppState::MainMenu),
+        AppState::Victory => {
+            for entity in victory_q.iter() {
+                commands.entity(entity).despawn();
+            }
+            next_state.set(AppState::MainMenu);
+        }
     }
 }
 
@@ -592,14 +740,18 @@ fn menu_focus_style(
             Entity,
             &Interaction,
             &MenuButtonPalette,
+            Option<&MenuButtonDisabled>,
             &mut BackgroundColor,
             &mut BorderColor,
         ),
         (With<Button>, With<MenuFocusable>),
     >,
 ) {
-    for (entity, interaction, palette, mut background, mut border) in buttons.iter_mut() {
-        if *interaction == Interaction::Pressed {
+    for (entity, interaction, palette, disabled, mut background, mut border) in buttons.iter_mut() {
+        if disabled.is_some() {
+            *background = BackgroundColor(Color::srgb(0.07, 0.08, 0.11));
+            *border = BorderColor::all(Color::srgb(0.28, 0.30, 0.36));
+        } else if *interaction == Interaction::Pressed {
             *background = BackgroundColor(Color::srgb(0.98, 0.62, 0.14));
             *border = BorderColor::all(Color::WHITE);
         } else if focus.entity == Some(entity) || *interaction == Interaction::Hovered {
@@ -693,8 +845,8 @@ fn setup_main_menu(mut commands: Commands) {
             p.spawn((
                 Button,
                 Node {
-                    width: Val::Px(86.0),
-                    height: Val::Px(68.0),
+                    width: Val::Px(260.0),
+                    height: Val::Px(62.0),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     border: UiRect::all(Val::Px(2.0)),
@@ -706,9 +858,9 @@ fn setup_main_menu(mut commands: Commands) {
             ))
             .with_children(|btn| {
                 btn.spawn((
-                    Text::new("▶"),
+                    Text::new("START GAME"),
                     TextFont {
-                        font_size: FontSize::Px(36.0),
+                        font_size: FontSize::Px(24.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -787,16 +939,16 @@ fn setup_pause_menu(
             ))
             .with_children(|page| {
                 for (label, action, color) in [
-                    ("▶", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
-                    ("↓", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
-                    ("↩", PauseAction::Title, Color::srgb(0.48, 0.18, 0.18)),
+                    ("RESUME", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
+                    ("SAVE GAME", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
+                    ("MAIN MENU", PauseAction::Title, Color::srgb(0.48, 0.18, 0.18)),
                     (
-                        "?",
+                        "CONTROLS",
                         PauseAction::Controls,
                         Color::srgb(0.22, 0.24, 0.52),
                     ),
-                    ("$", PauseAction::Shop, Color::srgb(0.22, 0.38, 0.44)),
-                    ("⚙", PauseAction::Settings, Color::srgb(0.36, 0.28, 0.52)),
+                    ("SHOP", PauseAction::Shop, Color::srgb(0.22, 0.38, 0.44)),
+                    ("SETTINGS", PauseAction::Settings, Color::srgb(0.36, 0.28, 0.52)),
                 ] {
                     spawn_pause_button(page, label, action, color);
                 }
@@ -842,7 +994,7 @@ fn setup_pause_menu(
                     },
                     TextColor(Color::srgb(0.86, 0.90, 1.0)),
                 ));
-                spawn_pause_button(page, "←", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
 
             root.spawn((
@@ -895,7 +1047,7 @@ fn setup_pause_menu(
                         ));
                     }
                 }
-                spawn_pause_button(page, "←", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
 
             root.spawn((
@@ -964,7 +1116,7 @@ fn setup_pause_menu(
                     spawn_settings_button(row, "SFX +", SettingsAction::SfxUp);
                     spawn_settings_button(row, "RUMBLE", SettingsAction::ToggleRumble);
                 });
-                spawn_pause_button(page, "←", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
+                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
         });
 }
@@ -979,7 +1131,7 @@ fn spawn_pause_button(
         .spawn((
             Button,
             Node {
-                width: Val::Px(68.0),
+                width: Val::Px(220.0),
                 height: Val::Px(48.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -992,7 +1144,7 @@ fn spawn_pause_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(26.0),
+                    font_size: FontSize::Px(18.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -1294,9 +1446,13 @@ fn setup_chapter_select(
                 ..default()
             })
             .with_children(|row| {
-                spawn_chapter_action_button(row, "←", ChapterSelectAction::Back);
-                spawn_chapter_action_button(row, "⚙", ChapterSelectAction::CharacterEditor);
-                spawn_chapter_action_button(row, "▣", ChapterSelectAction::RobotGarage);
+                spawn_chapter_action_button(row, "BACK", ChapterSelectAction::Back);
+                spawn_chapter_action_button(
+                    row,
+                    "CHARACTER EDITOR",
+                    ChapterSelectAction::CharacterEditor,
+                );
+                spawn_chapter_action_button(row, "ROBOT GARAGE", ChapterSelectAction::RobotGarage);
             });
             p.spawn(Node {
                 width: Val::Percent(100.0),
@@ -1588,7 +1744,7 @@ fn spawn_chapter_action_button(
         .spawn((
             Button,
             Node {
-                min_width: Val::Px(52.0),
+                min_width: Val::Px(140.0),
                 height: Val::Px(38.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -1604,7 +1760,7 @@ fn spawn_chapter_action_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(22.0),
+                    font_size: FontSize::Px(15.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -1746,7 +1902,7 @@ fn spawn_fast_travel_map(
                     Color::srgb(0.30, 0.32, 0.40)
                 };
 
-                map.spawn((
+                let mut marker_button = map.spawn((
                     Button,
                     Node {
                         position_type: PositionType::Absolute,
@@ -1767,8 +1923,11 @@ fn spawn_fast_travel_map(
                     BackgroundColor(marker_color),
                     BorderColor::all(border),
                     ChapterFastTravelButton(location.id),
-                ))
-                .with_children(|marker| {
+                ));
+                if !unlocked {
+                    marker_button.insert(MenuButtonDisabled);
+                }
+                marker_button.with_children(|marker| {
                     marker.spawn((
                         Text::new(location.id.0.to_string()),
                         TextFont {
@@ -2584,8 +2743,8 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                 for i in 0..4u8 {
                     row.spawn((
                         Node {
-                            width: Val::Px(210.0),
-                            height: Val::Px(240.0),
+                            width: Val::Px(230.0),
+                            height: Val::Px(300.0),
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::FlexStart,
@@ -2656,17 +2815,17 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                         .with_children(|row| {
                             spawn_player_select_button(
                                 row,
-                                "‹",
+                                "PREVIOUS",
                                 i,
                                 PlayerSelectAction::PreviousCharacter,
-                                40.0,
+                                96.0,
                             );
                             spawn_player_select_button(
                                 row,
-                                "›",
+                                "NEXT",
                                 i,
                                 PlayerSelectAction::NextCharacter,
-                                40.0,
+                                96.0,
                             );
                         });
                         card.spawn(Node {
@@ -2681,32 +2840,32 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                             if i > 0 {
                                 spawn_player_select_button(
                                     row,
-                                    "±",
+                                    "JOIN / LEAVE",
                                     i,
                                     PlayerSelectAction::JoinLeave,
-                                    42.0,
+                                    118.0,
                                 );
                             }
                             spawn_player_select_button(
                                 row,
-                                "✓",
+                                "READY",
                                 i,
                                 PlayerSelectAction::ToggleReady,
-                                42.0,
+                                82.0,
                             );
                             spawn_player_select_button(
                                 row,
-                                "⚙",
+                                "EDIT HERO",
                                 i,
                                 PlayerSelectAction::Customize,
-                                42.0,
+                                98.0,
                             );
                             spawn_player_select_button(
                                 row,
-                                "✦",
+                                "ADVANCED",
                                 i,
                                 PlayerSelectAction::AdvancedDesign,
-                                42.0,
+                                98.0,
                             );
                         });
                     });
@@ -2720,8 +2879,8 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                 ..default()
             })
             .with_children(|row| {
-                spawn_player_select_button(row, "←", 0, PlayerSelectAction::Back, 56.0);
-                spawn_player_select_button(row, "▶", 0, PlayerSelectAction::Begin, 56.0);
+                spawn_player_select_button(row, "BACK", 0, PlayerSelectAction::Back, 120.0);
+                spawn_player_select_button(row, "BEGIN GAME", 0, PlayerSelectAction::Begin, 170.0);
             });
         });
 }
@@ -2762,7 +2921,7 @@ fn spawn_player_select_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(22.0),
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -3519,6 +3678,7 @@ fn hud_update_system(
     >,
     wave: Res<WaveInfo>,
     current: Res<CurrentChapter>,
+    missile_q: Query<&TrackingMissile>,
     mut bar_q: Query<(&mut Node, &PlayerHudBar)>,
     mut text_sets: ParamSet<(
         Query<(&mut Text, &PlayerHudText)>,
@@ -3543,6 +3703,20 @@ fn hud_update_system(
 
         let weapon = weapons.active();
         let sabre_str = if sabre.active { " [SABRE]" } else { "" };
+        let missile_lock = missile_q
+            .iter()
+            .filter(|missile| missile.owner_player == index.0)
+            .any(|missile| missile.target.is_some());
+        let missile_active = missile_q
+            .iter()
+            .any(|missile| missile.owner_player == index.0);
+        let lock_label = if missile_lock {
+            " LOCK"
+        } else if missile_active {
+            " SEEK"
+        } else {
+            ""
+        };
         for (mut text, marker) in text_sets
             .p0()
             .iter_mut()
@@ -3565,8 +3739,12 @@ fn hud_update_system(
                 }
                 PlayerHudTextKind::Ammo => format!("{} / {}", weapon.ammo, weapon.max_ammo),
                 PlayerHudTextKind::SpecialAmmo => format!(
-                    "7:{} 8:{} 9:{} 0:{}",
-                    special.slot7.ammo, special.slot8.ammo, special.slot9.ammo, special.slot0.ammo,
+                    "7:{}{} 8:{} 9:{} 0:{}",
+                    special.slot7.ammo,
+                    lock_label,
+                    special.slot8.ammo,
+                    special.slot9.ammo,
+                    special.slot0.ammo,
                 ),
             });
         }
@@ -4083,7 +4261,7 @@ fn crafting_panel_system(
                 .materials
                 .iter()
                 .all(|m| inventory.has(m.item_id, m.quantity));
-        let status = if can_craft { "✓" } else { "✗" };
+        let status = if can_craft { "READY" } else { "LOCKED" };
         let mat_list: Vec<String> = recipe
             .materials
             .iter()
@@ -4171,7 +4349,7 @@ fn setup_game_over(mut commands: Commands) {
             p.spawn((
                 Button,
                 Node {
-                    width: Val::Px(64.0),
+                    width: Val::Px(180.0),
                     height: Val::Px(52.0),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
@@ -4184,9 +4362,9 @@ fn setup_game_over(mut commands: Commands) {
             ))
             .with_children(|button| {
                 button.spawn((
-                    Text::new("←"),
+                    Text::new("MAIN MENU"),
                     TextFont {
-                        font_size: FontSize::Px(28.0),
+                        font_size: FontSize::Px(18.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -4308,8 +4486,8 @@ fn setup_victory_screen(mut commands: Commands, progress: Res<ChapterProgress>) 
                 ..default()
             })
             .with_children(|row| {
-                spawn_victory_button(row, "←", VictoryAction::MainMenu);
-                spawn_victory_button(row, "+", VictoryAction::NewGamePlus);
+                spawn_victory_button(row, "MAIN MENU", VictoryAction::MainMenu);
+                spawn_victory_button(row, "NEW GAME +", VictoryAction::NewGamePlus);
             });
         });
 }
@@ -4323,7 +4501,7 @@ fn spawn_victory_button(
         .spawn((
             Button,
             Node {
-                width: Val::Px(64.0),
+                width: Val::Px(170.0),
                 height: Val::Px(46.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
@@ -4338,7 +4516,7 @@ fn spawn_victory_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(26.0),
+                    font_size: FontSize::Px(16.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -4806,5 +4984,41 @@ mod menu_navigation_tests {
             directional_menu_focus(buttons[0].0, MenuDirection::Up, &buttons),
             None
         );
+    }
+
+    #[test]
+    fn held_direction_waits_then_repeats() {
+        let mut focus = MenuFocus::default();
+        let held = MenuDirectionInput {
+            just: Some(MenuDirection::Down),
+            held: Some(MenuDirection::Down),
+        };
+        assert_eq!(
+            repeated_menu_direction(&mut focus, held, 0.0),
+            Some(MenuDirection::Down)
+        );
+        let held = MenuDirectionInput {
+            just: None,
+            held: Some(MenuDirection::Down),
+        };
+        assert_eq!(repeated_menu_direction(&mut focus, held, 0.2), None);
+        assert_eq!(
+            repeated_menu_direction(&mut focus, held, 0.2),
+            Some(MenuDirection::Down)
+        );
+    }
+
+    #[test]
+    fn released_direction_clears_repeat_state() {
+        let mut focus = MenuFocus {
+            repeat_direction: Some(MenuDirection::Right),
+            repeat_timer: 0.1,
+            ..default()
+        };
+        assert_eq!(
+            repeated_menu_direction(&mut focus, MenuDirectionInput::default(), 0.2),
+            None
+        );
+        assert_eq!(focus.repeat_direction, None);
     }
 }

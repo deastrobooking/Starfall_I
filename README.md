@@ -28,10 +28,10 @@ Implemented:
 - Castle/dungeon crawl foundation: dragon lair gates now open into single-screen top-down hack-and-slash mode, pulling the party together and switching movement/combat to dungeon-friendly axes.
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
-- Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
-- High-speed road foundation: terrain-aware mountain decks, settlement rings and spurs, collidable guardrails, boost lanes, banked curves, trick ramps, loop gates, selected full vertical loops, and NPC traffic. Full loop adhesion, camera behavior, checkpoint recovery, and multiplayer validation remain production work.
+- Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, variable jump release, apex gravity, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, momentum roll, heavy-input stomp bounce, downhill acceleration, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
+- High-speed road foundation: terrain-aware mountain decks, settlement rings and spurs, collidable guardrails, boost lanes, banked curves, trick ramps, loop gates, selected full vertical loops, NPC traffic, route checkpoints, missed-route recovery, and guided hoverboard adhesion through complete loops. Camera polish and multiplayer hardware validation remain.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
-- RPG combat with six primary star beams, four special energy tools, Star Sabre unlock, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load. The current `Homing Star` projectile does not yet steer; target acquisition and tracking are planned.
+- RPG combat with six larger-profile primary star beams, four special energy tools, Star Sabre unlock and persistent blade visual, melee combos, dungeon-wide melee arcs, armor elements, XP, perks, crafting, chests, hidden reward caches, companion rescue rewards, and save/load. Homing Star now acquires hostile targets, steers with a capped turn rate, reacquires after target loss, leaves an energy trail, and reports SEEK/LOCK per player in the HUD.
 
 In progress:
 
@@ -39,7 +39,7 @@ In progress:
 - Perks are functional and saved, with lightweight clickable chapter-select rows; controller focus navigation is still pending.
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
 - Character design is the single playable-character editor, with GLB-inspired base models, modular silhouette presets, armor layers, and saved per-slot loadouts.
-- Menu actions are rendered as Bevy buttons across the main flow. A shared first-pass focus layer now supplies deterministic initial focus, spatial arrows/WASD/D-pad navigation, mouse-hover synchronization, focused/pressed styling, and Enter/Space/controller-South activation. Standard Back, held-input repeat, disabled-item skipping, and per-controller menu ownership remain.
+- Menu actions are rendered as clearly named Bevy buttons across the main flow; action-critical controls avoid icon-only font glyphs. The shared focus layer supplies deterministic initial focus, spatial arrows/WASD/D-pad/left-stick navigation with held repeat, mouse-hover synchronization, focused/pressed/disabled styling, Enter/Space/controller-South activation, and Escape/controller-East Back routing. Character Studio retains its specialized field navigator.
 
 ## Cast
 
@@ -132,12 +132,12 @@ Keyboard and mouse:
 | `E` near wall while falling/hanging | Hang or climb up |
 | `E` | Interact; trigger nearby slingshots |
 | `G` | Grapple hook wind-up foundation |
-| `Q` | Dodge or drop from hang |
+| `Q` | Dodge or drop from hang; momentum roll while moving fast on ground |
 | `LMB` | Fire active star beam / Star Sabre slash |
 | `RMB` | Aim |
 | `Shift` | Sprint |
 | `R` | Reload active star beam |
-| `V` / `B` | Light / heavy mana combo |
+| `V` / `B` | Light / heavy mana combo; heavy input stomps while airborne |
 | `F` | Parry |
 | `T` | Toggle Star Sabre after unlock |
 | `1-6` | Select primary star beam |
@@ -167,7 +167,7 @@ Controller:
 | Left stick | Analog move |
 | Right stick | Look |
 | South | Jump, wall jump, hold for jetpack; trigger slingshots |
-| East | Dodge / drop |
+| East | Dodge / drop; momentum roll while moving fast on ground |
 | West | Reload active star beam |
 | North | Parry |
 | RT | Fire star beam |
@@ -186,7 +186,7 @@ Controller:
 | Select + D-Pad Right | Sprite Turret |
 | Start | Pause |
 | Guide / L3 + R3 | Toggle Star Sabre |
-| R3 / L3 | Light / heavy combo |
+| R3 / L3 | Light / heavy combo; airborne heavy input stomps |
 
 ## Star Beam Loadout
 

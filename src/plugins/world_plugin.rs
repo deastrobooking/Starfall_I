@@ -7094,6 +7094,16 @@ fn spawn_range_waylines(
     seed: u64,
 ) {
     for (ri, route) in mountain_routes().iter().enumerate() {
+        for (ci, (x, z)) in route.iter().copied().enumerate() {
+            let checkpoint = speed_road_terrain_point(x, z, seed, SPEED_ROAD_CLEARANCE + 2.0);
+            commands.spawn((
+                Transform::from_translation(checkpoint),
+                GlobalTransform::default(),
+                SpeedRoadCheckpoint { radius: 38.0 },
+                WorldGeometry,
+                Name::new(format!("Speed Road Checkpoint {ri}-{ci}")),
+            ));
+        }
         for (si, pair) in route.windows(2).enumerate() {
             let (ax, az) = pair[0];
             let (bx, bz) = pair[1];
@@ -7526,16 +7536,8 @@ fn spawn_speed_road_network(
             for chunk in 0..chunk_count {
                 let t0 = chunk as f32 / chunk_count as f32;
                 let t1 = (chunk + 1) as f32 / chunk_count as f32;
-                let start = Vec3::new(
-                    ax + (bx - ax) * t0,
-                    profile[chunk],
-                    az + (bz - az) * t0,
-                );
-                let end = Vec3::new(
-                    ax + (bx - ax) * t1,
-                    profile[chunk + 1],
-                    az + (bz - az) * t1,
-                );
+                let start = Vec3::new(ax + (bx - ax) * t0, profile[chunk], az + (bz - az) * t0);
+                let end = Vec3::new(ax + (bx - ax) * t1, profile[chunk + 1], az + (bz - az) * t1);
                 spawn_speed_road_deck_between(
                     commands,
                     meshes,
@@ -7592,14 +7594,24 @@ fn spawn_speed_road_network(
                 let mut prev = base;
                 for step in 1..=steps {
                     let phi = step as f32 / steps as f32 * TAU;
-                    let point = base
-                        + dir3 * (radius * phi.sin())
-                        + Vec3::Y * (radius * (1.0 - phi.cos()));
+                    let point =
+                        base + dir3 * (radius * phi.sin()) + Vec3::Y * (radius * (1.0 - phi.cos()));
                     spawn_banked_deck_segment(
                         commands, pal, &deck_mesh, prev, point, loop_w, 0.0, false,
                     );
                     prev = point;
                 }
+                commands.spawn((
+                    Transform::from_translation(base),
+                    GlobalTransform::default(),
+                    SpeedLoopGuide {
+                        radius,
+                        yaw: delta.x.atan2(delta.y),
+                        entry_speed: 0.78,
+                        lane_half_width: loop_w * 0.5,
+                    },
+                    WorldGeometry,
+                ));
             }
         }
 
@@ -7825,9 +7837,8 @@ fn spawn_banked_deck_segment(
     let horizontal_len = Vec2::new(delta.x, delta.z).length().max(0.001);
     let yaw = delta.x.atan2(delta.z);
     let pitch = (delta.y / horizontal_len).atan();
-    let rot = Quat::from_rotation_y(yaw)
-        * Quat::from_rotation_x(-pitch)
-        * Quat::from_rotation_z(roll);
+    let rot =
+        Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch) * Quat::from_rotation_z(roll);
     let center = start + delta * 0.5;
     let deck_thickness = 0.86;
 
@@ -7843,11 +7854,7 @@ fn spawn_banked_deck_segment(
         WorldGeometry,
         WalkableSurface,
         crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
-            width * 0.5,
-            deck_thickness * 0.5,
-            length * 0.52,
-        ),
+        crate::physics::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.52),
         world_space_collider_scale(),
     ));
     if rails {
@@ -7894,7 +7901,14 @@ fn spawn_route_corner_fillets(
         let roll = turn.signum() * 0.15; // bank into the turn
         for i in 0..samples {
             spawn_banked_deck_segment(
-                commands, pal, deck_mesh, pts[i], pts[i + 1], width, roll, true,
+                commands,
+                pal,
+                deck_mesh,
+                pts[i],
+                pts[i + 1],
+                width,
+                roll,
+                true,
             );
         }
     }
@@ -8089,7 +8103,7 @@ fn spawn_route_sweeper_curves(
                     step == 2 || step == steps - 1,
                     seed + ri as u64 * 1_009 + vi as u64 * 67 + step as u64,
                     terrain_seed,
-            true,
+                    true,
                 );
                 last = next;
             }
@@ -14051,11 +14065,7 @@ fn spawn_building(
                 WalkableSurface,
                 Building { zone, height },
                 crate::physics::prelude::RigidBody::Fixed,
-                crate::physics::prelude::Collider::cuboid(
-                    flank_w * 0.5,
-                    height * 0.5,
-                    along * 0.5,
-                ),
+                crate::physics::prelude::Collider::cuboid(flank_w * 0.5, height * 0.5, along * 0.5),
             ));
         }
 

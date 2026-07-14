@@ -20,7 +20,9 @@ use crate::components::enemy::{BossEnemy, DeadEnemy, Enemy, EnemyType, FlyingDro
 use crate::components::inventory::Inventory;
 use crate::components::player::*;
 use crate::components::weapon::*;
-use crate::components::world::{BoatPassenger, WorldAnchor, WorldRouteMarker};
+use crate::components::world::{
+    BoatPassenger, SpeedLoopGuide, SpeedRoadCheckpoint, WorldAnchor, WorldRouteMarker,
+};
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
 use crate::game_loop::{fixed_motor_off, fixed_motor_on, SimConfig};
@@ -120,6 +122,8 @@ impl Plugin for PlayerPlugin {
                     traversal_mode_switch_update,
                     grapple_hook_update,
                     player_movement,
+                    speed_loop_traversal_system,
+                    road_checkpoint_recovery_system,
                     grapple_hook_impact_system,
                     shared_encounter_camera_mode_system,
                     shared_encounter_party_pull_system,
@@ -153,6 +157,8 @@ impl Plugin for PlayerPlugin {
                     traversal_mode_switch_update,
                     grapple_hook_update,
                     player_movement,
+                    speed_loop_traversal_system,
+                    road_checkpoint_recovery_system,
                     grapple_hook_impact_system,
                 )
                     .chain()
@@ -463,6 +469,8 @@ fn spawn_players(
                 jetpack,
                 TraversalModeState::default(),
                 BoardBoostState::default(),
+                PlatformerMoveState::default(),
+                SpeedLoopTraversalState::default(),
                 GrappleHookState::default(),
                 EdgeGrabState::new(),
                 ClimbState::default(),
@@ -473,6 +481,7 @@ fn spawn_players(
                 Damageable::default(),
             ))
             .insert((
+                RoadRecoveryState::default(),
                 ArmorSet::default(),
                 Inventory::default(),
                 weapon_inventory,
@@ -1299,7 +1308,7 @@ fn player_movement(
             &mut JetpackState,
             &mut GrappleHookState,
             &TraversalModeState,
-            &mut BoardBoostState,
+            (&mut BoardBoostState, &mut PlatformerMoveState),
             &mut EdgeGrabState,
             &mut ClimbState,
             &mut DodgeState,
@@ -1320,7 +1329,7 @@ fn player_movement(
         mut jetpack,
         mut grapple,
         traversal,
-        mut board_boost,
+        (mut board_boost, mut platformer),
         mut edge_grab,
         mut climb,
         dodge,
@@ -1343,6 +1352,7 @@ fn player_movement(
             grapple.begin_recovery();
             edge_grab.is_hanging = false;
             climb.is_climbing = false;
+            *platformer = PlatformerMoveState::default();
             if sim.fixed_motor {
                 movement.motor_accum += Vec3::ZERO;
             } else {
@@ -1367,6 +1377,9 @@ fn player_movement(
         }
 
         movement.is_grounded = output.grounded;
+        let landed_stomp =
+            movement.is_grounded && !platformer.was_grounded && platformer.stomp_active;
+        platformer.roll_timer = (platformer.roll_timer - dt).max(0.0);
         edge_grab.cooldown_timer = (edge_grab.cooldown_timer - dt).max(0.0);
         edge_grab.wall_contact_timer = (edge_grab.wall_contact_timer - dt).max(0.0);
 
@@ -1382,6 +1395,13 @@ fn player_movement(
             edge_grab.hang_timer = 0.0;
             edge_grab.wall_clasp_timer = 0.0;
             edge_grab.wall_contact_timer = 0.0;
+            if landed_stomp {
+                movement.velocity.y = platformer.stomp_bounce_force;
+                movement.is_grounded = false;
+                movement.coyote_timer = 0.0;
+                platformer.stomp_active = false;
+                state.force(PlayerState::Jetpack);
+            }
         } else {
             movement.coyote_timer = (movement.coyote_timer - dt).max(0.0);
         }
@@ -1454,6 +1474,36 @@ fn player_movement(
 
         if sprinting {
             stats.stamina = (stats.stamina - 15.0 * dt).max(0.0);
+        }
+
+        if movement.is_grounded
+            && pi.dodge
+            && movement.ground_velocity.length() >= platformer.roll_min_speed
+        {
+            platformer.rolling = true;
+            platformer.roll_timer = 0.72;
+        }
+        if platformer.rolling
+            && (platformer.roll_timer <= 0.0
+                || movement.ground_velocity.length() < platformer.roll_min_speed * 0.55)
+        {
+            platformer.rolling = false;
+        }
+
+        if !movement.is_grounded && pi.melee_heavy && !platformer.stomp_active {
+            platformer.stomp_active = true;
+            movement.velocity.y = -platformer.stomp_speed;
+            jetpack.is_active = false;
+            jetpack.mode = FlightMode::Slam;
+            state.force(PlayerState::Jetpack);
+        }
+
+        if movement.is_grounded && (sprinting || traversal.active == TraversalMode::Hoverboard) {
+            if let Some(ground_normal) = ground_normal_from_controller_output(output) {
+                let downhill = downhill_direction(ground_normal);
+                let slope = (1.0 - ground_normal.y.clamp(0.0, 1.0)).max(0.0);
+                movement.ground_velocity += downhill * slope * dt * 2.4;
+            }
         }
 
         if let Some(normal) = wall_normal_from_controller_output(output) {
@@ -1762,6 +1812,11 @@ fn player_movement(
         }
 
         let mut target_h_vel = input * speed * input_strength;
+        if platformer.rolling {
+            let roll_direction = movement.ground_velocity.normalize_or_zero();
+            let steered = (roll_direction + input * platformer.roll_steer).normalize_or_zero();
+            target_h_vel = steered * movement.ground_velocity.length();
+        }
         if traversal.active == TraversalMode::Hoverboard
             && movement.is_grounded
             && input_strength > 0.05
@@ -1787,7 +1842,11 @@ fn player_movement(
                     movement.ground_accel
                 }
             } else {
-                movement.ground_decel
+                if platformer.rolling {
+                    platformer.roll_decel
+                } else {
+                    movement.ground_decel
+                }
             };
             movement.ground_velocity =
                 approach_vec3(movement.ground_velocity, target_h_vel, accel * dt);
@@ -1848,6 +1907,136 @@ fn player_movement(
                 state.transition(PlayerState::Idle);
             }
         }
+        platformer.was_grounded = movement.is_grounded;
+    }
+}
+
+fn speed_loop_traversal_system(
+    time: Res<Time>,
+    mut player_q: Query<
+        (
+            &mut Transform,
+            &mut KinematicCharacterController,
+            &mut PlayerMovement,
+            &TraversalModeState,
+            &mut SpeedLoopTraversalState,
+        ),
+        With<Player>,
+    >,
+    guide_q: Query<(Entity, &Transform, &SpeedLoopGuide), Without<Player>>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut controller, mut movement, traversal, mut loop_state) in
+        player_q.iter_mut()
+    {
+        loop_state.cooldown = (loop_state.cooldown - dt).max(0.0);
+
+        if loop_state.guide.is_none()
+            && loop_state.cooldown <= 0.0
+            && traversal.active == TraversalMode::Hoverboard
+        {
+            let speed = movement.ground_velocity.length();
+            for (guide_entity, guide_transform, guide) in guide_q.iter() {
+                if speed < guide.entry_speed {
+                    continue;
+                }
+                let forward = Quat::from_rotation_y(guide.yaw) * Vec3::Z;
+                let right = Vec3::new(forward.z, 0.0, -forward.x);
+                let offset = transform.translation - guide_transform.translation;
+                if offset.dot(right).abs() <= guide.lane_half_width
+                    && offset.dot(forward).abs() <= 9.0
+                    && offset.y.abs() <= 4.5
+                    && movement.ground_velocity.normalize_or_zero().dot(forward) > 0.45
+                {
+                    loop_state.guide = Some(guide_entity);
+                    loop_state.progress = 0.0;
+                    loop_state.speed = speed.max(guide.entry_speed);
+                    break;
+                }
+            }
+        }
+
+        let Some(guide_entity) = loop_state.guide else {
+            continue;
+        };
+        let Ok((_, guide_transform, guide)) = guide_q.get(guide_entity) else {
+            loop_state.guide = None;
+            loop_state.cooldown = 0.4;
+            continue;
+        };
+
+        let forward = Quat::from_rotation_y(guide.yaw) * Vec3::Z;
+        loop_state.progress += loop_state.speed * 60.0 / guide.radius.max(1.0) * dt;
+        let phi = loop_state.progress.min(std::f32::consts::TAU);
+        let center = guide_transform.translation;
+        let target = speed_loop_position(center, forward, guide.radius, phi);
+        transform.translation = target;
+        controller.translation = Some(Vec3::ZERO);
+        movement.motor_accum = Vec3::ZERO;
+        movement.velocity = Vec3::ZERO;
+        movement.is_grounded = false;
+
+        if loop_state.progress >= std::f32::consts::TAU {
+            transform.translation = center + forward * 5.0 + Vec3::Y * 1.25;
+            movement.ground_velocity = forward * loop_state.speed;
+            movement.velocity.y = 0.06;
+            loop_state.guide = None;
+            loop_state.cooldown = 0.65;
+        }
+    }
+}
+
+fn speed_loop_position(center: Vec3, forward: Vec3, radius: f32, phi: f32) -> Vec3 {
+    center
+        + forward.normalize_or_zero() * (radius * phi.sin())
+        + Vec3::Y * (radius * (1.0 - phi.cos()) + 1.25)
+}
+
+fn road_checkpoint_recovery_system(
+    time: Res<Time>,
+    checkpoint_q: Query<(&Transform, &SpeedRoadCheckpoint), Without<Player>>,
+    mut player_q: Query<
+        (
+            &mut Transform,
+            &mut PlayerMovement,
+            &TraversalModeState,
+            &SpeedLoopTraversalState,
+            &mut RoadRecoveryState,
+        ),
+        With<Player>,
+    >,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut movement, traversal, loop_state, mut recovery) in player_q.iter_mut() {
+        recovery.cooldown = (recovery.cooldown - dt).max(0.0);
+        if traversal.active != TraversalMode::Hoverboard || loop_state.guide.is_some() {
+            continue;
+        }
+
+        for (checkpoint_transform, checkpoint) in checkpoint_q.iter() {
+            if transform
+                .translation
+                .distance(checkpoint_transform.translation)
+                <= checkpoint.radius
+            {
+                recovery.last_checkpoint = Some(checkpoint_transform.translation);
+                break;
+            }
+        }
+
+        let Some(checkpoint) = recovery.last_checkpoint else {
+            continue;
+        };
+        let fell_below_route = transform.translation.y < checkpoint.y - 85.0;
+        let lost_from_route =
+            transform.translation.distance(checkpoint) > 780.0 && movement.velocity.y < -0.8;
+        if recovery.cooldown <= 0.0 && (fell_below_route || lost_from_route) {
+            transform.translation = checkpoint + Vec3::Y * 2.0;
+            movement.velocity = Vec3::ZERO;
+            movement.ground_velocity *= 0.35;
+            movement.motor_accum = Vec3::ZERO;
+            recovery.cooldown = 1.0;
+        }
     }
 }
 
@@ -1876,6 +2065,24 @@ fn wall_normal_from_controller_output(output: &KinematicCharacterControllerOutpu
     }
 
     best.map(|(normal, _)| normal)
+}
+
+fn ground_normal_from_controller_output(
+    output: &KinematicCharacterControllerOutput,
+) -> Option<Vec3> {
+    output
+        .collisions
+        .iter()
+        .filter_map(|collision| collision.hit.details.map(|details| details.normal2))
+        .filter(|normal| normal.y > 0.45)
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .map(Vec3::normalize_or_zero)
+}
+
+fn downhill_direction(ground_normal: Vec3) -> Vec3 {
+    let normal = ground_normal.normalize_or_zero();
+    let gravity_on_plane = Vec3::NEG_Y - normal * Vec3::NEG_Y.dot(normal);
+    gravity_on_plane.with_y(0.0).normalize_or_zero()
 }
 
 fn approach_vec3(current: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
@@ -2682,5 +2889,32 @@ mod tests {
             grapple_mode_for_target(GrappleTargetKind::EnemyPull, 18.0, Vec3::NEG_Z),
             GrappleHookMode::Zipping
         );
+    }
+
+    #[test]
+    fn downhill_direction_follows_slope_not_world_axis() {
+        let normal = Vec3::new(0.4, 0.9, 0.0).normalize();
+        let downhill = downhill_direction(normal);
+        assert!(downhill.x > 0.9);
+        assert!(downhill.y.abs() < 0.001);
+    }
+
+    #[test]
+    fn platformer_state_has_readable_roll_and_stomp_tuning() {
+        let state = PlatformerMoveState::default();
+        assert!(state.roll_min_speed > 0.0);
+        assert!(state.roll_decel < PlayerMovement::default().ground_decel);
+        assert!(state.stomp_speed > PlayerMovement::default().jump_force);
+        assert!(state.stomp_bounce_force >= PlayerMovement::default().jump_force);
+    }
+
+    #[test]
+    fn speed_loop_path_returns_to_entry_after_full_turn() {
+        let center = Vec3::new(4.0, 8.0, 12.0);
+        let entry = speed_loop_position(center, Vec3::Z, 24.0, 0.0);
+        let top = speed_loop_position(center, Vec3::Z, 24.0, std::f32::consts::PI);
+        let exit = speed_loop_position(center, Vec3::Z, 24.0, std::f32::consts::TAU);
+        assert!(entry.distance(exit) < 0.001);
+        assert!((top.y - entry.y - 48.0).abs() < 0.001);
     }
 }

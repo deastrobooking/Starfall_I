@@ -206,13 +206,38 @@ impl Weapon {
 
     // Visual stretch factor along travel direction for the projectile mesh.
     pub fn proj_stretch(&self) -> Vec3 {
-        match self.weapon_type {
-            WeaponType::Rifle => Vec3::new(0.6, 0.6, 4.0), // long needle
-            WeaponType::Laser => Vec3::new(0.5, 0.5, 5.5), // thin beam rod
-            WeaponType::Pistol => Vec3::new(0.9, 0.9, 2.2), // slight ovoid
-            WeaponType::Shotgun => Vec3::new(1.0, 1.0, 1.6),
-            WeaponType::Rocket => Vec3::splat(1.0), // round orb
-            WeaponType::Grenade => Vec3::splat(1.0),
+        self.visual_profile().projectile_scale
+    }
+
+    pub fn visual_profile(&self) -> WeaponVisualProfile {
+        WeaponVisualProfile::for_type(self.weapon_type)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WeaponVisualProfile {
+    pub projectile_scale: Vec3,
+    pub muzzle_scale: f32,
+    pub impact_scale: f32,
+}
+
+impl WeaponVisualProfile {
+    pub const fn for_type(weapon_type: WeaponType) -> Self {
+        match weapon_type {
+            WeaponType::Pistol => Self::new(Vec3::new(1.15, 1.15, 3.0), 1.0, 1.0),
+            WeaponType::Rifle => Self::new(Vec3::new(0.9, 0.9, 6.2), 1.15, 1.1),
+            WeaponType::Shotgun => Self::new(Vec3::new(1.25, 1.25, 2.2), 1.3, 1.15),
+            WeaponType::Rocket => Self::new(Vec3::splat(1.5), 1.45, 1.8),
+            WeaponType::Laser => Self::new(Vec3::new(0.75, 0.75, 8.5), 1.2, 1.2),
+            WeaponType::Grenade => Self::new(Vec3::splat(1.35), 1.25, 1.6),
+        }
+    }
+
+    const fn new(projectile_scale: Vec3, muzzle_scale: f32, impact_scale: f32) -> Self {
+        Self {
+            projectile_scale,
+            muzzle_scale,
+            impact_scale,
         }
     }
 }
@@ -465,6 +490,34 @@ pub struct Projectile {
     /// For grenade arc
     pub gravity_affected: bool,
     pub vertical_velocity: f32,
+}
+
+/// Steering state for the Nova tracking missile (`Homing Star` in the current
+/// loadout). Kept separate from `Projectile` so ordinary beams pay no targeting
+/// query or state cost.
+#[derive(Component, Debug, Clone)]
+pub struct TrackingMissile {
+    pub owner_player: u8,
+    pub target: Option<Entity>,
+    pub acquisition_range: f32,
+    pub acquisition_cone_cos: f32,
+    pub turn_rate_radians: f32,
+    pub reacquire_timer: f32,
+    pub trail_timer: f32,
+}
+
+impl TrackingMissile {
+    pub fn new(owner_player: u8) -> Self {
+        Self {
+            owner_player,
+            target: None,
+            acquisition_range: 96.0,
+            acquisition_cone_cos: 0.28,
+            turn_rate_radians: 4.6,
+            reacquire_timer: 0.0,
+            trail_timer: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
