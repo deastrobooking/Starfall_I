@@ -13,7 +13,7 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::chapters::{
     chapter_map_locations, map_settlements, MapSettlement, MapSettlementKind, SecretCaveLocation,
@@ -4830,8 +4830,11 @@ fn spawn_dungeon_turrets(
 // ── Terrain ───────────────────────────────────────────────────────────────────
 
 const TERRAIN_WORLD_SIZE: f32 = EVEREST_RANGE_WORLD_SIZE;
+const TERRAIN_MESH_RESOLUTION: usize = 320;
+const TERRAIN_MESH_CELL_SIZE: f32 = TERRAIN_WORLD_SIZE / TERRAIN_MESH_RESOLUTION as f32;
 const EVEREST_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/everest.png");
 static EVEREST_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
+static TERRAIN_MESH_HEIGHT_GRIDS: OnceLock<Mutex<HashMap<u64, Arc<Vec<f32>>>>> = OnceLock::new();
 
 const ROUTE_CORE_AURORA: &[(f32, f32)] = &[
     (22.0, 28.0),
@@ -5156,6 +5159,7 @@ fn mountain_route_influence(x: f32, z: f32) -> f32 {
 struct RouteProjection {
     point: Vec2,
     distance: f32,
+    tangent: Vec2,
 }
 
 fn nearest_mountain_route_point(x: f32, z: f32) -> Option<RouteProjection> {
@@ -5166,7 +5170,11 @@ fn nearest_mountain_route_point(x: f32, z: f32) -> Option<RouteProjection> {
             let (bx, bz) = pair[1];
             let (point, distance) = project_point_to_segment_xz(x, z, ax, az, bx, bz);
             if best.is_none_or(|projection| distance < projection.distance) {
-                best = Some(RouteProjection { point, distance });
+                best = Some(RouteProjection {
+                    point,
+                    distance,
+                    tangent: Vec2::new(bx - ax, bz - az).normalize_or_zero(),
+                });
             }
         }
     }
@@ -5181,12 +5189,16 @@ fn distance_to_mountain_route_network(x: f32, z: f32) -> f32 {
 
 // Shorter stations let the elevation solver see narrow ridges before a deck
 // reaches them.  This is also the maximum collider/deck seam spacing.
-const SPEED_ROAD_CHUNK_LEN: f32 = 220.0;
-const SPEED_ROAD_CLEARANCE: f32 = 4.6;
+const SPEED_ROAD_CHUNK_LEN: f32 = 48.0;
+// The deck normally rides close to terrain. The profile solver raises it only
+// where mountain clearance or the grade limit requires a viaduct.
+const SPEED_ROAD_CLEARANCE: f32 = 0.75;
+const SPEED_ROAD_TERRAIN_ENVELOPE: f32 = 0.65;
 // Sized for vehicles: two NPC cars + a player vehicle pass comfortably.
 const SPEED_ROAD_WIDTH: f32 = 52.0;
-const SPEED_ROAD_TERRAIN_SAMPLE_SPACING: f32 = 90.0;
-const SPEED_ROAD_EDGE_SAMPLE_FRACTION: f32 = 0.42;
+// Less than half a terrain cell, so every triangle crossed by a road receives
+// at least two longitudinal checks.
+const SPEED_ROAD_TERRAIN_SAMPLE_SPACING: f32 = 2.0;
 const SPEED_ROAD_TRAFFIC_LANE_OFFSET: f32 = 9.5;
 const SPEED_ROAD_PATROL_VEHICLE_COUNT: usize = 18;
 
@@ -5211,18 +5223,22 @@ fn speed_road_required_terrain_lift(
     let right = Vec2::new(dir.y, -dir.x);
     let samples = (horizontal_len / SPEED_ROAD_TERRAIN_SAMPLE_SPACING)
         .ceil()
-        .clamp(1.0, 16.0) as usize;
-    let edge_offset = width * SPEED_ROAD_EDGE_SAMPLE_FRACTION;
+        .clamp(1.0, 512.0) as usize;
     let mut needed_lift: f32 = 0.0;
 
     for i in 0..=samples {
         let t = i as f32 / samples as f32;
         let center = Vec2::new(start.x + delta_xz.x * t, start.z + delta_xz.y * t);
         let road_y = start.y + (end.y - start.y) * t;
-        for offset in [0.0_f32, -edge_offset, edge_offset] {
+        for lateral_step in 0..=12 {
+            let offset = -width * 0.5 + width * lateral_step as f32 / 12.0;
             let sample = center + right * offset;
-            needed_lift = needed_lift
-                .max(terrain_surface_y(sample.x, sample.y, terrain_seed) + clearance - road_y);
+            needed_lift = needed_lift.max(
+                terrain_surface_y(sample.x, sample.y, terrain_seed)
+                    + clearance
+                    + SPEED_ROAD_TERRAIN_ENVELOPE
+                    - road_y,
+            );
         }
     }
 
@@ -5262,6 +5278,27 @@ fn settlement_speed_ring_radius(seed: u64, settlement: MapSettlement) -> f32 {
 fn distance_to_speed_road_network(x: f32, z: f32, seed: u64) -> f32 {
     let mut best = distance_to_mountain_route_network(x, z);
     let point = Vec2::new(x, z);
+
+    // Ground-access ramps extend beyond route endpoints. Include their
+    // approach corridors in prop/building avoidance so the ramp mouths stay
+    // driveable instead of being filled with trees.
+    for route in mountain_routes() {
+        if route.len() < 2 {
+            continue;
+        }
+        for (endpoint, neighbor) in [
+            (route[0], route[1]),
+            (route[route.len() - 1], route[route.len() - 2]),
+        ] {
+            let end = Vec2::new(endpoint.0, endpoint.1);
+            let inward = Vec2::new(neighbor.0, neighbor.1) - end;
+            if inward.length_squared() <= 0.01 {
+                continue;
+            }
+            let outer = end - inward.normalize() * 420.0;
+            best = best.min(distance_to_segment_xz(x, z, outer.x, outer.y, end.x, end.y));
+        }
+    }
 
     for settlement in map_settlements().iter().copied() {
         let center = Vec2::new(settlement.x, settlement.z);
@@ -5447,7 +5484,88 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
 }
 
 fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
-    terrain_height(x, z, seed)
+    // Gameplay must query the same piecewise-planar surface used by the
+    // rendered trimesh collider. Sampling the analytic height function here
+    // can disagree by dozens of units on sharp ridges because the terrain mesh
+    // only has one vertex every 62.5 world units.
+    let grid_x = ((x + TERRAIN_WORLD_SIZE * 0.5) / TERRAIN_MESH_CELL_SIZE)
+        .clamp(0.0, TERRAIN_MESH_RESOLUTION as f32);
+    let grid_z = ((z + TERRAIN_WORLD_SIZE * 0.5) / TERRAIN_MESH_CELL_SIZE)
+        .clamp(0.0, TERRAIN_MESH_RESOLUTION as f32);
+    let cell_x = grid_x.floor().min((TERRAIN_MESH_RESOLUTION - 1) as f32);
+    let cell_z = grid_z.floor().min((TERRAIN_MESH_RESOLUTION - 1) as f32);
+    let tx = grid_x - cell_x;
+    let tz = grid_z - cell_z;
+    let stride = TERRAIN_MESH_RESOLUTION + 1;
+    let ix = cell_x as usize;
+    let iz = cell_z as usize;
+    let heights = terrain_mesh_height_grid(seed);
+    let h00 = heights[iz * stride + ix];
+    let h10 = heights[iz * stride + ix + 1];
+    let h01 = heights[(iz + 1) * stride + ix];
+    let h11 = heights[(iz + 1) * stride + ix + 1];
+
+    if tx + tz <= 1.0 {
+        h00 + (h10 - h00) * tx + (h01 - h00) * tz
+    } else {
+        h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz)
+    }
+}
+
+fn terrain_mesh_height_grid(seed: u64) -> Arc<Vec<f32>> {
+    let cache = TERRAIN_MESH_HEIGHT_GRIDS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(heights) = cache
+        .lock()
+        .expect("terrain height cache poisoned")
+        .get(&seed)
+    {
+        return Arc::clone(heights);
+    }
+
+    let stride = TERRAIN_MESH_RESOLUTION + 1;
+    let mut heights = Vec::with_capacity(stride * stride);
+    for zi in 0..=TERRAIN_MESH_RESOLUTION {
+        for xi in 0..=TERRAIN_MESH_RESOLUTION {
+            let x = xi as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+            let z = zi as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+            heights.push(terrain_mesh_vertex_height(x, z, seed));
+        }
+    }
+    let heights = Arc::new(heights);
+    let mut cache = cache.lock().expect("terrain height cache poisoned");
+    Arc::clone(cache.entry(seed).or_insert_with(|| Arc::clone(&heights)))
+}
+
+/// Cut a broad, blended shelf into the mountain mesh beneath authored roads.
+/// Without this cross-slope terrace, a 52-unit-wide unbanked deck must float
+/// above whichever edge of a steep mountain is highest. The shelf lets the
+/// road genuinely follow and climb the mountain while leaving cliffs intact
+/// outside the travel corridor.
+fn terrain_mesh_vertex_height(x: f32, z: f32, seed: u64) -> f32 {
+    let height = terrain_height(x, z, seed);
+    let Some(projection) = nearest_mountain_route_point(x, z) else {
+        return height;
+    };
+    if projection.distance >= 190.0 {
+        return height;
+    }
+    // Smooth the shelf longitudinally so the mesh itself provides a curving
+    // mountain ascent instead of preserving every sharp summit under the road.
+    let sample = |offset: f32| {
+        let point = projection.point + projection.tangent * offset;
+        terrain_height(point.x, point.y, seed)
+    };
+    let route_height = (sample(-160.0)
+        + sample(-80.0) * 2.0
+        + sample(0.0) * 4.0
+        + sample(80.0) * 2.0
+        + sample(160.0))
+        / 10.0;
+    // The collider grid is 62.5 units wide, so the fully terraced band must be
+    // wider than one cell or a route can pass between vertices without
+    // affecting the actual mesh triangles beneath it.
+    let shelf = 1.0 - smoothstep(96.0, 190.0, projection.distance);
+    height + (route_height - height) * shelf
 }
 
 fn mix_rgba(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
@@ -5506,20 +5624,13 @@ fn terrain_vertex_color(x: f32, z: f32, y: f32, normal: Vec3, seed: u64) -> [f32
 }
 
 fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
-    const RES: usize = 320; // quads per side — 62.5 world units per cell over 200 miles
+    const RES: usize = TERRAIN_MESH_RESOLUTION;
     const WORLD: f32 = TERRAIN_WORLD_SIZE;
     const CELL: f32 = WORLD / RES as f32;
 
     // ── Height grid ─────────────────────────────────────────────────────────
     let vcount = (RES + 1) * (RES + 1);
-    let mut h = vec![0.0f32; vcount];
-    for zi in 0..=RES {
-        for xi in 0..=RES {
-            let wx = (xi as f32 / RES as f32 - 0.5) * WORLD;
-            let wz = (zi as f32 / RES as f32 - 0.5) * WORLD;
-            h[zi * (RES + 1) + xi] = terrain_height(wx, wz, seed);
-        }
-    }
+    let h = terrain_mesh_height_grid(seed);
 
     // ── Mesh buffers ────────────────────────────────────────────────────────
     let mut positions = Vec::with_capacity(vcount);
@@ -7524,9 +7635,18 @@ fn spawn_speed_road_network(
                 chunk % 3 == 1,
                 seed + ri as u64 * 7_001 + chunk as u64 * 19,
                 terrain_seed,
-                false,
+            );
+            spawn_speed_road_support_columns(
+                commands,
+                pal,
+                &deck_mesh,
+                points[0],
+                points[1],
+                width,
+                terrain_seed,
             );
         }
+        spawn_speed_road_ground_access(commands, pal, &deck_mesh, profile, width, terrain_seed);
 
         for (si, pair) in route.windows(2).enumerate() {
             let (ax, az) = pair[0];
@@ -7675,7 +7795,12 @@ fn speed_road_terrain_point(x: f32, z: f32, terrain_seed: u64, clearance: f32) -
 
 /// Maximum sustained road grade (rise per horizontal unit, ≈12.5°). Real
 /// mountain roads hold an engineered grade instead of hugging every ridge.
-const SPEED_ROAD_MAX_GRADE: f32 = 0.22;
+// Mountain trunks are allowed to climb with the terrain. A low global cap
+// propagates remote summits backward through the connected graph and turns the
+// whole network into a viaduct; the carved/smoothed mountain shelf permits a
+// 100% short climb while ordinary sections remain much gentler,
+// while endpoint access ramps independently target a gentle 8% approach.
+const SPEED_ROAD_MAX_GRADE: f32 = 1.0;
 
 /// Build one continuous, terrain-safe elevation profile for a complete route.
 ///
@@ -7741,7 +7866,7 @@ fn speed_road_network_profiles(terrain_seed: u64) -> Vec<Vec<Vec3>> {
                 route,
                 SPEED_ROAD_WIDTH + (route_index % 3) as f32 * 2.4,
                 terrain_seed,
-                SPEED_ROAD_CLEARANCE + 1.0,
+                SPEED_ROAD_CLEARANCE,
             )
         })
         .collect();
@@ -7829,7 +7954,6 @@ fn spawn_speed_road_deck_between(
     include_ramps: bool,
     seed: u64,
     terrain_seed: u64,
-    apply_terrain_lift: bool,
 ) {
     let mut delta = end - start;
     let horizontal_len = Vec2::new(delta.x, delta.z).length();
@@ -7844,22 +7968,16 @@ fn spawn_speed_road_deck_between(
         terrain_seed,
         SPEED_ROAD_CLEARANCE + 1.0,
     );
-    // Grade-profiled callers already engineered the longitudinal heights; only
-    // absorb small intra-chunk bumps so the whole deck never spikes upward
-    // (that spiking is what made roads ride up every mountain and float over
-    // city streets as invisible ceilings).
-    let needed_lift = if apply_terrain_lift {
-        needed_lift
-    } else {
-        needed_lift.min(2.5)
-    };
+    // Never cap this correction. A capped lift was the root cause of deck
+    // colliders continuing straight into ridges that rose more than 2.5 units
+    // between the old sparse samples.
     start.y += needed_lift;
     end.y += needed_lift;
     delta = end - start;
 
     let length = delta.length();
     let yaw = delta.x.atan2(delta.z);
-    let pitch = (delta.y / horizontal_len).atan().clamp(-0.34, 0.34);
+    let pitch = (delta.y / horizontal_len).atan().clamp(-0.80, 0.80);
     let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
     let center = start + delta * 0.5;
     let deck_thickness = 0.86;
@@ -7929,6 +8047,145 @@ fn spawn_deck_guardrails(
             crate::physics::prelude::Collider::cuboid(0.325, rail_h * 0.5, length * 0.495),
             world_space_collider_scale(),
         ));
+    }
+}
+
+/// Paired structural pylons under viaduct portions of the speed-road network.
+/// Supports are omitted when the deck is close to grade and grow wider on tall
+/// aerial approaches. Their feet query the exact terrain trimesh surface.
+fn spawn_speed_road_support_columns(
+    commands: &mut Commands,
+    pal: &Palette,
+    unit_cube: &Handle<Mesh>,
+    start: Vec3,
+    end: Vec3,
+    road_width: f32,
+    terrain_seed: u64,
+) {
+    let delta = end - start;
+    let horizontal = Vec2::new(delta.x, delta.z);
+    let length = horizontal.length();
+    if length <= 4.0 {
+        return;
+    }
+    let direction = horizontal / length;
+    let right = Vec3::new(direction.y, 0.0, -direction.x);
+    let yaw = direction.x.atan2(direction.y);
+    let support_count = (length / 110.0).ceil().max(1.0) as usize;
+
+    for support in 0..support_count {
+        let t = (support as f32 + 0.5) / support_count as f32;
+        let road_center = start.lerp(end, t);
+        let center_ground = terrain_surface_y(road_center.x, road_center.z, terrain_seed);
+        let center_clearance = road_center.y - center_ground;
+        if center_clearance < 8.0 {
+            continue;
+        }
+
+        let column_width = (2.8 + center_clearance * 0.012).clamp(3.0, 6.5);
+        for side in [-1.0_f32, 1.0] {
+            let position = road_center + right * side * road_width * 0.30;
+            let ground = terrain_surface_y(position.x, position.z, terrain_seed);
+            let top = road_center.y - 0.48;
+            let height = (top - ground).max(1.0);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(unit_cube.clone()),
+                    material: MeshMaterial3d(pal.bridge_stone.clone()),
+                    transform: Transform::from_xyz(position.x, ground + height * 0.5, position.z)
+                        .with_rotation(Quat::from_rotation_y(yaw))
+                        .with_scale(Vec3::new(column_width, height, column_width)),
+                    ..default()
+                },
+                WorldGeometry,
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cuboid(
+                    column_width * 0.5,
+                    height * 0.5,
+                    column_width * 0.5,
+                ),
+                world_space_collider_scale(),
+            ));
+        }
+
+        // A visible cap ties the paired columns into one bridge bent.
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(unit_cube.clone()),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(road_center - Vec3::Y * 1.25)
+                    .with_rotation(Quat::from_rotation_y(yaw))
+                    .with_scale(Vec3::new(road_width * 0.76, 1.4, column_width * 1.25)),
+                ..default()
+            },
+            WorldGeometry,
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(road_width * 0.38, 0.7, column_width * 0.625),
+            world_space_collider_scale(),
+        ));
+    }
+}
+
+/// Build a low, terrain-following entrance that merges into each end of an
+/// engineered road profile. This keeps an aerial/raised deck reachable from
+/// ordinary ground without requiring a jump or spawning a vertical end wall.
+fn spawn_speed_road_ground_access(
+    commands: &mut Commands,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    profile: &[Vec3],
+    road_width: f32,
+    terrain_seed: u64,
+) {
+    if profile.len() < 2 {
+        return;
+    }
+
+    for (endpoint, neighbor) in [
+        (profile[0], profile[1]),
+        (profile[profile.len() - 1], profile[profile.len() - 2]),
+    ] {
+        let inward = Vec2::new(neighbor.x - endpoint.x, neighbor.z - endpoint.z);
+        if inward.length_squared() <= 0.01 {
+            continue;
+        }
+        let outward = -inward.normalize();
+        let endpoint_ground = terrain_surface_y(endpoint.x, endpoint.z, terrain_seed);
+        let initial_rise = (endpoint.y - endpoint_ground).max(0.0);
+        let mut length = (initial_rise / 0.08).clamp(90.0, 600.0);
+        let mut outer = Vec2::new(endpoint.x, endpoint.z) + outward * length;
+        let mut outer_ground = terrain_surface_y(outer.x, outer.y, terrain_seed);
+        let required_rise = (endpoint.y - outer_ground).max(0.0);
+        length = length.max((required_rise / 0.08).clamp(90.0, 600.0));
+        outer = Vec2::new(endpoint.x, endpoint.z) + outward * length;
+        outer_ground = terrain_surface_y(outer.x, outer.y, terrain_seed);
+
+        let steps = (length / 8.0).ceil().max(8.0) as usize;
+        let mut points = Vec::with_capacity(steps + 1);
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let xz = outer.lerp(Vec2::new(endpoint.x, endpoint.z), t);
+            let ground = terrain_surface_y(xz.x, xz.y, terrain_seed);
+            let eased = t * t * (3.0 - 2.0 * t);
+            let engineered_height = outer_ground + (endpoint.y - outer_ground) * eased;
+            points.push(Vec3::new(xz.x, engineered_height.max(ground + 0.08), xz.y));
+        }
+        if let Some(last) = points.last_mut() {
+            *last = endpoint;
+        }
+
+        for points in points.windows(2) {
+            spawn_banked_deck_segment(
+                commands,
+                pal,
+                deck_mesh,
+                points[0],
+                points[1],
+                road_width * 0.88,
+                0.0,
+                true,
+            );
+        }
     }
 }
 
@@ -8074,7 +8331,6 @@ fn spawn_settlement_speed_ring(
             false,
             seed + segment as u64 * 31,
             terrain_seed,
-            true,
         );
     }
 
@@ -8162,7 +8418,6 @@ fn spawn_settlement_speed_spur(
             chunk == 0 || chunk + 1 == chunk_count,
             seed + chunk as u64 * 41,
             terrain_seed,
-            true,
         );
     }
 }
@@ -8221,7 +8476,6 @@ fn spawn_route_sweeper_curves(
                     step == 1 || step + 2 == profile.len(),
                     seed + ri as u64 * 1_009 + vi as u64 * 67 + step as u64,
                     terrain_seed,
-                    false,
                 );
             }
         }
@@ -8396,7 +8650,6 @@ fn spawn_helical_speed_ramp(
             step == 0 || step + 1 == steps,
             seed + step as u64 * 29,
             terrain_seed,
-            true,
         );
     }
 }
@@ -15674,6 +15927,34 @@ mod tests {
     }
 
     #[test]
+    fn terrain_surface_query_matches_generated_trimesh_triangles() {
+        let seed = 42;
+        let cell_x = 173.0;
+        let cell_z = 91.0;
+        let origin_x = cell_x * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+        let origin_z = cell_z * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+        assert!(
+            (terrain_surface_y(origin_x, origin_z, seed)
+                - terrain_mesh_vertex_height(origin_x, origin_z, seed))
+            .abs()
+                < 0.001
+        );
+
+        let tx = 0.27;
+        let tz = 0.31;
+        let h00 = terrain_mesh_vertex_height(origin_x, origin_z, seed);
+        let h10 = terrain_mesh_vertex_height(origin_x + TERRAIN_MESH_CELL_SIZE, origin_z, seed);
+        let h01 = terrain_mesh_vertex_height(origin_x, origin_z + TERRAIN_MESH_CELL_SIZE, seed);
+        let expected = h00 + (h10 - h00) * tx + (h01 - h00) * tz;
+        let sampled = terrain_surface_y(
+            origin_x + TERRAIN_MESH_CELL_SIZE * tx,
+            origin_z + TERRAIN_MESH_CELL_SIZE * tz,
+            seed,
+        );
+        assert!((sampled - expected).abs() < 0.001);
+    }
+
+    #[test]
     fn mountain_routes_cover_multiple_passes() {
         assert!(mountain_routes().len() >= 14);
         assert!(mountain_routes().iter().all(|route| route.len() >= 2));
@@ -15799,7 +16080,7 @@ mod tests {
                     end,
                     SPEED_ROAD_WIDTH,
                     terrain_seed,
-                    SPEED_ROAD_CLEARANCE + 0.98,
+                    SPEED_ROAD_CLEARANCE + SPEED_ROAD_TERRAIN_ENVELOPE - 0.02,
                 );
             }
         }
@@ -15826,7 +16107,7 @@ mod tests {
                     points[1],
                     width,
                     terrain_seed,
-                    SPEED_ROAD_CLEARANCE + 0.98,
+                    SPEED_ROAD_CLEARANCE + SPEED_ROAD_TERRAIN_ENVELOPE - 0.02,
                 );
                 let horizontal =
                     Vec2::new(points[1].x - points[0].x, points[1].z - points[0].z).length();
@@ -15846,6 +16127,27 @@ mod tests {
             let high = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             assert!(high - low <= 0.01, "road junction must be vertically flush");
         }
+
+        let total_stations = profiles
+            .iter()
+            .map(|profile| profile.len().saturating_sub(1))
+            .sum::<usize>();
+        let aerial_support_stations = profiles
+            .iter()
+            .flat_map(|profile| profile.windows(2))
+            .filter(|points| {
+                let midpoint = points[0].lerp(points[1], 0.5);
+                midpoint.y - terrain_surface_y(midpoint.x, midpoint.z, terrain_seed) >= 8.0
+            })
+            .count();
+        assert!(
+            aerial_support_stations >= 40,
+            "the elevated network should produce frequent structural pylons"
+        );
+        assert!(
+            total_stations - aerial_support_stations >= total_stations / 2,
+            "roads should remain terrain-following: {aerial_support_stations}/{total_stations} stations are aerial"
+        );
     }
 
     #[test]
@@ -15892,15 +16194,15 @@ mod tests {
         let horizontal_len = delta_xz.length();
         let dir = delta_xz / horizontal_len.max(0.001);
         let right = Vec2::new(dir.y, -dir.x);
-        let samples = (horizontal_len / SPEED_ROAD_TERRAIN_SAMPLE_SPACING)
-            .ceil()
-            .clamp(1.0, 16.0) as usize;
-        let edge_offset = width * SPEED_ROAD_EDGE_SAMPLE_FRACTION;
+        // Deliberately denser and independently shaped from the production
+        // sampler so this test cannot repeat the same blind spots.
+        let samples = (horizontal_len / 2.0).ceil().clamp(1.0, 512.0) as usize;
         for i in 0..=samples {
             let t = i as f32 / samples as f32;
             let center = Vec2::new(start.x + delta_xz.x * t, start.z + delta_xz.y * t);
             let road_y = start.y + (end.y - start.y) * t;
-            for offset in [0.0_f32, -edge_offset, edge_offset] {
+            for lateral_step in 0..=12 {
+                let offset = -width * 0.5 + width * lateral_step as f32 / 12.0;
                 let sample = center + right * offset;
                 let ground = terrain_surface_y(sample.x, sample.y, terrain_seed);
                 assert!(

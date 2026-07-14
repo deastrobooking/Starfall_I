@@ -29,8 +29,13 @@ ownership where required, text plus color/icon meaning, and TV-safe layouts.
 
 `world_plugin.rs` owns fourteen authored trunks/cross-links, including six
 cross-mountain connectors that create multiple circuits. Continuous full-width
-terrain profiles keep the deck above mountain ridges, synchronize elevations at
-shared junctions, enforce grade limits, and drive the NPC traffic paths.
+terrain profiles query the actual triangle-mesh surface, densely sample
+thirteen lanes across the complete road width, apply uncapped clearance plus a
+safety envelope, carve and longitudinally smooth a blended mountain shelf,
+keep the deck above mountain ridges, synchronize elevations at shared
+junctions, permit short terrain-following speed climbs,
+limits, add ground-level entrance ramps at every route end, spawn paired
+supports only beneath genuinely aerial spans, and drive NPC traffic paths.
 Collidable guardrails, boost spans, rounded/banked curves, settlement
 connections, helical ramps, expanded hoverboard jumps and loop gates, selected
 360-degree loop geometry, checkpoints, and terrain/grade/junction tests are in

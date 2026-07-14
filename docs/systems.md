@@ -114,13 +114,28 @@ empty bar → release. Grapple swing/zip suppresses climb starts.
 Speed roads (2026-07): fourteen mountain trunks and cross-links form multiple
 closed racing circuits instead of isolated spokes. Decks use a continuous
 full-route profile (`speed_road_route_profile`) with stations no farther than
-220 units apart. Each station pair samples the center and both edges of the
-52+ unit road footprint, lifts over intervening terrain, and propagates a
-maximum sustained grade (`SPEED_ROAD_MAX_GRADE = 0.22`) in both directions.
+48 units apart. `terrain_surface_y` reproduces the exact two-triangle planes
+used by the 62.5-unit terrain collider grid instead of querying a mismatched
+continuous height function. Each station pair samples thirteen lanes across
+the entire 52+ unit road footprint every 2 longitudinal units. The nominal
+0.75-unit center clearance and 0.65-unit interpolation envelope keep ordinary
+roads close to grade. The terrain mesh carves a 96-unit full-width shelf that
+blends back into the mountain by 190 units and smooths summit noise along the
+route tangent. Uncapped correction and a mountain-road grade envelope
+(`SPEED_ROAD_MAX_GRADE = 1.0`) let short Sonic-style ascents follow that shelf
+instead of propagating a remote summit backward and lifting the whole network.
 `speed_road_network_profiles` synchronizes shared junction elevations and
 re-runs grade propagation across the connected graph, keeping intersections
 vertically flush. NPC traffic consumes the same profiles as deck generation.
 Non-route settlement rings and spurs retain their local terrain-lift solver.
+Every authored route endpoint gets a terrain-sampled entrance built by
+`spawn_speed_road_ground_access`: it begins with its deck surface at ground
+level, uses an eased ramp capped around an 8% target grade, and merges flush
+with the engineered profile. Approach corridors participate in prop avoidance.
+Elevated deck sections with at least 8 units of clearance spawn paired,
+collidable stone pylons with a metal crossbeam. Pylon feet independently sample
+the terrain collider beneath each side of the road, supporting rising mountain
+approaches and long aerial viaducts instead of leaving them visibly floating.
 
 Road system v3 (vehicle-grade): decks widened for traffic
 (`SPEED_ROAD_WIDTH = 52`; rings City 46 / Harbor 42 / Village 38 / Outpost 36).
