@@ -11,6 +11,13 @@ pub struct Building {
     pub height: f32,
 }
 
+/// Marks a generated building whose shell, floors, stairs, and rooms are
+/// physically explorable rather than represented by one solid collider.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnterableBuilding {
+    pub accessible_floors: u8,
+}
+
 /// Zone classification for buildings / terrain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum WorldZone {

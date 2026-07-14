@@ -392,6 +392,25 @@ missing-part errors, and save round-tripping of settlement economy state.
 
 ---
 
+## Explorable Building Interiors
+
+**Files:** `src/components/world.rs`, `src/plugins/world_plugin.rs`
+
+Selected downtown, industrial, residential, and authored-settlement buildings
+use `EnterableBuilding` instead of one solid cuboid. The generator builds four
+independent exterior walls around a real doorway, textured interior floors,
+partition walls with wide room openings, sparse non-blocking furniture,
+alternating warm/cool lighting, exterior windows, and an accessible roof.
+
+Floors are assembled around a stairwell opening. Each flight uses one smooth
+rotated collider so movement does not catch on decorative step edges; separate
+non-colliding treads retain a readable stair silhouette. Accessible floor count
+is derived from building height and capped at twelve to bound world-generation,
+rendering, lighting, and physics costs in four-player split screen. Remaining
+background buildings continue using the lightweight solid representation.
+
+---
+
 ## World Sites / Reclaimable World State
 
 **Files:** `src/resources.rs`, `src/components/world.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`, `src/plugins/ui_plugin.rs`

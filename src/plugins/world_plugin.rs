@@ -1932,6 +1932,9 @@ struct Palette {
     city_metal_panel: Handle<StandardMaterial>,
     stone_brick: Handle<StandardMaterial>,
     mortar_line: Handle<StandardMaterial>,
+    interior_wall: Handle<StandardMaterial>,
+    interior_floor: Handle<StandardMaterial>,
+    interior_trim: Handle<StandardMaterial>,
 
     industrial_metal: Handle<StandardMaterial>,
     industrial_rust: Handle<StandardMaterial>,
@@ -2140,6 +2143,33 @@ impl Palette {
                 metallic: 0.0,
                 perceptual_roughness: 1.0,
                 reflectance: 0.06,
+                ..default()
+            }),
+            interior_wall: m.add(StandardMaterial {
+                base_color: Color::srgb(0.72, 0.69, 0.63),
+                base_color_texture: Some(repeating_texture(
+                    asset_server,
+                    "Materials/stone (1).png",
+                )),
+                uv_transform: Affine2::from_scale(Vec2::splat(3.5)),
+                perceptual_roughness: 0.92,
+                reflectance: 0.12,
+                ..default()
+            }),
+            interior_floor: m.add(StandardMaterial {
+                base_color: Color::srgb(0.48, 0.32, 0.20),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/wood.jpg")),
+                uv_transform: Affine2::from_scale(Vec2::splat(4.0)),
+                perceptual_roughness: 0.78,
+                reflectance: 0.18,
+                ..default()
+            }),
+            interior_trim: m.add(StandardMaterial {
+                base_color: Color::srgb(0.58, 0.31, 0.16),
+                base_color_texture: Some(repeating_texture(asset_server, "Materials/wood.png")),
+                uv_transform: Affine2::from_scale(Vec2::splat(2.8)),
+                perceptual_roughness: 0.70,
+                reflectance: 0.20,
                 ..default()
             }),
 
@@ -9728,23 +9758,45 @@ fn spawn_settlement_buildings(
             i,
         );
 
-        spawn_building(
-            commands,
-            meshes,
-            material,
-            Vec3::new(world.x, floor_y + height * 0.5, world.z),
-            width,
-            height,
-            depth,
-            match settlement.kind {
-                MapSettlementKind::City => WorldZone::Downtown,
-                MapSettlementKind::Village => WorldZone::Residential,
-                MapSettlementKind::Harbor => WorldZone::OuterDistrict,
-                MapSettlementKind::Outpost => WorldZone::Spaceport,
-            },
-        );
+        let zone = match settlement.kind {
+            MapSettlementKind::City => WorldZone::Downtown,
+            MapSettlementKind::Village => WorldZone::Residential,
+            MapSettlementKind::Harbor => WorldZone::OuterDistrict,
+            MapSettlementKind::Outpost => WorldZone::Spaceport,
+        };
+        let interior_slot = if matches!(settlement.kind, MapSettlementKind::City) {
+            i % 4 == 0
+        } else {
+            i == 0
+        };
+        let enterable = interior_slot
+            && spawn_enterable_building(
+                commands,
+                meshes,
+                pal,
+                material.clone(),
+                Vec3::new(world.x, floor_y + height * 0.5, world.z),
+                width,
+                height,
+                depth,
+                yaw,
+                zone,
+                seed + i as u64 * 127 + settlement.anchor_id.len() as u64,
+            );
+        if !enterable {
+            spawn_building(
+                commands,
+                meshes,
+                material,
+                Vec3::new(world.x, floor_y + height * 0.5, world.z),
+                width,
+                height,
+                depth,
+                zone,
+            );
+        }
 
-        if !matches!(settlement.kind, MapSettlementKind::City) {
+        if !enterable && !matches!(settlement.kind, MapSettlementKind::City) {
             spawn_small_building_details(
                 commands,
                 meshes,
@@ -9758,10 +9810,12 @@ fn spawn_settlement_buildings(
             );
         }
 
-        if matches!(
-            settlement.kind,
-            MapSettlementKind::City | MapSettlementKind::Harbor
-        ) && i % 2 == 0
+        if !enterable
+            && matches!(
+                settlement.kind,
+                MapSettlementKind::City | MapSettlementKind::Harbor
+            )
+            && i % 2 == 0
         {
             spawn_settlement_window_facades(
                 commands,
@@ -9791,7 +9845,7 @@ fn spawn_settlement_buildings(
             WorldGeometry,
         ));
 
-        if matches!(settlement.kind, MapSettlementKind::City) {
+        if !enterable && matches!(settlement.kind, MapSettlementKind::City) {
             spawn_sky_tower_accents(
                 commands,
                 meshes,
@@ -11196,19 +11250,35 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         } else {
             glass[(i % 4) as usize].clone()
         };
-        spawn_building(
-            commands,
-            meshes,
-            mat,
-            Vec3::new(x, h * 0.5, z),
-            w,
-            h,
-            d,
-            WorldZone::Downtown,
-        );
+        let enterable = i.is_multiple_of(10)
+            && spawn_enterable_building(
+                commands,
+                meshes,
+                pal,
+                mat.clone(),
+                Vec3::new(x, h * 0.5, z),
+                w,
+                h,
+                d,
+                0.0,
+                WorldZone::Downtown,
+                seed + i * 101,
+            );
+        if !enterable {
+            spawn_building(
+                commands,
+                meshes,
+                mat,
+                Vec3::new(x, h * 0.5, z),
+                w,
+                h,
+                d,
+                WorldZone::Downtown,
+            );
+        }
 
         // Facade accent band near base
-        if i % 3 == 0 {
+        if !enterable && i % 3 == 0 {
             spawn_building(
                 commands,
                 meshes,
@@ -11228,9 +11298,11 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         } else {
             pal.window_cool.clone()
         };
-        spawn_window_facades(commands, meshes, win_mat, x, z, h, w, d);
-        spawn_modern_window_grid(commands, meshes, pal, x, z, h, w, d, seed + i * 17);
-        if i % 7 == 0 {
+        if !enterable {
+            spawn_window_facades(commands, meshes, win_mat, x, z, h, w, d);
+            spawn_modern_window_grid(commands, meshes, pal, x, z, h, w, d, seed + i * 17);
+        }
+        if !enterable && i % 7 == 0 {
             spawn_metal_cladding(
                 commands,
                 meshes,
@@ -11242,7 +11314,7 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
                 seed + i,
             );
         }
-        if i % 17 == 0 {
+        if !enterable && i % 17 == 0 {
             spawn_metal_cladding(
                 commands,
                 meshes,
@@ -11254,7 +11326,7 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
                 seed + i * 5 + 3,
             );
         }
-        if i % 13 == 0 {
+        if !enterable && i % 13 == 0 {
             spawn_stone_brick_courses(
                 commands,
                 meshes,
@@ -12474,27 +12546,43 @@ fn spawn_industrial(
         } else {
             pal.industrial_rust.clone()
         };
-        spawn_building(
-            commands,
-            meshes,
-            body_mat,
-            Vec3::new(x, ground_y + h * 0.5, z),
-            w,
-            h,
-            d,
-            WorldZone::Industrial,
-        );
-        spawn_metal_cladding(
-            commands,
-            meshes,
-            pal,
-            Vec3::new(x, ground_y + h * 0.5, z),
-            w,
-            h,
-            d,
-            seed + i * 23,
-        );
-        if i % 3 == 0 {
+        let enterable = i.is_multiple_of(9)
+            && spawn_enterable_building(
+                commands,
+                meshes,
+                pal,
+                body_mat.clone(),
+                Vec3::new(x, ground_y + h * 0.5, z),
+                w,
+                h,
+                d,
+                0.0,
+                WorldZone::Industrial,
+                seed + i * 109,
+            );
+        if !enterable {
+            spawn_building(
+                commands,
+                meshes,
+                body_mat,
+                Vec3::new(x, ground_y + h * 0.5, z),
+                w,
+                h,
+                d,
+                WorldZone::Industrial,
+            );
+            spawn_metal_cladding(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, ground_y + h * 0.5, z),
+                w,
+                h,
+                d,
+                seed + i * 23,
+            );
+        }
+        if !enterable && i % 3 == 0 {
             spawn_factory_window_ribbons(commands, meshes, pal, x, ground_y, z, h, w, d);
         }
 
@@ -12538,27 +12626,43 @@ fn spawn_residential(
         } else {
             pal.residential_b.clone()
         };
-        spawn_building(
-            commands,
-            meshes,
-            mat,
-            Vec3::new(x, ground_y + h * 0.5, z),
-            w,
-            h,
-            d,
-            WorldZone::Residential,
-        );
-        spawn_small_building_details(
-            commands,
-            meshes,
-            pal,
-            Vec3::new(x, ground_y + h * 0.5, z),
-            w,
-            h,
-            d,
-            seed + i,
-            stone_variant,
-        );
+        let enterable = i.is_multiple_of(12)
+            && spawn_enterable_building(
+                commands,
+                meshes,
+                pal,
+                mat.clone(),
+                Vec3::new(x, ground_y + h * 0.5, z),
+                w,
+                h,
+                d,
+                0.0,
+                WorldZone::Residential,
+                seed + i * 113,
+            );
+        if !enterable {
+            spawn_building(
+                commands,
+                meshes,
+                mat,
+                Vec3::new(x, ground_y + h * 0.5, z),
+                w,
+                h,
+                d,
+                WorldZone::Residential,
+            );
+            spawn_small_building_details(
+                commands,
+                meshes,
+                pal,
+                Vec3::new(x, ground_y + h * 0.5, z),
+                w,
+                h,
+                d,
+                seed + i,
+                stone_variant,
+            );
+        }
     }
 }
 
@@ -14566,6 +14670,397 @@ fn road_network_seed() -> u64 {
 const BUILDING_TUNNEL_CLEARANCE: f32 = 10.0;
 /// Drivable opening width through a tunnel building.
 const BUILDING_TUNNEL_PASSAGE: f32 = 30.0;
+
+fn spawn_enterable_piece(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    base: Vec3,
+    rotation: Quat,
+    local: Vec3,
+    size: Vec3,
+    walkable: bool,
+) {
+    let mut piece = commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(base + rotation * local).with_rotation(rotation),
+            ..default()
+        },
+        WorldGeometry,
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+    ));
+    if walkable {
+        piece.insert(WalkableSurface);
+    }
+}
+
+fn enterable_floor_layout(height: f32) -> (usize, f32) {
+    let floor_count = ((height / 5.6).floor() as usize).clamp(2, 12);
+    let story_height = ((height - 0.8) / floor_count as f32).clamp(4.5, 6.8);
+    (floor_count, story_height)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_enterable_building(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    exterior: Handle<StandardMaterial>,
+    center: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    yaw: f32,
+    zone: WorldZone,
+    seed: u64,
+) -> bool {
+    if width < 11.5 || depth < 11.5 || height < 9.0 {
+        return false;
+    }
+    let road_dist = distance_to_speed_road_network(center.x, center.z, road_network_seed());
+    let half_diag = Vec2::new(width, depth).length() * 0.5;
+    if road_dist < half_diag.max(SPEED_ROAD_WIDTH * 0.5) {
+        return false;
+    }
+
+    let rotation = Quat::from_rotation_y(yaw);
+    let base_y = center.y - height * 0.5;
+    let base = Vec3::new(center.x, base_y, center.z);
+    let wall = 0.52;
+    let door_width = 3.8_f32.min(width - 3.0);
+    let door_height = 3.8_f32.min(height - 1.0);
+    let front_segment = ((width - door_width) * 0.5).max(1.0);
+    let (floor_count, story_height) = enterable_floor_layout(height);
+
+    commands.spawn((
+        Transform::from_translation(base).with_rotation(rotation),
+        GlobalTransform::default(),
+        WorldGeometry,
+        Building { zone, height },
+        EnterableBuilding {
+            accessible_floors: floor_count as u8,
+        },
+        Name::new(format!("Explorable {:?} Building", zone)),
+    ));
+
+    // Four independent wall colliders form a hollow shell. The front is split
+    // into two jambs and a header, leaving a real walk-through doorway.
+    spawn_enterable_piece(
+        commands,
+        meshes,
+        exterior.clone(),
+        base,
+        rotation,
+        Vec3::new(0.0, height * 0.5, depth * 0.5),
+        Vec3::new(width, height, wall),
+        false,
+    );
+    for side in [-1.0_f32, 1.0] {
+        spawn_enterable_piece(
+            commands,
+            meshes,
+            exterior.clone(),
+            base,
+            rotation,
+            Vec3::new(side * width * 0.5, height * 0.5, 0.0),
+            Vec3::new(wall, height, depth),
+            false,
+        );
+        spawn_enterable_piece(
+            commands,
+            meshes,
+            exterior.clone(),
+            base,
+            rotation,
+            Vec3::new(
+                side * (door_width * 0.5 + front_segment * 0.5),
+                door_height * 0.5,
+                -depth * 0.5,
+            ),
+            Vec3::new(front_segment, door_height, wall),
+            false,
+        );
+    }
+    spawn_enterable_piece(
+        commands,
+        meshes,
+        exterior.clone(),
+        base,
+        rotation,
+        Vec3::new(
+            0.0,
+            door_height + (height - door_height) * 0.5,
+            -depth * 0.5,
+        ),
+        Vec3::new(width, height - door_height, wall),
+        false,
+    );
+
+    let opening_width = (width * 0.27).clamp(3.2, 4.6);
+    let opening_depth = (depth - 3.0).max(7.0);
+    let opening_x = (width * 0.22).min(width * 0.5 - opening_width * 0.5 - 0.9);
+    let opening_left = opening_x - opening_width * 0.5;
+    let opening_right = opening_x + opening_width * 0.5;
+    let left_width = opening_left + width * 0.5;
+    let right_width = width * 0.5 - opening_right;
+    let end_depth = ((depth - opening_depth) * 0.5).max(0.8);
+
+    // Each floor is built around the stairwell rather than as one solid slab.
+    for floor in 0..floor_count {
+        let y = 0.16 + floor as f32 * story_height;
+        for (x, z, size) in [
+            (
+                -width * 0.5 + left_width * 0.5,
+                0.0,
+                Vec3::new(left_width, 0.32, depth - wall * 2.0),
+            ),
+            (
+                opening_right + right_width * 0.5,
+                0.0,
+                Vec3::new(right_width, 0.32, depth - wall * 2.0),
+            ),
+            (
+                opening_x,
+                -depth * 0.5 + end_depth * 0.5,
+                Vec3::new(opening_width, 0.32, end_depth),
+            ),
+            (
+                opening_x,
+                depth * 0.5 - end_depth * 0.5,
+                Vec3::new(opening_width, 0.32, end_depth),
+            ),
+        ] {
+            if size.x > 0.25 && size.z > 0.25 {
+                spawn_enterable_piece(
+                    commands,
+                    meshes,
+                    pal.interior_floor.clone(),
+                    base,
+                    rotation,
+                    Vec3::new(x, y, z),
+                    size,
+                    true,
+                );
+            }
+        }
+
+        // Two room wings with a generous central doorway preserve navigation
+        // for four players while making each level read as actual rooms.
+        let partition_z = if floor.is_multiple_of(2) {
+            depth * 0.23
+        } else {
+            -depth * 0.20
+        };
+        let room_door_x = -width * 0.20;
+        let room_door_width = 2.8;
+        let partition_height = (story_height - 0.55).max(3.3);
+        let left_end = room_door_x - room_door_width * 0.5;
+        let right_start = room_door_x + room_door_width * 0.5;
+        for (x, segment_width) in [
+            ((-width * 0.5 + left_end) * 0.5, left_end + width * 0.5),
+            (
+                (right_start + opening_left) * 0.5,
+                opening_left - right_start,
+            ),
+        ] {
+            if segment_width > 0.5 {
+                spawn_enterable_piece(
+                    commands,
+                    meshes,
+                    pal.interior_wall.clone(),
+                    base,
+                    rotation,
+                    Vec3::new(x, y + 0.16 + partition_height * 0.5, partition_z),
+                    Vec3::new(segment_width, partition_height, 0.28),
+                    false,
+                );
+            }
+        }
+
+        // Sparse furniture gives the rooms scale without turning their floors
+        // into a field of movement-blocking collision bumps.
+        for side in [-1.0_f32, 1.0] {
+            let local = Vec3::new(
+                -width * 0.28,
+                y + 0.58,
+                side * depth * (0.29 + seeded(seed, floor as u64 * 7 + 2) * 0.04),
+            );
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(2.4, 0.82, 0.9))),
+                    material: MeshMaterial3d(pal.interior_trim.clone()),
+                    transform: Transform::from_translation(base + rotation * local)
+                        .with_rotation(rotation),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+
+        if floor.is_multiple_of(2) {
+            commands.spawn((
+                PointLightBundle {
+                    point_light: PointLight {
+                        color: if floor.is_multiple_of(4) {
+                            Color::srgb(1.0, 0.78, 0.45)
+                        } else {
+                            Color::srgb(0.48, 0.82, 1.0)
+                        },
+                        intensity: 5_500.0,
+                        range: width.max(depth) * 1.25,
+                        shadow_maps_enabled: false,
+                        ..default()
+                    },
+                    transform: Transform::from_translation(
+                        base + rotation * Vec3::new(0.0, y + story_height * 0.72, 0.0),
+                    ),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    // One smooth collider per flight avoids the tiny step collisions that
+    // previously robbed speed. Thin non-colliding treads provide stair detail.
+    let stair_run = opening_depth - 1.1;
+    let stair_length = (stair_run * stair_run + story_height * story_height).sqrt();
+    let stair_angle = (story_height / stair_run).atan();
+    for upper_floor in 1..floor_count {
+        let low_z = if upper_floor.is_multiple_of(2) {
+            stair_run * 0.5
+        } else {
+            -stair_run * 0.5
+        };
+        let high_z = -low_z;
+        let pitch = if high_z > low_z {
+            -stair_angle
+        } else {
+            stair_angle
+        };
+        let stair_center = Vec3::new(
+            opening_x,
+            (upper_floor as f32 - 0.5) * story_height + 0.24,
+            0.0,
+        );
+        let stair_rotation = rotation * Quat::from_rotation_x(pitch);
+        let mut stair = commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(opening_width - 0.45, 0.34, stair_length))),
+                material: MeshMaterial3d(pal.interior_trim.clone()),
+                transform: Transform::from_translation(base + rotation * stair_center)
+                    .with_rotation(stair_rotation),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(
+                (opening_width - 0.45) * 0.5,
+                0.17,
+                stair_length * 0.5,
+            ),
+        ));
+        stair.insert(Name::new("Smooth Interior Stair Flight"));
+
+        for tread in 0..8 {
+            let t = (tread as f32 + 0.5) / 8.0;
+            let z = low_z + (high_z - low_z) * t;
+            let y = (upper_floor as f32 - 1.0) * story_height + story_height * t + 0.36;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(
+                        opening_width - 0.28,
+                        0.08,
+                        stair_run / 8.0 * 0.72,
+                    ))),
+                    material: MeshMaterial3d(pal.brushed_metal.clone()),
+                    transform: Transform::from_translation(
+                        base + rotation * Vec3::new(opening_x, y, z),
+                    )
+                    .with_rotation(rotation),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    spawn_enterable_piece(
+        commands,
+        meshes,
+        exterior.clone(),
+        base,
+        rotation,
+        Vec3::new(0.0, height, 0.0),
+        Vec3::new(width + 0.7, 0.46, depth + 0.7),
+        true,
+    );
+
+    // Exterior frame bands break up large cuboid silhouettes and visibly use
+    // the textured facade material without sealing the doorway or windows.
+    for floor in 1..floor_count {
+        let y = floor as f32 * story_height - 0.16;
+        for z in [-depth * 0.5 - 0.05, depth * 0.5 + 0.05] {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.32, 0.18, 0.16))),
+                    material: MeshMaterial3d(pal.city_metal_panel.clone()),
+                    transform: Transform::from_translation(base + rotation * Vec3::new(0.0, y, z))
+                        .with_rotation(rotation),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    for floor in 0..floor_count {
+        let y = floor as f32 * story_height + story_height * 0.58;
+        let window_material = if (floor as u64 + seed).is_multiple_of(2) {
+            pal.window_warm.clone()
+        } else {
+            pal.window_cool.clone()
+        };
+        for side in [-1.0_f32, 1.0] {
+            // Back windows and upper front windows leave the entrance visually open.
+            for z in [depth * 0.5 + 0.055, -depth * 0.5 - 0.055] {
+                if floor == 0 && z < 0.0 {
+                    continue;
+                }
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(Cuboid::new(2.2, 1.45, 0.09))),
+                        material: MeshMaterial3d(window_material.clone()),
+                        transform: Transform::from_translation(
+                            base + rotation * Vec3::new(side * width * 0.27, y, z),
+                        )
+                        .with_rotation(rotation),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            }
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.09, 1.45, 2.2))),
+                    material: MeshMaterial3d(window_material.clone()),
+                    transform: Transform::from_translation(
+                        base + rotation * Vec3::new(side * (width * 0.5 + 0.055), y, 0.0),
+                    )
+                    .with_rotation(rotation),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    true
+}
 
 fn spawn_building(
     commands: &mut Commands,
@@ -16592,5 +17087,16 @@ mod tests {
 
         assert_eq!(reward_ids.len(), original_len);
         assert_eq!(original_len, 4);
+    }
+
+    #[test]
+    fn enterable_building_floors_stay_navigable_and_bounded() {
+        let (small_floors, small_story) = enterable_floor_layout(12.0);
+        let (tower_floors, tower_story) = enterable_floor_layout(140.0);
+
+        assert!(small_floors >= 2);
+        assert!((4.5..=6.8).contains(&small_story));
+        assert_eq!(tower_floors, 12);
+        assert!((4.5..=6.8).contains(&tower_story));
     }
 }
