@@ -19,6 +19,7 @@ pub mod spec;
 
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
+use bevy::ui::RelativeCursorPosition;
 use std::path::PathBuf;
 
 use crate::state::AppState;
@@ -31,6 +32,7 @@ impl Plugin for CharacterStudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StudioState>()
             .init_resource::<StudioFocus>()
+            .init_resource::<StudioSliderDrag>()
             .init_resource::<SaveLibrary>()
             .add_systems(OnEnter(AppState::CharacterStudio), setup_studio)
             .add_systems(OnExit(AppState::CharacterStudio), cleanup_studio)
@@ -38,6 +40,7 @@ impl Plugin for CharacterStudioPlugin {
                 Update,
                 (
                     button_interaction,
+                    morph_slider_interaction,
                     rebuild_library_rows,
                     rebuild_preview,
                     orbit_camera,
@@ -152,6 +155,11 @@ struct StudioFocus {
     col: usize,
 }
 
+#[derive(Resource, Default)]
+struct StudioSliderDrag {
+    active: Option<usize>,
+}
+
 /// Versioned character files on disk (`human_vNNN.json`).
 #[derive(Resource, Default)]
 struct SaveLibrary {
@@ -180,6 +188,19 @@ struct FocusRow(usize);
 
 #[derive(Component)]
 struct MorphValueText(usize);
+
+#[derive(Component)]
+struct MorphSlider {
+    index: usize,
+    row: usize,
+    col: usize,
+}
+
+#[derive(Component)]
+struct MorphSliderFill(usize);
+
+#[derive(Component)]
+struct MorphSliderThumb(usize);
 
 #[derive(Component)]
 struct StyleValueText(usize);
@@ -325,6 +346,56 @@ fn spawn_small_button(
         });
 }
 
+fn spawn_morph_slider(
+    parent: &mut ChildSpawnerCommands,
+    index: usize,
+    value: f32,
+    row: usize,
+    col: usize,
+) {
+    let pct = value.clamp(0.0, 1.0);
+    parent
+        .spawn((
+            Button,
+            MorphSlider { index, row, col },
+            RelativeCursorPosition::default(),
+            Node {
+                width: Val::Px(118.0),
+                height: Val::Px(20.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::FlexStart,
+                margin: UiRect::horizontal(Val::Px(4.0)),
+                padding: UiRect::horizontal(Val::Px(3.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.045, 0.065, 0.095, 0.95)),
+            BorderColor::all(Color::srgb(0.22, 0.34, 0.52)),
+        ))
+        .with_children(|track| {
+            track.spawn((
+                MorphSliderFill(index),
+                Node {
+                    width: Val::Percent(pct * 100.0),
+                    height: Val::Px(8.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.26, 0.78, 0.52)),
+            ));
+            track.spawn((
+                MorphSliderThumb(index),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(pct * 100.0),
+                    width: Val::Px(6.0),
+                    height: Val::Px(16.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.88, 1.0, 0.78)),
+            ));
+        });
+}
+
 fn section_label(parent: &mut ChildSpawnerCommands, label: &str) {
     parent
         .spawn((
@@ -418,16 +489,17 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                                 row_idx,
                                 0,
                             );
+                            spawn_morph_slider(controls, i, field.get(&state.spec), row_idx, 1);
                             controls
                                 .spawn(Node {
-                                    width: Val::Px(96.0),
+                                    width: Val::Px(42.0),
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 })
                                 .with_children(|n| {
                                     let (t, f, c) = text(
-                                        morph_bar(field.get(&state.spec)),
-                                        12.0,
+                                        morph_percent_label(field.get(&state.spec)),
+                                        11.0,
                                         Color::srgb(0.60, 0.95, 0.75),
                                     );
                                     n.spawn((MorphValueText(i), t, f, c));
@@ -437,7 +509,7 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                                 "+",
                                 StudioAction::MorphInc(i),
                                 row_idx,
-                                1,
+                                2,
                             );
                         });
                     });
@@ -535,12 +607,8 @@ fn spawn_right_panel(commands: &mut Commands) {
         });
 }
 
-fn morph_bar(v: f32) -> String {
-    let filled = (v * 10.0).round() as usize;
-    (0..10)
-        .map(|b| if b < filled { '#' } else { '-' })
-        .collect::<String>()
-        + &format!(" {v:.2}")
+fn morph_percent_label(v: f32) -> String {
+    format!("{:>3}%", (v.clamp(0.0, 1.0) * 100.0).round() as u8)
 }
 
 fn cleanup_studio(
@@ -709,6 +777,49 @@ fn button_interaction(
             }
             Interaction::None => {}
         }
+    }
+}
+
+fn morph_slider_interaction(
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut state: ResMut<StudioState>,
+    mut focus: ResMut<StudioFocus>,
+    mut drag: ResMut<StudioSliderDrag>,
+    slider_q: Query<(&Interaction, &RelativeCursorPosition, &MorphSlider), With<Button>>,
+) {
+    if mouse_buttons.just_released(MouseButton::Left) {
+        drag.active = None;
+    }
+
+    for (interaction, cursor, slider) in slider_q.iter() {
+        if matches!(interaction, Interaction::Hovered | Interaction::Pressed) {
+            focus.row = slider.row;
+            focus.col = slider.col;
+        }
+
+        if cursor.cursor_over() && mouse_buttons.just_pressed(MouseButton::Left) {
+            state.push_undo();
+            drag.active = Some(slider.index);
+        }
+
+        if drag.active != Some(slider.index) || !mouse_buttons.pressed(MouseButton::Left) {
+            continue;
+        }
+
+        let Some(normalized) = cursor.normalized else {
+            continue;
+        };
+
+        let field = MorphField::ALL[slider.index];
+        let next_value = normalized.x.clamp(0.0, 1.0);
+        if (field.get(&state.spec) - next_value).abs() <= f32::EPSILON {
+            continue;
+        }
+
+        field.set(&mut state.spec, next_value);
+        state.dirty = true;
+        state.labels_dirty = true;
+        state.status = format!("{} = {:.2}", field.label(), field.get(&state.spec));
     }
 }
 
@@ -888,6 +999,8 @@ fn orbit_camera(
 fn refresh_labels(
     mut state: ResMut<StudioState>,
     mut morph_q: Query<(&mut Text, &MorphValueText), Without<StyleValueText>>,
+    mut fill_q: Query<(&mut Node, &MorphSliderFill), Without<MorphSliderThumb>>,
+    mut thumb_q: Query<(&mut Node, &MorphSliderThumb), Without<MorphSliderFill>>,
     mut style_q: Query<(&mut Text, &StyleValueText), Without<MorphValueText>>,
     mut status_q: Query<
         &mut Text,
@@ -904,7 +1017,15 @@ fn refresh_labels(
     state.labels_dirty = false;
     for (mut text, marker) in morph_q.iter_mut() {
         let field = MorphField::ALL[marker.0];
-        *text = Text::new(morph_bar(field.get(&state.spec)));
+        *text = Text::new(morph_percent_label(field.get(&state.spec)));
+    }
+    for (mut node, marker) in fill_q.iter_mut() {
+        let field = MorphField::ALL[marker.0];
+        node.width = Val::Percent(field.get(&state.spec).clamp(0.0, 1.0) * 100.0);
+    }
+    for (mut node, marker) in thumb_q.iter_mut() {
+        let field = MorphField::ALL[marker.0];
+        node.left = Val::Percent(field.get(&state.spec).clamp(0.0, 1.0) * 100.0);
     }
     for (mut text, marker) in style_q.iter_mut() {
         let field = StyleField::ALL[marker.0];

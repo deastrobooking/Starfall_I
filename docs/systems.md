@@ -173,12 +173,12 @@ keys/presets/randomize → CharacterSpec → PresetGenerators → CharacterPatch
   Armor** (Megaman-style helmet + crest, chest core, shoulder spheres, right
   **buster cannon**, oversized boots).
 **GUI (2026-07):** fully button-driven — no keyboard commands. Every control is
-a clickable widget row (preset buttons, −/+ morph steppers with value bars,
-`<`/`>` style cyclers) that also participates in **gamepad focus navigation**:
-D-pad Up/Down moves rows, Left/Right adjusts or moves within a row, South
-activates, East backs out; mouse hover pulls focus so both inputs share one
-highlight. Viewport orbit: right-mouse drag + wheel zoom, or right stick +
-triggers.
+a clickable widget row (preset buttons, draggable morph sliders with stepper
+buttons, `<`/`>` style cyclers) that also participates in **gamepad focus
+navigation**: D-pad Up/Down moves rows, Left/Right adjusts or moves within a
+row, South activates, East backs out; mouse hover pulls focus so both inputs
+share one highlight. Viewport orbit: right-mouse drag + wheel zoom, or right
+stick + triggers.
 
 **Wardrobe (2026-07):** independent slots, mix-and-match — Top (None/T-Shirt/
 Long Shirt/Tunic/Jacket/Robe), Bottom (Underwear/Shorts/Pants/Skirt), Footwear
