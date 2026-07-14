@@ -132,6 +132,12 @@ Every authored route endpoint gets a terrain-sampled entrance built by
 `spawn_speed_road_ground_access`: it begins with its deck surface at ground
 level, uses an eased ramp capped around an 8% target grade, and merges flush
 with the engineered profile. Approach corridors participate in prop avoidance.
+`speed_road_sky_access_chunks` also divides every sustained aerial run into
+reachable intervals. `spawn_speed_road_sky_access` searches both sides for
+nearby low ground, builds a 120–720 unit supported branch ramp, removes the
+guardrails from the matching 48-unit main-road chunk, and leaves the final ramp
+segments open so the player can physically merge and turn onto the sky road.
+These side approaches also participate in tree/building corridor avoidance.
 Elevated deck sections with at least 8 units of clearance spawn paired,
 collidable stone pylons with a metal crossbeam. Pylon feet independently sample
 the terrain collider beneath each side of the road, supporting rising mountain

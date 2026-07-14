@@ -35,7 +35,9 @@ safety envelope, carve and longitudinally smooth a blended mountain shelf,
 keep the deck above mountain ridges, synchronize elevations at shared
 junctions, permit short terrain-following speed climbs,
 limits, add ground-level entrance ramps at every route end, spawn paired
-supports only beneath genuinely aerial spans, and drive NPC traffic paths.
+supports only beneath genuinely aerial spans, add recurring supported side
+ramps with guardrail openings throughout sustained sky-road runs, and drive NPC
+traffic paths.
 Collidable guardrails, boost spans, rounded/banked curves, settlement
 connections, helical ramps, expanded hoverboard jumps and loop gates, selected
 360-degree loop geometry, checkpoints, and terrain/grade/junction tests are in
