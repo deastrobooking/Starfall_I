@@ -185,6 +185,26 @@ pub struct PlaySessionTransition {
     pub resuming_from_pause: bool,
 }
 
+/// Optional non-chapter anchor selected from the world map. Chapter startup
+/// consumes this once world anchors exist, then clears it.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct FastTravelDestination {
+    pub anchor_id: Option<&'static str>,
+    pub cave_label: Option<&'static str>,
+}
+
+impl FastTravelDestination {
+    pub fn cave(&mut self, anchor_id: &'static str, label: &'static str) {
+        self.anchor_id = Some(anchor_id);
+        self.cave_label = Some(label);
+    }
+
+    pub fn clear(&mut self) {
+        self.anchor_id = None;
+        self.cave_label = None;
+    }
+}
+
 // ── Local Multiplayer ─────────────────────────────────────────────────────────
 /// How many local players are active (1–4).
 /// Set this before entering `AppState::Playing` to change the player count.
@@ -1879,5 +1899,16 @@ mod tests {
             registry.get(WorldSiteId(1)).unwrap().state,
             WorldSiteState::EnemyHeld
         );
+    }
+
+    #[test]
+    fn cave_fast_travel_destination_is_one_shot_and_clearable() {
+        let mut destination = FastTravelDestination::default();
+        destination.cave("secret_cave_ch03", "Sister Starwell Cave");
+        assert_eq!(destination.anchor_id, Some("secret_cave_ch03"));
+        assert_eq!(destination.cave_label, Some("Sister Starwell Cave"));
+        destination.clear();
+        assert!(destination.anchor_id.is_none());
+        assert!(destination.cave_label.is_none());
     }
 }

@@ -15,8 +15,8 @@ use std::f32::consts::TAU;
 use std::sync::OnceLock;
 
 use crate::chapters::{
-    chapter_map_locations, map_settlements, MapSettlement, MapSettlementKind,
-    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE,
+    chapter_map_locations, map_settlements, MapSettlement, MapSettlementKind, SecretCaveLocation,
+    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE, SECRET_CAVE_LOCATIONS,
 };
 use crate::commands::CommandRegistry;
 use crate::components::armor::ArmorSet;
@@ -668,7 +668,7 @@ fn dungeon_crawl_gate_system(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    let mut opened_chapters = Vec::new();
+    let mut opened_gates = Vec::new();
 
     for mut gate in gate_q.iter_mut() {
         let party_near_gate = player_q.iter().any(|(transform, _)| {
@@ -697,7 +697,7 @@ fn dungeon_crawl_gate_system(
         }
 
         if gate.opened {
-            opened_chapters.push(gate.chapter);
+            opened_gates.push(gate.gate_id);
         }
     }
 
@@ -715,7 +715,7 @@ fn dungeon_crawl_gate_system(
     }
 
     for (mut transform, door) in door_q.iter_mut() {
-        let target = if opened_chapters.contains(&door.chapter) {
+        let target = if opened_gates.contains(&door.gate_id) {
             door.open
         } else {
             door.closed
@@ -2937,138 +2937,13 @@ fn spawn_puzzle_anchors(commands: &mut Commands, seed: u64) {
     }
 }
 
-#[derive(Clone, Copy)]
-struct SecretCaveSpec {
-    chapter: u8,
-    anchor_id: &'static str,
-    x: f32,
-    z: f32,
-    yaw: f32,
-    length: f32,
-}
-
 fn spawn_secret_cave_systems(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
     seed: u64,
 ) {
-    let caves = [
-        SecretCaveSpec {
-            chapter: 1,
-            anchor_id: "secret_cave_ch01",
-            x: 42.0,
-            z: 54.0,
-            yaw: -0.55,
-            length: 38.0,
-        },
-        SecretCaveSpec {
-            chapter: 2,
-            anchor_id: "secret_cave_ch02",
-            x: 2340.0,
-            z: 1780.0,
-            yaw: -1.10,
-            length: 42.0,
-        },
-        SecretCaveSpec {
-            chapter: 3,
-            anchor_id: "secret_cave_ch03",
-            x: -2380.0,
-            z: 2720.0,
-            yaw: 0.70,
-            length: 36.0,
-        },
-        SecretCaveSpec {
-            chapter: 4,
-            anchor_id: "secret_cave_ch04",
-            x: 3200.0,
-            z: -1800.0,
-            yaw: 0.25,
-            length: 40.0,
-        },
-        SecretCaveSpec {
-            chapter: 5,
-            anchor_id: "secret_cave_ch05",
-            x: -3320.0,
-            z: 790.0,
-            yaw: 1.20,
-            length: 40.0,
-        },
-        SecretCaveSpec {
-            chapter: 6,
-            anchor_id: "secret_cave_ch06",
-            x: -8850.0,
-            z: -8200.0,
-            yaw: 0.78,
-            length: 46.0,
-        },
-        SecretCaveSpec {
-            chapter: 7,
-            anchor_id: "secret_cave_ch07",
-            x: -7950.0,
-            z: 4200.0,
-            yaw: -0.40,
-            length: 44.0,
-        },
-        SecretCaveSpec {
-            chapter: 8,
-            anchor_id: "secret_cave_ch08",
-            x: -6000.0,
-            z: 8200.0,
-            yaw: -0.90,
-            length: 38.0,
-        },
-        SecretCaveSpec {
-            chapter: 9,
-            anchor_id: "secret_cave_ch09",
-            x: 6300.0,
-            z: 260.0,
-            yaw: 1.00,
-            length: 36.0,
-        },
-        SecretCaveSpec {
-            chapter: 10,
-            anchor_id: "secret_cave_ch10",
-            x: 8900.0,
-            z: 5200.0,
-            yaw: -1.35,
-            length: 46.0,
-        },
-        SecretCaveSpec {
-            chapter: 11,
-            anchor_id: "secret_cave_ch11",
-            x: 2820.0,
-            z: -8650.0,
-            yaw: 0.95,
-            length: 42.0,
-        },
-        SecretCaveSpec {
-            chapter: 12,
-            anchor_id: "secret_cave_ch12",
-            x: 5750.0,
-            z: -3450.0,
-            yaw: 0.35,
-            length: 38.0,
-        },
-        SecretCaveSpec {
-            chapter: 13,
-            anchor_id: "secret_cave_ch13",
-            x: -4700.0,
-            z: -6550.0,
-            yaw: -0.20,
-            length: 42.0,
-        },
-        SecretCaveSpec {
-            chapter: 14,
-            anchor_id: "secret_cave_ch14",
-            x: 650.0,
-            z: -8300.0,
-            yaw: 0.0,
-            length: 44.0,
-        },
-    ];
-
-    for spec in caves {
+    for spec in SECRET_CAVE_LOCATIONS {
         spawn_secret_cave_system(commands, meshes, pal, seed, spec);
     }
 }
@@ -3110,27 +2985,28 @@ fn spawn_secret_cave_system(
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
     seed: u64,
-    spec: SecretCaveSpec,
+    spec: SecretCaveLocation,
 ) {
+    let chapter = spec.chapter.0;
     let floor_y = terrain_surface_y(spec.x, spec.z, seed) + 0.25;
     let entrance = Vec3::new(spec.x, floor_y, spec.z);
     let forward = Vec3::new(spec.yaw.sin(), 0.0, spec.yaw.cos());
     let right = Vec3::new(forward.z, 0.0, -forward.x);
     let rotation = Quat::from_rotation_y(spec.yaw);
-    let accent = secret_cave_accent(pal, spec.chapter);
-    let wall_mat = if matches!(spec.chapter, 5 | 11 | 13 | 14) {
+    let accent = secret_cave_accent(pal, chapter);
+    let wall_mat = if matches!(chapter, 5 | 11 | 13 | 14) {
         pal.rock_dark.clone()
     } else {
         pal.rock.clone()
     };
-    let floor_mat = if matches!(spec.chapter, 3 | 9 | 14) {
+    let floor_mat = if matches!(chapter, 3 | 9 | 14) {
         pal.marble.clone()
-    } else if matches!(spec.chapter, 1..=5 | 12..=14) {
+    } else if matches!(chapter, 1..=5 | 12..=14) {
         pal.stone_block.clone()
     } else {
         pal.dragon_stone.clone()
     };
-    let width = 10.0 + (spec.chapter % 3) as f32 * 1.5;
+    let width = 10.0 + (chapter % 3) as f32 * 1.5;
 
     for side in [-1.0, 1.0] {
         let pillar_pos = entrance + right * side * (width * 0.5 + 1.2) + Vec3::Y * 3.4;
@@ -3234,9 +3110,9 @@ fn spawn_secret_cave_system(
 
     for i in 0..7 {
         let side = if i % 2 == 0 { -1.0 } else { 1.0 };
-        let shard_h = 2.4 + seeded(seed, spec.chapter as u64 * 97 + i as u64) * 3.4;
-        let shard_r = 0.45 + seeded(seed, spec.chapter as u64 * 101 + i as u64) * 0.85;
-        let shard_mat = match (spec.chapter + i as u8) % 5 {
+        let shard_h = 2.4 + seeded(seed, chapter as u64 * 97 + i as u64) * 3.4;
+        let shard_r = 0.45 + seeded(seed, chapter as u64 * 101 + i as u64) * 0.85;
+        let shard_mat = match (chapter + i as u8) % 5 {
             0 => pal.crystal_emerald.clone(),
             1 | 2 => accent.clone(),
             _ => pal.crystal_aurora.clone(),
@@ -3265,9 +3141,9 @@ fn spawn_secret_cave_system(
             commands.spawn((
                 PointLightBundle {
                     point_light: PointLight {
-                        color: if matches!(spec.chapter, 6..=11) {
+                        color: if matches!(chapter, 6..=11) {
                             Color::srgb(1.0, 0.34, 0.12)
-                        } else if matches!((spec.chapter + i as u8) % 5, 0) {
+                        } else if matches!((chapter + i as u8) % 5, 0) {
                             Color::srgb(0.18, 1.0, 0.55)
                         } else {
                             Color::srgb(0.50, 0.78, 1.0)
@@ -3326,7 +3202,7 @@ fn spawn_secret_cave_system(
                 start: base + Vec3::Y * -1.0,
                 end: base + Vec3::Y * 2.2,
                 speed: 2.2 + i as f32 * 0.35,
-                phase: spec.chapter as f32 * 0.31 + i as f32,
+                phase: chapter as f32 * 0.31 + i as f32,
                 size: platform_size,
             },
         ));
@@ -3335,7 +3211,7 @@ fn spawn_secret_cave_system(
     commands.spawn((
         PointLightBundle {
             point_light: PointLight {
-                color: if matches!(spec.chapter, 6..=11) {
+                color: if matches!(chapter, 6..=11) {
                     Color::srgb(1.0, 0.45, 0.18)
                 } else {
                     Color::srgb(0.35, 0.92, 1.0)
@@ -3346,6 +3222,102 @@ fn spawn_secret_cave_system(
                 ..default()
             },
             transform: Transform::from_translation(chamber + Vec3::Y * 4.0),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // Every mountain cave is a real shared-screen dungeon entrance. The gate
+    // reuses the established four-player top-down movement/camera/combat mode.
+    let gate_entry = entrance + forward * 1.5 + Vec3::Y * 1.2;
+    commands.spawn((
+        Transform::from_translation(gate_entry),
+        DungeonCrawlGate {
+            gate_id: spec.anchor_id,
+            chapter,
+            label: spec.label,
+            entry: gate_entry,
+            focus: chamber + Vec3::Y * 1.0,
+            radius: 64.0,
+            interact_radius: 7.5,
+            opened: false,
+        },
+        WorldGeometry,
+    ));
+    for side in [-1.0f32, 1.0] {
+        let closed = entrance + right * side * (width * 0.24) + forward * 2.1 + Vec3::Y * 2.5;
+        let open = closed + right * side * (width * 0.45 + 1.5);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(width * 0.48, 5.0, 0.55))),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(closed).with_rotation(rotation),
+                ..default()
+            },
+            DungeonGateDoor {
+                gate_id: spec.anchor_id,
+                chapter,
+                closed,
+                open,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // Gauntlet-style pressure waves at the tunnel and arena, scaled by
+    // chapter while remaining readable for a shared four-player screen.
+    for (index, position) in [
+        entrance + forward * (spec.length * 0.52) + Vec3::Y * 1.0,
+        chamber + forward * 1.5 + Vec3::Y * 1.0,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        commands.spawn((
+            Transform::from_translation(position),
+            DungeonEnemySpawner {
+                chapter,
+                enemy_type: if index == 0 {
+                    EnemyType::Soldier
+                } else if chapter >= 8 {
+                    EnemyType::Heavy
+                } else {
+                    EnemyType::SpikeAlien
+                },
+                count: (2 + chapter / 4 + index as u8).min(6),
+                trigger_radius: 13.0,
+                difficulty: 0.82 + chapter as f32 * 0.055,
+                spawned: false,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // Mario-3D-World-style readable jump line: broad shared-screen pads with
+    // alternating heights lead to the cave checkpoint and reward chamber.
+    for step in 0..4 {
+        let side = if step % 2 == 0 { -1.0 } else { 1.0 };
+        let pad = chamber
+            + forward * (-5.5 + step as f32 * 3.7)
+            + right * side * 2.6
+            + Vec3::Y * (0.65 + (step % 3) as f32 * 0.7);
+        spawn_secret_cave_solid(
+            commands,
+            meshes,
+            accent.clone(),
+            Vec3::new(3.8, 0.55, 3.8),
+            Transform::from_translation(pad).with_rotation(rotation),
+            true,
+        );
+    }
+
+    // Persistent visual checkpoint. Discovery of the matching cave id unlocks
+    // its purple C button on the Everest fast-travel map.
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(1.4, 0.35))),
+            material: MeshMaterial3d(accent.clone()),
+            transform: Transform::from_translation(chamber + Vec3::Y * 0.45),
             ..default()
         },
         WorldGeometry,
@@ -3767,6 +3739,7 @@ fn spawn_scientist_temple_gate(
         GlobalTransform::default(),
         WorldGeometry,
         DungeonCrawlGate {
+            gate_id: spec.gate_label,
             chapter: spec.gate_id,
             label: spec.gate_label,
             entry,
@@ -3789,6 +3762,7 @@ fn spawn_scientist_temple_gate(
             },
             WorldGeometry,
             DungeonGateDoor {
+                gate_id: spec.gate_label,
                 chapter: spec.gate_id,
                 closed,
                 open,
@@ -4655,6 +4629,7 @@ fn spawn_dungeon_crawl_gate(
         GlobalTransform::default(),
         WorldGeometry,
         DungeonCrawlGate {
+            gate_id: spec.anchor_id,
             chapter: spec.chapter,
             label: spec.gate_label,
             entry,
@@ -4677,6 +4652,7 @@ fn spawn_dungeon_crawl_gate(
             },
             WorldGeometry,
             DungeonGateDoor {
+                gate_id: spec.anchor_id,
                 chapter: spec.chapter,
                 closed,
                 open,

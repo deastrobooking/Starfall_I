@@ -239,6 +239,7 @@ pub struct DungeonEnemySpawner {
 /// Interactable entrance to a single-screen top-down castle/dungeon crawl.
 #[derive(Component, Debug, Clone)]
 pub struct DungeonCrawlGate {
+    pub gate_id: &'static str,
     pub chapter: u8,
     pub label: &'static str,
     pub entry: Vec3,
@@ -251,6 +252,7 @@ pub struct DungeonCrawlGate {
 /// Visual door slab that slides away once its matching dungeon gate opens.
 #[derive(Component, Debug, Clone)]
 pub struct DungeonGateDoor {
+    pub gate_id: &'static str,
     pub chapter: u8,
     pub closed: Vec3,
     pub open: Vec3,

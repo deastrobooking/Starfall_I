@@ -695,15 +695,29 @@ The airship deck is a temporary chapter-spawned platform with colliders, rail bl
 
 **Files:** `src/chapters/mod.rs`, `src/plugins/chapter_plugin.rs`, `src/plugins/world_plugin.rs`, `src/plugins/discoverable_plugin.rs`
 
-Every chapter now has one optional cave route to discover. `WorldPlugin` spawns the physical cave systems when the world is generated:
+Every chapter now has one optional cave dungeon to discover. A single authored
+`SECRET_CAVE_LOCATIONS` table supplies world generation, chapter discovery,
+and the fast-travel map so cave coordinates cannot drift between systems.
+`WorldPlugin` spawns the physical cave systems when the world is generated:
 
 - Stone and dark-rock tunnel entrances.
 - Walkable tunnel floors, side walls, back chambers, and colliders.
 - Brushed-metal ribs, glass panels, glowing crystals, and point lights so the caves keep the ancient/new style.
 - Two small moving platforms inside each chamber.
 - A `WorldAnchor` named `secret_cave_ch01` through `secret_cave_ch14` at each cave's inner discovery point.
+- An interactable two-panel dungeon gate at every mountain entrance. Interact
+  gathers up to four players, switches all viewports to one top-down camera,
+  remaps movement to fixed dungeon axes, and enables the wider dungeon melee
+  and Star Sabre arcs.
+- Two chapter-scaled Gauntlet-style enemy waves per cave, plus broad alternating
+  jump pads and the existing vertical moving platforms for Mario-3D-World-style
+  cooperative traversal that remains readable on one screen.
+- A glowing chamber checkpoint. Once the matching cave discovery is saved,
+  Chapter Select enables a purple `C` map button at the real cave coordinates.
+  Selecting it transports every active player to the checkpoint and activates
+  shared-screen dungeon mode immediately.
 
-Chapter scripts use `PlaceSecretCave` to spawn a green discovery beacon at the matching anchor. Collecting it stores the cave id in `ChapterProgress.discoverables`, sends a UI message/radio line, and prevents that chapter's cave beacon from respawning after save/load.
+Chapter scripts use `PlaceSecretCave` to spawn a green discovery beacon at the matching anchor. Collecting it stores the cave id in `ChapterProgress.discoverables`, sends a UI message/radio line, prevents that chapter's cave beacon from respawning after save/load, and permanently unlocks its cave fast-travel point. The pending destination is transient; the discovery flag uses the existing save schema.
 
 ## Everest Range Fast Travel
 

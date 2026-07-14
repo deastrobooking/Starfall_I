@@ -139,7 +139,15 @@ Party-shared exceptions:
 - **Chapter director replaces wave loop**: `CurrentChapter` + `ChapterPlugin` replaces the old `WaveInfo`-driven loop. `WaveInfo` is kept alive only for legacy loot and save compatibility.
 - **Cached chapter catalog**: `chapters/mod.rs` builds the 14 chapter definitions once through `OnceLock`; `get_chapter()` clones from that catalog instead of rebuilding scripts every frame.
 - **Puzzle objectives are data-driven**: relic recovery uses chapter-scripted `PlaceRelicPuzzle` and `PlaceRelicFragmentPuzzle` steps so full relic challenges and five-piece fragment hunts can be added without bespoke level code.
-- **Secret caves are authored world anchors**: `WorldPlugin` spawns one cave system per chapter, while `PlaceSecretCave` drops a save-backed discovery beacon at that cave's inner anchor.
+- **Secret caves are shared-screen side dungeons**: the canonical fourteen-entry
+  `SECRET_CAVE_LOCATIONS` table drives world placement and map projection.
+  `WorldPlugin` creates each entrance gate, tunnel, combat spawners, cooperative
+  platform course, checkpoint, and inner anchor. `PlaceSecretCave` supplies the
+  save-backed discovery beacon; discovered ids unlock cave-specific map buttons.
+  `FastTravelDestination` is a one-shot request consumed by `ChapterPlugin`,
+  which moves the complete local party to the cave anchor and activates
+  `DungeonCrawlState`. Failed/missing anchors leave the request pending rather
+  than dropping players at an invalid position.
 - **Castle airships are encounter steps**: boss escapes and airship-deck raids are authored as `EncounterStep`s, so castle chapters can add a flying rematch without creating a separate top-level game state.
 - **PlayerInput abstraction**: All gameplay input is written into a `PlayerInput` component per player, keeping keyboard/gamepad mapping in `input_plugin.rs` and player behavior in feature plugins.
 - **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, companion ownership, rewards, and feedback use `PlayerIndex` as the shared key. Shared campaign systems intentionally live in resources like `ChapterProgress` and `PerkTree`.

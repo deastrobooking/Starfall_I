@@ -179,6 +179,13 @@ Primary files:
 Goal: make dragon lairs and Great Scientist temples compact SNES-style
 top-down side dungeons instead of proof-of-concept room chains.
 
+**2026-07 foundation complete:** all fourteen mountain caves now enter the
+single shared-camera dungeon mode, spawn chapter-scaled combat waves, include
+cooperative jump/moving-platform beats, and expose save-unlocked cave checkpoint
+buttons on the world map. Production follow-up should author unique room graphs,
+keys, hazards, minibosses, art sets, and completion rewards per cave rather than
+expanding the shared procedural layout indefinitely.
+
 - Give each lair one main objective, one optional hoard, one robot-pet shortcut,
   one traversal trick, and one boss-room staging beat.
 - Give each Great Scientist temple one mechanics trial, one puzzle lock, one

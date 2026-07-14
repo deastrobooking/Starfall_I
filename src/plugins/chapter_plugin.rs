@@ -6,7 +6,9 @@
 
 use bevy::prelude::*;
 
-use crate::chapters::{chapter_map_location, get_chapter, ChapterId, EncounterStep};
+use crate::chapters::{
+    chapter_map_location, get_chapter, secret_cave_location, ChapterId, EncounterStep,
+};
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
@@ -22,8 +24,8 @@ use crate::physics::prelude::{Collider, RigidBody};
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
 use crate::rendering::PbrBundle;
 use crate::resources::{
-    BiomePalette, ChapterProgress, CurrentChapter, DungeonCrawlState, PlaySessionTransition,
-    WaveInfo,
+    BiomePalette, ChapterProgress, CurrentChapter, DungeonCrawlState, FastTravelDestination,
+    PlaySessionTransition, WaveInfo,
 };
 use crate::state::AppState;
 
@@ -35,6 +37,8 @@ struct AirshipLevelPiece;
 #[derive(Resource, Default)]
 struct PendingChapterTravel {
     chapter: Option<ChapterId>,
+    cave_anchor: Option<&'static str>,
+    cave_label: Option<&'static str>,
 }
 
 impl Plugin for ChapterPlugin {
@@ -42,6 +46,7 @@ impl Plugin for ChapterPlugin {
         app.init_resource::<CurrentChapter>()
             .init_resource::<BiomePalette>()
             .init_resource::<ChapterProgress>()
+            .init_resource::<FastTravelDestination>()
             .init_resource::<PendingChapterTravel>()
             .add_systems(OnEnter(AppState::Playing), start_chapter)
             .add_systems(
@@ -67,6 +72,7 @@ fn start_chapter(
     mut started_ev: MessageWriter<ChapterStartedEvent>,
     mut wave: ResMut<WaveInfo>,
     mut pending_travel: ResMut<PendingChapterTravel>,
+    mut fast_travel: ResMut<FastTravelDestination>,
     mut dungeon: ResMut<DungeonCrawlState>,
     airship_q: Query<Entity, With<AirshipLevelPiece>>,
 ) {
@@ -99,7 +105,16 @@ fn start_chapter(
     *wave = WaveInfo::new();
     wave.wave_number = current.id.0 as u32;
     dungeon.clear();
-    pending_travel.chapter = Some(current.id);
+    if let (Some(anchor), Some(label)) = (fast_travel.anchor_id, fast_travel.cave_label) {
+        pending_travel.chapter = None;
+        pending_travel.cave_anchor = Some(anchor);
+        pending_travel.cave_label = Some(label);
+    } else {
+        pending_travel.chapter = Some(current.id);
+        pending_travel.cave_anchor = None;
+        pending_travel.cave_label = None;
+    }
+    fast_travel.clear();
     started_ev.write(ChapterStartedEvent {
         chapter: current.id.0,
     });
@@ -110,12 +125,58 @@ fn apply_pending_chapter_travel(
     mut pending_travel: ResMut<PendingChapterTravel>,
     mut player_q: Query<(Entity, &PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
     anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
+    mut dungeon: ResMut<DungeonCrawlState>,
 ) {
+    if let Some(anchor_id) = pending_travel.cave_anchor {
+        let Some(anchor) = resolve_anchor_position(&anchor_q, anchor_id) else {
+            return;
+        };
+        let Some(cave) = secret_cave_location(
+            crate::chapters::SECRET_CAVE_LOCATIONS
+                .iter()
+                .find(|cave| cave.anchor_id == anchor_id)
+                .map(|cave| cave.chapter)
+                .unwrap_or(ChapterId::FIRST),
+        ) else {
+            return;
+        };
+        move_players_to_world_anchor(&mut commands, &mut player_q, anchor);
+        dungeon.activate(
+            cave.chapter,
+            pending_travel.cave_label.unwrap_or(cave.label),
+            anchor,
+            anchor,
+            64.0,
+        );
+        pending_travel.cave_anchor = None;
+        pending_travel.cave_label = None;
+        return;
+    }
     let Some(chapter_id) = pending_travel.chapter else {
         return;
     };
     if move_players_to_chapter_location(&mut commands, &mut player_q, &anchor_q, chapter_id) {
         pending_travel.chapter = None;
+    }
+}
+
+fn move_players_to_world_anchor(
+    commands: &mut Commands,
+    player_q: &mut Query<(Entity, &PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
+    anchor: Vec3,
+) {
+    const OFFSETS: [Vec3; 4] = [
+        Vec3::new(-3.0, 1.3, -3.0),
+        Vec3::new(3.0, 1.3, -3.0),
+        Vec3::new(-3.0, 1.3, 3.0),
+        Vec3::new(3.0, 1.3, 3.0),
+    ];
+    for (entity, index, mut transform, mut movement) in player_q.iter_mut() {
+        transform.translation = anchor + OFFSETS[index.0.min(3) as usize];
+        movement.velocity = Vec3::ZERO;
+        movement.ground_velocity = Vec3::ZERO;
+        movement.is_grounded = false;
+        commands.entity(entity).remove::<BoatPassenger>();
     }
 }
 

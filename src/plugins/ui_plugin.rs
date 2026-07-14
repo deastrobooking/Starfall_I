@@ -7,7 +7,7 @@ use bevy::input::ButtonState;
 
 use crate::chapters::{
     all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
-    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE,
+    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE, SECRET_CAVE_LOCATIONS,
 };
 use crate::commands::{CommandOverlayState, CommandRegistry};
 use crate::components::armor::ArmorSet;
@@ -35,8 +35,9 @@ use crate::plugins::save_plugin::{save_current_session, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
-    GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerGuidance, PlayerSelectState,
-    ShopCatalog, ShopCategory, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
+    FastTravelDestination, GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerGuidance,
+    PlayerSelectState, ShopCatalog, ShopCategory, UiMessage, WaveInfo, WorldSiteRegistry,
+    HERO_ROSTER,
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
@@ -202,6 +203,7 @@ impl Plugin for UiPlugin {
                 (
                     chapter_select_action_buttons,
                     chapter_select_fast_travel_buttons,
+                    cave_fast_travel_buttons,
                     chapter_select_perk_buttons,
                     chapter_select_upgrade_buttons,
                     chapter_select_weapon_rank_buttons,
@@ -1367,6 +1369,12 @@ struct ChapterSelectScrollPanel;
 #[derive(Component)]
 struct ChapterFastTravelButton(ChapterId);
 #[derive(Component, Clone, Copy)]
+struct CaveFastTravelButton {
+    chapter: ChapterId,
+    anchor_id: &'static str,
+    label: &'static str,
+}
+#[derive(Component, Clone, Copy)]
 struct ChapterSelectActionButton(ChapterSelectAction);
 #[derive(Clone, Copy)]
 enum ChapterSelectAction {
@@ -1997,6 +2005,59 @@ fn spawn_fast_travel_map(
                 ));
             }
 
+            // Discovered caves become direct checkpoints. Locked silhouettes
+            // still advertise that each mountain region contains a dungeon.
+            for cave in SECRET_CAVE_LOCATIONS {
+                let discovered = progress.has_discoverable(cave.anchor_id);
+                let mut cave_button = map.spawn((
+                    Button,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(cave.x)),
+                        top: Val::Percent(world_to_map_top(cave.z)),
+                        width: Val::Px(20.0),
+                        height: Val::Px(20.0),
+                        margin: UiRect {
+                            left: Val::Px(-10.0),
+                            top: Val::Px(8.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(2.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(if discovered {
+                        Color::srgb(0.42, 0.18, 0.62)
+                    } else {
+                        Color::srgb(0.10, 0.10, 0.14)
+                    }),
+                    BorderColor::all(if discovered {
+                        Color::srgb(0.82, 0.52, 1.0)
+                    } else {
+                        Color::srgb(0.28, 0.28, 0.34)
+                    }),
+                    CaveFastTravelButton {
+                        chapter: cave.chapter,
+                        anchor_id: cave.anchor_id,
+                        label: cave.label,
+                    },
+                ));
+                if !discovered {
+                    cave_button.insert(MenuButtonDisabled);
+                }
+                cave_button.with_children(|marker| {
+                    marker.spawn((
+                        Text::new(if discovered { "C" } else { "?" }),
+                        TextFont {
+                            font_size: FontSize::Px(10.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+            }
+
             for temple in great_scientist_map_markers() {
                 let collected = progress.has_discoverable(temple.reward_id);
                 let marker_color = if collected {
@@ -2330,6 +2391,27 @@ fn chapter_select_fast_travel_buttons(
             current.started = false;
             next_state.set(AppState::Playing);
         }
+    }
+}
+
+fn cave_fast_travel_buttons(
+    progress: Res<ChapterProgress>,
+    mut current: ResMut<CurrentChapter>,
+    mut destination: ResMut<FastTravelDestination>,
+    mut next_state: ResMut<NextState<AppState>>,
+    interaction_q: Query<
+        (&Interaction, &CaveFastTravelButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed || !progress.has_discoverable(button.anchor_id) {
+            continue;
+        }
+        current.id = button.chapter;
+        current.started = false;
+        destination.cave(button.anchor_id, button.label);
+        next_state.set(AppState::Playing);
     }
 }
 
