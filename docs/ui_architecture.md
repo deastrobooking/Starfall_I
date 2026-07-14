@@ -59,7 +59,10 @@ activation through the existing `Interaction::Pressed` handlers.
 Player-facing actions use explicit ASCII text labels such as `START GAME`,
 `READY`, `CHARACTER EDITOR`, and `BACK`. Icon-only Unicode glyphs are avoided
 for menu actions because their availability varies with the configured Bevy
-font; button dimensions are sized for the full action names.
+font; button dimensions are sized for the full action names. Player Select cards
+use wrapped, named buttons so four local players can still read every action.
+Character Design uses a scrollable options panel with wheel scrolling for long
+customization lists.
 
 Held input now repeats after an initial delay, left stick joins D-pad navigation,
 disabled buttons are skipped and visibly muted, and East/Escape dispatches Back

@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+
 use crate::character_blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
@@ -43,6 +45,7 @@ impl Plugin for CharacterDesignPlugin {
                     human_studio_interaction,
                     prefab_action_interaction,
                     preview_zoom_interaction,
+                    scroll_design_panel,
                     update_swatch_borders,
                     update_base_model_status_text,
                     update_design_preset_colors,
@@ -60,6 +63,9 @@ impl Plugin for CharacterDesignPlugin {
 
 #[derive(Component)]
 struct DesignUiRoot;
+
+#[derive(Component)]
+struct DesignScrollPanel;
 
 #[derive(Component)]
 struct DesignLight;
@@ -599,6 +605,31 @@ fn preview_zoom_interaction(
     }
 }
 
+fn scroll_design_panel(
+    mut wheel: MessageReader<MouseWheel>,
+    mut panel_q: Query<(&mut ScrollPosition, &ComputedNode), With<DesignScrollPanel>>,
+) {
+    let mut delta_y = 0.0;
+    for event in wheel.read() {
+        let scale = match event.unit {
+            MouseScrollUnit::Line => 26.0,
+            MouseScrollUnit::Pixel => 1.0,
+        };
+        delta_y -= event.y * scale;
+    }
+
+    if delta_y == 0.0 {
+        return;
+    }
+
+    for (mut scroll_position, computed) in panel_q.iter_mut() {
+        let max_y = ((computed.content_size().y - computed.size().y)
+            * computed.inverse_scale_factor())
+        .max(0.0);
+        scroll_position.y = (scroll_position.y + delta_y).clamp(0.0, max_y);
+    }
+}
+
 fn run_prefab_action(
     action: PrefabAction,
     design_data: &mut CharacterDesignData,
@@ -934,10 +965,12 @@ fn spawn_design_ui(
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::axes(Val::Px(28.0), Val::Px(24.0)),
                     row_gap: Val::Px(10.0),
-                    overflow: Overflow::clip_y(),
+                    overflow: Overflow::scroll_y(),
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.025, 0.026, 0.030, 0.96)),
+                ScrollPosition::default(),
+                DesignScrollPanel,
             ))
             .with_children(|panel| {
                 panel.spawn((

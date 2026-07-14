@@ -2736,15 +2736,18 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
             // Four player slot cards
             root.spawn(Node {
                 flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(18.0),
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(16.0),
+                row_gap: Val::Px(16.0),
+                justify_content: JustifyContent::Center,
                 ..default()
             })
             .with_children(|row| {
                 for i in 0..4u8 {
                     row.spawn((
                         Node {
-                            width: Val::Px(230.0),
-                            height: Val::Px(300.0),
+                            width: Val::Px(248.0),
+                            min_height: Val::Px(324.0),
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::FlexStart,
@@ -2818,7 +2821,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                                 "PREVIOUS",
                                 i,
                                 PlayerSelectAction::PreviousCharacter,
-                                96.0,
+                                108.0,
                             );
                             spawn_player_select_button(
                                 row,
@@ -2843,7 +2846,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                                     "JOIN / LEAVE",
                                     i,
                                     PlayerSelectAction::JoinLeave,
-                                    118.0,
+                                    130.0,
                                 );
                             }
                             spawn_player_select_button(
@@ -2858,14 +2861,14 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                                 "EDIT HERO",
                                 i,
                                 PlayerSelectAction::Customize,
-                                98.0,
+                                108.0,
                             );
                             spawn_player_select_button(
                                 row,
                                 "ADVANCED",
                                 i,
                                 PlayerSelectAction::AdvancedDesign,
-                                98.0,
+                                108.0,
                             );
                         });
                     });
@@ -2903,10 +2906,10 @@ fn spawn_player_select_button(
             Button,
             Node {
                 width: Val::Px(width),
-                height: Val::Px(34.0),
+                min_height: Val::Px(38.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                padding: UiRect::horizontal(Val::Px(8.0)),
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
@@ -2921,9 +2924,10 @@ fn spawn_player_select_button(
             button.spawn((
                 Text::new(label),
                 TextFont {
-                    font_size: FontSize::Px(14.0),
+                    font_size: FontSize::Px(12.0),
                     ..default()
                 },
+                TextLayout::justify(Justify::Center),
                 TextColor(Color::WHITE),
             ));
         });
