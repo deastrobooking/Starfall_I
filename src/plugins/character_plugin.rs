@@ -257,10 +257,12 @@ fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
     if input.state == Some(PlayerState::Sprinting) {
         return CartoonPose::Sprint;
     }
-    if input.horizontal_speed > 28.0 {
+    // PlayerMovement uses per-tick world speeds (walk ~= 0.38, sprint ~= 0.70),
+    // so the old 28.0 threshold made the authored Run pose unreachable.
+    if input.horizontal_speed > 0.48 {
         return CartoonPose::Run;
     }
-    if input.horizontal_speed > 2.0 {
+    if input.horizontal_speed > 0.06 {
         return CartoonPose::Walk;
     }
     CartoonPose::Idle
@@ -2523,6 +2525,41 @@ mod tests {
             traversal_mode: TraversalMode::Grapple,
             grapple_attach_local: None,
         }
+    }
+
+    fn locomotion_pose_input(speed: f32) -> PoseInput {
+        PoseInput {
+            state: Some(PlayerState::Moving),
+            grounded: true,
+            horizontal_speed: speed,
+            vertical_velocity: 0.0,
+            hanging: false,
+            wall_sliding: false,
+            jetpack_active: false,
+            flight_mode: FlightMode::Grounded,
+            traversal_mode: TraversalMode::Grapple,
+            grapple_mode: None,
+            grapple_pose: false,
+            sabre_slashing: false,
+            melee_attacking: false,
+            dodging: false,
+            parrying: false,
+        }
+    }
+
+    #[test]
+    fn grounded_locomotion_reaches_walk_run_and_sprint_poses() {
+        assert_eq!(
+            select_cartoon_pose(locomotion_pose_input(0.30)),
+            CartoonPose::Walk
+        );
+        assert_eq!(
+            select_cartoon_pose(locomotion_pose_input(0.58)),
+            CartoonPose::Run
+        );
+        let mut sprint = locomotion_pose_input(0.70);
+        sprint.state = Some(PlayerState::Sprinting);
+        assert_eq!(select_cartoon_pose(sprint), CartoonPose::Sprint);
     }
 
     #[test]

@@ -95,6 +95,11 @@ one-hand wall slide, hang, combat, Star Sabre slash, and grapple wind-up. The
 long-form roadmap for turning this into a full humanoid traversal/combat system
 lives in `docs/playerengine.md`.
 
+Locomotion animation thresholds use the same units as `PlayerMovement`: walk
+begins above `0.06`, run above `0.48`, and the explicit `Sprinting` state selects
+the faster sprint cycle. The former run threshold of `28.0` was unreachable for
+normal movement speeds (`walk ~= 0.38`, `sprint ~= 0.70`).
+
 Grapple hook foundation: `GrappleHookState` is a single-hook state component
 with Ready/Windup/Searching/Swinging/Zipping/Recovering/Cooldown modes, cable
 tuning, zip/mountain/attack pull tuning, and attach-point fields for future
@@ -138,6 +143,14 @@ nearby low ground, builds a 120–720 unit supported branch ramp, removes the
 guardrails from the matching 48-unit main-road chunk, and leaves the final ramp
 segments open so the player can physically merge and turn onto the sky road.
 These side approaches also participate in tree/building corridor avoidance.
+Approach selection rejects ground points above the merge and heavily penalizes
+terrain that would pierce a straight uphill ramp. Generated ramp stations are
+monotonic toward the sky road. The main network no longer asks
+`spawn_boost_road_span` to add automatic end ramps to ordinary 48-unit chunks;
+those repeated colliders were the metallic bumps that drained player speed.
+`spawn_board_boost_ramp` now treats its position as the low entrance and derives
+yaw from launch direction, preventing half of the mesh from spawning beneath
+the road. Support crossbeams account for road grade and remain below the deck.
 Elevated deck sections with at least 8 units of clearance spawn paired,
 collidable stone pylons with a metal crossbeam. Pylon feet independently sample
 the terrain collider beneath each side of the road, supporting rising mountain

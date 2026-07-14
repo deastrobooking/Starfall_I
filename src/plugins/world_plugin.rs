@@ -4835,7 +4835,7 @@ const TERRAIN_MESH_CELL_SIZE: f32 = TERRAIN_WORLD_SIZE / TERRAIN_MESH_RESOLUTION
 const EVEREST_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/everest.png");
 static EVEREST_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
 static TERRAIN_MESH_HEIGHT_GRIDS: OnceLock<Mutex<HashMap<u64, Arc<Vec<f32>>>>> = OnceLock::new();
-static SKY_ROAD_ACCESS_CORRIDORS: OnceLock<Mutex<HashMap<u64, Arc<Vec<(Vec2, Vec2)>>>>> =
+static SKY_ROAD_ACCESS_CORRIDORS: OnceLock<Mutex<HashMap<u64, Arc<Vec<(Vec2, Vec3)>>>>> =
     OnceLock::new();
 
 const ROUTE_CORE_AURORA: &[(f32, f32)] = &[
@@ -5303,7 +5303,7 @@ fn distance_to_speed_road_network(x: f32, z: f32, seed: u64) -> f32 {
     }
     for &(outer, merge) in sky_road_access_corridors(seed).iter() {
         best = best.min(distance_to_segment_xz(
-            x, z, outer.x, outer.y, merge.x, merge.y,
+            x, z, outer.x, outer.y, merge.x, merge.z,
         ));
     }
 
@@ -7629,7 +7629,7 @@ fn spawn_speed_road_network(
     for (ri, route) in mountain_routes().iter().enumerate() {
         let width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
         let profile = &road_profiles[ri];
-        let sky_access_chunks = speed_road_sky_access_chunks(profile, terrain_seed);
+        let sky_access_chunks = speed_road_valid_sky_access_chunks(profile, terrain_seed);
         for (chunk, points) in profile.windows(2).enumerate() {
             spawn_speed_road_deck_between(
                 commands,
@@ -7640,7 +7640,6 @@ fn spawn_speed_road_network(
                 points[1],
                 width,
                 true,
-                chunk % 3 == 1,
                 seed + ri as u64 * 7_001 + chunk as u64 * 19,
                 terrain_seed,
                 !sky_access_chunks.contains(&chunk),
@@ -7969,7 +7968,6 @@ fn spawn_speed_road_deck_between(
     mut end: Vec3,
     width: f32,
     boost_overlay: bool,
-    include_ramps: bool,
     seed: u64,
     terrain_seed: u64,
     guardrails: bool,
@@ -8033,7 +8031,7 @@ fn spawn_speed_road_deck_between(
             pitch,
             length * 0.90,
             width * 0.72,
-            include_ramps,
+            false,
             seed,
         );
     }
@@ -8130,11 +8128,13 @@ fn spawn_speed_road_support_columns(
         }
 
         // A visible cap ties the paired columns into one bridge bent.
+        let grade = (delta.y / length).abs();
+        let cap_drop = 1.8 + grade * column_width * 0.75;
         commands.spawn((
             PbrBundle {
                 mesh: Mesh3d(unit_cube.clone()),
                 material: MeshMaterial3d(pal.brushed_metal.clone()),
-                transform: Transform::from_translation(road_center - Vec3::Y * 1.25)
+                transform: Transform::from_translation(road_center - Vec3::Y * cap_drop)
                     .with_rotation(Quat::from_rotation_y(yaw))
                     .with_scale(Vec3::new(road_width * 0.76, 1.4, column_width * 1.25)),
                 ..default()
@@ -8248,33 +8248,54 @@ fn speed_road_sky_access_chunks(profile: &[Vec3], terrain_seed: u64) -> Vec<usiz
     access
 }
 
-fn speed_road_sky_approach(merge: Vec3, forward: Vec2, terrain_seed: u64) -> (Vec2, f32) {
+fn speed_road_sky_approach(merge: Vec3, forward: Vec2, terrain_seed: u64) -> Option<(Vec2, f32)> {
     let right = Vec2::new(forward.y, -forward.x);
-    let mut best = (f32::INFINITY, 1.0_f32, 160.0_f32, merge.y);
+    let mut best: Option<(f32, f32, f32, f32)> = None;
     for side in [-1.0_f32, 1.0] {
         for distance in (120..=600).step_by(60) {
             let xz = Vec2::new(merge.x, merge.z) + right * side * distance as f32;
             let ground = terrain_surface_y(xz.x, xz.y, terrain_seed);
-            let score = ground + distance as f32 * 0.012;
-            if score < best.0 {
-                best = (score, side, distance as f32, ground);
+            if ground + 0.5 >= merge.y {
+                continue;
+            }
+            let mut obstruction = 0.0_f32;
+            for sample in 1..16 {
+                let t = sample as f32 / 16.0;
+                let sample_xz = xz.lerp(Vec2::new(merge.x, merge.z), t);
+                let line_y = ground + (merge.y - ground) * t;
+                obstruction = obstruction
+                    .max(terrain_surface_y(sample_xz.x, sample_xz.y, terrain_seed) + 0.08 - line_y);
+            }
+            let score = obstruction.max(0.0) * 10_000.0 + distance as f32 * 0.012;
+            if best.is_none_or(|candidate| score < candidate.0) {
+                best = Some((score, side, distance as f32, ground));
             }
         }
     }
 
+    let best = best?;
     let rise = (merge.y - best.3).max(0.0);
     let length = best.2.max((rise / 0.10).clamp(120.0, 720.0));
-    (
-        Vec2::new(merge.x, merge.z) + right * best.1 * length,
-        terrain_surface_y(
-            merge.x + right.x * best.1 * length,
-            merge.z + right.y * best.1 * length,
-            terrain_seed,
-        ),
-    )
+    let outer = Vec2::new(merge.x, merge.z) + right * best.1 * length;
+    let outer_ground = terrain_surface_y(outer.x, outer.y, terrain_seed);
+    (outer_ground + 0.5 < merge.y).then_some((outer, outer_ground))
 }
 
-fn sky_road_access_corridors(terrain_seed: u64) -> Arc<Vec<(Vec2, Vec2)>> {
+fn speed_road_valid_sky_access_chunks(profile: &[Vec3], terrain_seed: u64) -> Vec<usize> {
+    speed_road_sky_access_chunks(profile, terrain_seed)
+        .into_iter()
+        .filter(|&chunk| {
+            let points = &profile[chunk..=chunk + 1];
+            let merge = points[0].lerp(points[1], 0.5);
+            let forward =
+                Vec2::new(points[1].x - points[0].x, points[1].z - points[0].z).normalize_or_zero();
+            forward.length_squared() > 0.01
+                && speed_road_sky_approach(merge, forward, terrain_seed).is_some()
+        })
+        .collect()
+}
+
+fn sky_road_access_corridors(terrain_seed: u64) -> Arc<Vec<(Vec2, Vec3)>> {
     let cache = SKY_ROAD_ACCESS_CORRIDORS.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(corridors) = cache
         .lock()
@@ -8287,7 +8308,7 @@ fn sky_road_access_corridors(terrain_seed: u64) -> Arc<Vec<(Vec2, Vec2)>> {
     let profiles = speed_road_network_profiles(terrain_seed);
     let mut corridors = Vec::new();
     for profile in &profiles {
-        for chunk in speed_road_sky_access_chunks(profile, terrain_seed) {
+        for chunk in speed_road_valid_sky_access_chunks(profile, terrain_seed) {
             let points = &profile[chunk..=chunk + 1];
             let merge = points[0].lerp(points[1], 0.5);
             let forward =
@@ -8295,8 +8316,9 @@ fn sky_road_access_corridors(terrain_seed: u64) -> Arc<Vec<(Vec2, Vec2)>> {
             if forward.length_squared() <= 0.01 {
                 continue;
             }
-            let (outer, _) = speed_road_sky_approach(merge, forward, terrain_seed);
-            corridors.push((outer, Vec2::new(merge.x, merge.z)));
+            if let Some((outer, _)) = speed_road_sky_approach(merge, forward, terrain_seed) {
+                corridors.push((outer, merge));
+            }
         }
     }
     let corridors = Arc::new(corridors);
@@ -8330,20 +8352,41 @@ fn spawn_speed_road_sky_access(
         if forward.length_squared() <= 0.01 {
             continue;
         }
-        let (outer_xz, outer_ground) = speed_road_sky_approach(merge, forward, terrain_seed);
+        let Some((outer_xz, outer_ground)) = speed_road_sky_approach(merge, forward, terrain_seed)
+        else {
+            continue;
+        };
         let length = outer_xz.distance(Vec2::new(merge.x, merge.z));
         let steps = (length / 18.0).ceil().max(8.0) as usize;
         let mut ramp = Vec::with_capacity(steps + 1);
+        let mut last_height = outer_ground + 0.08;
+        let mut blocked = outer_ground + 0.5 >= merge.y;
         for step in 0..=steps {
             let t = step as f32 / steps as f32;
             let xz = outer_xz.lerp(Vec2::new(merge.x, merge.z), t);
             let ground = terrain_surface_y(xz.x, xz.y, terrain_seed);
-            let eased = t * t * (3.0 - 2.0 * t);
-            let ramp_height = outer_ground + (merge.y - outer_ground) * eased;
-            ramp.push(Vec3::new(xz.x, ramp_height.max(ground + 0.08), xz.y));
+            let ramp_height = outer_ground + (merge.y - outer_ground) * t;
+            let height = ramp_height.max(ground + 0.08).max(last_height);
+            blocked |= height > merge.y + 0.01;
+            last_height = height;
+            ramp.push(Vec3::new(xz.x, height, xz.y));
+        }
+        if blocked {
+            continue;
         }
         if let Some(last) = ramp.last_mut() {
             *last = merge;
+        }
+
+        // Raise the approach before any remaining terrain step. This removes
+        // the short up/down bumps that were bleeding speed from the player.
+        for index in (0..ramp.len().saturating_sub(1)).rev() {
+            let distance = Vec2::new(
+                ramp[index + 1].x - ramp[index].x,
+                ramp[index + 1].z - ramp[index].z,
+            )
+            .length();
+            ramp[index].y = ramp[index].y.max(ramp[index + 1].y - distance * 0.22);
         }
 
         let ramp_width = road_width * 0.46;
@@ -8511,7 +8554,6 @@ fn spawn_settlement_speed_ring(
             end,
             width,
             true,
-            false,
             seed + segment as u64 * 31,
             terrain_seed,
             true,
@@ -8599,7 +8641,6 @@ fn spawn_settlement_speed_spur(
             start.lerp(end, t1),
             SPEED_ROAD_WIDTH * 0.86,
             true,
-            chunk == 0 || chunk + 1 == chunk_count,
             seed + chunk as u64 * 41,
             terrain_seed,
             true,
@@ -8658,7 +8699,6 @@ fn spawn_route_sweeper_curves(
                     points[1],
                     width,
                     true,
-                    step == 1 || step + 2 == profile.len(),
                     seed + ri as u64 * 1_009 + vi as u64 * 67 + step as u64,
                     terrain_seed,
                     true,
@@ -8725,7 +8765,7 @@ fn spawn_hoverboard_trick_ramps(
                     ramp_z,
                 );
                 spawn_board_boost_ramp(
-                    commands, meshes, pal, center, yaw, dir, 18.0, 54.0, 18.0, 7.2, 2.35,
+                    commands, meshes, pal, center, dir, 18.0, 54.0, 18.0, 7.2, 2.35,
                 );
                 spawn_speed_loop_gate(
                     commands,
@@ -8833,7 +8873,6 @@ fn spawn_helical_speed_ramp(
             point(a1, t1),
             width,
             true,
-            step == 0 || step + 1 == steps,
             seed + step as u64 * 29,
             terrain_seed,
             true,
@@ -8918,17 +8957,11 @@ fn spawn_speed_loop_gate(
 
     for end in [-1.0_f32, 1.0] {
         let ramp_dir = if end > 0.0 { forward } else { -forward };
-        let ramp_yaw = if end > 0.0 {
-            yaw
-        } else {
-            yaw + std::f32::consts::PI
-        };
         spawn_board_boost_ramp(
             commands,
             meshes,
             pal,
             center + forward * end * radius * 1.16 + Vec3::Y * 0.80,
-            ramp_yaw,
             ramp_dir,
             width * 0.48,
             radius * 1.05,
@@ -12609,11 +12642,6 @@ fn spawn_boost_road_span(
         if include_ramps {
             for end in [-1.0_f32, 1.0] {
                 let ramp_dir = if end > 0.0 { lane_dir } else { -lane_dir };
-                let ramp_yaw = if end > 0.0 {
-                    lane_yaw
-                } else {
-                    lane_yaw + std::f32::consts::PI
-                };
                 let ramp_center =
                     lane_center + forward * end * length * 0.43 + Vec3::Y * (1.0 + end.abs());
                 spawn_board_boost_ramp(
@@ -12621,7 +12649,6 @@ fn spawn_boost_road_span(
                     meshes,
                     pal,
                     ramp_center,
-                    ramp_yaw,
                     ramp_dir,
                     lane_width * 0.92,
                     22.0,
@@ -12699,8 +12726,7 @@ fn spawn_board_boost_ramp(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
-    center: Vec3,
-    yaw: f32,
+    base_center: Vec3,
     direction: Vec3,
     width: f32,
     length: f32,
@@ -12708,8 +12734,17 @@ fn spawn_board_boost_ramp(
     impulse: f32,
     lift: f32,
 ) {
+    let direction = direction.with_y(0.0).normalize_or_zero();
+    if direction.length_squared() <= f32::EPSILON {
+        return;
+    }
+    let yaw = direction.x.atan2(direction.z);
     let pitch = (rise / length.max(0.1)).atan();
     let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+    // Callers provide the low road-surface entrance, not the mesh center.
+    // Moving half a run forward and half a rise upward keeps the complete ramp
+    // above the deck and guarantees that its uphill face matches `direction`.
+    let center = base_center + direction * (length * 0.5) + Vec3::Y * (rise * 0.5);
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.72, length))),
@@ -16360,12 +16395,17 @@ mod tests {
             "the aerial network needs frequent driveable access ramps"
         );
         for &(outer, merge) in corridors.iter() {
-            let length = outer.distance(merge);
+            let merge_xz = Vec2::new(merge.x, merge.z);
+            let length = outer.distance(merge_xz);
             assert!(
                 (119.0..=722.0).contains(&length),
                 "unexpected sky access length {length}"
             );
-            let midpoint = outer.lerp(merge, 0.5);
+            assert!(
+                terrain_surface_y(outer.x, outer.y, terrain_seed) + 0.5 < merge.y,
+                "sky access must rise from ground toward the road"
+            );
+            let midpoint = outer.lerp(merge_xz, 0.5);
             assert!(distance_to_speed_road_network(midpoint.x, midpoint.y, terrain_seed) < 0.1);
         }
     }
