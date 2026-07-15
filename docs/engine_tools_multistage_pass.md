@@ -151,9 +151,10 @@ is one undo transaction.
   spline/building recipes can regenerate every dependent mesh and collider;
 - world adapters cannot be duplicated or deleted accidentally.
 
-ET2's remaining production gate is now persistence and recipe regeneration:
-ET3 must save draft objects and stable adapter overrides, while the road and
-building forges must replace read-only adapters with complete recipe compilers.
+ET2's persistence gate is now delivered by ET3a. Draft primitives and editable
+world-adapter transforms save and reload through stable identities. The road and
+building forges must still replace read-only adapters with complete recipe
+compilers before generated geometry can be edited safely.
 
 ## ET3 — Content registry, files, and publishing
 
@@ -171,6 +172,34 @@ recipes; RON may be used for engine-authored scene manifests after evaluation.
 
 Acceptance: simulate an interrupted save, recover the previous valid project,
 rename a referenced asset without breaking a level, and reject duplicate IDs.
+
+### ET3a delivered — July 2026
+
+- `src/engine_tools/persistence.rs` defines schema-versioned project manifests,
+  content records, scene drafts, primitive records, and stable adapter
+  overrides without serializing Bevy `Entity` values.
+- Forge now exposes controller-focusable `SAVE`, `LOAD`, `RECOVER`, and
+  `PUBLISH` actions. Keyboard shortcuts are Command/Control-S, Command/Control-O,
+  Shift-Command/Control-O, and Shift-Command/Control-S respectively.
+- Saves use a temporary file, file synchronization, atomic rename, directory
+  synchronization, and three rotating recovery snapshots at
+  `starfall_forge/project.json`.
+- Normal load automatically falls back to the newest valid recovery snapshot;
+  explicit recovery loads snapshot 1. Loading clears stale selection and undo
+  history, restores authored IDs/names/transforms, and reapplies cave,
+  settlement, anchor, and route-marker overrides through stable keys.
+- Validation rejects future schemas, invalid or duplicate content IDs, missing
+  dependencies, zero or duplicate editor IDs, blank or duplicate adapter keys,
+  non-finite transforms, and zero-length rotations.
+- Publishing validates the current draft, refreshes deterministic scene hashes,
+  promotes them to `published_hash`, and writes through the atomic save path.
+- Automated coverage includes interrupted-write behavior, corrupt-primary
+  recovery, migration, dependency/reference rename, draft hashing, publishing,
+  invalid records, and an editor-world primitive/adapter round trip.
+
+ET3b remains: split large projects into per-record source files, add registry
+browsing/rename UI, surface detailed validation reports in Forge, and introduce
+recipe regeneration contracts for roads and buildings.
 
 ## ET4 — Character and Creature production workspaces
 
@@ -279,6 +308,7 @@ after at least three Starfall workspaces share the APIs.
   generator-time budgets;
 - no editor preview/runtime output divergence.
 
-The next implementation slice is ET3's versioned project/content registry,
-atomic draft persistence, and recovery snapshots. Road/building adapters become
-editable only as their recipe compilers acquire safe regeneration boundaries.
+The next implementation slice is ET3b's registry browser and per-record source
+files, followed by ET4 Character/Creature production workspaces. Road/building
+adapters become editable only as their recipe compilers acquire safe
+regeneration boundaries.

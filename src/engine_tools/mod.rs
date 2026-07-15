@@ -5,6 +5,8 @@
 //! Forge, and the future Level Scene Composer without serializing transient ECS
 //! entities or depending on Bevy's runtime `Entity` values.
 
+mod persistence;
+
 use std::collections::BTreeSet;
 
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
@@ -23,6 +25,10 @@ use crate::components::world::{
 use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::state::AppState;
+use persistence::{
+    AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject, ProjectLoadSource,
+    ProjectStore, SceneObjectDraft, TransformDraft,
+};
 
 pub struct EngineToolsPlugin;
 
@@ -41,6 +47,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorGizmoSettings>()
             .init_resource::<EditorDragState>()
             .init_resource::<EditorPendingTransactions>()
+            .init_resource::<EditorProjectSession>()
             .register_type::<EditorEntityId>()
             .add_systems(
                 Update,
@@ -324,6 +331,11 @@ impl EditorUndoStack {
     pub fn redo_description(&self) -> Option<&str> {
         self.redo.last().map(|entry| entry.description.as_str())
     }
+
+    pub fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
 }
 
 fn resolve_editor_entity(world: &mut World, id: EditorEntityId) -> Option<Entity> {
@@ -436,6 +448,10 @@ enum EditorAction {
     GizmoScale,
     ToggleTransformSpace,
     CycleSnap,
+    SaveProject,
+    PublishProject,
+    LoadProject,
+    RecoverProject,
 }
 
 #[derive(Resource, Default)]
@@ -525,6 +541,21 @@ struct EditorDragState(Option<ActiveEditorDrag>);
 
 #[derive(Resource, Default)]
 struct EditorPendingTransactions(Vec<EditorTransaction>);
+
+#[derive(Resource, Debug)]
+struct EditorProjectSession {
+    project: ForgeProject,
+    store: ProjectStore,
+}
+
+impl Default for EditorProjectSession {
+    fn default() -> Self {
+        Self {
+            project: ForgeProject::default(),
+            store: ProjectStore::default_workspace(),
+        }
+    }
+}
 
 impl Default for EditorCameraRig {
     fn default() -> Self {
@@ -806,6 +837,10 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     TextColor(Color::srgb(0.35, 0.92, 1.0)),
                 ));
                 spawn_editor_button(bar, 0, EditorAction::Exit, "EXIT  [Tab]");
+                spawn_editor_button(bar, 29, EditorAction::SaveProject, "SAVE  [⌘S]");
+                spawn_editor_button(bar, 30, EditorAction::LoadProject, "LOAD");
+                spawn_editor_button(bar, 31, EditorAction::RecoverProject, "RECOVER");
+                spawn_editor_button(bar, 32, EditorAction::PublishProject, "PUBLISH");
                 spawn_editor_button(bar, 1, EditorAction::Undo, "UNDO");
                 spawn_editor_button(bar, 2, EditorAction::Redo, "REDO");
                 spawn_editor_button(bar, 3, EditorAction::FrameSelection, "FRAME  [F]");
@@ -1077,6 +1112,22 @@ fn editor_controller_navigation(
             pending.0.push(EditorAction::Undo);
         }
     }
+    if command_modifier && keyboard.just_pressed(KeyCode::KeyS) {
+        let action =
+            if keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight) {
+                EditorAction::PublishProject
+            } else {
+                EditorAction::SaveProject
+            };
+        pending.0.push(action);
+    }
+    if command_modifier && keyboard.just_pressed(KeyCode::KeyO) {
+        if keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight) {
+            pending.0.push(EditorAction::RecoverProject);
+        } else {
+            pending.0.push(EditorAction::LoadProject);
+        }
+    }
     if command_modifier && keyboard.just_pressed(KeyCode::KeyD) {
         pending.0.push(EditorAction::Duplicate);
     }
@@ -1086,7 +1137,7 @@ fn editor_controller_navigation(
     if keyboard.just_pressed(KeyCode::KeyF) {
         pending.0.push(EditorAction::FrameSelection);
     }
-    if keyboard.just_pressed(KeyCode::KeyO) {
+    if keyboard.just_pressed(KeyCode::KeyO) && !command_modifier {
         pending.0.push(EditorAction::ToggleCameraMode);
     }
     if keyboard.just_pressed(KeyCode::KeyG) {
@@ -1562,7 +1613,224 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             };
             set_editor_status(world, format!("Translation snap: {snap:.2} m"));
         }
+        EditorAction::SaveProject => save_editor_project(world, false),
+        EditorAction::PublishProject => save_editor_project(world, true),
+        EditorAction::LoadProject => load_editor_project(world, false),
+        EditorAction::RecoverProject => load_editor_project(world, true),
     }
+}
+
+impl From<EditorPrimitive> for DraftPrimitive {
+    fn from(value: EditorPrimitive) -> Self {
+        match value {
+            EditorPrimitive::Empty => Self::Empty,
+            EditorPrimitive::Cube => Self::Cube,
+            EditorPrimitive::Pillar => Self::Pillar,
+            EditorPrimitive::Beacon => Self::Beacon,
+        }
+    }
+}
+
+impl From<DraftPrimitive> for EditorPrimitive {
+    fn from(value: DraftPrimitive) -> Self {
+        match value {
+            DraftPrimitive::Empty => Self::Empty,
+            DraftPrimitive::Cube => Self::Cube,
+            DraftPrimitive::Pillar => Self::Pillar,
+            DraftPrimitive::Beacon => Self::Beacon,
+        }
+    }
+}
+
+impl From<&Transform> for TransformDraft {
+    fn from(value: &Transform) -> Self {
+        Self {
+            translation: value.translation.to_array(),
+            rotation_xyzw: value.rotation.to_array(),
+            scale: value.scale.to_array(),
+        }
+    }
+}
+
+impl From<TransformDraft> for Transform {
+    fn from(value: TransformDraft) -> Self {
+        Self {
+            translation: Vec3::from_array(value.translation),
+            rotation: Quat::from_array(value.rotation_xyzw).normalize(),
+            scale: Vec3::from_array(value.scale),
+        }
+    }
+}
+
+fn adapter_key(
+    anchor: Option<&WorldAnchor>,
+    gate: Option<&DungeonCrawlGate>,
+    terminal: Option<&SettlementBuildTerminal>,
+    route: Option<&WorldRouteMarker>,
+) -> Option<String> {
+    if let Some(anchor) = anchor {
+        Some(format!("anchor:{}", anchor.id))
+    } else if let Some(gate) = gate {
+        Some(format!("cave:{}", gate.gate_id))
+    } else if let Some(terminal) = terminal {
+        Some(format!("settlement:{}", terminal.settlement_id))
+    } else {
+        route.map(|route| format!("route:{}", route.id.0))
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn save_editor_project(world: &mut World, publish: bool) {
+    let mut objects = world
+        .query::<(&EditorEntityId, &EditorPrimitive, &Transform, Option<&Name>)>()
+        .iter(world)
+        .map(|(id, primitive, transform, name)| SceneObjectDraft {
+            editor_id: id.0,
+            name: name
+                .map(|name| name.as_str().to_owned())
+                .unwrap_or_else(|| format!("{} {}", primitive_label(*primitive), id.0)),
+            primitive: (*primitive).into(),
+            transform: transform.into(),
+        })
+        .collect::<Vec<_>>();
+    objects.sort_by_key(|object| object.editor_id);
+
+    let mut adapter_overrides = world
+        .query::<(
+            &Transform,
+            &EditorAccess,
+            Option<&WorldAnchor>,
+            Option<&DungeonCrawlGate>,
+            Option<&SettlementBuildTerminal>,
+            Option<&WorldRouteMarker>,
+        )>()
+        .iter(world)
+        .filter_map(|(transform, access, anchor, gate, terminal, route)| {
+            if *access != EditorAccess::Editable {
+                return None;
+            }
+            Some(AdapterOverrideDraft {
+                adapter_key: adapter_key(anchor, gate, terminal, route)?,
+                transform: transform.into(),
+            })
+        })
+        .collect::<Vec<_>>();
+    adapter_overrides.sort_by(|left, right| left.adapter_key.cmp(&right.adapter_key));
+
+    let scene = EditorSceneDraft {
+        objects,
+        adapter_overrides,
+    };
+    let store = world.resource::<EditorProjectSession>().store.clone();
+    let path = store.path().display().to_string();
+    let result = {
+        let mut session = world.resource_mut::<EditorProjectSession>();
+        session.project.scene = scene;
+        if let Err(error) = publish
+            .then(|| session.project.publish_drafts())
+            .transpose()
+        {
+            Err(error)
+        } else {
+            store.save(&mut session.project)
+        }
+    };
+    match result {
+        Ok(()) => {
+            let mut document = world.resource_mut::<EditorDocumentState>();
+            document.dirty = false;
+            document.exit_armed = false;
+            let verb = if publish { "published" } else { "saved" };
+            set_editor_status(world, format!("Project {verb} atomically to {path}"));
+        }
+        Err(error) => set_editor_status(world, format!("Save failed: {error}")),
+    }
+}
+
+fn load_editor_project(world: &mut World, recovery_only: bool) {
+    let store = world.resource::<EditorProjectSession>().store.clone();
+    let result = if recovery_only {
+        store
+            .load_recovery(1)
+            .map(|project| (project, ProjectLoadSource::Recovery(1)))
+    } else {
+        store.load_with_recovery()
+    };
+    let (project, source) = match result {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            set_editor_status(world, format!("Load failed: {error}"));
+            return;
+        }
+    };
+
+    let primitive_entities = world
+        .query_filtered::<Entity, With<EditorPrimitive>>()
+        .iter(world)
+        .collect::<Vec<_>>();
+    for entity in primitive_entities {
+        world.despawn(entity);
+    }
+    world.resource_mut::<EditorSelection>().clear();
+    world.resource_mut::<EditorUndoStack>().clear();
+
+    for object in &project.scene.objects {
+        let id = EditorEntityId(object.editor_id);
+        world.resource_mut::<EditorIdAllocator>().reserve(id);
+        spawn_editor_primitive_record(
+            world,
+            id,
+            object.primitive.into(),
+            object.name.clone(),
+            object.transform.into(),
+        );
+    }
+
+    let mut applied_adapters = 0_usize;
+    let mut adapter_query = world.query::<(
+        &mut Transform,
+        Option<&WorldAnchor>,
+        Option<&DungeonCrawlGate>,
+        Option<&SettlementBuildTerminal>,
+        Option<&WorldRouteMarker>,
+    )>();
+    for (mut transform, anchor, gate, terminal, route) in adapter_query.iter_mut(world) {
+        let Some(key) = adapter_key(anchor, gate, terminal, route) else {
+            continue;
+        };
+        let Some(saved) = project
+            .scene
+            .adapter_overrides
+            .iter()
+            .find(|override_draft| override_draft.adapter_key == key)
+        else {
+            continue;
+        };
+        *transform = saved.transform.into();
+        applied_adapters += 1;
+    }
+
+    let missing_adapters = project
+        .scene
+        .adapter_overrides
+        .len()
+        .saturating_sub(applied_adapters);
+    world.resource_mut::<EditorProjectSession>().project = project;
+    {
+        let mut document = world.resource_mut::<EditorDocumentState>();
+        document.dirty = false;
+        document.exit_armed = false;
+    }
+    let source_label = match source {
+        ProjectLoadSource::Primary => "primary project".to_owned(),
+        ProjectLoadSource::Recovery(index) => format!("recovery snapshot {index}"),
+    };
+    let suffix = if missing_adapters == 0 {
+        String::new()
+    } else {
+        format!("; {missing_adapters} world adapters were not present")
+    };
+    set_editor_status(world, format!("Loaded {source_label}{}", suffix));
 }
 
 fn filtered_authorable_ids(world: &mut World) -> Vec<EditorEntityId> {
@@ -1591,10 +1859,35 @@ fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
     let mut transform = Transform::from_translation(
         camera_transform.translation + camera_transform.forward() * 8.0,
     );
-    let (kind, radius, mesh, color) = match primitive {
-        EditorPrimitive::Empty => ("Anchor", 0.55, None, Color::WHITE),
+    if primitive == EditorPrimitive::Beacon {
+        transform.scale = Vec3::splat(1.25);
+    }
+    let kind = primitive_label(primitive);
+    spawn_editor_primitive_record(world, id, primitive, format!("{kind} {}", id.0), transform);
+    world.resource_mut::<EditorSelection>().replace(id);
+    world.resource_mut::<EditorDocumentState>().dirty = true;
+    set_editor_status(world, format!("Created {kind} {}", id.0));
+}
+
+fn primitive_label(primitive: EditorPrimitive) -> &'static str {
+    match primitive {
+        EditorPrimitive::Empty => "Anchor",
+        EditorPrimitive::Cube => "Block",
+        EditorPrimitive::Pillar => "Pillar",
+        EditorPrimitive::Beacon => "Beacon",
+    }
+}
+
+fn spawn_editor_primitive_record(
+    world: &mut World,
+    id: EditorEntityId,
+    primitive: EditorPrimitive,
+    name: String,
+    transform: Transform,
+) {
+    let (radius, mesh, color) = match primitive {
+        EditorPrimitive::Empty => (0.55, None, Color::WHITE),
         EditorPrimitive::Cube => (
-            "Block",
             1.75,
             Some(
                 world
@@ -1604,7 +1897,6 @@ fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
             Color::srgb(0.15, 0.68, 0.94),
         ),
         EditorPrimitive::Pillar => (
-            "Pillar",
             2.7,
             Some(
                 world
@@ -1613,15 +1905,11 @@ fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
             ),
             Color::srgb(0.92, 0.52, 0.14),
         ),
-        EditorPrimitive::Beacon => {
-            transform.scale = Vec3::splat(1.25);
-            (
-                "Beacon",
-                1.4,
-                Some(world.resource_mut::<Assets<Mesh>>().add(Sphere::new(1.0))),
-                Color::srgb(0.35, 1.0, 0.58),
-            )
-        }
+        EditorPrimitive::Beacon => (
+            1.4,
+            Some(world.resource_mut::<Assets<Mesh>>().add(Sphere::new(1.0))),
+            Color::srgb(0.35, 1.0, 0.58),
+        ),
     };
 
     let render_parts = mesh.map(|mesh| {
@@ -1641,16 +1929,13 @@ fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
         AuthorableBounds(radius),
         primitive,
         id,
-        Name::new(format!("{kind} {}", id.0)),
+        Name::new(name),
         transform,
         GlobalTransform::default(),
     ));
     if let Some(render_parts) = render_parts {
         entity.insert(render_parts);
     }
-    world.resource_mut::<EditorSelection>().replace(id);
-    world.resource_mut::<EditorDocumentState>().dirty = true;
-    set_editor_status(world, format!("Created {kind} {}", id.0));
 }
 
 fn duplicate_active(world: &mut World) {
@@ -2117,6 +2402,33 @@ fn editor_camera_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn persistence_test_world(label: &str) -> (World, std::path::PathBuf) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "starfall_forge_world_{label}_{}_{nonce}",
+            std::process::id()
+        ));
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<EditorSelection>();
+        world.init_resource::<EditorIdAllocator>();
+        world.init_resource::<EditorUndoStack>();
+        world.init_resource::<EditorDocumentState>();
+        world.insert_resource(EditorRuntimeStatus {
+            message: String::new(),
+        });
+        world.insert_resource(EditorProjectSession {
+            project: ForgeProject::default(),
+            store: ProjectStore::new(root.join("project.json"), 3),
+        });
+        (world, root)
+    }
 
     #[test]
     fn stable_ids_allocate_and_reserve_without_collision() {
@@ -2237,5 +2549,59 @@ mod tests {
         assert_eq!(settings.translation_snap(), 0.25);
         settings.snap_index = 3;
         assert_eq!(settings.translation_snap(), 2.0);
+    }
+
+    #[test]
+    fn editor_project_round_trip_restores_primitives_and_stable_adapters() {
+        let (mut world, root) = persistence_test_world("round_trip");
+        let object_id = EditorEntityId(71);
+        let object_transform = Transform::from_xyz(4.0, 7.0, -12.0)
+            .with_rotation(Quat::from_rotation_y(0.7))
+            .with_scale(Vec3::new(1.2, 0.8, 2.0));
+        spawn_editor_primitive_record(
+            &mut world,
+            object_id,
+            EditorPrimitive::Cube,
+            "Saved block".into(),
+            object_transform,
+        );
+        let anchor_transform = Transform::from_xyz(33.0, 5.0, -8.0);
+        let anchor = world
+            .spawn((
+                EditorAccess::Editable,
+                WorldAnchor { id: "test_anchor" },
+                anchor_transform,
+            ))
+            .id();
+
+        save_editor_project(&mut world, false);
+        assert!(!world.resource::<EditorDocumentState>().dirty);
+        let saved = world
+            .resource::<EditorProjectSession>()
+            .store
+            .load()
+            .unwrap();
+        assert_eq!(saved.scene.objects[0].editor_id, object_id.0);
+        assert_eq!(
+            saved.scene.adapter_overrides[0].adapter_key,
+            "anchor:test_anchor"
+        );
+
+        world.get_mut::<Transform>(anchor).unwrap().translation = Vec3::ZERO;
+        load_editor_project(&mut world, false);
+        let loaded_entity = resolve_editor_entity(&mut world, object_id).unwrap();
+        assert_eq!(
+            world.get::<Transform>(loaded_entity).unwrap().translation,
+            object_transform.translation
+        );
+        assert_eq!(
+            world.get::<Transform>(anchor).unwrap().translation,
+            anchor_transform.translation
+        );
+        assert_eq!(
+            world.resource_mut::<EditorIdAllocator>().allocate(),
+            EditorEntityId(72)
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
