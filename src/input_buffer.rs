@@ -12,10 +12,10 @@
 //! * [`consume_fixed_input`] runs once per fixed tick, snapshots the pending
 //!   buffer into [`FixedInput`] for that tick, and clears the edge accumulator.
 //!
-//! EC1a is **additive**: it populates [`PlayerInputBuffers`] but nothing consumes
-//! `FixedInput` yet — the existing motor still reads `PlayerInput` in `Update`.
-//! EC1b migrates the motor into `FixedUpdate` to read `FixedInput`, at which point
-//! input is frame-rate-independent and replay-ready.
+//! EC1a introduced the additive buffer. EC1b now consumes [`FixedInput`] in the
+//! default-on fixed traversal, grapple, and motor chain; the legacy `Update`
+//! motor remains available as an A/B escape hatch. Combat migration and replay
+//! capture remain later engine-core work.
 
 use bevy::prelude::*;
 use std::collections::HashMap;

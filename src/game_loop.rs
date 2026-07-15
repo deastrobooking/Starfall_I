@@ -4,8 +4,9 @@
 //! * [`GameSet`] — the canonical gameplay system order
 //!   (`SampleInput → BuildCommands → Motor → Combat → PhysicsRead → Animation →
 //!   Camera → Presentation`). EC0 *defines and orders* the sets; per-system
-//!   `.in_set(..)` assignment across the gameplay plugins lands in `EC1` when the
-//!   simulation moves to `FixedUpdate`.
+//!   `.in_set(..)` assignment across gameplay plugins is incremental. EC1 has
+//!   moved traversal, grapple, and the motor to the default-on fixed chain;
+//!   combat and AI migration remain scoped follow-up work.
 //! * Profiling: frame-time + entity-count diagnostics and an in-game perf overlay
 //!   (F11), alongside the collider overlay (F9) and controller diagnostics (F8). Build with
 //!   `--features tracy` to stream spans to the Tracy profiler.
@@ -27,9 +28,10 @@ use crate::rendering::{
 
 /// Canonical per-frame gameplay ordering. Systems opt in with `.in_set(GameSet::X)`.
 ///
-/// The chain is configured for `Update` today; `EC1` moves the simulation sets
-/// (`Motor`/`Combat`/`PhysicsRead`) into `FixedUpdate`, leaving `SampleInput`
-/// before the fixed loop and `Animation`/`Camera`/`Presentation` after it.
+/// The canonical order spans schedules: input is sampled before the fixed loop,
+/// EC1 traversal/grapple/motor run in `FixedUpdate`, and presentation stays in
+/// frame schedules. Combat and physics-read systems opt into the remaining sets
+/// as their fixed-tick migrations land.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameSet {
     /// Read raw devices into per-player input (PreUpdate today).

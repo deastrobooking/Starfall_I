@@ -41,6 +41,25 @@ need refinement, but should not be reimplemented:
   routing, damage feedback ownership, and vehicle baselines already use
   `PlayerIndex` in substantial parts of the runtime.
 
+## July 15 follow-up audit reconciliation
+
+The later six-item deficiency memo was checked against the July 15 branch. It
+contains several concrete follow-up ideas, but its highest-severity conclusions
+were based on older code or inferred behavior:
+
+| Memo finding | Verified disposition | Durable follow-up |
+|---|---|---|
+| Companions collapse onto P1 | **Stale.** Default companions spawn once per active `PlayerIndex`; follow, attack, heal, and recruited-ally paths resolve `Companion.owner`. | Hardware-test multiple companions during four-player combat and budget their effects. |
+| Co-op chests call `get_single_mut()` and panic | **Stale.** Chests iterate eligible players, choose the nearest by distance, and mutate that entity's stats/health. Enemy loot likewise resolves the nearest eligible player entity. | Add explicit equal-distance tie-break tests and persist the still-missing per-player inventory/equipment records. |
+| Saves overwrite all players with P1 or permit NaN armor | **Mostly stale.** `players[]` is keyed by `player_index`, values are bounded when applied, and legacy flat fields are compatibility fallback only when `players[]` is empty. | Add finite-number rejection, schema migration/recovery UX, and per-player inventory/equipment records. `PerkTree` remains deliberately campaign-shared. |
+| Garage modes buff the whole party | **Partly stale.** Vehicle state is party-shared by policy, but effects are gated by `active_owner`; boats have deterministic driver/passenger ownership. Runtime meshes/controllers are still only a baseline. | Build visible assembly-driven vehicle bodies and document drop-in, driver handoff, and pause authority. |
+| Menus have no repeat throttle and are mouse-biased | **Mostly stale.** Shared menu focus supports D-pad/stick, Confirm/Back, disabled skipping, focus-follow scrolling, a 0.34 s initial repeat delay, and 0.11 s repeat cadence. | The present policy is one party-shared cursor for party menus plus owner-scoped specialist panels. Record four-pad controller-only acceptance before considering independent cursors. |
+| Aim has no cone; missiles have no swept collision; movement remains per-frame | **Mostly stale.** Aim assistance and missile acquisition use forward cones; projectile-to-target collision sweeps the previous/current segment; EC1 motor/traversal/grapple is now fixed at 64 Hz by default with buffered edges and camera interpolation. | Add world-obstacle casting for fast missiles, migrate the remaining combat/AI timing deliberately, and complete EC2 frame-data collision layers. |
+
+Do not preserve the memo's red/critical labels in milestones. The labels do not
+match current code evidence and would cause completed ownership and input work
+to be reimplemented.
+
 ## Confirmed or partially confirmed gaps
 
 ### Ship-blocking interaction gaps
@@ -71,15 +90,16 @@ need refinement, but should not be reimplemented:
 
 ### Engine and content-production gaps
 
-- ET1–ET2c provide safe tool mode, stable IDs, selection, transactions,
-  controller UI, viewport picking, transform handles, primitive drafts, and
-  guarded world adapters.
-- ET3 persistence is the next toolchain dependency: versioned content records,
-  atomic writes, rotating recovery snapshots, corrupt-input handling, and
-  stable adapter overrides.
-- Generated road loops and enterable buildings remain read-only editor adapters
-  until their recipes can regenerate every dependent mesh, collider, guide,
-  barrier, room, and stair as one transaction.
+- ET1–ET5c now provide safe tool mode, stable IDs, selection, transactions,
+  controller UI, viewport picking, transform handles, versioned atomic project
+  persistence/recovery, typed materials, deterministic world recipes, topology
+  validation, and atomically replaced protected sandbox roots.
+- ET5d is the next World Kit dependency: direct point/node/edge editing and an
+  explicit, scoped promotion transaction. Shipped world roots must remain
+  untouched until that boundary passes rollback and dependency tests.
+- Generated road/building/cave parts compile as bounded sandbox roots, but broad
+  shipped-world promotion still needs dependent collider/guide/barrier/room/
+  stair replacement and rollback as one transaction.
 - `world_plugin.rs` and `ui_plugin.rs` are large. Extraction should follow proven
   ownership boundaries; a mechanical split during active feature work would
   create merge risk without improving behavior.
@@ -101,19 +121,22 @@ world-space tracking lock rings, shared charged-shot critical resolution, and
 critical impact differentiation. Automated integration gates pass; recorded
 four-controller hardware and TV-layout acceptance remain.
 
-### Wave B — Engine persistence
+### Wave B — Engine persistence and World Kit foundation *(delivered)*
 
-1. ET3 project manifest and versioned content registry.
-2. Atomic draft save plus recovery rotation.
-3. Stable adapter overrides and primitive scene round-trip.
-4. Missing dependency, duplicate ID, corruption, and migration tests.
+ET3 through ET5c delivered the project manifest, versioned registries, atomic
+draft/recovery persistence, stable adapters, published material/recipe catalogs,
+typed generator parameters, topology preflight, and protected sandbox compile.
+ET5d promotion is intentionally not implied by this completion.
 
-### Wave C — Deterministic action engine
+### Wave C — Deterministic action engine *(current)*
 
-1. Move gameplay consumers onto fixed buffered commands behind measured gates.
-2. Add move definitions, frame data, cancel windows, hitstop budgets, and replay
-   capture.
-3. Establish four-player effect, physics, audio, and render budgets.
+1. Hardware-feel and refresh-rate validate the default-on EC1 fixed motor and
+   retain the documented legacy escape hatch until acceptance is recorded.
+2. Complete EC2 move definitions, frame data, cancel windows, hit/hurt layers,
+   per-move i-frames, and player-received knockback. Bounded hitstop, flinch,
+   damage numbers, dissolve, rumble, and camera shake are already the first slice.
+3. Establish four-player effect, physics, audio, and render budgets, including
+   missile world-obstacle casts and simultaneous companion/combat effects.
 
 ### Wave D — Content enrichment
 

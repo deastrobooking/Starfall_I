@@ -41,8 +41,9 @@ Handle these before widening content too much:
 - World generation is visually richer but still centralized in one very large
   plugin. New world content should be table-driven and share terrain helpers.
 - The main flow has shared spatial focus, D-pad/stick navigation, Confirm, Back,
-  repeat handling, and disabled-button styling. Remaining work is end-to-end
-  controller ownership and scroll/focus verification in complex panels.
+  throttled repeat handling, disabled-button styling, and focus-follow scrolling.
+  Remaining work is recorded four-pad controller-only acceptance in complex
+  panels, not another generic focus implementation.
 - A first `PlayerGuidance` HUD prompt now covers nearby interactions and city
   spy drones; future content should feed it instead of adding one-off hint text.
 - Robot pets have durable data, recipes, and a button-rendered Robot Garage screen
@@ -225,6 +226,10 @@ Primary files:
 
 Goal: make the core hero feel reliable before adding many more levels.
 
+- EC1 is now default-on: traversal, grapple, and motor run at 64 Hz from a
+  per-player latched input buffer, with overstep-interpolated camera follow.
+  Hardware-test 30/60/120/144 Hz behavior and preserve the F10/
+  `STARFALL_LEGACY_MOTOR=1` comparison path until the results are recorded.
 - Tune acceleration, step/snap, wall slide, wall jump, climb, dodge, parry,
   jetpack, beam saber, and hand-combat values through `PlayerMovement` and
   combat data.
@@ -233,8 +238,11 @@ Goal: make the core hero feel reliable before adding many more levels.
 - Use `docs/playerengine.md` as the milestone guide for humanoid
   traversal upgrades: wall/ledge/mantle suite, grounded athletic movement,
   flight kit, combat traversal, environment physics, and boss/world integration.
-- Add controller diagnostics overlay showing player assignment, stick values,
-  trigger source, and last fired action.
+- Use the existing F8 controller diagnostics overlay during acceptance; extend
+  it only when a test needs a missing signal or assignment detail.
+- Complete EC2 `MoveDef` frame data, cancel windows, hit/hurt layers, per-move
+  i-frames, and player-received knockback. Bounded hitstop and the first reaction
+  feedback layer are already delivered.
 - Add manual smoke notes for at least two Xbox-style controllers and one
   PlayStation-style controller when available.
 
@@ -261,15 +269,14 @@ route checkpoints/recovery, tracking missile acquisition/steering/reacquisition,
 per-player SEEK/LOCK HUD feedback, larger beam profiles, and persistent Star
 Sabre blade visuals. Remaining production work:
 
-- Prototype loop adhesion on a small test course: road contact frame, local
-  gravity/normal, minimum speed, entry/exit handoff, camera, and recovery.
-- Add route checkpoints, connectivity/landing-clearance validation, and a debug
-  overlay; extract road data/generation from `world_plugin.rs` before expansion.
-- Evolve `Homing Star` into the tracking missile with hostile target acquisition,
-  `PlayerIndex` ownership, capped steering, target-loss behavior, splash/trail,
-  and per-player HUD lock feedback.
-- Add data-driven beam visual profiles and held-blade/trail/impact presentation
-  for `BeamSabre`, with split-screen effect budgets.
+- Tune the existing loop adhesion, entry/exit handoff, camera, recovery, and
+  checkpoint behavior on representative ground, mountain, and aerial routes.
+- Add automated grade, connectivity, ramp-direction, landing-clearance, barrier,
+  and underside-artifact checks; extract road generation on a proven boundary.
+- Add world-obstacle casts to the existing swept target collision so fast
+  tracking missiles cannot pass through thin city or dungeon walls.
+- Move the existing beam, lock-ring, trail, Star Sabre blade, and impact visuals
+  into explicit profiles with measured four-view effect budgets.
 
 Verification:
 
@@ -416,13 +423,17 @@ Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol",
 
 ## Suggested Next Commit Scope
 
-For the next coding pass, keep the scope tight:
+For the next coding pass, choose one bounded vertical slice rather than mixing
+campaign content, engine combat, and Forge promotion:
 
-1. Add chapter-select region labels and route/readability markers for the
-   200-mile map (N1 — high value, low risk).
-2. Deepen one dragon lair or Great Scientist temple with keys, locked doors,
-   enemy placement, and a boss-room staging beat (N4 starter).
-3. Add a controller diagnostics overlay (stick values, player assignment,
-   last action) for hardware smoke passes (N5 prerequisite).
-4. Prototype a data-driven hot-reloading asset format for `CharacterBlueprint` or `RobotPetBlueprint` (N9 starter).
-5. Add tests only around pure data and ownership behavior touched by the pass.
+1. **Recommended engine slice — EC2a:** define one `MoveDef`, drive one Star
+   Sabre attack through startup/active/recovery and a cancel window, add hit/hurt
+   layer tests, and preserve the current bounded feedback behavior.
+2. **Recommended tool slice — ET5d topology editing:** controller selection and
+   movement for spline/node/edge records inside the protected sandbox, including
+   invalid-edit rollback. Do not promote shipped roots in the same first slice.
+3. **Acceptance slice:** record boot → character → chapter/settings/garage →
+   gameplay → pause/return using four pads, plus EC1 30/60/120/144 Hz comparison.
+
+Whichever slice is selected must add focused tests, update its owning roadmap,
+and pass the repository verification gates before a new feature branch begins.

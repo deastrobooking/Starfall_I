@@ -21,9 +21,11 @@ top-left initial focus, navigates by screen-space direction, follows mouse hover
 styles focus/press states, and converts Enter/Space/controller South into the
 existing `Interaction::Pressed` action path.
 
-Finish this substrate before converting screens again: add persistent disabled/
-locked states, held D-pad repeat, East/Escape Back routing, per-controller focus
-ownership where required, text plus color/icon meaning, and TV-safe layouts.
+The substrate now also has persistent disabled styling, throttled held repeat,
+East/Escape Back routing, and focus-follow scrolling. Keep party menus on one
+shared cursor unless a screen has a verified need for owner-scoped interaction;
+the remaining gate is recorded four-pad controller-only and TV-safe layout
+acceptance across boot, character, chapter, settings, garage, pause, and return.
 
 ## Speed-road Findings
 
@@ -43,11 +45,11 @@ connections, helical ramps, expanded hoverboard jumps and loop gates, selected
 360-degree loop geometry, checkpoints, and terrain/grade/junction tests are in
 place.
 
-Visual loops alone do not provide Sonic-style traversal. The kinematic controller
-needs an explicit road-contact frame, surface normal/gravity policy, adhesion rule,
-minimum entry speed, exit handoff, camera behavior, and safe recovery. Treat loops
-as a traversal feature, not only geometry. Before adding more pieces, extract road
-data/generation from the 15k-line world plugin and add a route/checkpoint overlay.
+Loops now have guided adhesion, a minimum entry speed, entry/exit handoff,
+checkpoints, and recovery. Production work is course-by-course tuning of the
+contact frame, camera, seams, ramp direction, barriers, landing clearance, and
+four-player performance. Extract road data/generation only along a boundary
+proven by those validators; do not mechanically split the large world plugin.
 
 ## Movement Findings
 
@@ -67,24 +69,27 @@ Four-player behavior must stay keyed by `PlayerIndex`.
 
 The Star Sabre supports keyboard and controller unlock/toggle, chained animated
 slashes, a persistent held blade, waves, dual waves, piercing/AOE upgrades, and
-dungeon arcs. Its production presentation still needs authored audio, afterimage,
-hit stop, and split-screen effect budgets.
+dungeon arcs. Bounded global hitstop and the first combat-reaction layer have now
+landed. Production presentation still needs authored audio, afterimages,
+move-specific frame data/cancel rules, and split-screen effect budgets.
 
 `Homing Star` and high-magic primary beams now acquire valid hostile targets in a
 configurable cone/range, store player ownership and target entity, steer with a
 capped turn rate, survive target loss, and use readable trails. Primary aiming
 locks toward living enemy torsos and projectile collision sweeps between frames.
-The next presentation pass should add data-driven beam visual profiles (width,
-length, core/glow color, muzzle and impact), sized for split-screen readability.
+The next presentation pass should consolidate existing beam, trail, lock-ring,
+blade, muzzle, and impact choices into data-driven profiles sized against measured
+split-screen budgets. Fast projectiles also need world-obstacle casts: the current
+sweep protects target hits, not thin-wall collision.
 
 ## Recommended Delivery Order
 
-1. Shared UI navigation substrate and controller-complete main flow.
-2. Movement characterization tests and ground/air feel tuning.
-3. Road-contact/loop traversal prototype on a small test course.
-4. Tracking missile vertical slice with ownership, HUD lock, steering, and VFX.
-5. Beam/Sabre visual profiles with four-player effect budgets.
-6. Expand the interconnected road network after loop and recovery rules work.
+1. Record controller-only main-flow and four-player ownership acceptance.
+2. Validate EC1 fixed movement at 30/60/120/144 Hz and tune ground/air/route feel.
+3. Build EC2 `MoveDef`, hit/hurt layers, cancel windows, and per-move reactions.
+4. Add road/ramp/landing/barrier validators and missile world-obstacle casts.
+5. Profile data-driven beam/Sabre/lock/impact effects across four viewports.
+6. Expand roads and combat content through the validated Forge/tool boundaries.
 
 Each slice should pass `cargo fmt --check`, `cargo check`, strict clippy, and
 `cargo test`, followed by a relevant manual 1–4 player controller smoke pass.

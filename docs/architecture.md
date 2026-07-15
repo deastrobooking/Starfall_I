@@ -121,6 +121,10 @@ Per-player state:
   crafting ownership, runtime stats, character blueprints, and save `players[]`
   records.
 
+`players[]` currently persists runtime stats, not inventory/equipment stacks.
+Inventory/equipment save records remain an explicit schema gap; do not infer
+their persistence from runtime `PlayerIndex` ownership.
+
 Party-shared exceptions:
 
 - Vehicle mode remains party-shared for now: one active driver/vehicle mode,

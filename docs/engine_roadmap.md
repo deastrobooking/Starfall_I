@@ -82,13 +82,13 @@ promise first:
 | Subsystem | Maturity | Key gap |
 |---|---|---|
 | 4-player camera (split↔shared, threat-aware) | Premium | Off-screen indicators; in-game drop-in/out; per-player identity polish |
-| Multi-controller input | Strong | Fixed input buffer exists, but motor/combat do not consume it yet; no remap/replay history |
-| Character motor (swing/jetpack/edge-grab/dodge/buffer/coyote) | Strong (~70%) | Default path still frame-rate dependent; fixed motor experimental; no wall-run |
+| Multi-controller input | Strong | Fixed traversal/grapple/motor consume buffered input; combat, remap, and replay history remain |
+| Character motor (swing/jetpack/edge-grab/dodge/buffer/coyote) | Strong (~75%) | Default path is fixed at 64 Hz; hardware/refresh acceptance and wall-run remain |
 | Movement tuning (`PlayerMovement`/`MovementProfile`) | Data-driven | — |
 | State machines | Clean | — |
 | Animation (procedural, motor-driven, 2-bone IK) | Elegant but rigid | No authored clips / no skinning |
-| Combat | Functional (~30% data) | No frame data, cancel windows, hitstop; knockback unused; no hit/hurt layers |
-| Loop / timing | Foundation in place | Fixed tick + input buffer + default-off fixed motor exist; no interpolation/full gameplay migration |
+| Combat | Functional (~40% data) | Bounded hitstop/reactions landed; no `MoveDef` frame data, cancel windows, hit/hurt layers, or player-received knockback |
+| Loop / timing | EC1 shipped, broader migration open | Default-on fixed motor, buffered edges, and camera interpolation landed; combat/AI and replay remain |
 | Profiling | Basic EC0 | Tracy feature, diagnostics, F11 overlay; no deep per-system budgets/hot-loop traces |
 
 ---
@@ -144,9 +144,9 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   `PlayerInputBuffers::fixed(idx)`). **Additive** — motor still reads `PlayerInput`
   in `Update`, so behavior is unchanged; 3 tests cover the buffer, and the local
   suite was green when this landed.
-- *EC1b (implemented behind a default-off toggle — needs hardware feel-testing)* —
+- *EC1b foundation (initially landed behind a default-off toggle)* —
   `SimConfig.fixed_motor` (env `STARFALL_FIXED_MOTOR=1` or **F10** at runtime).
-  OFF = the original `Update` chain, byte-identical (default). ON = the sim
+  OFF = the original `Update` chain, byte-identical. ON = the sim
   sub-chain (`traversal → grapple → motor → impact`) runs in `FixedUpdate` at
   `FIXED_HZ`; per-tick translation accumulates in `PlayerMovement.motor_accum`
   and `flush_motor_translation` applies the sum to the compatibility controller
