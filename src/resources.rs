@@ -6,6 +6,7 @@ use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterB
 use crate::character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
+use crate::character_studio::spec::CharacterSpec;
 use crate::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
@@ -1155,6 +1156,8 @@ pub struct PlayerSlotConfig {
     pub has_visor: Option<bool>,
     pub part_loadout: Option<PlayerPartLoadout>,
     pub blueprint: Option<CharacterBlueprint>,
+    /// Exact Advanced Character Studio recipe used by the runtime mesh builder.
+    pub studio_spec: Option<CharacterSpec>,
 }
 
 impl Default for PlayerSlotConfig {
@@ -1177,6 +1180,7 @@ impl Default for PlayerSlotConfig {
             has_visor: None,
             part_loadout: None,
             blueprint: None,
+            studio_spec: None,
         }
     }
 }

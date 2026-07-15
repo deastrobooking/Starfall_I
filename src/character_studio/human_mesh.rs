@@ -321,6 +321,59 @@ fn build_mats(materials: &mut Assets<StandardMaterial>, patch: &CharacterPatch) 
 
 // ── Spawner ───────────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StudioBodyRegion {
+    Torso,
+    Head,
+    LeftArm,
+    RightArm,
+    LeftLeg,
+    RightLeg,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct StudioHumanPart {
+    pub root: Entity,
+    pub rest: Transform,
+    pub pivot: Vec3,
+    pub region: StudioBodyRegion,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct PlayableStudioHuman {
+    pub owner: Entity,
+    pub rest: Transform,
+}
+
+fn classify_studio_part(p: &Proportions, position: Vec3) -> (StudioBodyRegion, Vec3) {
+    if position.y >= p.neck_top_y - p.h * 0.035 {
+        return (StudioBodyRegion::Head, Vec3::new(0.0, p.neck_top_y, 0.0));
+    }
+    if position.x.abs() >= p.shoulder_hw * 0.72 && position.y > p.hip_y * 0.82 {
+        let side = position.x.signum();
+        return (
+            if side < 0.0 {
+                StudioBodyRegion::LeftArm
+            } else {
+                StudioBodyRegion::RightArm
+            },
+            Vec3::new(side * p.shoulder_hw, p.shoulder_y, 0.0),
+        );
+    }
+    if position.x.abs() >= p.hip_hw * 0.28 && position.y < p.hip_y + p.h * 0.025 {
+        let side = position.x.signum();
+        return (
+            if side < 0.0 {
+                StudioBodyRegion::LeftLeg
+            } else {
+                StudioBodyRegion::RightLeg
+            },
+            Vec3::new(side * p.hip_hw * 0.55, p.hip_y, 0.0),
+        );
+    }
+    (StudioBodyRegion::Torso, Vec3::new(0.0, p.hip_y, 0.0))
+}
+
 /// Generate and spawn the full human under a fresh root entity. Feet rest at
 /// the root's origin. Returns the root.
 pub fn spawn_human(
@@ -343,11 +396,18 @@ pub fn spawn_human(
         .id();
 
     let mut part = |mesh: Mesh, mat: &Handle<StandardMaterial>, transform: Transform| {
+        let (region, pivot) = classify_studio_part(&p, transform.translation);
         let e = commands
             .spawn((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(mat.clone()),
                 transform,
+                StudioHumanPart {
+                    root,
+                    rest: transform,
+                    pivot,
+                    region,
+                },
             ))
             .id();
         commands.entity(root).add_child(e);
@@ -1785,4 +1845,37 @@ fn spawn_mecha_armor(
         &mats.metal,
         Transform::from_xyz(0.0, (p.hip_y + p.waist_y) * 0.5 - 0.01 * p.h, 0.0),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::character_studio::generators::build_character_patch;
+    use crate::character_studio::spec::CharacterSpec;
+
+    #[test]
+    fn generated_parts_map_to_runtime_animation_regions() {
+        let patch = build_character_patch(&CharacterSpec::default());
+        let proportions = Proportions::from_patch(&patch);
+        assert_eq!(
+            classify_studio_part(
+                &proportions,
+                Vec3::new(proportions.shoulder_hw, proportions.shoulder_y, 0.0)
+            )
+            .0,
+            StudioBodyRegion::RightArm
+        );
+        assert_eq!(
+            classify_studio_part(
+                &proportions,
+                Vec3::new(-proportions.hip_hw, proportions.knee_y, 0.0)
+            )
+            .0,
+            StudioBodyRegion::LeftLeg
+        );
+        assert_eq!(
+            classify_studio_part(&proportions, Vec3::Y * proportions.head_c_y).0,
+            StudioBodyRegion::Head
+        );
+    }
 }

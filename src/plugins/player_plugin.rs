@@ -9,6 +9,8 @@ use crate::character_blueprint::{
     CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
 use crate::character_parts::CharacterLoadout;
+use crate::character_studio::generators::build_character_patch;
+use crate::character_studio::human_mesh::{spawn_human, PlayableStudioHuman};
 use crate::characters::{
     accent_preset, attach_native_playable_character, attach_player_gameplay_rig,
     despawn_cartoon_character_parts, eye_preset, hair_preset, hero_config,
@@ -516,7 +518,40 @@ fn spawn_players(
         if hero_powers.magic >= 1.10 {
             commands.entity(player).insert(MagicBeamCaster);
         }
-        if USE_MODULAR_PLAYER_MESH {
+        if let Some(studio_spec) = slot.studio_spec {
+            attach_player_gameplay_rig(&mut commands, player, &character_config, spawn_pos);
+            let body = runtime_blueprint.body.validated();
+            let scale = character_config.scale;
+            let half_height = (0.6 * (body.height * 0.72 + body.leg_length * 0.28) * scale)
+                .clamp(0.44 * scale, 0.86 * scale);
+            let radius = (0.35
+                * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20)
+                * scale)
+                .clamp(0.26 * scale, 0.50 * scale);
+            let capsule_total = 2.0 * (half_height + radius);
+            let authored_height = 1.75
+                * (0.91 + studio_spec.body.height * 0.18)
+                * if matches!(studio_spec.sex, crate::character_studio::spec::Sex::Female) {
+                    0.945
+                } else {
+                    1.0
+                };
+            let visual_transform = Transform::from_xyz(0.0, -(half_height + radius), 0.0)
+                .with_scale(Vec3::splat(capsule_total / authored_height.max(0.5)));
+            let patch = build_character_patch(&studio_spec);
+            let visual = spawn_human(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &patch,
+                visual_transform,
+            );
+            commands.entity(visual).insert(PlayableStudioHuman {
+                owner: player,
+                rest: visual_transform,
+            });
+            commands.entity(player).add_child(visual);
+        } else if USE_MODULAR_PLAYER_MESH {
             // New native modular humanoid (built on the socket-assembly system).
             // Keep the gameplay rig so weapon/IK attach points still work.
             attach_player_gameplay_rig(&mut commands, player, &character_config, spawn_pos);

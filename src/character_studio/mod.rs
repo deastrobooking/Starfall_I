@@ -26,7 +26,11 @@ use bevy::ui::RelativeCursorPosition;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use std::path::PathBuf;
 
+use crate::character_blueprint::{
+    BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
+};
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
+use crate::resources::{CharacterDesignData, CharacterDesignReturnTarget, PlayerSelectState};
 use crate::state::AppState;
 use generators::build_character_patch;
 use spec::{CharacterSpec, MorphField, StyleField};
@@ -48,6 +52,7 @@ impl Plugin for CharacterStudioPlugin {
                     button_interaction,
                     morph_slider_interaction,
                     studio_controller_navigation,
+                    apply_studio_character_to_player,
                     rebuild_library_rows,
                     rebuild_preview,
                     fallback_failed_rig_preview,
@@ -83,6 +88,7 @@ enum StudioAction {
     PreviewProcedural,
     PreviewRigged,
     SaveVersion,
+    UseInGame,
     Back,
     MorphDec(usize),
     MorphInc(usize),
@@ -124,7 +130,11 @@ const ACTION_GROUPS: [&[StudioAction]; 8] = [
     ],
     &[StudioAction::ViewFull, StudioAction::ViewFace],
     &[StudioAction::PreviewProcedural, StudioAction::PreviewRigged],
-    &[StudioAction::SaveVersion, StudioAction::Back],
+    &[
+        StudioAction::SaveVersion,
+        StudioAction::UseInGame,
+        StudioAction::Back,
+    ],
 ];
 const ACTION_ROW_COUNT: usize = ACTION_GROUPS.len();
 const MORPH_ROW_0: usize = ACTION_ROW_COUNT;
@@ -151,6 +161,7 @@ fn action_label(action: StudioAction) -> &'static str {
         StudioAction::PreviewProcedural => "GENERATED",
         StudioAction::PreviewRigged => "RIG TEST",
         StudioAction::SaveVersion => "SAVE VERSION",
+        StudioAction::UseInGame => "USE IN GAME",
         StudioAction::Back => "BACK",
         _ => "",
     }
@@ -170,6 +181,7 @@ pub struct StudioState {
     focus_height: f32,
     preview_backend: StudioPreviewBackend,
     status: String,
+    apply_requested: bool,
 }
 
 impl Default for StudioState {
@@ -186,6 +198,7 @@ impl Default for StudioState {
             focus_height: 0.95,
             preview_backend: StudioPreviewBackend::Procedural,
             status: "Welcome to the Character Studio".to_string(),
+            apply_requested: false,
         }
     }
 }
@@ -303,7 +316,16 @@ fn setup_studio(
     mut state: ResMut<StudioState>,
     mut focus: ResMut<StudioFocus>,
     mut library: ResMut<SaveLibrary>,
+    select: Res<PlayerSelectState>,
+    design: Res<CharacterDesignData>,
 ) {
+    state.spec = select
+        .slots
+        .get(design.player_index)
+        .and_then(|slot| slot.studio_spec)
+        .unwrap_or_else(generators::preset_male);
+    state.undo.clear();
+    state.apply_requested = false;
     state.dirty = true;
     state.labels_dirty = true;
     if std::env::var_os("STARFALL_STUDIO_RIG").is_some() {
@@ -777,6 +799,79 @@ fn cleanup_studio(
     }
 }
 
+pub fn studio_spec_to_blueprint(name: &str, spec: CharacterSpec) -> CharacterBlueprint {
+    let body = BodyRecipe {
+        height: 0.82 + spec.body.height * 0.42,
+        shoulder_width: 0.76 + spec.body.shoulder_width * 0.54,
+        chest_size: 0.78 + (spec.body.muscle * 0.32 + spec.body.weight * 0.16),
+        arm_length: 0.78 + spec.body.limb_length * 0.48,
+        leg_length: 0.82 + spec.body.limb_length * 0.55,
+        hand_size: 0.88 + spec.body.muscle * 0.22,
+        foot_size: 0.90 + spec.body.weight * 0.20,
+        head_size: 0.88 + spec.face.eye_size * 0.22,
+        neck_length: 0.84 + spec.body.limb_length * 0.24,
+        torso_curve: (spec.body.waist_width - 0.5) * 0.34,
+        hip_width: 0.78 + spec.body.hip_width * 0.48,
+        spine_posture: 0.0,
+        mass: 0.74 + spec.body.weight * 0.66,
+        muscle: 0.72 + spec.body.muscle * 0.66,
+        body_fat: 0.72 + spec.body.weight * 0.66,
+        asymmetry: 0.0,
+    }
+    .validated();
+    let wardrobe = spec.style.wardrobe;
+    CharacterBlueprint::hero(
+        name,
+        body,
+        CharacterPaletteRecipe {
+            skin: generators::skin_tones()[spec.style.skin_tone % 8],
+            outfit: generators::outfit_colors()[spec.style.primary_color % 12],
+            accent: generators::outfit_colors()[spec.style.secondary_color % 12],
+            hair: generators::hair_colors()[spec.style.hair_color % 12],
+            eye: generators::eye_colors()[spec.style.eye_color % 8],
+        },
+        CartoonAppearanceRecipe {
+            has_hood: false,
+            has_cape: matches!(wardrobe.top, spec::TopStyle::Robe),
+            has_gloves: !matches!(wardrobe.hands, spec::HandStyle::Bare),
+            has_boots: !matches!(wardrobe.feet, spec::FootStyle::Barefoot),
+            has_shoulder_pads: !matches!(wardrobe.armor, spec::ArmorStyle::None),
+            has_visor: matches!(wardrobe.armor, spec::ArmorStyle::MechaArmor),
+        },
+    )
+}
+
+fn apply_studio_character_to_player(
+    mut state: ResMut<StudioState>,
+    design: Res<CharacterDesignData>,
+    mut select: ResMut<PlayerSelectState>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    if !state.apply_requested {
+        return;
+    }
+    state.apply_requested = false;
+    let player_index = design.player_index.min(select.slots.len() - 1);
+    let name = select.character_name(player_index);
+    let blueprint = studio_spec_to_blueprint(name, state.spec);
+    let Some(slot) = select.slots.get_mut(player_index) else {
+        return;
+    };
+    slot.studio_spec = Some(state.spec);
+    slot.blueprint = Some(blueprint);
+    slot.skin_idx = Some(state.spec.style.skin_tone);
+    slot.hair_idx = Some(state.spec.style.hair_color);
+    slot.outfit_idx = Some(state.spec.style.primary_color);
+    slot.accent_idx = Some(state.spec.style.secondary_color);
+    slot.eye_idx = Some(state.spec.style.eye_color);
+    slot.ready = false;
+
+    next_state.set(match design.return_target {
+        CharacterDesignReturnTarget::PlayerSelect => AppState::PlayerSelect,
+        CharacterDesignReturnTarget::ChapterSelect => AppState::ChapterSelect,
+    });
+}
+
 // ── Action dispatch ───────────────────────────────────────────────────────────
 
 fn apply_action(
@@ -902,6 +997,11 @@ fn apply_action(
                 state.labels_dirty = true;
             }
         },
+        StudioAction::UseInGame => {
+            state.apply_requested = true;
+            state.status = "Applying this model to the selected player...".into();
+            state.labels_dirty = true;
+        }
         StudioAction::Back => next_state.set(AppState::CharacterDesign),
         StudioAction::MorphDec(i) | StudioAction::MorphInc(i) => {
             let dir = if matches!(action, StudioAction::MorphInc(_)) {
@@ -1768,4 +1868,23 @@ fn save_new_version(spec: &CharacterSpec, existing: &[String]) -> Result<String,
 fn load_version(name: &str) -> Result<CharacterSpec, String> {
     let json = std::fs::read_to_string(preset_dir().join(name)).map_err(|e| e.to_string())?;
     serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod playable_tests {
+    use super::*;
+
+    #[test]
+    fn studio_spec_converts_to_playable_blueprint_profiles() {
+        let mut spec = CharacterSpec::default();
+        spec.body.height = 0.9;
+        spec.body.limb_length = 0.8;
+        spec.style.primary_color = 7;
+        let blueprint = studio_spec_to_blueprint("Custom Hero", spec);
+
+        assert_eq!(blueprint.name, "Custom Hero");
+        assert!(blueprint.body.height > 1.0);
+        assert!(blueprint.body.leg_length > 1.0);
+        assert_eq!(blueprint.animation_profile.states.len(), 9);
+    }
 }

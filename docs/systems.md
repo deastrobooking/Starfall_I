@@ -95,6 +95,19 @@ one-hand wall slide, hang, combat, Star Sabre slash, and grapple wind-up. The
 long-form roadmap for turning this into a full humanoid traversal/combat system
 lives in `docs/playerengine.md`.
 
+Advanced Character Studio output is playable rather than preview-only. The
+`USE IN GAME` action stores both an exact `CharacterSpec` and a derived
+`CharacterBlueprint` on the selected `PlayerSlotConfig`; save data serializes
+the studio recipe separately so clothing, face, hair, colors, and morphs survive
+reload. Player spawning sends that recipe through `build_character_patch()` and
+`spawn_human()` while retaining the normal gameplay skeleton, collider, movement
+profiles, weapons, and camera setup. `StudioHumanPart` classifies generated mesh
+pieces into torso/head/arm/leg regions. `studio_human_animation_system` rotates
+those regions around authored body pivots for walking, running, sprinting,
+jumping, falling, shooting, Star Sabre attacks, hovering, gliding, flight, and
+air dash, while the visual root adds pose-specific lean, bob, stretch, and
+compression.
+
 Locomotion animation thresholds use the same units as `PlayerMovement`: walk
 begins above `0.06`, run above `0.48`, and the explicit `Sprinting` state selects
 the faster sprint cycle. The former run threshold of `28.0` was unreachable for

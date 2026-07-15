@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use crate::character_blueprint::CharacterBlueprint;
 use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
+use crate::character_studio::spec::CharacterSpec;
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::components::weapon::WeaponRanks;
@@ -111,6 +112,8 @@ pub struct SaveData {
     pub perk_ranks: Vec<(String, u32)>,
     #[serde(default)]
     pub character_blueprints: Vec<Option<CharacterBlueprint>>,
+    #[serde(default)]
+    pub studio_character_specs: Vec<Option<CharacterSpec>>,
     #[serde(default)]
     pub part_loadouts: Vec<Option<PlayerPartLoadout>>,
     #[serde(default)]
@@ -228,6 +231,7 @@ impl Default for SaveData {
             perk_points_unspent: 0,
             perk_ranks: Vec::new(),
             character_blueprints: vec![None, None, None, None],
+            studio_character_specs: vec![None, None, None, None],
             part_loadouts: vec![None, None, None, None],
             players: Vec::new(),
             robot_pets: RobotPetCollection::default(),
@@ -427,6 +431,7 @@ fn build_save_data(
             .iter()
             .map(|slot| slot.blueprint.clone())
             .collect(),
+        studio_character_specs: select.slots.iter().map(|slot| slot.studio_spec).collect(),
         part_loadouts: select.slots.iter().map(|slot| slot.part_loadout).collect(),
         players,
         robot_pets: robot_pets.clone(),
@@ -474,6 +479,15 @@ fn hydrate_character_blueprints(
         let blueprint = blueprints.get(index).cloned().flatten();
         select.slots[index].blueprint =
             blueprint.filter(|blueprint| !is_stale_reference_blueprint(name, blueprint));
+    }
+}
+
+fn hydrate_studio_character_specs(
+    select: &mut PlayerSelectState,
+    specs: Vec<Option<CharacterSpec>>,
+) {
+    for (index, slot) in select.slots.iter_mut().enumerate() {
+        slot.studio_spec = specs.get(index).copied().flatten();
     }
 }
 
@@ -573,6 +587,7 @@ fn hydrate_progress_from_disk(
         perks.points_unspent = data.perk_points_unspent;
         perks.ranks = data.perk_ranks;
         hydrate_character_blueprints(&mut select, data.character_blueprints);
+        hydrate_studio_character_specs(&mut select, data.studio_character_specs);
         part_loadout.body = data.part_loadout_body;
         part_loadout.arms = data.part_loadout_arms;
         part_loadout.legs = data.part_loadout_legs;
@@ -950,6 +965,7 @@ mod tests {
                 None,
                 None,
             ],
+            studio_character_specs: vec![Some(CharacterSpec::default()), None, None, None],
             part_loadouts: vec![
                 Some(PlayerPartLoadout {
                     body: BodyPreset::RiftMantle,
@@ -1020,6 +1036,7 @@ mod tests {
             loaded.character_blueprints[0].as_ref().unwrap().name,
             "Vincenzo"
         );
+        assert!(loaded.studio_character_specs[0].is_some());
         assert_eq!(loaded.completed_chapters, vec![1]);
         assert_eq!(loaded.perk_ranks, vec![("heart_vitality".to_string(), 2)]);
         assert_eq!(loaded.robot_pets.part_count(RobotPartKind::StarDrive), 2);

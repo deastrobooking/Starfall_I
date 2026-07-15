@@ -2861,6 +2861,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
             slot.has_visor = saved.has_visor;
             slot.part_loadout = saved.part_loadout;
             slot.blueprint = saved.blueprint;
+            slot.studio_spec = saved.studio_spec;
         }
         select.slots[0].joined = true;
     }
@@ -3171,9 +3172,11 @@ fn player_select_update(
                 match action {
                     PlayerSelectAction::PreviousCharacter if slot.joined && !slot.ready => {
                         slot.character_index = (slot.character_index + roster_len - 1) % roster_len;
+                        slot.studio_spec = None;
                     }
                     PlayerSelectAction::NextCharacter if slot.joined && !slot.ready => {
                         slot.character_index = (slot.character_index + 1) % roster_len;
+                        slot.studio_spec = None;
                     }
                     PlayerSelectAction::ToggleReady if slot.joined => {
                         slot.ready = !slot.ready;
@@ -3211,7 +3214,15 @@ fn player_select_update(
     for (mut t, marker) in char_q.iter_mut() {
         let s = &select.slots[marker.0 as usize];
         *t = Text::new(if s.joined {
-            format!("< {} >", HERO_ROSTER[s.character_index % roster_len])
+            format!(
+                "< {}{} >",
+                HERO_ROSTER[s.character_index % roster_len],
+                if s.studio_spec.is_some() {
+                    " — STUDIO CUSTOM"
+                } else {
+                    ""
+                }
+            )
         } else {
             "- - - - -".to_string()
         });
@@ -3224,6 +3235,8 @@ fn player_select_update(
             "Available".to_string()
         } else if s.ready {
             "✓  READY".to_string()
+        } else if s.studio_spec.is_some() {
+            "Custom model loaded — ready up".to_string()
         } else {
             "Not ready".to_string()
         });

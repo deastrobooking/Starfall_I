@@ -742,6 +742,9 @@ fn save_design(
     slot.has_shoulder_pads = Some(design_data.has_shoulder_pads);
     slot.has_visor = Some(design_data.has_visor);
     slot.blueprint = Some(blueprint);
+    // Applying the basic designer intentionally replaces any previously
+    // selected Advanced Studio runtime recipe for this slot.
+    slot.studio_spec = None;
 
     let loadout = current_design_loadout(design_data);
     slot.part_loadout = Some(loadout);

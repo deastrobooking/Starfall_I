@@ -6,6 +6,7 @@ use crate::character_parts::{
     spawn_arms, spawn_body, spawn_head, spawn_legs, spawn_shoulders, CharacterLoadout,
     CharacterVisualConfig, PartSlotTag,
 };
+use crate::character_studio::human_mesh::{PlayableStudioHuman, StudioBodyRegion, StudioHumanPart};
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
     CartoonPose, CharacterIkPose, HandEngine, HandGrip, HandPoseState, HandSide, IkTarget,
@@ -30,6 +31,7 @@ impl Plugin for CharacterPlugin {
                 cartoon_animation_system.run_if(
                     in_state(AppState::Playing).or_else(in_state(AppState::CharacterDesign)),
                 ),
+                studio_human_animation_system.run_if(in_state(AppState::Playing)),
                 swap_character_parts,
             )
                 .chain(),
@@ -827,6 +829,144 @@ fn cartoon_animation_system(
             continue;
         };
         apply_part_pose(part, &mut transform, *sample);
+    }
+}
+
+fn studio_human_animation_system(
+    players: Query<&CartoonAnimator>,
+    mut roots: Query<(Entity, &PlayableStudioHuman, &mut Transform)>,
+    mut parts: Query<(&StudioHumanPart, &mut Transform), Without<PlayableStudioHuman>>,
+) {
+    let mut poses = HashMap::new();
+    for (root_entity, visual, mut transform) in roots.iter_mut() {
+        let Ok(animator) = players.get(visual.owner) else {
+            continue;
+        };
+        *transform = visual.rest;
+        let wave = animator.phase.sin();
+        match animator.pose {
+            CartoonPose::Idle => transform.translation.y += wave * 0.012,
+            CartoonPose::Walk => transform.translation.y += wave.abs() * 0.018,
+            CartoonPose::Run => {
+                transform.translation.y += wave.abs() * 0.032;
+                transform.rotation *= Quat::from_rotation_x(-0.08);
+            }
+            CartoonPose::Sprint => {
+                transform.translation.y += wave.abs() * 0.045;
+                transform.rotation *= Quat::from_rotation_x(-0.16);
+            }
+            CartoonPose::Jump => {
+                transform.rotation *= Quat::from_rotation_x(-0.08);
+                transform.scale *= Vec3::new(0.97, 1.035, 0.97);
+            }
+            CartoonPose::Fall => {
+                transform.rotation *= Quat::from_rotation_x(0.10);
+                transform.scale *= Vec3::new(1.025, 0.97, 1.025);
+            }
+            CartoonPose::Fly | CartoonPose::Glide | CartoonPose::AirDash => {
+                let pitch = if animator.pose == CartoonPose::AirDash {
+                    -0.48
+                } else if animator.pose == CartoonPose::Glide {
+                    -0.28
+                } else {
+                    -0.38
+                };
+                transform.rotation *= Quat::from_rotation_x(pitch);
+                transform.translation.y += wave * 0.018;
+            }
+            CartoonPose::Hover => transform.translation.y += wave * 0.028,
+            CartoonPose::Attack | CartoonPose::SabreSlash => {
+                transform.rotation *= Quat::from_rotation_y(wave * 0.06);
+            }
+            _ => {}
+        }
+        poses.insert(root_entity, (animator.pose, animator.phase));
+    }
+
+    for (part, mut transform) in parts.iter_mut() {
+        let Some((pose, phase)) = poses.get(&part.root).copied() else {
+            continue;
+        };
+        let wave = phase.sin();
+        let side = match part.region {
+            StudioBodyRegion::LeftArm | StudioBodyRegion::LeftLeg => -1.0,
+            StudioBodyRegion::RightArm | StudioBodyRegion::RightLeg => 1.0,
+            _ => 0.0,
+        };
+        let rotation = match pose {
+            CartoonPose::Walk => match part.region {
+                StudioBodyRegion::LeftArm | StudioBodyRegion::RightArm => {
+                    Quat::from_rotation_x(-wave * side * 0.48)
+                }
+                StudioBodyRegion::LeftLeg | StudioBodyRegion::RightLeg => {
+                    Quat::from_rotation_x(wave * side * 0.52)
+                }
+                StudioBodyRegion::Torso => Quat::from_rotation_z(wave * 0.025),
+                StudioBodyRegion::Head => Quat::from_rotation_y(wave * 0.035),
+            },
+            CartoonPose::Run | CartoonPose::Sprint => {
+                let amount = if pose == CartoonPose::Sprint {
+                    0.92
+                } else {
+                    0.72
+                };
+                match part.region {
+                    StudioBodyRegion::LeftArm | StudioBodyRegion::RightArm => {
+                        Quat::from_rotation_x(-wave * side * amount)
+                    }
+                    StudioBodyRegion::LeftLeg | StudioBodyRegion::RightLeg => {
+                        Quat::from_rotation_x(wave * side * amount * 0.92)
+                    }
+                    StudioBodyRegion::Torso => Quat::from_rotation_z(wave * 0.045),
+                    StudioBodyRegion::Head => Quat::from_rotation_y(wave * 0.055),
+                }
+            }
+            CartoonPose::Jump => match part.region {
+                StudioBodyRegion::LeftArm => Quat::from_rotation_z(-0.72),
+                StudioBodyRegion::RightArm => Quat::from_rotation_z(0.72),
+                StudioBodyRegion::LeftLeg => Quat::from_rotation_x(-0.30),
+                StudioBodyRegion::RightLeg => Quat::from_rotation_x(0.30),
+                _ => Quat::IDENTITY,
+            },
+            CartoonPose::Fall | CartoonPose::Glide => match part.region {
+                StudioBodyRegion::LeftArm => Quat::from_rotation_z(-1.02),
+                StudioBodyRegion::RightArm => Quat::from_rotation_z(1.02),
+                StudioBodyRegion::LeftLeg => Quat::from_rotation_x(-0.16),
+                StudioBodyRegion::RightLeg => Quat::from_rotation_x(0.16),
+                _ => Quat::IDENTITY,
+            },
+            CartoonPose::Fly | CartoonPose::Hover | CartoonPose::AirDash => match part.region {
+                StudioBodyRegion::LeftArm => {
+                    Quat::from_rotation_z(-0.46) * Quat::from_rotation_x(0.20 + wave * 0.08)
+                }
+                StudioBodyRegion::RightArm => {
+                    Quat::from_rotation_z(0.46) * Quat::from_rotation_x(0.20 - wave * 0.08)
+                }
+                StudioBodyRegion::LeftLeg => Quat::from_rotation_x(-0.10),
+                StudioBodyRegion::RightLeg => Quat::from_rotation_x(0.10),
+                _ => Quat::IDENTITY,
+            },
+            CartoonPose::Attack => match part.region {
+                StudioBodyRegion::RightArm => Quat::from_rotation_x(1.24),
+                StudioBodyRegion::LeftArm => {
+                    Quat::from_rotation_x(0.78) * Quat::from_rotation_z(-0.20)
+                }
+                StudioBodyRegion::Torso => Quat::from_rotation_y(-0.10),
+                _ => Quat::IDENTITY,
+            },
+            CartoonPose::SabreSlash => match part.region {
+                StudioBodyRegion::RightArm => {
+                    Quat::from_rotation_y(wave * 0.92) * Quat::from_rotation_x(0.86)
+                }
+                StudioBodyRegion::LeftArm => Quat::from_rotation_x(0.42),
+                StudioBodyRegion::Torso => Quat::from_rotation_y(wave * 0.22),
+                _ => Quat::IDENTITY,
+            },
+            _ => Quat::IDENTITY,
+        };
+        transform.translation = part.pivot + rotation * (part.rest.translation - part.pivot);
+        transform.rotation = rotation * part.rest.rotation;
+        transform.scale = part.rest.scale;
     }
 }
 
@@ -2600,5 +2740,52 @@ mod tests {
         assert_eq!(hands.right.grip, HandGrip::Balance);
         assert!(hands.left.spread > 0.6);
         assert!(hands.right.spread > 0.6);
+    }
+
+    #[test]
+    fn studio_playable_run_pose_animates_generated_limbs() {
+        let mut app = App::new();
+        app.add_systems(Update, studio_human_animation_system);
+        let owner = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                CartoonAnimator {
+                    phase: 1.2,
+                    last_position: Vec3::ZERO,
+                    speed: 0.7,
+                    pose: CartoonPose::Run,
+                },
+            ))
+            .id();
+        let visual_root = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                PlayableStudioHuman {
+                    owner,
+                    rest: Transform::default(),
+                },
+            ))
+            .id();
+        let rest = Transform::from_xyz(0.4, 0.8, 0.0);
+        let limb = app
+            .world_mut()
+            .spawn((
+                rest,
+                StudioHumanPart {
+                    root: visual_root,
+                    rest,
+                    pivot: Vec3::new(0.3, 1.2, 0.0),
+                    region: StudioBodyRegion::RightArm,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let animated = app.world().get::<Transform>(limb).unwrap();
+        assert_ne!(animated.rotation, Quat::IDENTITY);
+        assert_ne!(animated.translation, rest.translation);
     }
 }
