@@ -19,6 +19,7 @@ use crate::hacking::{Hackable, HackedUnit};
 use crate::rendering::PbrBundle;
 use crate::resources::{PlaySessionTransition, WaveInfo};
 use crate::robot_pets::{salvage_for_enemy, RobotPetCollection};
+use crate::hitstop::hitstop_inactive;
 use crate::state::AppState;
 
 #[derive(Resource, Clone)]
@@ -47,13 +48,13 @@ impl Plugin for EnemyPlugin {
             .add_systems(
                 Update,
                 (
-                    enemy_ai_system,
-                    apply_enemy_knockback,
-                    flying_drone_attack_system,
-                    dragon_boss_system,
-                    enemy_projectile_update_system,
+                    enemy_ai_system.run_if(hitstop_inactive),
+                    apply_enemy_knockback.run_if(hitstop_inactive),
+                    flying_drone_attack_system.run_if(hitstop_inactive),
+                    dragon_boss_system.run_if(hitstop_inactive),
+                    enemy_projectile_update_system.run_if(hitstop_inactive),
                     enemy_attack_vfx_cleanup,
-                    enemy_attack_system,
+                    enemy_attack_system.run_if(hitstop_inactive),
                     enemy_dead_cleanup,
                     enemy_killed_reward,
                     robot_salvage_reward_system,
@@ -369,7 +370,11 @@ fn enemy_ai_system(
             Option<&CitySpyDrone>,
             Option<&DragonBoss>,
         ),
-        (Without<Player>, Without<HackedUnit>),
+        (
+            Without<Player>,
+            Without<HackedUnit>,
+            Without<crate::combat_feedback::Flinch>,
+        ),
     >,
 ) {
     let dt = time.delta_secs();
@@ -1086,7 +1091,11 @@ fn enemy_attack_system(
             Option<&FlyingDrone>,
             Option<&DragonBoss>,
         ),
-        (Without<Player>, Without<HackedUnit>),
+        (
+            Without<Player>,
+            Without<HackedUnit>,
+            Without<crate::combat_feedback::Flinch>,
+        ),
     >,
     mut player_damage_q: Query<
         (

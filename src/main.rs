@@ -21,7 +21,9 @@ mod discussion;
 mod engine_tools;
 mod events;
 mod final_war;
+mod combat_feedback;
 mod game_loop;
+mod hitstop;
 mod hacking;
 mod hero_roster;
 mod input_buffer;
@@ -140,6 +142,10 @@ fn main() {
         .add_plugins(EngineToolsPlugin)
         // EC0: engine-core loop scaffolding (GameSet ordering + profiling overlay).
         .add_plugins(game_loop::GameLoopPlugin)
+        // EC2: bounded hitstop + hit-reaction feedback (flinch, flashes,
+        // death dissolve, damage numbers, outgoing shake/rumble).
+        .add_plugins(hitstop::HitstopPlugin)
+        .add_plugins(combat_feedback::CombatFeedbackPlugin)
         // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
         .add_plugins(input_buffer::InputBufferPlugin)
         .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())

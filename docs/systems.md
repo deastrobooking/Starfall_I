@@ -105,6 +105,12 @@ one-hand wall slide, hang, combat, Star Sabre slash, and grapple wind-up. The
 long-form roadmap for turning this into a full humanoid traversal/combat system
 lives in `docs/playerengine.md`.
 
+**Fixed-tick motor (EC1, default ON, 2026-07):** the traversal/grapple/motor
+chain runs at 64 Hz in `FixedUpdate`, consuming a per-player latched input
+buffer (edges fire exactly once per tick at any frame rate) with camera
+interpolation by the fixed-clock overstep. Escape hatches:
+`STARFALL_LEGACY_MOTOR=1` or F10. See `docs/guides/fixed-tick-motor.md`.
+
 Advanced Character Studio output is playable rather than preview-only. The
 `USE IN GAME` action stores both an exact `CharacterSpec` and a derived
 `CharacterBlueprint` on the selected `PlayerSlotConfig`; save data serializes
@@ -675,6 +681,17 @@ now matters per faction.
 as an exponentially-decaying shove (~0.25 s). Wired: projectiles (2.2),
 explosions (falloff-scaled 1.0–5.5), melee combos (authored table values),
 sabre slashes (3.0). Player-receiving knockback is not yet drained (EC2).
+
+**Hit reactions (2026-07, EC2 first slice):** landed hits now produce bounded
+**hitstop** (`src/hitstop.rs`: 28–90 ms scaled by damage, max-not-sum, drains
+on real time; simulation chains skip via `run_if(hitstop_inactive)` while
+cameras/UI keep running), plus the `src/combat_feedback.rs` layer: enemy
+**flinch** (AI/attack skip `With<Flinch>` entities), impact **hit-flash** orbs,
+**death dissolve** (shrink-out over the despawn window), split-screen-aware
+floating **damage numbers** (per-camera `world_to_viewport`, capped 32),
+proximity-scaled outgoing **camera shake**, and the rumble hook. See
+`docs/guides/combat-feel.md` for the pipeline and tuning knobs.
+
 
 ---
 

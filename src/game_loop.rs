@@ -69,10 +69,10 @@ pub struct PreviousTickPosition(pub Vec3);
 
 /// EC1b runtime toggle for the experimental fixed-tick player motor.
 ///
-/// **Default OFF** → the motor runs in `Update` exactly as before (shipping path
-/// is unchanged). Toggle at runtime with **F10**, or start with the env var
-/// `STARFALL_FIXED_MOTOR=1`. When ON, the motor's simulation systems run in
+/// **Default ON** (EC1b shipped): the motor's simulation systems run in
 /// `FixedUpdate` and their translation is flushed to physics once per frame.
+/// Escape hatches: launch with `STARFALL_LEGACY_MOTOR=1` or toggle **F10** at
+/// runtime to fall back to the legacy per-frame `Update` motor.
 #[derive(Resource)]
 pub struct SimConfig {
     pub fixed_motor: bool,
@@ -81,7 +81,9 @@ pub struct SimConfig {
 impl Default for SimConfig {
     fn default() -> Self {
         Self {
-            fixed_motor: std::env::var_os("STARFALL_FIXED_MOTOR").is_some(),
+            // EC1b shipped: fixed-tick motor is the default path. Escape
+            // hatches: launch with STARFALL_LEGACY_MOTOR=1 or toggle F10.
+            fixed_motor: std::env::var_os("STARFALL_LEGACY_MOTOR").is_none(),
         }
     }
 }

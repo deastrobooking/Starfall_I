@@ -163,9 +163,11 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   `player_camera_follow_system` lerps camera targets from tick-start toward the
   live transform by `Time<Fixed>::overstep_fraction()` (≤1 tick camera latency,
   hides the tick staircase above `FIXED_HZ`). 4 buffer unit tests; both paths
-  boot clean. **Remaining:** hardware feel test at 60/120/144 Hz (F10 A/B) →
-  then flip `SimConfig::default()` ON; revisit Avian stepping only if
-  coalescing proves insufficient.
+  boot clean.
+- *EC1 SHIPPED (2026-07-15)* — `SimConfig::default()` flipped ON per user
+  approval. Escape hatches: `STARFALL_LEGACY_MOTOR=1` env or F10 runtime
+  toggle (legacy `Update` path kept intact for A/B). Revisit Avian stepping
+  only if coalescing proves insufficient.
 
 ### EC2 — Collision layers + frame-data combat
 **Goal:** Fighting-game precision inside the action RPG.
@@ -179,6 +181,14 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   (reuse per-player `CameraShake`).
 **Acceptance:** a move's frames/cancels are editable as data without recompiling
 gameplay logic; hits produce hitstop + knockback + shake.
+**Status (first slice landed 2026-07-15):** bounded hitstop (`src/hitstop.rs`,
+28–90 ms max-not-sum, drains on `Time<Real>`, sim chains gated via
+`run_if(hitstop_inactive)`) + the `src/combat_feedback.rs` reaction layer
+(flinch with `Without<Flinch>` AI/attack filters, hit-flash orbs, death
+dissolve, split-screen damage numbers, proximity outgoing shake, rumble hook).
+2 hitstop unit tests; suite 244. Remaining EC2: collision layers, `MoveDef`
+frame-data assets, per-move cancel windows/i-frames, player-received
+knockback.
 
 ### EC3 — Motor to "feels amazing"
 **Goal:** Lock in Spider-Man + Mega Man feel on the deterministic base.

@@ -28,6 +28,7 @@ use crate::components::world::{
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
 use crate::game_loop::{fixed_motor_off, fixed_motor_on, PreviousTickPosition, SimConfig};
+use crate::hitstop::hitstop_inactive;
 use crate::input_buffer::PlayerInputBuffers;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
@@ -274,12 +275,12 @@ impl Plugin for PlayerPlugin {
                     player_look,
                     camera_shake_system,
                     update_camera_post_processing,
-                    traversal_mode_switch_update,
-                    grapple_hook_update,
-                    player_movement,
-                    speed_loop_traversal_system,
-                    road_checkpoint_recovery_system,
-                    grapple_hook_impact_system,
+                    traversal_mode_switch_update.run_if(hitstop_inactive),
+                    grapple_hook_update.run_if(hitstop_inactive),
+                    player_movement.run_if(hitstop_inactive),
+                    speed_loop_traversal_system.run_if(hitstop_inactive),
+                    road_checkpoint_recovery_system.run_if(hitstop_inactive),
+                    grapple_hook_impact_system.run_if(hitstop_inactive),
                     shared_encounter_camera_mode_system,
                     shared_encounter_party_pull_system,
                     dungeon_crawl_party_pull_system,
@@ -319,7 +320,8 @@ impl Plugin for PlayerPlugin {
                 )
                     .chain()
                     .run_if(in_state(AppState::Playing))
-                    .run_if(fixed_motor_on),
+                    .run_if(fixed_motor_on)
+                    .run_if(hitstop_inactive),
             )
             .add_systems(
                 Update,

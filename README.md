@@ -31,6 +31,8 @@ Implemented:
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, variable jump release, apex gravity, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, momentum roll, heavy-input stomp bounce, downhill acceleration, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
+- Fixed-tick character motor (EC1, default ON): traversal/grapple/motor simulation runs at 64 Hz in `FixedUpdate` with a per-player latched input buffer (button edges fire exactly once per tick at any frame rate) and overstep-interpolated camera follow. Legacy per-frame motor stays one toggle away (`F10` or `STARFALL_LEGACY_MOTOR=1`).
+- Hit-reaction layer (EC2 first slice): bounded hitstop freeze-frames on impacts and kills, enemy flinch with AI/attack suppression, impact hit-flash, death dissolve instead of blink-out, split-screen-aware floating damage numbers, proximity-scaled outgoing camera shake, plus the earlier faction resistances, enemy defense scaling, and drained knockback shoves.
 - High-speed road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with protected guardrail merge mouths and its own support columns. Taller outer barriers contain players and vehicles, and collidable center medians separate opposite boost-arrow directions. Ordinary road chunks keep a clean collider surface; raised stunt ramps exist only at authored trick/loop sites. Settlement rings/spurs, boost lanes, banked curves, NPC traffic, checkpoints, recovery, and guided hoverboard adhesion are included.
 - Explorable buildings now replace selected solid blocks throughout downtown, industrial, residential, and settlement districts. These use textured exterior/interior materials, open doorways, hollow collision shells, multiple wood floors, smooth ramp-backed stair flights with visible treads, partitioned rooms, sparse furniture, interior lights, and windows. Background buildings remain lightweight for four-player performance.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
@@ -156,7 +158,11 @@ Keyboard and mouse:
 | `J` | Enter vehicle / board nearby boat; dock before disembarking |
 | `M` | Open map |
 | `Esc` | Back / pause |
+| `F7` | Command-asset roster overlay |
+| `F8` | Controller diagnostics overlay |
 | `F9` | Toggle collider debug overlay during play |
+| `F10` | Fixed-tick motor A/B toggle (legacy vs. 64 Hz) |
+| `F11` | Perf overlay: FPS, frame ms, entities, sim ticks, cameras, materials |
 
 Pause menu shortcuts:
 
@@ -230,6 +236,9 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 
 ## Documentation
 
+- **[Documentation Map](docs/README.md)** — what every doc is for, living vs. snapshot
+- **[Developer Guides](docs/guides/README.md)** — process how-tos: [verification gates](docs/guides/verification.md), [fixed-tick motor](docs/guides/fixed-tick-motor.md), [combat feel](docs/guides/combat-feel.md), [character-studio pipeline](docs/guides/character-studio-pipeline.md)
+- [Engine Core Roadmap](docs/engine_roadmap.md) — `EC#` fixed-tick/combat/profiling substrate track
 - [Architecture Overview](docs/architecture.md)
 - [Gameplay Systems Reference](docs/systems.md)
 - [Improvement Notes](docs/improvements.md)
