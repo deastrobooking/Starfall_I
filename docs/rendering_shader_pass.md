@@ -71,16 +71,55 @@ four-viewport scenes on target hardware.
 5. Forge material resources are grouped in one typed system parameter so adding
    material families does not exceed Bevy's direct-system parameter arity.
 
-## R2 remaining
+## R3 delivered
+
+1. Forge resolves legacy-compatible Material field maps into typed Toon, Water,
+   Energy, Shield, Ice/Snow, and Lava authoring specifications. Each family has
+   three palette/tuning presets and four to six named scalar controls.
+2. Controller-focusable Material Family, Material Preset, Next Parameter,
+   Value −/+, and Reset actions update the selected record and its matching live
+   shader preview. Bounds are displayed beside the active value.
+3. Publish validation rejects unsupported shader IDs, invalid preset indices,
+   nonnumeric fields, and values outside the runtime-safe ranges. Toon shadow/
+   light thresholds and band levels remain ordered after legacy or extreme input.
+4. The F11 performance overlay now reports active cameras, live projectiles,
+   transient combat VFX, and custom/Standard material asset totals alongside
+   FPS, frame time, total entities, and fixed ticks.
+
+The controls are discrete controller-friendly steppers rather than mouse-only
+sliders. A future slider widget may share the same typed bounds without changing
+the saved payload contract.
+
+## R4 delivered
+
+1. Publishing builds a `PublishedMaterialCatalog` keyed by stable Forge content
+   IDs. Catalog entries own typed Bevy handles for Toon, Water, Energy, Shield,
+   Ice/Snow, or Lava; handles never enter project files or gameplay saves.
+2. Scene object drafts have a backward-compatible optional `material_id`.
+   Validation rejects missing/non-Material references, rename migrates bindings,
+   and delete is blocked while any object depends on the material.
+3. Controller-focusable `APPLY TO OBJECT` and `CLEAR OBJECT MATERIAL` actions
+   swap the correct typed material component while retaining the object's mesh.
+   The outliner displays each bound content ID and the registry reports the live
+   runtime-catalog count.
+4. Save/publish records unique scene-to-material dependencies. Project reload
+   rebuilds published handles, restores bindings by ID, and safely leaves an
+   unpublished binding on its Standard preview rather than inventing a handle.
+
+Authoring flow: create/tune a Material, publish once to place it in the runtime
+catalog, select a renderable scene object and apply the Material, then publish
+again to persist the scene binding and dependency.
+
+## Rendering work remaining
 
 1. Evaluate clustered point/spot lights through Bevy's current cluster lookup;
    compare that path against a cheaper dominant-light CPU uniform on four-way
    split screen.
-2. Add per-view GPU timing labels and material/entity counters. Establish
-   measured one/two/four-camera budgets before enabling any full-screen outline,
-   refraction, or heat-distortion pass.
-3. Expose typed Material payload fields in Forge with live sliders, palette
-   presets, validation bounds, preview meshes, and publish-to-runtime catalogs.
+2. Add per-view GPU timing labels and establish measured one/two/four-camera
+   budgets before enabling any full-screen outline, refraction, or
+   heat-distortion pass. CPU-visible asset/entity counters are now delivered.
+3. Bind biome/road/building recipes to the delivered runtime catalog IDs and
+   add controlled regeneration transactions. Scene primitives are delivered.
 4. Apply Ice/Lava to authored biome zones only after collision-safe placement
    and one/two/four-camera measurements; Forge previews are the current rollout.
 

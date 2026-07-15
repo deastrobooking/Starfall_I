@@ -7,7 +7,7 @@
 
 mod persistence;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::ecs::system::SystemParam;
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
@@ -33,7 +33,7 @@ use crate::rendering::{
 use crate::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
-    ProjectLoadSource, ProjectStore, SceneObjectDraft, TransformDraft,
+    GenericRecipeDraft, ProjectLoadSource, ProjectStore, SceneObjectDraft, TransformDraft,
 };
 
 #[derive(SystemParam)]
@@ -44,6 +44,475 @@ struct ForgeMaterialAssets<'w> {
     shield: ResMut<'w, Assets<ShieldMaterial>>,
     ice: ResMut<'w, Assets<IceMaterial>>,
     lava: ResMut<'w, Assets<LavaMaterial>>,
+}
+
+#[derive(SystemParam)]
+struct ForgePreviewHandles<'w, 's> {
+    toon: Query<'w, 's, &'static MeshMaterial3d<ToonMaterial>, With<EditorWorkspaceRoot>>,
+    water: Query<'w, 's, &'static MeshMaterial3d<WaterMaterial>, With<EditorWorkspaceRoot>>,
+    energy: Query<'w, 's, &'static MeshMaterial3d<EnergyMaterial>, With<EditorWorkspaceRoot>>,
+    shield: Query<'w, 's, &'static MeshMaterial3d<ShieldMaterial>, With<EditorWorkspaceRoot>>,
+    ice: Query<'w, 's, &'static MeshMaterial3d<IceMaterial>, With<EditorWorkspaceRoot>>,
+    lava: Query<'w, 's, &'static MeshMaterial3d<LavaMaterial>, With<EditorWorkspaceRoot>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForgeMaterialFamily {
+    Toon,
+    Water,
+    Energy,
+    Shield,
+    Ice,
+    Lava,
+}
+
+impl ForgeMaterialFamily {
+    const ALL: [Self; 6] = [
+        Self::Toon,
+        Self::Water,
+        Self::Energy,
+        Self::Shield,
+        Self::Ice,
+        Self::Lava,
+    ];
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Toon => "toon_v1",
+            Self::Water => "water_v1",
+            Self::Energy => "energy_v1",
+            Self::Shield => "shield_v1",
+            Self::Ice => "ice_v1",
+            Self::Lava => "lava_v1",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Toon => "Toon",
+            Self::Water => "Water",
+            Self::Energy => "Energy",
+            Self::Shield => "Shield",
+            Self::Ice => "Ice / Snow",
+            Self::Lava => "Lava",
+        }
+    }
+
+    fn from_id(id: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|family| family.id() == id)
+            .unwrap_or(Self::Toon)
+    }
+
+    fn offset(self, delta: isize) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|family| *family == self)
+            .unwrap_or(0);
+        Self::ALL[(index as isize + delta).rem_euclid(Self::ALL.len() as isize) as usize]
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ForgeMaterialControl {
+    key: &'static str,
+    label: &'static str,
+    min: f32,
+    max: f32,
+    step: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ForgeMaterialSpec {
+    family: ForgeMaterialFamily,
+    preset: usize,
+    values: [f32; 6],
+}
+
+#[derive(Debug, Clone)]
+enum PublishedMaterialHandle {
+    Toon(Handle<ToonMaterial>),
+    Water(Handle<WaterMaterial>),
+    Energy(Handle<EnergyMaterial>),
+    Shield(Handle<ShieldMaterial>),
+    Ice(Handle<IceMaterial>),
+    Lava(Handle<LavaMaterial>),
+}
+
+#[derive(Debug, Clone)]
+struct PublishedMaterialEntry {
+    source_hash: String,
+    handle: PublishedMaterialHandle,
+}
+
+/// Runtime lookup keyed by stable Forge content IDs. Bevy handles never enter
+/// project files or save data.
+#[derive(Resource, Default)]
+pub struct PublishedMaterialCatalog {
+    entries: BTreeMap<String, PublishedMaterialEntry>,
+}
+
+impl PublishedMaterialCatalog {
+    pub fn contains(&self, content_id: &str) -> bool {
+        self.entries.contains_key(content_id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+struct EditorMaterialBinding(String);
+
+impl ForgeMaterialSpec {
+    fn from_recipe(recipe: &GenericRecipeDraft) -> Self {
+        let family = recipe
+            .fields
+            .get("shader")
+            .and_then(serde_json::Value::as_str)
+            .map(ForgeMaterialFamily::from_id)
+            .unwrap_or(ForgeMaterialFamily::Toon);
+        let preset = recipe
+            .fields
+            .get("preset")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize
+            % 3;
+        let mut spec = Self::preset(family, preset);
+        for (index, control) in material_controls(family).iter().enumerate() {
+            if let Some(value) = recipe
+                .fields
+                .get(control.key)
+                .and_then(serde_json::Value::as_f64)
+            {
+                spec.values[index] = (value as f32).clamp(control.min, control.max);
+            }
+        }
+        // Read the original R1 nested Toon payload without changing its codec.
+        if family == ForgeMaterialFamily::Toon {
+            if let Some(bands) = recipe.fields.get("bands") {
+                for (index, key) in [
+                    "shadow_threshold",
+                    "light_threshold",
+                    "shadow_level",
+                    "mid_level",
+                ]
+                .iter()
+                .enumerate()
+                {
+                    if recipe.fields.contains_key(*key) {
+                        continue;
+                    }
+                    if let Some(value) = bands.get(*key).and_then(serde_json::Value::as_f64) {
+                        let control = material_controls(family)[index];
+                        spec.values[index] = (value as f32).clamp(control.min, control.max);
+                    }
+                }
+            }
+            if let Some(rim) = recipe.fields.get("rim") {
+                if !recipe.fields.contains_key("rim_strength") {
+                    if let Some(value) = rim.get("strength").and_then(serde_json::Value::as_f64) {
+                        spec.values[4] = (value as f32).clamp(0.0, 1.5);
+                    }
+                }
+                if !recipe.fields.contains_key("rim_exponent") {
+                    if let Some(value) = rim.get("exponent").and_then(serde_json::Value::as_f64) {
+                        spec.values[5] = (value as f32).clamp(0.5, 8.0);
+                    }
+                }
+            }
+        }
+        spec.normalize();
+        spec
+    }
+
+    fn preset(family: ForgeMaterialFamily, preset: usize) -> Self {
+        let values = match (family, preset % 3) {
+            (ForgeMaterialFamily::Toon, 0) => [0.12, 0.52, 0.28, 0.64, 0.48, 2.4],
+            (ForgeMaterialFamily::Toon, 1) => [0.08, 0.42, 0.18, 0.58, 0.72, 3.4],
+            (ForgeMaterialFamily::Toon, _) => [0.18, 0.62, 0.36, 0.74, 0.32, 1.8],
+            (ForgeMaterialFamily::Water, 0) => [0.72, 0.055, 0.16, 0.63, 3.2, 0.66],
+            (ForgeMaterialFamily::Water, 1) => [1.15, 0.085, 0.24, 0.82, 2.4, 0.72],
+            (ForgeMaterialFamily::Water, _) => [0.34, 0.035, 0.08, 0.42, 4.6, 0.58],
+            (ForgeMaterialFamily::Energy, 0) => [2.4, 5.0, 3.2, 0.82, 0.0, 0.0],
+            (ForgeMaterialFamily::Energy, 1) => [4.6, 8.0, 6.2, 0.94, 0.0, 0.0],
+            (ForgeMaterialFamily::Energy, _) => [1.3, 3.2, 2.1, 0.68, 0.0, 0.0],
+            (ForgeMaterialFamily::Shield, 0) => [7.0, 0.08, 2.2, 0.38, 2.4, 0.85],
+            (ForgeMaterialFamily::Shield, 1) => [11.0, 0.055, 4.0, 0.52, 3.2, 1.15],
+            (ForgeMaterialFamily::Shield, _) => [4.5, 0.12, 1.4, 0.28, 1.8, 0.65],
+            (ForgeMaterialFamily::Ice, 0) => [0.18, 0.42, 0.34, 0.38, 0.0, 0.0],
+            (ForgeMaterialFamily::Ice, 1) => [0.32, 0.62, 0.58, 0.52, 0.0, 0.0],
+            (ForgeMaterialFamily::Ice, _) => [0.10, 0.24, 0.16, 0.28, 0.0, 0.0],
+            (ForgeMaterialFamily::Lava, 0) => [0.34, 0.21, 0.24, 1.65, 0.0, 0.0],
+            (ForgeMaterialFamily::Lava, 1) => [0.72, 0.34, 0.15, 1.95, 0.0, 0.0],
+            (ForgeMaterialFamily::Lava, _) => [0.16, 0.14, 0.34, 1.25, 0.0, 0.0],
+        };
+        Self {
+            family,
+            preset: preset % 3,
+            values,
+        }
+    }
+
+    fn write_to(&self, recipe: &mut GenericRecipeDraft) {
+        recipe
+            .fields
+            .insert("shader".into(), serde_json::json!(self.family.id()));
+        recipe
+            .fields
+            .insert("preset".into(), serde_json::json!(self.preset));
+        for (index, control) in material_controls(self.family).iter().enumerate() {
+            recipe
+                .fields
+                .insert(control.key.into(), serde_json::json!(self.values[index]));
+        }
+    }
+
+    fn normalize(&mut self) {
+        if self.family == ForgeMaterialFamily::Toon {
+            self.values[1] = self.values[1].max(self.values[0] + 0.02).min(1.0);
+            self.values[3] = self.values[3].max(self.values[2] + 0.02).min(0.95);
+        }
+    }
+}
+
+fn material_controls(family: ForgeMaterialFamily) -> &'static [ForgeMaterialControl] {
+    const TOON: [ForgeMaterialControl; 6] = [
+        ForgeMaterialControl {
+            key: "shadow_threshold",
+            label: "Shadow threshold",
+            min: 0.0,
+            max: 0.8,
+            step: 0.02,
+        },
+        ForgeMaterialControl {
+            key: "light_threshold",
+            label: "Light threshold",
+            min: 0.2,
+            max: 1.0,
+            step: 0.02,
+        },
+        ForgeMaterialControl {
+            key: "shadow_level",
+            label: "Shadow level",
+            min: 0.05,
+            max: 0.8,
+            step: 0.02,
+        },
+        ForgeMaterialControl {
+            key: "mid_level",
+            label: "Mid level",
+            min: 0.2,
+            max: 0.95,
+            step: 0.02,
+        },
+        ForgeMaterialControl {
+            key: "rim_strength",
+            label: "Rim strength",
+            min: 0.0,
+            max: 1.5,
+            step: 0.05,
+        },
+        ForgeMaterialControl {
+            key: "rim_exponent",
+            label: "Rim exponent",
+            min: 0.5,
+            max: 8.0,
+            step: 0.2,
+        },
+    ];
+    const WATER: [ForgeMaterialControl; 6] = [
+        ForgeMaterialControl {
+            key: "wave_speed",
+            label: "Wave speed",
+            min: 0.0,
+            max: 3.0,
+            step: 0.1,
+        },
+        ForgeMaterialControl {
+            key: "wave_frequency",
+            label: "Wave frequency",
+            min: 0.005,
+            max: 0.3,
+            step: 0.01,
+        },
+        ForgeMaterialControl {
+            key: "wave_amplitude",
+            label: "Wave amplitude",
+            min: 0.0,
+            max: 0.8,
+            step: 0.03,
+        },
+        ForgeMaterialControl {
+            key: "secondary_wave",
+            label: "Secondary wave",
+            min: 0.0,
+            max: 1.5,
+            step: 0.05,
+        },
+        ForgeMaterialControl {
+            key: "fresnel_exponent",
+            label: "Fresnel exponent",
+            min: 0.5,
+            max: 8.0,
+            step: 0.2,
+        },
+        ForgeMaterialControl {
+            key: "opacity",
+            label: "Opacity",
+            min: 0.15,
+            max: 1.0,
+            step: 0.04,
+        },
+    ];
+    const ENERGY: [ForgeMaterialControl; 4] = [
+        ForgeMaterialControl {
+            key: "flow_speed",
+            label: "Flow speed",
+            min: 0.0,
+            max: 8.0,
+            step: 0.2,
+        },
+        ForgeMaterialControl {
+            key: "spatial_frequency",
+            label: "Flow frequency",
+            min: 0.5,
+            max: 14.0,
+            step: 0.4,
+        },
+        ForgeMaterialControl {
+            key: "pulse_speed",
+            label: "Pulse speed",
+            min: 0.0,
+            max: 12.0,
+            step: 0.3,
+        },
+        ForgeMaterialControl {
+            key: "opacity",
+            label: "Opacity",
+            min: 0.1,
+            max: 1.0,
+            step: 0.04,
+        },
+    ];
+    const SHIELD: [ForgeMaterialControl; 6] = [
+        ForgeMaterialControl {
+            key: "grid_scale",
+            label: "Grid scale",
+            min: 2.0,
+            max: 18.0,
+            step: 0.5,
+        },
+        ForgeMaterialControl {
+            key: "line_width",
+            label: "Line width",
+            min: 0.02,
+            max: 0.24,
+            step: 0.01,
+        },
+        ForgeMaterialControl {
+            key: "pulse_speed",
+            label: "Pulse speed",
+            min: 0.0,
+            max: 10.0,
+            step: 0.25,
+        },
+        ForgeMaterialControl {
+            key: "opacity",
+            label: "Opacity",
+            min: 0.08,
+            max: 0.9,
+            step: 0.04,
+        },
+        ForgeMaterialControl {
+            key: "fresnel_exponent",
+            label: "Fresnel exponent",
+            min: 0.5,
+            max: 8.0,
+            step: 0.2,
+        },
+        ForgeMaterialControl {
+            key: "edge_strength",
+            label: "Edge strength",
+            min: 0.0,
+            max: 2.0,
+            step: 0.05,
+        },
+    ];
+    const ICE: [ForgeMaterialControl; 4] = [
+        ForgeMaterialControl {
+            key: "detail_scale",
+            label: "Detail scale",
+            min: 0.02,
+            max: 1.0,
+            step: 0.03,
+        },
+        ForgeMaterialControl {
+            key: "frost_coverage",
+            label: "Frost coverage",
+            min: 0.0,
+            max: 1.0,
+            step: 0.04,
+        },
+        ForgeMaterialControl {
+            key: "sparkle_strength",
+            label: "Sparkle strength",
+            min: 0.0,
+            max: 1.5,
+            step: 0.05,
+        },
+        ForgeMaterialControl {
+            key: "fresnel_strength",
+            label: "Fresnel strength",
+            min: 0.0,
+            max: 1.5,
+            step: 0.05,
+        },
+    ];
+    const LAVA: [ForgeMaterialControl; 4] = [
+        ForgeMaterialControl {
+            key: "flow_speed",
+            label: "Flow speed",
+            min: 0.0,
+            max: 2.0,
+            step: 0.08,
+        },
+        ForgeMaterialControl {
+            key: "cell_scale",
+            label: "Cell scale",
+            min: 0.03,
+            max: 0.8,
+            step: 0.03,
+        },
+        ForgeMaterialControl {
+            key: "seam_width",
+            label: "Seam width",
+            min: 0.04,
+            max: 0.7,
+            step: 0.03,
+        },
+        ForgeMaterialControl {
+            key: "emissive_strength",
+            label: "Emissive strength",
+            min: 0.2,
+            max: 2.0,
+            step: 0.08,
+        },
+    ];
+    match family {
+        ForgeMaterialFamily::Toon => &TOON,
+        ForgeMaterialFamily::Water => &WATER,
+        ForgeMaterialFamily::Energy => &ENERGY,
+        ForgeMaterialFamily::Shield => &SHIELD,
+        ForgeMaterialFamily::Ice => &ICE,
+        ForgeMaterialFamily::Lava => &LAVA,
+    }
 }
 
 pub struct EngineToolsPlugin;
@@ -64,6 +533,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorDragState>()
             .init_resource::<EditorPendingTransactions>()
             .init_resource::<EditorProjectSession>()
+            .init_resource::<PublishedMaterialCatalog>()
             .init_resource::<EditorRegistryState>()
             .init_resource::<EditorTextInputCapture>()
             .register_type::<EditorEntityId>()
@@ -86,6 +556,7 @@ impl Plugin for EngineToolsPlugin {
                     editor_gizmo_drag,
                     editor_viewport_picking,
                     apply_editor_actions,
+                    sync_forge_material_preview,
                     sync_world_adapters,
                     update_editor_workspace_text,
                     update_editor_button_style,
@@ -482,6 +953,14 @@ enum EditorAction {
     DeleteRecord,
     NormalizeSourcePath,
     SearchRegistry,
+    MaterialCycleFamily,
+    MaterialCyclePreset,
+    MaterialNextParameter,
+    MaterialDecrease,
+    MaterialIncrease,
+    MaterialReset,
+    ApplySelectedMaterial,
+    ClearObjectMaterial,
 }
 
 #[derive(Resource, Default)]
@@ -585,6 +1064,7 @@ struct EditorRegistryState {
     rename_buffer: String,
     search_active: bool,
     search_text: String,
+    material_parameter: usize,
 }
 
 #[derive(Resource, Default)]
@@ -751,6 +1231,406 @@ fn enter_editor_workspace(
     ));
 
     spawn_editor_workspace_ui(&mut commands);
+}
+
+fn forge_material_colors(family: ForgeMaterialFamily, preset: usize) -> (Vec4, Vec4) {
+    match (family, preset % 3) {
+        (ForgeMaterialFamily::Toon, 0) => (
+            Vec4::new(0.18, 0.72, 1.0, 1.0),
+            Vec4::new(0.55, 0.92, 1.0, 1.0),
+        ),
+        (ForgeMaterialFamily::Toon, 1) => (
+            Vec4::new(1.0, 0.32, 0.68, 1.0),
+            Vec4::new(1.0, 0.86, 0.32, 1.0),
+        ),
+        (ForgeMaterialFamily::Toon, _) => (
+            Vec4::new(0.34, 0.92, 0.48, 1.0),
+            Vec4::new(0.62, 1.0, 0.82, 1.0),
+        ),
+        (ForgeMaterialFamily::Water, 0) => (
+            Vec4::new(0.015, 0.10, 0.28, 0.82),
+            Vec4::new(0.05, 0.56, 0.72, 0.72),
+        ),
+        (ForgeMaterialFamily::Water, 1) => (
+            Vec4::new(0.02, 0.20, 0.34, 0.86),
+            Vec4::new(0.16, 0.82, 0.92, 0.76),
+        ),
+        (ForgeMaterialFamily::Water, _) => (
+            Vec4::new(0.05, 0.08, 0.18, 0.80),
+            Vec4::new(0.34, 0.26, 0.62, 0.68),
+        ),
+        (ForgeMaterialFamily::Energy, 0) => (
+            Vec4::new(1.0, 0.96, 0.72, 1.0),
+            Vec4::new(0.10, 0.72, 1.0, 1.0),
+        ),
+        (ForgeMaterialFamily::Energy, 1) => (
+            Vec4::new(1.0, 0.82, 0.96, 1.0),
+            Vec4::new(0.72, 0.08, 1.0, 1.0),
+        ),
+        (ForgeMaterialFamily::Energy, _) => (
+            Vec4::new(0.82, 1.0, 0.74, 1.0),
+            Vec4::new(0.06, 1.0, 0.36, 1.0),
+        ),
+        (ForgeMaterialFamily::Shield, 0) => (Vec4::new(0.20, 0.78, 1.0, 1.0), Vec4::ZERO),
+        (ForgeMaterialFamily::Shield, 1) => (Vec4::new(1.0, 0.28, 0.76, 1.0), Vec4::ZERO),
+        (ForgeMaterialFamily::Shield, _) => (Vec4::new(0.36, 1.0, 0.48, 1.0), Vec4::ZERO),
+        (ForgeMaterialFamily::Ice, 0) => (
+            Vec4::new(0.84, 0.94, 1.0, 1.0),
+            Vec4::new(0.08, 0.42, 0.68, 1.0),
+        ),
+        (ForgeMaterialFamily::Ice, 1) => (
+            Vec4::new(0.96, 0.98, 1.0, 1.0),
+            Vec4::new(0.18, 0.68, 0.92, 1.0),
+        ),
+        (ForgeMaterialFamily::Ice, _) => (
+            Vec4::new(0.72, 0.82, 0.94, 1.0),
+            Vec4::new(0.22, 0.18, 0.54, 1.0),
+        ),
+        (ForgeMaterialFamily::Lava, 0) => (
+            Vec4::new(0.055, 0.025, 0.018, 1.0),
+            Vec4::new(1.0, 0.16, 0.015, 1.0),
+        ),
+        (ForgeMaterialFamily::Lava, 1) => (
+            Vec4::new(0.075, 0.018, 0.025, 1.0),
+            Vec4::new(1.0, 0.55, 0.03, 1.0),
+        ),
+        (ForgeMaterialFamily::Lava, _) => (
+            Vec4::new(0.035, 0.025, 0.06, 1.0),
+            Vec4::new(0.72, 0.08, 1.0, 1.0),
+        ),
+    }
+}
+
+fn add_published_material(world: &mut World, spec: &ForgeMaterialSpec) -> PublishedMaterialHandle {
+    let (primary, secondary) = forge_material_colors(spec.family, spec.preset);
+    match spec.family {
+        ForgeMaterialFamily::Toon => {
+            let mut rim_shape = ToonMaterialUniform::default().rim_shape;
+            rim_shape.y = spec.values[5];
+            let settings = ToonMaterialUniform {
+                color: primary,
+                bands: Vec4::new(
+                    spec.values[0],
+                    spec.values[1],
+                    spec.values[2],
+                    spec.values[3],
+                ),
+                rim_color_strength: Vec4::new(
+                    secondary.x,
+                    secondary.y,
+                    secondary.z,
+                    spec.values[4],
+                ),
+                rim_shape,
+                ..default()
+            };
+            PublishedMaterialHandle::Toon(
+                world
+                    .resource_mut::<Assets<ToonMaterial>>()
+                    .add(ToonMaterial { settings }),
+            )
+        }
+        ForgeMaterialFamily::Water => {
+            let mut surface = WaterMaterialUniform::default().surface;
+            surface.x = spec.values[4];
+            surface.y = spec.values[5];
+            let settings = WaterMaterialUniform {
+                deep_color: primary,
+                shallow_color: secondary,
+                wave: Vec4::new(
+                    spec.values[0],
+                    spec.values[1],
+                    spec.values[2],
+                    spec.values[3],
+                ),
+                surface,
+            };
+            PublishedMaterialHandle::Water(
+                world
+                    .resource_mut::<Assets<WaterMaterial>>()
+                    .add(WaterMaterial { settings }),
+            )
+        }
+        ForgeMaterialFamily::Energy => {
+            PublishedMaterialHandle::Energy(world.resource_mut::<Assets<EnergyMaterial>>().add(
+                EnergyMaterial {
+                    settings: EnergyMaterialUniform {
+                        core_color: primary,
+                        edge_color: secondary,
+                        motion: Vec4::new(
+                            spec.values[0],
+                            spec.values[1],
+                            spec.values[2],
+                            spec.values[3],
+                        ),
+                    },
+                },
+            ))
+        }
+        ForgeMaterialFamily::Shield => {
+            let mut edge = ShieldMaterialUniform::default().edge;
+            edge.x = spec.values[4];
+            edge.y = spec.values[5];
+            let settings = ShieldMaterialUniform {
+                color: primary,
+                pattern: Vec4::new(
+                    spec.values[0],
+                    spec.values[1],
+                    spec.values[2],
+                    spec.values[3],
+                ),
+                edge,
+            };
+            PublishedMaterialHandle::Shield(
+                world
+                    .resource_mut::<Assets<ShieldMaterial>>()
+                    .add(ShieldMaterial { settings }),
+            )
+        }
+        ForgeMaterialFamily::Ice => {
+            PublishedMaterialHandle::Ice(world.resource_mut::<Assets<IceMaterial>>().add(
+                IceMaterial {
+                    settings: IceMaterialUniform {
+                        snow_color: primary,
+                        ice_color: secondary,
+                        surface: Vec4::new(
+                            spec.values[0],
+                            spec.values[1],
+                            spec.values[2],
+                            spec.values[3],
+                        ),
+                    },
+                },
+            ))
+        }
+        ForgeMaterialFamily::Lava => {
+            PublishedMaterialHandle::Lava(world.resource_mut::<Assets<LavaMaterial>>().add(
+                LavaMaterial {
+                    settings: LavaMaterialUniform {
+                        crust_color: primary,
+                        hot_color: secondary,
+                        motion: Vec4::new(
+                            spec.values[0],
+                            spec.values[1],
+                            spec.values[2],
+                            spec.values[3],
+                        ),
+                    },
+                },
+            ))
+        }
+    }
+}
+
+fn rebuild_published_material_catalog(world: &mut World, project: &ForgeProject) {
+    let authored = project
+        .records
+        .iter()
+        .filter(|record| {
+            record.published_hash.as_ref() == Some(&record.draft_hash)
+                && record.published_hash.is_some()
+        })
+        .filter_map(|record| {
+            let persistence::ContentPayload::Material(recipe) =
+                project.payloads.get(&record.content_id)?
+            else {
+                return None;
+            };
+            Some((
+                record.content_id.clone(),
+                record.draft_hash.clone(),
+                ForgeMaterialSpec::from_recipe(recipe),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut entries = BTreeMap::new();
+    for (content_id, source_hash, spec) in authored {
+        let handle = add_published_material(world, &spec);
+        entries.insert(
+            content_id,
+            PublishedMaterialEntry {
+                source_hash,
+                handle,
+            },
+        );
+    }
+    world.resource_mut::<PublishedMaterialCatalog>().entries = entries;
+}
+
+fn remove_mesh_material_components(entity: &mut EntityWorldMut<'_>) {
+    entity.remove::<MeshMaterial3d<StandardMaterial>>();
+    entity.remove::<MeshMaterial3d<ToonMaterial>>();
+    entity.remove::<MeshMaterial3d<WaterMaterial>>();
+    entity.remove::<MeshMaterial3d<EnergyMaterial>>();
+    entity.remove::<MeshMaterial3d<ShieldMaterial>>();
+    entity.remove::<MeshMaterial3d<IceMaterial>>();
+    entity.remove::<MeshMaterial3d<LavaMaterial>>();
+}
+
+fn apply_catalog_material(world: &mut World, entity: Entity, content_id: &str) -> bool {
+    if world.get::<Mesh3d>(entity).is_none() {
+        return false;
+    }
+    let handle = world
+        .resource::<PublishedMaterialCatalog>()
+        .entries
+        .get(content_id)
+        .map(|entry| entry.handle.clone());
+    let Some(handle) = handle else {
+        return false;
+    };
+    let mut target = world.entity_mut(entity);
+    remove_mesh_material_components(&mut target);
+    match handle {
+        PublishedMaterialHandle::Toon(handle) => target.insert(MeshMaterial3d(handle)),
+        PublishedMaterialHandle::Water(handle) => target.insert(MeshMaterial3d(handle)),
+        PublishedMaterialHandle::Energy(handle) => target.insert(MeshMaterial3d(handle)),
+        PublishedMaterialHandle::Shield(handle) => target.insert(MeshMaterial3d(handle)),
+        PublishedMaterialHandle::Ice(handle) => target.insert(MeshMaterial3d(handle)),
+        PublishedMaterialHandle::Lava(handle) => target.insert(MeshMaterial3d(handle)),
+    };
+    target.insert(EditorMaterialBinding(content_id.into()));
+    true
+}
+
+fn primitive_standard_color(primitive: EditorPrimitive) -> Color {
+    match primitive {
+        EditorPrimitive::Empty => Color::WHITE,
+        EditorPrimitive::Cube => Color::srgb(0.15, 0.68, 0.94),
+        EditorPrimitive::Pillar => Color::srgb(0.92, 0.52, 0.14),
+        EditorPrimitive::Beacon => Color::srgb(0.35, 1.0, 0.58),
+    }
+}
+
+fn clear_catalog_material(world: &mut World, entity: Entity) -> bool {
+    let Some(primitive) = world.get::<EditorPrimitive>(entity).copied() else {
+        return false;
+    };
+    if world.get::<Mesh3d>(entity).is_none() {
+        return false;
+    }
+    let material = world
+        .resource_mut::<Assets<StandardMaterial>>()
+        .add(StandardMaterial {
+            base_color: primitive_standard_color(primitive),
+            metallic: 0.15,
+            perceptual_roughness: 0.42,
+            ..default()
+        });
+    let mut target = world.entity_mut(entity);
+    remove_mesh_material_components(&mut target);
+    target.remove::<EditorMaterialBinding>();
+    target.insert(MeshMaterial3d(material));
+    true
+}
+
+fn sync_forge_material_preview(
+    session: Res<EditorProjectSession>,
+    registry: Res<EditorRegistryState>,
+    mut materials: ForgeMaterialAssets,
+    previews: ForgePreviewHandles,
+) {
+    let Some(record) = session.project.records.get(registry.selected) else {
+        return;
+    };
+    let Some(persistence::ContentPayload::Material(recipe)) =
+        session.project.payloads.get(&record.content_id)
+    else {
+        return;
+    };
+    let spec = ForgeMaterialSpec::from_recipe(recipe);
+    let (primary, secondary) = forge_material_colors(spec.family, spec.preset);
+    match spec.family {
+        ForgeMaterialFamily::Toon => {
+            for handle in previews.toon.iter() {
+                if let Some(mut material) = materials.toon.get_mut(&handle.0) {
+                    material.settings.color = primary;
+                    material.settings.bands = Vec4::new(
+                        spec.values[0],
+                        spec.values[1],
+                        spec.values[2],
+                        spec.values[3],
+                    );
+                    material.settings.rim_color_strength =
+                        Vec4::new(secondary.x, secondary.y, secondary.z, spec.values[4]);
+                    material.settings.rim_shape.y = spec.values[5];
+                }
+            }
+        }
+        ForgeMaterialFamily::Water => {
+            for handle in previews.water.iter() {
+                if let Some(mut material) = materials.water.get_mut(&handle.0) {
+                    material.settings.deep_color = primary;
+                    material.settings.shallow_color = secondary;
+                    material.settings.wave = Vec4::new(
+                        spec.values[0],
+                        spec.values[1],
+                        spec.values[2],
+                        spec.values[3],
+                    );
+                    material.settings.surface.x = spec.values[4];
+                    material.settings.surface.y = spec.values[5];
+                }
+            }
+        }
+        ForgeMaterialFamily::Energy => {
+            for handle in previews.energy.iter() {
+                if let Some(mut material) = materials.energy.get_mut(&handle.0) {
+                    material.settings.core_color = primary;
+                    material.settings.edge_color = secondary;
+                    material.settings.motion = Vec4::new(
+                        spec.values[0],
+                        spec.values[1],
+                        spec.values[2],
+                        spec.values[3],
+                    );
+                }
+            }
+        }
+        ForgeMaterialFamily::Shield => {
+            for handle in previews.shield.iter() {
+                if let Some(mut material) = materials.shield.get_mut(&handle.0) {
+                    material.settings.color = primary;
+                    material.settings.pattern = Vec4::new(
+                        spec.values[0],
+                        spec.values[1],
+                        spec.values[2],
+                        spec.values[3],
+                    );
+                    material.settings.edge.x = spec.values[4];
+                    material.settings.edge.y = spec.values[5];
+                }
+            }
+        }
+        ForgeMaterialFamily::Ice => {
+            for handle in previews.ice.iter() {
+                if let Some(mut material) = materials.ice.get_mut(&handle.0) {
+                    material.settings.snow_color = primary;
+                    material.settings.ice_color = secondary;
+                    material.settings.surface = Vec4::new(
+                        spec.values[0],
+                        spec.values[1],
+                        spec.values[2],
+                        spec.values[3],
+                    );
+                }
+            }
+        }
+        ForgeMaterialFamily::Lava => {
+            for handle in previews.lava.iter() {
+                if let Some(mut material) = materials.lava.get_mut(&handle.0) {
+                    material.settings.crust_color = primary;
+                    material.settings.hot_color = secondary;
+                    material.settings.motion = Vec4::new(
+                        spec.values[0],
+                        spec.values[1],
+                        spec.values[2],
+                        spec.values[3],
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn exit_editor_workspace(
@@ -1050,7 +1930,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                         panel,
                         37,
                         EditorAction::CreateMaterialRecord,
-                        "+ TOON MATERIAL",
+                        "+ SHADER MATERIAL",
                     );
                     spawn_editor_button(
                         panel,
@@ -1066,6 +1946,39 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                         "SYNC SOURCE PATH",
                     );
                     spawn_editor_button(panel, 41, EditorAction::SearchRegistry, "SEARCH RECORDS");
+                    spawn_editor_button(
+                        panel,
+                        42,
+                        EditorAction::MaterialCycleFamily,
+                        "MATERIAL FAMILY",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        43,
+                        EditorAction::MaterialCyclePreset,
+                        "MATERIAL PRESET",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        44,
+                        EditorAction::MaterialNextParameter,
+                        "NEXT PARAMETER",
+                    );
+                    spawn_editor_button(panel, 45, EditorAction::MaterialDecrease, "VALUE  −");
+                    spawn_editor_button(panel, 46, EditorAction::MaterialIncrease, "VALUE  +");
+                    spawn_editor_button(panel, 47, EditorAction::MaterialReset, "RESET MATERIAL");
+                    spawn_editor_button(
+                        panel,
+                        48,
+                        EditorAction::ApplySelectedMaterial,
+                        "APPLY TO OBJECT",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        49,
+                        EditorAction::ClearObjectMaterial,
+                        "CLEAR OBJECT MATERIAL",
+                    );
                 });
             });
 
@@ -1715,6 +2628,167 @@ fn apply_editor_actions(world: &mut World) {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum MaterialEdit {
+    CycleFamily,
+    CyclePreset,
+    NextParameter,
+    Adjust(f32),
+    Reset,
+}
+
+fn edit_selected_material(world: &mut World, edit: MaterialEdit) {
+    let (selected, parameter_index) = {
+        let registry = world.resource::<EditorRegistryState>();
+        (registry.selected, registry.material_parameter)
+    };
+    let content_id = world
+        .resource::<EditorProjectSession>()
+        .project
+        .records
+        .get(selected)
+        .map(|record| record.content_id.clone());
+    let Some(content_id) = content_id else {
+        set_editor_status(world, "No registry record selected");
+        return;
+    };
+    let current = world
+        .resource::<EditorProjectSession>()
+        .project
+        .payloads
+        .get(&content_id)
+        .and_then(|payload| match payload {
+            persistence::ContentPayload::Material(recipe) => {
+                Some(ForgeMaterialSpec::from_recipe(recipe))
+            }
+            _ => None,
+        });
+    let Some(mut spec) = current else {
+        set_editor_status(world, "Selected registry record is not a material");
+        return;
+    };
+    let controls = material_controls(spec.family);
+    let active = parameter_index % controls.len();
+
+    if matches!(edit, MaterialEdit::NextParameter) {
+        let next = (active + 1) % controls.len();
+        world
+            .resource_mut::<EditorRegistryState>()
+            .material_parameter = next;
+        set_editor_status(
+            world,
+            format!("Material parameter: {}", controls[next].label),
+        );
+        return;
+    }
+
+    match edit {
+        MaterialEdit::CycleFamily => {
+            spec = ForgeMaterialSpec::preset(spec.family.offset(1), 0);
+            world
+                .resource_mut::<EditorRegistryState>()
+                .material_parameter = 0;
+        }
+        MaterialEdit::CyclePreset => {
+            spec = ForgeMaterialSpec::preset(spec.family, (spec.preset + 1) % 3);
+        }
+        MaterialEdit::Adjust(direction) => {
+            let control = controls[active];
+            spec.values[active] =
+                (spec.values[active] + control.step * direction).clamp(control.min, control.max);
+        }
+        MaterialEdit::Reset => {
+            spec = ForgeMaterialSpec::preset(spec.family, spec.preset);
+        }
+        MaterialEdit::NextParameter => unreachable!(),
+    }
+    spec.normalize();
+
+    if let Some(persistence::ContentPayload::Material(recipe)) = world
+        .resource_mut::<EditorProjectSession>()
+        .project
+        .payloads
+        .get_mut(&content_id)
+    {
+        spec.write_to(recipe);
+    }
+    world.resource_mut::<EditorDocumentState>().dirty = true;
+    let controls = material_controls(spec.family);
+    let active = world.resource::<EditorRegistryState>().material_parameter % controls.len();
+    set_editor_status(
+        world,
+        format!(
+            "{} preset {} • {} = {:.3}",
+            spec.family.label(),
+            spec.preset + 1,
+            controls[active].label,
+            spec.values[active],
+        ),
+    );
+}
+
+fn apply_selected_material_to_object(world: &mut World) {
+    let selected_record = world.resource::<EditorRegistryState>().selected;
+    let material_id = world
+        .resource::<EditorProjectSession>()
+        .project
+        .records
+        .get(selected_record)
+        .filter(|record| record.category == persistence::ContentCategory::Material)
+        .map(|record| record.content_id.clone());
+    let Some(material_id) = material_id else {
+        set_editor_status(world, "Select a Material registry record first");
+        return;
+    };
+    if !world
+        .resource::<PublishedMaterialCatalog>()
+        .contains(&material_id)
+    {
+        set_editor_status(
+            world,
+            "Material is not published; publish the project first",
+        );
+        return;
+    }
+    let Some(editor_id) = world.resource::<EditorSelection>().active() else {
+        set_editor_status(world, "Select a scene object before applying a material");
+        return;
+    };
+    let Some(entity) = resolve_editor_entity(world, editor_id) else {
+        set_editor_status(world, "Selected scene object is missing");
+        return;
+    };
+    if apply_catalog_material(world, entity, &material_id) {
+        world.resource_mut::<EditorDocumentState>().dirty = true;
+        set_editor_status(
+            world,
+            format!("Applied {material_id} to object #{}", editor_id.0),
+        );
+    } else {
+        set_editor_status(world, "Selected object has no renderable mesh");
+    }
+}
+
+fn clear_selected_object_material(world: &mut World) {
+    let Some(editor_id) = world.resource::<EditorSelection>().active() else {
+        set_editor_status(world, "Select a scene object before clearing its material");
+        return;
+    };
+    let Some(entity) = resolve_editor_entity(world, editor_id) else {
+        set_editor_status(world, "Selected scene object is missing");
+        return;
+    };
+    if clear_catalog_material(world, entity) {
+        world.resource_mut::<EditorDocumentState>().dirty = true;
+        set_editor_status(
+            world,
+            format!("Cleared material on object #{}", editor_id.0),
+        );
+    } else {
+        set_editor_status(world, "Selected object has no renderable mesh");
+    }
+}
+
 fn apply_editor_action(world: &mut World, action: EditorAction) {
     if action != EditorAction::Exit {
         world.resource_mut::<EditorDocumentState>().exit_armed = false;
@@ -1962,7 +3036,10 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             let result = world
                 .resource_mut::<EditorProjectSession>()
                 .project
-                .create_content(persistence::ContentCategory::Material, "New Toon Material");
+                .create_content(
+                    persistence::ContentCategory::Material,
+                    "New Shader Material",
+                );
             match result {
                 Ok(content_id) => {
                     let index = world
@@ -2087,6 +3164,20 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 },
             );
         }
+        EditorAction::MaterialCycleFamily => {
+            edit_selected_material(world, MaterialEdit::CycleFamily)
+        }
+        EditorAction::MaterialCyclePreset => {
+            edit_selected_material(world, MaterialEdit::CyclePreset)
+        }
+        EditorAction::MaterialNextParameter => {
+            edit_selected_material(world, MaterialEdit::NextParameter)
+        }
+        EditorAction::MaterialDecrease => edit_selected_material(world, MaterialEdit::Adjust(-1.0)),
+        EditorAction::MaterialIncrease => edit_selected_material(world, MaterialEdit::Adjust(1.0)),
+        EditorAction::MaterialReset => edit_selected_material(world, MaterialEdit::Reset),
+        EditorAction::ApplySelectedMaterial => apply_selected_material_to_object(world),
+        EditorAction::ClearObjectMaterial => clear_selected_object_material(world),
     }
 }
 
@@ -2170,16 +3261,25 @@ fn adapter_key(
 #[allow(clippy::type_complexity)]
 fn save_editor_project(world: &mut World, publish: bool) {
     let mut objects = world
-        .query::<(&EditorEntityId, &EditorPrimitive, &Transform, Option<&Name>)>()
+        .query::<(
+            &EditorEntityId,
+            &EditorPrimitive,
+            &Transform,
+            Option<&Name>,
+            Option<&EditorMaterialBinding>,
+        )>()
         .iter(world)
-        .map(|(id, primitive, transform, name)| SceneObjectDraft {
-            editor_id: id.0,
-            name: name
-                .map(|name| name.as_str().to_owned())
-                .unwrap_or_else(|| format!("{} {}", primitive_label(*primitive), id.0)),
-            primitive: (*primitive).into(),
-            transform: transform.into(),
-        })
+        .map(
+            |(id, primitive, transform, name, material)| SceneObjectDraft {
+                editor_id: id.0,
+                name: name
+                    .map(|name| name.as_str().to_owned())
+                    .unwrap_or_else(|| format!("{} {}", primitive_label(*primitive), id.0)),
+                primitive: (*primitive).into(),
+                transform: transform.into(),
+                material_id: material.map(|binding| binding.0.clone()),
+            },
+        )
         .collect::<Vec<_>>();
     objects.sort_by_key(|object| object.editor_id);
 
@@ -2214,6 +3314,23 @@ fn save_editor_project(world: &mut World, publish: bool) {
     let result = {
         let mut session = world.resource_mut::<EditorProjectSession>();
         session.project.scene = scene;
+        let material_dependencies = session
+            .project
+            .scene
+            .objects
+            .iter()
+            .filter_map(|object| object.material_id.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if let Some(scene_record) = session
+            .project
+            .records
+            .iter_mut()
+            .find(|record| record.category == persistence::ContentCategory::Scene)
+        {
+            scene_record.dependencies = material_dependencies;
+        }
         if let Err(error) = publish
             .then(|| session.project.publish_drafts())
             .transpose()
@@ -2229,6 +3346,10 @@ fn save_editor_project(world: &mut World, publish: bool) {
             document.dirty = false;
             document.exit_armed = false;
             let verb = if publish { "published" } else { "saved" };
+            if publish {
+                let project = world.resource::<EditorProjectSession>().project.clone();
+                rebuild_published_material_catalog(world, &project);
+            }
             set_editor_status(world, format!("Project {verb} atomically to {path}"));
         }
         Err(error) => set_editor_status(world, format!("Save failed: {error}")),
@@ -2261,17 +3382,25 @@ fn load_editor_project(world: &mut World, recovery_only: bool) {
     }
     world.resource_mut::<EditorSelection>().clear();
     world.resource_mut::<EditorUndoStack>().clear();
+    rebuild_published_material_catalog(world, &project);
 
     for object in &project.scene.objects {
         let id = EditorEntityId(object.editor_id);
         world.resource_mut::<EditorIdAllocator>().reserve(id);
-        spawn_editor_primitive_record(
+        let entity = spawn_editor_primitive_record(
             world,
             id,
             object.primitive.into(),
             object.name.clone(),
             object.transform.into(),
         );
+        if let Some(material_id) = &object.material_id {
+            if !apply_catalog_material(world, entity, material_id) {
+                world
+                    .entity_mut(entity)
+                    .insert(EditorMaterialBinding(material_id.clone()));
+            }
+        }
     }
 
     let mut applied_adapters = 0_usize;
@@ -2383,7 +3512,7 @@ fn spawn_editor_primitive_record(
     primitive: EditorPrimitive,
     name: String,
     transform: Transform,
-) {
+) -> Entity {
     let (radius, mesh, color) = match primitive {
         EditorPrimitive::Empty => (0.55, None, Color::WHITE),
         EditorPrimitive::Cube => (
@@ -2393,7 +3522,7 @@ fn spawn_editor_primitive_record(
                     .resource_mut::<Assets<Mesh>>()
                     .add(Cuboid::new(2.5, 2.5, 2.5)),
             ),
-            Color::srgb(0.15, 0.68, 0.94),
+            primitive_standard_color(primitive),
         ),
         EditorPrimitive::Pillar => (
             2.7,
@@ -2402,12 +3531,12 @@ fn spawn_editor_primitive_record(
                     .resource_mut::<Assets<Mesh>>()
                     .add(Cylinder::new(1.15, 5.0)),
             ),
-            Color::srgb(0.92, 0.52, 0.14),
+            primitive_standard_color(primitive),
         ),
         EditorPrimitive::Beacon => (
             1.4,
             Some(world.resource_mut::<Assets<Mesh>>().add(Sphere::new(1.0))),
-            Color::srgb(0.35, 1.0, 0.58),
+            primitive_standard_color(primitive),
         ),
     };
 
@@ -2435,6 +3564,7 @@ fn spawn_editor_primitive_record(
     if let Some(render_parts) = render_parts {
         entity.insert(render_parts);
     }
+    entity.id()
 }
 
 fn duplicate_active(world: &mut World) {
@@ -2470,6 +3600,35 @@ fn duplicate_active(world: &mut World) {
     let material = world
         .get::<MeshMaterial3d<StandardMaterial>>(entity)
         .cloned();
+    let custom_material = world
+        .get::<MeshMaterial3d<ToonMaterial>>(entity)
+        .map(|handle| PublishedMaterialHandle::Toon(handle.0.clone()))
+        .or_else(|| {
+            world
+                .get::<MeshMaterial3d<WaterMaterial>>(entity)
+                .map(|handle| PublishedMaterialHandle::Water(handle.0.clone()))
+        })
+        .or_else(|| {
+            world
+                .get::<MeshMaterial3d<EnergyMaterial>>(entity)
+                .map(|handle| PublishedMaterialHandle::Energy(handle.0.clone()))
+        })
+        .or_else(|| {
+            world
+                .get::<MeshMaterial3d<ShieldMaterial>>(entity)
+                .map(|handle| PublishedMaterialHandle::Shield(handle.0.clone()))
+        })
+        .or_else(|| {
+            world
+                .get::<MeshMaterial3d<IceMaterial>>(entity)
+                .map(|handle| PublishedMaterialHandle::Ice(handle.0.clone()))
+        })
+        .or_else(|| {
+            world
+                .get::<MeshMaterial3d<LavaMaterial>>(entity)
+                .map(|handle| PublishedMaterialHandle::Lava(handle.0.clone()))
+        });
+    let binding = world.get::<EditorMaterialBinding>(entity).cloned();
     transform.translation.x += 1.0;
     let id = world.resource_mut::<EditorIdAllocator>().allocate();
     let mut duplicate = world.spawn((
@@ -2487,6 +3646,19 @@ fn duplicate_active(world: &mut World) {
     }
     if let Some(material) = material {
         duplicate.insert(material);
+    }
+    if let Some(material) = custom_material {
+        match material {
+            PublishedMaterialHandle::Toon(handle) => duplicate.insert(MeshMaterial3d(handle)),
+            PublishedMaterialHandle::Water(handle) => duplicate.insert(MeshMaterial3d(handle)),
+            PublishedMaterialHandle::Energy(handle) => duplicate.insert(MeshMaterial3d(handle)),
+            PublishedMaterialHandle::Shield(handle) => duplicate.insert(MeshMaterial3d(handle)),
+            PublishedMaterialHandle::Ice(handle) => duplicate.insert(MeshMaterial3d(handle)),
+            PublishedMaterialHandle::Lava(handle) => duplicate.insert(MeshMaterial3d(handle)),
+        };
+    }
+    if let Some(binding) = binding {
+        duplicate.insert(binding);
     }
     world.resource_mut::<EditorSelection>().replace(id);
     world.resource_mut::<EditorDocumentState>().dirty = true;
@@ -2630,8 +3802,16 @@ fn update_editor_workspace_text(
     camera_rig: Res<EditorCameraRig>,
     gizmo: Res<EditorGizmoSettings>,
     session: Res<EditorProjectSession>,
+    catalog: Res<PublishedMaterialCatalog>,
     registry: Res<EditorRegistryState>,
-    authorables: Query<(&EditorEntityId, Option<&Name>), With<Authorable>>,
+    authorables: Query<
+        (
+            &EditorEntityId,
+            Option<&Name>,
+            Option<&EditorMaterialBinding>,
+        ),
+        With<Authorable>,
+    >,
     mut text_queries: ParamSet<(
         Query<&mut Text, With<EditorSummaryText>>,
         Query<&mut Text, With<EditorStatusText>>,
@@ -2646,7 +3826,7 @@ fn update_editor_workspace_text(
         .unwrap_or_else(|| "none".into());
     let mut matching = authorables
         .iter()
-        .filter(|(_, name)| {
+        .filter(|(_, name, _)| {
             filter.text.is_empty()
                 || name.is_some_and(|value| {
                     value
@@ -2655,9 +3835,14 @@ fn update_editor_workspace_text(
                         .contains(&filter.text.to_lowercase())
                 })
         })
-        .map(|(id, name)| {
-            name.map(|value| value.as_str().to_owned())
-                .unwrap_or_else(|| format!("Object {}", id.0))
+        .map(|(id, name, material)| {
+            let name = name
+                .map(|value| value.as_str().to_owned())
+                .unwrap_or_else(|| format!("Object {}", id.0));
+            match material {
+                Some(binding) => format!("{name}  [{}]", binding.0),
+                None => name,
+            }
         })
         .collect::<Vec<_>>();
     matching.sort();
@@ -2732,8 +3917,26 @@ fn update_editor_workspace_text(
                 "DRAFT"
             };
             let hash = record.draft_hash.chars().take(8).collect::<String>();
+            let material = match session.project.payloads.get(&record.content_id) {
+                Some(persistence::ContentPayload::Material(recipe)) => {
+                    let spec = ForgeMaterialSpec::from_recipe(recipe);
+                    let controls = material_controls(spec.family);
+                    let parameter_index = registry.material_parameter % controls.len();
+                    let parameter = controls[parameter_index];
+                    format!(
+                        "\nMATERIAL: {} • Preset {}\n{}: {:.3}  [{:.3}–{:.3}]",
+                        spec.family.label(),
+                        spec.preset + 1,
+                        parameter.label,
+                        spec.values[parameter_index],
+                        parameter.min,
+                        parameter.max,
+                    )
+                }
+                _ => String::new(),
+            };
             format!(
-                "\n{:?} • {state}\n{}\nHash: {}",
+                "\n{:?} • {state}\n{}\nHash: {}{material}",
                 record.category,
                 record.source_path,
                 if hash.is_empty() { "—" } else { &hash }
@@ -2772,10 +3975,11 @@ fn update_editor_workspace_text(
     };
     for mut text in &mut text_queries.p3() {
         *text = Text::new(format!(
-            "Project: {}\nRecords: {} • Matches: {}{search}\n\n{record_listing}{selected_details}{rename}\n\n{validation}",
+            "Project: {}\nRecords: {} • Matches: {} • Runtime materials: {}{search}\n\n{record_listing}{selected_details}{rename}\n\n{validation}",
             session.project.display_name,
             records.len(),
-            registry_indices.len()
+            registry_indices.len(),
+            catalog.len(),
         ));
     }
 }
@@ -2993,6 +4197,13 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
         world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<ToonMaterial>>();
+        world.init_resource::<Assets<WaterMaterial>>();
+        world.init_resource::<Assets<EnergyMaterial>>();
+        world.init_resource::<Assets<ShieldMaterial>>();
+        world.init_resource::<Assets<IceMaterial>>();
+        world.init_resource::<Assets<LavaMaterial>>();
+        world.init_resource::<PublishedMaterialCatalog>();
         world.init_resource::<EditorSelection>();
         world.init_resource::<EditorIdAllocator>();
         world.init_resource::<EditorUndoStack>();
@@ -3247,5 +4458,127 @@ mod tests {
         assert_eq!(filtered_registry_indices(&project, "anime"), [1]);
         assert_eq!(filtered_registry_indices(&project, "material"), [1]);
         assert!(filtered_registry_indices(&project, "missing").is_empty());
+    }
+
+    #[test]
+    fn every_shader_family_round_trips_typed_forge_controls() {
+        for family in ForgeMaterialFamily::ALL {
+            let authored = ForgeMaterialSpec::preset(family, 1);
+            let mut recipe = GenericRecipeDraft::default();
+            authored.write_to(&mut recipe);
+
+            assert_eq!(ForgeMaterialSpec::from_recipe(&recipe), authored);
+            assert_eq!(
+                recipe.fields["shader"].as_str(),
+                Some(family.id()),
+                "{} payload lost its shader identity",
+                family.label(),
+            );
+        }
+    }
+
+    #[test]
+    fn toon_authoring_keeps_ordered_bands_after_extreme_input() {
+        let mut recipe = GenericRecipeDraft::default();
+        recipe
+            .fields
+            .insert("shader".into(), serde_json::json!("toon_v1"));
+        recipe
+            .fields
+            .insert("shadow_threshold".into(), serde_json::json!(0.8));
+        recipe
+            .fields
+            .insert("light_threshold".into(), serde_json::json!(0.2));
+        recipe
+            .fields
+            .insert("shadow_level".into(), serde_json::json!(0.8));
+        recipe
+            .fields
+            .insert("mid_level".into(), serde_json::json!(0.2));
+
+        let spec = ForgeMaterialSpec::from_recipe(&recipe);
+        assert!(spec.values[0] < spec.values[1]);
+        assert!(spec.values[2] < spec.values[3]);
+    }
+
+    #[test]
+    fn authored_toon_values_override_legacy_nested_seed_fields() {
+        let persistence::ContentPayload::Material(mut recipe) =
+            persistence::ContentPayload::empty(persistence::ContentCategory::Material)
+        else {
+            unreachable!();
+        };
+        let authored = ForgeMaterialSpec::preset(ForgeMaterialFamily::Toon, 1);
+        authored.write_to(&mut recipe);
+
+        assert_eq!(ForgeMaterialSpec::from_recipe(&recipe), authored);
+    }
+
+    #[test]
+    fn published_catalog_resolves_stable_id_to_typed_object_material() {
+        let (mut world, root) = persistence_test_world("published_material_catalog");
+        let material_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Material, "Hero Ink")
+            .unwrap();
+        world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .publish_drafts()
+            .unwrap();
+        let project = world.resource::<EditorProjectSession>().project.clone();
+        rebuild_published_material_catalog(&mut world, &project);
+        let entity = spawn_editor_primitive_record(
+            &mut world,
+            EditorEntityId(88),
+            EditorPrimitive::Cube,
+            "Catalog block".into(),
+            Transform::default(),
+        );
+
+        assert!(apply_catalog_material(&mut world, entity, &material_id));
+        assert_eq!(
+            world.get::<EditorMaterialBinding>(entity),
+            Some(&EditorMaterialBinding(material_id.clone()))
+        );
+        assert!(world.get::<MeshMaterial3d<ToonMaterial>>(entity).is_some());
+        assert!(world
+            .get::<MeshMaterial3d<StandardMaterial>>(entity)
+            .is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn published_object_material_binding_survives_project_reload() {
+        let (mut world, root) = persistence_test_world("material_binding_reload");
+        let object_id = EditorEntityId(91);
+        spawn_editor_primitive_record(
+            &mut world,
+            object_id,
+            EditorPrimitive::Cube,
+            "Bound block".into(),
+            Transform::default(),
+        );
+        world.resource_mut::<EditorSelection>().replace(object_id);
+        let material_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Material, "Reload Ink")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+
+        save_editor_project(&mut world, true);
+        apply_selected_material_to_object(&mut world);
+        save_editor_project(&mut world, true);
+        load_editor_project(&mut world, false);
+
+        let entity = resolve_editor_entity(&mut world, object_id).unwrap();
+        assert_eq!(
+            world.get::<EditorMaterialBinding>(entity),
+            Some(&EditorMaterialBinding(material_id))
+        );
+        assert!(world.get::<MeshMaterial3d<ToonMaterial>>(entity).is_some());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

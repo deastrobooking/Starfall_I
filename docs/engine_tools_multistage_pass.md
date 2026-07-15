@@ -252,6 +252,36 @@ ET3's registry foundation is now sufficient for ET4 production workspace
 integration. Road/building adapters remain read-only until ET5 supplies recipe
 regeneration contracts for dependent meshes and colliders.
 
+### ET3d typed material authoring delivered — July 2026
+
+- The legacy-compatible Material payload codec now resolves into typed Toon,
+  Water, Energy, Shield, Ice/Snow, and Lava specifications instead of exposing
+  unbounded JSON values directly to preview materials.
+- Every family supplies three presets and bounded named controls. Six new
+  controller-focusable registry actions cycle family/preset/parameter, step the
+  value down or up, and reset the current preset.
+- The selected Material record updates its matching live Forge preview without
+  recreating material assets. Invalid shaders, presets, numeric types, and
+  control ranges block validation and publishing.
+- The F11 performance overlay reports active cameras, projectiles, transient
+  VFX, and custom/Standard material counts. Per-view GPU timing and draw-call
+  metrics still require renderer instrumentation and measured hardware passes.
+
+### ET3e runtime material catalogs delivered — July 2026
+
+- Published Material records compile into a runtime catalog keyed by stable
+  content IDs and backed by typed Bevy handles. ECS/asset handles are never
+  serialized.
+- Scene primitives persist an optional Material content ID. Bindings validate
+  category and existence, migrate during content-ID rename, block unsafe record
+  deletion, and become explicit scene-record dependencies during save/publish.
+- Controller-focusable Apply/Clear actions bind catalog materials to selected
+  renderable objects. The outliner exposes bindings, and load reconstructs the
+  typed material component from the stable ID.
+- The tested workflow is create/tune → publish Material → apply to object →
+  publish scene. Unpublished bindings retain their ID but fall back safely to
+  the Standard preview until a matching published catalog entry exists.
+
 ## ET4 — Character and Creature production workspaces
 
 Move Character Studio and `CreatureSpec` onto ET1–ET3 services:
@@ -359,7 +389,7 @@ after at least three Starfall workspaces share the APIs.
   generator-time budgets;
 - no editor preview/runtime output divergence.
 
-The next implementation slice is ET3c's complete record lifecycle and payload
-codec boundary, followed by ET4 Character/Creature production workspaces.
+The next implementation slice is ET4 Character/Creature production workspaces,
+followed by ET5 safe world-recipe regeneration.
 Road/building adapters become editable only as their recipe compilers acquire
 safe regeneration boundaries.

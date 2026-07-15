@@ -39,8 +39,12 @@ together.
 - Rendering R2 lives in `src/rendering.rs` and `assets/shaders/`: Toon, Grass,
   Water, Energy, Shield, Ice/Snow, and Lava use Bevy 0.19 material contracts.
   Weapon VFX reuse five bounded Energy handles; each local-player slot owns one
-  persistent damage/parry Shield handle. Forge compiles all material families.
-  Clustered-light and four-camera performance work remains in
+  persistent damage/parry Shield handle. Forge compiles all material families
+  and exposes typed family/preset/bounded-parameter authoring with live previews.
+  Published materials enter `PublishedMaterialCatalog` by stable content ID;
+  Forge scene primitives persist optional validated IDs rather than Bevy handles.
+  F11 reports camera/projectile/VFX/material counts. Clustered-light, recipe-
+  regenerated biome bindings, and four-camera GPU timing work remains in
   `docs/rendering_shader_pass.md`; do not copy legacy fixed-group WGSL examples
   or claim unmeasured millisecond budgets.
 - Robot pet foundation lives in `src/robot_pets.rs`: shared saved pet records,

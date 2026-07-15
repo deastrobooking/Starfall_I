@@ -234,5 +234,9 @@ The staged custom-material and shader plan is tracked in
 `docs/rendering_shader_pass.md`. Rendering R1 delivered branchless scene-lit
 Toon, configurable GPU Grass, and procedural world Water. R2 now integrates a
 bounded five-handle Energy combat palette, per-player damage/parry Shield
-pulses, and typed Ice/Snow plus Lava materials in Forge. Clustered-light
-evaluation, authoring sliders, and measured four-viewport GPU budgets remain.
+pulses, and typed Ice/Snow plus Lava materials in Forge. R3 adds controller-
+focused family/preset/parameter authoring, live bounded previews, publish
+validation, and render asset/entity counters. Clustered-light evaluation,
+measured four-viewport GPU budgets, and recipe-regenerated biome bindings remain.
+R4 now publishes typed runtime material catalogs and persists validated stable-ID
+bindings on Forge scene primitives.

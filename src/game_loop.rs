@@ -7,7 +7,7 @@
 //!   `.in_set(..)` assignment across the gameplay plugins lands in `EC1` when the
 //!   simulation moves to `FixedUpdate`.
 //! * Profiling: frame-time + entity-count diagnostics and an in-game perf overlay
-//!   (F9), mirroring the controller-diagnostics overlay (F8). Build with
+//!   (F11), alongside the collider overlay (F9) and controller diagnostics (F8). Build with
 //!   `--features tracy` to stream spans to the Tracy profiler.
 //!
 //! This module is intentionally self-contained so it can become an engine crate
@@ -16,7 +16,14 @@
 use bevy::diagnostic::{
     DiagnosticsStore, EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
 };
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+
+use crate::components::weapon::Projectile;
+use crate::plugins::weapon_plugin::HitParticle;
+use crate::rendering::{
+    EnergyMaterial, IceMaterial, LavaMaterial, ShieldMaterial, ToonMaterial, WaterMaterial,
+};
 
 /// Canonical per-frame gameplay ordering. Systems opt in with `.in_set(GameSet::X)`.
 ///
@@ -48,7 +55,7 @@ pub enum GameSet {
 pub const FIXED_HZ: f64 = 64.0;
 
 /// Monotonic count of fixed simulation ticks executed (EC1). Proves the fixed
-/// loop is live and feeds the perf overlay; later useful for replay timestamps.
+/// loop is live and feeds the F11 perf overlay; later useful for replay timestamps.
 #[derive(Resource, Default)]
 pub struct FixedTickCount(pub u64);
 
@@ -127,7 +134,7 @@ fn count_fixed_tick(mut ticks: ResMut<FixedTickCount>) {
     ticks.0 = ticks.0.wrapping_add(1);
 }
 
-// ── Perf overlay (F9) ───────────────────────────────────────────────────────
+// ── Perf overlay (F11) ──────────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
 struct PerfOverlay {
@@ -139,6 +146,38 @@ struct PerfOverlayRoot;
 
 #[derive(Component)]
 struct PerfOverlayText;
+
+#[derive(SystemParam)]
+struct RenderPerfCounts<'w, 's> {
+    cameras: Query<'w, 's, &'static Camera>,
+    projectiles: Query<'w, 's, (), With<Projectile>>,
+    transient_vfx: Query<'w, 's, (), With<HitParticle>>,
+    standard: Res<'w, Assets<StandardMaterial>>,
+    toon: Res<'w, Assets<ToonMaterial>>,
+    water: Res<'w, Assets<WaterMaterial>>,
+    energy: Res<'w, Assets<EnergyMaterial>>,
+    shield: Res<'w, Assets<ShieldMaterial>>,
+    ice: Res<'w, Assets<IceMaterial>>,
+    lava: Res<'w, Assets<LavaMaterial>>,
+}
+
+impl RenderPerfCounts<'_, '_> {
+    fn active_cameras(&self) -> usize {
+        self.cameras
+            .iter()
+            .filter(|camera| camera.is_active)
+            .count()
+    }
+
+    fn custom_materials(&self) -> usize {
+        self.toon.len()
+            + self.water.len()
+            + self.energy.len()
+            + self.shield.len()
+            + self.ice.len()
+            + self.lava.len()
+    }
+}
 
 fn setup_perf_overlay(mut commands: Commands) {
     commands
@@ -193,6 +232,7 @@ fn update_perf_overlay(
     state: Res<PerfOverlay>,
     diagnostics: Res<DiagnosticsStore>,
     ticks: Res<FixedTickCount>,
+    render: RenderPerfCounts,
     mut text_q: Query<&mut Text, With<PerfOverlayText>>,
 ) {
     if !state.visible {
@@ -210,12 +250,17 @@ fn update_perf_overlay(
         .get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT)
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
+    let cameras = render.active_cameras();
+    let projectiles = render.projectiles.iter().count();
+    let transient_vfx = render.transient_vfx.iter().count();
+    let standard_materials = render.standard.len();
+    let custom_materials = render.custom_materials();
 
     // Budgets (EC0): 60 FPS = 16.67 ms/frame; sim < 2–4 ms target (EC1 splits this out).
     for mut text in &mut text_q {
         *text = Text::new(format!(
-            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\nsim:   {} ticks @{:.0}Hz",
-            ticks.0, FIXED_HZ
+            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nmats:  {custom_materials} custom / {standard_materials} standard\nsim:   {} ticks @{:.0}Hz",
+            ticks.0, FIXED_HZ,
         ));
     }
 }

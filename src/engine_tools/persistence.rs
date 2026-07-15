@@ -104,6 +104,11 @@ impl ForgeProject {
                 }
             }
         }
+        for object in &mut self.scene.objects {
+            if object.material_id.as_deref() == Some(old_id) {
+                object.material_id = Some(new_id.into());
+            }
+        }
         Ok(())
     }
 
@@ -228,6 +233,17 @@ impl ForgeProject {
             return Err(ProjectMutationError::ContentHasDependents {
                 content_id: content_id.into(),
                 owner: owner.content_id.clone(),
+            });
+        }
+        if self
+            .scene
+            .objects
+            .iter()
+            .any(|object| object.material_id.as_deref() == Some(content_id))
+        {
+            return Err(ProjectMutationError::ContentHasDependents {
+                content_id: content_id.into(),
+                owner: "scene object material binding".into(),
             });
         }
         self.payloads.remove(content_id);
@@ -459,6 +475,8 @@ pub struct SceneObjectDraft {
     pub name: String,
     pub primitive: DraftPrimitive,
     pub transform: TransformDraft,
+    #[serde(default)]
+    pub material_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -509,6 +527,8 @@ pub enum ProjectValidationError {
     InvalidTransform(String),
     MissingDependency { owner: String, dependency: String },
     MissingContent(String),
+    InvalidMaterial(String),
+    InvalidMaterialBinding(String),
 }
 
 #[derive(Debug)]
@@ -574,6 +594,9 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
             }
             _ => {}
         }
+        if let Some(ContentPayload::Material(recipe)) = project.payloads.get(&record.content_id) {
+            validate_material_recipe(&record.content_id, recipe, &mut errors);
+        }
     }
     for record in &project.records {
         for dependency in &record.dependencies {
@@ -598,6 +621,23 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
             format!("editor object {}", object.editor_id),
             &mut errors,
         );
+        if let Some(material_id) = &object.material_id {
+            let valid = project
+                .records
+                .iter()
+                .find(|record| record.content_id == *material_id)
+                .is_some_and(|record| record.category == ContentCategory::Material)
+                && matches!(
+                    project.payloads.get(material_id),
+                    Some(ContentPayload::Material(_))
+                );
+            if !valid {
+                errors.push(ProjectValidationError::InvalidMaterialBinding(format!(
+                    "editor object {} references missing/non-material {}",
+                    object.editor_id, material_id
+                )));
+            }
+        }
     }
     let mut adapter_keys = BTreeSet::new();
     for adapter in &project.scene.adapter_overrides {
@@ -617,6 +657,89 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
         );
     }
     errors
+}
+
+fn validate_material_recipe(
+    content_id: &str,
+    recipe: &GenericRecipeDraft,
+    errors: &mut Vec<ProjectValidationError>,
+) {
+    let shader = recipe
+        .fields
+        .get("shader")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("toon_v1");
+    let bounds: &[(&str, f64, f64)] = match shader {
+        "toon_v1" => &[
+            ("shadow_threshold", 0.0, 0.8),
+            ("light_threshold", 0.2, 1.0),
+            ("shadow_level", 0.05, 0.8),
+            ("mid_level", 0.2, 0.95),
+            ("rim_strength", 0.0, 1.5),
+            ("rim_exponent", 0.5, 8.0),
+        ],
+        "water_v1" => &[
+            ("wave_speed", 0.0, 3.0),
+            ("wave_frequency", 0.005, 0.3),
+            ("wave_amplitude", 0.0, 0.8),
+            ("secondary_wave", 0.0, 1.5),
+            ("fresnel_exponent", 0.5, 8.0),
+            ("opacity", 0.15, 1.0),
+        ],
+        "energy_v1" => &[
+            ("flow_speed", 0.0, 8.0),
+            ("spatial_frequency", 0.5, 14.0),
+            ("pulse_speed", 0.0, 12.0),
+            ("opacity", 0.1, 1.0),
+        ],
+        "shield_v1" => &[
+            ("grid_scale", 2.0, 18.0),
+            ("line_width", 0.02, 0.24),
+            ("pulse_speed", 0.0, 10.0),
+            ("opacity", 0.08, 0.9),
+            ("fresnel_exponent", 0.5, 8.0),
+            ("edge_strength", 0.0, 2.0),
+        ],
+        "ice_v1" => &[
+            ("detail_scale", 0.02, 1.0),
+            ("frost_coverage", 0.0, 1.0),
+            ("sparkle_strength", 0.0, 1.5),
+            ("fresnel_strength", 0.0, 1.5),
+        ],
+        "lava_v1" => &[
+            ("flow_speed", 0.0, 2.0),
+            ("cell_scale", 0.03, 0.8),
+            ("seam_width", 0.04, 0.7),
+            ("emissive_strength", 0.2, 2.0),
+        ],
+        other => {
+            errors.push(ProjectValidationError::InvalidMaterial(format!(
+                "{content_id}: unsupported shader {other}"
+            )));
+            return;
+        }
+    };
+    if let Some(preset) = recipe.fields.get("preset") {
+        let valid = preset.as_u64().is_some_and(|value| value < 3);
+        if !valid {
+            errors.push(ProjectValidationError::InvalidMaterial(format!(
+                "{content_id}: preset must be 0, 1, or 2"
+            )));
+        }
+    }
+    for (key, min, max) in bounds {
+        let Some(raw) = recipe.fields.get(*key) else {
+            continue;
+        };
+        let valid = raw
+            .as_f64()
+            .is_some_and(|value| value.is_finite() && (*min..=*max).contains(&value));
+        if !valid {
+            errors.push(ProjectValidationError::InvalidMaterial(format!(
+                "{content_id}: {key} must be numeric in [{min}, {max}]"
+            )));
+        }
+    }
 }
 
 fn safe_source_path(path: &str) -> bool {
@@ -1094,6 +1217,7 @@ mod tests {
             name: "Test Block".into(),
             primitive: DraftPrimitive::Cube,
             transform: TransformDraft::default(),
+            material_id: None,
         });
         store.save(&mut project).unwrap();
         let loaded = store.load().unwrap();
@@ -1113,6 +1237,7 @@ mod tests {
             name: "Source object".into(),
             primitive: DraftPrimitive::Beacon,
             transform: TransformDraft::default(),
+            material_id: None,
         });
         store.save(&mut project).unwrap();
 
@@ -1135,6 +1260,7 @@ mod tests {
             name: "First generation".into(),
             primitive: DraftPrimitive::Cube,
             transform: TransformDraft::default(),
+            material_id: None,
         });
         store.save(&mut first).unwrap();
         let mut second = first.clone();
@@ -1190,12 +1316,14 @@ mod tests {
                 name: "A".into(),
                 primitive: DraftPrimitive::Empty,
                 transform: TransformDraft::default(),
+                material_id: None,
             },
             SceneObjectDraft {
                 editor_id: 4,
                 name: "B".into(),
                 primitive: DraftPrimitive::Empty,
                 transform: TransformDraft::default(),
+                material_id: None,
             },
         ]);
         let errors = validate_project(&project);
@@ -1258,6 +1386,7 @@ mod tests {
             name: "Changed".into(),
             primitive: DraftPrimitive::Beacon,
             transform: TransformDraft::default(),
+            material_id: None,
         });
         let changed = serde_json::to_vec(&scene).unwrap();
         assert_ne!(fnv1a_hash(&empty), fnv1a_hash(&changed));
@@ -1297,6 +1426,7 @@ mod tests {
                 rotation_xyzw: [0.0; 4],
                 ..TransformDraft::default()
             },
+            material_id: None,
         });
         project.scene.adapter_overrides.push(AdapterOverrideDraft {
             adapter_key: " ".into(),
@@ -1421,6 +1551,66 @@ mod tests {
         );
         assert!(store.source_diagnostics(&loaded).is_empty());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn material_validation_rejects_unknown_shaders_and_out_of_range_controls() {
+        let mut project = ForgeProject::default();
+        let material_id = project
+            .create_content(ContentCategory::Material, "Broken Shader")
+            .unwrap();
+        let ContentPayload::Material(recipe) = project.payloads.get_mut(&material_id).unwrap()
+        else {
+            panic!("created material has the wrong payload codec");
+        };
+        recipe
+            .fields
+            .insert("shader".into(), serde_json::json!("phantom_v9"));
+        assert!(validate_project(&project)
+            .iter()
+            .any(|error| matches!(error, ProjectValidationError::InvalidMaterial(_))));
+
+        let ContentPayload::Material(recipe) = project.payloads.get_mut(&material_id).unwrap()
+        else {
+            unreachable!();
+        };
+        recipe
+            .fields
+            .insert("shader".into(), serde_json::json!("lava_v1"));
+        recipe
+            .fields
+            .insert("emissive_strength".into(), serde_json::json!(9.0));
+        assert!(validate_project(&project)
+            .iter()
+            .any(|error| matches!(error, ProjectValidationError::InvalidMaterial(_))));
+    }
+
+    #[test]
+    fn scene_material_bindings_validate_rename_and_block_delete() {
+        let mut project = ForgeProject::default();
+        let material_id = project
+            .create_content(ContentCategory::Material, "Castle Ice")
+            .unwrap();
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 17,
+            name: "Ice floor".into(),
+            primitive: DraftPrimitive::Cube,
+            transform: TransformDraft::default(),
+            material_id: Some(material_id.clone()),
+        });
+        assert!(validate_project(&project).is_empty());
+
+        project
+            .rename_content(&material_id, "material.castle_ice_runtime")
+            .unwrap();
+        assert_eq!(
+            project.scene.objects[0].material_id.as_deref(),
+            Some("material.castle_ice_runtime")
+        );
+        assert!(matches!(
+            project.delete_content("material.castle_ice_runtime"),
+            Err(ProjectMutationError::ContentHasDependents { .. })
+        ));
     }
 
     #[test]
