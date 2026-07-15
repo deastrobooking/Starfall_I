@@ -18,13 +18,13 @@
 ///  RB  (RTrigger)   — weapon next
 ///  A / Cross / B    — jump                     (South)
 ///  B / Circle / A   — dodge                    (East)
-///  X / Square / Y   — reload                   (West)
+///  X / Square / Y   — reload; LB+X uses equipped quick item (West)
 ///  Y / Triangle / X — parry                    (North)
 ///  LB + Y / Triangle — toggle Star Sabre; RT swings it
 ///  (LT + Y and Guide/Home remain alternate mappings)
 ///  L3 (left click)  — melee heavy              (LeftThumb)
 ///  R3 (right click) — melee light              (RightThumb)
-///  Select/Back/Share/View — crafting (alone) OR special-slot modifier (+ DPad)
+///  Select/Back/Share/View — crafting (alone), loadout (LB+Select), or special modifier (+ DPad)
 ///  Start/Options/Menu     — pause              (Start)
 ///  Guide/Home             — sabre toggle       (Mode)  [fallback: L3+R3]
 ///  G / Select+RB      — grapple hook foundation
@@ -390,9 +390,11 @@ fn update_player_inputs(
             || native_just(NativeButton::East);
 
         // ── Reload ────────────────────────────────────────────────────────────
-        pi.reload = (is_p1 && keyboard.just_pressed(KeyCode::KeyR))
-            || btn_just(GamepadButton::West)
-            || native_just(NativeButton::West);
+        let west_just = btn_just(GamepadButton::West) || native_just(NativeButton::West);
+        pi.use_quick_item =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyH)) || (left_shoulder_held && west_just);
+        pi.reload =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyR)) || (!left_shoulder_held && west_just);
 
         // ── Parry ─────────────────────────────────────────────────────────────
         pi.parry = (is_p1 && keyboard.just_pressed(KeyCode::KeyF))
@@ -546,11 +548,16 @@ fn update_player_inputs(
             || (dpad_free
                 && (btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight)));
 
-        // ── Crafting ──────────────────────────────────────────────────────────
-        // Select alone fires crafting; Select+DPad is the special-slot modifier.
+        // ── In-game equipment menus ───────────────────────────────────────────
+        // Select alone opens crafting. LB+Select opens the unified loadout;
+        // Select+DPad remains the direct special-slot chord.
+        pi.loadout_menu = (is_p1 && keyboard.just_pressed(KeyCode::KeyI))
+            || (left_shoulder_held
+                && (btn_just(GamepadButton::Select) || native_just(NativeButton::Select)));
         pi.crafting = (is_p1 && keyboard.just_pressed(KeyCode::KeyC))
             || ((btn_just(GamepadButton::Select) || native_just(NativeButton::Select))
-                && !dpad_any_just);
+                && !dpad_any_just
+                && !left_shoulder_held);
 
         // ── Pause ─────────────────────────────────────────────────────────────
         pi.pause = (is_p1 && keyboard.just_pressed(KeyCode::Escape))
@@ -583,6 +590,12 @@ fn update_player_inputs(
         pi.ui_down = (is_p1 && keyboard.just_pressed(KeyCode::ArrowDown))
             || btn_just(GamepadButton::DPadDown)
             || native_just(NativeButton::DPadDown);
+        pi.ui_left = (is_p1 && keyboard.just_pressed(KeyCode::ArrowLeft))
+            || btn_just(GamepadButton::DPadLeft)
+            || native_just(NativeButton::DPadLeft);
+        pi.ui_right = (is_p1 && keyboard.just_pressed(KeyCode::ArrowRight))
+            || btn_just(GamepadButton::DPadRight)
+            || native_just(NativeButton::DPadRight);
         pi.ui_confirm = (is_p1 && keyboard.just_pressed(KeyCode::Enter))
             || btn_just(GamepadButton::South)
             || native_just(NativeButton::South);
@@ -600,18 +613,24 @@ fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
     let preserved = (
         input.gamepad_active,
         input.crafting,
+        input.loadout_menu,
         input.ui_vertical,
         input.ui_up,
         input.ui_down,
+        input.ui_left,
+        input.ui_right,
         input.ui_confirm,
     );
     *input = PlayerInput::default();
     (
         input.gamepad_active,
         input.crafting,
+        input.loadout_menu,
         input.ui_vertical,
         input.ui_up,
         input.ui_down,
+        input.ui_left,
+        input.ui_right,
         input.ui_confirm,
     ) = preserved;
 }
@@ -654,8 +673,10 @@ mod tests {
             jump: true,
             enter_vehicle: true,
             crafting: true,
+            loadout_menu: true,
             ui_vertical: -1.0,
             ui_down: true,
+            ui_right: true,
             ui_confirm: true,
             ..default()
         };
@@ -665,8 +686,10 @@ mod tests {
         assert!(!input.jump);
         assert!(!input.enter_vehicle);
         assert!(input.crafting);
+        assert!(input.loadout_menu);
         assert_eq!(input.ui_vertical, -1.0);
         assert!(input.ui_down);
+        assert!(input.ui_right);
         assert!(input.ui_confirm);
     }
 }

@@ -19,7 +19,7 @@ use crate::characters::{
 use crate::components::armor::ArmorSet;
 use crate::components::character::{CartoonPart, JointMarker};
 use crate::components::enemy::{BossEnemy, DeadEnemy, Enemy, EnemyType, FlyingDrone};
-use crate::components::inventory::Inventory;
+use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::{
@@ -34,7 +34,10 @@ use crate::input_buffer::PlayerInputBuffers;
 use crate::perks::PerkTree;
 use crate::physics::prelude::*;
 use crate::player_mesh::attach_modular_player_mesh;
-use crate::rendering::{Camera3dBundle, ShieldMaterial, ShieldMaterialUniform, ShieldPbrBundle};
+use crate::rendering::{
+    Camera3dBundle, PbrBundle, ShieldMaterial, ShieldMaterialUniform, ShieldPbrBundle,
+    SpatialBundle,
+};
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe, CameraShake,
     ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig, PlaySessionTransition,
@@ -67,6 +70,11 @@ struct SharedEncounterCamera {
     focus: Vec3,
     radius: f32,
     reversion_cooldown: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct RocketHoverboardVisual {
+    owner: u8,
 }
 
 impl Default for SharedEncounterCamera {
@@ -275,6 +283,7 @@ impl Plugin for PlayerPlugin {
                     player_look,
                     camera_shake_system,
                     update_camera_post_processing,
+                    update_rocket_hoverboard_visuals,
                     traversal_mode_switch_update.run_if(hitstop_inactive),
                     grapple_hook_update.run_if(hitstop_inactive),
                     player_movement.run_if(hitstop_inactive),
@@ -297,6 +306,7 @@ impl Plugin for PlayerPlugin {
                     player_look,
                     camera_shake_system,
                     update_camera_post_processing,
+                    update_rocket_hoverboard_visuals,
                     shared_encounter_camera_mode_system,
                     shared_encounter_party_pull_system,
                     dungeon_crawl_party_pull_system,
@@ -331,6 +341,7 @@ impl Plugin for PlayerPlugin {
                     player_state_update,
                     player_stamina_regen,
                     player_perk_health_regen,
+                    player_quick_item_system,
                     player_invulnerability_update,
                     player_level_up,
                     player_died_check,
@@ -355,6 +366,77 @@ impl Plugin for PlayerPlugin {
                     .run_if(in_state(AppState::Playing))
                     .run_if(fixed_motor_on),
             );
+    }
+}
+
+fn player_quick_item_system(
+    mut players: Query<
+        (
+            &PlayerIndex,
+            &PlayerInput,
+            &mut Inventory,
+            &mut QuickItemSlot,
+            &mut Health,
+            &mut PlayerStats,
+        ),
+        With<Player>,
+    >,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (index, input, mut inventory, mut quick, mut health, mut stats) in players.iter_mut() {
+        if !input.use_quick_item {
+            continue;
+        }
+        let Some(item_id) = quick.item_id.clone() else {
+            msg_ev.write(UiMessageEvent {
+                text: format!("P{} has no quick item equipped", index.0 + 1),
+                duration: 1.4,
+            });
+            continue;
+        };
+        if !inventory.has(&item_id, 1) {
+            quick.item_id = None;
+            msg_ev.write(UiMessageEvent {
+                text: format!("P{} quick item is empty", index.0 + 1),
+                duration: 1.4,
+            });
+            continue;
+        }
+
+        let used = match item_id.as_str() {
+            "health_pack" if health.current < health.max => {
+                health.heal(50.0);
+                Some("Health Pack")
+            }
+            "armor_shard" if stats.armor < stats.max_armor => {
+                stats.armor = (stats.armor + 25.0).min(stats.max_armor);
+                Some("Armor Shard")
+            }
+            "shield_booster" if stats.armor < stats.max_armor => {
+                stats.armor = stats.max_armor;
+                Some("Shield Booster")
+            }
+            "xp_chip" => {
+                stats.experience = stats.experience.saturating_add(25);
+                Some("XP Chip")
+            }
+            _ => None,
+        };
+        let Some(label) = used else {
+            msg_ev.write(UiMessageEvent {
+                text: format!("P{} cannot use that item right now", index.0 + 1),
+                duration: 1.4,
+            });
+            continue;
+        };
+        inventory.remove_item(&item_id, 1);
+        if !inventory.has(&item_id, 1) {
+            quick.item_id = None;
+        }
+        msg_ev.write(UiMessageEvent {
+            text: format!("P{} used {}", index.0 + 1, label),
+            duration: 1.5,
+        });
     }
 }
 
@@ -548,6 +630,29 @@ fn spawn_players(
         .single()
         .map(|w| (w.physical_width(), w.physical_height()))
         .unwrap_or((1280, 720));
+    let board_deck_mesh = meshes.add(Cuboid::new(0.62, 0.12, 1.75));
+    let board_rail_mesh = meshes.add(Cuboid::new(0.10, 0.10, 1.42));
+    let board_thruster_mesh = meshes.add(Cuboid::new(0.30, 0.20, 0.22));
+    let board_flame_mesh = meshes.add(Cuboid::new(0.18, 0.14, 0.48));
+    let board_shell = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.055, 0.075, 0.13),
+        metallic: 0.88,
+        perceptual_roughness: 0.24,
+        ..default()
+    });
+    let board_trim = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.12, 0.72, 1.0),
+        emissive: LinearRgba::new(0.08, 1.4, 3.4, 1.0),
+        metallic: 0.62,
+        perceptual_roughness: 0.20,
+        ..default()
+    });
+    let board_flame = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.36, 0.05),
+        emissive: LinearRgba::new(4.8, 0.72, 0.04, 1.0),
+        unlit: true,
+        ..default()
+    });
 
     for i in 0..active {
         let spawn_pos = player_spawn_position(i, &current, &chapter_anchor_q);
@@ -587,6 +692,9 @@ fn spawn_players(
             &mut special_inventory,
             &mut melee_combo,
         );
+        let mut starter_inventory = Inventory::default();
+        starter_inventory.add_item("health_pack", 2, 10);
+        starter_inventory.add_item("armor_shard", 2, 10);
 
         // Apply perk and tech-upgrade HP bonuses to the authoritative max_health.
         player_stats.max_health += perks.hp_bonus() + upgrades.armor_health_bonus();
@@ -641,13 +749,27 @@ fn spawn_players(
             .insert((
                 RoadRecoveryState::default(),
                 ArmorSet::default(),
-                Inventory::default(),
+                starter_inventory,
+                QuickItemSlot::default(),
                 weapon_inventory,
                 special_inventory,
                 BeamSabre::default(),
                 melee_combo,
             ))
             .id();
+
+        attach_rocket_hoverboard(
+            &mut commands,
+            player,
+            i,
+            &board_deck_mesh,
+            &board_rail_mesh,
+            &board_thruster_mesh,
+            &board_flame_mesh,
+            &board_shell,
+            &board_trim,
+            &board_flame,
+        );
 
         despawn_cartoon_character_parts(&mut commands, player, &existing_visuals);
         let mut character_config = hero_config_with_overrides(
@@ -768,6 +890,103 @@ fn spawn_players(
             .id();
 
         commands.entity(player).insert(PlayerCameraRef(cam_entity));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attach_rocket_hoverboard(
+    commands: &mut Commands,
+    player: Entity,
+    owner: u8,
+    deck_mesh: &Handle<Mesh>,
+    rail_mesh: &Handle<Mesh>,
+    thruster_mesh: &Handle<Mesh>,
+    flame_mesh: &Handle<Mesh>,
+    shell: &Handle<StandardMaterial>,
+    trim: &Handle<StandardMaterial>,
+    flame: &Handle<StandardMaterial>,
+) {
+    commands.entity(player).with_children(|player_root| {
+        player_root
+            .spawn((
+                SpatialBundle {
+                    transform: Transform::from_xyz(0.0, -0.88, 0.0),
+                    visibility: Visibility::Hidden,
+                    ..default()
+                },
+                RocketHoverboardVisual { owner },
+                Name::new(format!("P{} Rocket Hoverboard", owner + 1)),
+            ))
+            .with_children(|board| {
+                board.spawn(PbrBundle {
+                    mesh: Mesh3d(deck_mesh.clone()),
+                    material: MeshMaterial3d(shell.clone()),
+                    transform: Transform::default(),
+                    ..default()
+                });
+                for side in [-1.0_f32, 1.0] {
+                    board.spawn(PbrBundle {
+                        mesh: Mesh3d(rail_mesh.clone()),
+                        material: MeshMaterial3d(trim.clone()),
+                        transform: Transform::from_xyz(side * 0.30, 0.09, 0.0),
+                        ..default()
+                    });
+                    board.spawn(PbrBundle {
+                        mesh: Mesh3d(thruster_mesh.clone()),
+                        material: MeshMaterial3d(shell.clone()),
+                        transform: Transform::from_xyz(side * 0.23, -0.08, 0.66),
+                        ..default()
+                    });
+                    board.spawn(PbrBundle {
+                        mesh: Mesh3d(flame_mesh.clone()),
+                        material: MeshMaterial3d(flame.clone()),
+                        transform: Transform::from_xyz(side * 0.23, -0.08, 0.94),
+                        ..default()
+                    });
+                }
+            });
+    });
+}
+
+fn update_rocket_hoverboard_visuals(
+    time: Res<Time>,
+    players: Query<
+        (
+            &PlayerIndex,
+            &TraversalModeState,
+            &PlayerMovement,
+            &JetpackState,
+            &BoardBoostState,
+        ),
+        With<Player>,
+    >,
+    mut boards: Query<(&RocketHoverboardVisual, &mut Visibility, &mut Transform)>,
+) {
+    for (board, mut visibility, mut transform) in boards.iter_mut() {
+        let Some((_, traversal, movement, jetpack, boost)) =
+            players.iter().find(|(index, ..)| index.0 == board.owner)
+        else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let active = traversal.active == TraversalMode::Hoverboard;
+        *visibility = if active {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if !active {
+            continue;
+        }
+        let speed = movement.ground_velocity.length();
+        let rocket = jetpack.is_active || !movement.is_grounded;
+        let pulse = (time.elapsed_secs() * if rocket { 18.0 } else { 8.0 }).sin();
+        transform.translation.y = -0.88 + pulse * if rocket { 0.035 } else { 0.012 };
+        transform.rotation =
+            Quat::from_rotation_x((-movement.velocity.y * 0.12 - speed * 0.018).clamp(-0.30, 0.24))
+                * Quat::from_rotation_z(pulse * 0.025);
+        let boost_scale = if boost.timer > 0.0 { 1.08 } else { 1.0 };
+        transform.scale = Vec3::new(boost_scale, 1.0, 1.0);
     }
 }
 
@@ -2048,6 +2267,28 @@ fn player_movement(
                     }
                     state.transition(PlayerState::Jetpack);
                 }
+                TraversalMode::Hoverboard => {
+                    let forward_target = if input.length_squared() > 0.01 {
+                        input
+                    } else {
+                        fwd
+                    } * jetpack.boost_forward_speed
+                        * traversal.hoverboard_rocket_forward_mult
+                        * if pi.sprint { 1.30 } else { 0.82 };
+                    movement.ground_velocity = approach_vec3(
+                        movement.ground_velocity,
+                        forward_target,
+                        dt * if pi.sprint { 6.8 } else { 4.2 },
+                    );
+                    movement.velocity.y = (movement.velocity.y
+                        + jetpack.force * traversal.hoverboard_rocket_lift_mult)
+                        .min(jetpack.max_vertical_vel * 0.82);
+                    jetpack.fuel -=
+                        jetpack.fuel_cost_per_sec * traversal.hoverboard_rocket_fuel_mult * dt;
+                    jetpack.is_active = true;
+                    jetpack.mode = FlightMode::Hoverboard;
+                    state.transition(PlayerState::Jetpack);
+                }
                 _ => {
                     movement.velocity.y =
                         (movement.velocity.y + jetpack.force).min(jetpack.max_vertical_vel);
@@ -3074,6 +3315,52 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quick_item_heals_and_consumes_only_one_stack_item() {
+        let mut app = App::new();
+        app.add_message::<UiMessageEvent>();
+        app.add_systems(Update, player_quick_item_system);
+
+        let mut inventory = Inventory::default();
+        inventory.add_item("health_pack", 2, 10);
+        let mut health = Health::new(100.0);
+        health.current = 20.0;
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(1),
+                PlayerInput {
+                    use_quick_item: true,
+                    ..default()
+                },
+                inventory,
+                QuickItemSlot {
+                    item_id: Some("health_pack".to_string()),
+                },
+                health,
+                PlayerStats::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let world = app.world();
+        assert_eq!(world.get::<Health>(player).unwrap().current, 70.0);
+        assert_eq!(
+            world.get::<Inventory>(player).unwrap().count("health_pack"),
+            1
+        );
+        assert_eq!(
+            world
+                .get::<QuickItemSlot>(player)
+                .unwrap()
+                .item_id
+                .as_deref(),
+            Some("health_pack")
+        );
+    }
 
     #[test]
     fn shield_pulse_updates_only_the_owned_local_player() {

@@ -121,9 +121,10 @@ Per-player state:
   crafting ownership, runtime stats, character blueprints, and save `players[]`
   records.
 
-`players[]` currently persists runtime stats, not inventory/equipment stacks.
-Inventory/equipment save records remain an explicit schema gap; do not infer
-their persistence from runtime `PlayerIndex` ownership.
+`players[]` now persists runtime stats plus inventory stacks, primary/special
+selection, armor infusion, quick-item selection, and traversal ride. Legacy
+records default those fields safely; load clamps slot indices and rejects an
+equipped quick item that is absent from the restored inventory.
 
 Party-shared exceptions:
 

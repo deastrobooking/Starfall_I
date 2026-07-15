@@ -15,9 +15,10 @@ use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleRelicEncounter,
 };
 use crate::components::enemy::CitySpyDrone;
-use crate::components::inventory::Inventory;
+use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot};
 use crate::components::player::{
-    ClimbState, JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats,
+    ClimbState, JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats, TraversalMode,
+    TraversalModeState,
 };
 use crate::components::weapon::{
     BeamSabre, SpecialWeaponInventory, TrackingMissile, WeaponInventory, WeaponRanks, WeaponType,
@@ -51,6 +52,7 @@ impl Plugin for UiPlugin {
         app.init_resource::<UiMessage>()
             .init_resource::<PlayerGuidance>()
             .init_resource::<CraftingPanelState>()
+            .init_resource::<LoadoutPanelState>()
             .init_resource::<DiscussionState>()
             .init_resource::<PauseMenuState>()
             .init_resource::<MenuFocus>()
@@ -164,7 +166,8 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                crafting_panel_system
+                (crafting_panel_system, loadout_panel_system)
+                    .chain()
                     .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
@@ -398,6 +401,20 @@ struct CraftingPanelRoot;
 #[derive(Component)]
 struct CraftingPanelText;
 #[derive(Component)]
+struct LoadoutPanelRoot;
+#[derive(Component)]
+struct LoadoutTitleText;
+#[derive(Component)]
+struct LoadoutStatusText;
+#[derive(Component, Clone, Copy)]
+struct LoadoutTabButton(LoadoutTab);
+#[derive(Component, Clone, Copy)]
+struct LoadoutEntryButton(usize);
+#[derive(Component)]
+struct LoadoutCloseButton;
+#[derive(Component, Clone, Copy)]
+struct LoadoutEntryLabel(usize);
+#[derive(Component)]
 struct DiscussionPanelRoot;
 #[derive(Component)]
 struct DiscussionTitleText;
@@ -422,6 +439,66 @@ struct CraftingPanelState {
     visible: bool,
     owner: Option<u8>,
     recipe_index: [usize; 4],
+    repeat_direction: i8,
+    repeat_timer: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LoadoutTab {
+    #[default]
+    Weapons,
+    Armor,
+    Items,
+    Specials,
+    Rides,
+}
+
+impl LoadoutTab {
+    const ALL: [Self; 5] = [
+        Self::Weapons,
+        Self::Armor,
+        Self::Items,
+        Self::Specials,
+        Self::Rides,
+    ];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Weapons => 0,
+            Self::Armor => 1,
+            Self::Items => 2,
+            Self::Specials => 3,
+            Self::Rides => 4,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Weapons => "WEAPONS",
+            Self::Armor => "ARMOR",
+            Self::Items => "ITEMS",
+            Self::Specials => "SPECIALS",
+            Self::Rides => "RIDES",
+        }
+    }
+
+    fn offset(self, delta: i8) -> Self {
+        let len = Self::ALL.len();
+        let index = if delta < 0 {
+            (self.index() + len - 1) % len
+        } else {
+            (self.index() + 1) % len
+        };
+        Self::ALL[index]
+    }
+}
+
+#[derive(Resource, Default)]
+struct LoadoutPanelState {
+    visible: bool,
+    owner: Option<u8>,
+    tab: LoadoutTab,
+    selection: [[usize; 5]; 4],
     repeat_direction: i8,
     repeat_timer: f32,
 }
@@ -3688,6 +3765,146 @@ fn setup_hud(
                 }
             });
 
+            // ── Per-player loadout panel (I / LB+Select, hidden) ─────────────
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(18.0),
+                    top: Val::Percent(10.0),
+                    width: Val::Percent(64.0),
+                    max_height: Val::Percent(80.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(18.0)),
+                    row_gap: Val::Px(10.0),
+                    display: Display::None,
+                    overflow: Overflow::clip_y(),
+                    border_radius: BorderRadius::all(Val::Px(12.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.018, 0.028, 0.065, 0.97)),
+                BorderColor::all(Color::srgb(0.20, 0.78, 1.0)),
+                LoadoutPanelRoot,
+            ))
+            .with_children(|panel| {
+                panel.spawn((
+                    Text::new("P1 STAR LOADOUT"),
+                    TextFont {
+                        font_size: FontSize::Px(25.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.96, 0.86, 0.30)),
+                    LoadoutTitleText,
+                ));
+                panel.spawn((
+                    Text::new("D-PAD/STICK: navigate   A: equip   LB+SELECT / I: close"),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.62, 0.82, 1.0)),
+                ));
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(6.0),
+                        ..default()
+                    })
+                    .with_children(|tabs| {
+                        for tab in LoadoutTab::ALL {
+                            tabs.spawn((
+                                Button,
+                                Node {
+                                    flex_grow: 1.0,
+                                    min_height: Val::Px(38.0),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(0.08, 0.13, 0.25)),
+                                BorderColor::all(Color::srgb(0.16, 0.35, 0.55)),
+                                LoadoutTabButton(tab),
+                            ))
+                            .with_child((
+                                Text::new(tab.label()),
+                                TextFont {
+                                    font_size: FontSize::Px(13.0),
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        }
+                    });
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        ..default()
+                    })
+                    .with_children(|entries| {
+                        for index in 0..8 {
+                            entries
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        min_height: Val::Px(38.0),
+                                        padding: UiRect::axes(
+                                            Val::Px(12.0),
+                                            Val::Px(7.0),
+                                        ),
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(0.055, 0.075, 0.14)),
+                                    BorderColor::all(Color::srgb(0.12, 0.24, 0.40)),
+                                    LoadoutEntryButton(index),
+                                ))
+                                .with_child((
+                                    Text::new(""),
+                                    TextFont {
+                                        font_size: FontSize::Px(15.0),
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.88, 0.93, 1.0)),
+                                    LoadoutEntryLabel(index),
+                                ));
+                        }
+                    });
+                panel.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.50, 0.94, 0.78)),
+                    LoadoutStatusText,
+                ));
+                panel
+                    .spawn((
+                        Button,
+                        Node {
+                            width: Val::Px(170.0),
+                            min_height: Val::Px(38.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.32, 0.10, 0.18)),
+                        BorderColor::all(Color::srgb(0.85, 0.28, 0.42)),
+                        LoadoutCloseButton,
+                    ))
+                    .with_child((
+                        Text::new("CLOSE"),
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+            });
+
             // ── Crafting panel (toggle C, hidden by default) ──────────────────────
             root.spawn((
                 Node {
@@ -4640,6 +4857,489 @@ fn crafting_panel_system(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn loadout_panel_system(
+    time: Res<Time>,
+    mut state: ResMut<LoadoutPanelState>,
+    mut crafting: ResMut<CraftingPanelState>,
+    mut capture: ResMut<UiGameplayCapture>,
+    mut panel_q: Query<&mut Node, (With<LoadoutPanelRoot>, Without<Button>)>,
+    mut texts: ParamSet<(
+        Query<&mut Text, With<LoadoutTitleText>>,
+        Query<&mut Text, With<LoadoutStatusText>>,
+        Query<(&LoadoutEntryLabel, &mut Text)>,
+    )>,
+    input_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &mut WeaponInventory,
+            &mut SpecialWeaponInventory,
+            &mut ArmorSet,
+            &Inventory,
+            &mut QuickItemSlot,
+            &mut TraversalModeState,
+        ),
+        With<Player>,
+    >,
+    mut buttons: ParamSet<(
+        Query<
+            (
+                &Interaction,
+                Option<&LoadoutTabButton>,
+                Option<&LoadoutEntryButton>,
+                Option<&LoadoutCloseButton>,
+            ),
+            (With<Button>, Changed<Interaction>),
+        >,
+        Query<
+            (
+                &Interaction,
+                Option<&LoadoutTabButton>,
+                Option<&LoadoutEntryButton>,
+                Option<&LoadoutCloseButton>,
+                &mut Node,
+                &mut BackgroundColor,
+                &mut BorderColor,
+            ),
+            With<Button>,
+        >,
+    )>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let mut opened_this_frame = false;
+    for (index, input) in input_q.iter() {
+        if input.loadout_menu {
+            let closing = state.visible && state.owner == Some(index.0);
+            state.visible = !closing;
+            state.owner = state.visible.then_some(index.0);
+            state.repeat_direction = 0;
+            state.repeat_timer = 0.0;
+            if state.visible {
+                crafting.visible = false;
+                crafting.owner = None;
+                opened_this_frame = true;
+            }
+        } else if state.visible && state.owner == Some(index.0) && input.crafting {
+            state.visible = false;
+            state.owner = None;
+        }
+    }
+
+    let mut clicked_tab = None;
+    let mut clicked_entry = None;
+    let mut clicked_close = false;
+    for (interaction, tab, entry, close) in buttons.p0().iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        clicked_tab = clicked_tab.or(tab.map(|button| button.0));
+        clicked_entry = clicked_entry.or(entry.map(|button| button.0));
+        clicked_close |= close.is_some();
+    }
+    if clicked_close {
+        state.visible = false;
+        state.owner = None;
+    }
+
+    if let Ok(mut node) = panel_q.single_mut() {
+        node.display = if state.visible {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    if !state.visible {
+        if !crafting.visible {
+            capture.owner = None;
+        }
+        return;
+    }
+
+    let Some(owner) = state.owner else {
+        state.visible = false;
+        capture.owner = None;
+        return;
+    };
+    capture.owner = Some(owner);
+    let owner_slot = usize::from(owner).min(3);
+    let owner_input = input_q
+        .iter()
+        .find_map(|(index, input)| (index.0 == owner).then_some(input));
+
+    if let Some(tab) = clicked_tab {
+        state.tab = tab;
+    } else if !opened_this_frame {
+        if owner_input.is_some_and(|input| input.ui_left) {
+            state.tab = state.tab.offset(-1);
+        } else if owner_input.is_some_and(|input| input.ui_right) {
+            state.tab = state.tab.offset(1);
+        }
+    }
+
+    let Some((_, mut weapons, mut specials, mut armor, inventory, mut quick, mut traversal)) =
+        player_q.iter_mut().find(|(index, ..)| index.0 == owner)
+    else {
+        state.visible = false;
+        state.owner = None;
+        capture.owner = None;
+        return;
+    };
+
+    let mut entries = loadout_entry_labels(
+        state.tab, &weapons, &specials, &armor, inventory, &quick, &traversal,
+    );
+    let tab_slot = state.tab.index();
+    state.selection[owner_slot][tab_slot] =
+        state.selection[owner_slot][tab_slot].min(entries.len().saturating_sub(1));
+
+    if !opened_this_frame {
+        let direction = owner_input
+            .map(|input| loadout_navigation_direction(&mut state, input, time.delta_secs()))
+            .unwrap_or(0);
+        if direction != 0 && !entries.is_empty() {
+            state.selection[owner_slot][tab_slot] = cycle_index(
+                state.selection[owner_slot][tab_slot],
+                entries.len(),
+                direction,
+            );
+        }
+    }
+    if let Some(index) = clicked_entry.filter(|index| *index < entries.len()) {
+        state.selection[owner_slot][tab_slot] = index;
+    }
+
+    let selected = state.selection[owner_slot][tab_slot];
+    let confirm = !opened_this_frame
+        && (clicked_entry.is_some() || owner_input.is_some_and(|input| input.ui_confirm));
+    if confirm && !entries.is_empty() {
+        let equipped = activate_loadout_entry(
+            state.tab,
+            selected,
+            &mut weapons,
+            &mut specials,
+            &mut armor,
+            inventory,
+            &mut quick,
+            &mut traversal,
+        );
+        msg_ev.write(UiMessageEvent {
+            text: format!("P{} equipped {}", owner + 1, equipped),
+            duration: 1.5,
+        });
+        entries = loadout_entry_labels(
+            state.tab, &weapons, &specials, &armor, inventory, &quick, &traversal,
+        );
+    }
+
+    if let Ok(mut text) = texts.p0().single_mut() {
+        *text = Text::new(format!(
+            "P{} STAR LOADOUT — {}",
+            owner + 1,
+            state.tab.label()
+        ));
+    }
+    if let Ok(mut text) = texts.p1().single_mut() {
+        *text = Text::new(match state.tab {
+            LoadoutTab::Weapons => {
+                "Primary beams have unlimited energy; selection changes RT fire.".to_string()
+            }
+            LoadoutTab::Armor => format!(
+                "Active armor infusion: {}",
+                armor.active_element.display_name()
+            ),
+            LoadoutTab::Items => format!(
+                "Quick item: {}",
+                quick.item_id.as_deref().unwrap_or("None equipped")
+            ),
+            LoadoutTab::Specials => {
+                "A selected special replaces RT until PRIMARY FIRE is chosen.".to_string()
+            }
+            LoadoutTab::Rides => {
+                "Rocket Hoverboard: jump to launch, hold jump for lift, LB to boost.".to_string()
+            }
+        });
+    }
+    for (label, mut text) in texts.p2().iter_mut() {
+        *text = Text::new(entries.get(label.0).cloned().unwrap_or_default());
+    }
+
+    for (interaction, tab, entry, close, mut node, mut background, mut border) in
+        buttons.p1().iter_mut()
+    {
+        if let Some(tab) = tab {
+            let active = tab.0 == state.tab;
+            *background = BackgroundColor(if active {
+                Color::srgb(0.10, 0.48, 0.72)
+            } else {
+                Color::srgb(0.08, 0.13, 0.25)
+            });
+            *border = BorderColor::all(if active {
+                Color::srgb(0.92, 0.82, 0.28)
+            } else {
+                Color::srgb(0.16, 0.35, 0.55)
+            });
+        } else if let Some(entry) = entry {
+            node.display = if entry.0 < entries.len() {
+                Display::Flex
+            } else {
+                Display::None
+            };
+            let focused = entry.0 == selected;
+            *background = BackgroundColor(if focused {
+                Color::srgb(0.10, 0.34, 0.55)
+            } else if *interaction == Interaction::Hovered {
+                Color::srgb(0.09, 0.20, 0.34)
+            } else {
+                Color::srgb(0.055, 0.075, 0.14)
+            });
+            *border = BorderColor::all(if focused {
+                Color::srgb(1.0, 0.82, 0.25)
+            } else {
+                Color::srgb(0.12, 0.24, 0.40)
+            });
+        } else if close.is_some() && *interaction == Interaction::Hovered {
+            *background = BackgroundColor(Color::srgb(0.55, 0.14, 0.24));
+        }
+    }
+}
+
+fn loadout_entry_labels(
+    tab: LoadoutTab,
+    weapons: &WeaponInventory,
+    specials: &SpecialWeaponInventory,
+    armor: &ArmorSet,
+    inventory: &Inventory,
+    quick: &QuickItemSlot,
+    traversal: &TraversalModeState,
+) -> Vec<String> {
+    match tab {
+        LoadoutTab::Weapons => weapons
+            .slots
+            .iter()
+            .enumerate()
+            .map(|(index, weapon)| {
+                format!(
+                    "{} {}  •  Rank {}",
+                    if weapons.active_slot == index {
+                        "✓"
+                    } else {
+                        " "
+                    },
+                    weapon.weapon_type.display_name(),
+                    weapon.rank
+                )
+            })
+            .collect(),
+        LoadoutTab::Armor => armor_elements()
+            .iter()
+            .map(|element| {
+                format!(
+                    "{} {} Infusion",
+                    if armor.active_element == *element {
+                        "✓"
+                    } else {
+                        " "
+                    },
+                    element.display_name()
+                )
+            })
+            .collect(),
+        LoadoutTab::Items => consumable_inventory_entries(inventory)
+            .into_iter()
+            .map(|(id, name, quantity)| {
+                format!(
+                    "{} {}  ×{}",
+                    if quick.item_id.as_deref() == Some(id.as_str()) {
+                        "✓"
+                    } else {
+                        " "
+                    },
+                    name,
+                    quantity
+                )
+            })
+            .collect(),
+        LoadoutTab::Specials => std::iter::once(format!(
+            "{} PRIMARY FIRE",
+            if specials.active_slot.is_none() {
+                "✓"
+            } else {
+                " "
+            }
+        ))
+        .chain(
+            [
+                &specials.slot7,
+                &specials.slot8,
+                &specials.slot9,
+                &specials.slot0,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, special)| {
+                format!(
+                    "{} {}  •  Level {}",
+                    if specials.active_slot == Some(index as u8) {
+                        "✓"
+                    } else {
+                        " "
+                    },
+                    special.name,
+                    special.level
+                )
+            }),
+        )
+        .collect(),
+        LoadoutTab::Rides => ride_modes()
+            .iter()
+            .map(|mode| {
+                format!(
+                    "{} {}",
+                    if traversal.active == *mode {
+                        "✓"
+                    } else {
+                        " "
+                    },
+                    mode.label()
+                )
+            })
+            .collect(),
+    }
+}
+
+fn activate_loadout_entry(
+    tab: LoadoutTab,
+    index: usize,
+    weapons: &mut WeaponInventory,
+    specials: &mut SpecialWeaponInventory,
+    armor: &mut ArmorSet,
+    inventory: &Inventory,
+    quick: &mut QuickItemSlot,
+    traversal: &mut TraversalModeState,
+) -> String {
+    match tab {
+        LoadoutTab::Weapons => {
+            weapons.active_slot = index.min(weapons.slots.len() - 1);
+            weapons.active().weapon_type.display_name().to_string()
+        }
+        LoadoutTab::Armor => {
+            armor.active_element = armor_elements()[index.min(armor_elements().len() - 1)];
+            format!("{} Infusion", armor.active_element.display_name())
+        }
+        LoadoutTab::Items => {
+            let entries = consumable_inventory_entries(inventory);
+            let Some((id, name, _)) = entries.get(index) else {
+                return "no quick item".to_string();
+            };
+            quick.item_id = Some(id.clone());
+            name.clone()
+        }
+        LoadoutTab::Specials => {
+            if index == 0 {
+                specials.active_slot = None;
+                "Primary Fire".to_string()
+            } else {
+                specials
+                    .select((index - 1).min(3) as u8)
+                    .map(|special| special.name.to_string())
+                    .unwrap_or_else(|| "Primary Fire".to_string())
+            }
+        }
+        LoadoutTab::Rides => {
+            traversal.active = ride_modes()[index.min(ride_modes().len() - 1)];
+            traversal.active.label().to_string()
+        }
+    }
+}
+
+fn consumable_inventory_entries(inventory: &Inventory) -> Vec<(String, String, u32)> {
+    let definitions = all_items();
+    inventory
+        .slots
+        .iter()
+        .flatten()
+        .filter_map(|slot| {
+            let definition = definitions
+                .iter()
+                .find(|definition| definition.id == slot.item_id)?;
+            (definition.item_type == ItemType::Consumable).then(|| {
+                (
+                    slot.item_id.clone(),
+                    definition.name.to_string(),
+                    slot.quantity,
+                )
+            })
+        })
+        .collect()
+}
+
+fn armor_elements() -> [crate::components::armor::ElementType; 6] {
+    use crate::components::armor::ElementType;
+    [
+        ElementType::None,
+        ElementType::Fire,
+        ElementType::Ice,
+        ElementType::Electric,
+        ElementType::DarkEnergy,
+        ElementType::Rift,
+    ]
+}
+
+fn ride_modes() -> [TraversalMode; 4] {
+    [
+        TraversalMode::Grapple,
+        TraversalMode::HoverJet,
+        TraversalMode::Flight,
+        TraversalMode::Hoverboard,
+    ]
+}
+
+fn loadout_navigation_direction(
+    state: &mut LoadoutPanelState,
+    input: &PlayerInput,
+    delta_secs: f32,
+) -> i8 {
+    const INITIAL_REPEAT_DELAY: f32 = 0.34;
+    const REPEAT_INTERVAL: f32 = 0.11;
+    let just = if input.ui_up {
+        -1
+    } else if input.ui_down {
+        1
+    } else {
+        0
+    };
+    let held = if input.ui_vertical > 0.60 {
+        -1
+    } else if input.ui_vertical < -0.60 {
+        1
+    } else {
+        0
+    };
+    if just != 0 {
+        state.repeat_direction = just;
+        state.repeat_timer = INITIAL_REPEAT_DELAY;
+        return just;
+    }
+    if held != state.repeat_direction {
+        state.repeat_direction = held;
+        state.repeat_timer = INITIAL_REPEAT_DELAY;
+        return held;
+    }
+    if held == 0 {
+        state.repeat_direction = 0;
+        state.repeat_timer = 0.0;
+        return 0;
+    }
+    state.repeat_timer -= delta_secs;
+    if state.repeat_timer <= 0.0 {
+        state.repeat_timer = REPEAT_INTERVAL;
+        held
+    } else {
+        0
+    }
+}
+
 fn cycle_index(current: usize, len: usize, direction: i8) -> usize {
     if len == 0 {
         return 0;
@@ -5434,5 +6134,74 @@ mod menu_navigation_tests {
         state.recipe_index[1] = 1;
         assert_eq!(state.recipe_index[0], 3);
         assert_eq!(state.recipe_index[1], 1);
+    }
+
+    #[test]
+    fn loadout_tabs_wrap_and_keep_per_player_selection() {
+        assert_eq!(LoadoutTab::Weapons.offset(-1), LoadoutTab::Rides);
+        assert_eq!(LoadoutTab::Rides.offset(1), LoadoutTab::Weapons);
+        let mut state = LoadoutPanelState::default();
+        state.selection[0][LoadoutTab::Weapons.index()] = 4;
+        state.selection[1][LoadoutTab::Weapons.index()] = 1;
+        assert_eq!(state.selection[0][LoadoutTab::Weapons.index()], 4);
+        assert_eq!(state.selection[1][LoadoutTab::Weapons.index()], 1);
+    }
+
+    #[test]
+    fn loadout_activation_changes_only_the_requested_category() {
+        let mut weapons = WeaponInventory::default();
+        let mut specials = SpecialWeaponInventory::default();
+        let mut armor = ArmorSet::default();
+        let mut inventory = Inventory::default();
+        inventory.add_item("health_pack", 2, 10);
+        let mut quick = QuickItemSlot::default();
+        let mut traversal = TraversalModeState::default();
+
+        activate_loadout_entry(
+            LoadoutTab::Weapons,
+            4,
+            &mut weapons,
+            &mut specials,
+            &mut armor,
+            &inventory,
+            &mut quick,
+            &mut traversal,
+        );
+        activate_loadout_entry(
+            LoadoutTab::Specials,
+            1,
+            &mut weapons,
+            &mut specials,
+            &mut armor,
+            &inventory,
+            &mut quick,
+            &mut traversal,
+        );
+        activate_loadout_entry(
+            LoadoutTab::Items,
+            0,
+            &mut weapons,
+            &mut specials,
+            &mut armor,
+            &inventory,
+            &mut quick,
+            &mut traversal,
+        );
+        activate_loadout_entry(
+            LoadoutTab::Rides,
+            3,
+            &mut weapons,
+            &mut specials,
+            &mut armor,
+            &inventory,
+            &mut quick,
+            &mut traversal,
+        );
+
+        assert_eq!(weapons.active_slot, 4);
+        assert_eq!(specials.active_slot, Some(0));
+        assert_eq!(quick.item_id.as_deref(), Some("health_pack"));
+        assert_eq!(traversal.active, TraversalMode::Hoverboard);
+        assert_eq!(armor.active_element.display_name(), "None");
     }
 }

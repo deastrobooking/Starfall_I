@@ -177,9 +177,9 @@ together.
   review is `docs/parallel_review_triage_2026-07.md`; do not treat its raw idea
   inventory as verified defects or implicit product commitments. Its July 15
   follow-up reconciliation also supersedes the later six-item deficiency memo:
-  companion/chest/aim/fixed-loop claims were stale, while inventory/equipment
-  persistence, four-pad acceptance, vehicle bodies, and missile obstacle casts
-  remain scoped gaps.
+  companion/chest/aim/fixed-loop claims were stale. Per-player inventory and
+  active loadout persistence plus the Star Loadout button GUI are now delivered;
+  four-pad acceptance, broader vehicle bodies, and missile obstacle casts remain.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
 - The July 2026 audit is `docs/game_review_2026-07.md`. Shared menu navigation

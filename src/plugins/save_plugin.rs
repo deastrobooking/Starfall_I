@@ -8,8 +8,12 @@ use crate::character_blueprint::CharacterBlueprint;
 use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
 use crate::character_studio::spec::CharacterSpec;
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
-use crate::components::player::{Player, PlayerIndex, PlayerStats};
-use crate::components::weapon::WeaponRanks;
+use crate::components::armor::{ArmorSet, ElementType};
+use crate::components::inventory::{Inventory, QuickItemSlot};
+use crate::components::player::{
+    Player, PlayerIndex, PlayerStats, TraversalMode, TraversalModeState,
+};
+use crate::components::weapon::{SpecialWeaponInventory, WeaponInventory, WeaponRanks};
 use crate::damage::Health;
 use crate::events::UiMessageEvent;
 use crate::final_war::{FinalWarRegistry, FinalWarSaveRecord};
@@ -55,8 +59,22 @@ fn next_save_slot(current: u8) -> u8 {
 /// `pause_menu_action_system` stay within Bevy's 16-param system limit.
 #[derive(SystemParam)]
 pub struct SaveParams<'w, 's> {
-    pub player_q:
-        Query<'w, 's, (&'static PlayerIndex, &'static PlayerStats, &'static Health), With<Player>>,
+    pub player_q: Query<
+        'w,
+        's,
+        (
+            &'static PlayerIndex,
+            &'static PlayerStats,
+            &'static Health,
+            &'static WeaponInventory,
+            &'static SpecialWeaponInventory,
+            &'static ArmorSet,
+            &'static Inventory,
+            &'static QuickItemSlot,
+            &'static TraversalModeState,
+        ),
+        With<Player>,
+    >,
     pub wave: Res<'w, WaveInfo>,
     pub progress: Res<'w, ChapterProgress>,
     pub perks: Res<'w, PerkTree>,
@@ -166,10 +184,35 @@ pub struct PlayerSaveData {
     pub max_stamina: f32,
     pub armor: f32,
     pub max_armor: f32,
+    #[serde(default)]
+    pub primary_weapon_slot: usize,
+    #[serde(default)]
+    pub special_weapon_slot: Option<u8>,
+    #[serde(default)]
+    pub armor_element: ElementType,
+    /// `None` identifies saves written before inventory persistence existed, so
+    /// their freshly spawned starter items are not accidentally erased.
+    #[serde(default)]
+    pub inventory: Option<Inventory>,
+    #[serde(default)]
+    pub quick_item_id: Option<String>,
+    #[serde(default)]
+    pub traversal_mode: u8,
 }
 
 impl PlayerSaveData {
-    fn from_runtime(player_index: u8, stats: &PlayerStats, health: &Health) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    fn from_runtime(
+        player_index: u8,
+        stats: &PlayerStats,
+        health: &Health,
+        weapons: &WeaponInventory,
+        specials: &SpecialWeaponInventory,
+        armor: &ArmorSet,
+        inventory: &Inventory,
+        quick: &QuickItemSlot,
+        traversal: &TraversalModeState,
+    ) -> Self {
         Self {
             player_index,
             level: stats.level,
@@ -181,6 +224,12 @@ impl PlayerSaveData {
             max_stamina: stats.max_stamina,
             armor: stats.armor,
             max_armor: stats.max_armor,
+            primary_weapon_slot: weapons.active_slot,
+            special_weapon_slot: specials.active_slot,
+            armor_element: armor.active_element,
+            inventory: Some(inventory.clone()),
+            quick_item_id: quick.item_id.clone(),
+            traversal_mode: traversal_mode_index(traversal.active),
         }
     }
 
@@ -196,6 +245,12 @@ impl PlayerSaveData {
             max_stamina: data.max_stamina,
             armor: data.max_armor,
             max_armor: data.max_armor,
+            primary_weapon_slot: 0,
+            special_weapon_slot: None,
+            armor_element: ElementType::None,
+            inventory: None,
+            quick_item_id: None,
+            traversal_mode: 0,
         }
     }
 
@@ -210,6 +265,50 @@ impl PlayerSaveData {
         stats.armor = self.armor.clamp(0.0, stats.max_armor);
         health.max = stats.max_health;
         health.current = self.health_current.clamp(0.0, health.max);
+    }
+
+    fn apply_loadout(
+        &self,
+        weapons: &mut WeaponInventory,
+        specials: &mut SpecialWeaponInventory,
+        armor: &mut ArmorSet,
+        inventory: &mut Inventory,
+        quick: &mut QuickItemSlot,
+        traversal: &mut TraversalModeState,
+    ) {
+        weapons.active_slot = self.primary_weapon_slot.min(weapons.slots.len() - 1);
+        specials.active_slot = self.special_weapon_slot.filter(|slot| *slot <= 3);
+        armor.active_element = self.armor_element;
+        if let Some(saved_inventory) = &self.inventory {
+            inventory.clone_from(saved_inventory);
+        }
+        quick.item_id.clone_from(&self.quick_item_id);
+        if quick
+            .item_id
+            .as_deref()
+            .is_some_and(|item_id| !inventory.has(item_id, 1))
+        {
+            quick.item_id = None;
+        }
+        traversal.active = traversal_mode_from_index(self.traversal_mode);
+    }
+}
+
+fn traversal_mode_index(mode: TraversalMode) -> u8 {
+    match mode {
+        TraversalMode::Grapple => 0,
+        TraversalMode::HoverJet => 1,
+        TraversalMode::Flight => 2,
+        TraversalMode::Hoverboard => 3,
+    }
+}
+
+fn traversal_mode_from_index(index: u8) -> TraversalMode {
+    match index {
+        1 => TraversalMode::HoverJet,
+        2 => TraversalMode::Flight,
+        3 => TraversalMode::Hoverboard,
+        _ => TraversalMode::Grapple,
     }
 }
 
@@ -525,11 +624,30 @@ fn player_save_for(data: &SaveData, player_index: u8) -> Option<PlayerSaveData> 
 }
 
 fn collect_player_saves(
-    player_q: &Query<(&PlayerIndex, &PlayerStats, &Health), With<Player>>,
+    player_q: &Query<
+        (
+            &PlayerIndex,
+            &PlayerStats,
+            &Health,
+            &WeaponInventory,
+            &SpecialWeaponInventory,
+            &ArmorSet,
+            &Inventory,
+            &QuickItemSlot,
+            &TraversalModeState,
+        ),
+        With<Player>,
+    >,
 ) -> Vec<PlayerSaveData> {
     let mut players: Vec<_> = player_q
         .iter()
-        .map(|(index, stats, health)| PlayerSaveData::from_runtime(index.0, stats, health))
+        .map(
+            |(index, stats, health, weapons, specials, armor, inventory, quick, traversal)| {
+                PlayerSaveData::from_runtime(
+                    index.0, stats, health, weapons, specials, armor, inventory, quick, traversal,
+                )
+            },
+        )
         .collect();
     players.sort_by_key(|player| player.player_index);
     players
@@ -616,7 +734,20 @@ fn hydrate_progress_from_disk(
 }
 
 fn load_save_on_enter(
-    mut player_q: Query<(&PlayerIndex, &mut PlayerStats, &mut Health), With<Player>>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &mut PlayerStats,
+            &mut Health,
+            &mut WeaponInventory,
+            &mut SpecialWeaponInventory,
+            &mut ArmorSet,
+            &mut Inventory,
+            &mut QuickItemSlot,
+            &mut TraversalModeState,
+        ),
+        With<Player>,
+    >,
     mut wave: ResMut<WaveInfo>,
     mut progress: ResMut<ChapterProgress>,
     mut perks: ResMut<PerkTree>,
@@ -639,10 +770,29 @@ fn load_save_on_enter(
         *settlement_economy = data.settlement_economy.clone();
         *upgrades = data.tech_upgrades.clone();
         let mut active_players = 0usize;
-        for (index, mut stats, mut health) in player_q.iter_mut() {
+        for (
+            index,
+            mut stats,
+            mut health,
+            mut weapons,
+            mut specials,
+            mut armor,
+            mut inventory,
+            mut quick,
+            mut traversal,
+        ) in player_q.iter_mut()
+        {
             active_players += 1;
             if let Some(saved) = player_save_for(&data, index.0) {
                 saved.apply_to(&mut stats, &mut health);
+                saved.apply_loadout(
+                    &mut weapons,
+                    &mut specials,
+                    &mut armor,
+                    &mut inventory,
+                    &mut quick,
+                    &mut traversal,
+                );
             }
         }
         wave.wave_number = data.wave_number;
@@ -792,6 +942,12 @@ mod tests {
             max_stamina: 120.0 + f32::from(player_index),
             armor: 10.0 + f32::from(player_index),
             max_armor: 90.0 + f32::from(player_index),
+            primary_weapon_slot: 0,
+            special_weapon_slot: None,
+            armor_element: ElementType::None,
+            inventory: Some(Inventory::default()),
+            quick_item_id: None,
+            traversal_mode: 0,
         }
     }
 
@@ -1146,6 +1302,16 @@ mod tests {
             max_stamina: 80.0,
             armor: -10.0,
             max_armor: 60.0,
+            primary_weapon_slot: 999,
+            special_weapon_slot: Some(9),
+            armor_element: ElementType::Electric,
+            inventory: Some({
+                let mut inventory = Inventory::default();
+                inventory.add_item("health_pack", 2, 10);
+                inventory
+            }),
+            quick_item_id: Some("health_pack".to_string()),
+            traversal_mode: 3,
         };
         let mut stats = PlayerStats::default();
         let mut health = Health::new(100.0);
@@ -1162,5 +1328,26 @@ mod tests {
         assert_eq!(stats.stamina, 80.0);
         assert_eq!(stats.max_armor, 60.0);
         assert_eq!(stats.armor, 0.0);
+
+        let mut weapons = WeaponInventory::default();
+        let mut specials = SpecialWeaponInventory::default();
+        let mut armor = ArmorSet::default();
+        let mut inventory = Inventory::default();
+        let mut quick = QuickItemSlot::default();
+        let mut traversal = TraversalModeState::default();
+        saved.apply_loadout(
+            &mut weapons,
+            &mut specials,
+            &mut armor,
+            &mut inventory,
+            &mut quick,
+            &mut traversal,
+        );
+        assert_eq!(weapons.active_slot, weapons.slots.len() - 1);
+        assert_eq!(specials.active_slot, None);
+        assert_eq!(armor.active_element, ElementType::Electric);
+        assert_eq!(inventory.count("health_pack"), 2);
+        assert_eq!(quick.item_id.as_deref(), Some("health_pack"));
+        assert_eq!(traversal.active, TraversalMode::Hoverboard);
     }
 }

@@ -161,12 +161,14 @@ Goal: remove remaining P1-only assumptions from player-facing play.
 
 **2026-07 ownership slice complete:** armor infusion now routes through
 per-player input, crafting has per-owner controller cursors plus modal gameplay
-capture, active party vehicles reject silent ownership takeover, and boat seats,
-late boarding, and replacement drivers are deterministic. Remaining work is a
-full inventory/equipment screen, deliberate pause/drop-in authority, save-backed
-equipment selection, and four-pad hardware acceptance.
+capture, the button-based Star Loadout owns Weapons/Armor/Items/Specials/Rides,
+inventory and active selections round-trip per player, active party vehicles
+reject silent ownership takeover, and boat seats/driver replacement are
+deterministic. Remaining work is deliberate pause/drop-in authority and
+four-pad hardware acceptance.
 
-- Build per-player inventory/equipment UI before expanding armor complexity.
+- Hardware-test four players opening and changing their own loadouts without
+  movement/fire leakage or cross-player selection.
 - Decide pause/save authority UX for local multiplayer and document it.
 - Move developer-only equipment cycling behind a debug overlay or chord.
 - Add tests for reward ownership, feedback ownership, and save preservation

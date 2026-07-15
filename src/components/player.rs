@@ -366,7 +366,7 @@ impl TraversalMode {
             TraversalMode::Grapple => "Grapple",
             TraversalMode::HoverJet => "Hover Jet",
             TraversalMode::Flight => "Flight",
-            TraversalMode::Hoverboard => "Hoverboard",
+            TraversalMode::Hoverboard => "Rocket Hoverboard",
         }
     }
 }
@@ -376,6 +376,9 @@ pub struct TraversalModeState {
     pub active: TraversalMode,
     pub hoverboard_speed_mult: f32,
     pub hoverboard_air_control_mult: f32,
+    pub hoverboard_rocket_forward_mult: f32,
+    pub hoverboard_rocket_lift_mult: f32,
+    pub hoverboard_rocket_fuel_mult: f32,
 }
 
 impl Default for TraversalModeState {
@@ -384,6 +387,9 @@ impl Default for TraversalModeState {
             active: TraversalMode::Grapple,
             hoverboard_speed_mult: 1.65,
             hoverboard_air_control_mult: 1.45,
+            hoverboard_rocket_forward_mult: 1.28,
+            hoverboard_rocket_lift_mult: 0.82,
+            hoverboard_rocket_fuel_mult: 0.68,
         }
     }
 }
@@ -816,6 +822,7 @@ pub struct PlayerInput {
     pub fire_just: bool,
     pub dodge: bool,
     pub reload: bool,
+    pub use_quick_item: bool,
     pub parry: bool,
     pub interact: bool,
     pub grapple: bool,
@@ -823,6 +830,7 @@ pub struct PlayerInput {
     pub melee_light: bool,
     pub melee_heavy: bool,
     pub crafting: bool,
+    pub loadout_menu: bool,
     pub pause: bool,
     pub weapon_next: bool,
     pub weapon_prev: bool,
@@ -836,6 +844,8 @@ pub struct PlayerInput {
     pub ui_vertical: f32,
     pub ui_up: bool,
     pub ui_down: bool,
+    pub ui_left: bool,
+    pub ui_right: bool,
     pub ui_confirm: bool,
     pub weapon_slot: Option<usize>,
     pub traversal_mode_switch: Option<TraversalMode>,
@@ -891,7 +901,7 @@ mod tests {
     #[test]
     fn traversal_mode_labels_are_stable() {
         assert_eq!(TraversalMode::Grapple.label(), "Grapple");
-        assert_eq!(TraversalMode::Hoverboard.label(), "Hoverboard");
+        assert_eq!(TraversalMode::Hoverboard.label(), "Rocket Hoverboard");
     }
 
     #[test]
@@ -900,6 +910,9 @@ mod tests {
 
         assert!(traversal.hoverboard_speed_mult >= 1.6);
         assert!(traversal.hoverboard_air_control_mult >= 1.4);
+        assert!(traversal.hoverboard_rocket_forward_mult > 1.0);
+        assert!(traversal.hoverboard_rocket_lift_mult > 0.0);
+        assert!(traversal.hoverboard_rocket_fuel_mult < 1.0);
     }
 
     #[test]

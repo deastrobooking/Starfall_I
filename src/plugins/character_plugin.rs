@@ -232,8 +232,7 @@ fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
         return CartoonPose::WallSlide;
     }
     if input.traversal_mode == TraversalMode::Hoverboard
-        && input.grounded
-        && input.horizontal_speed > 0.08
+        && (input.horizontal_speed > 0.08 || input.jetpack_active || !input.grounded)
     {
         return CartoonPose::Hoverboard;
     }

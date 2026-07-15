@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 // ── Item Types ────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -284,17 +285,25 @@ pub fn all_items() -> Vec<ItemDefinition> {
 }
 
 // ── Inventory Slot ────────────────────────────────────────────────────────────
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InventorySlot {
     pub item_id: String,
     pub quantity: u32,
 }
 
 // ── Inventory Component ───────────────────────────────────────────────────────
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Inventory {
     pub slots: Vec<Option<InventorySlot>>,
     pub max_slots: usize,
+}
+
+/// Per-player item equipped for future one-button use. The loadout menu owns
+/// selection; storing the stable item ID keeps the choice independent of slot
+/// compaction as stacks are consumed or rearranged.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct QuickItemSlot {
+    pub item_id: Option<String>,
 }
 
 impl Default for Inventory {

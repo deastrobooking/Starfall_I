@@ -53,6 +53,13 @@ eight siblings.
 - Armor infusion cycling is per-player: every controller uses LT + D-pad
   Left/Right; P1 can use Shift + `[` / `]`. Plain brackets remain primary weapon
   cycling.
+- The in-game Star Loadout is a per-player modal button GUI opened with `I` or
+  LB+Select. Weapons, Armor, Items, Specials, and Rides use owner-scoped D-pad/
+  stick focus and A/Confirm; only the owner's gameplay input is captured.
+- Rocket Hoverboard is the production Hoverboard traversal profile: fast
+  ground momentum and loop adhesion plus airborne steering, jump-held rocket
+  lift, LB boost flight, fuel drain, camera pullback, a persistent rider pose,
+  and visible metallic/emissive twin-thruster board geometry.
 - Crafting panels retain an independent recipe cursor for each player. The owner
   uses D-pad/left stick to select, South/A to craft, and Select to close. A
   per-player modal capture preserves those UI actions while suppressing movement,
@@ -1062,7 +1069,11 @@ Save file: `starfall_i_save.json` (written next to the binary).
 
 Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, robot pets, tech upgrade ranks, rejuvenation reserve, player-slot character blueprints, and chassis part loadout (`part_loadout_body/arms/legs/shoulders` as `CharacterPartStyle`).
 
-Saved per-player fields live in `players[]` records keyed by `player_index`: level, experience, credits, health, stamina, and armor values. Older top-level stat fields are still accepted for legacy save migration, but new saves use the per-player records as the authoritative source.
+Saved per-player fields live in `players[]` records keyed by `player_index`:
+level, experience, credits, health, stamina, armor values, inventory stacks,
+primary/special selection, armor infusion, quick item, and traversal ride. Older
+records default the new loadout fields and top-level stats remain accepted for
+legacy migration.
 
 Save ownership tests cover per-player record round-trips, legacy top-level stat hydration, matching by `player_index` instead of record order, and clamping loaded runtime values into valid health/stamina/armor ranges.
 

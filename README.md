@@ -32,6 +32,7 @@ Implemented:
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, variable jump release, apex gravity, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, momentum roll, heavy-input stomp bounce, downhill acceleration, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
 - Fixed-tick character motor (EC1, default ON): traversal/grapple/motor simulation runs at 64 Hz in `FixedUpdate` with a per-player latched input buffer (button edges fire exactly once per tick at any frame rate) and overstep-interpolated camera follow. Legacy per-frame motor stays one toggle away (`F10` or `STARFALL_LEGACY_MOTOR=1`).
+- Per-player Star Loadout: press `I` or LB+Select during play for a real button-based Weapons/Armor/Items/Specials/Rides menu. Controller navigation is owner-scoped and captures only that player's gameplay input. Primary/special selection, armor infusion, quick item, complete inventory stacks, and traversal ride persist in `players[]`. The Rocket Hoverboard is a selectable ride with a visible metallic deck, emissive rails, twin thrusters, fast ground carving, airborne steering, jump-held lift, and LB boost flight.
 - Hit-reaction layer (EC2 first slice): bounded hitstop freeze-frames on impacts and kills, enemy flinch with AI/attack suppression, impact hit-flash, death dissolve instead of blink-out, split-screen-aware floating damage numbers, proximity-scaled outgoing camera shake, plus the earlier faction resistances, enemy defense scaling, and drained knockback shoves.
 - Procedural retro SFX bus: every combat/reward beat (fire, slash, hit, parry, kill, hurt, loot, chest, level-up, reload) is synthesized at startup from chip-style recipes — square/saw sweeps, noise bursts, bit-crush — with zero external audio assets, per-sound polyphony cooldowns, deterministic pitch jitter, and the settings SFX volume respected.
 - Character Studio GLB export: one button serializes the generated character — every part, color, and transform — into a standards-compliant `.glb` (hand-rolled glTF 2.0 writer, zero new dependencies) saved into the versioned preset library; opens in Quick Look, Blender, and Bevy itself. The first brick of the modding pipeline.
@@ -161,6 +162,8 @@ Keyboard and mouse:
 | `9` | Moon Bubble |
 | `0` | Sprite Turret |
 | `C` | Crafting |
+| `I` | Open/close Star Loadout |
+| `H` | Use equipped quick item |
 | `J` | Enter vehicle / board nearby boat; dock before disembarking |
 | `M` | Open map |
 | `Esc` | Back / pause |
@@ -194,6 +197,8 @@ Controller:
 | LB + North | Toggle Star Sabre; RT performs its animated slash |
 | LT + North | Alternate Star Sabre toggle |
 | LB | Sprint |
+| LB + Select | Open/close the owning player's Star Loadout |
+| LB + West | Use equipped quick item |
 | RB | Next beam |
 | Select + RB | Grapple hook wind-up foundation |
 | D-Pad Left | Previous beam |
@@ -222,6 +227,10 @@ Controller:
 
 Special tools:
 Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
+
+Rocket Hoverboard controls: select it from Star Loadout → Rides, move to carve,
+jump to launch, hold jump for rocket lift, and hold LB while airborne for a
+faster forward boost. Fuel uses the existing per-player jet gauge.
 
 ## Chapters
 
