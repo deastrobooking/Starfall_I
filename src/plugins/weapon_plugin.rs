@@ -290,10 +290,17 @@ fn apply_weapon_ranks_system(
 
 // ── Weapon Select ─────────────────────────────────────────────────────────────
 fn weapon_select_system(
-    mut player_q: Query<(&PlayerInput, &mut WeaponInventory), With<Player>>,
+    mut player_q: Query<
+        (
+            &PlayerInput,
+            &mut WeaponInventory,
+            &mut SpecialWeaponInventory,
+        ),
+        With<Player>,
+    >,
     mut switched_ev: MessageWriter<WeaponSwitchedEvent>,
 ) {
-    for (pi, mut inv) in player_q.iter_mut() {
+    for (pi, mut inv, mut specials) in player_q.iter_mut() {
         let prev = inv.active_slot;
         let count = inv.slots.len();
 
@@ -309,6 +316,7 @@ fn weapon_select_system(
 
         if let Some(s) = new_slot {
             if s < count {
+                specials.active_slot = None;
                 inv.active_slot = s;
                 if s != prev {
                     switched_ev.write(WeaponSwitchedEvent {
@@ -333,6 +341,7 @@ fn weapon_fire_system(
             &GlobalTransform,
             &PlayerIndex,
             &mut WeaponInventory,
+            &SpecialWeaponInventory,
             &mut PlayerStateMachine,
             &PlayerInput,
             &PlayerCameraRef,
@@ -356,6 +365,7 @@ fn weapon_fire_system(
         player_transform,
         player_index,
         mut inv,
+        special_inv,
         mut sm,
         pi,
         cam_ref,
@@ -364,6 +374,11 @@ fn weapon_fire_system(
         magic_caster,
     ) in player_q.iter_mut()
     {
+        // A selected special weapon owns RT until normal weapon cycling or a
+        // direct primary slot clears the selection.
+        if special_inv.active_slot.is_some() {
+            continue;
+        }
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
         };
@@ -883,6 +898,7 @@ fn special_weapon_system(
             &PlayerInput,
             &PlayerCameraRef,
             &ArmorSet,
+            &BeamSabre,
         ),
         With<Player>,
     >,
@@ -892,7 +908,7 @@ fn special_weapon_system(
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult = perks.damage_mult();
-    for (player_entity, player_transform, player_index, mut inv, pi, cam_ref, armor) in
+    for (player_entity, player_transform, player_index, mut inv, pi, cam_ref, armor, sabre) in
         player_q.iter_mut()
     {
         inv.slot7.cooldown_timer = (inv.slot7.cooldown_timer - dt).max(0.0);
@@ -900,9 +916,24 @@ fn special_weapon_system(
         inv.slot9.cooldown_timer = (inv.slot9.cooldown_timer - dt).max(0.0);
         inv.slot0.cooldown_timer = (inv.slot0.cooldown_timer - dt).max(0.0);
 
-        let Some(slot) = pi.special_slot else {
+        if let Some(slot) = pi.special_slot {
+            if let Some(selected) = inv.select(slot) {
+                let name = selected.name;
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "Selected {name} — RT to fire; RB/D-pad Left returns to primaries"
+                    ),
+                    duration: 2.2,
+                });
+            }
+            continue;
+        }
+        let Some(slot) = inv.active_slot else {
             continue;
         };
+        if !pi.fire_just || sabre.active {
+            continue;
+        }
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
         };
@@ -1812,6 +1843,7 @@ fn beam_sabre_update_system(
     >,
     mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
     let perk_damage_mult =
@@ -1841,6 +1873,19 @@ fn beam_sabre_update_system(
         if pi.sabre_toggle {
             if sabre.unlocked {
                 sabre.active = !sabre.active;
+                msg_ev.write(UiMessageEvent {
+                    text: if sabre.active {
+                        "Star Sabre active — RT to slash".into()
+                    } else {
+                        "Star Sabre holstered".into()
+                    },
+                    duration: 1.8,
+                });
+            } else {
+                msg_ev.write(UiMessageEvent {
+                    text: "Star Sabre locked — recover the Solar Sabre Glyph".into(),
+                    duration: 2.4,
+                });
             }
             continue;
         }
@@ -2124,5 +2169,34 @@ mod tracking_missile_tests {
         let mut special = SpecialWeapon::new(SpecialSlot::Slot7);
         special.ammo = 0;
         assert!(special.can_fire());
+    }
+
+    #[test]
+    fn primary_weapon_cycle_exits_persistent_tracking_missile_selection() {
+        let mut app = App::new();
+        app.add_message::<WeaponSwitchedEvent>();
+        app.add_systems(Update, weapon_select_system);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerInput {
+                    weapon_next: true,
+                    ..Default::default()
+                },
+                WeaponInventory::default(),
+                SpecialWeaponInventory {
+                    active_slot: Some(0),
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let specials = app.world().get::<SpecialWeaponInventory>(entity).unwrap();
+        let primaries = app.world().get::<WeaponInventory>(entity).unwrap();
+        assert_eq!(specials.active_slot, None);
+        assert_eq!(primaries.active_slot, 1);
     }
 }

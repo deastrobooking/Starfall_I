@@ -395,6 +395,9 @@ pub struct SpecialWeaponInventory {
     pub slot8: SpecialWeapon,
     pub slot9: SpecialWeapon,
     pub slot0: SpecialWeapon,
+    /// Controller/keyboard-selected special. `None` returns RT to the primary
+    /// weapon; `Some(0)` is the tracking Homing Star missile.
+    pub active_slot: Option<u8>,
 }
 
 impl Default for SpecialWeaponInventory {
@@ -404,6 +407,24 @@ impl Default for SpecialWeaponInventory {
             slot8: SpecialWeapon::new(SpecialSlot::Slot8),
             slot9: SpecialWeapon::new(SpecialSlot::Slot9),
             slot0: SpecialWeapon::new(SpecialSlot::Slot0),
+            active_slot: None,
+        }
+    }
+}
+
+impl SpecialWeaponInventory {
+    pub fn select(&mut self, slot: u8) -> Option<&SpecialWeapon> {
+        self.active_slot = (slot <= 3).then_some(slot);
+        self.selected()
+    }
+
+    pub fn selected(&self) -> Option<&SpecialWeapon> {
+        match self.active_slot? {
+            0 => Some(&self.slot7),
+            1 => Some(&self.slot8),
+            2 => Some(&self.slot9),
+            3 => Some(&self.slot0),
+            _ => None,
         }
     }
 }

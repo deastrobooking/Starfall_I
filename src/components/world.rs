@@ -122,6 +122,15 @@ pub struct BoardBoostPad {
     pub force_hoverboard: bool,
 }
 
+/// Collidable road containment. Outer rails prevent falls; center dividers
+/// keep opposite boost-arrow directions physically separated.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoadSafetyBarrier {
+    OuterRail,
+    DirectionDivider,
+    MergeRail,
+}
+
 /// Authored traversal guide for a complete vertical speed-road loop. Geometry
 /// remains collidable scenery; this guide supplies the non-world-up adhesion
 /// frame required by the kinematic hoverboard controller.

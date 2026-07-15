@@ -165,9 +165,10 @@ level, uses an eased ramp capped around an 8% target grade, and merges flush
 with the engineered profile. Approach corridors participate in prop avoidance.
 `speed_road_sky_access_chunks` also divides every sustained aerial run into
 reachable intervals. `spawn_speed_road_sky_access` searches both sides for
-nearby low ground, builds a 120–720 unit supported branch ramp, removes the
-guardrails from the matching 48-unit main-road chunk, and leaves the final ramp
-segments open so the player can physically merge and turn onto the sky road.
+nearby low ground and builds a 120–720 unit supported branch ramp. The matching
+main-road chunk now restores a full rail opposite the ramp plus split rails on
+the approach side, leaving only the actual ramp mouth open instead of an entire
+unprotected aerial chunk. Final ramp segments remain open for the merge.
 These side approaches also participate in tree/building corridor avoidance.
 Approach selection rejects ground points above the merge and heavily penalizes
 terrain that would pierce a straight uphill ramp. Generated ramp stations are
@@ -184,9 +185,11 @@ approaches and long aerial viaducts instead of leaving them visibly floating.
 
 Road system v3 (vehicle-grade): decks widened for traffic
 (`SPEED_ROAD_WIDTH = 52`; rings City 46 / Harbor 42 / Village 38 / Outpost 36).
-**Collidable guardrails** on both edges of every deck (2.6 tall,
+**Collidable guardrails** on both edges of every deck (3.4 tall and 0.9 thick,
 `spawn_deck_guardrails`) — players and vehicles can no longer slide off the
-network. **Banked corner fillets** (`spawn_route_corner_fillets`): every
+network. Each two-way boost overlay also has a 1.75-unit collidable center
+divider, preventing momentum from carrying a player onto the arrows facing the
+opposite direction. **Banked corner fillets** (`spawn_route_corner_fillets`): every
 interior route waypoint is rounded with a quadratic-arc of short decks rolled
 0.15 rad into the turn, so corners drive like curves instead of sharp joints.
 **Vertical loops**: qualifying straights (>1800) spawn a drivable 360° loop
@@ -687,11 +690,11 @@ sabre slashes (3.0). Player-receiving knockback is not yet drained (EC2).
 
 Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Projectile collision sweeps the full per-frame travel segment, preventing fast Rainbow Ray bolts from tunneling through targets. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Characters designed with `DariaCannon` arms can hold and release a charge shot. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
 
-**Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T`, controller LT+North, Guide, or L3+R3; RT/LMB performs the animated slash while active. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise the Star Sabre's effective wave tier for combo behavior: finishers gain single waves first, mid-chain slashes gain waves next, dual waves arrive at high tier, and level-5/tier-5 finishers throw a triple spread.
+**Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T` or controller LB+North; LT+North, Guide, and L3+R3 remain fallbacks. RT/LMB performs the animated slash while active. Toggle attempts now display active, holstered, or locked feedback so a controller press never fails silently. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise the Star Sabre's effective wave tier for combo behavior: finishers gain single waves first, mid-chain slashes gain waves next, dual waves arrive at high tier, and level-5/tier-5 finishers throw a triple spread.
 
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 
-Special tools fire from keyboard `7`, `8`, `9`, `0`, or from controller Select + D-pad Up/Down/Left/Right.
+Special tools are selected with keyboard `7`, `8`, `9`, `0`, or controller Select + D-pad Up/Down/Left/Right, then fired with RT/LMB. Homing Star—the tracking missile—is Select+D-pad Up. Its name replaces the primary weapon name in the HUD while selected. RB, D-pad Left, or primary number keys return RT to primary weapons.
 
 ---
 

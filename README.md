@@ -29,7 +29,7 @@ Implemented:
 - Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
 - Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
 - Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, variable jump release, apex gravity, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, momentum roll, heavy-input stomp bounce, downhill acceleration, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
-- High-speed road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with real guardrail merge openings and its own support columns. Ordinary road chunks keep a clean collider surface; raised stunt ramps exist only at authored trick/loop sites. Settlement rings/spurs, boost lanes, banked curves, NPC traffic, checkpoints, recovery, and guided hoverboard adhesion are included.
+- High-speed road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with protected guardrail merge mouths and its own support columns. Taller outer barriers contain players and vehicles, and collidable center medians separate opposite boost-arrow directions. Ordinary road chunks keep a clean collider surface; raised stunt ramps exist only at authored trick/loop sites. Settlement rings/spurs, boost lanes, banked curves, NPC traffic, checkpoints, recovery, and guided hoverboard adhesion are included.
 - Explorable buildings now replace selected solid blocks throughout downtown, industrial, residential, and settlement districts. These use textured exterior/interior materials, open doorways, hollow collision shells, multiple wood floors, smooth ramp-backed stair flights with visible treads, partitioned rooms, sparse furniture, interior lights, and windows. Background buildings remain lightweight for four-player performance.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
 - RPG combat with unlimited-ammo primary beams and special tools, swept projectile collision, stronger body-centered aim assistance, arm-cannon charge shots, magic-user tracking beams, Star Sabre controller support and animated slash poses, melee combos, armor elements, XP, perks, crafting, rewards, and save/load. Homing Star acquires/reacquires hostile targets, steers with a capped turn rate, leaves an energy trail, and reports SEEK/LOCK per player in the HUD.
@@ -177,7 +177,8 @@ Controller:
 | North | Parry |
 | RT | Fire star beam |
 | LT | Aim |
-| LT + North | Toggle Star Sabre; RT performs its animated slash |
+| LB + North | Toggle Star Sabre; RT performs its animated slash |
+| LT + North | Alternate Star Sabre toggle |
 | LB | Sprint |
 | RB | Next beam |
 | Select + RB | Grapple hook wind-up foundation |
@@ -186,12 +187,12 @@ Controller:
 | D-Pad Up | Enter vehicle |
 | D-Pad Right | Open map |
 | Select | Crafting |
-| Select + D-Pad Up | Homing Star |
+| Select + D-Pad Up | Select Homing Star tracking missile; RT fires |
 | Select + D-Pad Down | Tri-Star Burst |
 | Select + D-Pad Left | Moon Bubble |
 | Select + D-Pad Right | Sprite Turret |
 | Start | Pause |
-| Guide / L3 + R3 | Alternate Star Sabre toggle |
+| Guide / L3 + R3 | Additional Star Sabre toggle fallback |
 | R3 / L3 | Light / heavy combo; airborne heavy input stomps |
 
 ## Star Beam Loadout

@@ -3871,7 +3871,7 @@ fn hud_update_system(
         Query<&mut Text, With<EnemyCountText>>,
     )>,
 ) {
-    for (index, health, stats, jetpack, climb, weapons, _special, armor, sabre) in player_q.iter() {
+    for (index, health, stats, jetpack, climb, weapons, special, armor, sabre) in player_q.iter() {
         for (mut node, bar) in bar_q
             .iter_mut()
             .filter(|(_, bar)| bar.player_index == index.0)
@@ -3920,7 +3920,11 @@ fn hud_update_system(
                     format!("Element: {}", armor.active_element.display_name())
                 }
                 PlayerHudTextKind::WeaponName => {
-                    format!("{}{}", weapon.weapon_type.display_name(), sabre_str)
+                    let selected_name = special
+                        .selected()
+                        .map(|selected| selected.name)
+                        .unwrap_or_else(|| weapon.weapon_type.display_name());
+                    format!("{}{}", selected_name, sabre_str)
                 }
                 PlayerHudTextKind::Ammo => "∞ AMMO".to_string(),
                 PlayerHudTextKind::SpecialAmmo => format!("SPECIALS ∞{}", lock_label),

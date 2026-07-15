@@ -8078,7 +8078,8 @@ fn spawn_deck_guardrails(
     width: f32,
     length: f32,
 ) {
-    let rail_h = 2.6;
+    let rail_h = 3.4;
+    let rail_w = 0.90;
     for side in [-1.0_f32, 1.0] {
         commands.spawn((
             PbrBundle {
@@ -8088,12 +8089,13 @@ fn spawn_deck_guardrails(
                     center + rot * Vec3::new(side * width * 0.505, rail_h * 0.5 + 0.35, 0.0),
                 )
                 .with_rotation(rot)
-                .with_scale(Vec3::new(0.65, rail_h, length * 0.99)),
+                .with_scale(Vec3::new(rail_w, rail_h, length * 0.99)),
                 ..default()
             },
             WorldGeometry,
+            RoadSafetyBarrier::OuterRail,
             crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(0.325, rail_h * 0.5, length * 0.495),
+            crate::physics::prelude::Collider::cuboid(rail_w * 0.5, rail_h * 0.5, length * 0.495),
             world_space_collider_scale(),
         ));
     }
@@ -8404,6 +8406,9 @@ fn spawn_speed_road_sky_access(
         if blocked {
             continue;
         }
+        spawn_merge_chunk_guardrails(
+            commands, pal, deck_mesh, points[0], points[1], outer_xz, road_width,
+        );
         if let Some(last) = ramp.last_mut() {
             *last = merge;
         }
@@ -8441,6 +8446,73 @@ fn spawn_speed_road_sky_access(
                 ramp_width,
                 terrain_seed,
             );
+        }
+    }
+}
+
+/// Restore containment on a sky-road merge chunk while leaving only the ramp
+/// mouth open. Previously the entire chunk omitted both rails, creating a long
+/// unprotected aerial section.
+fn spawn_merge_chunk_guardrails(
+    commands: &mut Commands,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    start: Vec3,
+    end: Vec3,
+    approach: Vec2,
+    width: f32,
+) {
+    let delta = end - start;
+    let length = delta.length();
+    let horizontal = Vec2::new(delta.x, delta.z);
+    if length < 1.0 || horizontal.length_squared() < 0.01 {
+        return;
+    }
+    let horizontal_len = horizontal.length();
+    let yaw = delta.x.atan2(delta.z);
+    let pitch = (delta.y / horizontal_len).atan().clamp(-0.80, 0.80);
+    let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+    let center = start + delta * 0.5;
+    let right = Vec2::new(horizontal.y, -horizontal.x).normalize_or_zero();
+    let approach_side = (approach - Vec2::new(center.x, center.z))
+        .dot(right)
+        .signum();
+    let rail_h = 3.4;
+    let rail_w = 0.90;
+    let gap = (width * 0.58).min(length * 0.70).max(length * 0.15);
+
+    for side in [-1.0_f32, 1.0] {
+        let on_approach_side = side * approach_side > 0.0;
+        let spans: Vec<(f32, f32)> = if on_approach_side {
+            let span_len = (length - gap) * 0.5;
+            let offset = gap * 0.5 + span_len * 0.5;
+            vec![(-offset, span_len), (offset, span_len)]
+        } else {
+            vec![(0.0, length * 0.99)]
+        };
+        for (local_z, span_len) in spans {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(deck_mesh.clone()),
+                    material: MeshMaterial3d(pal.brushed_metal.clone()),
+                    transform: Transform::from_translation(
+                        center
+                            + rot * Vec3::new(side * width * 0.505, rail_h * 0.5 + 0.35, local_z),
+                    )
+                    .with_rotation(rot)
+                    .with_scale(Vec3::new(rail_w, rail_h, span_len)),
+                    ..default()
+                },
+                WorldGeometry,
+                RoadSafetyBarrier::MergeRail,
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cuboid(
+                    rail_w * 0.5,
+                    rail_h * 0.5,
+                    span_len * 0.5,
+                ),
+                world_space_collider_scale(),
+            ));
         }
     }
 }
@@ -12687,6 +12759,33 @@ fn spawn_boost_road_span(
     let side_offset = width * 0.24;
     let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let light_mesh = meshes.add(Sphere::new(1.0));
+
+    // A physical median prevents a player boosted in one direction from
+    // drifting across the centerline and striking the opposite arrows. It is
+    // tall enough to contain hoverboards but low enough to jump deliberately.
+    let divider_height = 1.75;
+    let divider_width = 0.82;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(unit_cube.clone()),
+            material: MeshMaterial3d(pal.brushed_metal.clone()),
+            transform: Transform::from_translation(
+                center + rot * Vec3::new(0.0, divider_height * 0.5 + 0.12, 0.0),
+            )
+            .with_rotation(rot)
+            .with_scale(Vec3::new(divider_width, divider_height, length * 0.98)),
+            ..default()
+        },
+        WorldGeometry,
+        RoadSafetyBarrier::DirectionDivider,
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
+            divider_width * 0.5,
+            divider_height * 0.5,
+            length * 0.49,
+        ),
+        world_space_collider_scale(),
+    ));
 
     for (lane_index, side) in [(-1.0_f32), 1.0].iter().copied().enumerate() {
         let lane_center = center + right * side * side_offset;

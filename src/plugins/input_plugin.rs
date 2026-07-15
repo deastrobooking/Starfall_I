@@ -20,7 +20,8 @@
 ///  B / Circle / A   — dodge                    (East)
 ///  X / Square / Y   — reload                   (West)
 ///  Y / Triangle / X — parry                    (North)
-///  LT + Y / Triangle — toggle Star Sabre; RT swings it
+///  LB + Y / Triangle — toggle Star Sabre; RT swings it
+///  (LT + Y and Guide/Home remain alternate mappings)
 ///  L3 (left click)  — melee heavy              (LeftThumb)
 ///  R3 (right click) — melee light              (RightThumb)
 ///  Select/Back/Share/View — crafting (alone) OR special-slot modifier (+ DPad)
@@ -33,7 +34,7 @@
 ///  DPad Right        — open map
 ///
 ///  Select + DPad (held Select, then tap DPad):
-///    Up → special slot 0 | Down → special slot 1
+///    Up → select tracking missile | Down → special slot 1
 ///    Left → special slot 2 | Right → special slot 3
 use bevy::input::gamepad::{
     Gamepad, GamepadAxis, GamepadButton, GamepadButtonStateChangedEvent, GamepadConnection,
@@ -290,6 +291,8 @@ fn update_player_inputs(
         let right_trigger_just = btn_just(GamepadButton::RightTrigger2)
             || native_just(NativeButton::RightTrigger)
             || (right_trigger_axis && !trigger_history[history_slot].right);
+        let left_shoulder_held =
+            btn_held(GamepadButton::LeftTrigger) || native_held(NativeButton::LeftShoulder);
 
         // ── Movement ──────────────────────────────────────────────────────────
         let raw_move = Vec2::new(
@@ -353,8 +356,7 @@ fn update_player_inputs(
         // ── Sprint ────────────────────────────────────────────────────────────
         pi.sprint = (is_p1
             && (keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight)))
-            || btn_held(GamepadButton::LeftTrigger)
-            || native_held(NativeButton::LeftShoulder);
+            || left_shoulder_held;
 
         // ── Jump / Jetpack ────────────────────────────────────────────────────
         pi.jump = (is_p1 && keyboard.just_pressed(KeyCode::Space))
@@ -377,6 +379,7 @@ fn update_player_inputs(
         // ── Parry ─────────────────────────────────────────────────────────────
         pi.parry = (is_p1 && keyboard.just_pressed(KeyCode::KeyF))
             || (!left_trigger_held
+                && !left_shoulder_held
                 && (btn_just(GamepadButton::North) || native_just(NativeButton::North)));
 
         // ── Melee ─────────────────────────────────────────────────────────────
@@ -513,13 +516,17 @@ fn update_player_inputs(
             || native_just(NativeButton::Start);
 
         // ── Star Sabre toggle ─────────────────────────────────────────────────
-        // Primary:  Guide/Home button (Xbox/PS/Switch).
+        // Primary: LB + Y / Triangle is entirely digital and works on pads
+        // whose analog-trigger or Guide mapping is unavailable.
+        // Alternate: LT + Y, Guide/Home, or L3+R3.
         //   Note: on Windows the Guide button is handled by the OS in some
         //   configurations. The L3+R3 combo is a reliable cross-platform fallback.
         // Fallback: press Left Stick + Right Stick simultaneously.
         let l3r3 = btn_just(GamepadButton::LeftThumb) && btn_held(GamepadButton::RightThumb)
             || btn_just(GamepadButton::RightThumb) && btn_held(GamepadButton::LeftThumb);
         pi.sabre_toggle = (is_p1 && keyboard.just_pressed(KeyCode::KeyT))
+            || (left_shoulder_held
+                && (btn_just(GamepadButton::North) || native_just(NativeButton::North)))
             || (left_trigger_held
                 && (btn_just(GamepadButton::North) || native_just(NativeButton::North)))
             || btn_just(GamepadButton::Mode)
