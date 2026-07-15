@@ -28,6 +28,7 @@ noted):
 | Damage numbers | `EnemyDamagedEvent` | per-active-camera `world_to_viewport` + viewport offset (split-screen correct), rise/fade, capped at 32 |
 | Camera shake | damage + kills | proximity-scaled `CameraShake::add_player_trauma` per player |
 | Rumble | same | `trigger_player_rumble` (currently a stub body — wire when Bevy exposes rumble) |
+| SFX | 10 events (fire/slash/hit/parry/kill/hurt/loot/chest/level-up/reload) | `src/sfx.rs` bus over the procedural retro palette in `src/audio_synth.rs` — zero external assets, 50 ms per-kind cooldown, deterministic ±5% pitch jitter, obeys `GameSettings.sfx_volume` |
 
 ## Rules of thumb
 
@@ -46,6 +47,14 @@ noted):
    `CombatFeedbackPlugin` under `in_state(AppState::Playing)`.
 3. Presentation systems stay UNgated by hitstop so they animate during the
    pause; cap live entities; despawn on `OnExit(Playing)` if they can persist.
+
+## Sound
+
+The palette is synthesized at startup (`audio_synth.rs` presets → WAV bytes →
+`Assets<AudioSource>`). To retune a sound, edit its `preset_*` recipe
+(waveform, sweep, decay, crush) — renders are deterministic and unit-tested.
+To replace one with a recorded file later, swap the handle in
+`bake_sfx_library`; the event wiring doesn't change.
 
 ## Tuning knobs
 

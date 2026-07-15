@@ -189,6 +189,10 @@ dissolve, split-screen damage numbers, proximity outgoing shake, rumble hook).
 2 hitstop unit tests; suite 244. Remaining EC2: collision layers, `MoveDef`
 frame-data assets, per-move cancel windows/i-frames, player-received
 knockback.
+**Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
+synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
+gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no
+longer silent; file-based sounds can replace presets handle-for-handle.
 
 ### EC3 — Motor to "feels amazing"
 **Goal:** Lock in Spider-Man + Mega Man feel on the deterministic base.

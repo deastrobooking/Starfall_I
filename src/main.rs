@@ -21,9 +21,11 @@ mod discussion;
 mod engine_tools;
 mod events;
 mod final_war;
+mod audio_synth;
 mod combat_feedback;
 mod game_loop;
 mod hitstop;
+mod sfx;
 mod hacking;
 mod hero_roster;
 mod input_buffer;
@@ -146,6 +148,8 @@ fn main() {
         // death dissolve, damage numbers, outgoing shake/rumble).
         .add_plugins(hitstop::HitstopPlugin)
         .add_plugins(combat_feedback::CombatFeedbackPlugin)
+        // S3: procedural retro SFX bus (zero external assets).
+        .add_plugins(sfx::SfxPlugin)
         // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
         .add_plugins(input_buffer::InputBufferPlugin)
         .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
