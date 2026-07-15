@@ -52,6 +52,10 @@ Handle these before widening content too much:
   store purchasing, and runtime 3-D mech/ship controllers.
 - Save data still carries legacy top-level fields. Keep compatibility, but
   prefer clean shared campaign sections plus per-player records for new fields.
+- Mountain caves now have monumental exterior ancient gates plus encounter-owned
+  Star Chamber seals and reward reveals. Next cave pass should add authored
+  reward effects/pickups, reset policy, multi-wave sequencing, and extend the
+  reusable room/encounter contracts into dragon lairs and Scientist temples.
 - Dragon lair dungeons have physical gates and top-down camera mode, but need
   keys, locks, room objectives, enemy placement, minimap labels, and boss-room
   staging.
@@ -196,7 +200,13 @@ top-down side dungeons instead of proof-of-concept room chains.
 **2026-07 foundation complete:** all fourteen mountain caves now enter the
 single shared-camera dungeon mode, spawn chapter-scaled combat waves, include
 cooperative jump/moving-platform beats, and expose save-unlocked cave checkpoint
-buttons on the world map. Production follow-up should author unique room graphs,
+buttons on the world map. Gate-keyed return portals now provide a deterministic
+four-player exit for caves, lairs, and scientist temples. Fixed three-slab cave
+tunnels have also been replaced by continuous terrain-safe profiles and
+final-pass mountain insets validated across all fourteen caves. Production
+follow-up now has a reusable three-node room/portal graph and party-driven
+camera zones for every mountain cave. Expand those nodes into unique authored
+graphs, then add encounter-owned locks,
 keys, hazards, minibosses, art sets, and completion rewards per cave rather than
 expanding the shared procedural layout indefinitely.
 

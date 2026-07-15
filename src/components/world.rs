@@ -245,6 +245,7 @@ pub struct DungeonKeyGate {
 #[derive(Component, Debug, Clone)]
 pub struct DungeonEnemySpawner {
     pub chapter: u8,
+    pub encounter: Option<(&'static str, u8)>,
     pub enemy_type: crate::components::enemy::EnemyType,
     pub count: u8,
     pub trigger_radius: f32,
@@ -263,6 +264,86 @@ pub struct DungeonCrawlGate {
     pub radius: f32,
     pub interact_radius: f32,
     pub opened: bool,
+}
+
+/// Marks the monumental exterior structure surrounding a mountain-cave gate.
+/// Fast travel is optional; this world-space entrance remains the canonical
+/// way to discover and enter its linked dungeon.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AncientCaveGate {
+    pub gate_id: &'static str,
+    pub clear_width: f32,
+    pub height: f32,
+}
+
+/// An explicit return point for a linked shared-screen dungeon. Interacting
+/// with the portal returns the complete local party to safe exterior slots.
+#[derive(Component, Debug, Clone)]
+pub struct DungeonExitPortal {
+    pub gate_id: &'static str,
+    pub position: Vec3,
+    pub return_positions: [Vec3; 4],
+    pub interact_radius: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DungeonRoomKind {
+    Entrance,
+    Traversal,
+    Combat,
+    Reward,
+}
+
+/// A camera/progression zone in a shared-screen dungeon room graph.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct DungeonRoomZone {
+    pub gate_id: &'static str,
+    pub room_index: u8,
+    pub label: &'static str,
+    pub kind: DungeonRoomKind,
+    pub focus: Vec3,
+    pub camera_radius: f32,
+}
+
+/// An undirected graph edge connecting two dungeon rooms. The marker position
+/// is also available to future door, lock, minimap, and encounter systems.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct DungeonRoomPortal {
+    pub gate_id: &'static str,
+    pub room_a: u8,
+    pub room_b: u8,
+    pub position: Vec3,
+}
+
+/// Identifies an enemy spawned for one room's authored combat encounter.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DungeonEncounterEnemy {
+    pub gate_id: &'static str,
+    pub room_index: u8,
+}
+
+/// A physical doorway that seals while its room encounter is active and
+/// opens permanently after the encounter has been cleared this session.
+#[derive(Component, Debug, Clone)]
+pub struct DungeonEncounterDoor {
+    pub gate_id: &'static str,
+    pub room_index: u8,
+    pub closed: Vec3,
+    pub open: Vec3,
+}
+
+/// A chamber reward that becomes visible when its encounter is cleared.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DungeonEncounterReward {
+    pub gate_id: &'static str,
+    pub room_index: u8,
+}
+
+impl DungeonRoomPortal {
+    pub fn connects(&self, room_a: u8, room_b: u8) -> bool {
+        (self.room_a == room_a && self.room_b == room_b)
+            || (self.room_a == room_b && self.room_b == room_a)
+    }
 }
 
 /// Visual door slab that slides away once its matching dungeon gate opens.

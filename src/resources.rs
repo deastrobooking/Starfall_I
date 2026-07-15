@@ -267,6 +267,10 @@ impl Default for CurrentChapter {
 pub struct DungeonRoomState {
     /// Chapters whose dungeon key has been collected this session.
     pub keys_collected: Vec<u8>,
+    pub active_gate_id: Option<&'static str>,
+    pub active_room: Option<u8>,
+    pub visited_rooms: Vec<(&'static str, u8)>,
+    pub cleared_rooms: Vec<(&'static str, u8)>,
 }
 
 impl DungeonRoomState {
@@ -279,12 +283,37 @@ impl DungeonRoomState {
             self.keys_collected.push(chapter);
         }
     }
+
+    pub fn enter_room(&mut self, gate_id: &'static str, room: u8) -> bool {
+        let changed = self.active_gate_id != Some(gate_id) || self.active_room != Some(room);
+        self.active_gate_id = Some(gate_id);
+        self.active_room = Some(room);
+        if !self.visited_rooms.contains(&(gate_id, room)) {
+            self.visited_rooms.push((gate_id, room));
+        }
+        changed
+    }
+
+    pub fn mark_cleared(&mut self, gate_id: &'static str, room: u8) {
+        if !self.cleared_rooms.contains(&(gate_id, room)) {
+            self.cleared_rooms.push((gate_id, room));
+        }
+    }
+
+    pub fn clear_active(&mut self) {
+        self.active_gate_id = None;
+        self.active_room = None;
+    }
 }
 
 // ── Dungeon Crawl Mode ───────────────────────────────────────────────────────
 #[derive(Resource, Debug, Clone)]
 pub struct DungeonCrawlState {
     pub active: bool,
+    pub gate_id: Option<&'static str>,
+    /// False on the activation frame so the gate-opening press cannot also
+    /// trigger a nearby return portal.
+    pub exit_armed: bool,
     pub chapter: Option<ChapterId>,
     pub label: String,
     pub focus: Vec3,
@@ -296,6 +325,8 @@ impl Default for DungeonCrawlState {
     fn default() -> Self {
         Self {
             active: false,
+            gate_id: None,
+            exit_armed: false,
             chapter: None,
             label: String::new(),
             focus: Vec3::ZERO,
@@ -308,6 +339,7 @@ impl Default for DungeonCrawlState {
 impl DungeonCrawlState {
     pub fn activate(
         &mut self,
+        gate_id: &'static str,
         chapter: ChapterId,
         label: impl Into<String>,
         focus: Vec3,
@@ -315,6 +347,8 @@ impl DungeonCrawlState {
         radius: f32,
     ) {
         self.active = true;
+        self.gate_id = Some(gate_id);
+        self.exit_armed = false;
         self.chapter = Some(chapter);
         self.label = label.into();
         self.focus = focus;
@@ -324,6 +358,8 @@ impl DungeonCrawlState {
 
     pub fn clear(&mut self) {
         self.active = false;
+        self.gate_id = None;
+        self.exit_armed = false;
         self.chapter = None;
         self.label.clear();
         self.focus = Vec3::ZERO;
@@ -1646,6 +1682,7 @@ mod tests {
     fn dungeon_crawl_state_activates_and_clears() {
         let mut dungeon = DungeonCrawlState::default();
         dungeon.activate(
+            "test_gate",
             ChapterId(6),
             "Collosar's Crown Gate",
             Vec3::new(-500.0, 4.0, -330.0),
@@ -1654,6 +1691,7 @@ mod tests {
         );
 
         assert!(dungeon.active);
+        assert_eq!(dungeon.gate_id, Some("test_gate"));
         assert_eq!(dungeon.chapter, Some(ChapterId(6)));
         assert_eq!(dungeon.label, "Collosar's Crown Gate");
         assert_eq!(dungeon.radius, 66.0);
@@ -1661,6 +1699,7 @@ mod tests {
         dungeon.clear();
 
         assert!(!dungeon.active);
+        assert!(dungeon.gate_id.is_none());
         assert!(dungeon.chapter.is_none());
         assert!(dungeon.label.is_empty());
     }

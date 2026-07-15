@@ -208,10 +208,8 @@ impl Plugin for WorldPlugin {
                     city_spy_drone_patrol_system,
                     city_spy_drone_data_drop_system,
                     discussion_interaction_system,
-                    dungeon_crawl_gate_system,
                     dungeon_key_pickup_system,
                     dungeon_key_gate_system,
-                    dungeon_enemy_spawner_system,
                     world_site_enemy_spawner_system,
                     site_liberation_system,
                     world_route_unlock_system,
@@ -223,6 +221,26 @@ impl Plugin for WorldPlugin {
                     laser_beam_cleanup_system,
                     collider_debug_toggle_system,
                 )
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (
+                    dungeon_crawl_gate_system,
+                    dungeon_room_progress_system,
+                    dungeon_exit_portal_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (
+                    dungeon_enemy_spawner_system,
+                    ApplyDeferred,
+                    dungeon_encounter_progress_system,
+                )
+                    .chain()
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -700,6 +718,7 @@ fn dungeon_crawl_gate_system(
             }
             gate.opened = true;
             dungeon.activate(
+                gate.gate_id,
                 crate::chapters::ChapterId(gate.chapter),
                 gate.label,
                 gate.focus,
@@ -713,19 +732,6 @@ fn dungeon_crawl_gate_system(
         }
     }
 
-    if dungeon.active {
-        let keep_active = player_q.iter().any(|(transform, _)| {
-            transform.translation.distance(dungeon.focus) <= dungeon.radius + 70.0
-        });
-        if !keep_active {
-            dungeon.clear();
-            msg_ev.write(UiMessageEvent {
-                text: "Dungeon camera released.".to_string(),
-                duration: 1.6,
-            });
-        }
-    }
-
     for (mut transform, door) in door_q.iter_mut() {
         let target = if opened_gates.contains(&door.gate_id) {
             door.open
@@ -735,6 +741,140 @@ fn dungeon_crawl_gate_system(
         let blend = 1.0 - (-dt * 5.5).exp();
         transform.translation = transform.translation.lerp(target, blend);
     }
+}
+
+fn dungeon_room_progress_system(
+    mut dungeon: ResMut<DungeonCrawlState>,
+    mut room_state: ResMut<DungeonRoomState>,
+    room_q: Query<&DungeonRoomZone>,
+    portal_q: Query<&DungeonRoomPortal>,
+    player_q: Query<&Transform, With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let Some(gate_id) = dungeon.gate_id.filter(|_| dungeon.active) else {
+        room_state.clear_active();
+        return;
+    };
+    let player_count = player_q.iter().count();
+    if player_count == 0 {
+        return;
+    }
+    let party_focus = player_q
+        .iter()
+        .map(|transform| transform.translation)
+        .sum::<Vec3>()
+        / player_count as f32;
+    let rooms = room_q
+        .iter()
+        .filter(|room| room.gate_id == gate_id)
+        .collect::<Vec<_>>();
+    if rooms.is_empty() {
+        room_state.clear_active();
+        return;
+    }
+    let distance_to_party =
+        |room: &DungeonRoomZone| (room.focus - party_focus).with_y(0.0).length_squared();
+    let nearest = rooms
+        .iter()
+        .copied()
+        .min_by(|a, b| distance_to_party(a).total_cmp(&distance_to_party(b)))
+        .expect("non-empty dungeon room list");
+
+    let target = if room_state.active_gate_id == Some(gate_id) {
+        room_state
+            .active_room
+            .and_then(|active| rooms.iter().copied().find(|room| room.room_index == active))
+            .map(|current| {
+                let current_distance = distance_to_party(current).sqrt();
+                let nearest_distance = distance_to_party(nearest).sqrt();
+                let adjacent = portal_q.iter().any(|portal| {
+                    portal.gate_id == gate_id
+                        && portal.connects(current.room_index, nearest.room_index)
+                });
+                if nearest.room_index != current.room_index
+                    && adjacent
+                    && nearest_distance + 2.5 < current_distance
+                {
+                    nearest
+                } else {
+                    current
+                }
+            })
+            .unwrap_or(nearest)
+    } else {
+        nearest
+    };
+
+    if room_state.enter_room(gate_id, target.room_index) {
+        dungeon.focus = target.focus;
+        dungeon.radius = target.camera_radius.max(28.0);
+        msg_ev.write(UiMessageEvent {
+            text: format!("{} — {}", dungeon.label, target.label),
+            duration: 1.8,
+        });
+    }
+}
+
+fn dungeon_exit_portal_system(
+    mut commands: Commands,
+    mut dungeon: ResMut<DungeonCrawlState>,
+    mut room_state: ResMut<DungeonRoomState>,
+    portal_q: Query<&DungeonExitPortal>,
+    mut player_q: Query<
+        (
+            Entity,
+            &PlayerIndex,
+            &PlayerInput,
+            &mut Transform,
+            &mut PlayerMovement,
+        ),
+        With<Player>,
+    >,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let Some(active_gate_id) = dungeon.gate_id.filter(|_| dungeon.active) else {
+        return;
+    };
+    if !dungeon.exit_armed {
+        dungeon.exit_armed = true;
+        return;
+    }
+    let Some(portal) = portal_q
+        .iter()
+        .find(|portal| portal.gate_id == active_gate_id)
+    else {
+        return;
+    };
+    let exit_requested = player_q.iter().any(|(_, _, input, transform, _)| {
+        input.interact && transform.translation.distance(portal.position) <= portal.interact_radius
+    });
+    if !exit_requested {
+        return;
+    }
+
+    for (entity, index, _, mut transform, mut movement) in player_q.iter_mut() {
+        transform.translation = portal.return_positions[usize::from(index.0.min(3))];
+        movement.velocity = Vec3::ZERO;
+        movement.ground_velocity = Vec3::ZERO;
+        movement.motor_accum = Vec3::ZERO;
+        movement.is_grounded = false;
+        commands.entity(entity).remove::<BoatPassenger>();
+    }
+    dungeon.clear();
+    room_state.clear_active();
+    msg_ev.write(UiMessageEvent {
+        text: "Party returned to the mountain entrance.".to_string(),
+        duration: 2.4,
+    });
+}
+
+fn dungeon_return_positions(center: Vec3, right: Vec3, forward: Vec3) -> [Vec3; 4] {
+    [
+        center - right * 1.8 - forward * 1.2,
+        center + right * 1.8 - forward * 1.2,
+        center - right * 1.8 + forward * 1.2,
+        center + right * 1.8 + forward * 1.2,
+    ]
 }
 
 fn dungeon_key_pickup_system(
@@ -810,7 +950,7 @@ fn dungeon_enemy_spawner_system(
                 0.0,
                 0.0,
             );
-            spawn_enemy_entity(
+            let enemy = spawn_enemy_entity(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
@@ -819,11 +959,74 @@ fn dungeon_enemy_spawner_system(
                 spawner.difficulty,
                 None,
             );
+            if let Some((gate_id, room_index)) = spawner.encounter {
+                commands.entity(enemy).insert(DungeonEncounterEnemy {
+                    gate_id,
+                    room_index,
+                });
+            }
         }
         msg_ev.write(UiMessageEvent {
             text: "Enemies appear!".to_string(),
             duration: 1.8,
         });
+    }
+}
+
+fn dungeon_encounter_progress_system(
+    time: Res<Time>,
+    dungeon: Res<DungeonCrawlState>,
+    mut room_state: ResMut<DungeonRoomState>,
+    spawner_q: Query<&DungeonEnemySpawner>,
+    enemy_q: Query<&DungeonEncounterEnemy>,
+    mut door_q: Query<(&mut Transform, &DungeonEncounterDoor)>,
+    mut reward_q: Query<(&DungeonEncounterReward, &mut Visibility)>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let active_gate = dungeon.gate_id.filter(|_| dungeon.active);
+    let dt = time.delta_secs();
+
+    for (mut transform, door) in door_q.iter_mut() {
+        let started = active_gate == Some(door.gate_id)
+            && spawner_q.iter().any(|spawner| {
+                spawner.encounter == Some((door.gate_id, door.room_index)) && spawner.spawned
+            });
+        let enemies_alive = enemy_q
+            .iter()
+            .any(|enemy| enemy.gate_id == door.gate_id && enemy.room_index == door.room_index);
+        let was_cleared = room_state
+            .cleared_rooms
+            .contains(&(door.gate_id, door.room_index));
+        if started && !enemies_alive && !was_cleared {
+            room_state.mark_cleared(door.gate_id, door.room_index);
+            msg_ev.write(UiMessageEvent {
+                text: "Star Chamber cleared — ancient seals released and reward awakened!"
+                    .to_string(),
+                duration: 3.5,
+            });
+        }
+        let cleared = was_cleared
+            || room_state
+                .cleared_rooms
+                .contains(&(door.gate_id, door.room_index));
+        let target = if started && !cleared {
+            door.closed
+        } else {
+            door.open
+        };
+        let blend = 1.0 - (-dt * 5.0).exp();
+        transform.translation = transform.translation.lerp(target, blend);
+    }
+
+    for (reward, mut visibility) in reward_q.iter_mut() {
+        *visibility = if room_state
+            .cleared_rooms
+            .contains(&(reward.gate_id, reward.room_index))
+        {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -3005,6 +3208,154 @@ fn secret_cave_accent(pal: &Palette, chapter: u8) -> Handle<StandardMaterial> {
     }
 }
 
+const ANCIENT_CAVE_GATE_HEIGHT: f32 = 13.5;
+
+fn spawn_ancient_cave_gate(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    gate_id: &'static str,
+    entrance: Vec3,
+    forward: Vec3,
+    right: Vec3,
+    rotation: Quat,
+    clear_width: f32,
+    wall_material: Handle<StandardMaterial>,
+    accent: Handle<StandardMaterial>,
+) {
+    commands.spawn((
+        Name::new(format!("{gate_id} Ancient Exterior Gate")),
+        Transform::from_translation(entrance),
+        GlobalTransform::default(),
+        AncientCaveGate {
+            gate_id,
+            clear_width,
+            height: ANCIENT_CAVE_GATE_HEIGHT,
+        },
+        WorldGeometry,
+    ));
+
+    // Massive battered pylons and a deep lintel make the entrance readable
+    // against the mountain silhouette from road-travel distance.
+    for side in [-1.0, 1.0] {
+        let pylon = entrance + right * side * (clear_width * 0.5 + 2.35) - forward * 0.35
+            + Vec3::Y * (ANCIENT_CAVE_GATE_HEIGHT * 0.5);
+        spawn_secret_cave_solid(
+            commands,
+            meshes,
+            wall_material.clone(),
+            "ancient_gate_stone",
+            Vec3::new(4.3, ANCIENT_CAVE_GATE_HEIGHT, 4.6),
+            Transform::from_translation(pylon)
+                .with_rotation(rotation * Quat::from_rotation_z(side * -0.035)),
+            false,
+        );
+        let crown = pylon + Vec3::Y * (ANCIENT_CAVE_GATE_HEIGHT * 0.52);
+        commands.spawn((
+            Name::new(format!("{gate_id} Gate Crown Rune")),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Torus {
+                    major_radius: 1.35,
+                    minor_radius: 0.24,
+                })),
+                material: MeshMaterial3d(accent.clone()),
+                transform: Transform::from_translation(crown - forward * 2.35)
+                    .with_rotation(rotation * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+    spawn_secret_cave_solid(
+        commands,
+        meshes,
+        wall_material,
+        "ancient_gate_stone",
+        Vec3::new(clear_width + 8.4, 2.4, 4.8),
+        Transform::from_translation(
+            entrance - forward * 0.35 + Vec3::Y * (ANCIENT_CAVE_GATE_HEIGHT - 0.9),
+        )
+        .with_rotation(rotation),
+        false,
+    );
+
+    // A luminous keystone identifies the gate as interactive ancient
+    // technology rather than an ordinary mountain decoration.
+    commands.spawn((
+        Name::new(format!("{gate_id} Gate Keystone")),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(1.25, 0.55))),
+            material: MeshMaterial3d(accent),
+            transform: Transform::from_translation(
+                entrance - forward * 2.75 + Vec3::Y * (ANCIENT_CAVE_GATE_HEIGHT - 1.0),
+            )
+            .with_rotation(rotation * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    // Dark recessed mouth behind the opening adds depth while leaving the
+    // physical tunnel and its interactive doors fully traversable.
+    commands.spawn((
+        Name::new(format!("{gate_id} Recessed Cave Mouth")),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(4.8))),
+            material: MeshMaterial3d(pal.rock_dark.clone()),
+            transform: Transform {
+                translation: entrance + forward * 3.5 + Vec3::Y * 3.5,
+                scale: Vec3::new(1.45, 0.88, 0.30),
+                rotation,
+            },
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_dungeon_exit_portal(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    material: Handle<StandardMaterial>,
+    gate_id: &'static str,
+    position: Vec3,
+    return_positions: [Vec3; 4],
+) {
+    commands.spawn((
+        Name::new(format!("{} Return Portal", gate_id)),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Torus {
+                major_radius: 1.75,
+                minor_radius: 0.28,
+            })),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(position - Vec3::Y * 0.95),
+            ..default()
+        },
+        DungeonExitPortal {
+            gate_id,
+            position,
+            return_positions,
+            interact_radius: 5.5,
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PointLightBundle {
+            point_light: PointLight {
+                color: Color::srgb(0.72, 0.32, 1.0),
+                intensity: 8_500.0,
+                range: 13.0,
+                shadow_maps_enabled: false,
+                ..default()
+            },
+            transform: Transform::from_translation(position + Vec3::Y * 1.2),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
 fn spawn_secret_cave_solid(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -3031,6 +3382,207 @@ fn spawn_secret_cave_solid(
     }
 }
 
+const SECRET_CAVE_TUNNEL_SPACING: f32 = 4.0;
+const SECRET_CAVE_MAX_GRADE: f32 = 0.24;
+const SECRET_CAVE_TERRAIN_CLEARANCE: f32 = 0.65;
+const SECRET_CAVE_CHAMBER_HALF_LENGTH: f32 = 8.5;
+
+#[derive(Debug, Clone)]
+struct SecretCaveFloorProfile {
+    stations: Vec<Vec3>,
+    tunnel_end: f32,
+    chamber_surface: Vec3,
+}
+
+fn secret_cave_required_surface_y(center: Vec2, right: Vec2, half_width: f32, seed: u64) -> f32 {
+    [-half_width, 0.0, half_width]
+        .into_iter()
+        .map(|offset| {
+            let point = center + right * offset;
+            terrain_surface_y(point.x, point.y, seed)
+        })
+        .fold(f32::NEG_INFINITY, f32::max)
+        + SECRET_CAVE_TERRAIN_CLEARANCE
+}
+
+fn secret_cave_floor_profile(
+    spec: SecretCaveLocation,
+    seed: u64,
+    width: f32,
+) -> SecretCaveFloorProfile {
+    let forward = Vec2::new(spec.yaw.sin(), spec.yaw.cos());
+    let right = Vec2::new(forward.y, -forward.x);
+    let entrance = Vec2::new(spec.x, spec.z);
+    let tunnel_end = (spec.length - SECRET_CAVE_CHAMBER_HALF_LENGTH).max(12.0);
+    let segment_count = (tunnel_end / SECRET_CAVE_TUNNEL_SPACING).ceil() as usize;
+    let station_count = segment_count + 1;
+    let half_width = width * 0.5 + 0.8;
+
+    let mut required = Vec::with_capacity(station_count);
+    for station in 0..station_count {
+        let along = tunnel_end * station as f32 / segment_count as f32;
+        let center = entrance + forward * along;
+        required.push(secret_cave_required_surface_y(
+            center, right, half_width, seed,
+        ));
+    }
+
+    let chamber_center = entrance + forward * spec.length;
+    let chamber_half_width = (width + 9.0) * 0.5 + 0.7;
+    let mut chamber_y = f32::NEG_INFINITY;
+    for along in [
+        -SECRET_CAVE_CHAMBER_HALF_LENGTH,
+        0.0,
+        SECRET_CAVE_CHAMBER_HALF_LENGTH,
+    ] {
+        for side in [-chamber_half_width, 0.0, chamber_half_width] {
+            let point = chamber_center + forward * along + right * side;
+            chamber_y = chamber_y.max(terrain_surface_y(point.x, point.y, seed));
+        }
+    }
+    chamber_y += SECRET_CAVE_TERRAIN_CLEARANCE;
+    if let Some(last) = required.last_mut() {
+        *last = last.max(chamber_y);
+    }
+
+    // Raising lower stations in both directions produces a profile that never
+    // cuts into terrain while respecting the maximum climb/descent grade.
+    let station_run = tunnel_end / segment_count as f32;
+    let max_delta = station_run * SECRET_CAVE_MAX_GRADE;
+    for _ in 0..2 {
+        for index in 1..required.len() {
+            required[index] = required[index].max(required[index - 1] - max_delta);
+        }
+        for index in (0..required.len().saturating_sub(1)).rev() {
+            required[index] = required[index].max(required[index + 1] - max_delta);
+        }
+    }
+
+    let stations = required
+        .into_iter()
+        .enumerate()
+        .map(|(station, y)| {
+            let along = tunnel_end * station as f32 / segment_count as f32;
+            let center = entrance + forward * along;
+            Vec3::new(center.x, y, center.y)
+        })
+        .collect::<Vec<_>>();
+    let chamber_surface_y = stations
+        .last()
+        .map(|station| station.y)
+        .unwrap_or(chamber_y);
+
+    SecretCaveFloorProfile {
+        stations,
+        tunnel_end,
+        chamber_surface: Vec3::new(chamber_center.x, chamber_surface_y, chamber_center.y),
+    }
+}
+
+fn secret_cave_profile_position(profile: &SecretCaveFloorProfile, along: f32) -> Vec3 {
+    if profile.stations.len() < 2 {
+        return profile
+            .stations
+            .first()
+            .copied()
+            .unwrap_or(profile.chamber_surface);
+    }
+    let normalized = (along / profile.tunnel_end).clamp(0.0, 1.0);
+    let scaled = normalized * (profile.stations.len() - 1) as f32;
+    let index = scaled.floor() as usize;
+    let next = (index + 1).min(profile.stations.len() - 1);
+    profile.stations[index].lerp(profile.stations[next], scaled - index as f32)
+}
+
+fn secret_cave_segment_rotation(yaw: f32, from: Vec3, to: Vec3) -> Quat {
+    let delta = to - from;
+    let horizontal = delta.with_y(0.0).length().max(0.001);
+    let slope = delta.y.atan2(horizontal);
+    Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-slope)
+}
+
+#[derive(Debug, Clone)]
+struct SecretCaveRoomGraph {
+    rooms: [DungeonRoomZone; 3],
+    portals: [DungeonRoomPortal; 2],
+}
+
+fn secret_cave_room_graph(
+    spec: SecretCaveLocation,
+    profile: &SecretCaveFloorProfile,
+) -> SecretCaveRoomGraph {
+    let entrance_focus = secret_cave_profile_position(profile, 5.0) + Vec3::Y;
+    let traversal_focus =
+        secret_cave_profile_position(profile, profile.tunnel_end * 0.58) + Vec3::Y;
+    let chamber_focus = profile.chamber_surface + Vec3::Y;
+    SecretCaveRoomGraph {
+        rooms: [
+            DungeonRoomZone {
+                gate_id: spec.anchor_id,
+                room_index: 0,
+                label: "Entrance Gallery",
+                kind: DungeonRoomKind::Entrance,
+                focus: entrance_focus,
+                camera_radius: 30.0,
+            },
+            DungeonRoomZone {
+                gate_id: spec.anchor_id,
+                room_index: 1,
+                label: "Traversal Tunnel",
+                kind: DungeonRoomKind::Traversal,
+                focus: traversal_focus,
+                camera_radius: 30.0,
+            },
+            DungeonRoomZone {
+                gate_id: spec.anchor_id,
+                room_index: 2,
+                label: "Star Chamber",
+                kind: DungeonRoomKind::Combat,
+                focus: chamber_focus,
+                camera_radius: 34.0,
+            },
+        ],
+        portals: [
+            DungeonRoomPortal {
+                gate_id: spec.anchor_id,
+                room_a: 0,
+                room_b: 1,
+                position: entrance_focus.lerp(traversal_focus, 0.5),
+            },
+            DungeonRoomPortal {
+                gate_id: spec.anchor_id,
+                room_a: 1,
+                room_b: 2,
+                position: secret_cave_profile_position(profile, profile.tunnel_end) + Vec3::Y,
+            },
+        ],
+    }
+}
+
+fn spawn_secret_cave_room_graph(commands: &mut Commands, graph: &SecretCaveRoomGraph) {
+    for room in graph.rooms {
+        commands.spawn((
+            Name::new(format!("{} Room {}", room.gate_id, room.room_index)),
+            Transform::from_translation(room.focus),
+            GlobalTransform::default(),
+            room,
+            WorldGeometry,
+        ));
+    }
+    for portal in graph.portals {
+        commands.spawn((
+            Name::new(format!(
+                "{} Room Portal {}-{}",
+                portal.gate_id, portal.room_a, portal.room_b
+            )),
+            Transform::from_translation(portal.position),
+            GlobalTransform::default(),
+            portal,
+            WorldGeometry,
+        ));
+    }
+}
+
 fn spawn_secret_cave_system(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -3039,8 +3591,6 @@ fn spawn_secret_cave_system(
     spec: SecretCaveLocation,
 ) {
     let chapter = spec.chapter.0;
-    let floor_y = terrain_surface_y(spec.x, spec.z, seed) + 0.25;
-    let entrance = Vec3::new(spec.x, floor_y, spec.z);
     let forward = Vec3::new(spec.yaw.sin(), 0.0, spec.yaw.cos());
     let right = Vec3::new(forward.z, 0.0, -forward.x);
     let rotation = Quat::from_rotation_y(spec.yaw);
@@ -3058,52 +3608,37 @@ fn spawn_secret_cave_system(
         pal.dragon_stone.clone()
     };
     let width = 10.0 + (chapter % 3) as f32 * 1.5;
+    let floor_profile = secret_cave_floor_profile(spec, seed, width);
+    let entrance = floor_profile.stations[0];
 
-    for side in [-1.0, 1.0] {
-        let pillar_pos = entrance + right * side * (width * 0.5 + 1.2) + Vec3::Y * 3.4;
-        spawn_secret_cave_solid(
-            commands,
-            meshes,
-            wall_mat.clone(),
-            "rock",
-            Vec3::new(2.0, 6.8, 2.4),
-            Transform::from_translation(pillar_pos).with_rotation(rotation),
-            false,
-        );
-    }
-    spawn_secret_cave_solid(
+    spawn_ancient_cave_gate(
         commands,
         meshes,
+        pal,
+        spec.anchor_id,
+        entrance,
+        forward,
+        right,
+        rotation,
+        width,
         wall_mat.clone(),
-        "rock",
-        Vec3::new(width + 4.5, 1.3, 2.8),
-        Transform::from_translation(entrance + Vec3::Y * 7.0).with_rotation(rotation),
-        false,
+        accent.clone(),
     );
-    commands.spawn((
-        PbrBundle {
-            mesh: Mesh3d(meshes.add(Sphere::new(4.2))),
-            material: MeshMaterial3d(pal.rock_dark.clone()),
-            transform: Transform {
-                translation: entrance + forward * 3.2 + Vec3::Y * 2.9,
-                scale: Vec3::new(1.25, 0.72, 0.30),
-                rotation,
-            },
-            ..default()
-        },
-        WorldGeometry,
-    ));
 
-    for segment in 0..3 {
-        let along = 7.0 + segment as f32 * 10.5;
-        let center = entrance + forward * along + Vec3::Y * 0.05;
+    for (segment, pair) in floor_profile.stations.windows(2).enumerate() {
+        let from = pair[0];
+        let to = pair[1];
+        let segment_rotation = secret_cave_segment_rotation(spec.yaw, from, to);
+        let segment_up = segment_rotation * Vec3::Y;
+        let segment_length = from.distance(to) + 0.18;
+        let center = from.lerp(to, 0.5) - segment_up * 0.275;
         spawn_secret_cave_solid(
             commands,
             meshes,
             floor_mat.clone(),
             "floor",
-            Vec3::new(width, 0.55, 10.6),
-            Transform::from_translation(center).with_rotation(rotation),
+            Vec3::new(width, 0.55, segment_length),
+            Transform::from_translation(center).with_rotation(segment_rotation),
             true,
         );
         for side in [-1.0, 1.0] {
@@ -3112,34 +3647,79 @@ fn spawn_secret_cave_system(
                 meshes,
                 wall_mat.clone(),
                 "rock",
-                Vec3::new(0.95, 4.0, 10.8),
+                Vec3::new(0.95, 4.0, segment_length + 0.12),
                 Transform::from_translation(
-                    center + right * side * (width * 0.5 + 0.65) + Vec3::Y * 2.2,
+                    center + right * side * (width * 0.5 + 0.65) + segment_up * 2.2,
                 )
-                .with_rotation(rotation),
+                .with_rotation(segment_rotation),
                 false,
             );
         }
-        let rib_pos = center + Vec3::Y * 4.5 + forward * 4.4;
-        spawn_secret_cave_solid(
-            commands,
-            meshes,
-            pal.brushed_metal.clone(),
-            "accent",
-            Vec3::new(width + 1.6, 0.45, 0.75),
-            Transform::from_translation(rib_pos).with_rotation(rotation),
-            false,
-        );
+        if segment % 2 == 1 || segment + 1 == floor_profile.stations.len() - 1 {
+            let rib_pos = to + (segment_rotation * Vec3::Y) * 4.25;
+            spawn_secret_cave_solid(
+                commands,
+                meshes,
+                pal.brushed_metal.clone(),
+                "accent",
+                Vec3::new(width + 1.6, 0.45, 0.75),
+                Transform::from_translation(rib_pos).with_rotation(segment_rotation),
+                false,
+            );
+        }
     }
 
-    let chamber = entrance + forward * spec.length + Vec3::Y * 0.1;
+    let chamber = floor_profile.chamber_surface;
+    let room_graph = secret_cave_room_graph(spec, &floor_profile);
+    spawn_secret_cave_room_graph(commands, &room_graph);
+
+    // This portcullis is initially raised so the party can enter. The chamber
+    // wave lowers it behind the party, then permanently releases it when every
+    // encounter-owned enemy has been defeated.
+    let encounter_threshold = room_graph.portals[1].position - Vec3::Y;
+    let encounter_closed = encounter_threshold + Vec3::Y * 2.8;
+    let encounter_open = encounter_closed + Vec3::Y * 8.0;
+    commands.spawn((
+        Name::new(format!("{} Star Chamber Seal", spec.anchor_id)),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.8, 5.6, 0.7))),
+            material: MeshMaterial3d(pal.brushed_metal.clone()),
+            transform: Transform::from_translation(encounter_open).with_rotation(rotation),
+            ..default()
+        },
+        DungeonEncounterDoor {
+            gate_id: spec.anchor_id,
+            room_index: 2,
+            closed: encounter_closed,
+            open: encounter_open,
+        },
+        crate::physics::prelude::RigidBody::KinematicPositionBased,
+        crate::physics::prelude::Collider::cuboid((width + 0.8) * 0.5, 2.8, 0.35),
+        WorldGeometry,
+    ));
+
+    commands.spawn((
+        Name::new(format!("{} Awakened Chamber Reward", spec.anchor_id)),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(1.05))),
+            material: MeshMaterial3d(accent.clone()),
+            transform: Transform::from_translation(chamber + forward * 5.5 + Vec3::Y * 1.8),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        DungeonEncounterReward {
+            gate_id: spec.anchor_id,
+            room_index: 2,
+        },
+        WorldGeometry,
+    ));
     spawn_secret_cave_solid(
         commands,
         meshes,
         floor_mat.clone(),
         "floor",
         Vec3::new(width + 9.0, 0.65, 17.0),
-        Transform::from_translation(chamber).with_rotation(rotation),
+        Transform::from_translation(chamber - Vec3::Y * 0.325).with_rotation(rotation),
         true,
     );
     for side in [-1.0, 1.0] {
@@ -3288,7 +3868,7 @@ fn spawn_secret_cave_system(
 
     // Every mountain cave is a real shared-screen dungeon entrance. The gate
     // reuses the established four-player top-down movement/camera/combat mode.
-    let gate_entry = entrance + forward * 1.5 + Vec3::Y * 1.2;
+    let gate_entry = secret_cave_profile_position(&floor_profile, 1.5) + Vec3::Y * 1.2;
     commands.spawn((
         Transform::from_translation(gate_entry),
         DungeonCrawlGate {
@@ -3303,13 +3883,32 @@ fn spawn_secret_cave_system(
         },
         WorldGeometry,
     ));
+    let return_xz = entrance - forward * 4.5;
+    let return_center = Vec3::new(
+        return_xz.x,
+        terrain_surface_y(return_xz.x, return_xz.z, seed) + 1.3,
+        return_xz.z,
+    );
+    let portal_position = secret_cave_profile_position(&floor_profile, 6.0) + Vec3::Y * 1.2;
+    spawn_dungeon_exit_portal(
+        commands,
+        meshes,
+        accent.clone(),
+        spec.anchor_id,
+        portal_position,
+        dungeon_return_positions(return_center, right, forward),
+    );
     for side in [-1.0f32, 1.0] {
-        let closed = entrance + right * side * (width * 0.24) + forward * 2.1 + Vec3::Y * 2.5;
+        let doorway = secret_cave_profile_position(&floor_profile, 2.1);
+        let door_height = 8.2;
+        let door_width = width * 0.49;
+        let closed = doorway + right * side * (width * 0.245) + Vec3::Y * (door_height * 0.5);
         let open = closed + right * side * (width * 0.45 + 1.5);
         commands.spawn((
+            Name::new(format!("{} Ancient Gate Door", spec.anchor_id)),
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(width * 0.48, 5.0, 0.55))),
-                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                mesh: Mesh3d(meshes.add(Cuboid::new(door_width, door_height, 0.8))),
+                material: MeshMaterial3d(pal.dragon_stone.clone()),
                 transform: Transform::from_translation(closed).with_rotation(rotation),
                 ..default()
             },
@@ -3319,6 +3918,8 @@ fn spawn_secret_cave_system(
                 closed,
                 open,
             },
+            crate::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::physics::prelude::Collider::cuboid(door_width * 0.5, door_height * 0.5, 0.4),
             WorldGeometry,
         ));
     }
@@ -3326,7 +3927,7 @@ fn spawn_secret_cave_system(
     // Gauntlet-style pressure waves at the tunnel and arena, scaled by
     // chapter while remaining readable for a shared four-player screen.
     for (index, position) in [
-        entrance + forward * (spec.length * 0.52) + Vec3::Y * 1.0,
+        secret_cave_profile_position(&floor_profile, spec.length * 0.52) + Vec3::Y * 1.0,
         chamber + forward * 1.5 + Vec3::Y * 1.0,
     ]
     .into_iter()
@@ -3336,6 +3937,7 @@ fn spawn_secret_cave_system(
             Transform::from_translation(position),
             DungeonEnemySpawner {
                 chapter,
+                encounter: (index == 1).then_some((spec.anchor_id, 2)),
                 enemy_type: if index == 0 {
                     EnemyType::Soldier
                 } else if chapter >= 8 {
@@ -3809,6 +4411,15 @@ fn spawn_scientist_temple_gate(
             opened: false,
         },
     ));
+    let outward_center = origin + rot * Vec3::new(0.0, 2.4, -66.0);
+    spawn_dungeon_exit_portal(
+        commands,
+        meshes,
+        trim_mat.clone(),
+        spec.gate_label,
+        origin + rot * Vec3::new(0.0, 2.4, -48.0),
+        dungeon_return_positions(outward_center, rot * Vec3::X, rot * Vec3::Z),
+    );
 
     for side in [-1.0_f32, 1.0] {
         let closed = origin + rot * Vec3::new(side * 3.2, 4.2, -58.5);
@@ -4237,6 +4848,7 @@ fn spawn_ch6_crown_dungeon_extras(
             GlobalTransform::default(),
             DungeonEnemySpawner {
                 chapter: 6,
+                encounter: None,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -4322,6 +4934,7 @@ fn spawn_ch7_ember_dungeon_extras(
             GlobalTransform::default(),
             DungeonEnemySpawner {
                 chapter: 7,
+                encounter: None,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -4407,6 +5020,7 @@ fn spawn_ch8_fangroot_dungeon_extras(
             GlobalTransform::default(),
             DungeonEnemySpawner {
                 chapter: 8,
+                encounter: None,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -4492,6 +5106,7 @@ fn spawn_ch9_garden_dungeon_extras(
             GlobalTransform::default(),
             DungeonEnemySpawner {
                 chapter: 9,
+                encounter: None,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -4577,6 +5192,7 @@ fn spawn_ch10_granite_dungeon_extras(
             GlobalTransform::default(),
             DungeonEnemySpawner {
                 chapter: 10,
+                encounter: None,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -4662,6 +5278,7 @@ fn spawn_ch11_icebreaker_dungeon_extras(
             GlobalTransform::default(),
             DungeonEnemySpawner {
                 chapter: 11,
+                encounter: None,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -4699,6 +5316,15 @@ fn spawn_dungeon_crawl_gate(
             opened: false,
         },
     ));
+    let outward_center = origin + rot * Vec3::new(0.0, 2.4, -68.0);
+    spawn_dungeon_exit_portal(
+        commands,
+        meshes,
+        trim_mat.clone(),
+        spec.anchor_id,
+        origin + rot * Vec3::new(0.0, 2.4, -49.0),
+        dungeon_return_positions(outward_center, rot * Vec3::X, rot * Vec3::Z),
+    );
 
     for side in [-1.0_f32, 1.0] {
         let closed = origin + rot * Vec3::new(side * 2.75, 3.7, -62.7);
@@ -5473,7 +6099,7 @@ fn everest_heightmap_relief(x: f32, z: f32, seed: u64) -> f32 {
 
 /// Layered sine-wave height at world position (x, z).
 /// The city centre is kept near-flat; elevation builds toward the outer ring.
-fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
+fn terrain_height_uncarved(x: f32, z: f32, seed: u64) -> f32 {
     // Phase offset so every world seed looks distinct.
     let so = seeded(seed, 7) * std::f32::consts::TAU;
 
@@ -5549,6 +6175,40 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     (shaped_height * (1.0 - city_flat)).max(0.0)
 }
 
+fn secret_cave_terrain_inset(x: f32, z: f32, seed: u64, base_height: f32) -> f32 {
+    let point = Vec2::new(x, z);
+    let mut height = base_height;
+    for spec in SECRET_CAVE_LOCATIONS {
+        let forward = Vec2::new(spec.yaw.sin(), spec.yaw.cos());
+        let start = Vec2::new(spec.x, spec.z) - forward * 12.0;
+        let end = Vec2::new(spec.x, spec.z)
+            + forward * (spec.length + SECRET_CAVE_CHAMBER_HALF_LENGTH + 12.0);
+        let axis = end - start;
+        let axis_len_sq = axis.length_squared().max(0.001);
+        let t = ((point - start).dot(axis) / axis_len_sq).clamp(0.0, 1.0);
+        let nearest = start + axis * t;
+        let distance = point.distance(nearest);
+
+        // The terrain mesh is sampled every 62.5 units. This inset must be
+        // wider than a cell diagonal so all triangles beneath the much smaller
+        // cave geometry receive compatible heights rather than slicing through
+        // the room between sparse mesh vertices.
+        let influence = 1.0 - smoothstep(160.0, 240.0, distance);
+        if influence <= 0.0 {
+            continue;
+        }
+
+        let entrance = Vec2::new(spec.x, spec.z);
+        let entrance_height = terrain_height_uncarved(entrance.x, entrance.y, seed);
+        height = height.lerp(entrance_height, influence);
+    }
+    height.max(0.0)
+}
+
+fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
+    terrain_height_uncarved(x, z, seed)
+}
+
 fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
     // Gameplay must query the same piecewise-planar surface used by the
     // rendered trimesh collider. Sampling the analytic height function here
@@ -5610,10 +6270,10 @@ fn terrain_mesh_height_grid(seed: u64) -> Arc<Vec<f32>> {
 fn terrain_mesh_vertex_height(x: f32, z: f32, seed: u64) -> f32 {
     let height = terrain_height(x, z, seed);
     let Some(projection) = nearest_mountain_route_point(x, z) else {
-        return height;
+        return secret_cave_terrain_inset(x, z, seed, height);
     };
     if projection.distance >= 190.0 {
-        return height;
+        return secret_cave_terrain_inset(x, z, seed, height);
     }
     // Smooth the shelf longitudinally so the mesh itself provides a curving
     // mountain ascent instead of preserving every sharp summit under the road.
@@ -5631,7 +6291,11 @@ fn terrain_mesh_vertex_height(x: f32, z: f32, seed: u64) -> f32 {
     // wider than one cell or a route can pass between vertices without
     // affecting the actual mesh triangles beneath it.
     let shelf = 1.0 - smoothstep(96.0, 190.0, projection.distance);
-    height + (route_height - height) * shelf
+    let road_terraced_height = height + (route_height - height) * shelf;
+    // Cave interiors are the final terrain authority where a road shelf and a
+    // cave mouth overlap; otherwise the road pass can reintroduce a mountain
+    // wedge through an already validated dungeon floor.
+    secret_cave_terrain_inset(x, z, seed, road_terraced_height)
 }
 
 fn mix_rgba(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
@@ -16773,6 +17437,382 @@ fn spawn_magic_crystals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dungeon_return_slots_are_distinct_and_centered() {
+        let center = Vec3::new(12.0, 4.0, -8.0);
+        let right = Vec3::new(0.0, 0.0, -1.0);
+        let forward = Vec3::X;
+        let positions = dungeon_return_positions(center, right, forward);
+
+        for a in 0..positions.len() {
+            for b in (a + 1)..positions.len() {
+                assert!(positions[a].distance(positions[b]) >= 2.3);
+            }
+        }
+        let average = positions.into_iter().sum::<Vec3>() / 4.0;
+        assert!(average.distance(center) <= 0.001);
+    }
+
+    #[test]
+    fn dungeon_exit_returns_all_four_players_and_releases_camera_state() {
+        let mut app = App::new();
+        app.add_message::<UiMessageEvent>();
+        app.init_resource::<DungeonRoomState>();
+        app.add_systems(Update, dungeon_exit_portal_system);
+        let mut dungeon = DungeonCrawlState::default();
+        dungeon.activate(
+            "cave_test",
+            crate::chapters::ChapterId(1),
+            "Test Cave",
+            Vec3::new(0.0, 0.0, 30.0),
+            Vec3::ZERO,
+            64.0,
+        );
+        app.insert_resource(dungeon);
+
+        let returns = dungeon_return_positions(Vec3::new(0.0, 2.0, -8.0), Vec3::X, Vec3::Z);
+        app.world_mut().spawn(DungeonExitPortal {
+            gate_id: "cave_test",
+            position: Vec3::ZERO,
+            return_positions: returns,
+            interact_radius: 5.5,
+        });
+        let mut players = Vec::new();
+        for index in 0..4u8 {
+            players.push(
+                app.world_mut()
+                    .spawn((
+                        Player,
+                        PlayerIndex(index),
+                        PlayerInput {
+                            interact: index == 0,
+                            ..default()
+                        },
+                        Transform::from_xyz(index as f32 * 20.0, 2.0, 0.0),
+                        PlayerMovement::default(),
+                    ))
+                    .id(),
+            );
+        }
+
+        // Activation first arms the portal; a later intentional interaction
+        // performs the return instead of reusing the gate-opening press.
+        app.update();
+        assert!(app.world().resource::<DungeonCrawlState>().active);
+        app.update();
+
+        assert!(!app.world().resource::<DungeonCrawlState>().active);
+        assert!(app
+            .world()
+            .resource::<DungeonCrawlState>()
+            .gate_id
+            .is_none());
+        for (index, entity) in players.into_iter().enumerate() {
+            let transform = app.world().get::<Transform>(entity).unwrap();
+            let movement = app.world().get::<PlayerMovement>(entity).unwrap();
+            assert_eq!(transform.translation, returns[index]);
+            assert_eq!(movement.velocity, Vec3::ZERO);
+            assert_eq!(movement.ground_velocity, Vec3::ZERO);
+        }
+    }
+
+    #[test]
+    fn every_secret_cave_profile_is_continuous_graded_and_terrain_safe() {
+        let seed = GameSettings::default().world_seed;
+        for spec in SECRET_CAVE_LOCATIONS {
+            let width = 10.0 + (spec.chapter.0 % 3) as f32 * 1.5;
+            let profile = secret_cave_floor_profile(spec, seed, width);
+            let forward = Vec3::new(spec.yaw.sin(), 0.0, spec.yaw.cos());
+            let right = Vec3::new(forward.z, 0.0, -forward.x);
+
+            assert!(
+                profile.stations.len() >= 4,
+                "{} has too few stations",
+                spec.label
+            );
+            for pair in profile.stations.windows(2) {
+                let horizontal = (pair[1] - pair[0]).with_y(0.0).length();
+                let grade = (pair[1].y - pair[0].y).abs() / horizontal.max(0.001);
+                assert!(
+                    horizontal <= SECRET_CAVE_TUNNEL_SPACING + 0.01,
+                    "{} has an oversized floor seam",
+                    spec.label
+                );
+                assert!(
+                    grade <= SECRET_CAVE_MAX_GRADE + 0.001,
+                    "{} exceeds safe grade: {grade}",
+                    spec.label
+                );
+            }
+
+            let chamber_front = profile.chamber_surface - forward * SECRET_CAVE_CHAMBER_HALF_LENGTH;
+            let tunnel_end = *profile.stations.last().unwrap();
+            assert!(
+                tunnel_end.distance(chamber_front) <= 0.01,
+                "{} tunnel does not meet its chamber",
+                spec.label
+            );
+
+            let half_width = width * 0.5 + 0.75;
+            let sample_count = (profile.tunnel_end / 1.0).ceil() as usize;
+            let mut maximum_clearance = 0.0_f32;
+            for sample in 0..=sample_count {
+                let along = profile.tunnel_end * sample as f32 / sample_count as f32;
+                let floor = secret_cave_profile_position(&profile, along);
+                for side in [-half_width, 0.0, half_width] {
+                    let point = floor + right * side;
+                    let clearance = floor.y - terrain_surface_y(point.x, point.z, seed);
+                    maximum_clearance = maximum_clearance.max(clearance);
+                    assert!(
+                        clearance >= SECRET_CAVE_TERRAIN_CLEARANCE - 0.08,
+                        "{} intersects terrain at {along:.1}: clearance {clearance:.2}",
+                        spec.label
+                    );
+                }
+            }
+            assert!(
+                maximum_clearance <= SECRET_CAVE_TERRAIN_CLEARANCE + 0.08,
+                "{} floats above its terrain inset: {maximum_clearance:.2}",
+                spec.label
+            );
+
+            let chamber_half_width = (width + 9.0) * 0.5 + 0.65;
+            for along in [-8.5, 0.0, 8.5] {
+                for side in [-chamber_half_width, 0.0, chamber_half_width] {
+                    let point = profile.chamber_surface + forward * along + right * side;
+                    assert!(
+                        profile.chamber_surface.y
+                            >= terrain_surface_y(point.x, point.z, seed)
+                                + SECRET_CAVE_TERRAIN_CLEARANCE
+                                - 0.01,
+                        "{} chamber intersects terrain",
+                        spec.label
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_secret_cave_room_graph_is_connected_and_ordered() {
+        let seed = GameSettings::default().world_seed;
+        for spec in SECRET_CAVE_LOCATIONS {
+            let width = 10.0 + (spec.chapter.0 % 3) as f32 * 1.5;
+            let profile = secret_cave_floor_profile(spec, seed, width);
+            let graph = secret_cave_room_graph(spec, &profile);
+
+            assert_eq!(graph.rooms.map(|room| room.room_index), [0, 1, 2]);
+            assert!(graph.portals[0].connects(0, 1));
+            assert!(graph.portals[1].connects(1, 2));
+            assert!(!graph.portals.iter().any(|portal| portal.connects(0, 2)));
+            for pair in graph.rooms.windows(2) {
+                assert!(
+                    pair[1].focus.distance(pair[0].focus) <= pair[0].camera_radius,
+                    "{} camera zones leave a party-pull gap",
+                    spec.label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_mountain_cave_has_monumental_exterior_gate_dimensions() {
+        const { assert!(ANCIENT_CAVE_GATE_HEIGHT >= 12.0) };
+        for spec in SECRET_CAVE_LOCATIONS {
+            let clear_width = 10.0 + (spec.chapter.0 % 3) as f32 * 1.5;
+            let gate = AncientCaveGate {
+                gate_id: spec.anchor_id,
+                clear_width,
+                height: ANCIENT_CAVE_GATE_HEIGHT,
+            };
+            assert_eq!(gate.gate_id, spec.anchor_id);
+            assert!(gate.clear_width >= 10.0);
+            assert!(gate.height > gate.clear_width * 0.9);
+        }
+    }
+
+    #[test]
+    fn chamber_encounter_stays_locked_until_owned_enemies_are_defeated() {
+        let mut app = App::new();
+        app.add_message::<UiMessageEvent>();
+        app.init_resource::<Time>();
+        app.init_resource::<DungeonRoomState>();
+        app.add_systems(Update, dungeon_encounter_progress_system);
+        let mut dungeon = DungeonCrawlState::default();
+        dungeon.activate(
+            "encounter_test",
+            crate::chapters::ChapterId(1),
+            "Encounter Test",
+            Vec3::ZERO,
+            Vec3::ZERO,
+            32.0,
+        );
+        app.insert_resource(dungeon);
+        app.world_mut().spawn(DungeonEnemySpawner {
+            chapter: 1,
+            encounter: Some(("encounter_test", 2)),
+            enemy_type: EnemyType::Soldier,
+            count: 1,
+            trigger_radius: 10.0,
+            difficulty: 1.0,
+            spawned: true,
+        });
+        let enemy = app
+            .world_mut()
+            .spawn(DungeonEncounterEnemy {
+                gate_id: "encounter_test",
+                room_index: 2,
+            })
+            .id();
+        app.world_mut().spawn((
+            Transform::from_translation(Vec3::Y * 8.0),
+            DungeonEncounterDoor {
+                gate_id: "encounter_test",
+                room_index: 2,
+                closed: Vec3::ZERO,
+                open: Vec3::Y * 8.0,
+            },
+        ));
+        let reward = app
+            .world_mut()
+            .spawn((
+                DungeonEncounterReward {
+                    gate_id: "encounter_test",
+                    room_index: 2,
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+
+        app.update();
+        assert!(!app
+            .world()
+            .resource::<DungeonRoomState>()
+            .cleared_rooms
+            .contains(&("encounter_test", 2)));
+        assert_eq!(
+            app.world().get::<Visibility>(reward),
+            Some(&Visibility::Hidden)
+        );
+
+        app.world_mut().entity_mut(enemy).despawn();
+        app.update();
+        assert!(app
+            .world()
+            .resource::<DungeonRoomState>()
+            .cleared_rooms
+            .contains(&("encounter_test", 2)));
+        assert_eq!(
+            app.world().get::<Visibility>(reward),
+            Some(&Visibility::Visible)
+        );
+    }
+
+    #[test]
+    fn dungeon_room_progression_moves_camera_through_adjacent_rooms() {
+        let mut app = App::new();
+        app.add_message::<UiMessageEvent>();
+        app.init_resource::<DungeonRoomState>();
+        app.add_systems(Update, dungeon_room_progress_system);
+
+        let spec = SECRET_CAVE_LOCATIONS[0];
+        let width = 10.0 + (spec.chapter.0 % 3) as f32 * 1.5;
+        let profile = secret_cave_floor_profile(spec, GameSettings::default().world_seed, width);
+        let graph = secret_cave_room_graph(spec, &profile);
+        for room in graph.rooms {
+            app.world_mut().spawn(room);
+        }
+        for portal in graph.portals {
+            app.world_mut().spawn(portal);
+        }
+        let mut dungeon = DungeonCrawlState::default();
+        dungeon.activate(
+            spec.anchor_id,
+            spec.chapter,
+            spec.label,
+            graph.rooms[0].focus,
+            graph.rooms[0].focus,
+            64.0,
+        );
+        app.insert_resource(dungeon);
+        let players = (0..4u8)
+            .map(|index| {
+                app.world_mut()
+                    .spawn((
+                        Player,
+                        PlayerIndex(index),
+                        Transform::from_translation(
+                            graph.rooms[0].focus + Vec3::X * (index as f32 - 1.5),
+                        ),
+                    ))
+                    .id()
+            })
+            .collect::<Vec<_>>();
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<DungeonRoomState>().active_room,
+            Some(0)
+        );
+
+        for (index, entity) in players.iter().enumerate() {
+            app.world_mut()
+                .get_mut::<Transform>(*entity)
+                .unwrap()
+                .translation = graph.rooms[1].focus + Vec3::X * (index as f32 - 1.5);
+        }
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().resource::<DungeonRoomState>().active_room,
+            Some(1)
+        );
+        assert_eq!(
+            app.world().resource::<DungeonCrawlState>().focus,
+            graph.rooms[1].focus
+        );
+
+        for (index, entity) in players.iter().enumerate() {
+            app.world_mut()
+                .get_mut::<Transform>(*entity)
+                .unwrap()
+                .translation = graph.rooms[2].focus + Vec3::X * (index as f32 - 1.5);
+        }
+        app.update();
+        app.update();
+        let room_state = app.world().resource::<DungeonRoomState>();
+        assert_eq!(room_state.active_room, Some(2));
+        assert_eq!(
+            room_state.visited_rooms,
+            vec![
+                (spec.anchor_id, 0),
+                (spec.anchor_id, 1),
+                (spec.anchor_id, 2)
+            ]
+        );
+        assert_eq!(
+            app.world().resource::<DungeonCrawlState>().radius,
+            graph.rooms[2].camera_radius
+        );
+
+        // A direct cave fast-travel arrival has no active room yet and must
+        // initialize from the chamber instead of forcing the entrance node.
+        app.world_mut()
+            .resource_mut::<DungeonRoomState>()
+            .clear_active();
+        app.update();
+        assert_eq!(
+            app.world().resource::<DungeonRoomState>().active_room,
+            Some(2)
+        );
+        {
+            let mut room_state = app.world_mut().resource_mut::<DungeonRoomState>();
+            room_state.mark_cleared(spec.anchor_id, 2);
+            room_state.mark_cleared(spec.anchor_id, 2);
+            assert_eq!(room_state.cleared_rooms, vec![(spec.anchor_id, 2)]);
+        }
+    }
 
     #[test]
     fn everest_heightmap_asset_loads() {

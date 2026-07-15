@@ -159,7 +159,21 @@ Party-shared exceptions:
   `FastTravelDestination` is a one-shot request consumed by `ChapterPlugin`,
   which moves the complete local party to the cave anchor and activates
   `DungeonCrawlState`. Failed/missing anchors leave the request pending rather
-  than dropping players at an invalid position.
+  than dropping players at an invalid position. `DungeonCrawlState.gate_id`
+  binds the active shared-camera session to exactly one `DungeonExitPortal`;
+  deliberate interaction returns the complete party to authored exterior slots
+  and clears the mode instead of relying on contradictory distance thresholds.
+  Secret-cave terrain insets are the final terrain-mesh height authority after
+  mountain-road shelves. Cave profiles sample that exact cached trimesh,
+  enforce bounded seams/grade/clearance, and connect directly to the chamber.
+  `DungeonRoomZone` nodes and undirected `DungeonRoomPortal` edges form the
+  reusable runtime room graph. `DungeonRoomState` owns transient visited/cleared
+  progression, while the active node drives `DungeonCrawlState` camera focus
+  and radius from the complete party centroid. Every mountain graph is entered
+  through a physical `AncientCaveGate`; fast travel is not required. Combat
+  spawners tag their chamber-owned enemies, allowing `DungeonEncounterDoor` and
+  `DungeonEncounterReward` state to derive from that room's living encounter
+  entities instead of unreliable world-wide enemy counts.
 - **Castle airships are encounter steps**: boss escapes and airship-deck raids are authored as `EncounterStep`s, so castle chapters can add a flying rematch without creating a separate top-level game state.
 - **PlayerInput abstraction**: All gameplay input is written into a `PlayerInput` component per player, keeping keyboard/gamepad mapping in `input_plugin.rs` and player behavior in feature plugins.
 - **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, companion ownership, rewards, and feedback use `PlayerIndex` as the shared key. Shared campaign systems intentionally live in resources like `ChapterProgress` and `PerkTree`.

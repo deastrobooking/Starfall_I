@@ -24,7 +24,9 @@ use crate::components::weapon::{
     BeamSabre, SpecialWeaponInventory, TrackingMissile, WeaponInventory, WeaponRanks, WeaponType,
     MAX_WEAPON_RANK,
 };
-use crate::components::world::{BoatVehicle, DiscussionNpc, DungeonCrawlGate, WorldLoot};
+use crate::components::world::{
+    BoatVehicle, DiscussionNpc, DungeonCrawlGate, DungeonExitPortal, WorldLoot,
+};
 use crate::damage::Health;
 use crate::discussion::DiscussionState;
 use crate::events::*;
@@ -36,9 +38,9 @@ use crate::plugins::save_plugin::{save_current_session, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
-    FastTravelDestination, GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerGuidance,
-    PlayerSelectState, ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage, WaveInfo,
-    WorldSiteRegistry, HERO_ROSTER,
+    DungeonCrawlState, FastTravelDestination, GameSettings, LocalPlayerConfig,
+    PlaySessionTransition, PlayerGuidance, PlayerSelectState, ShopCatalog, ShopCategory,
+    UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
@@ -4367,9 +4369,11 @@ struct GuidanceCandidate {
 fn player_guidance_system(
     mut guidance: ResMut<PlayerGuidance>,
     discussion: Res<DiscussionState>,
+    dungeon: Res<DungeonCrawlState>,
     player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
     npc_q: Query<(&Transform, &DiscussionNpc)>,
     gate_q: Query<&DungeonCrawlGate>,
+    exit_q: Query<&DungeonExitPortal>,
     boat_q: Query<(&Transform, &BoatVehicle)>,
     disc_q: Query<(&Transform, &Discoverable)>,
     loot_q: Query<(&Transform, &WorldLoot)>,
@@ -4384,6 +4388,28 @@ fn player_guidance_system(
     let mut best: Option<GuidanceCandidate> = None;
 
     if !discussion.active {
+        if let Some(active_gate_id) = dungeon.gate_id.filter(|_| dungeon.active) {
+            for portal in exit_q
+                .iter()
+                .filter(|portal| portal.gate_id == active_gate_id)
+            {
+                if let Some((player_index, distance)) =
+                    nearest_player_to(&player_q, portal.position)
+                {
+                    if distance <= portal.interact_radius + 4.0 {
+                        offer_guidance(
+                            &mut best,
+                            0.0,
+                            distance,
+                            "Return to the Mountain",
+                            format!("P{} can return the complete party.", player_index + 1),
+                            "E / D-pad Down: Exit dungeon",
+                        );
+                    }
+                }
+            }
+        }
+
         for (npc_transform, npc) in npc_q.iter() {
             if let Some((player_index, distance)) =
                 nearest_player_to(&player_q, npc_transform.translation)
@@ -4401,7 +4427,7 @@ fn player_guidance_system(
             }
         }
 
-        for gate in gate_q.iter() {
+        for gate in gate_q.iter().filter(|gate| !gate.opened) {
             if let Some((player_index, distance)) = nearest_player_to(&player_q, gate.entry) {
                 if distance <= gate.interact_radius + 4.0 {
                     offer_guidance(

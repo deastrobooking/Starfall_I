@@ -88,6 +88,22 @@ together.
   `dragon_dungeon_chXX` anchors for future boss/key/switch staging. Dungeon
   gates activate `DungeonCrawlState`, which switches players to one top-down
   screen and makes melee/Star Sabre use wider dungeon arcs.
+- Shared-screen dungeons now carry a stable active `gate_id` and spawn a
+  `DungeonExitPortal`. A second intentional interact returns every local player
+  to safe exterior slots, clears movement/boat state, and releases the linked
+  camera; do not reintroduce distance-only dungeon exit logic.
+- Mountain cave floors use adaptive continuous profiles sampled from the final
+  terrain trimesh. Cave insets run after road terracing, and tests enforce seam,
+  grade, minimum-clearance, maximum-float, and chamber-connection contracts for
+  all fourteen authored caves.
+- Mountain caves generate stable three-node `DungeonRoomZone` graphs connected
+  by `DungeonRoomPortal` edges. `DungeonRoomState` tracks active/visited/cleared
+  identities, and party-centroid adjacency plus hysteresis drives the shared
+  camera focus without room skipping or boundary bounce.
+- Every mountain cave has a physical 13.5-meter `AncientCaveGate`; discovery
+  fast travel is optional. Star Chamber spawners tag `DungeonEncounterEnemy`
+  ownership, so their collision-backed seals close during combat and reopen
+  with a visible reward only when that chamber's enemies are gone.
 - Great Scientist temple subquests also live in `src/plugins/world_plugin.rs`.
   They reuse dungeon gates/top-down mode and `HiddenReward` caches to grant
   persistent mechanics upgrades: flight core, solar sabre/laser, nova missile,

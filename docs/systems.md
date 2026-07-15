@@ -839,17 +839,42 @@ and the fast-travel map so cave coordinates cannot drift between systems.
 `WorldPlugin` spawns the physical cave systems when the world is generated:
 
 - Stone and dark-rock tunnel entrances.
-- Walkable tunnel floors, side walls, back chambers, and colliders.
+- Walkable tunnel floors, side walls, back chambers, and colliders. Tunnel
+  stations sample the final piecewise-planar terrain collider, enforce bounded
+  spacing/grade/clearance, and spawn overlapping pitch-aligned floors with
+  matching walls. A broad blended cave inset runs after road terracing so road
+  shelves cannot push a mountain wedge back through the dungeon. The final
+  tunnel station and chamber front share an exact surface position.
 - Brushed-metal ribs, glass panels, glowing crystals, and point lights so the caves keep the ancient/new style.
 - Two small moving platforms inside each chamber.
 - A `WorldAnchor` named `secret_cave_ch01` through `secret_cave_ch14` at each cave's inner discovery point.
-- An interactable two-panel dungeon gate at every mountain entrance. Interact
+- A monumental `AncientCaveGate` at every mountain entrance: 13.5-meter stone
+  pylons, a deep lintel, luminous crown runes/keystone, recessed cave mouth,
+  and animated collision-backed stone doors. These are canonical world-space
+  entrances; cave fast travel remains an earned optional shortcut. Interact
   gathers up to four players, switches all viewports to one top-down camera,
   remaps movement to fixed dungeon axes, and enables the wider dungeon melee
   and Star Sabre arcs.
+- A gate-keyed glowing return portal inside every cave, dragon lair, and Great
+  Scientist temple. A separate `E` / D-pad Down press returns all four players
+  to distinct safe exterior slots, clears their travel momentum/boat state,
+  and releases the shared camera. The activation-frame arming guard prevents
+  the gate-opening press from immediately exiting again.
+- A reusable `DungeonRoomZone` / `DungeonRoomPortal` graph. Mountain caves
+  currently generate Entrance Gallery, Traversal Tunnel, and Star Chamber
+  nodes connected by two explicit adjacency edges. `DungeonRoomState` tracks
+  the active gate/room plus visited and cleared room identities for the session.
+  Party-centroid nearest-room selection uses an adjacency check and hysteresis;
+  entering a room updates `DungeonCrawlState.focus/radius`, producing stable
+  shared-camera moves without skipping a graph edge or bouncing at a midpoint.
 - Two chapter-scaled Gauntlet-style enemy waves per cave, plus broad alternating
   jump pads and the existing vertical moving platforms for Mario-3D-World-style
   cooperative traversal that remains readable on one screen.
+- Star Chamber waves use `DungeonEncounterEnemy` ownership rather than global
+  enemy counts. `DungeonEncounterDoor` lowers after the chamber wave spawns,
+  remains sealed while any owned enemy lives, then opens permanently for the
+  session and reveals the matching `DungeonEncounterReward`. Unrelated enemies
+  elsewhere in the cave or world cannot incorrectly hold the seal closed.
 - A glowing chamber checkpoint. Once the matching cave discovery is saved,
   Chapter Select enables a purple `C` map button at the real cave coordinates.
   Selecting it transports every active player to the checkpoint and activates

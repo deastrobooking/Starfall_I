@@ -143,6 +143,7 @@ fn apply_pending_chapter_travel(
         };
         move_players_to_world_anchor(&mut commands, &mut player_q, anchor);
         dungeon.activate(
+            cave.anchor_id,
             cave.chapter,
             pending_travel.cave_label.unwrap_or(cave.label),
             anchor,
