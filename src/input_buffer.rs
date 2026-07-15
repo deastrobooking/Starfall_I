@@ -296,9 +296,11 @@ mod tests {
 
         // Base carries a field the buffer doesn't own (pause) and a stale edge
         // (dodge) that must NOT leak through the overlay.
-        let mut base = PlayerInput::default();
-        base.pause = true;
-        base.dodge = true;
+        let base = PlayerInput {
+            pause: true,
+            dodge: true,
+            ..default()
+        };
 
         let eff = tick.overlay(&base);
         assert!(eff.jump, "buffered jump edge must fire on this tick");

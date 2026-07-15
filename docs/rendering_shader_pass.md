@@ -53,6 +53,32 @@ four-viewport scenes on target hardware.
   post-process cost and require per-view texture dimensions rather than the
   hardcoded 1920×1080 texel size suggested by the review.
 
+## R6 realistic water pass delivered — July 2026
+
+1. Water deformation now combines four differently directed wave bands instead
+   of two axis-aligned waves. The vertex shader derives the surface gradient
+   analytically, so sun glints and reflections follow the animated shape without
+   normal-map texture fetches or CPU mesh updates.
+2. The fragment pass adds view-angle optical-depth color variation, live
+   directional-light tint, a bounded Blinn-style sun highlight, forward scatter,
+   Fresnel sky/horizon reflection, crest foam, and optional UV shoreline foam.
+   The implementation remains branchless in the per-fragment water logic.
+3. Ocean and river use separate typed profiles. Ocean water has stronger swell
+   and shoreline foam; the calmer river profile disables mesh-edge foam so its
+   tiled sections do not reveal artificial white seams.
+4. Forge `water_v1` records remain backward compatible: the existing speed,
+   frequency, amplitude, secondary-wave, Fresnel, and opacity controls drive the
+   upgraded shader while new optical/foam values receive bounded production
+   defaults. A later authoring slice may expose those advanced values without a
+   material schema break.
+5. Contract tests require the layered-wave, reflection, glint, and foam paths and
+   verify that ocean/river defaults remain bounded.
+
+This is a realistic stylized surface pass, not full fluid simulation. True
+geometry-aware shore intersection, refraction, planar/screen-space reflection,
+boat displacement wakes, caustics, and an underwater camera still require
+explicit depth/render-graph or gameplay integrations and four-viewport budgets.
+
 ## R2 delivered
 
 1. Charge shots, Homing Star missiles/trails, magic tracking beams, Tri-Star

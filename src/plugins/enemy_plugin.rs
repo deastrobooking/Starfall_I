@@ -5,8 +5,8 @@ use crate::characters::{enemy_config, spawn_cartoon_character};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
     boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, Enemy, EnemyAIState,
-    EnemyAttackVfx, MechBoss, RiftBoss,
-    EnemyProjectile, EnemyProjectileKind, EnemyStateMachine, EnemyType, FlyingDrone,
+    EnemyAttackVfx, EnemyProjectile, EnemyProjectileKind, EnemyStateMachine, EnemyType,
+    FlyingDrone, MechBoss, RiftBoss,
 };
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
@@ -397,8 +397,15 @@ fn enemy_ai_system(
     let dt = time.delta_secs();
     let rng = game_rng.world();
 
-    for (mut transform, mut enemy, mut sm, health, drone, city_spy, (dragon_boss, rift_boss, mech_boss)) in
-        enemy_q.iter_mut()
+    for (
+        mut transform,
+        mut enemy,
+        mut sm,
+        health,
+        drone,
+        city_spy,
+        (dragon_boss, rift_boss, mech_boss),
+    ) in enemy_q.iter_mut()
     {
         if !health.is_alive() {
             continue;
@@ -407,7 +414,8 @@ fn enemy_ai_system(
         sm.timer += dt;
         enemy.attack_cooldown_timer = (enemy.attack_cooldown_timer - dt).max(0.0);
 
-        if dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some() || city_spy.is_some() {
+        if dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some() || city_spy.is_some()
+        {
             continue;
         }
 
@@ -843,8 +851,8 @@ fn rift_boss_system(
             spawn_shockwave_vfx(&mut commands, &assets, transform.translation, 2.4, 0.30);
             let ring = 20.0 - phase * 4.0;
             let angle = boss.weave_angle * 1.9;
-            let arrival = player_pos
-                + Vec3::new(angle.cos() * ring, 2.2 + phase * 0.6, angle.sin() * ring);
+            let arrival =
+                player_pos + Vec3::new(angle.cos() * ring, 2.2 + phase * 0.6, angle.sin() * ring);
             transform.translation = arrival;
             spawn_shockwave_vfx(&mut commands, &assets, arrival, 2.8, 0.30);
 
@@ -883,8 +891,8 @@ fn rift_boss_system(
             };
             for (i, kind) in kinds.iter().enumerate() {
                 let theta = boss.weave_angle * 2.3 + i as f32 * 2.4;
-                let spot = transform.translation
-                    + Vec3::new(theta.cos() * 5.0, -1.2, theta.sin() * 5.0);
+                let spot =
+                    transform.translation + Vec3::new(theta.cos() * 5.0, -1.2, theta.sin() * 5.0);
                 spawn_shockwave_vfx(&mut commands, &assets, spot, 2.0, 0.35);
                 spawn_enemy_entity(
                     &mut commands,
@@ -922,7 +930,13 @@ fn mech_boss_system(
         (With<Player>, Without<BossEnemy>),
     >,
     mut boss_q: Query<
-        (&mut Transform, &Enemy, &mut MechBoss, &Health, &mut Damageable),
+        (
+            &mut Transform,
+            &Enemy,
+            &mut MechBoss,
+            &Health,
+            &mut Damageable,
+        ),
         (With<BossEnemy>, Without<Player>),
     >,
     mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
@@ -1416,8 +1430,7 @@ fn enemy_attack_system(
         if !health.is_alive() {
             continue;
         }
-        if drone.is_some() || dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some()
-        {
+        if drone.is_some() || dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some() {
             continue;
         }
         if sm.current != EnemyAIState::Attack {

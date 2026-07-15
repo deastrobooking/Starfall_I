@@ -241,19 +241,46 @@ pub struct WaterMaterial {
 pub struct WaterMaterialUniform {
     pub deep_color: Vec4,
     pub shallow_color: Vec4,
+    /// RGB foam color; W is foam brightness.
+    pub foam_color: Vec4,
+    /// RGB horizon reflection tint; W is unused padding.
+    pub horizon_color: Vec4,
     /// X speed, Y spatial frequency, Z amplitude, W secondary-wave scale.
     pub wave: Vec4,
     /// X Fresnel exponent, Y base opacity, Z edge opacity, W light tint.
     pub surface: Vec4,
+    /// X specular strength, Y highlight exponent, Z forward scatter, W reflection.
+    pub optics: Vec4,
+    /// X crest threshold, Y softness, Z shoreline UV width, W shoreline strength.
+    pub foam: Vec4,
 }
 
 impl Default for WaterMaterialUniform {
     fn default() -> Self {
         Self {
-            deep_color: Vec4::new(0.015, 0.10, 0.28, 0.82),
-            shallow_color: Vec4::new(0.05, 0.56, 0.72, 0.72),
-            wave: Vec4::new(0.72, 0.055, 0.16, 0.63),
-            surface: Vec4::new(3.2, 0.66, 0.90, 0.25),
+            deep_color: Vec4::new(0.008, 0.055, 0.16, 0.86),
+            shallow_color: Vec4::new(0.025, 0.38, 0.50, 0.74),
+            foam_color: Vec4::new(0.82, 0.96, 1.0, 0.90),
+            horizon_color: Vec4::new(0.36, 0.62, 0.82, 0.0),
+            wave: Vec4::new(0.68, 0.050, 0.18, 0.58),
+            surface: Vec4::new(4.2, 0.70, 0.94, 0.32),
+            optics: Vec4::new(0.95, 96.0, 0.28, 0.58),
+            foam: Vec4::new(0.68, 0.12, 0.035, 0.75),
+        }
+    }
+}
+
+impl WaterMaterialUniform {
+    /// Calmer inland water with no mesh-edge shoreline term. River sections are
+    /// tiled, so disabling that term prevents artificial foam at every seam.
+    pub fn river() -> Self {
+        Self {
+            deep_color: Vec4::new(0.012, 0.09, 0.18, 0.88),
+            shallow_color: Vec4::new(0.035, 0.34, 0.38, 0.78),
+            wave: Vec4::new(0.48, 0.075, 0.085, 0.44),
+            optics: Vec4::new(0.72, 72.0, 0.36, 0.46),
+            foam: Vec4::new(0.77, 0.10, 0.0, 0.0),
+            ..Self::default()
         }
     }
 }
@@ -470,9 +497,28 @@ mod shader_contract_tests {
         let lava = LavaMaterialUniform::default();
         assert!((0.0..=1.0).contains(&water.surface.y));
         assert!((0.0..=1.0).contains(&water.surface.z));
+        assert!((0.0..=1.0).contains(&water.optics.x));
+        assert!(water.optics.y >= 1.0);
+        assert!((0.0..=1.0).contains(&water.foam.w));
         assert!((0.0..=1.0).contains(&energy.motion.w));
         assert!((0.0..=1.0).contains(&shield.pattern.w));
         assert!((0.0..=1.0).contains(&ice.surface.y));
         assert!(lava.motion.w > 0.0 && lava.motion.w <= 2.0);
+    }
+
+    #[test]
+    fn realistic_water_keeps_ocean_and_tiled_river_profiles_safe() {
+        let ocean = WaterMaterialUniform::default();
+        let river = WaterMaterialUniform::river();
+
+        assert!(ocean.wave.z > river.wave.z);
+        assert!(ocean.foam.w > 0.0);
+        assert_eq!(river.foam.z, 0.0);
+        assert_eq!(river.foam.w, 0.0);
+        assert!(WATER_SHADER.contains("let phase_d"));
+        assert!(WATER_SHADER.contains("reflect(-view_direction, normal)"));
+        assert!(WATER_SHADER.contains("let sun_glint"));
+        assert!(WATER_SHADER.contains("let shoreline"));
+        assert!(WATER_SHADER.contains("smoothstep(crest_start"));
     }
 }

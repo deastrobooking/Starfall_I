@@ -1869,8 +1869,11 @@ fn generate_city(
     let m = &mut *mats;
 
     let pal = Palette::build(m, &asset_server);
-    let water_surface = water_mats.add(WaterMaterial {
+    let ocean_water = water_mats.add(WaterMaterial {
         settings: WaterMaterialUniform::default(),
+    });
+    let river_water = water_mats.add(WaterMaterial {
+        settings: WaterMaterialUniform::river(),
     });
 
     spawn_lighting(&mut commands, &mut meshes, m);
@@ -1891,13 +1894,13 @@ fn generate_city(
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
     spawn_everest_range_biomes(&mut commands, &mut meshes, &pal, seed);
     if current.id.0 == 1 {
-        spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal, &water_surface);
+        spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal, &ocean_water);
     }
     spawn_grasslands(&mut commands, &mut meshes, &mut grass_mats, seed + 10);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8, seed);
-    spawn_river(&mut commands, &mut meshes, &pal, &water_surface);
+    spawn_river(&mut commands, &mut meshes, &pal, &river_water);
     spawn_water_gardens(&mut commands, &mut meshes, &pal, seed + 12, seed);
     spawn_mana_waterfalls(&mut commands, &mut meshes, &pal, seed + 18, seed);
     spawn_mana_forests(&mut commands, &mut meshes, &pal, seed + 19, seed);

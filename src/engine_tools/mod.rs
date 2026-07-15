@@ -1553,6 +1553,7 @@ fn add_published_material(world: &mut World, spec: &ForgeMaterialSpec) -> Publis
                     spec.values[3],
                 ),
                 surface,
+                ..default()
             };
             PublishedMaterialHandle::Water(
                 world
