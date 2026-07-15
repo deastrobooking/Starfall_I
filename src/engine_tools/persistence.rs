@@ -1,6 +1,6 @@
 //! Versioned, atomic persistence for Starfall Forge projects.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -528,6 +528,12 @@ pub struct ProceduralRecipeDraft {
     #[serde(default)]
     pub material_slots: BTreeMap<String, String>,
     #[serde(default)]
+    pub spline_points: Vec<RoadSplinePointDraft>,
+    #[serde(default)]
+    pub topology_nodes: Vec<WorldTopologyNodeDraft>,
+    #[serde(default)]
+    pub topology_edges: Vec<WorldTopologyEdgeDraft>,
+    #[serde(default)]
     pub fields: BTreeMap<String, serde_json::Value>,
 }
 
@@ -538,9 +544,62 @@ impl Default for ProceduralRecipeDraft {
             seed: 0,
             revision: 0,
             material_slots: BTreeMap::new(),
+            spline_points: Vec::new(),
+            topology_nodes: Vec::new(),
+            topology_edges: Vec::new(),
             fields: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoadSplinePointDraft {
+    pub point_id: String,
+    pub position: [f32; 3],
+    #[serde(default = "one_f32")]
+    pub width_scale: f32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldTopologyNodeKind {
+    #[default]
+    Room,
+    Entrance,
+    FastTravel,
+    Zone,
+    Landmark,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorldTopologyNodeDraft {
+    pub node_id: String,
+    #[serde(default)]
+    pub kind: WorldTopologyNodeKind,
+    pub position: [f32; 3],
+    pub size: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldTopologyEdgeKind {
+    #[default]
+    Door,
+    Stair,
+    Tunnel,
+    Portal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorldTopologyEdgeDraft {
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub kind: WorldTopologyEdgeKind,
+}
+
+fn one_f32() -> f32 {
+    1.0
 }
 
 pub fn procedural_material_slots(category: ContentCategory) -> &'static [&'static str] {
@@ -1017,6 +1076,179 @@ fn validate_procedural_recipe(
     };
     if let Some(message) = budget_error {
         errors.push(ProjectValidationError::InvalidProceduralRecipe(message));
+    }
+    validate_procedural_topology(content_id, category, recipe, errors);
+}
+
+fn validate_procedural_topology(
+    content_id: &str,
+    category: ContentCategory,
+    recipe: &ProceduralRecipeDraft,
+    errors: &mut Vec<ProjectValidationError>,
+) {
+    if category == ContentCategory::Road {
+        if recipe.spline_points.len() == 1 || recipe.spline_points.len() > 64 {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: road spline must contain 0 or 2–64 points"
+            )));
+        }
+        let mut ids = BTreeSet::new();
+        for point in &recipe.spline_points {
+            if point.point_id.trim().is_empty() || !ids.insert(point.point_id.clone()) {
+                errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                    "{content_id}: spline point IDs must be nonempty and unique"
+                )));
+            }
+            if !point.position.iter().all(|value| value.is_finite())
+                || !point.width_scale.is_finite()
+                || !(0.5..=2.0).contains(&point.width_scale)
+            {
+                errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                    "{content_id}: spline point {} has invalid position/width scale",
+                    point.point_id
+                )));
+            }
+        }
+        let max_grade = procedural_parameter_specs(category)
+            .iter()
+            .find(|spec| spec.key == "max_grade_deg")
+            .map(|spec| procedural_parameter_value(recipe, *spec))
+            .unwrap_or(22.0)
+            .to_radians();
+        for points in recipe.spline_points.windows(2) {
+            let a = points[0].position;
+            let b = points[1].position;
+            let dx = (b[0] - a[0]) as f64;
+            let dy = (b[1] - a[1]) as f64;
+            let dz = (b[2] - a[2]) as f64;
+            let horizontal = dx.hypot(dz);
+            let length = horizontal.hypot(dy);
+            if !(2.0..=500.0).contains(&length) || horizontal <= 0.25 {
+                errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                    "{content_id}: spline segments must be 2–500m with horizontal travel"
+                )));
+            } else if dy.abs().atan2(horizontal) > max_grade + 1.0e-6 {
+                errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                    "{content_id}: spline segment exceeds maximum road grade"
+                )));
+            }
+        }
+    } else if !recipe.spline_points.is_empty() {
+        errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+            "{content_id}: spline points are only valid for Road recipes"
+        )));
+    }
+
+    if recipe.topology_nodes.len() > 96 || recipe.topology_edges.len() > 192 {
+        errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+            "{content_id}: topology exceeds the 96-node/192-edge compiler budget"
+        )));
+        return;
+    }
+    let mut nodes = BTreeMap::new();
+    for node in &recipe.topology_nodes {
+        if node.node_id.trim().is_empty() || nodes.insert(node.node_id.clone(), node).is_some() {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: topology node IDs must be nonempty and unique"
+            )));
+        }
+        if !node.position.iter().all(|value| value.is_finite())
+            || !node
+                .size
+                .iter()
+                .all(|value| value.is_finite() && *value > 0.25 && *value <= 250.0)
+        {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: topology node {} has invalid position/size",
+                node.node_id
+            )));
+        }
+    }
+    let mut adjacency = BTreeMap::<String, Vec<String>>::new();
+    let mut edge_ids = BTreeSet::new();
+    for edge in &recipe.topology_edges {
+        let valid =
+            edge.from != edge.to && nodes.contains_key(&edge.from) && nodes.contains_key(&edge.to);
+        let (a, b) = if edge.from <= edge.to {
+            (&edge.from, &edge.to)
+        } else {
+            (&edge.to, &edge.from)
+        };
+        let edge_id = format!("{:?}:{a}:{b}", edge.kind);
+        if !valid || !edge_ids.insert(edge_id) {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: topology edges must be unique and reference two valid nodes"
+            )));
+            continue;
+        }
+        adjacency
+            .entry(edge.from.clone())
+            .or_default()
+            .push(edge.to.clone());
+        adjacency
+            .entry(edge.to.clone())
+            .or_default()
+            .push(edge.from.clone());
+    }
+
+    if !recipe.topology_nodes.is_empty()
+        && matches!(category, ContentCategory::Building | ContentCategory::Cave)
+    {
+        if !recipe
+            .topology_nodes
+            .iter()
+            .any(|node| node.kind == WorldTopologyNodeKind::Entrance)
+        {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: navigable topology requires an entrance"
+            )));
+        }
+        let start = recipe.topology_nodes[0].node_id.clone();
+        let mut visited = BTreeSet::from([start.clone()]);
+        let mut queue = VecDeque::from([start]);
+        while let Some(node) = queue.pop_front() {
+            for neighbor in adjacency.get(&node).into_iter().flatten() {
+                if visited.insert(neighbor.clone()) {
+                    queue.push_back(neighbor.clone());
+                }
+            }
+        }
+        if visited.len() != recipe.topology_nodes.len() {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: every room must be reachable from the topology entrance"
+            )));
+        }
+        for (index, left) in recipe.topology_nodes.iter().enumerate() {
+            for right in recipe.topology_nodes.iter().skip(index + 1) {
+                let overlaps = (0..3).all(|axis| {
+                    (left.position[axis] - right.position[axis]).abs()
+                        < (left.size[axis] + right.size[axis]) * 0.5 - 0.25
+                });
+                if overlaps {
+                    errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                        "{content_id}: rooms {} and {} overlap before collision build",
+                        left.node_id, right.node_id
+                    )));
+                }
+            }
+        }
+    }
+    if category == ContentCategory::Cave && !recipe.topology_nodes.is_empty() {
+        let requested = procedural_parameter_specs(category)
+            .iter()
+            .find(|spec| spec.key == "fast_travel_points")
+            .map(|spec| procedural_parameter_value(recipe, *spec) as usize)
+            .unwrap_or_default();
+        let authored = recipe
+            .topology_nodes
+            .iter()
+            .filter(|node| node.kind == WorldTopologyNodeKind::FastTravel)
+            .count();
+        if authored < requested {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: cave requests {requested} fast-travel points but authors {authored}"
+            )));
+        }
     }
 }
 
@@ -2136,6 +2368,82 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn road_spline_preflight_rejects_duplicate_ids_and_excessive_grade() {
+        let mut project = ForgeProject::default();
+        let road_id = project
+            .create_content(ContentCategory::Road, "Unsafe Spline")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&road_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe.spline_points = vec![
+            RoadSplinePointDraft {
+                point_id: "same".into(),
+                position: [0.0, 0.0, 0.0],
+                width_scale: 1.0,
+            },
+            RoadSplinePointDraft {
+                point_id: "same".into(),
+                position: [0.0, 50.0, 10.0],
+                width_scale: 1.0,
+            },
+        ];
+        let errors = validate_project(&project);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("unique")
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("maximum road grade")
+        )));
+    }
+
+    #[test]
+    fn room_graph_preflight_requires_reachability_and_nonoverlap() {
+        let mut project = ForgeProject::default();
+        let building_id = project
+            .create_content(ContentCategory::Building, "Broken Rooms")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&building_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe.topology_nodes = vec![
+            WorldTopologyNodeDraft {
+                node_id: "entry".into(),
+                kind: WorldTopologyNodeKind::Entrance,
+                position: [0.0, 0.0, 0.0],
+                size: [8.0, 4.0, 8.0],
+            },
+            WorldTopologyNodeDraft {
+                node_id: "room".into(),
+                kind: WorldTopologyNodeKind::Room,
+                position: [1.0, 0.0, 0.0],
+                size: [8.0, 4.0, 8.0],
+            },
+        ];
+        let errors = validate_project(&project);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("reachable")
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("overlap")
+        )));
     }
 
     #[test]

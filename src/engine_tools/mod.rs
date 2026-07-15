@@ -33,8 +33,9 @@ use crate::rendering::{
 use crate::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
-    GenericRecipeDraft, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore, SceneObjectDraft,
-    TransformDraft,
+    GenericRecipeDraft, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore,
+    RoadSplinePointDraft, SceneObjectDraft, TransformDraft, WorldTopologyEdgeDraft,
+    WorldTopologyEdgeKind, WorldTopologyNodeDraft, WorldTopologyNodeKind,
 };
 
 #[derive(SystemParam)]
@@ -637,6 +638,8 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<PublishedContentCatalogEpoch>()
             .init_resource::<EditorRegistryState>()
             .init_resource::<WorldKitPreviewState>()
+            .init_resource::<WorldKitSandboxState>()
+            .init_resource::<WorldKitSandboxAssets>()
             .init_resource::<EditorTextInputCapture>()
             .register_type::<EditorEntityId>()
             .add_systems(Startup, bootstrap_published_content_catalogs)
@@ -663,6 +666,7 @@ impl Plugin for EngineToolsPlugin {
                     apply_editor_actions,
                     sync_forge_material_preview,
                     sync_world_kit_preview,
+                    sync_world_kit_sandbox,
                     sync_world_adapters,
                     update_editor_workspace_text,
                     update_editor_button_style,
@@ -789,8 +793,8 @@ pub enum EditorCommand {
     },
     SetProceduralRecipe {
         content_id: String,
-        before: ProceduralRecipeDraft,
-        after: ProceduralRecipeDraft,
+        before: Box<ProceduralRecipeDraft>,
+        after: Box<ProceduralRecipeDraft>,
     },
 }
 
@@ -828,7 +832,7 @@ impl EditorCommand {
             Self::SetTransform { id, after, .. } => set_transform(world, *id, *after),
             Self::SetProceduralRecipe {
                 content_id, after, ..
-            } => set_procedural_recipe(world, content_id, after.clone()),
+            } => set_procedural_recipe(world, content_id, (**after).clone()),
         }
     }
 
@@ -837,7 +841,7 @@ impl EditorCommand {
             Self::SetTransform { id, before, .. } => set_transform(world, *id, *before),
             Self::SetProceduralRecipe {
                 content_id, before, ..
-            } => set_procedural_recipe(world, content_id, before.clone()),
+            } => set_procedural_recipe(world, content_id, (**before).clone()),
         }
     }
 }
@@ -1123,6 +1127,9 @@ enum EditorAction {
     RecipeSeedDecrease,
     RecipeSeedIncrease,
     ValidateSelectedRecipe,
+    SeedDefaultTopology,
+    CompileSandboxRoot,
+    ClearSandboxRoot,
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1135,9 +1142,30 @@ enum EditorPanelKind {
 #[derive(Component)]
 struct WorldKitPreview;
 
+#[derive(Component, Debug, Clone)]
+struct WorldKitGeneratedRoot {
+    content_id: String,
+    signature: String,
+}
+
+#[derive(Component)]
+struct WorldKitGeneratedPart;
+
 #[derive(Resource, Default)]
 struct WorldKitPreviewState {
     signature: Option<String>,
+}
+
+#[derive(Resource, Default)]
+struct WorldKitSandboxState {
+    active_content_id: Option<String>,
+    applied_signature: Option<String>,
+}
+
+#[derive(Resource, Default)]
+struct WorldKitSandboxAssets {
+    cube: Option<Handle<Mesh>>,
+    fallback: Option<Handle<StandardMaterial>>,
 }
 
 #[derive(Resource, Default)]
@@ -2105,6 +2133,169 @@ fn sync_world_kit_preview(world: &mut World) {
     );
 }
 
+fn clear_world_kit_sandbox(world: &mut World) {
+    let roots = world
+        .query_filtered::<Entity, With<WorldKitGeneratedRoot>>()
+        .iter(world)
+        .collect::<Vec<_>>();
+    for root in roots {
+        world.despawn(root);
+    }
+    *world.resource_mut::<WorldKitSandboxState>() = WorldKitSandboxState::default();
+}
+
+fn sync_world_kit_sandbox(world: &mut World) {
+    let active_content_id = world
+        .resource::<WorldKitSandboxState>()
+        .active_content_id
+        .clone();
+    let Some(content_id) = active_content_id else {
+        return;
+    };
+    let selected = {
+        let session = world.resource::<EditorProjectSession>();
+        session
+            .project
+            .records
+            .iter()
+            .find(|record| record.content_id == content_id)
+            .and_then(|record| {
+                let recipe = session
+                    .project
+                    .payloads
+                    .get(&record.content_id)?
+                    .procedural_recipe()?
+                    .clone();
+                Some((record.category, recipe))
+            })
+    };
+    let Some((category, recipe)) = selected else {
+        set_editor_status(
+            world,
+            format!("Sandbox recipe {content_id} no longer exists"),
+        );
+        return;
+    };
+    let Ok(signature) = serde_json::to_string(&(content_id.as_str(), category, &recipe)) else {
+        set_editor_status(world, "Sandbox recipe signature could not be serialized");
+        return;
+    };
+    if world
+        .resource::<WorldKitSandboxState>()
+        .applied_signature
+        .as_deref()
+        == Some(signature.as_str())
+    {
+        return;
+    }
+    let errors = validate_project(&world.resource::<EditorProjectSession>().project)
+        .into_iter()
+        .map(|error| format!("{error:?}"))
+        .filter(|error| error.contains(&content_id))
+        .collect::<Vec<_>>();
+    if let Some(error) = errors.first() {
+        set_editor_status(
+            world,
+            format!("Sandbox retained last valid {content_id}: {error}"),
+        );
+        return;
+    }
+    let parts = match compile_world_kit(category, &recipe) {
+        Ok(parts) => parts,
+        Err(error) => {
+            set_editor_status(
+                world,
+                format!("Sandbox compile rejected for {content_id}: {error}"),
+            );
+            return;
+        }
+    };
+
+    let cube = if let Some(handle) = world.resource::<WorldKitSandboxAssets>().cube.clone() {
+        handle
+    } else {
+        let handle = world
+            .resource_mut::<Assets<Mesh>>()
+            .add(Cuboid::new(1.0, 1.0, 1.0));
+        world.resource_mut::<WorldKitSandboxAssets>().cube = Some(handle.clone());
+        handle
+    };
+    let fallback = if let Some(handle) = world.resource::<WorldKitSandboxAssets>().fallback.clone()
+    {
+        handle
+    } else {
+        let handle = world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(Color::srgb(0.24, 0.36, 0.52));
+        world.resource_mut::<WorldKitSandboxAssets>().fallback = Some(handle.clone());
+        handle
+    };
+    let camera = world
+        .query_filtered::<&Transform, With<EditorCamera>>()
+        .iter(world)
+        .next()
+        .copied()
+        .unwrap_or_else(|| Transform::from_xyz(0.0, 4.0, 12.0).looking_at(Vec3::ZERO, Vec3::Y));
+    let root_transform = Transform::from_translation(
+        camera.translation + camera.forward() * 12.0 + camera.right() * 4.0,
+    )
+    .with_scale(Vec3::splat(0.10));
+    let new_root = world
+        .spawn((
+            EditorWorkspaceRoot,
+            WorldKitGeneratedRoot {
+                content_id: content_id.clone(),
+                signature: signature.clone(),
+            },
+            Name::new(format!("World Kit Sandbox • {content_id}")),
+            root_transform,
+            GlobalTransform::default(),
+        ))
+        .id();
+    for part in &parts {
+        let mut transform = part.transform;
+        transform.scale = part.size;
+        let child = world
+            .spawn((
+                WorldKitGeneratedPart,
+                Name::new(part.name.clone()),
+                Mesh3d(cube.clone()),
+                MeshMaterial3d(fallback.clone()),
+                transform,
+                crate::physics::prelude::RigidBody::Fixed,
+                crate::physics::prelude::Collider::cuboid(0.5, 0.5, 0.5),
+            ))
+            .id();
+        if let Some(material_id) = recipe.material_slots.get(part.material_slot) {
+            if apply_catalog_material(world, child, material_id) {
+                world.entity_mut(child).remove::<EditorMaterialBinding>();
+            }
+        }
+        world.entity_mut(new_root).add_child(child);
+    }
+
+    let old_roots = world
+        .query::<(Entity, &WorldKitGeneratedRoot)>()
+        .iter(world)
+        .filter_map(|(entity, root)| {
+            (entity != new_root).then_some((entity, root.signature.clone()))
+        })
+        .collect::<Vec<_>>();
+    for (root, _) in old_roots {
+        world.despawn(root);
+    }
+    world
+        .resource_mut::<WorldKitSandboxState>()
+        .applied_signature = Some(signature);
+    set_editor_status(
+        world,
+        format!(
+            "Atomically compiled {content_id} into {} sandbox parts",
+            parts.len()
+        ),
+    );
+}
+
 fn exit_editor_workspace(
     mut commands: Commands,
     roots: Query<Entity, With<EditorWorkspaceRoot>>,
@@ -2538,6 +2729,24 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                             63,
                             EditorAction::ValidateSelectedRecipe,
                             "VALIDATE WORLD RECIPE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            64,
+                            EditorAction::SeedDefaultTopology,
+                            "SEED DEFAULT TOPOLOGY",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            65,
+                            EditorAction::CompileSandboxRoot,
+                            "COMPILE SANDBOX ROOT",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            66,
+                            EditorAction::ClearSandboxRoot,
+                            "CLEAR SANDBOX ROOT",
                         );
                     },
                 );
@@ -3331,8 +3540,8 @@ fn execute_recipe_edit(
         description: description.clone(),
         commands: vec![EditorCommand::SetProceduralRecipe {
             content_id,
-            before,
-            after,
+            before: Box::new(before),
+            after: Box::new(after),
         }],
     };
     let result = world
@@ -3405,6 +3614,288 @@ fn selected_recipe_validation_errors(world: &World) -> Option<(String, Vec<Strin
         .filter(|error| error.contains(&content_id))
         .collect();
     Some((content_id, errors))
+}
+
+fn seed_default_topology(
+    category: persistence::ContentCategory,
+    recipe: &mut ProceduralRecipeDraft,
+) {
+    recipe.spline_points.clear();
+    recipe.topology_nodes.clear();
+    recipe.topology_edges.clear();
+    if category == persistence::ContentCategory::Road {
+        recipe.spline_points = [
+            ("start", [0.0, 0.0, 0.0]),
+            ("ramp", [0.0, 3.0, 30.0]),
+            ("ridge", [20.0, 6.0, 60.0]),
+            ("finish", [0.0, 3.0, 90.0]),
+        ]
+        .into_iter()
+        .map(|(point_id, position)| RoadSplinePointDraft {
+            point_id: point_id.into(),
+            position,
+            width_scale: 1.0,
+        })
+        .collect();
+        return;
+    }
+    let node = |node_id: &str, kind: WorldTopologyNodeKind, position: [f32; 3], size: [f32; 3]| {
+        WorldTopologyNodeDraft {
+            node_id: node_id.into(),
+            kind,
+            position,
+            size,
+        }
+    };
+    let edge = |from: &str, to: &str, kind: WorldTopologyEdgeKind| WorldTopologyEdgeDraft {
+        from: from.into(),
+        to: to.into(),
+        kind,
+    };
+    match category {
+        persistence::ContentCategory::Building => {
+            recipe.topology_nodes = vec![
+                node(
+                    "entrance",
+                    WorldTopologyNodeKind::Entrance,
+                    [-12.0, 0.0, 0.0],
+                    [8.0, 4.0, 8.0],
+                ),
+                node(
+                    "lobby",
+                    WorldTopologyNodeKind::Room,
+                    [0.0, 0.0, 0.0],
+                    [10.0, 4.0, 10.0],
+                ),
+                node(
+                    "upper",
+                    WorldTopologyNodeKind::Room,
+                    [12.0, 5.0, 0.0],
+                    [10.0, 4.0, 10.0],
+                ),
+                node(
+                    "suite",
+                    WorldTopologyNodeKind::Room,
+                    [24.0, 5.0, 0.0],
+                    [10.0, 4.0, 10.0],
+                ),
+            ];
+            recipe.topology_edges = vec![
+                edge("entrance", "lobby", WorldTopologyEdgeKind::Door),
+                edge("lobby", "upper", WorldTopologyEdgeKind::Stair),
+                edge("upper", "suite", WorldTopologyEdgeKind::Door),
+            ];
+        }
+        persistence::ContentCategory::Cave => {
+            recipe.topology_nodes = vec![
+                node(
+                    "entrance",
+                    WorldTopologyNodeKind::Entrance,
+                    [-24.0, 0.0, 0.0],
+                    [10.0, 6.0, 10.0],
+                ),
+                node(
+                    "chamber",
+                    WorldTopologyNodeKind::Room,
+                    [-8.0, 0.0, 0.0],
+                    [12.0, 7.0, 12.0],
+                ),
+                node(
+                    "travel_a",
+                    WorldTopologyNodeKind::FastTravel,
+                    [8.0, 5.0, 0.0],
+                    [10.0, 6.0, 10.0],
+                ),
+                node(
+                    "travel_b",
+                    WorldTopologyNodeKind::FastTravel,
+                    [24.0, 5.0, 0.0],
+                    [10.0, 6.0, 10.0],
+                ),
+            ];
+            recipe.topology_edges = vec![
+                edge("entrance", "chamber", WorldTopologyEdgeKind::Tunnel),
+                edge("chamber", "travel_a", WorldTopologyEdgeKind::Tunnel),
+                edge("travel_a", "travel_b", WorldTopologyEdgeKind::Portal),
+            ];
+        }
+        persistence::ContentCategory::Biome => {
+            recipe.topology_nodes = vec![
+                node(
+                    "core",
+                    WorldTopologyNodeKind::Zone,
+                    [0.0, 0.0, 0.0],
+                    [24.0, 2.0, 24.0],
+                ),
+                node(
+                    "water",
+                    WorldTopologyNodeKind::Zone,
+                    [28.0, -1.0, 0.0],
+                    [18.0, 1.0, 18.0],
+                ),
+                node(
+                    "hazard",
+                    WorldTopologyNodeKind::Zone,
+                    [-28.0, 2.0, 0.0],
+                    [18.0, 3.0, 18.0],
+                ),
+                node(
+                    "landmark",
+                    WorldTopologyNodeKind::Landmark,
+                    [0.0, 5.0, 28.0],
+                    [8.0, 10.0, 8.0],
+                ),
+            ];
+        }
+        persistence::ContentCategory::City => {
+            recipe.topology_nodes = vec![
+                node(
+                    "central",
+                    WorldTopologyNodeKind::Zone,
+                    [0.0, 0.0, 0.0],
+                    [22.0, 3.0, 22.0],
+                ),
+                node(
+                    "east",
+                    WorldTopologyNodeKind::Zone,
+                    [28.0, 0.0, 0.0],
+                    [20.0, 4.0, 20.0],
+                ),
+                node(
+                    "west",
+                    WorldTopologyNodeKind::Zone,
+                    [-28.0, 0.0, 0.0],
+                    [20.0, 5.0, 20.0],
+                ),
+                node(
+                    "landmark",
+                    WorldTopologyNodeKind::Landmark,
+                    [0.0, 8.0, 28.0],
+                    [10.0, 16.0, 10.0],
+                ),
+            ];
+        }
+        _ => {}
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompiledWorldKitPart {
+    name: String,
+    transform: Transform,
+    size: Vec3,
+    material_slot: &'static str,
+}
+
+fn segment_part(
+    name: String,
+    start: Vec3,
+    end: Vec3,
+    width: f32,
+    height: f32,
+    material_slot: &'static str,
+) -> Option<CompiledWorldKitPart> {
+    let delta = end - start;
+    let horizontal = Vec2::new(delta.x, delta.z).length();
+    if horizontal <= 0.25 || delta.length() <= 0.5 {
+        return None;
+    }
+    let yaw = delta.x.atan2(delta.z);
+    let pitch = (delta.y / horizontal).atan();
+    let transform = Transform::from_translation(start + delta * 0.5)
+        .with_rotation(Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch));
+    Some(CompiledWorldKitPart {
+        name,
+        transform,
+        size: Vec3::new(width, height, delta.length()),
+        material_slot,
+    })
+}
+
+fn compile_world_kit(
+    category: persistence::ContentCategory,
+    recipe: &ProceduralRecipeDraft,
+) -> Result<Vec<CompiledWorldKitPart>, String> {
+    let parameter = |key: &str| {
+        persistence::procedural_parameter_specs(category)
+            .iter()
+            .find(|spec| spec.key == key)
+            .map(|spec| persistence::procedural_parameter_value(recipe, *spec) as f32)
+            .unwrap_or_default()
+    };
+    let mut parts = Vec::new();
+    if category == persistence::ContentCategory::Road {
+        if recipe.spline_points.len() < 2 {
+            return Err("seed or author at least two spline points".into());
+        }
+        for (index, points) in recipe.spline_points.windows(2).enumerate() {
+            let width = parameter("width") * (points[0].width_scale + points[1].width_scale) * 0.5;
+            let part = segment_part(
+                format!("Road segment {index}"),
+                Vec3::from_array(points[0].position),
+                Vec3::from_array(points[1].position),
+                width,
+                0.8,
+                "deck",
+            )
+            .ok_or_else(|| format!("road segment {index} is degenerate"))?;
+            parts.push(part);
+        }
+    } else {
+        if recipe.topology_nodes.is_empty() {
+            return Err("seed or author topology nodes before compiling".into());
+        }
+        for node in &recipe.topology_nodes {
+            let material_slot = match (category, node.kind) {
+                (persistence::ContentCategory::Biome, WorldTopologyNodeKind::Landmark) => "detail",
+                (persistence::ContentCategory::Biome, _) => "terrain",
+                (persistence::ContentCategory::Building, WorldTopologyNodeKind::Entrance) => {
+                    "exterior"
+                }
+                (persistence::ContentCategory::Building, _) => "interior",
+                (persistence::ContentCategory::Cave, WorldTopologyNodeKind::FastTravel) => "accent",
+                (persistence::ContentCategory::Cave, _) => "rock",
+                (persistence::ContentCategory::City, WorldTopologyNodeKind::Landmark) => "landmark",
+                (persistence::ContentCategory::City, _) => "exterior",
+                _ => "detail",
+            };
+            parts.push(CompiledWorldKitPart {
+                name: format!("{:?} {}", node.kind, node.node_id),
+                transform: Transform::from_translation(Vec3::from_array(node.position)),
+                size: Vec3::from_array(node.size),
+                material_slot,
+            });
+        }
+        let nodes = recipe
+            .topology_nodes
+            .iter()
+            .map(|node| (node.node_id.as_str(), Vec3::from_array(node.position)))
+            .collect::<BTreeMap<_, _>>();
+        for (index, edge) in recipe.topology_edges.iter().enumerate() {
+            let start = nodes[edge.from.as_str()];
+            let end = nodes[edge.to.as_str()];
+            let (width, slot) = match category {
+                persistence::ContentCategory::Building => (parameter("stair_width"), "floor"),
+                persistence::ContentCategory::Cave => (parameter("tunnel_width") * 0.55, "floor"),
+                persistence::ContentCategory::City => (parameter("road_width"), "road"),
+                _ => (3.0, "detail"),
+            };
+            if let Some(part) = segment_part(
+                format!("{:?} connector {index}", edge.kind),
+                start,
+                end,
+                width,
+                0.45,
+                slot,
+            ) {
+                parts.push(part);
+            }
+        }
+    }
+    if parts.is_empty() || parts.len() > 192 {
+        return Err("compiled root must contain 1–192 bounded parts".into());
+    }
+    Ok(parts)
 }
 
 fn edit_selected_material(world: &mut World, edit: MaterialEdit) {
@@ -4112,6 +4603,34 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 );
             }
         }
+        EditorAction::SeedDefaultTopology => {
+            let Some((_, category, _)) = selected_procedural_recipe(world) else {
+                set_editor_status(world, "Select a World Kit recipe before seeding topology");
+                return;
+            };
+            execute_recipe_edit(world, "Seed default World Kit topology", move |recipe| {
+                seed_default_topology(category, recipe);
+            });
+        }
+        EditorAction::CompileSandboxRoot => {
+            let Some((content_id, _, _)) = selected_procedural_recipe(world) else {
+                set_editor_status(
+                    world,
+                    "Select a World Kit recipe before sandbox compilation",
+                );
+                return;
+            };
+            {
+                let mut sandbox = world.resource_mut::<WorldKitSandboxState>();
+                sandbox.active_content_id = Some(content_id);
+                sandbox.applied_signature = None;
+            }
+            sync_world_kit_sandbox(world);
+        }
+        EditorAction::ClearSandboxRoot => {
+            clear_world_kit_sandbox(world);
+            set_editor_status(world, "World Kit sandbox root cleared");
+        }
     }
 }
 
@@ -4722,6 +5241,7 @@ fn update_editor_workspace_text(
     session: Res<EditorProjectSession>,
     catalog: Res<PublishedMaterialCatalog>,
     procedural_catalog: Res<PublishedProceduralRecipeCatalog>,
+    sandbox: Res<WorldKitSandboxState>,
     registry: Res<EditorRegistryState>,
     authorables: Query<
         (
@@ -4865,10 +5385,13 @@ fn update_editor_workspace_text(
                     let parameter = specs[registry.recipe_parameter % specs.len()];
                     let value = persistence::procedural_parameter_value(recipe, parameter);
                     format!(
-                        "\nWORLD KIT: {} • Seed {} • Rev {}\nSlot {}: {}\n{}: {:.2}  [{:.2}–{:.2}]",
+                        "\nWORLD KIT: {} • Seed {} • Rev {}\nTopology: {} points • {} nodes • {} edges\nSlot {}: {}\n{}: {:.2}  [{:.2}–{:.2}]",
                         world_recipe_label(record.category),
                         recipe.seed,
                         recipe.revision,
+                        recipe.spline_points.len(),
+                        recipe.topology_nodes.len(),
+                        recipe.topology_edges.len(),
                         slot,
                         material,
                         parameter.label,
@@ -4919,9 +5442,10 @@ fn update_editor_workspace_text(
     };
     let recipe_type = WORLD_RECIPE_CATEGORIES[registry.recipe_kind % WORLD_RECIPE_CATEGORIES.len()];
     let clipboard = registry.material_clipboard.as_deref().unwrap_or("empty");
+    let sandbox_label = sandbox.active_content_id.as_deref().unwrap_or("inactive");
     for mut text in &mut text_queries.p3() {
         *text = Text::new(format!(
-            "Project: {}\nRecords: {} • Matches: {} • Runtime materials: {} • Recipes: {}{search}\nNew recipe: {} • Material clipboard: {}\n\n{record_listing}{selected_details}{rename}\n\n{validation}",
+            "Project: {}\nRecords: {} • Matches: {} • Runtime materials: {} • Recipes: {}{search}\nNew recipe: {} • Material clipboard: {}\nSandbox: {}\n\n{record_listing}{selected_details}{rename}\n\n{validation}",
             session.project.display_name,
             records.len(),
             registry_indices.len(),
@@ -4929,6 +5453,7 @@ fn update_editor_workspace_text(
             procedural_catalog.len(),
             world_recipe_label(recipe_type),
             clipboard,
+            sandbox_label,
         ));
     }
 }
@@ -5156,6 +5681,8 @@ mod tests {
         world.init_resource::<PublishedProceduralRecipeCatalog>();
         world.init_resource::<PublishedContentCatalogEpoch>();
         world.init_resource::<WorldKitPreviewState>();
+        world.init_resource::<WorldKitSandboxState>();
+        world.init_resource::<WorldKitSandboxAssets>();
         world.init_resource::<EditorSelection>();
         world.init_resource::<EditorIdAllocator>();
         world.init_resource::<EditorUndoStack>();
@@ -5792,5 +6319,117 @@ mod tests {
         assert_eq!(editor_focus_reveal_delta(10.0, 90.0, 30.0, 50.0), 0.0);
         assert_eq!(editor_focus_reveal_delta(10.0, 90.0, -5.0, 15.0), 15.0);
         assert_eq!(editor_focus_reveal_delta(10.0, 90.0, 85.0, 105.0), -15.0);
+    }
+
+    #[test]
+    fn default_topology_is_transactional_and_compiles_each_world_family() {
+        let (mut world, root) = persistence_test_world("default_topology_compile");
+        for category in WORLD_RECIPE_CATEGORIES {
+            let content_id = world
+                .resource_mut::<EditorProjectSession>()
+                .project
+                .create_content(category, world_recipe_default_name(category))
+                .unwrap();
+            let selected = world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .iter()
+                .position(|record| record.content_id == content_id)
+                .unwrap();
+            world.resource_mut::<EditorRegistryState>().selected = selected;
+            apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+            let (_, _, recipe) = selected_procedural_recipe(&world).unwrap();
+            assert!(validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
+            let compiled = compile_world_kit(category, &recipe).unwrap();
+            assert!(!compiled.is_empty());
+            assert!(compiled.len() <= 192);
+        }
+        apply_editor_action(&mut world, EditorAction::Undo);
+        let (_, _, recipe) = selected_procedural_recipe(&world).unwrap();
+        assert!(recipe.spline_points.is_empty());
+        assert!(recipe.topology_nodes.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sandbox_root_swap_is_atomic_bounded_and_reuses_assets() {
+        let (mut world, root) = persistence_test_world("sandbox_atomic_swap");
+        let road_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Road, "Speed Network")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+        apply_editor_action(&mut world, EditorAction::CompileSandboxRoot);
+        let first_root = world
+            .query_filtered::<Entity, With<WorldKitGeneratedRoot>>()
+            .iter(&world)
+            .next()
+            .unwrap();
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
+                .iter(&world)
+                .count(),
+            3
+        );
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
+        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
+
+        apply_editor_action(&mut world, EditorAction::RecipeParameterIncrease);
+        sync_world_kit_sandbox(&mut world);
+        let second_root = world
+            .query_filtered::<Entity, With<WorldKitGeneratedRoot>>()
+            .iter(&world)
+            .next()
+            .unwrap();
+        assert_ne!(first_root, second_root);
+        assert!(world.get_entity(first_root).is_err());
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
+                .iter(&world)
+                .count(),
+            3
+        );
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
+        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
+
+        world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .payloads
+            .get_mut(&road_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap()
+            .spline_points[1]
+            .position[1] = 200.0;
+        sync_world_kit_sandbox(&mut world);
+        let retained_root = world
+            .query_filtered::<Entity, With<WorldKitGeneratedRoot>>()
+            .iter(&world)
+            .next()
+            .unwrap();
+        assert_eq!(retained_root, second_root);
+
+        apply_editor_action(&mut world, EditorAction::ClearSandboxRoot);
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<WorldKitGeneratedRoot>>()
+                .iter(&world)
+                .count(),
+            0
+        );
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
+                .iter(&world)
+                .count(),
+            0
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

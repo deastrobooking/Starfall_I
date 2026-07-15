@@ -339,10 +339,34 @@ painting, and transactional live-world root replacement remain ET5c work.
   meshes, transforms, height, spacing, grade, and scale. Parameter, seed, reset,
   and regeneration edits are all recipe-snapshot transactions with undo/redo.
 
-ET5c remains the safe live-world compiler boundary: typed spline points and
+The ET5c target was the safe live-world compiler boundary: typed spline points and
 room/portal graphs, navigation/collision preflight, generated-root ownership,
 and atomic swap of a validated replacement root. The shipped world is not
 destructively regenerated from a preview-only recipe.
+
+### ET5c topology compiler and sandbox roots delivered — July 2026
+
+- `ProceduralRecipeDraft` now persists backward-compatible stable-ID road
+  spline points plus typed topology nodes and Door/Stair/Tunnel/Portal edges.
+  Nodes identify rooms, entrances, fast-travel points, zones, and landmarks.
+- Preflight enforces finite bounded geometry, unique point/node IDs, valid edge
+  endpoints, 2–64 road points, maximum road grade, 96-node/192-edge caps,
+  connected Building/Cave navigation from an entrance, non-overlapping room
+  volumes, and enough authored Cave fast-travel nodes for the recipe request.
+- `SEED DEFAULT TOPOLOGY` creates a valid undoable starter spline or graph for
+  every World Kit family. `COMPILE SANDBOX ROOT` builds a pure intermediate list
+  first, then spawns a single owned root and its bounded physics/render children.
+- Root replacement is atomic: the previous valid root is removed only after the
+  replacement has compiled and spawned. Invalid edits retain the last valid
+  root. Undo/redo recipe changes automatically recompile an active sandbox.
+- Sandbox parts share one cached cube mesh and fallback material, preventing
+  asset growth across regeneration. `CLEAR SANDBOX ROOT` removes the owned root
+  and all linked children without touching shipped world geometry.
+
+ET5d remains direct topology editing: controller selection and movement of
+individual points/nodes, edge creation/removal, spline tangents and junctions,
+room doorway/socket placement, terrain projection, and explicit promotion of a
+published sandbox root into a scoped world-generation layer.
 
 ## ET4 — Character and Creature production workspaces
 

@@ -52,8 +52,12 @@ together.
   scrolls the active control into view.
   ET5b adds bounded typed generator parameters, seed/reset/validation controls,
   parameter-driven four-object previews, and road/building/cave budget gates.
-  Do not replace shipped world roots until ET5c collision/navigation preflight
-  and atomic generated-root swapping are implemented.
+  Do not replace shipped world roots until ET5d adds explicit published-layer
+  scope and promotion controls.
+  ET5c implements that boundary inside a protected editor sandbox: stable road
+  spline points, typed room/zone nodes and portal edges, collision/navigation
+  preflight, cached part assets, and atomic owned-root replacement. Shipped world
+  promotion remains ET5d and must require explicit published-layer scope.
   F11 reports camera/projectile/VFX/material counts. World Kit regeneration UI,
   clustered-light evaluation, and four-camera GPU timing work remain in
   `docs/rendering_shader_pass.md`; do not copy legacy fixed-group WGSL examples

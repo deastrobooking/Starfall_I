@@ -151,6 +151,15 @@ change the compiled preview geometry. Invalid values and entity/navigation
 budget violations block regeneration before material or geometry replacement.
 The preview remains limited to four material-slot objects.
 
+## R8 / Atomic World Kit sandbox materials delivered
+
+Validated spline and topology recipes now compile into an owned sandbox root
+with bounded render/physics children. Each part resolves its named published
+material slot while sharing cached fallback mesh/material assets. A replacement
+root is fully created before its predecessor is removed, and an invalid draft
+retains the last valid rendered root. Clearing the sandbox despawns the linked
+hierarchy without modifying shipped terrain, roads, caves, or cities.
+
 ## Rendering work remaining
 
 1. Evaluate clustered point/spot lights through Bevy's current cluster lookup;

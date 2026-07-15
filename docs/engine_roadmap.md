@@ -246,5 +246,7 @@ regeneration remain before broad Ice/Lava biome rollout. ET5a now supplies the
 controller-facing recipe/type/slot/material workflow, focus-follow scrolling,
 and bounded undoable preview regeneration. ET5b now delivers bounded
 family-specific controls, cross-field generation budgets, seed editing, and
-parameter-driven preview compilation. ET5c remains typed spline/room graphs and
-atomic validated live-root replacement.
+parameter-driven preview compilation. ET5c now delivers stable spline and
+room/portal data, collision/navigation preflight, cached generated-root assets,
+and atomic replacement inside the protected editor sandbox. ET5d remains direct
+point/edge editing and explicit published-layer promotion into the shipped world.
