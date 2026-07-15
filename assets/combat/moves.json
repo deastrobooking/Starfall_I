@@ -1,0 +1,56 @@
+{
+  "light": [
+    {
+      "name": "Star Jab",
+      "damage": 15.0,
+      "knockback": 3.0,
+      "startup": 0.07,
+      "active": 0.1,
+      "recovery": 0.23,
+      "cancel_after": 0.08,
+      "hitstop": 0.03
+    },
+    {
+      "name": "Comet Cross",
+      "damage": 20.0,
+      "knockback": 4.0,
+      "startup": 0.08,
+      "active": 0.1,
+      "recovery": 0.27,
+      "cancel_after": 0.1,
+      "hitstop": 0.034
+    },
+    {
+      "name": "Moon Uppercut",
+      "damage": 30.0,
+      "knockback": 6.0,
+      "startup": 0.12,
+      "active": 0.12,
+      "recovery": 0.36,
+      "cancel_after": 0.16,
+      "hitstop": 0.05
+    }
+  ],
+  "heavy": [
+    {
+      "name": "Meteor Slam",
+      "damage": 35.0,
+      "knockback": 8.0,
+      "startup": 0.16,
+      "active": 0.14,
+      "recovery": 0.4,
+      "cancel_after": 0.18,
+      "hitstop": 0.06
+    },
+    {
+      "name": "Orbit Sweep",
+      "damage": 45.0,
+      "knockback": 10.0,
+      "startup": 0.18,
+      "active": 0.16,
+      "recovery": 0.46,
+      "cancel_after": 0.2,
+      "hitstop": 0.07
+    }
+  ]
+}

@@ -77,7 +77,7 @@ pub fn render_wav(params: &SfxParams) -> Vec<u8> {
     out.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes()); // byte rate
     out.extend_from_slice(&2u16.to_le_bytes()); // block align
     out.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
-    // data chunk.
+                                                 // data chunk.
     out.extend_from_slice(b"data");
     out.extend_from_slice(&data_len.to_le_bytes());
     for s in samples {
@@ -91,8 +91,7 @@ fn render_samples(params: &SfxParams) -> Vec<i16> {
     let mut samples = Vec::with_capacity(count);
     let mut phase = 0.0_f32;
     // Deterministic noise: LCG seeded from the recipe so renders are stable.
-    let mut noise_state: u32 =
-        0x9E37_79B9 ^ (params.freq_start as u32).wrapping_mul(2_654_435_761);
+    let mut noise_state: u32 = 0x9E37_79B9 ^ (params.freq_start as u32).wrapping_mul(2_654_435_761);
 
     let f0 = params.freq_start.max(1.0);
     let f1 = params.freq_end.max(1.0);
@@ -286,6 +285,9 @@ mod tests {
         let bytes = render_wav(&preset_kill());
         let last = bytes[bytes.len() - 2..].try_into().unwrap();
         let final_sample = i16::from_le_bytes(last);
-        assert!(final_sample.unsigned_abs() < 1500, "tail must ramp to ~zero");
+        assert!(
+            final_sample.unsigned_abs() < 1500,
+            "tail must ramp to ~zero"
+        );
     }
 }

@@ -48,6 +48,20 @@ noted):
 3. Presentation systems stay UNgated by hitstop so they animate during the
    pause; cap live entities; despawn on `OnExit(Playing)` if they can persist.
 
+## Frame data (MoveDef)
+
+Melee moves are authored data, not code: `assets/combat/moves.json` holds each
+move's `startup` (wind-up) / `active` (strike) / `recovery` phases,
+`cancel_after` (seconds into recovery when a buffered next attack may chain),
+`damage`, `knockback`, and per-move `hitstop`. Edit + relaunch to retune —
+no recompile. Delete the file to restore defaults (they're also written on
+first run). Loading/validation: `src/combat_data.rs` (`MoveLibrary`; invalid
+files log a warning and fall back to defaults, never soft-lock).
+
+Execution: `melee_combo_system` runs a Startup→Active→Recovery machine per
+player; the hit lands at the start of Active; buffered inputs chain during the
+cancel window. Chain reach/arc stay per-chain constants in the system.
+
 ## Sound
 
 The palette is synthesized at startup (`audio_synth.rs` presets → WAV bytes →

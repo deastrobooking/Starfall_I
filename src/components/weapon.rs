@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+
+use crate::combat_data::ActiveMelee;
 use serde::{Deserialize, Serialize};
 
 // ── Weapon Type ───────────────────────────────────────────────────────────────
@@ -581,8 +583,9 @@ pub struct MeleeCombo {
     pub heavy_index: usize,
     pub light_timer: f32,
     pub heavy_timer: f32,
-    pub active_timer: f32,
-    pub is_attacking: bool,
+    /// The move currently executing through its startup/active/recovery
+    /// phases (frame data from `MoveLibrary`). `None` = ready to attack.
+    pub active: Option<ActiveMelee>,
     pub buffered_light: bool,
     pub buffered_heavy: bool,
     pub damage_multiplier: f32,

@@ -99,12 +99,7 @@ fn tick_sfx_cooldowns(time: Res<Time>, library: Option<ResMut<SfxLibrary>>) {
     });
 }
 
-fn play(
-    commands: &mut Commands,
-    library: &mut SfxLibrary,
-    settings: &GameSettings,
-    kind: SfxKind,
-) {
+fn play(commands: &mut Commands, library: &mut SfxLibrary, settings: &GameSettings, kind: SfxKind) {
     if settings.sfx_volume <= 0.01 {
         return;
     }

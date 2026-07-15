@@ -302,8 +302,14 @@ mod tests {
 
         let eff = tick.overlay(&base);
         assert!(eff.jump, "buffered jump edge must fire on this tick");
-        assert!(!eff.dodge, "buffer owns edges; stale live dodge must not leak");
-        assert!(eff.sprint, "held state comes from the latest latched sample");
+        assert!(
+            !eff.dodge,
+            "buffer owns edges; stale live dodge must not leak"
+        );
+        assert!(
+            eff.sprint,
+            "held state comes from the latest latched sample"
+        );
         assert_eq!(eff.move_axis, Vec2::new(0.0, 1.0));
         assert!(eff.pause, "fields the buffer doesn't own pass through");
 

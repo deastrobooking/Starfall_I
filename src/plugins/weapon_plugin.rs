@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{DeadEnemy, Enemy};
 use crate::components::player::*;
@@ -11,6 +12,7 @@ use crate::damage::{
 use crate::events::*;
 use crate::game_rng::GameRng;
 use crate::hacking::HackedUnit;
+use crate::hitstop::HitstopState;
 use crate::perks::PerkTree;
 use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::resources::DungeonCrawlState;
@@ -1798,19 +1800,10 @@ fn damage_road_vehicles_in_radius(
 }
 
 // ── Melee Combo ───────────────────────────────────────────────────────────────
-const LIGHT_COMBO: &[(&str, f32, f32, f32)] = &[
-    ("Star Jab", 15.0, 3.0, 0.4),
-    ("Comet Cross", 20.0, 4.0, 0.45),
-    ("Moon Uppercut", 30.0, 6.0, 0.6),
-];
-
-const HEAVY_COMBO: &[(&str, f32, f32, f32)] = &[
-    ("Meteor Slam", 35.0, 8.0, 0.7),
-    ("Orbit Sweep", 45.0, 10.0, 0.8),
-];
-
 fn melee_combo_system(
     time: Res<Time>,
+    library: Res<MoveLibrary>,
+    mut hitstop: ResMut<HitstopState>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     dungeon: Res<DungeonCrawlState>,
@@ -1844,7 +1837,6 @@ fn melee_combo_system(
 
         combo.light_timer = (combo.light_timer - dt).max(0.0);
         combo.heavy_timer = (combo.heavy_timer - dt).max(0.0);
-        combo.active_timer = (combo.active_timer - dt).max(0.0);
 
         if pi.melee_light {
             combo.buffered_light = true;
@@ -1860,19 +1852,6 @@ fn melee_combo_system(
             combo.heavy_index = 0;
         }
 
-        if combo.active_timer <= 0.0 && combo.is_attacking {
-            combo.is_attacking = false;
-            sm.transition(PlayerState::Idle);
-        }
-        if combo.is_attacking {
-            continue;
-        }
-
-        let do_light = combo.buffered_light;
-        let do_heavy = combo.buffered_heavy;
-        combo.buffered_light = false;
-        combo.buffered_heavy = false;
-
         let cam_fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let cam_pos = star_muzzle_origin(player_transform, cam_fwd);
         let armor_damage_mult = armor.modified_outgoing_damage(1.0);
@@ -1885,86 +1864,156 @@ fn melee_combo_system(
             DamageType::Melee
         };
 
-        if do_light && combo.light_index < LIGHT_COMBO.len() {
-            let (name, base_damage, knockback, duration) = LIGHT_COMBO[combo.light_index];
-            let damage =
-                base_damage * combo.damage_multiplier * armor_damage_mult * blade_damage_mult;
-            let radius = (if dungeon.active { 4.1 } else { 3.0 }) + blade_reach_bonus;
-            let offset = (if dungeon.active { 2.1 } else { 2.5 }) + blade_reach_bonus * 0.5;
-            let arc_cos = if dungeon.active { -0.20 } else { 0.15 };
-
-            execute_melee_hit(
-                cam_pos,
-                cam_fwd,
-                radius,
-                offset,
-                arc_cos,
-                damage,
-                melee_damage_type,
-                knockback,
-                &mut enemy_q,
-                &mut damaged_ev,
-                &mut killed_ev,
-            );
-            spawn_melee_flash(&mut commands, &proj_assets, cam_pos + cam_fwd * 2.5);
-
-            combo_ev.write(ComboHitEvent {
-                combo_name: "Light".to_string(),
-                attack_name: name.to_string(),
-                combo_index: combo.light_index,
-            });
-            combo.light_index = (combo.light_index + 1) % LIGHT_COMBO.len();
-            combo.light_timer = 1.5;
-            combo.active_timer = duration;
-            combo.is_attacking = true;
-            sm.force(PlayerState::Attacking);
-
-            if combo.light_index == 0 {
-                finished_ev.write(ComboFinishedEvent {
-                    combo_name: "Light".to_string(),
-                });
+        // Per-chain reach/arc tuning (data-adjacent, chain-wide constants).
+        let reach = |chain: MeleeChain| -> (f32, f32, f32) {
+            match chain {
+                MeleeChain::Light => (
+                    (if dungeon.active { 4.1 } else { 3.0 }) + blade_reach_bonus,
+                    (if dungeon.active { 2.1 } else { 2.5 }) + blade_reach_bonus * 0.5,
+                    if dungeon.active { -0.20 } else { 0.15 },
+                ),
+                MeleeChain::Heavy => (
+                    (if dungeon.active { 5.7 } else { 4.5 }) + blade_reach_bonus * 1.3,
+                    (if dungeon.active { 2.2 } else { 2.0 }) + blade_reach_bonus * 0.6,
+                    if dungeon.active { -0.35 } else { 0.05 },
+                ),
             }
-        } else if do_heavy && combo.heavy_index < HEAVY_COMBO.len() {
-            let (name, base_damage, knockback, duration) = HEAVY_COMBO[combo.heavy_index];
-            let damage =
-                base_damage * combo.damage_multiplier * armor_damage_mult * blade_damage_mult;
-            let radius = (if dungeon.active { 5.7 } else { 4.5 }) + blade_reach_bonus * 1.3;
-            let offset = (if dungeon.active { 2.2 } else { 2.0 }) + blade_reach_bonus * 0.6;
-            let arc_cos = if dungeon.active { -0.35 } else { 0.05 };
+        };
 
-            execute_melee_hit(
-                cam_pos,
-                cam_fwd,
-                radius,
-                offset,
-                arc_cos,
-                damage,
-                melee_damage_type,
-                knockback,
-                &mut enemy_q,
-                &mut damaged_ev,
-                &mut killed_ev,
-            );
-            spawn_melee_flash(&mut commands, &proj_assets, cam_pos + cam_fwd * 2.0);
+        // ── Frame-data phase machine ──────────────────────────────────────────
+        if let Some(mut active) = combo.active {
+            let Some(def) = library.get(active.chain, active.index).cloned() else {
+                combo.active = None;
+                continue;
+            };
+            active.timer -= dt;
+            match active.phase {
+                MeleePhase::Startup => {
+                    if active.timer <= 0.0 {
+                        // The strike lands at the start of the active window.
+                        let damage = def.damage
+                            * combo.damage_multiplier
+                            * armor_damage_mult
+                            * blade_damage_mult;
+                        let (radius, offset, arc_cos) = reach(active.chain);
+                        execute_melee_hit(
+                            cam_pos,
+                            cam_fwd,
+                            radius,
+                            offset,
+                            arc_cos,
+                            damage,
+                            melee_damage_type,
+                            def.knockback,
+                            &mut enemy_q,
+                            &mut damaged_ev,
+                            &mut killed_ev,
+                        );
+                        spawn_melee_flash(&mut commands, &proj_assets, cam_pos + cam_fwd * 2.5);
+                        hitstop.remaining = hitstop.remaining.max(def.hitstop);
 
-            combo_ev.write(ComboHitEvent {
-                combo_name: "Heavy".to_string(),
-                attack_name: name.to_string(),
-                combo_index: combo.heavy_index,
-            });
-            combo.heavy_index = (combo.heavy_index + 1) % HEAVY_COMBO.len();
-            combo.heavy_timer = 2.0;
-            combo.active_timer = duration;
-            combo.is_attacking = true;
-            sm.force(PlayerState::Attacking);
+                        let chain_name = match active.chain {
+                            MeleeChain::Light => "Light",
+                            MeleeChain::Heavy => "Heavy",
+                        };
+                        combo_ev.write(ComboHitEvent {
+                            combo_name: chain_name.to_string(),
+                            attack_name: def.name.clone(),
+                            combo_index: active.index,
+                        });
 
-            if combo.heavy_index == 0 {
-                finished_ev.write(ComboFinishedEvent {
-                    combo_name: "Heavy".to_string(),
-                });
+                        // Advance the chain and refresh its follow-up window.
+                        let len = library.chain_len(active.chain).max(1);
+                        match active.chain {
+                            MeleeChain::Light => {
+                                combo.light_index = (active.index + 1) % len;
+                                combo.light_timer = 1.5;
+                                if combo.light_index == 0 {
+                                    finished_ev.write(ComboFinishedEvent {
+                                        combo_name: "Light".to_string(),
+                                    });
+                                }
+                            }
+                            MeleeChain::Heavy => {
+                                combo.heavy_index = (active.index + 1) % len;
+                                combo.heavy_timer = 2.0;
+                                if combo.heavy_index == 0 {
+                                    finished_ev.write(ComboFinishedEvent {
+                                        combo_name: "Heavy".to_string(),
+                                    });
+                                }
+                            }
+                        }
+                        active.phase = MeleePhase::Active;
+                        active.timer = def.active;
+                    }
+                    combo.active = Some(active);
+                }
+                MeleePhase::Active => {
+                    if active.timer <= 0.0 {
+                        active.phase = MeleePhase::Recovery;
+                        active.timer = def.recovery;
+                    }
+                    combo.active = Some(active);
+                }
+                MeleePhase::Recovery => {
+                    let elapsed = (def.recovery - active.timer).max(0.0);
+                    let can_cancel = elapsed >= def.cancel_after;
+                    if can_cancel && (combo.buffered_light || combo.buffered_heavy) {
+                        // Cancel window: chain straight into the buffered move.
+                        let chain = if combo.buffered_light {
+                            MeleeChain::Light
+                        } else {
+                            MeleeChain::Heavy
+                        };
+                        combo.buffered_light = false;
+                        combo.buffered_heavy = false;
+                        combo.active = start_melee_move(&library, &mut combo, chain, &mut sm);
+                    } else if active.timer <= 0.0 {
+                        combo.active = None;
+                        sm.transition(PlayerState::Idle);
+                    } else {
+                        combo.active = Some(active);
+                    }
+                }
             }
+            continue;
+        }
+
+        // ── Idle: start a buffered attack ────────────────────────────────────
+        let do_light = combo.buffered_light;
+        let do_heavy = combo.buffered_heavy;
+        combo.buffered_light = false;
+        combo.buffered_heavy = false;
+
+        if do_light {
+            combo.active = start_melee_move(&library, &mut combo, MeleeChain::Light, &mut sm);
+        } else if do_heavy {
+            combo.active = start_melee_move(&library, &mut combo, MeleeChain::Heavy, &mut sm);
         }
     }
+}
+
+/// Begin a move's startup phase from the chain's current index.
+fn start_melee_move(
+    library: &MoveLibrary,
+    combo: &mut MeleeCombo,
+    chain: MeleeChain,
+    sm: &mut PlayerStateMachine,
+) -> Option<ActiveMelee> {
+    let index = match chain {
+        MeleeChain::Light => combo.light_index,
+        MeleeChain::Heavy => combo.heavy_index,
+    }
+    .min(library.chain_len(chain).saturating_sub(1));
+    let def = library.get(chain, index)?;
+    sm.force(PlayerState::Attacking);
+    Some(ActiveMelee {
+        chain,
+        index,
+        phase: MeleePhase::Startup,
+        timer: def.startup,
+    })
 }
 
 fn spawn_melee_flash(commands: &mut Commands, assets: &ProjectileAssets, position: Vec3) {

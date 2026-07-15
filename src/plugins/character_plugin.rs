@@ -680,7 +680,7 @@ fn cartoon_animation_system(
         let sabre_slashing = sabre
             .map(|s| s.unlocked && s.active && s.is_slashing)
             .unwrap_or(false);
-        let melee_attacking = melee.map(|m| m.is_attacking).unwrap_or(false);
+        let melee_attacking = melee.map(|m| m.active.is_some()).unwrap_or(false);
         animator.pose = select_cartoon_pose(PoseInput {
             state: current_state,
             grounded: movement.map(|m| m.is_grounded).unwrap_or(true),

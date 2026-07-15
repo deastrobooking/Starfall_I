@@ -28,9 +28,9 @@ use crate::components::world::{
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
 use crate::game_loop::{fixed_motor_off, fixed_motor_on, PreviousTickPosition, SimConfig};
+use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::hitstop::hitstop_inactive;
 use crate::input_buffer::PlayerInputBuffers;
-use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
 use crate::physics::prelude::*;
 use crate::player_mesh::attach_modular_player_mesh;
@@ -2543,14 +2543,16 @@ fn grapple_hook_update(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    for (entity, transform, (idx, input), traversal, mut grapple, mut state) in
-        player_q.iter_mut()
+    for (entity, transform, (idx, input), traversal, mut grapple, mut state) in player_q.iter_mut()
     {
         grapple.tick_foundation(dt);
 
         // EC1b: fixed tick reads the buffered edge; Update path reads live input.
         let grapple_just = if sim.fixed_motor {
-            buffers.fixed(idx.0).map(|f| f.edges.grapple).unwrap_or(false)
+            buffers
+                .fixed(idx.0)
+                .map(|f| f.edges.grapple)
+                .unwrap_or(false)
         } else {
             input.grapple_just
         };

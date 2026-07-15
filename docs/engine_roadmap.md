@@ -200,6 +200,14 @@ hand-rolled writer in `src/character_studio/glb_export.rs` (no new deps).
 combat/loot/world/cosmetic; seed logged, `STARFALL_SEED` reproduces) replaced
 every gameplay `thread_rng()`; sole exemption: camera-shake offset
 (presentation-only, annotated). EC6 replay now has its randomness seam.
+**Frame-data slice (S5, 2026-07-15):** `MoveDef`/`MoveLibrary`
+(`src/combat_data.rs`) — melee chains load from editable
+`assets/combat/moves.json` (defaults written on first run, validated with
+fallback); `melee_combo_system` rebuilt as a Startup→Active→Recovery phase
+machine with cancel-window chaining and per-move hitstop. Loot drops tiered by
+enemy type (champion = guaranteed core + extra rolls). Remaining EC2:
+collision layers, per-move i-frames, player-received knockback, MoveDefs for
+sabre/ranged.
 
 ### EC3 — Motor to "feels amazing"
 **Goal:** Lock in Spider-Man + Mega Man feel on the deterministic base.

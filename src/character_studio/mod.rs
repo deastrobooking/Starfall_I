@@ -30,9 +30,9 @@ use std::path::PathBuf;
 use crate::character_blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
+use crate::game_rng::GameRng;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{CharacterDesignData, CharacterDesignReturnTarget, PlayerSelectState};
-use crate::game_rng::GameRng;
 use crate::state::AppState;
 use generators::build_character_patch;
 use spec::{CharacterSpec, MorphField, StyleField};
@@ -1350,7 +1350,13 @@ fn studio_controller_navigation(
 
     if confirm {
         if let Some(action) = focused_studio_action(&focus, &buttons) {
-            apply_action(action, &mut state, &mut library, &mut game_rng, &mut next_state);
+            apply_action(
+                action,
+                &mut state,
+                &mut library,
+                &mut game_rng,
+                &mut next_state,
+            );
         } else if focus.row >= MORPH_ROW_0 && focus.row < STYLE_ROW_0 {
             apply_action(
                 StudioAction::MorphInc(focus.row - MORPH_ROW_0),

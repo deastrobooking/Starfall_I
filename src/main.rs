@@ -9,11 +9,14 @@ use crate::physics::prelude::*;
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
+mod audio_synth;
 mod chapters;
 mod character_blueprint;
 mod character_parts;
 mod character_studio;
 mod characters;
+mod combat_data;
+mod combat_feedback;
 mod commands;
 mod components;
 mod damage;
@@ -21,14 +24,11 @@ mod discussion;
 mod engine_tools;
 mod events;
 mod final_war;
-mod audio_synth;
-mod combat_feedback;
 mod game_loop;
 mod game_rng;
-mod hitstop;
-mod sfx;
 mod hacking;
 mod hero_roster;
+mod hitstop;
 mod input_buffer;
 mod lsystem;
 mod modular_character;
@@ -43,6 +43,7 @@ mod resources;
 mod robot_pets;
 mod robots;
 mod settlement_economy;
+mod sfx;
 mod state;
 mod upgrades;
 
@@ -149,6 +150,7 @@ fn main() {
         // EC2: bounded hitstop + hit-reaction feedback (flinch, flashes,
         // death dissolve, damage numbers, outgoing shake/rumble).
         .add_plugins(hitstop::HitstopPlugin)
+        .add_plugins(combat_data::CombatDataPlugin)
         .add_plugins(combat_feedback::CombatFeedbackPlugin)
         // S3: procedural retro SFX bus (zero external assets).
         .add_plugins(sfx::SfxPlugin)

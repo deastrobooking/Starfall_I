@@ -109,8 +109,7 @@ fn spawn_hit_flash(
         commands.spawn((
             Mesh3d(assets.flash_mesh.clone()),
             MeshMaterial3d(assets.flash_mat.clone()),
-            Transform::from_translation(ev.position + Vec3::Y * 1.0)
-                .with_scale(Vec3::splat(0.55)),
+            Transform::from_translation(ev.position + Vec3::Y * 1.0).with_scale(Vec3::splat(0.55)),
             HitFlash {
                 timer: 0.12,
                 max: 0.12,

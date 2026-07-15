@@ -15,12 +15,12 @@ use crate::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageResistance, DamageType, Damageable, Health,
 };
 use crate::events::*;
+use crate::game_rng::GameRng;
 use crate::hacking::{Hackable, HackedUnit};
+use crate::hitstop::hitstop_inactive;
 use crate::rendering::PbrBundle;
 use crate::resources::{PlaySessionTransition, WaveInfo};
 use crate::robot_pets::{salvage_for_enemy, RobotPetCollection};
-use crate::game_rng::GameRng;
-use crate::hitstop::hitstop_inactive;
 use crate::state::AppState;
 
 #[derive(Resource, Clone)]
@@ -1223,52 +1223,80 @@ fn enemy_loot_drop_system(
     let rng = game_rng.loot();
 
     for ev in killed_ev.read() {
-        // ~60% drop chance
-        let roll: f32 = rng.gen();
-        if roll > 0.60 {
-            continue;
-        }
+        // Tiered drops: tougher enemies drop more, better, and more often —
+        // a rift champion is a jackpot, a scout is pocket change.
+        let (drop_chance, extra_rolls, quantity_mult, guaranteed_core) =
+            match ev.enemy_type.as_str() {
+                "Scallarian rift champion" => (1.0_f32, 2usize, 2.0_f32, true),
+                "dragon brute" => (0.85, 1, 1.5, false),
+                "Scallarian spike alien" | "Scallarian invader" => (0.65, 0, 1.0, false),
+                _ => (0.45, 0, 0.8, false), // scouts / spy drones
+            };
 
-        let (item_id, quantity, r, g, b): (&'static str, u32, f32, f32, f32) = if roll < 0.10 {
-            ("health_pack", 1, 0.2, 1.0, 0.3)
-        } else if roll < 0.20 {
-            ("armor_shard", 1, 0.3, 0.5, 1.0)
-        } else if roll < 0.35 {
-            ("plasma_cell", rng.gen_range(10..25), 0.0, 0.6, 1.0)
-        } else if roll < 0.48 {
-            ("scrap_metal", rng.gen_range(1..4), 0.6, 0.5, 0.3)
-        } else {
-            ("energy_core", 1, 1.0, 0.8, 0.0)
-        };
+        let rolls = 1 + extra_rolls + usize::from(guaranteed_core);
+        for drop_index in 0..rolls {
+            // The guaranteed core rides the final roll slot.
+            let force_core = guaranteed_core && drop_index == rolls - 1;
+            let roll: f32 = rng.gen();
+            if !force_core && roll > drop_chance {
+                continue;
+            }
 
-        let mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(r, g, b),
-            emissive: LinearRgba::new(r * 1.5, g * 1.5, b * 1.5, 1.0),
-            unlit: false,
-            metallic: 0.5,
-            ..default()
-        });
+            let (item_id, quantity, r, g, b): (&'static str, u32, f32, f32, f32) = if force_core {
+                ("energy_core", 1, 1.0, 0.8, 0.0)
+            } else if roll < 0.10 {
+                ("health_pack", 1, 0.2, 1.0, 0.3)
+            } else if roll < 0.20 {
+                ("armor_shard", 1, 0.3, 0.5, 1.0)
+            } else if roll < 0.35 {
+                (
+                    "plasma_cell",
+                    ((rng.gen_range(10..25) as f32 * quantity_mult) as u32).max(1),
+                    0.0,
+                    0.6,
+                    1.0,
+                )
+            } else if roll < 0.48 {
+                (
+                    "scrap_metal",
+                    ((rng.gen_range(1..4) as f32 * quantity_mult) as u32).max(1),
+                    0.6,
+                    0.5,
+                    0.3,
+                )
+            } else {
+                ("energy_core", 1, 1.0, 0.8, 0.0)
+            };
 
-        let base_y = ev.position.y + 0.6;
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Sphere::new(0.35))),
-                material: MeshMaterial3d(mat),
-                transform: Transform::from_translation(Vec3::new(
-                    ev.position.x,
-                    base_y,
-                    ev.position.z,
-                )),
+            let mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(r, g, b),
+                emissive: LinearRgba::new(r * 1.5, g * 1.5, b * 1.5, 1.0),
+                unlit: false,
+                metallic: 0.5,
                 ..default()
-            },
-            WorldLoot {
-                item_id,
-                quantity,
-                credits: 0,
-                pickup_radius: 2.5,
-                base_y,
-            },
-        ));
+            });
+
+            let base_y = ev.position.y + 0.6;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Sphere::new(0.35))),
+                    material: MeshMaterial3d(mat),
+                    transform: Transform::from_translation(Vec3::new(
+                        ev.position.x + drop_index as f32 * 0.8 - extra_rolls as f32 * 0.4,
+                        base_y,
+                        ev.position.z,
+                    )),
+                    ..default()
+                },
+                WorldLoot {
+                    item_id,
+                    quantity,
+                    credits: 0,
+                    pickup_radius: 2.5,
+                    base_y,
+                },
+            ));
+        }
     }
 }
 

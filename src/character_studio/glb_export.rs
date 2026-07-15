@@ -62,23 +62,22 @@ pub fn build_glb(parts: &[GlbPart]) -> Option<Vec<u8>> {
             Some((min, max)),
         );
         // ── NORMAL (optional) ──
-        let normal_accessor = (!part.normals.is_empty()
-            && part.normals.len() == part.positions.len())
-        .then(|| {
-            push_accessor(
-                &mut bin,
-                &mut buffer_views,
-                &mut accessors,
-                bytemuck_f32(&part.normals.iter().flatten().copied().collect::<Vec<_>>()),
-                "VEC3",
-                5126,
-                part.normals.len(),
-                None,
-            )
-        });
+        let normal_accessor =
+            (!part.normals.is_empty() && part.normals.len() == part.positions.len()).then(|| {
+                push_accessor(
+                    &mut bin,
+                    &mut buffer_views,
+                    &mut accessors,
+                    bytemuck_f32(&part.normals.iter().flatten().copied().collect::<Vec<_>>()),
+                    "VEC3",
+                    5126,
+                    part.normals.len(),
+                    None,
+                )
+            });
         // ── TEXCOORD_0 (optional) ──
-        let uv_accessor = (!part.uvs.is_empty() && part.uvs.len() == part.positions.len())
-            .then(|| {
+        let uv_accessor =
+            (!part.uvs.is_empty() && part.uvs.len() == part.positions.len()).then(|| {
                 push_accessor(
                     &mut bin,
                     &mut buffer_views,
@@ -91,11 +90,7 @@ pub fn build_glb(parts: &[GlbPart]) -> Option<Vec<u8>> {
                 )
             });
         // ── indices ──
-        let index_bytes: Vec<u8> = part
-            .indices
-            .iter()
-            .flat_map(|i| i.to_le_bytes())
-            .collect();
+        let index_bytes: Vec<u8> = part.indices.iter().flat_map(|i| i.to_le_bytes()).collect();
         let index_accessor = push_accessor(
             &mut bin,
             &mut buffer_views,
@@ -302,8 +297,7 @@ mod tests {
         assert!((color[0].as_f64().unwrap() - 0.8).abs() < 1e-6);
         // Buffer byteLength must match the BIN chunk payload.
         let bin_head = 20 + json_len;
-        let bin_len =
-            u32::from_le_bytes(bytes[bin_head..bin_head + 4].try_into().unwrap()) as u64;
+        let bin_len = u32::from_le_bytes(bytes[bin_head..bin_head + 4].try_into().unwrap()) as u64;
         assert_eq!(gltf["buffers"][0]["byteLength"].as_u64().unwrap(), bin_len);
     }
 
