@@ -8,7 +8,7 @@ use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureFormat,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError, TextureFormat,
 };
 use bevy::shader::ShaderRef;
 use std::collections::HashMap;
@@ -45,7 +45,9 @@ use crate::raids::{
     static_defense_score_for_site, RaidId, RaidKind, RaidRegistry, RaidStartResult,
     RaidThreatMarker, RaidTickEvent, RaidUfoMarker, CLOUDRAIL_TUTORIAL_RAID_SITE,
 };
-use crate::rendering::{DirectionalLightBundle, PbrBundle, PointLightBundle};
+use crate::rendering::{
+    DirectionalLightBundle, PbrBundle, PointLightBundle, WaterMaterial, WaterMaterialUniform,
+};
 use crate::resources::{
     initial_world_routes, initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState,
     DungeonRoomState, GameSettings, PlaySessionTransition, WorldRouteRegistry, WorldRouteState,
@@ -83,7 +85,15 @@ fn world_space_collider_scale() -> crate::physics::prelude::ColliderScale {
 #[derive(Asset, TypePath, AsBindGroup, Clone)]
 struct GrassMaterial {
     #[uniform(0)]
-    color: Vec4, // linear RGBA packed for the WGSL uniform
+    settings: GrassMaterialUniform,
+}
+
+#[derive(ShaderType, Clone, Copy)]
+struct GrassMaterialUniform {
+    tip_color: Vec4,
+    root_color: Vec4,
+    /// X speed, Y strength, Z spatial frequency, W secondary-wave scale.
+    wind: Vec4,
 }
 
 impl Material for GrassMaterial {
@@ -1839,6 +1849,7 @@ fn generate_city(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut grass_mats: ResMut<Assets<GrassMaterial>>,
+    mut water_mats: ResMut<Assets<WaterMaterial>>,
     asset_server: Res<AssetServer>,
     transition: Res<PlaySessionTransition>,
     settings: Res<GameSettings>,
@@ -1857,6 +1868,9 @@ fn generate_city(
     let m = &mut *mats;
 
     let pal = Palette::build(m, &asset_server);
+    let water_surface = water_mats.add(WaterMaterial {
+        settings: WaterMaterialUniform::default(),
+    });
 
     spawn_lighting(&mut commands, &mut meshes, m);
     spawn_ground_plane(&mut commands);
@@ -1876,13 +1890,13 @@ fn generate_city(
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
     spawn_everest_range_biomes(&mut commands, &mut meshes, &pal, seed);
     if current.id.0 == 1 {
-        spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal);
+        spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal, &water_surface);
     }
     spawn_grasslands(&mut commands, &mut meshes, &mut grass_mats, seed + 10);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8, seed);
-    spawn_river(&mut commands, &mut meshes, &pal);
+    spawn_river(&mut commands, &mut meshes, &pal, &water_surface);
     spawn_water_gardens(&mut commands, &mut meshes, &pal, seed + 12, seed);
     spawn_mana_waterfalls(&mut commands, &mut meshes, &pal, seed + 18, seed);
     spawn_mana_forests(&mut commands, &mut meshes, &pal, seed + 19, seed);
@@ -13717,16 +13731,26 @@ fn spawn_grasslands(
     let blade_wide = meshes.add(Rectangle::new(0.09, 0.52));
 
     // ── Three wind-grass material variants (linear sRGB greens) ──────────
+    let make_grass = |tip: Vec4, root: Vec4| GrassMaterial {
+        settings: GrassMaterialUniform {
+            tip_color: tip,
+            root_color: root,
+            wind: Vec4::new(1.30, 0.13, 0.60, 0.35),
+        },
+    };
     let mats: [Handle<GrassMaterial>; 3] = [
-        grass_mats.add(GrassMaterial {
-            color: Vec4::new(0.09, 0.27, 0.07, 1.0),
-        }),
-        grass_mats.add(GrassMaterial {
-            color: Vec4::new(0.13, 0.35, 0.10, 1.0),
-        }),
-        grass_mats.add(GrassMaterial {
-            color: Vec4::new(0.07, 0.22, 0.05, 1.0),
-        }),
+        grass_mats.add(make_grass(
+            Vec4::new(0.12, 0.36, 0.09, 1.0),
+            Vec4::new(0.035, 0.11, 0.025, 1.0),
+        )),
+        grass_mats.add(make_grass(
+            Vec4::new(0.17, 0.44, 0.12, 1.0),
+            Vec4::new(0.045, 0.14, 0.03, 1.0),
+        )),
+        grass_mats.add(make_grass(
+            Vec4::new(0.10, 0.30, 0.07, 1.0),
+            Vec4::new(0.028, 0.09, 0.02, 1.0),
+        )),
     ];
 
     // ── L-system string, evaluated once ──────────────────────────────────
@@ -13938,18 +13962,20 @@ fn spawn_outer_districts(
 }
 
 // ── River ─────────────────────────────────────────────────────────────────────
-fn spawn_river(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette) {
+fn spawn_river(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    water: &Handle<WaterMaterial>,
+) {
     for i in -15..=15i32 {
         let z = i as f32 * 40.0;
         let x = (z * 0.05).sin() * 60.0;
 
         commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(25.0, 0.1, 42.0))),
-                material: MeshMaterial3d(pal.water.clone()),
-                transform: Transform::from_xyz(x, -0.1, z),
-                ..default()
-            },
+            Mesh3d(meshes.add(Cuboid::new(25.0, 0.1, 42.0))),
+            MeshMaterial3d(water.clone()),
+            Transform::from_xyz(x, -0.1, z),
             WorldGeometry,
         ));
     }
@@ -14043,15 +14069,13 @@ fn spawn_chapter_one_ocean_island(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    water: &Handle<WaterMaterial>,
 ) {
     let ocean_transform = Transform::from_xyz(0.0, 0.18, 760.0);
     commands.spawn((
-        PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(840.0, 0.08, 430.0))),
-            material: MeshMaterial3d(pal.water.clone()),
-            transform: ocean_transform,
-            ..default()
-        },
+        Mesh3d(meshes.add(Cuboid::new(840.0, 0.08, 430.0))),
+        MeshMaterial3d(water.clone()),
+        ocean_transform,
         WorldGeometry,
         NatureSway::new(&ocean_transform, 1.7, 0.7, 0.001, 0.035, 0.004),
     ));

@@ -143,6 +143,9 @@ fn main() {
         // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
         .add_plugins(input_buffer::InputBufferPlugin)
         .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
+        .add_plugins(MaterialPlugin::<rendering::WaterMaterial>::default())
+        .add_plugins(MaterialPlugin::<rendering::EnergyMaterial>::default())
+        .add_plugins(MaterialPlugin::<rendering::ShieldMaterial>::default())
         // Game plugins
         .add_plugins((
             InputPlugin,

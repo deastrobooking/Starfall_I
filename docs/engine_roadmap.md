@@ -228,3 +228,10 @@ thin glue.
   genuinely different (racing/builder/shooter)? Decides how general the EC7
   crates (`forge_play`, `forge_world`) must be.
 - **Sim tick rate:** 64 vs 120 Hz — settle with EC0 profiler data in EC1.
+# Rendering shader pass
+
+The staged custom-material and shader plan is tracked in
+`docs/rendering_shader_pass.md`. Rendering R1 is delivered with branchless,
+scene-lit Toon; configurable GPU Grass; procedural world Water; and compiled
+Energy/Shield Forge previews. R2 owns combat/armor integration, ice/lava domain
+materials, clustered-light evaluation, and measured four-viewport GPU budgets.

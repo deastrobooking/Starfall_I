@@ -1,59 +1,75 @@
-// Wind-swaying grass blade shader.
-//
-// Vertex stage: applies a sin-wave sway in world-X that is zero at the blade
-// root (local y ≤ 0) and grows toward the tip, giving the classic old-school
-// grass animation without any CPU updates per frame.
-//
-// Fragment stage: Lambert diffuse against a fixed sun direction, with abs()
-// on the dot product so both faces of the double-sided quad are lit.
+// Configurable, scene-lit grass for Starfall's large outdoor world.
+// Wind is vertex-only and spatially phased, so the CPU never updates blades.
 
-#import bevy_pbr::mesh_view_bindings::{view, globals}
+#import bevy_pbr::mesh_view_bindings::{view, globals, lights}
 #import bevy_pbr::mesh_functions::{get_world_from_local, mesh_normal_local_to_world}
 
-const WIND_SPEED:     f32 = 1.30;   // cycles per second
-const WIND_STRENGTH:  f32 = 0.13;   // world-unit sway amplitude at the tip
-const WIND_FREQUENCY: f32 = 0.60;   // spatial variation (world-X phase)
+struct GrassSettings {
+    tip_color: vec4<f32>,
+    root_color: vec4<f32>,
+    // X speed, Y strength, Z spatial frequency, W secondary-wave scale.
+    wind: vec4<f32>,
+};
 
-// Material uniform: one RGBA colour per blade variant.
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> color: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0)
+var<uniform> grass: GrassSettings;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
-    @location(1) normal:   vec3<f32>,
-    @location(2) uv:       vec2<f32>,
-}
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+};
 
 struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0)       world_normal:  vec3<f32>,
-}
+    @builtin(position) position: vec4<f32>,
+    @location(0) world_normal: vec3<f32>,
+    @location(1) height_mix: f32,
+};
 
 @vertex
 fn vertex(in: Vertex) -> VertexOutput {
     var out: VertexOutput;
-
     let world_from_local = get_world_from_local(in.instance_index);
-    var world_pos        = world_from_local * vec4<f32>(in.position, 1.0);
+    var world_position = world_from_local * vec4<f32>(in.position, 1.0);
 
-    // Blades are 0.52–0.72 tall; local y runs from -half_h (root) to +half_h (tip).
-    // Clamp so negative-y root vertices get zero sway and tip gets full sway.
-    let sway_t = clamp(in.position.y / 0.4, 0.0, 1.0);
-    let phase  = globals.time * WIND_SPEED + world_pos.x * WIND_FREQUENCY;
-    let sway   = sin(phase) * WIND_STRENGTH * sway_t;
-    world_pos.x += sway;
-    world_pos.z += sway * 0.35;   // slight Z component for more organic feel
+    // Bevy Rectangle UVs are 0 at the top and 1 at the bottom. This keeps the
+    // root fixed for any blade height instead of relying on a mesh magic number.
+    let height_mix = clamp(1.0 - in.uv.y, 0.0, 1.0);
+    let phase = globals.time * grass.wind.x
+        + world_position.x * grass.wind.z
+        + world_position.z * grass.wind.z * 0.73;
+    let primary = sin(phase);
+    let secondary = sin(phase * 1.71 + world_position.z * 0.19);
+    let sway = (primary + secondary * 0.32) * grass.wind.y * height_mix * height_mix;
+    world_position.x += sway;
+    world_position.z += sway * grass.wind.w;
 
-    out.clip_position = view.clip_from_world * world_pos;
-    out.world_normal  = mesh_normal_local_to_world(in.normal, in.instance_index);
+    // A small vertical normal correction follows the bend so highlights do not
+    // remain completely static while the blade moves.
+    let base_normal = mesh_normal_local_to_world(in.normal, in.instance_index);
+    out.world_normal = normalize(base_normal + vec3<f32>(0.0, -sway * 0.8, 0.0));
+    out.position = view.clip_from_world * world_position;
+    out.height_mix = height_mix;
     return out;
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Fixed sun direction — roughly matches the directional light in spawn_lighting.
-    let sun     = normalize(vec3<f32>(0.45, 1.0, 0.30));
-    // abs() ensures the back face is lit the same as the front (double-sided).
-    let diffuse = mix(0.22, 1.0, abs(dot(normalize(in.world_normal), sun)));
-    return vec4<f32>(color.rgb * diffuse, 1.0);
+    let normal = normalize(in.world_normal);
+    var direction_sum = vec3<f32>(0.45, 1.0, 0.30) * 0.0001;
+    var color_sum = vec3<f32>(0.0001);
+    for (var index = 0u; index < lights.n_directional_lights; index += 1u) {
+        let scene_light = lights.directional_lights[index];
+        let energy = max(max(scene_light.color.r, scene_light.color.g), scene_light.color.b);
+        direction_sum += scene_light.direction_to_light * energy;
+        color_sum += scene_light.color.rgb;
+    }
+    let light = normalize(direction_sum);
+    let light_tint = color_sum / max(max(color_sum.r, color_sum.g), color_sum.b);
+    let ndotl = abs(dot(normal, light));
+    let diffuse = mix(0.30, 1.0, ndotl);
+    let blade_color = mix(grass.root_color.rgb, grass.tip_color.rgb, in.height_mix);
+    let scene_tint = mix(vec3<f32>(1.0), light_tint, 0.18);
+    return vec4<f32>(blade_color * diffuse * scene_tint, grass.tip_color.a);
 }
