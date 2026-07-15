@@ -46,7 +46,7 @@ use character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use commands::{CommandOverlayState, CommandRegistry};
-use engine_tools::EngineToolsPlugin;
+use engine_tools::{EngineToolMode, EngineToolsPlugin};
 use events::EventsPlugin;
 use final_war::FinalWarRegistry;
 use hacking::HackingRegistry;
@@ -175,6 +175,12 @@ fn main() {
     // Boot straight into the Character Studio for design-tool iteration.
     if std::env::var_os("STARFALL_STUDIO").is_some() {
         app.insert_state(AppState::CharacterStudio);
+    }
+    // Boot directly into a live chapter with Starfall Forge open for editor
+    // smoke tests and rapid tool iteration.
+    if std::env::var_os("STARFALL_EDITOR").is_some() {
+        app.insert_state(AppState::Playing);
+        app.insert_state(EngineToolMode::Editing);
     }
 
     app.run();

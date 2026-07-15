@@ -83,7 +83,7 @@ Acceptance: IDs survive save-oriented serialization, invalid transaction
 targets do not modify valid targets, and execute/undo/redo restore exact
 transforms. Automated tests cover each requirement.
 
-## ET2 — Safe editor workspace shell
+## ET2 — Safe editor workspace shell (in progress)
 
 Build a native Bevy UI overlay first, reusing the project's controller focus
 system. Add:
@@ -100,6 +100,60 @@ system. Add:
 Acceptance: edit a test arena for ten minutes without firing a weapon, moving a
 player, advancing AI, or losing controller menu access. Every transform gesture
 is one undo transaction.
+
+### ET2a delivered
+
+- Tab or Select + Start enters and exits the workspace while a chapter is live;
+- gameplay input is zeroed, virtual simulation and Avian physics are paused,
+  gameplay cameras are disabled, and cursor ownership is transferred atomically;
+- a dedicated real-time 6-DOF editor camera supports WASD/QE, right-mouse look,
+  controller sticks, and Shift speed boost;
+- controller/keyboard focus and mouse activation work across labeled toolbar,
+  outliner, and inspector buttons;
+- authorable empty anchors can be created, selected, duplicated, deleted, and
+  moved on a one-metre X grid;
+- transform nudges use ET1 transactions and are undoable/redoable;
+- the status bar reports selection and command results.
+
+### ET2b delivered
+
+- cursor-ray viewport selection is restricted to roots marked `Authorable` and
+  respects approximate scaled bounds; Shift-click supports multi-selection;
+- selected objects receive visible red/green/blue world axes and a ground
+  footprint over the editor grid;
+- the inspector exposes snapped XYZ translation, 15-degree Y rotation, and
+  proportional scale controls, all routed through ET1 undo transactions;
+- fly/orbit camera switching and frame-selection are available from labeled,
+  controller-focusable buttons and keyboard shortcuts;
+- the creation palette spawns visible block, pillar, beacon, and empty-anchor
+  draft objects in front of the editor camera;
+- the outliner has live name filtering, a matching object list, and filtered
+  previous/next selection;
+- dirty drafts are visible in the status bar and require a deliberate second
+  exit command before returning to play mode.
+
+### ET2c delivered
+
+- colored viewport axes now accept direct mouse drags in translate, rotate, and
+  per-axis scale modes;
+- a complete drag previews continuously but commits exactly one ET1 undo
+  transaction when released;
+- rotation mode draws three colored rings and snaps to 15-degree increments;
+- transform space switches between world and object-local axes;
+- translation snapping cycles through 0.25, 0.5, 1.0, and 2.0 metres and is
+  shared by direct handles and inspector movement;
+- live world adapters expose chapter anchors, cave gates, settlement terminals,
+  and route markers as editable stable roots;
+- moving a cave or settlement adapter synchronizes its gameplay entry/focus or
+  construction origin instead of changing only its visible transform;
+- generated road loops and explorable-building roots appear as selectable,
+  searchable read-only adapters. Editing them is blocked until their complete
+  spline/building recipes can regenerate every dependent mesh and collider;
+- world adapters cannot be duplicated or deleted accidentally.
+
+ET2's remaining production gate is now persistence and recipe regeneration:
+ET3 must save draft objects and stable adapter overrides, while the road and
+building forges must replace read-only adapters with complete recipe compilers.
 
 ## ET3 — Content registry, files, and publishing
 
@@ -225,6 +279,6 @@ after at least three Starfall workspaces share the APIs.
   generator-time budgets;
 - no editor preview/runtime output divergence.
 
-The next implementation slice is ET2's safe workspace shell. Camera and input
-capture land before the Tab shortcut, followed by selection/outliner and the
-first transform gizmo using ET1 transactions.
+The next implementation slice is ET3's versioned project/content registry,
+atomic draft persistence, and recovery snapshots. Road/building adapters become
+editable only as their recipe compilers acquire safe regeneration boundaries.

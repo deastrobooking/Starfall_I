@@ -46,6 +46,7 @@ use bevy::input::InputSystems;
 use bevy::prelude::*;
 
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
+use crate::engine_tools::EngineToolMode;
 use crate::resources::GameSettings;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -57,9 +58,25 @@ impl Plugin for InputPlugin {
             .add_systems(PreUpdate, poll_native_controllers.after(InputSystems))
             .add_systems(
                 PreUpdate,
-                update_player_inputs.after(poll_native_controllers),
+                update_player_inputs
+                    .after(poll_native_controllers)
+                    .run_if(in_state(EngineToolMode::Playing)),
+            )
+            .add_systems(
+                PreUpdate,
+                clear_player_inputs
+                    .after(poll_native_controllers)
+                    .run_if(in_state(EngineToolMode::Editing)),
             )
             .add_systems(Update, log_gamepad_connections);
+    }
+}
+
+/// Editor input is intentionally destructive: held gameplay actions from the
+/// previous frame must not survive when the authoring workspace takes control.
+fn clear_player_inputs(mut players: Query<&mut PlayerInput, With<Player>>) {
+    for mut input in &mut players {
+        *input = PlayerInput::default();
     }
 }
 

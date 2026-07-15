@@ -1251,6 +1251,15 @@ fn pause_input_system(
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
+    // Select + Start belongs to the level-editor workspace. Do not also open
+    // the pause menu on the frame that chord changes tool mode.
+    let editor_chord = gamepads.iter().any(|gamepad| {
+        gamepad.pressed(GamepadButton::Select) && gamepad.just_pressed(GamepadButton::Start)
+    }) || (native.pressed(NativeButton::Select)
+        && native.just_pressed(NativeButton::Start));
+    if editor_chord {
+        return;
+    }
     let raw_pause_pressed = keyboard.just_pressed(KeyCode::Escape)
         || gamepads
             .iter()
