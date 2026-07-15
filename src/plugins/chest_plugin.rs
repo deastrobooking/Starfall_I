@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+
+use crate::game_rng::GameRng;
 use rand::Rng;
 
 use crate::components::player::{Player, PlayerStats};
@@ -25,6 +27,7 @@ impl Plugin for ChestPlugin {
 }
 
 fn spawn_chests(
+    mut game_rng: ResMut<GameRng>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -35,7 +38,7 @@ fn spawn_chests(
         return;
     }
 
-    let mut rng = rand::thread_rng();
+    let rng = game_rng.loot();
     let gold_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.9, 0.7, 0.1),
         metallic: 0.8,

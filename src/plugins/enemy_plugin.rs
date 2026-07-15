@@ -19,6 +19,7 @@ use crate::hacking::{Hackable, HackedUnit};
 use crate::rendering::PbrBundle;
 use crate::resources::{PlaySessionTransition, WaveInfo};
 use crate::robot_pets::{salvage_for_enemy, RobotPetCollection};
+use crate::game_rng::GameRng;
 use crate::hitstop::hitstop_inactive;
 use crate::state::AppState;
 
@@ -358,6 +359,7 @@ pub fn spawn_named_enemy(
 
 // ── AI System ─────────────────────────────────────────────────────────────────
 fn enemy_ai_system(
+    mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
     player_q: Query<(Entity, &Transform), (With<Player>, Without<Enemy>)>,
     mut enemy_q: Query<
@@ -378,7 +380,7 @@ fn enemy_ai_system(
     >,
 ) {
     let dt = time.delta_secs();
-    let mut rng = rand::thread_rng();
+    let rng = game_rng.world();
 
     for (mut transform, mut enemy, mut sm, health, drone, city_spy, dragon_boss) in
         enemy_q.iter_mut()
@@ -1212,12 +1214,13 @@ fn robot_salvage_reward_system(
 
 // ── Loot Drop on Kill ─────────────────────────────────────────────────────────
 fn enemy_loot_drop_system(
+    mut game_rng: ResMut<GameRng>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut killed_ev: MessageReader<EnemyKilledEvent>,
 ) {
-    let mut rng = rand::thread_rng();
+    let rng = game_rng.loot();
 
     for ev in killed_ev.read() {
         // ~60% drop chance

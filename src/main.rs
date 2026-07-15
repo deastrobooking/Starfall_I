@@ -24,6 +24,7 @@ mod final_war;
 mod audio_synth;
 mod combat_feedback;
 mod game_loop;
+mod game_rng;
 mod hitstop;
 mod sfx;
 mod hacking;
@@ -126,6 +127,7 @@ fn main() {
         .init_resource::<CommandOverlayState>()
         .init_resource::<HackingRegistry>()
         .init_resource::<FinalWarRegistry>()
+        .init_resource::<game_rng::GameRng>()
         .register_type::<BodyRecipe>()
         .register_type::<CartoonAppearanceRecipe>()
         .register_type::<BodyPreset>()

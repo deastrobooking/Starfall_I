@@ -9,6 +9,7 @@ use crate::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
 };
 use crate::events::*;
+use crate::game_rng::GameRng;
 use crate::hacking::HackedUnit;
 use crate::perks::PerkTree;
 use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
@@ -422,6 +423,7 @@ fn weapon_select_system(
 
 // ── Primary Weapon Fire ───────────────────────────────────────────────────────
 fn weapon_fire_system(
+    mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
@@ -531,6 +533,7 @@ fn weapon_fire_system(
                     primary_fallback_damage_type(wt, explosive_weapon),
                 );
                 spawn_charge_blast(
+                    game_rng.combat(),
                     &mut commands,
                     &proj_assets,
                     player_entity,
@@ -630,7 +633,7 @@ fn weapon_fire_system(
 
         for _ in 0..pellets {
             use rand::Rng;
-            let mut rng = rand::thread_rng();
+            let rng = game_rng.combat();
             let (sx, sy) = if spread > 0.0 {
                 (
                     rng.gen_range(-spread..spread),
@@ -747,6 +750,7 @@ fn spawn_muzzle_flash_scaled(
 }
 
 fn spawn_charge_blast(
+    rng: &mut rand::rngs::StdRng,
     commands: &mut Commands,
     assets: &ProjectileAssets,
     owner: Entity,
@@ -821,7 +825,6 @@ fn spawn_charge_blast(
         // Shotgun: nova burst of 18 wide-spread pellets
         WeaponType::Shotgun => {
             use rand::Rng;
-            let mut rng = rand::thread_rng();
             let up = dir.cross(right).normalize_or_zero();
             let pellet_dmg = damage / 14.0;
             for _ in 0..18u32 {
@@ -901,13 +904,14 @@ fn spawn_charge_blast(
 
 // ── Charge build VFX ─────────────────────────────────────────────────────────
 fn charge_spark_system(
+    mut game_rng: ResMut<GameRng>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     player_q: Query<(&GlobalTransform, &WeaponInventory, &PlayerCameraRef), With<Player>>,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
 ) {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let rng = game_rng.cosmetic();
 
     for (player_transform, inv, cam_ref) in player_q.iter() {
         let weapon = inv.active();
@@ -1002,6 +1006,7 @@ fn rescale_ammo_cap(current: &mut u32, max: &mut u32, base_max: u32, ammo_mult: 
 
 // ── Special Energy Tools ──────────────────────────────────────────────────────
 fn special_weapon_system(
+    mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
@@ -1118,7 +1123,7 @@ fn special_weapon_system(
                         gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
                     inv.slot8.cooldown_timer = inv.slot8.cooldown;
                     use rand::Rng;
-                    let mut rng = rand::thread_rng();
+                    let rng = game_rng.combat();
                     let right = cam.right().as_vec3();
                     let up = cam.up().as_vec3();
                     let burst_count = 3 + upgrades.gauntlet_extra_pellets();
@@ -1220,7 +1225,7 @@ fn special_weapon_system(
                         gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
                     inv.slot0.cooldown_timer = inv.slot0.cooldown;
                     use rand::Rng;
-                    let mut rng = rand::thread_rng();
+                    let rng = game_rng.combat();
                     let right = cam.right().as_vec3();
                     let up = cam.up().as_vec3();
                     let burst_count = 5 + upgrades.gauntlet_extra_pellets();
@@ -2266,12 +2271,13 @@ fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transfo
 
 // ── Hit Particles ─────────────────────────────────────────────────────────────
 fn hit_particle_spawn_system(
+    mut game_rng: ResMut<GameRng>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     mut damaged_ev: MessageReader<EnemyDamagedEvent>,
 ) {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let rng = game_rng.cosmetic();
 
     for ev in damaged_ev.read() {
         let count = rng.gen_range(4usize..8);

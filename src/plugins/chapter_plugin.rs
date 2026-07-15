@@ -27,6 +27,7 @@ use crate::resources::{
     BiomePalette, ChapterProgress, CurrentChapter, DungeonCrawlState, FastTravelDestination,
     PlaySessionTransition, WaveInfo,
 };
+use crate::game_rng::GameRng;
 use crate::state::AppState;
 
 pub struct ChapterPlugin;
@@ -183,6 +184,7 @@ fn move_players_to_world_anchor(
 // ── Director ──────────────────────────────────────────────────────────────────
 #[allow(clippy::too_many_arguments)]
 fn chapter_director_system(
+    mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
     mut current: ResMut<CurrentChapter>,
     mut commands: Commands,
@@ -227,7 +229,7 @@ fn chapter_director_system(
     let Some(player_pos) = party_anchor_position(&mut player_q) else {
         return;
     };
-    let mut rng = rand::thread_rng();
+    let rng = game_rng.world();
 
     let mut advance = false;
 
@@ -257,7 +259,7 @@ fn chapter_director_system(
             scale,
         } => {
             for _ in 0..count {
-                let pos = random_spawn_pos(player_pos, &mut rng);
+                let pos = random_spawn_pos(player_pos, rng);
                 spawn_enemy_entity(
                     &mut commands,
                     &mut meshes,

@@ -518,9 +518,7 @@ pub fn apply_sharp_face(spec: &mut CharacterSpec) {
 }
 
 /// Full random character (body + face + style), sex included.
-pub fn randomize(spec: &mut CharacterSpec) {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
+pub fn randomize(spec: &mut CharacterSpec, rng: &mut impl rand::Rng) {
     let base = if rng.gen_bool(0.5) {
         preset_male()
     } else {

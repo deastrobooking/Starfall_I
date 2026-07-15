@@ -193,6 +193,13 @@ knockback.
 synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no
 longer silent; file-based sounds can replace presets handle-for-handle.
+**Ownership slice (S4, 2026-07-15):** studio **GLB export** — `EXPORT GLB`
+button walks the preview and writes versioned `human_vNNN.glb` via the
+hand-rolled writer in `src/character_studio/glb_export.rs` (no new deps).
+**Deterministic RNG seam** — `src/game_rng.rs` `GameRng` (StdRng streams:
+combat/loot/world/cosmetic; seed logged, `STARFALL_SEED` reproduces) replaced
+every gameplay `thread_rng()`; sole exemption: camera-shake offset
+(presentation-only, annotated). EC6 replay now has its randomness seam.
 
 ### EC3 — Motor to "feels amazing"
 **Goal:** Lock in Spider-Man + Mega Man feel on the deterministic base.

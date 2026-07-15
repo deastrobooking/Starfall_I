@@ -1221,6 +1221,8 @@ fn player_camera_transform(
 fn camera_shake_offset(trauma: f32) -> Vec3 {
     if trauma > 0.01 {
         use rand::Rng;
+        // Presentation-only randomness (screen shake offset): exempt from the
+        // deterministic GameRng seam — cannot affect simulation state.
         let mut rng = rand::thread_rng();
         let mag = trauma * trauma * 0.18;
         Vec3::new(

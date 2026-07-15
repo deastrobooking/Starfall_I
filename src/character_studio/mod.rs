@@ -14,6 +14,7 @@
 //! library panel with LOAD/DELETE buttons per version.
 
 pub mod generators;
+pub mod glb_export;
 pub mod human_mesh;
 pub mod rig_bridge;
 pub mod spec;
@@ -31,6 +32,7 @@ use crate::character_blueprint::{
 };
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{CharacterDesignData, CharacterDesignReturnTarget, PlayerSelectState};
+use crate::game_rng::GameRng;
 use crate::state::AppState;
 use generators::build_character_patch;
 use spec::{CharacterSpec, MorphField, StyleField};
@@ -53,6 +55,7 @@ impl Plugin for CharacterStudioPlugin {
                     morph_slider_interaction,
                     studio_controller_navigation,
                     apply_studio_character_to_player,
+                    export_glb_system,
                     rebuild_library_rows,
                     rebuild_preview,
                     fallback_failed_rig_preview,
@@ -93,6 +96,7 @@ enum StudioAction {
     PreviewProcedural,
     PreviewRigged,
     SaveVersion,
+    ExportGlb,
     UseInGame,
     Back,
     MorphDec(usize),
@@ -144,6 +148,7 @@ const ACTION_GROUPS: [&[StudioAction]; 9] = [
     &[StudioAction::PreviewProcedural, StudioAction::PreviewRigged],
     &[
         StudioAction::SaveVersion,
+        StudioAction::ExportGlb,
         StudioAction::UseInGame,
         StudioAction::Back,
     ],
@@ -178,6 +183,7 @@ fn action_label(action: StudioAction) -> &'static str {
         StudioAction::PreviewProcedural => "GENERATED",
         StudioAction::PreviewRigged => "RIG TEST",
         StudioAction::SaveVersion => "SAVE VERSION",
+        StudioAction::ExportGlb => "EXPORT GLB",
         StudioAction::UseInGame => "USE IN GAME",
         StudioAction::Back => "BACK",
         _ => "",
@@ -199,6 +205,7 @@ pub struct StudioState {
     preview_backend: StudioPreviewBackend,
     status: String,
     apply_requested: bool,
+    export_requested: bool,
 }
 
 impl Default for StudioState {
@@ -216,6 +223,7 @@ impl Default for StudioState {
             preview_backend: StudioPreviewBackend::Procedural,
             status: "Welcome to the Character Studio".to_string(),
             apply_requested: false,
+            export_requested: false,
         }
     }
 }
@@ -895,6 +903,7 @@ fn apply_action(
     action: StudioAction,
     state: &mut StudioState,
     library: &mut SaveLibrary,
+    game_rng: &mut GameRng,
     next_state: &mut NextState<AppState>,
 ) {
     let mark = |state: &mut StudioState, msg: String| {
@@ -966,7 +975,7 @@ fn apply_action(
         StudioAction::Random => {
             state.push_undo();
             let mut spec = state.spec;
-            generators::randomize(&mut spec);
+            generators::randomize(&mut spec, game_rng.cosmetic());
             state.spec = spec;
             mark(state, "Randomized".into());
         }
@@ -1039,6 +1048,11 @@ fn apply_action(
                 state.labels_dirty = true;
             }
         },
+        StudioAction::ExportGlb => {
+            state.export_requested = true;
+            state.status = "Exporting .glb...".into();
+            state.labels_dirty = true;
+        }
         StudioAction::UseInGame => {
             state.apply_requested = true;
             state.status = "Applying this model to the selected player...".into();
@@ -1116,6 +1130,7 @@ fn apply_action(
 // ── Mouse ─────────────────────────────────────────────────────────────────────
 
 fn button_interaction(
+    mut game_rng: ResMut<GameRng>,
     mut interactions: Query<(&Interaction, &ActionButton), Changed<Interaction>>,
     mut state: ResMut<StudioState>,
     mut library: ResMut<SaveLibrary>,
@@ -1131,7 +1146,13 @@ fn button_interaction(
             Interaction::Pressed => {
                 focus.row = button.row;
                 focus.col = button.col;
-                apply_action(button.action, &mut state, &mut library, &mut next_state);
+                apply_action(
+                    button.action,
+                    &mut state,
+                    &mut library,
+                    &mut game_rng,
+                    &mut next_state,
+                );
             }
             Interaction::None => {}
         }
@@ -1183,6 +1204,7 @@ fn morph_slider_interaction(
 
 #[allow(clippy::too_many_arguments)]
 fn studio_controller_navigation(
+    mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
@@ -1255,6 +1277,7 @@ fn studio_controller_navigation(
                 StudioAction::MorphReset(focus.row - MORPH_ROW_0),
                 &mut state,
                 &mut library,
+                &mut game_rng,
                 &mut next_state,
             );
         } else if focus.row >= STYLE_ROW_0 && focus.row < FILE_ROW_0 {
@@ -1262,6 +1285,7 @@ fn studio_controller_navigation(
                 StudioAction::StyleReset(focus.row - STYLE_ROW_0),
                 &mut state,
                 &mut library,
+                &mut game_rng,
                 &mut next_state,
             );
         }
@@ -1284,6 +1308,7 @@ fn studio_controller_navigation(
                         StudioAction::MorphDec(focus.row - MORPH_ROW_0),
                         &mut state,
                         &mut library,
+                        &mut game_rng,
                         &mut next_state,
                     );
                 } else if focus.row >= STYLE_ROW_0 && focus.row < FILE_ROW_0 {
@@ -1291,6 +1316,7 @@ fn studio_controller_navigation(
                         StudioAction::StylePrev(focus.row - STYLE_ROW_0),
                         &mut state,
                         &mut library,
+                        &mut game_rng,
                         &mut next_state,
                     );
                 } else {
@@ -1303,6 +1329,7 @@ fn studio_controller_navigation(
                         StudioAction::MorphInc(focus.row - MORPH_ROW_0),
                         &mut state,
                         &mut library,
+                        &mut game_rng,
                         &mut next_state,
                     );
                 } else if focus.row >= STYLE_ROW_0 && focus.row < FILE_ROW_0 {
@@ -1310,6 +1337,7 @@ fn studio_controller_navigation(
                         StudioAction::StyleNext(focus.row - STYLE_ROW_0),
                         &mut state,
                         &mut library,
+                        &mut game_rng,
                         &mut next_state,
                     );
                 } else {
@@ -1322,12 +1350,13 @@ fn studio_controller_navigation(
 
     if confirm {
         if let Some(action) = focused_studio_action(&focus, &buttons) {
-            apply_action(action, &mut state, &mut library, &mut next_state);
+            apply_action(action, &mut state, &mut library, &mut game_rng, &mut next_state);
         } else if focus.row >= MORPH_ROW_0 && focus.row < STYLE_ROW_0 {
             apply_action(
                 StudioAction::MorphInc(focus.row - MORPH_ROW_0),
                 &mut state,
                 &mut library,
+                &mut game_rng,
                 &mut next_state,
             );
         }
@@ -1904,6 +1933,135 @@ fn save_new_version(spec: &CharacterSpec, existing: &[String]) -> Result<String,
     let name = format!("human_v{next:03}.json");
     let json = serde_json::to_string_pretty(spec).map_err(|e| e.to_string())?;
     std::fs::write(dir.join(&name), json).map_err(|e| e.to_string())?;
+    Ok(name)
+}
+
+/// Walk the live preview hierarchy and serialize every mesh part to a
+/// versioned `.glb` beside the JSON specs. Exports exactly what is on screen.
+fn export_glb_system(
+    mut state: ResMut<StudioState>,
+    meshes: Res<Assets<Mesh>>,
+    materials: Res<Assets<StandardMaterial>>,
+    roots: Query<(Entity, &GlobalTransform), With<StudioPreview>>,
+    children_q: Query<&Children>,
+    parts: Query<(
+        &Mesh3d,
+        &MeshMaterial3d<StandardMaterial>,
+        &GlobalTransform,
+        Option<&Name>,
+    )>,
+) {
+    if !state.export_requested {
+        return;
+    }
+    state.export_requested = false;
+
+    let Ok((root, root_gt)) = roots.single() else {
+        state.status = "Export failed: no preview to export".into();
+        state.labels_dirty = true;
+        return;
+    };
+    let root_inverse = root_gt.affine().inverse();
+
+    let mut glb_parts = Vec::new();
+    let mut part_index = 0usize;
+    for entity in children_q.iter_descendants(root) {
+        let Ok((mesh3d, material3d, part_gt, name)) = parts.get(entity) else {
+            continue;
+        };
+        let Some(mesh) = meshes.get(&mesh3d.0) else {
+            continue;
+        };
+        let Some(positions) = float3_attribute(mesh, Mesh::ATTRIBUTE_POSITION) else {
+            continue;
+        };
+        let indices = match mesh.indices() {
+            Some(bevy::mesh::Indices::U32(v)) => v.clone(),
+            Some(bevy::mesh::Indices::U16(v)) => v.iter().map(|i| *i as u32).collect(),
+            None => (0..positions.len() as u32).collect(),
+        };
+        let (base_color, metallic, roughness) = materials
+            .get(&material3d.0)
+            .map(|m| {
+                let c = m.base_color.to_linear();
+                (
+                    [c.red, c.green, c.blue, c.alpha],
+                    m.metallic,
+                    m.perceptual_roughness,
+                )
+            })
+            .unwrap_or(([0.8, 0.8, 0.8, 1.0], 0.0, 0.9));
+
+        part_index += 1;
+        glb_parts.push(glb_export::GlbPart {
+            name: name
+                .map(|n| n.as_str().to_string())
+                .unwrap_or_else(|| format!("part_{part_index:02}")),
+            positions,
+            normals: float3_attribute(mesh, Mesh::ATTRIBUTE_NORMAL).unwrap_or_default(),
+            uvs: float2_attribute(mesh, Mesh::ATTRIBUTE_UV_0).unwrap_or_default(),
+            indices,
+            base_color,
+            metallic,
+            roughness,
+            matrix: Mat4::from(root_inverse * part_gt.affine()).to_cols_array(),
+        });
+    }
+
+    match glb_export::build_glb(&glb_parts) {
+        Some(bytes) => match save_glb_bytes(&bytes) {
+            Ok(name) => {
+                state.status = format!("Exported {name} ({} parts)", glb_parts.len());
+                state.labels_dirty = true;
+            }
+            Err(err) => {
+                state.status = format!("Export failed: {err}");
+                state.labels_dirty = true;
+            }
+        },
+        None => {
+            state.status = "Export failed: preview has no mesh parts (rig view?)".into();
+            state.labels_dirty = true;
+        }
+    }
+}
+
+fn float3_attribute(mesh: &Mesh, attr: bevy::mesh::MeshVertexAttribute) -> Option<Vec<[f32; 3]>> {
+    match mesh.attribute(attr) {
+        Some(bevy::mesh::VertexAttributeValues::Float32x3(v)) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+fn float2_attribute(mesh: &Mesh, attr: bevy::mesh::MeshVertexAttribute) -> Option<Vec<[f32; 2]>> {
+    match mesh.attribute(attr) {
+        Some(bevy::mesh::VertexAttributeValues::Float32x2(v)) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+/// Never overwrites: allocates the next `human_vNNN.glb` (numbering is
+/// independent of the JSON specs so either can be pruned freely).
+fn save_glb_bytes(bytes: &[u8]) -> Result<String, String> {
+    let dir = preset_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let next = std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter_map(|n| {
+                    n.strip_prefix("human_v")
+                        .and_then(|s| s.strip_suffix(".glb"))
+                        .and_then(|s| s.parse::<u32>().ok())
+                })
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+        + 1;
+    let name = format!("human_v{next:03}.glb");
+    std::fs::write(dir.join(&name), bytes).map_err(|e| e.to_string())?;
     Ok(name)
 }
 
