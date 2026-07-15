@@ -176,6 +176,23 @@ pub struct SpeedRoadCheckpoint {
     pub radius: f32,
 }
 
+/// Ordered checkpoint on a closed settlement-ring race course.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StuntRaceGate {
+    pub course_id: &'static str,
+    pub course_label: &'static str,
+    pub gate_index: u8,
+    pub gate_count: u8,
+    pub radius: f32,
+}
+
+/// NPC road vehicle promoted to a named racing opponent.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StuntRaceOpponent {
+    pub racer_id: u8,
+    pub course_id: &'static str,
+}
+
 /// Civilian or patrol vehicle riding the generated speed-road network.
 #[derive(Component, Debug, Clone)]
 pub struct NpcRoadVehicle {

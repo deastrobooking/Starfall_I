@@ -3,6 +3,7 @@ use bevy::image::{
     CompressedImageFormats, Image, ImageAddressMode, ImageLoaderSettings, ImageSampler,
     ImageSamplerDescriptor, ImageType,
 };
+use bevy::input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy::math::Affine2;
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
@@ -14,6 +15,7 @@ use bevy::shader::ShaderRef;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use crate::chapters::{
     chapter_map_locations, map_settlements, MapSettlement, MapSettlementKind, SecretCaveLocation,
@@ -26,7 +28,8 @@ use crate::components::enemy::{CitySpyDrone, Enemy, EnemyStateMachine, EnemyType
 use crate::components::faction::Faction;
 use crate::components::player::{
     BoardBoostState, ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement,
-    PlayerStateMachine, PlayerStats, TraversalMode, TraversalModeState,
+    PlayerStateMachine, PlayerStats, StuntRaceProgress, StuntRunState, TraversalMode,
+    TraversalModeState,
 };
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
@@ -216,13 +219,23 @@ impl Plugin for WorldPlugin {
                     moving_platform_system,
                     rotating_elevator_system,
                     sling_shot_system,
-                    spring_jump_pad_system,
-                    board_boost_pad_system,
-                    stunt_grind_rail_system,
                     laser_turret_system,
                     laser_beam_cleanup_system,
                     collider_debug_toggle_system,
                 )
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (
+                    spring_jump_pad_system,
+                    board_boost_pad_system,
+                    stunt_grind_rail_system,
+                    ApplyDeferred,
+                    stunt_combo_system,
+                    stunt_race_gate_system,
+                )
+                    .chain()
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -1891,6 +1904,174 @@ fn stunt_grind_rail_system(
             direction,
         });
         state.force(crate::components::player::PlayerState::Sprinting);
+    }
+}
+
+fn bank_stunt_run(run: &mut StuntRunState) -> u64 {
+    if !run.active {
+        return 0;
+    }
+    let rotations = (run.spin_degrees.abs() / 360.0).floor() as u32;
+    if rotations > 0 {
+        run.pending_score += rotations as f32 * 325.0;
+        run.trick_count = run.trick_count.saturating_add(rotations as u16);
+    }
+    let banked = (run.pending_score * run.multiplier).round().max(0.0) as u64;
+    run.total_score = run.total_score.saturating_add(banked);
+    run.pending_score = 0.0;
+    run.multiplier = 1.0;
+    run.airtime = 0.0;
+    run.spin_degrees = 0.0;
+    run.trick_count = 0;
+    run.active = false;
+    banked
+}
+
+fn stunt_combo_system(
+    time: Res<Time>,
+    settings: Res<GameSettings>,
+    gamepad_q: Query<Entity, With<Gamepad>>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &PlayerInput,
+            &PlayerMovement,
+            &TraversalModeState,
+            Option<&RailGrindState>,
+            &mut StuntRunState,
+        ),
+        With<Player>,
+    >,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+    mut rumble_ev: MessageWriter<GamepadRumbleRequest>,
+) {
+    let dt = time.delta_secs();
+    let mut gamepads = gamepad_q.iter().collect::<Vec<_>>();
+    gamepads.sort_by_key(|entity| entity.index());
+    for (index, input, movement, traversal, grinding, mut run) in player_q.iter_mut() {
+        let is_grinding = grinding.is_some();
+        if is_grinding {
+            if !run.was_grinding {
+                run.active = true;
+                run.pending_score += 250.0;
+                run.multiplier = (run.multiplier + 0.25).min(8.0);
+                run.trick_count = run.trick_count.saturating_add(1);
+            }
+            run.pending_score += 115.0 * dt;
+        } else if traversal.active == TraversalMode::Hoverboard && !movement.is_grounded {
+            run.active = true;
+            run.airtime += dt;
+            run.pending_score += 55.0 * dt;
+            run.spin_degrees += input.move_axis.x * 270.0 * dt;
+        }
+
+        let landed = movement.is_grounded && !run.was_grounded && !is_grinding;
+        if landed && run.active {
+            let multiplier = run.multiplier;
+            let banked = bank_stunt_run(&mut run);
+            if banked > 0 {
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "P{} STUNT LANDED +{}  x{multiplier:.2}  TOTAL {}",
+                        index.0 + 1,
+                        banked,
+                        run.total_score
+                    ),
+                    duration: 2.5,
+                });
+                if settings.rumble_on_hit {
+                    if let Some(gamepad) = gamepads.get(usize::from(index.0)) {
+                        let strength = (0.25 + multiplier * 0.08).min(0.9);
+                        rumble_ev.write(GamepadRumbleRequest::Add {
+                            gamepad: *gamepad,
+                            duration: Duration::from_millis(110),
+                            intensity: GamepadRumbleIntensity {
+                                strong_motor: strength,
+                                weak_motor: strength * 0.65,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        run.was_grounded = movement.is_grounded;
+        run.was_grinding = is_grinding;
+    }
+}
+
+fn stunt_race_gate_system(
+    time: Res<Time>,
+    gate_q: Query<(&Transform, &StuntRaceGate), Without<Player>>,
+    mut player_q: Query<
+        (
+            &Transform,
+            &PlayerIndex,
+            &TraversalModeState,
+            &mut StuntRaceProgress,
+        ),
+        With<Player>,
+    >,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let dt = time.delta_secs();
+    for (transform, index, traversal, mut progress) in player_q.iter_mut() {
+        progress.gate_cooldown = (progress.gate_cooldown - dt).max(0.0);
+        if progress.gate_cooldown > 0.0 || traversal.active != TraversalMode::Hoverboard {
+            continue;
+        }
+        let gate = gate_q
+            .iter()
+            .find(|(gate_transform, gate)| {
+                let valid_course = progress.course_id == Some(gate.course_id)
+                    || (progress.course_id.is_none() && gate.gate_index == 0);
+                valid_course
+                    && gate.gate_index == progress.next_gate
+                    && transform.translation.distance(gate_transform.translation) <= gate.radius
+            })
+            .map(|(_, gate)| gate);
+        let Some(gate) = gate else {
+            continue;
+        };
+
+        progress.gate_cooldown = 0.55;
+        if progress.course_id.is_none() {
+            progress.course_id = Some(gate.course_id);
+            progress.lap = 1;
+            progress.next_gate = 1;
+            msg_ev.write(UiMessageEvent {
+                text: format!("P{} {} — LAP 1/3 GO!", index.0 + 1, gate.course_label),
+                duration: 2.4,
+            });
+            continue;
+        }
+
+        if gate.gate_index == 0 {
+            if progress.lap >= 3 {
+                progress.races_finished = progress.races_finished.saturating_add(1);
+                progress.course_id = None;
+                progress.next_gate = 0;
+                progress.lap = 0;
+                progress.gate_cooldown = 2.0;
+                msg_ev.write(UiMessageEvent {
+                    text: format!("P{} {} — FINISH!", index.0 + 1, gate.course_label),
+                    duration: 3.5,
+                });
+            } else {
+                progress.lap += 1;
+                progress.next_gate = 1;
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "P{} {} — LAP {}/3",
+                        index.0 + 1,
+                        gate.course_label,
+                        progress.lap
+                    ),
+                    duration: 2.0,
+                });
+            }
+        } else {
+            progress.next_gate = (gate.gate_index + 1) % gate.gate_count;
+        }
     }
 }
 
@@ -9499,6 +9680,14 @@ fn spawn_settlement_speed_ring(
         MapSettlementKind::Outpost => 36.0,
     };
 
+    let opponent_path = (0..=24)
+        .map(|step| {
+            let angle = step as f32 * TAU / 24.0;
+            settlement_speed_ring_point(settlement, layout, ring_radius, angle, terrain_seed)
+                + Vec3::Y * 1.7
+        })
+        .collect::<Vec<_>>();
+
     for segment in 0..segment_count {
         let a0 = segment as f32 * TAU / segment_count as f32;
         let a1 = (segment + 1) as f32 * TAU / segment_count as f32;
@@ -9517,6 +9706,80 @@ fn spawn_settlement_speed_ring(
             terrain_seed,
             true,
         );
+    }
+
+    for gate_index in 0..4u8 {
+        let angle = gate_index as f32 * TAU / 4.0;
+        let position =
+            settlement_speed_ring_point(settlement, layout, ring_radius, angle, terrain_seed)
+                + Vec3::Y * (width * 0.34);
+        let tangent = Vec2::new(-angle.sin(), angle.cos()).normalize_or_zero();
+        let yaw = tangent.x.atan2(tangent.y);
+        commands.spawn((
+            Name::new(format!("{} Race Gate {}", settlement.name, gate_index + 1)),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Torus {
+                    major_radius: width * 0.34,
+                    minor_radius: 0.62,
+                })),
+                material: MeshMaterial3d(if gate_index == 0 {
+                    pal.crystal_dragon.clone()
+                } else {
+                    pal.crystal_aurora.clone()
+                }),
+                transform: Transform::from_translation(position).with_rotation(
+                    Quat::from_rotation_y(yaw) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                ),
+                ..default()
+            },
+            StuntRaceGate {
+                course_id: settlement.anchor_id,
+                course_label: settlement.name,
+                gate_index,
+                gate_count: 4,
+                radius: width * 0.58,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let opponent_mesh = meshes.add(Cuboid::new(6.4, 1.7, 10.2));
+    for racer_id in 0..2u8 {
+        let lane_offset = if racer_id == 0 { -7.0 } else { 7.0 };
+        let vehicle = NpcRoadVehicle {
+            path: opponent_path.clone(),
+            segment: usize::from(racer_id) * 8,
+            progress: 0.0,
+            speed: 46.0 + racer_id as f32 * 5.0,
+            lane_offset,
+            hit_radius: 5.4,
+            wreck_timer: 4.0,
+        };
+        let (position, yaw) = road_vehicle_pose(&vehicle).unwrap_or((opponent_path[0], 0.0));
+        commands.spawn((
+            Name::new(format!("{} Rival Racer {}", settlement.name, racer_id + 1)),
+            PbrBundle {
+                mesh: Mesh3d(opponent_mesh.clone()),
+                material: MeshMaterial3d(if racer_id == 0 {
+                    pal.city_metal_panel.clone()
+                } else {
+                    pal.crystal_emerald.clone()
+                }),
+                transform: Transform::from_translation(position)
+                    .with_rotation(Quat::from_rotation_y(yaw)),
+                ..default()
+            },
+            StuntRaceOpponent {
+                racer_id,
+                course_id: settlement.anchor_id,
+            },
+            vehicle,
+            WorldGeometry,
+            Health::new(120.0),
+            Damageable::default(),
+            crate::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::physics::prelude::Collider::cuboid(3.2, 0.85, 5.1),
+        ));
     }
 
     let gate_angle = std::f32::consts::FRAC_PI_2 - settlement.facing_yaw;
@@ -9552,6 +9815,14 @@ fn settlement_speed_ring_point(
     let y =
         layout.floor_y_at(x, z, terrain_seed) + if layout.is_sky_district() { 3.2 } else { 2.4 };
     Vec3::new(x, y, z)
+}
+
+fn stunt_race_gate_count() -> usize {
+    map_settlements().len() * 4
+}
+
+fn stunt_race_opponent_count() -> usize {
+    map_settlements().len() * 2
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -18523,6 +18794,104 @@ mod tests {
                 TraversalMode::Hoverboard
             );
         }
+    }
+
+    #[test]
+    fn stunt_combo_banks_rotations_and_multiplier_only_on_landing() {
+        let mut run = StuntRunState {
+            pending_score: 1_000.0,
+            multiplier: 2.0,
+            spin_degrees: 720.0,
+            active: true,
+            ..default()
+        };
+        assert_eq!(run.total_score, 0);
+        let banked = bank_stunt_run(&mut run);
+        assert_eq!(banked, 3_300);
+        assert_eq!(run.total_score, 3_300);
+        assert!(!run.active);
+        assert_eq!(run.pending_score, 0.0);
+        assert_eq!(run.multiplier, 1.0);
+    }
+
+    #[test]
+    fn settlement_races_supply_four_gates_and_two_rivals_each() {
+        assert_eq!(stunt_race_gate_count(), map_settlements().len() * 4);
+        assert_eq!(stunt_race_opponent_count(), map_settlements().len() * 2);
+        assert!(stunt_race_gate_count() >= 32);
+        assert!(stunt_race_opponent_count() >= 16);
+    }
+
+    #[test]
+    fn three_lap_race_requires_every_gate_in_order() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.add_message::<UiMessageEvent>();
+        app.add_systems(Update, stunt_race_gate_system);
+        for gate_index in 0..4u8 {
+            app.world_mut().spawn((
+                Transform::from_xyz(gate_index as f32 * 20.0, 0.0, 0.0),
+                StuntRaceGate {
+                    course_id: "test_ring",
+                    course_label: "Test Ring",
+                    gate_index,
+                    gate_count: 4,
+                    radius: 4.0,
+                },
+            ));
+        }
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(0),
+                Transform::default(),
+                TraversalModeState {
+                    active: TraversalMode::Hoverboard,
+                    ..default()
+                },
+                StuntRaceProgress::default(),
+            ))
+            .id();
+
+        let cross_gate = |app: &mut App, gate_index: u8| {
+            app.world_mut()
+                .get_mut::<Transform>(player)
+                .unwrap()
+                .translation = Vec3::X * (gate_index as f32 * 20.0);
+            app.world_mut()
+                .get_mut::<StuntRaceProgress>(player)
+                .unwrap()
+                .gate_cooldown = 0.0;
+            app.update();
+        };
+
+        cross_gate(&mut app, 0);
+        assert_eq!(app.world().get::<StuntRaceProgress>(player).unwrap().lap, 1);
+        // Gate 2 cannot be skipped while gate 1 is expected.
+        cross_gate(&mut app, 2);
+        assert_eq!(
+            app.world()
+                .get::<StuntRaceProgress>(player)
+                .unwrap()
+                .next_gate,
+            1
+        );
+        for lap in 1..=3u8 {
+            cross_gate(&mut app, 1);
+            cross_gate(&mut app, 2);
+            cross_gate(&mut app, 3);
+            cross_gate(&mut app, 0);
+            if lap < 3 {
+                assert_eq!(
+                    app.world().get::<StuntRaceProgress>(player).unwrap().lap,
+                    lap + 1
+                );
+            }
+        }
+        let progress = app.world().get::<StuntRaceProgress>(player).unwrap();
+        assert_eq!(progress.races_finished, 1);
+        assert!(progress.course_id.is_none());
     }
 
     #[test]

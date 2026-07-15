@@ -281,11 +281,16 @@ route checkpoints/recovery, tracking missile acquisition/steering/reacquisition,
 per-player SEEK/LOCK HUD feedback, larger beam profiles, and persistent Star
 Sabre blade visuals. The stunt-road slice adds 18 elevated grind lines,
 same-frame four-player directional springs, jump-off rail transfers, and
-turn-strength banking on the large sweeper curves. Remaining production work:
+turn-strength banking on the large sweeper curves. Settlement rings now provide
+four-gate three-lap races with two NPC rivals each; per-player rail/air/spin
+combos bank on landing and drive board rotation, stunt FOV, score messages, and
+real Bevy gamepad rumble requests. Remaining production work:
 
 - Tune the existing loop adhesion, entry/exit handoff, camera, recovery, and
   checkpoint behavior plus rail/spring camera handoff on representative ground,
   mountain, and aerial routes.
+- Add a persistent race HUD/leaderboard, timed starts, opponent lap timing,
+  authored trick names, landing-failure penalties, and stunt/race audio cues.
 - Add automated grade, connectivity, ramp-direction, landing-clearance, barrier,
   and underside-artifact checks; extract road generation on a proven boundary.
 - Add world-obstacle casts to the existing swept target collision so fast

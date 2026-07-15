@@ -231,6 +231,17 @@ speed through either an automatic end launch or a player-requested jump-off.
 Sweeper overlays now use `spawn_banked_deck_segment` with turn-strength banking
 up to 0.34 radians, making the large curves read and drive like futuristic
 Mario-Kart-style velodrome turns rather than flat duplicate roads.
+**Race and combo layer**: each settlement speed ring spawns four ordered
+`StuntRaceGate`s and two `StuntRaceOpponent` hovercraft using the established
+`NpcRoadVehicle` path controller. `StuntRaceProgress` is player-owned: only gate
+zero starts a course, every intermediate gate must be crossed in order, and
+three complete laps produce a finish before the course can restart. Race state
+does not leak between the four local players. `StuntRunState` keeps rail time,
+airtime, transfer count, stick-driven spin degrees, provisional score, and an
+eight-times-bounded multiplier. A line banks only after a clean landing; board
+visuals display the accumulated yaw/roll, the individual camera pulls back and
+widens FOV with stunt intensity, and landing sends both owner-labelled score
+feedback and a short owner-mapped `GamepadRumbleRequest` when rumble is enabled.
 **Clear corridor**: tree scatter skips anything within road half-width + 10 of
 the network — the props vehicles used to crash into. Buildings are reactive to
 the network: if the road centerline crosses a footprint, `spawn_building` emits

@@ -176,6 +176,58 @@ pub struct RoadRecoveryState {
     pub cooldown: f32,
 }
 
+/// Per-player skate/road combo. Points stay provisional until a clean landing,
+/// allowing springs, rails, and aerial rotations to chain into one line.
+#[derive(Component, Debug, Clone)]
+pub struct StuntRunState {
+    pub total_score: u64,
+    pub pending_score: f32,
+    pub multiplier: f32,
+    pub airtime: f32,
+    pub spin_degrees: f32,
+    pub trick_count: u16,
+    pub active: bool,
+    pub was_grounded: bool,
+    pub was_grinding: bool,
+}
+
+impl Default for StuntRunState {
+    fn default() -> Self {
+        Self {
+            total_score: 0,
+            pending_score: 0.0,
+            multiplier: 1.0,
+            airtime: 0.0,
+            spin_degrees: 0.0,
+            trick_count: 0,
+            active: false,
+            was_grounded: true,
+            was_grinding: false,
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StuntRaceProgress {
+    pub course_id: Option<&'static str>,
+    pub next_gate: u8,
+    pub lap: u8,
+    pub races_finished: u16,
+    pub gate_cooldown: f32,
+}
+
+impl Default for StuntRaceProgress {
+    fn default() -> Self {
+        Self {
+            course_id: None,
+            next_gate: 0,
+            lap: 0,
+            races_finished: 0,
+            gate_cooldown: 0.0,
+        }
+    }
+}
+
 // ── Edge Grab / Wall Jump ────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct EdgeGrabState {

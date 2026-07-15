@@ -203,7 +203,10 @@ together.
   skipping/styles. Speed roads include checkpoints, recovery, and guided
   hoverboard loop traversal plus 18 per-player bidirectional grind rails,
   automatic four-player Sonic springs, jump-off rail transfers, and strongly
-  banked sweeper curves. `Homing Star` now tracks/reacquires hostile targets
+  banked sweeper curves. Every settlement ring now has an ordered three-lap
+  four-gate race and two NPC rivals. `StuntRunState` banks per-player rail/air/
+  spin combos on landing and drives board rotation, stunt FOV, UI score, and
+  owner-mapped Bevy rumble. `Homing Star` now tracks/reacquires hostile targets
   with per-player SEEK/LOCK HUD feedback. `BeamSabre` has a persistent blade
   visual; authored animation/audio and hardware polish remain.
 

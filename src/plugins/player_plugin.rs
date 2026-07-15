@@ -748,6 +748,8 @@ fn spawn_players(
             ))
             .insert((
                 RoadRecoveryState::default(),
+                StuntRunState::default(),
+                StuntRaceProgress::default(),
                 ArmorSet::default(),
                 starter_inventory,
                 QuickItemSlot::default(),
@@ -957,13 +959,15 @@ fn update_rocket_hoverboard_visuals(
             &PlayerMovement,
             &JetpackState,
             &BoardBoostState,
+            &PlayerInput,
+            &StuntRunState,
         ),
         With<Player>,
     >,
     mut boards: Query<(&RocketHoverboardVisual, &mut Visibility, &mut Transform)>,
 ) {
     for (board, mut visibility, mut transform) in boards.iter_mut() {
-        let Some((_, traversal, movement, jetpack, boost)) =
+        let Some((_, traversal, movement, jetpack, boost, input, stunt)) =
             players.iter().find(|(index, ..)| index.0 == board.owner)
         else {
             *visibility = Visibility::Hidden;
@@ -982,9 +986,21 @@ fn update_rocket_hoverboard_visuals(
         let rocket = jetpack.is_active || !movement.is_grounded;
         let pulse = (time.elapsed_secs() * if rocket { 18.0 } else { 8.0 }).sin();
         transform.translation.y = -0.88 + pulse * if rocket { 0.035 } else { 0.012 };
-        transform.rotation =
-            Quat::from_rotation_x((-movement.velocity.y * 0.12 - speed * 0.018).clamp(-0.30, 0.24))
-                * Quat::from_rotation_z(pulse * 0.025);
+        let aerial_spin = if !movement.is_grounded {
+            stunt.spin_degrees.to_radians()
+        } else {
+            0.0
+        };
+        let aerial_roll = if !movement.is_grounded {
+            -input.move_axis.x * 0.34
+        } else {
+            pulse * 0.025
+        };
+        transform.rotation = Quat::from_rotation_y(aerial_spin)
+            * Quat::from_rotation_x(
+                (-movement.velocity.y * 0.12 - speed * 0.018).clamp(-0.30, 0.24),
+            )
+            * Quat::from_rotation_z(aerial_roll);
         let boost_scale = if boost.timer > 0.0 { 1.08 } else { 1.0 };
         transform.scale = Vec3::new(boost_scale, 1.0, 1.0);
     }
@@ -1224,6 +1240,7 @@ fn player_camera_follow_system(
         ),
         (With<Player>, Without<PlayerCamera>),
     >,
+    stunt_q: Query<(&PlayerIndex, &StuntRunState), With<Player>>,
     mut cam_q: Query<
         (
             Entity,
@@ -1341,6 +1358,17 @@ fn player_camera_follow_system(
                     }
                 })
                 .unwrap_or(0.0);
+            let stunt_intensity = stunt_q
+                .iter()
+                .find(|(stunt_index, _)| stunt_index.0 == index.0)
+                .map(|(_, stunt)| {
+                    if stunt.active {
+                        (stunt.multiplier - 1.0 + stunt.airtime * 0.35).clamp(0.0, 3.5)
+                    } else {
+                        0.0
+                    }
+                })
+                .unwrap_or(0.0);
             // Climbing: pull well back and lift so the face above (and drop
             // below) stays readable while scaling walls.
             let climb_pullback = climb
@@ -1350,13 +1378,18 @@ fn player_camera_follow_system(
                 * Vec3::new(
                     0.0,
                     flight_lift + speed_pullback * 0.18 + climb_pullback * 0.45,
-                    hook_pullback + board_pullback + speed_pullback + climb_pullback,
+                    hook_pullback
+                        + board_pullback
+                        + speed_pullback
+                        + climb_pullback
+                        + stunt_intensity * 0.85,
                 );
             if let Projection::Perspective(ref mut perspective) = *projection {
                 let target_fov = (58.0
                     + speed_pullback * 4.0
                     + hook_pullback * 1.2
                     + board_pullback * 1.6
+                    + stunt_intensity * 2.1
                     + climb_pullback * 2.2)
                     .to_radians();
                 perspective.fov += (target_fov - perspective.fov) * (1.0 - (-dt * 8.0).exp());
