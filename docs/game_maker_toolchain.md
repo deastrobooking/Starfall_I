@@ -29,6 +29,9 @@ All generators follow these rules:
 - Recipes receive stable content IDs so levels reference content without
   copying generated geometry into campaign saves.
 
+The broader Blender-inspired capability triage, current-Bevy corrections, and
+ET1–ET11 delivery gates are specified in `docs/engine_tools_multistage_pass.md`.
+
 ## Tool sequence
 
 ### GM1 — Humanoid Character Studio (active)

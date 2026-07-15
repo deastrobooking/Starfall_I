@@ -18,6 +18,7 @@ mod commands;
 mod components;
 mod damage;
 mod discussion;
+mod engine_tools;
 mod events;
 mod final_war;
 mod game_loop;
@@ -45,6 +46,7 @@ use character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use commands::{CommandOverlayState, CommandRegistry};
+use engine_tools::EngineToolsPlugin;
 use events::EventsPlugin;
 use final_war::FinalWarRegistry;
 use hacking::HackingRegistry;
@@ -132,6 +134,9 @@ fn main() {
         .register_type::<CharacterDesignSnapshot>()
         // Event infrastructure
         .add_plugins(EventsPlugin)
+        // Shared recipe-editor services: tool mode, stable IDs, selection,
+        // and transactional undo/redo. Player-facing workspace UI lands ET2.
+        .add_plugins(EngineToolsPlugin)
         // EC0: engine-core loop scaffolding (GameSet ordering + profiling overlay).
         .add_plugins(game_loop::GameLoopPlugin)
         // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
