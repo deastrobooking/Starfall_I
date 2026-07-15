@@ -1,0 +1,37 @@
+{
+  "sex": "Male",
+  "body": {
+    "height": 0.74323773,
+    "muscle": 0.7453936,
+    "weight": 0.35170275,
+    "shoulder_width": 0.46573192,
+    "waist_width": 0.68756104,
+    "hip_width": 0.69035065,
+    "limb_length": 0.36731735
+  },
+  "face": {
+    "jaw_width": 0.5952673,
+    "chin_length": 0.56456137,
+    "nose_length": 0.82016647,
+    "nose_width": 0.29688597,
+    "brow_depth": 0.54722524,
+    "cheek_fullness": 0.7876206,
+    "eye_size": 0.7001742,
+    "mouth_width": 0.4473303
+  },
+  "style": {
+    "skin_tone": 2,
+    "eye_color": 1,
+    "hair": "Short",
+    "hair_color": 7,
+    "wardrobe": {
+      "top": "MotoJacket",
+      "bottom": "Skirt",
+      "feet": "Barefoot",
+      "hands": "Gloves",
+      "armor": "MechaArmor"
+    },
+    "primary_color": 6,
+    "secondary_color": 1
+  }
+}
