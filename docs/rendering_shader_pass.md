@@ -110,6 +110,47 @@ Authoring flow: create/tune a Material, publish once to place it in the runtime
 catalog, select a renderable scene object and apply the Material, then publish
 again to persist the scene binding and dependency.
 
+## R5 delivered
+
+1. Biome, Road, Building, Cave, and City payloads now use a backward-compatible
+   `ProceduralRecipeDraft`: deterministic seed/revision data, free recipe
+   parameters, and typed named material slots are stored separately from
+   disposable generated entities.
+2. Publishing builds a `PublishedProceduralRecipeCatalog` keyed by stable
+   content ID. Material-slot references validate, migrate during rename, block
+   unsafe deletion, and synchronize into record dependencies before save or
+   publish. Legacy generic Road/Building/Cave JSON loads with safe defaults.
+3. Generated terrain, speed-road decks/barriers/supports, standard building
+   exteriors, and secret-cave rock/floor/accent geometry now carry stable
+   recipe/slot requests. Resolution swaps the typed published material while
+   preserving the original Standard handle as a reversible fallback.
+4. Catalog epochs make regeneration bounded: each generated entity resolves at
+   most once per published-catalog revision. Draft, missing, cleared, or
+   unpublished bindings restore or retain the original material instead of
+   retrying every frame or serializing Bevy handles.
+
+Initial live recipe IDs are `biome.main_world`, `road.speed_network`,
+`building.world`, and `cave.secret_network`. World Kit can now author and bind
+their slots through controlled preview-regenerate/undo actions.
+
+## R6 / World Kit material controls delivered
+
+The controller-facing registry can now create all five world recipe families,
+copy a published Material, cycle category-specific slots, bind/clear the copied
+ID, and regenerate a bounded deterministic preview. Recipe mutations are atomic
+undo/redo commands. The four-slot preview uses the published Material catalog
+for live typed shader display and never grows across regeneration. Controller
+focus also scrolls the registry to reveal every added action.
+
+## R7 / Typed World Kit previews delivered
+
+World Kit previews now consume bounded family-specific generator parameters,
+not only seed and revision. Road grade/width/curve, building footprint/floors,
+cave tunnel/layers, biome radius/relief/water, and city block/density settings
+change the compiled preview geometry. Invalid values and entity/navigation
+budget violations block regeneration before material or geometry replacement.
+The preview remains limited to four material-slot objects.
+
 ## Rendering work remaining
 
 1. Evaluate clustered point/spot lights through Bevy's current cluster lookup;
@@ -118,8 +159,8 @@ again to persist the scene binding and dependency.
 2. Add per-view GPU timing labels and establish measured one/two/four-camera
    budgets before enabling any full-screen outline, refraction, or
    heat-distortion pass. CPU-visible asset/entity counters are now delivered.
-3. Bind biome/road/building recipes to the delivered runtime catalog IDs and
-   add controlled regeneration transactions. Scene primitives are delivered.
+3. Replace preview-only regeneration with bounded live-world root replacement
+   after road/building/cave generator parameters and validation budgets exist.
 4. Apply Ice/Lava to authored biome zones only after collision-safe placement
    and one/two/four-camera measurements; Forge previews are the current rollout.
 

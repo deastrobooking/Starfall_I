@@ -43,8 +43,19 @@ together.
   and exposes typed family/preset/bounded-parameter authoring with live previews.
   Published materials enter `PublishedMaterialCatalog` by stable content ID;
   Forge scene primitives persist optional validated IDs rather than Bevy handles.
-  F11 reports camera/projectile/VFX/material counts. Clustered-light, recipe-
-  regenerated biome bindings, and four-camera GPU timing work remains in
+  ET3f also publishes deterministic Biome/Road/Building/Cave/City records into
+  `PublishedProceduralRecipeCatalog`; generated world geometry requests named
+  material slots and retains a reversible Standard-material fallback.
+  ET5a exposes controller buttons for recipe type/create, published-material
+  copy, named-slot selection/bind/clear, and bounded preview regeneration.
+  Recipe snapshots share the editor undo stack, and panel focus automatically
+  scrolls the active control into view.
+  ET5b adds bounded typed generator parameters, seed/reset/validation controls,
+  parameter-driven four-object previews, and road/building/cave budget gates.
+  Do not replace shipped world roots until ET5c collision/navigation preflight
+  and atomic generated-root swapping are implemented.
+  F11 reports camera/projectile/VFX/material counts. World Kit regeneration UI,
+  clustered-light evaluation, and four-camera GPU timing work remain in
   `docs/rendering_shader_pass.md`; do not copy legacy fixed-group WGSL examples
   or claim unmeasured millisecond budgets.
 - Robot pet foundation lives in `src/robot_pets.rs`: shared saved pet records,

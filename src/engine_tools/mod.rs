@@ -33,7 +33,8 @@ use crate::rendering::{
 use crate::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
-    GenericRecipeDraft, ProjectLoadSource, ProjectStore, SceneObjectDraft, TransformDraft,
+    GenericRecipeDraft, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore, SceneObjectDraft,
+    TransformDraft,
 };
 
 #[derive(SystemParam)]
@@ -166,6 +167,104 @@ impl PublishedMaterialCatalog {
         self.entries.is_empty()
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProceduralRecipeKind {
+    Biome,
+    Road,
+    Building,
+    Cave,
+    City,
+}
+
+impl ProceduralRecipeKind {
+    fn from_category(category: persistence::ContentCategory) -> Option<Self> {
+        match category {
+            persistence::ContentCategory::Biome => Some(Self::Biome),
+            persistence::ContentCategory::Road => Some(Self::Road),
+            persistence::ContentCategory::Building => Some(Self::Building),
+            persistence::ContentCategory::Cave => Some(Self::Cave),
+            persistence::ContentCategory::City => Some(Self::City),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PublishedProceduralRecipeEntry {
+    source_hash: String,
+    kind: ProceduralRecipeKind,
+    seed: u64,
+    revision: u64,
+    material_slots: BTreeMap<String, String>,
+}
+
+/// Published deterministic generator inputs keyed by stable Forge content ID.
+/// The catalog contains source data only; generated ECS entities remain
+/// disposable and can be rebuilt without changing authored identity.
+#[derive(Resource, Default)]
+pub struct PublishedProceduralRecipeCatalog {
+    entries: BTreeMap<String, PublishedProceduralRecipeEntry>,
+}
+
+impl PublishedProceduralRecipeCatalog {
+    pub fn contains(&self, content_id: &str) -> bool {
+        self.entries.contains_key(content_id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn material_id(&self, recipe_id: &str, slot: &str) -> Option<&str> {
+        self.entries
+            .get(recipe_id)?
+            .material_slots
+            .get(slot)
+            .map(String::as_str)
+    }
+
+    pub fn generation(&self, recipe_id: &str) -> Option<(ProceduralRecipeKind, u64, u64)> {
+        let entry = self.entries.get(recipe_id)?;
+        Some((entry.kind, entry.seed, entry.revision))
+    }
+
+    pub fn source_hash(&self, recipe_id: &str) -> Option<&str> {
+        self.entries
+            .get(recipe_id)
+            .map(|entry| entry.source_hash.as_str())
+    }
+}
+
+/// Stable appearance request attached to disposable generated geometry.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct ProceduralMaterialBinding {
+    pub recipe_id: String,
+    pub slot: String,
+}
+
+impl ProceduralMaterialBinding {
+    pub fn new(recipe_id: impl Into<String>, slot: impl Into<String>) -> Self {
+        Self {
+            recipe_id: recipe_id.into(),
+            slot: slot.into(),
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+struct ResolvedProceduralMaterialBinding {
+    epoch: u64,
+    recipe_id: String,
+    slot: String,
+    material_id: Option<String>,
+}
+
+#[derive(Component, Debug, Clone)]
+struct ProceduralStandardMaterialFallback(Handle<StandardMaterial>);
+
+#[derive(Resource, Default)]
+struct PublishedContentCatalogEpoch(u64);
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 struct EditorMaterialBinding(String);
@@ -534,9 +633,13 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorPendingTransactions>()
             .init_resource::<EditorProjectSession>()
             .init_resource::<PublishedMaterialCatalog>()
+            .init_resource::<PublishedProceduralRecipeCatalog>()
+            .init_resource::<PublishedContentCatalogEpoch>()
             .init_resource::<EditorRegistryState>()
+            .init_resource::<WorldKitPreviewState>()
             .init_resource::<EditorTextInputCapture>()
             .register_type::<EditorEntityId>()
+            .add_systems(Startup, bootstrap_published_content_catalogs)
             .add_systems(
                 Update,
                 toggle_editor_workspace.run_if(in_state(AppState::Playing)),
@@ -546,6 +649,7 @@ impl Plugin for EngineToolsPlugin {
                 (enter_editor_workspace, adapt_world_authorables).chain(),
             )
             .add_systems(OnExit(EngineToolMode::Editing), exit_editor_workspace)
+            .add_systems(Update, resolve_procedural_material_bindings)
             .add_systems(
                 Update,
                 (
@@ -553,10 +657,12 @@ impl Plugin for EngineToolsPlugin {
                     editor_button_interactions,
                     editor_search_input,
                     editor_controller_navigation,
+                    keep_editor_focus_in_view,
                     editor_gizmo_drag,
                     editor_viewport_picking,
                     apply_editor_actions,
                     sync_forge_material_preview,
+                    sync_world_kit_preview,
                     sync_world_adapters,
                     update_editor_workspace_text,
                     update_editor_button_style,
@@ -668,6 +774,7 @@ impl EditorSelection {
 pub enum EditorCommandError {
     MissingEntity(EditorEntityId),
     MissingTransform(EditorEntityId),
+    MissingRecipe(String),
     EmptyTransaction,
 }
 
@@ -680,16 +787,33 @@ pub enum EditorCommand {
         before: Transform,
         after: Transform,
     },
+    SetProceduralRecipe {
+        content_id: String,
+        before: ProceduralRecipeDraft,
+        after: ProceduralRecipeDraft,
+    },
 }
 
 impl EditorCommand {
     fn target(&self) -> EditorEntityId {
         match self {
             Self::SetTransform { id, .. } => *id,
+            Self::SetProceduralRecipe { .. } => EditorEntityId(0),
         }
     }
 
     fn preflight(&self, world: &mut World) -> Result<(), EditorCommandError> {
+        if let Self::SetProceduralRecipe { content_id, .. } = self {
+            let exists = world
+                .resource::<EditorProjectSession>()
+                .project
+                .payloads
+                .get(content_id)
+                .is_some_and(|payload| payload.procedural_recipe().is_some());
+            return exists
+                .then_some(())
+                .ok_or_else(|| EditorCommandError::MissingRecipe(content_id.clone()));
+        }
         let id = self.target();
         let entity =
             resolve_editor_entity(world, id).ok_or(EditorCommandError::MissingEntity(id))?;
@@ -702,12 +826,18 @@ impl EditorCommand {
     fn execute(&self, world: &mut World) -> Result<(), EditorCommandError> {
         match self {
             Self::SetTransform { id, after, .. } => set_transform(world, *id, *after),
+            Self::SetProceduralRecipe {
+                content_id, after, ..
+            } => set_procedural_recipe(world, content_id, after.clone()),
         }
     }
 
     fn undo(&self, world: &mut World) -> Result<(), EditorCommandError> {
         match self {
             Self::SetTransform { id, before, .. } => set_transform(world, *id, *before),
+            Self::SetProceduralRecipe {
+                content_id, before, ..
+            } => set_procedural_recipe(world, content_id, before.clone()),
         }
     }
 }
@@ -847,6 +977,24 @@ fn set_transform(
     Ok(())
 }
 
+fn set_procedural_recipe(
+    world: &mut World,
+    content_id: &str,
+    value: ProceduralRecipeDraft,
+) -> Result<(), EditorCommandError> {
+    let mut session = world.resource_mut::<EditorProjectSession>();
+    let payload = session
+        .project
+        .payloads
+        .get_mut(content_id)
+        .ok_or_else(|| EditorCommandError::MissingRecipe(content_id.into()))?;
+    let recipe = payload
+        .procedural_recipe_mut()
+        .ok_or_else(|| EditorCommandError::MissingRecipe(content_id.into()))?;
+    *recipe = value;
+    Ok(())
+}
+
 // ── ET2: safe editor workspace shell ─────────────────────────────────────────
 
 #[derive(Component)]
@@ -961,6 +1109,35 @@ enum EditorAction {
     MaterialReset,
     ApplySelectedMaterial,
     ClearObjectMaterial,
+    CycleRecipeKind,
+    CreateRecipeRecord,
+    CopySelectedMaterial,
+    RecipeNextSlot,
+    BindRecipeMaterial,
+    ClearRecipeMaterial,
+    RegenerateRecipePreview,
+    RecipeNextParameter,
+    RecipeParameterDecrease,
+    RecipeParameterIncrease,
+    RecipeResetParameters,
+    RecipeSeedDecrease,
+    RecipeSeedIncrease,
+    ValidateSelectedRecipe,
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorPanelKind {
+    Outliner,
+    Inspector,
+    Registry,
+}
+
+#[derive(Component)]
+struct WorldKitPreview;
+
+#[derive(Resource, Default)]
+struct WorldKitPreviewState {
+    signature: Option<String>,
 }
 
 #[derive(Resource, Default)]
@@ -1065,6 +1242,10 @@ struct EditorRegistryState {
     search_active: bool,
     search_text: String,
     material_parameter: usize,
+    recipe_kind: usize,
+    recipe_slot: usize,
+    recipe_parameter: usize,
+    material_clipboard: Option<String>,
 }
 
 #[derive(Resource, Default)]
@@ -1422,7 +1603,7 @@ fn add_published_material(world: &mut World, spec: &ForgeMaterialSpec) -> Publis
     }
 }
 
-fn rebuild_published_material_catalog(world: &mut World, project: &ForgeProject) {
+fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject) {
     let authored = project
         .records
         .iter()
@@ -1455,6 +1636,155 @@ fn rebuild_published_material_catalog(world: &mut World, project: &ForgeProject)
         );
     }
     world.resource_mut::<PublishedMaterialCatalog>().entries = entries;
+
+    let recipes = project
+        .records
+        .iter()
+        .filter(|record| {
+            record.published_hash.as_ref() == Some(&record.draft_hash)
+                && record.published_hash.is_some()
+        })
+        .filter_map(|record| {
+            let kind = ProceduralRecipeKind::from_category(record.category)?;
+            let recipe = project
+                .payloads
+                .get(&record.content_id)?
+                .procedural_recipe()?;
+            Some((
+                record.content_id.clone(),
+                PublishedProceduralRecipeEntry {
+                    source_hash: record.draft_hash.clone(),
+                    kind,
+                    seed: recipe.seed,
+                    revision: recipe.revision,
+                    material_slots: recipe.material_slots.clone(),
+                },
+            ))
+        })
+        .collect();
+    world
+        .resource_mut::<PublishedProceduralRecipeCatalog>()
+        .entries = recipes;
+    let mut epoch = world.resource_mut::<PublishedContentCatalogEpoch>();
+    epoch.0 = epoch.0.wrapping_add(1).max(1);
+}
+
+fn bootstrap_published_content_catalogs(world: &mut World) {
+    let store = world.resource::<EditorProjectSession>().store.clone();
+    if !store.path().exists() {
+        return;
+    }
+    let Ok((project, _)) = store.load_with_recovery() else {
+        return;
+    };
+    rebuild_published_content_catalogs(world, &project);
+    world.resource_mut::<EditorProjectSession>().project = project;
+}
+
+fn restore_procedural_standard_material(world: &mut World, entity: Entity) {
+    let fallback = world
+        .get::<ProceduralStandardMaterialFallback>(entity)
+        .map(|fallback| fallback.0.clone());
+    let Some(fallback) = fallback else {
+        return;
+    };
+    let mut target = world.entity_mut(entity);
+    remove_mesh_material_components(&mut target);
+    target.insert(MeshMaterial3d(fallback));
+}
+
+fn resolve_procedural_material_bindings(world: &mut World) {
+    let targets = world
+        .query::<(
+            Entity,
+            &ProceduralMaterialBinding,
+            Option<&ResolvedProceduralMaterialBinding>,
+            Option<&MeshMaterial3d<StandardMaterial>>,
+        )>()
+        .iter(world)
+        .map(|(entity, binding, resolved, standard)| {
+            (
+                entity,
+                binding.clone(),
+                resolved.cloned(),
+                standard.map(|material| material.0.clone()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for (entity, binding, resolved, standard) in targets {
+        let epoch = world.resource::<PublishedContentCatalogEpoch>().0;
+        if resolved.as_ref().is_some_and(|current| {
+            current.epoch == epoch
+                && current.recipe_id == binding.recipe_id
+                && current.slot == binding.slot
+        }) {
+            continue;
+        }
+        let desired = world
+            .resource::<PublishedProceduralRecipeCatalog>()
+            .entries
+            .get(&binding.recipe_id)
+            .and_then(|recipe| recipe.material_slots.get(&binding.slot).cloned());
+        let Some(material_id) = desired else {
+            if resolved
+                .as_ref()
+                .is_some_and(|current| current.material_id.is_some())
+            {
+                restore_procedural_standard_material(world, entity);
+            }
+            world
+                .entity_mut(entity)
+                .insert(ResolvedProceduralMaterialBinding {
+                    epoch,
+                    recipe_id: binding.recipe_id,
+                    slot: binding.slot,
+                    material_id: None,
+                });
+            continue;
+        };
+        if !world
+            .resource::<PublishedMaterialCatalog>()
+            .contains(&material_id)
+        {
+            if resolved
+                .as_ref()
+                .is_some_and(|current| current.material_id.is_some())
+            {
+                restore_procedural_standard_material(world, entity);
+            }
+            world
+                .entity_mut(entity)
+                .insert(ResolvedProceduralMaterialBinding {
+                    epoch,
+                    recipe_id: binding.recipe_id,
+                    slot: binding.slot,
+                    material_id: None,
+                });
+            continue;
+        }
+        if world
+            .get::<ProceduralStandardMaterialFallback>(entity)
+            .is_none()
+        {
+            if let Some(standard) = standard {
+                world
+                    .entity_mut(entity)
+                    .insert(ProceduralStandardMaterialFallback(standard));
+            }
+        }
+        if apply_catalog_material(world, entity, &material_id) {
+            world
+                .entity_mut(entity)
+                .remove::<EditorMaterialBinding>()
+                .insert(ResolvedProceduralMaterialBinding {
+                    epoch,
+                    recipe_id: binding.recipe_id,
+                    slot: binding.slot,
+                    material_id: Some(material_id),
+                });
+        }
+    }
 }
 
 fn remove_mesh_material_components(entity: &mut EntityWorldMut<'_>) {
@@ -1631,6 +1961,148 @@ fn sync_forge_material_preview(
             }
         }
     }
+}
+
+fn sync_world_kit_preview(world: &mut World) {
+    let selected = selected_procedural_recipe(world);
+    let signature = selected
+        .as_ref()
+        .and_then(|(content_id, category, recipe)| {
+            serde_json::to_string(&(content_id, category, recipe)).ok()
+        });
+    if world.resource::<WorldKitPreviewState>().signature == signature {
+        return;
+    }
+    let old = world
+        .query_filtered::<Entity, With<WorldKitPreview>>()
+        .iter(world)
+        .collect::<Vec<_>>();
+    for entity in old {
+        world.despawn(entity);
+    }
+    world.resource_mut::<WorldKitPreviewState>().signature = signature;
+    let Some((content_id, category, recipe)) = selected else {
+        return;
+    };
+    let camera_transform = world
+        .query_filtered::<&Transform, With<EditorCamera>>()
+        .iter(world)
+        .next()
+        .copied()
+        .unwrap_or_else(|| Transform::from_xyz(0.0, 4.0, 12.0).looking_at(Vec3::ZERO, Vec3::Y));
+    let center = camera_transform.translation + camera_transform.forward() * 7.0
+        - camera_transform.up() * 2.2;
+    let right = camera_transform.right();
+    let up = camera_transform.up();
+    let slots = persistence::procedural_material_slots(category);
+    let variation =
+        ((recipe.seed ^ recipe.revision.wrapping_mul(0x9e37_79b9)) % 101) as f32 / 100.0;
+    let parameter = |key: &str| {
+        persistence::procedural_parameter_specs(category)
+            .iter()
+            .find(|spec| spec.key == key)
+            .map(|spec| persistence::procedural_parameter_value(&recipe, *spec) as f32)
+            .unwrap_or_default()
+    };
+    for (index, slot) in slots.iter().enumerate() {
+        let mesh = match category {
+            persistence::ContentCategory::Biome => {
+                let radius = (parameter("zone_radius") / 120.0).clamp(0.45, 2.5);
+                world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(
+                    1.8 * radius,
+                    0.18 + parameter("relief") * 0.85,
+                    1.8 * radius,
+                ))
+            }
+            persistence::ContentCategory::Road => {
+                world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(
+                    1.7 * (parameter("width") / 18.0),
+                    0.22,
+                    2.2 + parameter("curve_radius") / 60.0 + variation,
+                ))
+            }
+            persistence::ContentCategory::Building => {
+                world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(
+                    1.55 * parameter("width") / 24.0,
+                    (parameter("floors") * 0.34).clamp(0.5, 5.0),
+                    1.55 * parameter("depth") / 20.0,
+                ))
+            }
+            persistence::ContentCategory::City => {
+                world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(
+                    1.55 * parameter("block_size") / 80.0,
+                    0.8 + parameter("building_density") * 2.2 + variation,
+                    1.55 * parameter("block_size") / 80.0,
+                ))
+            }
+            persistence::ContentCategory::Cave => {
+                world.resource_mut::<Assets<Mesh>>().add(Sphere::new(
+                    0.85 * (parameter("tunnel_width") / 12.0).clamp(0.5, 2.5) + variation * 0.12,
+                ))
+            }
+            _ => continue,
+        };
+        let fallback = world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(Color::srgb(
+                0.18 + index as f32 * 0.08,
+                0.28 + variation * 0.2,
+                0.42 + index as f32 * 0.09,
+            ));
+        let column = index % 2;
+        let row = index / 2;
+        let category_offset = match category {
+            persistence::ContentCategory::Biome if index == 2 => {
+                Vec3::from(up) * parameter("water_level") * 0.035
+            }
+            persistence::ContentCategory::Road => {
+                Vec3::from(up) * index as f32 * parameter("max_grade_deg").to_radians().sin() * 0.65
+            }
+            persistence::ContentCategory::Cave => {
+                Vec3::from(up) * index as f32 * parameter("vertical_layers") * 0.08
+            }
+            persistence::ContentCategory::City => {
+                Vec3::from(right) * parameter("road_width") * 0.018
+            }
+            _ => Vec3::ZERO,
+        };
+        let position = center
+            + Vec3::from(right) * (column as f32 * 2.2 - 1.1)
+            + Vec3::from(up) * (row as f32 * 1.8)
+            + category_offset;
+        let rotation = if category == persistence::ContentCategory::Road {
+            Quat::from_rotation_x(-parameter("max_grade_deg").to_radians() * 0.35)
+                * Quat::from_rotation_y(
+                    (parameter("loop_count") + parameter("jump_count") * 0.25)
+                        * index as f32
+                        * 0.08,
+                )
+        } else {
+            Quat::IDENTITY
+        };
+        let entity = world
+            .spawn((
+                EditorWorkspaceRoot,
+                WorldKitPreview,
+                Name::new(format!("{} {} preview", world_recipe_label(category), slot)),
+                Mesh3d(mesh),
+                MeshMaterial3d(fallback),
+                Transform::from_translation(position).with_rotation(rotation),
+            ))
+            .id();
+        if let Some(material_id) = recipe.material_slots.get(*slot) {
+            if apply_catalog_material(world, entity, material_id) {
+                world.entity_mut(entity).remove::<EditorMaterialBinding>();
+            }
+        }
+    }
+    set_editor_status(
+        world,
+        format!(
+            "Previewed {content_id} • seed {} • revision {}",
+            recipe.seed, recipe.revision
+        ),
+    );
 }
 
 fn exit_editor_workspace(
@@ -1844,7 +2316,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                 ..default()
             })
             .with_children(|body| {
-                spawn_editor_panel(body, "OUTLINER", |panel| {
+                spawn_editor_panel(body, EditorPanelKind::Outliner, "OUTLINER", |panel| {
                     panel.spawn((
                         EditorSummaryText,
                         Text::new("Authorable objects: 0\nActive: none"),
@@ -1872,7 +2344,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     spawn_editor_button(panel, 11, EditorAction::CreateBeacon, "+ BEACON");
                 });
 
-                spawn_editor_panel(body, "INSPECTOR", |panel| {
+                spawn_editor_panel(body, EditorPanelKind::Inspector, "INSPECTOR", |panel| {
                     panel.spawn((
                         Text::new(
                             "TRANSFORM\nDrag colored handles\nToolbar controls mode / space / snap",
@@ -1897,89 +2369,178 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     spawn_editor_button(panel, 23, EditorAction::ScaleUp, "SCALE  +10%");
                 });
 
-                spawn_editor_panel(body, "CONTENT REGISTRY", |panel| {
-                    panel.spawn((
-                        EditorRegistryText,
-                        Text::new("Loading project registry…"),
-                        TextFont {
-                            font_size: FontSize::Px(14.0),
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.82, 0.88, 0.98)),
-                    ));
-                    spawn_editor_button(
-                        panel,
-                        33,
-                        EditorAction::RegistryPrevious,
-                        "◀ PREVIOUS RECORD",
-                    );
-                    spawn_editor_button(panel, 34, EditorAction::RegistryNext, "NEXT RECORD ▶");
-                    spawn_editor_button(
-                        panel,
-                        35,
-                        EditorAction::RegistryRename,
-                        "RENAME CONTENT ID",
-                    );
-                    spawn_editor_button(
-                        panel,
-                        36,
-                        EditorAction::ValidateProject,
-                        "VALIDATE PROJECT",
-                    );
-                    spawn_editor_button(
-                        panel,
-                        37,
-                        EditorAction::CreateMaterialRecord,
-                        "+ SHADER MATERIAL",
-                    );
-                    spawn_editor_button(
-                        panel,
-                        38,
-                        EditorAction::DuplicateRecord,
-                        "DUPLICATE RECORD",
-                    );
-                    spawn_editor_button(panel, 39, EditorAction::DeleteRecord, "DELETE RECORD");
-                    spawn_editor_button(
-                        panel,
-                        40,
-                        EditorAction::NormalizeSourcePath,
-                        "SYNC SOURCE PATH",
-                    );
-                    spawn_editor_button(panel, 41, EditorAction::SearchRegistry, "SEARCH RECORDS");
-                    spawn_editor_button(
-                        panel,
-                        42,
-                        EditorAction::MaterialCycleFamily,
-                        "MATERIAL FAMILY",
-                    );
-                    spawn_editor_button(
-                        panel,
-                        43,
-                        EditorAction::MaterialCyclePreset,
-                        "MATERIAL PRESET",
-                    );
-                    spawn_editor_button(
-                        panel,
-                        44,
-                        EditorAction::MaterialNextParameter,
-                        "NEXT PARAMETER",
-                    );
-                    spawn_editor_button(panel, 45, EditorAction::MaterialDecrease, "VALUE  −");
-                    spawn_editor_button(panel, 46, EditorAction::MaterialIncrease, "VALUE  +");
-                    spawn_editor_button(panel, 47, EditorAction::MaterialReset, "RESET MATERIAL");
-                    spawn_editor_button(
-                        panel,
-                        48,
-                        EditorAction::ApplySelectedMaterial,
-                        "APPLY TO OBJECT",
-                    );
-                    spawn_editor_button(
-                        panel,
-                        49,
-                        EditorAction::ClearObjectMaterial,
-                        "CLEAR OBJECT MATERIAL",
-                    );
-                });
+                spawn_editor_panel(
+                    body,
+                    EditorPanelKind::Registry,
+                    "CONTENT REGISTRY",
+                    |panel| {
+                        panel.spawn((
+                            EditorRegistryText,
+                            Text::new("Loading project registry…"),
+                            TextFont {
+                                font_size: FontSize::Px(14.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.82, 0.88, 0.98)),
+                        ));
+                        spawn_editor_button(
+                            panel,
+                            33,
+                            EditorAction::RegistryPrevious,
+                            "◀ PREVIOUS RECORD",
+                        );
+                        spawn_editor_button(panel, 34, EditorAction::RegistryNext, "NEXT RECORD ▶");
+                        spawn_editor_button(
+                            panel,
+                            35,
+                            EditorAction::RegistryRename,
+                            "RENAME CONTENT ID",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            36,
+                            EditorAction::ValidateProject,
+                            "VALIDATE PROJECT",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            37,
+                            EditorAction::CreateMaterialRecord,
+                            "+ SHADER MATERIAL",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            38,
+                            EditorAction::DuplicateRecord,
+                            "DUPLICATE RECORD",
+                        );
+                        spawn_editor_button(panel, 39, EditorAction::DeleteRecord, "DELETE RECORD");
+                        spawn_editor_button(
+                            panel,
+                            40,
+                            EditorAction::NormalizeSourcePath,
+                            "SYNC SOURCE PATH",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            41,
+                            EditorAction::SearchRegistry,
+                            "SEARCH RECORDS",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            42,
+                            EditorAction::MaterialCycleFamily,
+                            "MATERIAL FAMILY",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            43,
+                            EditorAction::MaterialCyclePreset,
+                            "MATERIAL PRESET",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            44,
+                            EditorAction::MaterialNextParameter,
+                            "NEXT PARAMETER",
+                        );
+                        spawn_editor_button(panel, 45, EditorAction::MaterialDecrease, "VALUE  −");
+                        spawn_editor_button(panel, 46, EditorAction::MaterialIncrease, "VALUE  +");
+                        spawn_editor_button(
+                            panel,
+                            47,
+                            EditorAction::MaterialReset,
+                            "RESET MATERIAL",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            48,
+                            EditorAction::ApplySelectedMaterial,
+                            "APPLY TO OBJECT",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            49,
+                            EditorAction::ClearObjectMaterial,
+                            "CLEAR OBJECT MATERIAL",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            50,
+                            EditorAction::CycleRecipeKind,
+                            "WORLD RECIPE TYPE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            51,
+                            EditorAction::CreateRecipeRecord,
+                            "+ WORLD RECIPE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            52,
+                            EditorAction::CopySelectedMaterial,
+                            "COPY MATERIAL",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            53,
+                            EditorAction::RecipeNextSlot,
+                            "NEXT MATERIAL SLOT",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            54,
+                            EditorAction::BindRecipeMaterial,
+                            "BIND COPIED MATERIAL",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            55,
+                            EditorAction::ClearRecipeMaterial,
+                            "CLEAR RECIPE SLOT",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            56,
+                            EditorAction::RegenerateRecipePreview,
+                            "REGENERATE PREVIEW",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            57,
+                            EditorAction::RecipeNextParameter,
+                            "NEXT RECIPE PARAMETER",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            58,
+                            EditorAction::RecipeParameterDecrease,
+                            "RECIPE VALUE  −",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            59,
+                            EditorAction::RecipeParameterIncrease,
+                            "RECIPE VALUE  +",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            60,
+                            EditorAction::RecipeResetParameters,
+                            "RESET RECIPE VALUES",
+                        );
+                        spawn_editor_button(panel, 61, EditorAction::RecipeSeedDecrease, "SEED  −");
+                        spawn_editor_button(panel, 62, EditorAction::RecipeSeedIncrease, "SEED  +");
+                        spawn_editor_button(
+                            panel,
+                            63,
+                            EditorAction::ValidateSelectedRecipe,
+                            "VALIDATE WORLD RECIPE",
+                        );
+                    },
+                );
             });
 
             root.spawn((
@@ -2018,6 +2579,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
 
 fn spawn_editor_panel(
     parent: &mut ChildSpawnerCommands,
+    kind: EditorPanelKind,
     title: &str,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
@@ -2032,6 +2594,8 @@ fn spawn_editor_panel(
                 overflow: Overflow::scroll_y(),
                 ..default()
             },
+            kind,
+            ScrollPosition::default(),
             BackgroundColor(Color::srgba(0.035, 0.05, 0.085, 0.94)),
             BorderColor::all(Color::srgb(0.14, 0.42, 0.62)),
         ))
@@ -2368,6 +2932,68 @@ fn editor_controller_navigation(
     }
 }
 
+fn keep_editor_focus_in_view(
+    focus: Res<EditorFocus>,
+    buttons: Query<(&EditorButton, &GlobalTransform, &ComputedNode)>,
+    mut panels: Query<(
+        &EditorPanelKind,
+        &GlobalTransform,
+        &ComputedNode,
+        &mut ScrollPosition,
+    )>,
+) {
+    let panel_kind = match focus.0 {
+        5..=11 => EditorPanelKind::Outliner,
+        12..=23 => EditorPanelKind::Inspector,
+        33.. => EditorPanelKind::Registry,
+        _ => return,
+    };
+    let Some((_, button_transform, button_node)) = buttons
+        .iter()
+        .find(|(button, _, _)| button.order == focus.0)
+    else {
+        return;
+    };
+    let Some((_, panel_transform, panel_node, mut scroll)) = panels
+        .iter_mut()
+        .find(|(kind, _, _, _)| **kind == panel_kind)
+    else {
+        return;
+    };
+    let max_y = ((panel_node.content_size().y - panel_node.size().y)
+        * panel_node.inverse_scale_factor())
+    .max(0.0);
+    if max_y <= 0.0 {
+        return;
+    }
+    let margin = 18.0;
+    let panel_center = panel_transform.translation().y;
+    let panel_half = panel_node.size().y * 0.5;
+    let visible_min = panel_center - panel_half + margin;
+    let visible_max = panel_center + panel_half - margin;
+    let button_center = button_transform.translation().y;
+    let button_half = button_node.size().y * 0.5;
+    let button_min = button_center - button_half;
+    let button_max = button_center + button_half;
+    let delta = editor_focus_reveal_delta(visible_min, visible_max, button_min, button_max);
+    scroll.y = (scroll.y + delta).clamp(0.0, max_y);
+}
+
+fn editor_focus_reveal_delta(
+    visible_min: f32,
+    visible_max: f32,
+    item_min: f32,
+    item_max: f32,
+) -> f32 {
+    if item_min < visible_min {
+        visible_min - item_min
+    } else if item_max > visible_max {
+        visible_max - item_max
+    } else {
+        0.0
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn editor_gizmo_drag(
     mouse: Res<ButtonInput<MouseButton>>,
@@ -2635,6 +3261,150 @@ enum MaterialEdit {
     NextParameter,
     Adjust(f32),
     Reset,
+}
+
+const WORLD_RECIPE_CATEGORIES: [persistence::ContentCategory; 5] = [
+    persistence::ContentCategory::Biome,
+    persistence::ContentCategory::Road,
+    persistence::ContentCategory::Building,
+    persistence::ContentCategory::Cave,
+    persistence::ContentCategory::City,
+];
+
+fn world_recipe_label(category: persistence::ContentCategory) -> &'static str {
+    match category {
+        persistence::ContentCategory::Biome => "Biome",
+        persistence::ContentCategory::Road => "Road",
+        persistence::ContentCategory::Building => "Building",
+        persistence::ContentCategory::Cave => "Cave",
+        persistence::ContentCategory::City => "City",
+        _ => "Unsupported",
+    }
+}
+
+fn world_recipe_default_name(category: persistence::ContentCategory) -> &'static str {
+    match category {
+        persistence::ContentCategory::Biome => "Main World",
+        persistence::ContentCategory::Road => "Speed Network",
+        persistence::ContentCategory::Building => "World",
+        persistence::ContentCategory::Cave => "Secret Network",
+        persistence::ContentCategory::City => "Main",
+        _ => "World Recipe",
+    }
+}
+
+fn selected_procedural_recipe(
+    world: &World,
+) -> Option<(String, persistence::ContentCategory, ProceduralRecipeDraft)> {
+    let registry = world.resource::<EditorRegistryState>();
+    let session = world.resource::<EditorProjectSession>();
+    let record = session.project.records.get(registry.selected)?;
+    let recipe = session
+        .project
+        .payloads
+        .get(&record.content_id)?
+        .procedural_recipe()?
+        .clone();
+    Some((record.content_id.clone(), record.category, recipe))
+}
+
+fn execute_recipe_edit(
+    world: &mut World,
+    description: impl Into<String>,
+    edit: impl FnOnce(&mut ProceduralRecipeDraft),
+) {
+    let Some((content_id, _, before)) = selected_procedural_recipe(world) else {
+        set_editor_status(
+            world,
+            "Select a Biome, Road, Building, Cave, or City recipe",
+        );
+        return;
+    };
+    let mut after = before.clone();
+    edit(&mut after);
+    if before == after {
+        set_editor_status(world, "Recipe already has that value");
+        return;
+    }
+    let description = description.into();
+    let transaction = EditorTransaction {
+        description: description.clone(),
+        commands: vec![EditorCommand::SetProceduralRecipe {
+            content_id,
+            before,
+            after,
+        }],
+    };
+    let result = world
+        .resource_scope(|world, mut stack: Mut<EditorUndoStack>| stack.execute(world, transaction));
+    match result {
+        Ok(()) => {
+            world.resource_mut::<EditorDocumentState>().dirty = true;
+            world.resource_mut::<WorldKitPreviewState>().signature = None;
+            set_editor_status(world, format!("{description} complete"));
+        }
+        Err(error) => set_editor_status(world, format!("{description} failed: {error:?}")),
+    }
+}
+
+fn active_recipe_slot(world: &World) -> Option<(String, &'static str)> {
+    let (content_id, category, _) = selected_procedural_recipe(world)?;
+    let slots = persistence::procedural_material_slots(category);
+    let index = world.resource::<EditorRegistryState>().recipe_slot % slots.len();
+    Some((content_id, slots[index]))
+}
+
+fn adjust_selected_recipe_parameter(world: &mut World, direction: f64) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a World Kit recipe before editing parameters");
+        return;
+    };
+    let specs = persistence::procedural_parameter_specs(category);
+    let index = world.resource::<EditorRegistryState>().recipe_parameter % specs.len();
+    let spec = specs[index];
+    let current = persistence::procedural_parameter_value(&recipe, spec);
+    let mut next = (current + spec.step * direction).clamp(spec.min, spec.max);
+    if spec.whole {
+        next = next.round();
+    }
+    execute_recipe_edit(
+        world,
+        format!("Set {} to {next:.2}", spec.label),
+        move |recipe| {
+            recipe
+                .fields
+                .insert(spec.key.into(), serde_json::json!(next));
+        },
+    );
+}
+
+fn reset_selected_recipe_parameters(world: &mut World) {
+    let Some((_, category, _)) = selected_procedural_recipe(world) else {
+        set_editor_status(
+            world,
+            "Select a World Kit recipe before resetting parameters",
+        );
+        return;
+    };
+    let keys = persistence::procedural_parameter_specs(category)
+        .iter()
+        .map(|spec| spec.key)
+        .collect::<Vec<_>>();
+    execute_recipe_edit(world, "Reset World Kit parameters", move |recipe| {
+        for key in keys {
+            recipe.fields.remove(key);
+        }
+    });
+}
+
+fn selected_recipe_validation_errors(world: &World) -> Option<(String, Vec<String>)> {
+    let (content_id, _, _) = selected_procedural_recipe(world)?;
+    let errors = validate_project(&world.resource::<EditorProjectSession>().project)
+        .into_iter()
+        .map(|error| format!("{error:?}"))
+        .filter(|error| error.contains(&content_id))
+        .collect();
+    Some((content_id, errors))
 }
 
 fn edit_selected_material(world: &mut World, edit: MaterialEdit) {
@@ -3178,6 +3948,170 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
         EditorAction::MaterialReset => edit_selected_material(world, MaterialEdit::Reset),
         EditorAction::ApplySelectedMaterial => apply_selected_material_to_object(world),
         EditorAction::ClearObjectMaterial => clear_selected_object_material(world),
+        EditorAction::CycleRecipeKind => {
+            let label = {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.recipe_kind = (registry.recipe_kind + 1) % WORLD_RECIPE_CATEGORIES.len();
+                let category = WORLD_RECIPE_CATEGORIES[registry.recipe_kind];
+                world_recipe_label(category)
+            };
+            set_editor_status(world, format!("New World Kit recipe type: {label}"));
+        }
+        EditorAction::CreateRecipeRecord => {
+            let category = {
+                let registry = world.resource::<EditorRegistryState>();
+                WORLD_RECIPE_CATEGORIES[registry.recipe_kind % WORLD_RECIPE_CATEGORIES.len()]
+            };
+            let result = world
+                .resource_mut::<EditorProjectSession>()
+                .project
+                .create_content(category, world_recipe_default_name(category));
+            match result {
+                Ok(content_id) => {
+                    let index = world
+                        .resource::<EditorProjectSession>()
+                        .project
+                        .records
+                        .iter()
+                        .position(|record| record.content_id == content_id)
+                        .unwrap_or(0);
+                    let mut registry = world.resource_mut::<EditorRegistryState>();
+                    registry.selected = index;
+                    registry.recipe_slot = 0;
+                    registry.recipe_parameter = 0;
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    world.resource_mut::<WorldKitPreviewState>().signature = None;
+                    set_editor_status(world, format!("Created {content_id}"));
+                }
+                Err(error) => set_editor_status(world, format!("Create rejected: {error}")),
+            }
+        }
+        EditorAction::CopySelectedMaterial => {
+            let selected = world.resource::<EditorRegistryState>().selected;
+            let material_id = world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .get(selected)
+                .filter(|record| record.category == persistence::ContentCategory::Material)
+                .map(|record| record.content_id.clone());
+            let Some(material_id) = material_id else {
+                set_editor_status(world, "Select a Material record before copying");
+                return;
+            };
+            if !world
+                .resource::<PublishedMaterialCatalog>()
+                .contains(&material_id)
+            {
+                set_editor_status(world, "Publish this Material before using it in World Kit");
+                return;
+            }
+            world
+                .resource_mut::<EditorRegistryState>()
+                .material_clipboard = Some(material_id.clone());
+            set_editor_status(world, format!("Copied {material_id}"));
+        }
+        EditorAction::RecipeNextSlot => {
+            let Some((_, category, _)) = selected_procedural_recipe(world) else {
+                set_editor_status(world, "Select a World Kit recipe before choosing a slot");
+                return;
+            };
+            let slots = persistence::procedural_material_slots(category);
+            let slot = {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.recipe_slot = (registry.recipe_slot + 1) % slots.len();
+                slots[registry.recipe_slot]
+            };
+            set_editor_status(
+                world,
+                format!("Active {} slot: {slot}", world_recipe_label(category)),
+            );
+        }
+        EditorAction::BindRecipeMaterial => {
+            let Some((_, slot)) = active_recipe_slot(world) else {
+                set_editor_status(world, "Select a World Kit recipe before binding a slot");
+                return;
+            };
+            let material_id = world
+                .resource::<EditorRegistryState>()
+                .material_clipboard
+                .clone();
+            let Some(material_id) = material_id else {
+                set_editor_status(world, "Copy a published Material before binding");
+                return;
+            };
+            execute_recipe_edit(world, format!("Bind {slot} material"), move |recipe| {
+                recipe.material_slots.insert(slot.into(), material_id);
+            });
+        }
+        EditorAction::ClearRecipeMaterial => {
+            let Some((_, slot)) = active_recipe_slot(world) else {
+                set_editor_status(world, "Select a World Kit recipe before clearing a slot");
+                return;
+            };
+            execute_recipe_edit(world, format!("Clear {slot} material"), move |recipe| {
+                recipe.material_slots.remove(slot);
+            });
+        }
+        EditorAction::RegenerateRecipePreview => {
+            let Some((content_id, errors)) = selected_recipe_validation_errors(world) else {
+                set_editor_status(world, "Select a World Kit recipe before regenerating");
+                return;
+            };
+            if !errors.is_empty() {
+                set_editor_status(
+                    world,
+                    format!("Regeneration blocked for {content_id}: {}", errors[0]),
+                );
+                return;
+            }
+            execute_recipe_edit(world, "Regenerate World Kit preview", |recipe| {
+                recipe.revision = recipe.revision.wrapping_add(1);
+            });
+        }
+        EditorAction::RecipeNextParameter => {
+            let Some((_, category, _)) = selected_procedural_recipe(world) else {
+                set_editor_status(
+                    world,
+                    "Select a World Kit recipe before choosing a parameter",
+                );
+                return;
+            };
+            let specs = persistence::procedural_parameter_specs(category);
+            let spec = {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.recipe_parameter = (registry.recipe_parameter + 1) % specs.len();
+                specs[registry.recipe_parameter]
+            };
+            set_editor_status(world, format!("Active recipe parameter: {}", spec.label));
+        }
+        EditorAction::RecipeParameterDecrease => adjust_selected_recipe_parameter(world, -1.0),
+        EditorAction::RecipeParameterIncrease => adjust_selected_recipe_parameter(world, 1.0),
+        EditorAction::RecipeResetParameters => reset_selected_recipe_parameters(world),
+        EditorAction::RecipeSeedDecrease => {
+            execute_recipe_edit(world, "Previous World Kit seed", |recipe| {
+                recipe.seed = recipe.seed.wrapping_sub(1);
+            });
+        }
+        EditorAction::RecipeSeedIncrease => {
+            execute_recipe_edit(world, "Next World Kit seed", |recipe| {
+                recipe.seed = recipe.seed.wrapping_add(1);
+            });
+        }
+        EditorAction::ValidateSelectedRecipe => {
+            let Some((content_id, errors)) = selected_recipe_validation_errors(world) else {
+                set_editor_status(world, "Select a World Kit recipe before validation");
+                return;
+            };
+            if errors.is_empty() {
+                set_editor_status(world, format!("{content_id} passes World Kit validation"));
+            } else {
+                set_editor_status(
+                    world,
+                    format!("{content_id} has {} issue(s): {}", errors.len(), errors[0]),
+                );
+            }
+        }
     }
 }
 
@@ -3314,23 +4248,7 @@ fn save_editor_project(world: &mut World, publish: bool) {
     let result = {
         let mut session = world.resource_mut::<EditorProjectSession>();
         session.project.scene = scene;
-        let material_dependencies = session
-            .project
-            .scene
-            .objects
-            .iter()
-            .filter_map(|object| object.material_id.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        if let Some(scene_record) = session
-            .project
-            .records
-            .iter_mut()
-            .find(|record| record.category == persistence::ContentCategory::Scene)
-        {
-            scene_record.dependencies = material_dependencies;
-        }
+        session.project.synchronize_authored_dependencies();
         if let Err(error) = publish
             .then(|| session.project.publish_drafts())
             .transpose()
@@ -3348,7 +4266,7 @@ fn save_editor_project(world: &mut World, publish: bool) {
             let verb = if publish { "published" } else { "saved" };
             if publish {
                 let project = world.resource::<EditorProjectSession>().project.clone();
-                rebuild_published_material_catalog(world, &project);
+                rebuild_published_content_catalogs(world, &project);
             }
             set_editor_status(world, format!("Project {verb} atomically to {path}"));
         }
@@ -3382,7 +4300,7 @@ fn load_editor_project(world: &mut World, recovery_only: bool) {
     }
     world.resource_mut::<EditorSelection>().clear();
     world.resource_mut::<EditorUndoStack>().clear();
-    rebuild_published_material_catalog(world, &project);
+    rebuild_published_content_catalogs(world, &project);
 
     for object in &project.scene.objects {
         let id = EditorEntityId(object.editor_id);
@@ -3803,6 +4721,7 @@ fn update_editor_workspace_text(
     gizmo: Res<EditorGizmoSettings>,
     session: Res<EditorProjectSession>,
     catalog: Res<PublishedMaterialCatalog>,
+    procedural_catalog: Res<PublishedProceduralRecipeCatalog>,
     registry: Res<EditorRegistryState>,
     authorables: Query<
         (
@@ -3933,6 +4852,31 @@ fn update_editor_workspace_text(
                         parameter.max,
                     )
                 }
+                Some(payload) if payload.procedural_recipe().is_some() => {
+                    let recipe = payload.procedural_recipe().unwrap();
+                    let slots = persistence::procedural_material_slots(record.category);
+                    let slot = slots[registry.recipe_slot % slots.len()];
+                    let material = recipe
+                        .material_slots
+                        .get(slot)
+                        .map(String::as_str)
+                        .unwrap_or("— fallback —");
+                    let specs = persistence::procedural_parameter_specs(record.category);
+                    let parameter = specs[registry.recipe_parameter % specs.len()];
+                    let value = persistence::procedural_parameter_value(recipe, parameter);
+                    format!(
+                        "\nWORLD KIT: {} • Seed {} • Rev {}\nSlot {}: {}\n{}: {:.2}  [{:.2}–{:.2}]",
+                        world_recipe_label(record.category),
+                        recipe.seed,
+                        recipe.revision,
+                        slot,
+                        material,
+                        parameter.label,
+                        value,
+                        parameter.min,
+                        parameter.max,
+                    )
+                }
                 _ => String::new(),
             };
             format!(
@@ -3973,13 +4917,18 @@ fn update_editor_workspace_text(
         let cursor = if registry.search_active { "_" } else { "" };
         format!("\nSEARCH: {}{cursor}", registry.search_text)
     };
+    let recipe_type = WORLD_RECIPE_CATEGORIES[registry.recipe_kind % WORLD_RECIPE_CATEGORIES.len()];
+    let clipboard = registry.material_clipboard.as_deref().unwrap_or("empty");
     for mut text in &mut text_queries.p3() {
         *text = Text::new(format!(
-            "Project: {}\nRecords: {} • Matches: {} • Runtime materials: {}{search}\n\n{record_listing}{selected_details}{rename}\n\n{validation}",
+            "Project: {}\nRecords: {} • Matches: {} • Runtime materials: {} • Recipes: {}{search}\nNew recipe: {} • Material clipboard: {}\n\n{record_listing}{selected_details}{rename}\n\n{validation}",
             session.project.display_name,
             records.len(),
             registry_indices.len(),
             catalog.len(),
+            procedural_catalog.len(),
+            world_recipe_label(recipe_type),
+            clipboard,
         ));
     }
 }
@@ -4204,6 +5153,9 @@ mod tests {
         world.init_resource::<Assets<IceMaterial>>();
         world.init_resource::<Assets<LavaMaterial>>();
         world.init_resource::<PublishedMaterialCatalog>();
+        world.init_resource::<PublishedProceduralRecipeCatalog>();
+        world.init_resource::<PublishedContentCatalogEpoch>();
+        world.init_resource::<WorldKitPreviewState>();
         world.init_resource::<EditorSelection>();
         world.init_resource::<EditorIdAllocator>();
         world.init_resource::<EditorUndoStack>();
@@ -4528,7 +5480,7 @@ mod tests {
             .publish_drafts()
             .unwrap();
         let project = world.resource::<EditorProjectSession>().project.clone();
-        rebuild_published_material_catalog(&mut world, &project);
+        rebuild_published_content_catalogs(&mut world, &project);
         let entity = spawn_editor_primitive_record(
             &mut world,
             EditorEntityId(88),
@@ -4580,5 +5532,265 @@ mod tests {
         );
         assert!(world.get::<MeshMaterial3d<ToonMaterial>>(entity).is_some());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn procedural_binding_resolves_once_and_restores_fallback_when_draft_changes() {
+        let (mut world, root) = persistence_test_world("procedural_binding");
+        let (material_id, road_id) = {
+            let mut session = world.resource_mut::<EditorProjectSession>();
+            let material_id = session
+                .project
+                .create_content(persistence::ContentCategory::Material, "Road Toon")
+                .unwrap();
+            let road_id = session
+                .project
+                .create_content(persistence::ContentCategory::Road, "Speed Network")
+                .unwrap();
+            let recipe = session
+                .project
+                .payloads
+                .get_mut(&road_id)
+                .unwrap()
+                .procedural_recipe_mut()
+                .unwrap();
+            recipe.seed = 42_195;
+            recipe.revision = 3;
+            recipe
+                .material_slots
+                .insert("deck".into(), material_id.clone());
+            session.project.publish_drafts().unwrap();
+            (material_id, road_id)
+        };
+        let project = world.resource::<EditorProjectSession>().project.clone();
+        rebuild_published_content_catalogs(&mut world, &project);
+        assert_eq!(
+            world
+                .resource::<PublishedProceduralRecipeCatalog>()
+                .generation(&road_id),
+            Some((ProceduralRecipeKind::Road, 42_195, 3))
+        );
+        assert_eq!(
+            world
+                .resource::<PublishedProceduralRecipeCatalog>()
+                .material_id(&road_id, "deck"),
+            Some(material_id.as_str())
+        );
+
+        let mesh = world
+            .resource_mut::<Assets<Mesh>>()
+            .add(Cuboid::new(2.0, 0.5, 8.0));
+        let fallback = world
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(Color::srgb(0.2, 0.2, 0.2));
+        let entity = world
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(fallback.clone()),
+                ProceduralMaterialBinding::new(road_id.clone(), "deck"),
+            ))
+            .id();
+        resolve_procedural_material_bindings(&mut world);
+        assert!(world.get::<MeshMaterial3d<ToonMaterial>>(entity).is_some());
+        assert!(world
+            .get::<MeshMaterial3d<StandardMaterial>>(entity)
+            .is_none());
+
+        {
+            let mut session = world.resource_mut::<EditorProjectSession>();
+            let recipe = session
+                .project
+                .payloads
+                .get_mut(&road_id)
+                .unwrap()
+                .procedural_recipe_mut()
+                .unwrap();
+            recipe.revision += 1;
+            recipe.material_slots.clear();
+            session.project.refresh_hashes().unwrap();
+        }
+        let changed = world.resource::<EditorProjectSession>().project.clone();
+        rebuild_published_content_catalogs(&mut world, &changed);
+        resolve_procedural_material_bindings(&mut world);
+        assert_eq!(
+            world.get::<MeshMaterial3d<StandardMaterial>>(entity),
+            Some(&MeshMaterial3d(fallback))
+        );
+        assert!(world.get::<MeshMaterial3d<ToonMaterial>>(entity).is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_kit_controller_actions_bind_and_regenerate_with_undo() {
+        let (mut world, root) = persistence_test_world("world_kit_actions");
+        let material_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Material, "Road Toon")
+            .unwrap();
+        world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .publish_drafts()
+            .unwrap();
+        let project = world.resource::<EditorProjectSession>().project.clone();
+        rebuild_published_content_catalogs(&mut world, &project);
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::CopySelectedMaterial);
+        assert_eq!(
+            world
+                .resource::<EditorRegistryState>()
+                .material_clipboard
+                .as_deref(),
+            Some(material_id.as_str())
+        );
+
+        world.resource_mut::<EditorRegistryState>().recipe_kind = 1;
+        apply_editor_action(&mut world, EditorAction::CreateRecipeRecord);
+        let road_id = world
+            .resource::<EditorProjectSession>()
+            .project
+            .records
+            .last()
+            .unwrap()
+            .content_id
+            .clone();
+        assert_eq!(road_id, "road.speed_network");
+        apply_editor_action(&mut world, EditorAction::BindRecipeMaterial);
+        let recipe = world.resource::<EditorProjectSession>().project.payloads[&road_id]
+            .procedural_recipe()
+            .unwrap();
+        assert_eq!(recipe.material_slots.get("deck"), Some(&material_id));
+
+        apply_editor_action(&mut world, EditorAction::RegenerateRecipePreview);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .revision,
+            1
+        );
+        apply_editor_action(&mut world, EditorAction::Undo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .revision,
+            0
+        );
+        apply_editor_action(&mut world, EditorAction::Redo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .revision,
+            1
+        );
+        apply_editor_action(&mut world, EditorAction::RecipeParameterIncrease);
+        let recipe = world.resource::<EditorProjectSession>().project.payloads[&road_id]
+            .procedural_recipe()
+            .unwrap();
+        assert_eq!(recipe.fields["width"], serde_json::json!(19.0));
+        apply_editor_action(&mut world, EditorAction::Undo);
+        assert!(
+            !world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .fields
+                .contains_key("width")
+        );
+
+        apply_editor_action(&mut world, EditorAction::RecipeSeedIncrease);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .seed,
+            1
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn world_kit_preview_regeneration_is_bounded_to_four_slot_objects() {
+        let (mut world, root) = persistence_test_world("world_kit_preview");
+        let road_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Road, "Speed Network")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        sync_world_kit_preview(&mut world);
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<WorldKitPreview>>()
+                .iter(&world)
+                .count(),
+            4
+        );
+
+        world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .payloads
+            .get_mut(&road_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap()
+            .revision = 8;
+        sync_world_kit_preview(&mut world);
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<WorldKitPreview>>()
+                .iter(&world)
+                .count(),
+            4
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_world_recipe_cannot_regenerate_preview_revision() {
+        let (mut world, root) = persistence_test_world("invalid_world_kit_regeneration");
+        let building_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Building, "Huge Tower")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        {
+            let mut session = world.resource_mut::<EditorProjectSession>();
+            let recipe = session
+                .project
+                .payloads
+                .get_mut(&building_id)
+                .unwrap()
+                .procedural_recipe_mut()
+                .unwrap();
+            recipe.fields.insert("floors".into(), serde_json::json!(20));
+            recipe
+                .fields
+                .insert("rooms_per_floor".into(), serde_json::json!(12));
+        }
+        apply_editor_action(&mut world, EditorAction::RegenerateRecipePreview);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&building_id]
+                .procedural_recipe()
+                .unwrap()
+                .revision,
+            0
+        );
+        assert!(world
+            .resource::<EditorRuntimeStatus>()
+            .message
+            .contains("blocked"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn editor_focus_reveal_delta_moves_only_outside_items() {
+        assert_eq!(editor_focus_reveal_delta(10.0, 90.0, 30.0, 50.0), 0.0);
+        assert_eq!(editor_focus_reveal_delta(10.0, 90.0, -5.0, 15.0), 15.0);
+        assert_eq!(editor_focus_reveal_delta(10.0, 90.0, 85.0, 105.0), -15.0);
     }
 }

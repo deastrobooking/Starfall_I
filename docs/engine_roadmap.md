@@ -238,5 +238,13 @@ pulses, and typed Ice/Snow plus Lava materials in Forge. R3 adds controller-
 focused family/preset/parameter authoring, live bounded previews, publish
 validation, and render asset/entity counters. Clustered-light evaluation,
 measured four-viewport GPU budgets, and recipe-regenerated biome bindings remain.
-R4 now publishes typed runtime material catalogs and persists validated stable-ID
-bindings on Forge scene primitives.
+R4 publishes typed runtime material catalogs and persists validated stable-ID
+bindings on Forge scene primitives. R5 adds deterministic Biome/Road/Building/
+Cave/City recipes, published recipe catalogs, and reversible material-slot
+resolution on key generated world geometry. World Kit controls and transactional
+regeneration remain before broad Ice/Lava biome rollout. ET5a now supplies the
+controller-facing recipe/type/slot/material workflow, focus-follow scrolling,
+and bounded undoable preview regeneration. ET5b now delivers bounded
+family-specific controls, cross-field generation budgets, seed editing, and
+parameter-driven preview compilation. ET5c remains typed spline/room graphs and
+atomic validated live-root replacement.

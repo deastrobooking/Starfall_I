@@ -282,6 +282,68 @@ regeneration contracts for dependent meshes and colliders.
   publish scene. Unpublished bindings retain their ID but fall back safely to
   the Standard preview until a matching published catalog entry exists.
 
+### ET3f procedural recipe catalogs delivered — July 2026
+
+- Biome, Road, Building, Cave, and City records now have deterministic
+  seed/revision recipes with category-specific material slots. Existing generic
+  Road/Building/Cave source files remain readable through serde defaults.
+- Publish synchronizes recipe material dependencies and builds a second stable-ID
+  runtime catalog. Rename, validation, and dependent-delete protection cover
+  every slot without persisting Bevy entities or asset handles.
+- Terrain, speed-road deck/barrier/support geometry, building exteriors, and
+  cave rock/floor/accent geometry carry stable recipe-slot components. An
+  epoch-based resolver applies published typed materials once per catalog
+  revision and restores captured Standard fallbacks when a binding disappears.
+- This completes the safe runtime boundary for ET5. The next pass is the
+  controller-facing World Kit UI and transactional recipe regeneration, not
+  additional ad-hoc mutations of generated ECS children.
+
+### ET5a World Kit controls delivered — July 2026
+
+- The controller-focusable registry now creates Biome, Road, Building, Cave,
+  and City recipes. The chosen type, copied published Material, selected named
+  slot, seed, revision, and current binding remain visible in the registry.
+- The authoring loop is explicit: publish a Material, `COPY MATERIAL`, select or
+  create a World recipe, choose `NEXT MATERIAL SLOT`, then bind or clear it.
+  Binding and clearing use recipe snapshot commands in the shared bounded undo/
+  redo stack instead of mutating generated ECS entities.
+- `REGENERATE PREVIEW` advances the recipe revision as an atomic undoable
+  transaction. A camera-relative four-object preview is destroyed and rebuilt
+  from the deterministic seed/revision, so repeated regeneration cannot leak or
+  accumulate preview entities.
+- All editor panels now own real `ScrollPosition` state. Controller focus keeps
+  the active button visible inside the correct panel, including World Kit
+  controls below the original registry viewport.
+
+ET5b begins the production generator editor with typed scalar/count controls
+and validation budgets. Typed spline points, room/portal graphs, biome zone
+painting, and transactional live-world root replacement remain ET5c work.
+
+### ET5b typed generator controls delivered — July 2026
+
+- Every World Kit family now publishes a bounded parameter contract instead of
+  relying on undocumented JSON numbers. Controller steppers expose the active
+  label, value, range, reset, and deterministic seed controls.
+- Road recipes cover width, maximum grade, curve radius, loop count, jump count,
+  and support spacing. Building recipes cover footprint, floors, rooms, stairs,
+  and entrances. Cave recipes cover tunnel width, rooms, vertical layers,
+  secrets, fast-travel points, and the four-player shared-camera radius.
+- Biome recipes cover zone radius, relief, water level, hazards, and landmarks;
+  City recipes cover block/road scale, building density, districts, and
+  landmarks. Whole-number controls are enforced independently from scalars.
+- Validation blocks nonnumeric/out-of-range values and unsafe generation
+  budgets: 180 road segments, 160 building rooms, 96 cave room/layers, cave
+  camera coverage, and city road-to-block clearance. Invalid recipes cannot
+  advance their regeneration revision.
+- The bounded four-object compiler now reflects these typed parameters in its
+  meshes, transforms, height, spacing, grade, and scale. Parameter, seed, reset,
+  and regeneration edits are all recipe-snapshot transactions with undo/redo.
+
+ET5c remains the safe live-world compiler boundary: typed spline points and
+room/portal graphs, navigation/collision preflight, generated-root ownership,
+and atomic swap of a validated replacement root. The shipped world is not
+destructively regenerated from a preview-only recipe.
+
 ## ET4 — Character and Creature production workspaces
 
 Move Character Studio and `CreatureSpec` onto ET1–ET3 services:

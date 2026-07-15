@@ -109,10 +109,21 @@ impl ForgeProject {
                 object.material_id = Some(new_id.into());
             }
         }
+        for payload in self.payloads.values_mut() {
+            let Some(recipe) = payload.procedural_recipe_mut() else {
+                continue;
+            };
+            for material_id in recipe.material_slots.values_mut() {
+                if material_id == old_id {
+                    *material_id = new_id.into();
+                }
+            }
+        }
         Ok(())
     }
 
     pub fn publish_drafts(&mut self) -> Result<(), ProjectIoError> {
+        self.synchronize_authored_dependencies();
         self.refresh_hashes()?;
         let errors = validate_project(self);
         if !errors.is_empty() {
@@ -122,6 +133,50 @@ impl ForgeProject {
             record.published_hash = Some(record.draft_hash.clone());
         }
         Ok(())
+    }
+
+    /// Rebuild material dependencies from authored scene and procedural slots.
+    /// Other dependency families are retained so this remains forward-compatible
+    /// with character, creature, and gameplay-graph references.
+    pub fn synchronize_authored_dependencies(&mut self) {
+        let material_ids = self
+            .records
+            .iter()
+            .filter(|record| record.category == ContentCategory::Material)
+            .map(|record| record.content_id.clone())
+            .collect::<BTreeSet<_>>();
+        let scene_materials = self
+            .scene
+            .objects
+            .iter()
+            .filter_map(|object| object.material_id.clone())
+            .collect::<BTreeSet<_>>();
+        let authored = self
+            .records
+            .iter()
+            .map(|record| {
+                let bindings = if record.category == ContentCategory::Scene {
+                    scene_materials.clone()
+                } else {
+                    self.payloads
+                        .get(&record.content_id)
+                        .and_then(ContentPayload::procedural_recipe)
+                        .map(|recipe| recipe.material_slots.values().cloned().collect())
+                        .unwrap_or_default()
+                };
+                (record.content_id.clone(), bindings)
+            })
+            .collect::<BTreeMap<_, BTreeSet<_>>>();
+        for record in &mut self.records {
+            record
+                .dependencies
+                .retain(|dependency| !material_ids.contains(dependency));
+            if let Some(bindings) = authored.get(&record.content_id) {
+                record.dependencies.extend(bindings.iter().cloned());
+                record.dependencies.sort();
+                record.dependencies.dedup();
+            }
+        }
     }
 
     pub fn create_content(
@@ -246,6 +301,21 @@ impl ForgeProject {
                 owner: "scene object material binding".into(),
             });
         }
+        if let Some((owner, slot)) = self.payloads.iter().find_map(|(owner, payload)| {
+            payload.procedural_recipe().and_then(|recipe| {
+                recipe
+                    .material_slots
+                    .iter()
+                    .find_map(|(slot, material_id)| {
+                        (material_id == content_id).then(|| (owner.clone(), slot.clone()))
+                    })
+            })
+        }) {
+            return Err(ProjectMutationError::ContentHasDependents {
+                content_id: content_id.into(),
+                owner: format!("{owner} material slot {slot}"),
+            });
+        }
         self.payloads.remove(content_id);
         Ok(self.records.remove(index))
     }
@@ -331,9 +401,11 @@ pub enum ContentPayload {
     Scene(EditorSceneDraft),
     Character(GenericRecipeDraft),
     Creature(GenericRecipeDraft),
-    Road(GenericRecipeDraft),
-    Building(GenericRecipeDraft),
-    Cave(GenericRecipeDraft),
+    Biome(ProceduralRecipeDraft),
+    Road(ProceduralRecipeDraft),
+    Building(ProceduralRecipeDraft),
+    Cave(ProceduralRecipeDraft),
+    City(ProceduralRecipeDraft),
     Material(GenericRecipeDraft),
     Ui(GenericRecipeDraft),
 }
@@ -345,9 +417,11 @@ impl ContentPayload {
             ContentCategory::Scene => Self::Scene(EditorSceneDraft::default()),
             ContentCategory::Character => Self::Character(recipe),
             ContentCategory::Creature => Self::Creature(recipe),
-            ContentCategory::Road => Self::Road(recipe),
-            ContentCategory::Building => Self::Building(recipe),
-            ContentCategory::Cave => Self::Cave(recipe),
+            ContentCategory::Biome => Self::Biome(ProceduralRecipeDraft::default()),
+            ContentCategory::Road => Self::Road(ProceduralRecipeDraft::default()),
+            ContentCategory::Building => Self::Building(ProceduralRecipeDraft::default()),
+            ContentCategory::Cave => Self::Cave(ProceduralRecipeDraft::default()),
+            ContentCategory::City => Self::City(ProceduralRecipeDraft::default()),
             ContentCategory::Material => {
                 let mut recipe = recipe;
                 recipe
@@ -390,11 +464,35 @@ impl ContentPayload {
             Self::Scene(_) => ContentCategory::Scene,
             Self::Character(_) => ContentCategory::Character,
             Self::Creature(_) => ContentCategory::Creature,
+            Self::Biome(_) => ContentCategory::Biome,
             Self::Road(_) => ContentCategory::Road,
             Self::Building(_) => ContentCategory::Building,
             Self::Cave(_) => ContentCategory::Cave,
+            Self::City(_) => ContentCategory::City,
             Self::Material(_) => ContentCategory::Material,
             Self::Ui(_) => ContentCategory::Ui,
+        }
+    }
+
+    pub fn procedural_recipe(&self) -> Option<&ProceduralRecipeDraft> {
+        match self {
+            Self::Biome(recipe)
+            | Self::Road(recipe)
+            | Self::Building(recipe)
+            | Self::Cave(recipe)
+            | Self::City(recipe) => Some(recipe),
+            _ => None,
+        }
+    }
+
+    pub fn procedural_recipe_mut(&mut self) -> Option<&mut ProceduralRecipeDraft> {
+        match self {
+            Self::Biome(recipe)
+            | Self::Road(recipe)
+            | Self::Building(recipe)
+            | Self::Cave(recipe)
+            | Self::City(recipe) => Some(recipe),
+            _ => None,
         }
     }
 }
@@ -416,6 +514,156 @@ impl Default for GenericRecipeDraft {
     }
 }
 
+/// Deterministic source data for generated world content. Runtime entities and
+/// Bevy asset handles are deliberately excluded; regeneration consumes this
+/// recipe and resolves material slots through published stable content IDs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProceduralRecipeDraft {
+    #[serde(default = "current_schema")]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub seed: u64,
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default)]
+    pub material_slots: BTreeMap<String, String>,
+    #[serde(default)]
+    pub fields: BTreeMap<String, serde_json::Value>,
+}
+
+impl Default for ProceduralRecipeDraft {
+    fn default() -> Self {
+        Self {
+            schema_version: CURRENT_PROJECT_SCHEMA,
+            seed: 0,
+            revision: 0,
+            material_slots: BTreeMap::new(),
+            fields: BTreeMap::new(),
+        }
+    }
+}
+
+pub fn procedural_material_slots(category: ContentCategory) -> &'static [&'static str] {
+    match category {
+        ContentCategory::Biome => &["terrain", "detail", "water", "hazard"],
+        ContentCategory::Road => &["deck", "barrier", "support", "boost"],
+        ContentCategory::Building => &["exterior", "interior", "floor", "trim"],
+        ContentCategory::Cave => &["rock", "floor", "accent", "hazard"],
+        ContentCategory::City => &["road", "exterior", "interior", "landmark"],
+        _ => &[],
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProceduralParameterSpec {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub default: f64,
+    pub whole: bool,
+}
+
+macro_rules! parameter {
+    ($key:literal, $label:literal, $min:expr, $max:expr, $step:expr, $default:expr) => {
+        ProceduralParameterSpec {
+            key: $key,
+            label: $label,
+            min: $min,
+            max: $max,
+            step: $step,
+            default: $default,
+            whole: false,
+        }
+    };
+    (whole $key:literal, $label:literal, $min:expr, $max:expr, $step:expr, $default:expr) => {
+        ProceduralParameterSpec {
+            key: $key,
+            label: $label,
+            min: $min,
+            max: $max,
+            step: $step,
+            default: $default,
+            whole: true,
+        }
+    };
+}
+
+pub fn procedural_parameter_specs(category: ContentCategory) -> &'static [ProceduralParameterSpec] {
+    const BIOME: [ProceduralParameterSpec; 5] = [
+        parameter!("zone_radius", "Zone radius", 20.0, 500.0, 10.0, 120.0),
+        parameter!("relief", "Terrain relief", 0.0, 1.0, 0.05, 0.55),
+        parameter!("water_level", "Water level", -20.0, 20.0, 1.0, 0.0),
+        parameter!("hazard_density", "Hazard density", 0.0, 1.0, 0.05, 0.10),
+        parameter!(whole "landmark_count", "Landmarks", 0.0, 24.0, 1.0, 4.0),
+    ];
+    const ROAD: [ProceduralParameterSpec; 6] = [
+        parameter!("width", "Road width", 8.0, 40.0, 1.0, 18.0),
+        parameter!("max_grade_deg", "Maximum grade", 5.0, 45.0, 1.0, 22.0),
+        parameter!("curve_radius", "Curve radius", 12.0, 180.0, 4.0, 60.0),
+        parameter!(whole "loop_count", "Loops", 0.0, 8.0, 1.0, 1.0),
+        parameter!(whole "jump_count", "Jumps", 0.0, 16.0, 1.0, 2.0),
+        parameter!("support_spacing", "Support spacing", 20.0, 160.0, 5.0, 80.0),
+    ];
+    const BUILDING: [ProceduralParameterSpec; 6] = [
+        parameter!("width", "Footprint width", 8.0, 80.0, 2.0, 24.0),
+        parameter!("depth", "Footprint depth", 8.0, 80.0, 2.0, 20.0),
+        parameter!(whole "floors", "Floors", 1.0, 20.0, 1.0, 4.0),
+        parameter!(whole "rooms_per_floor", "Rooms per floor", 1.0, 12.0, 1.0, 4.0),
+        parameter!("stair_width", "Stair width", 1.5, 6.0, 0.25, 3.0),
+        parameter!(whole "entrance_count", "Entrances", 1.0, 6.0, 1.0, 2.0),
+    ];
+    const CAVE: [ProceduralParameterSpec; 6] = [
+        parameter!("tunnel_width", "Tunnel width", 6.0, 30.0, 1.0, 12.0),
+        parameter!(whole "room_count", "Rooms", 1.0, 24.0, 1.0, 6.0),
+        parameter!(whole "vertical_layers", "Vertical layers", 1.0, 8.0, 1.0, 2.0),
+        parameter!("secret_density", "Secret density", 0.0, 1.0, 0.05, 0.25),
+        parameter!(whole "fast_travel_points", "Fast travel points", 0.0, 8.0, 1.0, 2.0),
+        parameter!(
+            "shared_camera_radius",
+            "Shared camera radius",
+            16.0,
+            80.0,
+            2.0,
+            32.0
+        ),
+    ];
+    const CITY: [ProceduralParameterSpec; 5] = [
+        parameter!("block_size", "Block size", 30.0, 180.0, 5.0, 80.0),
+        parameter!("road_width", "Road width", 6.0, 36.0, 1.0, 14.0),
+        parameter!(
+            "building_density",
+            "Building density",
+            0.10,
+            1.0,
+            0.05,
+            0.65
+        ),
+        parameter!(whole "district_count", "Districts", 1.0, 12.0, 1.0, 4.0),
+        parameter!(whole "landmark_count", "Landmarks", 1.0, 16.0, 1.0, 4.0),
+    ];
+    match category {
+        ContentCategory::Biome => &BIOME,
+        ContentCategory::Road => &ROAD,
+        ContentCategory::Building => &BUILDING,
+        ContentCategory::Cave => &CAVE,
+        ContentCategory::City => &CITY,
+        _ => &[],
+    }
+}
+
+pub fn procedural_parameter_value(
+    recipe: &ProceduralRecipeDraft,
+    spec: ProceduralParameterSpec,
+) -> f64 {
+    recipe
+        .fields
+        .get(spec.key)
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(spec.default)
+}
+
 fn current_schema() -> u32 {
     CURRENT_PROJECT_SCHEMA
 }
@@ -426,9 +674,11 @@ pub enum ContentCategory {
     Scene,
     Character,
     Creature,
+    Biome,
     Road,
     Building,
     Cave,
+    City,
     Material,
     Ui,
 }
@@ -439,9 +689,11 @@ impl ContentCategory {
             Self::Scene => "scene",
             Self::Character => "character",
             Self::Creature => "creature",
+            Self::Biome => "biome",
             Self::Road => "road",
             Self::Building => "building",
             Self::Cave => "cave",
+            Self::City => "city",
             Self::Material => "material",
             Self::Ui => "ui",
         }
@@ -452,9 +704,11 @@ impl ContentCategory {
             Self::Scene => "scenes",
             Self::Character => "characters",
             Self::Creature => "creatures",
+            Self::Biome => "biomes",
             Self::Road => "roads",
             Self::Building => "buildings",
             Self::Cave => "caves",
+            Self::City => "cities",
             Self::Material => "materials",
             Self::Ui => "ui",
         }
@@ -529,6 +783,7 @@ pub enum ProjectValidationError {
     MissingContent(String),
     InvalidMaterial(String),
     InvalidMaterialBinding(String),
+    InvalidProceduralRecipe(String),
 }
 
 #[derive(Debug)]
@@ -597,6 +852,38 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
         if let Some(ContentPayload::Material(recipe)) = project.payloads.get(&record.content_id) {
             validate_material_recipe(&record.content_id, recipe, &mut errors);
         }
+        if let Some(recipe) = project
+            .payloads
+            .get(&record.content_id)
+            .and_then(ContentPayload::procedural_recipe)
+        {
+            validate_procedural_recipe(&record.content_id, record.category, recipe, &mut errors);
+            let allowed = procedural_material_slots(record.category);
+            for (slot, material_id) in &recipe.material_slots {
+                if !allowed.contains(&slot.as_str()) {
+                    errors.push(ProjectValidationError::InvalidMaterialBinding(format!(
+                        "{} uses unsupported {:?} material slot {}",
+                        record.content_id, record.category, slot
+                    )));
+                    continue;
+                }
+                let valid = project
+                    .records
+                    .iter()
+                    .find(|candidate| candidate.content_id == *material_id)
+                    .is_some_and(|candidate| candidate.category == ContentCategory::Material)
+                    && matches!(
+                        project.payloads.get(material_id),
+                        Some(ContentPayload::Material(_))
+                    );
+                if !valid {
+                    errors.push(ProjectValidationError::InvalidMaterialBinding(format!(
+                        "{} slot {} references missing/non-material {}",
+                        record.content_id, slot, material_id
+                    )));
+                }
+            }
+        }
     }
     for record in &project.records {
         for dependency in &record.dependencies {
@@ -657,6 +944,80 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
         );
     }
     errors
+}
+
+fn validate_procedural_recipe(
+    content_id: &str,
+    category: ContentCategory,
+    recipe: &ProceduralRecipeDraft,
+    errors: &mut Vec<ProjectValidationError>,
+) {
+    let specs = procedural_parameter_specs(category);
+    for spec in specs {
+        let Some(raw) = recipe.fields.get(spec.key) else {
+            continue;
+        };
+        let Some(value) = raw.as_f64() else {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: {} must be numeric",
+                spec.key
+            )));
+            continue;
+        };
+        if !value.is_finite() || value < spec.min || value > spec.max {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: {} must be within [{}, {}]",
+                spec.key, spec.min, spec.max
+            )));
+        } else if spec.whole && value.fract().abs() > f64::EPSILON {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: {} must be a whole number",
+                spec.key
+            )));
+        }
+    }
+
+    let value = |key: &str| {
+        specs
+            .iter()
+            .find(|spec| spec.key == key)
+            .map(|spec| procedural_parameter_value(recipe, *spec))
+            .unwrap_or_default()
+    };
+    let budget_error = match category {
+        ContentCategory::Road => {
+            let estimated_segments = 12.0 + value("loop_count") * 16.0 + value("jump_count") * 3.0;
+            (estimated_segments > 180.0).then(|| {
+                format!("{content_id}: road preview exceeds the 180-segment generation budget")
+            })
+        }
+        ContentCategory::Building => {
+            let rooms = value("floors") * value("rooms_per_floor");
+            (rooms > 160.0)
+                .then(|| format!("{content_id}: building exceeds the 160-room navigation budget"))
+        }
+        ContentCategory::Cave => {
+            let rooms = value("room_count") * value("vertical_layers");
+            if rooms > 96.0 {
+                Some(format!(
+                    "{content_id}: cave exceeds the 96-room/layer generation budget"
+                ))
+            } else if value("shared_camera_radius") < value("tunnel_width") {
+                Some(format!(
+                    "{content_id}: shared camera radius must cover the tunnel width"
+                ))
+            } else {
+                None
+            }
+        }
+        ContentCategory::City => (value("road_width") >= value("block_size") * 0.5).then(|| {
+            format!("{content_id}: city road width must be less than half the block size")
+        }),
+        _ => None,
+    };
+    if let Some(message) = budget_error {
+        errors.push(ProjectValidationError::InvalidProceduralRecipe(message));
+    }
 }
 
 fn validate_material_recipe(
@@ -1611,6 +1972,189 @@ mod tests {
             project.delete_content("material.castle_ice_runtime"),
             Err(ProjectMutationError::ContentHasDependents { .. })
         ));
+    }
+
+    #[test]
+    fn procedural_recipe_material_slots_publish_rename_and_round_trip() {
+        let (root, store) = test_store("procedural_material_slots");
+        let mut project = ForgeProject::default();
+        let material_id = project
+            .create_content(ContentCategory::Material, "Road Toon")
+            .unwrap();
+        let road_id = project
+            .create_content(ContentCategory::Road, "Speed Network")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&road_id)
+            .and_then(ContentPayload::procedural_recipe_mut)
+            .unwrap();
+        recipe.seed = 42_195;
+        recipe.revision = 7;
+        recipe
+            .material_slots
+            .insert("deck".into(), material_id.clone());
+
+        project.publish_drafts().unwrap();
+        let road_record = project
+            .records
+            .iter()
+            .find(|record| record.content_id == road_id)
+            .unwrap();
+        assert_eq!(
+            road_record.dependencies.as_slice(),
+            std::slice::from_ref(&material_id)
+        );
+        assert_eq!(
+            road_record.published_hash,
+            Some(road_record.draft_hash.clone())
+        );
+
+        project
+            .rename_content(&material_id, "material.road_runtime")
+            .unwrap();
+        let recipe = project.payloads[&road_id].procedural_recipe().unwrap();
+        assert_eq!(
+            recipe.material_slots.get("deck").map(String::as_str),
+            Some("material.road_runtime")
+        );
+        assert!(matches!(
+            project.delete_content("material.road_runtime"),
+            Err(ProjectMutationError::ContentHasDependents { .. })
+        ));
+
+        store.save(&mut project).unwrap();
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.payloads[&road_id], project.payloads[&road_id]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn procedural_recipe_validation_rejects_unknown_slots_and_materials() {
+        let mut project = ForgeProject::default();
+        let cave_id = project
+            .create_content(ContentCategory::Cave, "Secret Network")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&cave_id)
+            .and_then(ContentPayload::procedural_recipe_mut)
+            .unwrap();
+        recipe
+            .material_slots
+            .insert("ceiling_fog".into(), "material.missing".into());
+        let errors = validate_project(&project);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidMaterialBinding(message)
+                if message.contains("unsupported")
+        )));
+
+        let recipe = project
+            .payloads
+            .get_mut(&cave_id)
+            .and_then(ContentPayload::procedural_recipe_mut)
+            .unwrap();
+        recipe.material_slots.clear();
+        recipe
+            .material_slots
+            .insert("rock".into(), "material.missing".into());
+        assert!(validate_project(&project).iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidMaterialBinding(message)
+                if message.contains("missing/non-material")
+        )));
+    }
+
+    #[test]
+    fn typed_world_recipe_parameters_enforce_ranges_whole_values_and_budgets() {
+        let mut project = ForgeProject::default();
+        let road_id = project
+            .create_content(ContentCategory::Road, "Budget Road")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&road_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe
+            .fields
+            .insert("width".into(), serde_json::json!(900.0));
+        recipe
+            .fields
+            .insert("loop_count".into(), serde_json::json!(1.5));
+        let errors = validate_project(&project);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("width")
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("whole number")
+        )));
+
+        let building_id = project
+            .create_content(ContentCategory::Building, "Huge Tower")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&building_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe.fields.insert("floors".into(), serde_json::json!(20));
+        recipe
+            .fields
+            .insert("rooms_per_floor".into(), serde_json::json!(12));
+        assert!(validate_project(&project).iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("160-room")
+        )));
+    }
+
+    #[test]
+    fn every_world_recipe_family_has_safe_typed_defaults() {
+        for category in [
+            ContentCategory::Biome,
+            ContentCategory::Road,
+            ContentCategory::Building,
+            ContentCategory::Cave,
+            ContentCategory::City,
+        ] {
+            let specs = procedural_parameter_specs(category);
+            assert!(specs.len() >= 5);
+            let recipe = ProceduralRecipeDraft::default();
+            for spec in specs {
+                let value = procedural_parameter_value(&recipe, *spec);
+                assert!((spec.min..=spec.max).contains(&value));
+                if spec.whole {
+                    assert_eq!(value.fract(), 0.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_generic_road_json_loads_as_a_procedural_recipe() {
+        let payload: ContentPayload = serde_json::from_value(serde_json::json!({
+            "kind": "road",
+            "data": {
+                "schema_version": 1,
+                "fields": { "lane_count": 4 }
+            }
+        }))
+        .unwrap();
+        let ContentPayload::Road(recipe) = payload else {
+            panic!("legacy road decoded as the wrong payload kind");
+        };
+        assert_eq!(recipe.fields["lane_count"], serde_json::json!(4));
+        assert!(recipe.material_slots.is_empty());
+        assert_eq!(recipe.seed, 0);
+        assert_eq!(recipe.revision, 0);
     }
 
     #[test]

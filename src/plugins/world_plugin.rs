@@ -33,6 +33,7 @@ use crate::damage::{DamageInfo, DamageType, Damageable, Health};
 use crate::discussion::{
     discussion_script, settlement_discussion_id, settlement_guardian_role, DiscussionState,
 };
+use crate::engine_tools::ProceduralMaterialBinding;
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::final_war::{
     coordinated_raid_trigger_system, final_war_phase_announce_system, pressure_accumulation_system,
@@ -3005,6 +3006,7 @@ fn spawn_secret_cave_solid(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     material: Handle<StandardMaterial>,
+    material_slot: &'static str,
     size: Vec3,
     transform: Transform,
     walkable: bool,
@@ -3017,6 +3019,7 @@ fn spawn_secret_cave_solid(
             ..default()
         },
         WorldGeometry,
+        ProceduralMaterialBinding::new("cave.secret_network", material_slot),
         crate::physics::prelude::RigidBody::Fixed,
         crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
     ));
@@ -3059,6 +3062,7 @@ fn spawn_secret_cave_system(
             commands,
             meshes,
             wall_mat.clone(),
+            "rock",
             Vec3::new(2.0, 6.8, 2.4),
             Transform::from_translation(pillar_pos).with_rotation(rotation),
             false,
@@ -3068,6 +3072,7 @@ fn spawn_secret_cave_system(
         commands,
         meshes,
         wall_mat.clone(),
+        "rock",
         Vec3::new(width + 4.5, 1.3, 2.8),
         Transform::from_translation(entrance + Vec3::Y * 7.0).with_rotation(rotation),
         false,
@@ -3093,6 +3098,7 @@ fn spawn_secret_cave_system(
             commands,
             meshes,
             floor_mat.clone(),
+            "floor",
             Vec3::new(width, 0.55, 10.6),
             Transform::from_translation(center).with_rotation(rotation),
             true,
@@ -3102,6 +3108,7 @@ fn spawn_secret_cave_system(
                 commands,
                 meshes,
                 wall_mat.clone(),
+                "rock",
                 Vec3::new(0.95, 4.0, 10.8),
                 Transform::from_translation(
                     center + right * side * (width * 0.5 + 0.65) + Vec3::Y * 2.2,
@@ -3115,6 +3122,7 @@ fn spawn_secret_cave_system(
             commands,
             meshes,
             pal.brushed_metal.clone(),
+            "accent",
             Vec3::new(width + 1.6, 0.45, 0.75),
             Transform::from_translation(rib_pos).with_rotation(rotation),
             false,
@@ -3126,6 +3134,7 @@ fn spawn_secret_cave_system(
         commands,
         meshes,
         floor_mat.clone(),
+        "floor",
         Vec3::new(width + 9.0, 0.65, 17.0),
         Transform::from_translation(chamber).with_rotation(rotation),
         true,
@@ -3135,6 +3144,7 @@ fn spawn_secret_cave_system(
             commands,
             meshes,
             wall_mat.clone(),
+            "rock",
             Vec3::new(1.2, 5.0, 17.0),
             Transform::from_translation(
                 chamber + right * side * ((width + 9.0) * 0.5 + 0.5) + Vec3::Y * 2.6,
@@ -3147,6 +3157,7 @@ fn spawn_secret_cave_system(
         commands,
         meshes,
         wall_mat,
+        "rock",
         Vec3::new(width + 9.0, 5.0, 1.0),
         Transform::from_translation(chamber + forward * 8.5 + Vec3::Y * 2.6)
             .with_rotation(rotation),
@@ -3350,6 +3361,7 @@ fn spawn_secret_cave_system(
             commands,
             meshes,
             accent.clone(),
+            "accent",
             Vec3::new(3.8, 0.55, 3.8),
             Transform::from_translation(pad).with_rotation(rotation),
             true,
@@ -5751,6 +5763,7 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
         },
         WorldGeometry,
         WalkableSurface,
+        ProceduralMaterialBinding::new("biome.main_world", "terrain"),
         crate::physics::prelude::RigidBody::Fixed,
         terrain_collider,
     ));
@@ -8056,6 +8069,7 @@ fn spawn_speed_road_deck_between(
         WalkableSurface,
         crate::physics::prelude::RigidBody::Fixed,
         crate::physics::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.5),
+        ProceduralMaterialBinding::new("road.speed_network", "deck"),
         world_space_collider_scale(),
     ));
 
@@ -8108,6 +8122,7 @@ fn spawn_deck_guardrails(
             },
             WorldGeometry,
             RoadSafetyBarrier::OuterRail,
+            ProceduralMaterialBinding::new("road.speed_network", "barrier"),
             crate::physics::prelude::RigidBody::Fixed,
             crate::physics::prelude::Collider::cuboid(rail_w * 0.5, rail_h * 0.5, length * 0.495),
             world_space_collider_scale(),
@@ -8163,6 +8178,7 @@ fn spawn_speed_road_support_columns(
                     ..default()
                 },
                 WorldGeometry,
+                ProceduralMaterialBinding::new("road.speed_network", "support"),
                 crate::physics::prelude::RigidBody::Fixed,
                 crate::physics::prelude::Collider::cuboid(
                     column_width * 0.5,
@@ -8186,6 +8202,7 @@ fn spawn_speed_road_support_columns(
                 ..default()
             },
             WorldGeometry,
+            ProceduralMaterialBinding::new("road.speed_network", "support"),
             crate::physics::prelude::RigidBody::Fixed,
             crate::physics::prelude::Collider::cuboid(road_width * 0.38, 0.7, column_width * 0.625),
             world_space_collider_scale(),
@@ -15240,6 +15257,7 @@ fn spawn_building(
                 WorldGeometry,
                 WalkableSurface,
                 Building { zone, height },
+                ProceduralMaterialBinding::new("building.world", "exterior"),
                 crate::physics::prelude::RigidBody::Fixed,
                 crate::physics::prelude::Collider::cuboid(flank_w * 0.5, height * 0.5, along * 0.5),
             ));
@@ -15265,6 +15283,7 @@ fn spawn_building(
                     zone,
                     height: header_h,
                 },
+                ProceduralMaterialBinding::new("building.world", "exterior"),
                 crate::physics::prelude::RigidBody::Fixed,
                 crate::physics::prelude::Collider::cuboid(
                     header_w * 0.5,
@@ -15286,6 +15305,7 @@ fn spawn_building(
         WorldGeometry,
         WalkableSurface,
         Building { zone, height },
+        ProceduralMaterialBinding::new("building.world", "exterior"),
         crate::physics::prelude::RigidBody::Fixed,
         crate::physics::prelude::Collider::cuboid(width * 0.5, height * 0.5, depth * 0.5),
     ));
