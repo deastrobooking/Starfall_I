@@ -4,7 +4,8 @@ use rand::Rng;
 use crate::characters::{enemy_config, spawn_cartoon_character};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
-    BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, Enemy, EnemyAIState, EnemyAttackVfx,
+    boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, Enemy, EnemyAIState,
+    EnemyAttackVfx, MechBoss, RiftBoss,
     EnemyProjectile, EnemyProjectileKind, EnemyStateMachine, EnemyType, FlyingDrone,
 };
 use crate::components::faction::{Faction, NamedCharacter};
@@ -53,6 +54,8 @@ impl Plugin for EnemyPlugin {
                     apply_enemy_knockback.run_if(hitstop_inactive),
                     flying_drone_attack_system.run_if(hitstop_inactive),
                     dragon_boss_system.run_if(hitstop_inactive),
+                    rift_boss_system.run_if(hitstop_inactive),
+                    mech_boss_system.run_if(hitstop_inactive),
                     enemy_projectile_update_system.run_if(hitstop_inactive),
                     enemy_attack_vfx_cleanup,
                     enemy_attack_system.run_if(hitstop_inactive),
@@ -354,6 +357,18 @@ pub fn spawn_named_enemy(
     }
     if is_dragon_boss {
         e.insert(DragonBoss::new(position));
+    } else if is_boss {
+        // Faction-distinct boss brains: corrupted humans/wizard rivals pilot
+        // reactor mechs; Scallarians (and anything else) fight as rift
+        // champions. Dragons keep their flight controller above.
+        match faction {
+            Faction::CorruptedHuman | Faction::WizardScientist => {
+                e.insert(MechBoss::new(position));
+            }
+            _ => {
+                e.insert(RiftBoss::new(position));
+            }
+        }
     }
 }
 
@@ -370,7 +385,7 @@ fn enemy_ai_system(
             &Health,
             Option<&mut FlyingDrone>,
             Option<&CitySpyDrone>,
-            Option<&DragonBoss>,
+            (Option<&DragonBoss>, Option<&RiftBoss>, Option<&MechBoss>),
         ),
         (
             Without<Player>,
@@ -382,7 +397,7 @@ fn enemy_ai_system(
     let dt = time.delta_secs();
     let rng = game_rng.world();
 
-    for (mut transform, mut enemy, mut sm, health, drone, city_spy, dragon_boss) in
+    for (mut transform, mut enemy, mut sm, health, drone, city_spy, (dragon_boss, rift_boss, mech_boss)) in
         enemy_q.iter_mut()
     {
         if !health.is_alive() {
@@ -392,7 +407,7 @@ fn enemy_ai_system(
         sm.timer += dt;
         enemy.attack_cooldown_timer = (enemy.attack_cooldown_timer - dt).max(0.0);
 
-        if dragon_boss.is_some() || city_spy.is_some() {
+        if dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some() || city_spy.is_some() {
             continue;
         }
 
@@ -737,6 +752,289 @@ fn dragon_boss_system(
                 &mut parry_ev,
             );
             boss.slam_timer = 6.6 - phase * 0.7;
+        }
+    }
+}
+
+/// Scallarian rift champion: teleporting summoner. Hovers in a weaving drift,
+/// blinks to a new bearing around its target (portal flash at both ends),
+/// fires widening rift-laser volleys, and from phase 2 tears open portals
+/// that pull in reinforcements. Phase 3 blinks end in a radial nova.
+#[allow(clippy::too_many_arguments)]
+fn rift_boss_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Res<EnemyAttackAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    player_pos_q: Query<(Entity, &Transform, &PlayerIndex), (With<Player>, Without<BossEnemy>)>,
+    mut boss_q: Query<
+        (&mut Transform, &Enemy, &mut RiftBoss, &Health),
+        (With<BossEnemy>, Without<Player>),
+    >,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, enemy, mut boss, health) in boss_q.iter_mut() {
+        if !health.is_alive() {
+            continue;
+        }
+        let Some((_e, player_pos, _idx, distance)) =
+            closest_indexed_player(transform.translation, 150.0, &player_pos_q)
+        else {
+            continue;
+        };
+
+        boss.phase = boss_phase(health.current, health.max);
+        let phase = boss.phase as f32;
+        boss.weave_angle += dt * (0.9 + phase * 0.25);
+        boss.volley_timer -= dt;
+        boss.blink_timer -= dt;
+        boss.summon_timer -= dt;
+
+        // Menacing hover-weave around the current position (movement is
+        // mostly teleports; the drift keeps it alive between blinks).
+        let hover = Vec3::new(
+            boss.weave_angle.sin() * 2.2,
+            2.6 + (boss.weave_angle * 1.7).sin() * 0.8,
+            boss.weave_angle.cos() * 2.2,
+        );
+        let anchor = boss.home + (player_pos - boss.home).clamp_length_max(70.0);
+        let desired = Vec3::new(anchor.x, player_pos.y, anchor.z) + hover;
+        let to_desired = desired - transform.translation;
+        if to_desired.length_squared() > 0.04 {
+            transform.translation += to_desired.clamp_length_max((3.0 + phase) * dt);
+        }
+        transform.look_at(player_pos + Vec3::Y * 1.0, Vec3::Y);
+
+        let muzzle = transform.translation + Vec3::Y * 1.2 + transform.forward().as_vec3() * 1.6;
+
+        // Rift volley: fan of lasers that tightens with phase.
+        if boss.volley_timer <= 0.0 {
+            let count = 2 + boss.phase as i32;
+            for i in 0..count {
+                let spread = (i as f32 - (count - 1) as f32 * 0.5) * (0.14 - phase * 0.02);
+                let direction = ((player_pos + Vec3::Y * 0.9 - muzzle)
+                    + transform.right().as_vec3() * spread * distance.min(36.0))
+                .normalize_or_zero();
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(assets.laser_mesh.clone()),
+                        material: MeshMaterial3d(assets.laser_mat.clone()),
+                        transform: Transform::from_translation(muzzle),
+                        ..default()
+                    },
+                    EnemyProjectile {
+                        kind: EnemyProjectileKind::Laser,
+                        damage: enemy.scaled_damage() * (0.26 + phase * 0.07),
+                        speed: 22.0 + phase * 3.0,
+                        direction,
+                        lifetime: 3.2,
+                        hit_radius: 1.0,
+                        splash_radius: 0.0,
+                    },
+                ));
+            }
+            boss.volley_timer = 2.8 - phase * 0.45;
+        }
+
+        // Blink: reposition on a shrinking ring around the player, with a
+        // portal flash at both ends. Phase 3 arrivals detonate a laser nova.
+        if boss.blink_timer <= 0.0 && distance > 6.0 {
+            spawn_shockwave_vfx(&mut commands, &assets, transform.translation, 2.4, 0.30);
+            let ring = 20.0 - phase * 4.0;
+            let angle = boss.weave_angle * 1.9;
+            let arrival = player_pos
+                + Vec3::new(angle.cos() * ring, 2.2 + phase * 0.6, angle.sin() * ring);
+            transform.translation = arrival;
+            spawn_shockwave_vfx(&mut commands, &assets, arrival, 2.8, 0.30);
+
+            if boss.phase >= 3 {
+                for i in 0..8 {
+                    let theta = i as f32 * std::f32::consts::TAU / 8.0;
+                    let direction = Vec3::new(theta.cos(), -0.12, theta.sin()).normalize();
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: Mesh3d(assets.laser_mesh.clone()),
+                            material: MeshMaterial3d(assets.laser_mat.clone()),
+                            transform: Transform::from_translation(arrival),
+                            ..default()
+                        },
+                        EnemyProjectile {
+                            kind: EnemyProjectileKind::Laser,
+                            damage: enemy.scaled_damage() * 0.30,
+                            speed: 20.0,
+                            direction,
+                            lifetime: 2.4,
+                            hit_radius: 1.0,
+                            splash_radius: 0.0,
+                        },
+                    ));
+                }
+            }
+            boss.blink_timer = 5.5 - phase * 0.8;
+        }
+
+        // Portal reinforcements from phase 2 on.
+        if boss.phase >= 2 && boss.summon_timer <= 0.0 {
+            let kinds: &[EnemyType] = if boss.phase >= 3 {
+                &[EnemyType::Soldier, EnemyType::Drone]
+            } else {
+                &[EnemyType::Drone]
+            };
+            for (i, kind) in kinds.iter().enumerate() {
+                let theta = boss.weave_angle * 2.3 + i as f32 * 2.4;
+                let spot = transform.translation
+                    + Vec3::new(theta.cos() * 5.0, -1.2, theta.sin() * 5.0);
+                spawn_shockwave_vfx(&mut commands, &assets, spot, 2.0, 0.35);
+                spawn_enemy_entity(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    *kind,
+                    spot,
+                    enemy.difficulty_scale,
+                    Some(Faction::default()),
+                );
+            }
+            boss.summon_timer = 10.0 - phase * 1.2;
+        }
+    }
+}
+
+/// Corrupted-human reactor mech: grounded brawler-artillery. Strafes at
+/// standoff range, fires laser barrages, telegraphs a committed charge dash
+/// that detonates a shockwave on arrival, and from phase 2 cycles a brief
+/// invulnerable reactor shield.
+#[allow(clippy::too_many_arguments)]
+fn mech_boss_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Res<EnemyAttackAssets>,
+    player_pos_q: Query<(Entity, &Transform, &PlayerIndex), (With<Player>, Without<BossEnemy>)>,
+    mut player_damage_q: Query<
+        (
+            &mut Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut ParryState,
+            &ArmorSet,
+        ),
+        (With<Player>, Without<BossEnemy>),
+    >,
+    mut boss_q: Query<
+        (&mut Transform, &Enemy, &mut MechBoss, &Health, &mut Damageable),
+        (With<BossEnemy>, Without<Player>),
+    >,
+    mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
+    mut parry_ev: MessageWriter<PlayerParryEvent>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, enemy, mut boss, health, mut damageable) in boss_q.iter_mut() {
+        if !health.is_alive() {
+            continue;
+        }
+        let Some((_e, player_pos, _idx, distance)) =
+            closest_indexed_player(transform.translation, 130.0, &player_pos_q)
+        else {
+            continue;
+        };
+
+        boss.phase = boss_phase(health.current, health.max);
+        let phase = boss.phase as f32;
+        boss.barrage_timer -= dt;
+        boss.charge_timer -= dt;
+        boss.shield_cycle_timer -= dt;
+
+        // Reactor shield cycles (phase 2+): brief invulnerability with a
+        // visible pulse so players learn to wait it out.
+        if boss.shielded_remaining > 0.0 {
+            boss.shielded_remaining -= dt;
+            if boss.shielded_remaining <= 0.0 {
+                damageable.is_invulnerable = false;
+            } else if (boss.shielded_remaining * 3.0).fract() < dt * 3.0 {
+                spawn_shockwave_vfx(&mut commands, &assets, transform.translation, 3.4, 0.22);
+            }
+        } else if boss.phase >= 2 && boss.shield_cycle_timer <= 0.0 {
+            boss.shielded_remaining = 2.2;
+            damageable.is_invulnerable = true;
+            boss.shield_cycle_timer = 9.0 - phase * 1.0;
+        }
+
+        // Committed charge dash.
+        if boss.charging > 0.0 {
+            boss.charging -= dt;
+            transform.translation += boss.charge_dir * (26.0 + phase * 5.0) * dt;
+            if boss.charging <= 0.0 {
+                let center = transform.translation;
+                let radius = 7.0 + phase * 1.6;
+                spawn_shockwave_vfx(&mut commands, &assets, center, radius, 0.45);
+                damage_players_in_radius(
+                    center,
+                    radius,
+                    enemy.scaled_damage() * (0.24 + phase * 0.07),
+                    DamageType::Collision,
+                    &mut player_damage_q,
+                    &player_pos_q,
+                    &mut damaged_ev,
+                    &mut parry_ev,
+                );
+            }
+            continue;
+        }
+
+        // Grounded standoff strafing.
+        let standoff = 14.0 - phase * 1.5;
+        let to_player = (player_pos - transform.translation).with_y(0.0);
+        let dist_flat = to_player.length().max(0.01);
+        let toward = to_player / dist_flat;
+        let tangent = Vec3::new(-toward.z, 0.0, toward.x) * boss.strafe_dir;
+        let range_correction = (dist_flat - standoff) * 0.55;
+        let velocity = (toward * range_correction + tangent * (4.5 + phase))
+            .clamp_length_max(9.0 + phase * 2.0);
+        transform.translation += velocity * dt;
+        transform.look_at(player_pos + Vec3::Y * 0.8, Vec3::Y);
+        // Flip strafe direction on a slow deterministic cadence.
+        if (time.elapsed_secs() * 0.31).sin() > 0.995 {
+            boss.strafe_dir = -boss.strafe_dir;
+        }
+
+        // Laser barrage.
+        if boss.barrage_timer <= 0.0 {
+            let muzzle =
+                transform.translation + Vec3::Y * 1.6 + transform.forward().as_vec3() * 1.8;
+            let count = 3 + boss.phase as i32;
+            for i in 0..count {
+                let spread = (i as f32 - (count - 1) as f32 * 0.5) * 0.07;
+                let direction = ((player_pos + Vec3::Y * 0.8 - muzzle)
+                    + transform.right().as_vec3() * spread * distance.min(30.0))
+                .normalize_or_zero();
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(assets.laser_mesh.clone()),
+                        material: MeshMaterial3d(assets.laser_mat.clone()),
+                        transform: Transform::from_translation(muzzle),
+                        ..default()
+                    },
+                    EnemyProjectile {
+                        kind: EnemyProjectileKind::Laser,
+                        damage: enemy.scaled_damage() * (0.22 + phase * 0.06),
+                        speed: 26.0 + phase * 2.5,
+                        direction,
+                        lifetime: 2.8,
+                        hit_radius: 1.0,
+                        splash_radius: 0.0,
+                    },
+                ));
+            }
+            boss.barrage_timer = 2.6 - phase * 0.35;
+        }
+
+        // Telegraph + commit the charge.
+        if boss.charge_timer <= 0.0 && distance > 8.0 && distance < 60.0 {
+            spawn_shockwave_vfx(&mut commands, &assets, transform.translation, 2.2, 0.4);
+            boss.charge_dir = toward;
+            boss.charging = 0.75 + phase * 0.05;
+            boss.charge_timer = 7.5 - phase * 0.9;
         }
     }
 }
@@ -1091,7 +1389,7 @@ fn enemy_attack_system(
             &EnemyStateMachine,
             &Health,
             Option<&FlyingDrone>,
-            Option<&DragonBoss>,
+            (Option<&DragonBoss>, Option<&RiftBoss>, Option<&MechBoss>),
         ),
         (
             Without<Player>,
@@ -1112,11 +1410,14 @@ fn enemy_attack_system(
     mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
     mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
-    for (e_transform, mut enemy, sm, health, drone, dragon_boss) in enemy_q.iter_mut() {
+    for (e_transform, mut enemy, sm, health, drone, (dragon_boss, rift_boss, mech_boss)) in
+        enemy_q.iter_mut()
+    {
         if !health.is_alive() {
             continue;
         }
-        if drone.is_some() || dragon_boss.is_some() {
+        if drone.is_some() || dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some()
+        {
             continue;
         }
         if sm.current != EnemyAIState::Attack {

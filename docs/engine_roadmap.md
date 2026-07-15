@@ -208,6 +208,11 @@ machine with cancel-window chaining and per-move hitstop. Loot drops tiered by
 enemy type (champion = guaranteed core + extra rolls). Remaining EC2:
 collision layers, per-move i-frames, player-received knockback, MoveDefs for
 sabre/ranged.
+**Boss variety (2026-07-15):** RiftBoss + MechBoss controllers
+(`enemy_plugin.rs`, components in `enemy.rs` with shared `boss_phase()`)
+close gameplay-review item #3 — all boss factions mechanically distinct.
+Fix shipped alongside: Bevy `wav` feature enabled (synth SFX decoded via
+rodio; without it any first sound panicked `UnrecognizedFormat`).
 
 ### EC3 — Motor to "feels amazing"
 **Goal:** Lock in Spider-Man + Mega Man feel on the deterministic base.

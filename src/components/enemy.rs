@@ -311,6 +311,79 @@ impl DragonBoss {
     }
 }
 
+/// Scallarian rift champion boss: a teleporting summoner. Blinks around the
+/// arena, fires rift-laser volleys, and tears open portals for reinforcements.
+/// Phases escalate at 66%/33% health like [`DragonBoss`].
+#[derive(Component, Debug, Clone)]
+pub struct RiftBoss {
+    pub home: Vec3,
+    pub phase: u8,
+    pub volley_timer: f32,
+    pub blink_timer: f32,
+    pub summon_timer: f32,
+    /// Deterministic angle cursor for blink/summon placement (no RNG needed).
+    pub weave_angle: f32,
+}
+
+impl RiftBoss {
+    pub fn new(position: Vec3) -> Self {
+        Self {
+            home: position,
+            phase: 1,
+            volley_timer: 2.2,
+            blink_timer: 5.0,
+            summon_timer: 7.5,
+            weave_angle: 0.0,
+        }
+    }
+}
+
+/// Corrupted-human reactor-suit boss: a grounded brawler-artillery mech.
+/// Strafes at standoff range, fires laser barrages, telegraphs a charging
+/// dash that ends in a shockwave, and cycles an invulnerable shield in later
+/// phases.
+#[derive(Component, Debug, Clone)]
+pub struct MechBoss {
+    pub home: Vec3,
+    pub phase: u8,
+    pub barrage_timer: f32,
+    pub charge_timer: f32,
+    /// Remaining dash seconds while > 0 (the boss is committed to the charge).
+    pub charging: f32,
+    pub charge_dir: Vec3,
+    pub shield_cycle_timer: f32,
+    pub shielded_remaining: f32,
+    pub strafe_dir: f32,
+}
+
+impl MechBoss {
+    pub fn new(position: Vec3) -> Self {
+        Self {
+            home: position,
+            phase: 1,
+            barrage_timer: 2.0,
+            charge_timer: 6.0,
+            charging: 0.0,
+            charge_dir: Vec3::ZERO,
+            shield_cycle_timer: 8.0,
+            shielded_remaining: 0.0,
+            strafe_dir: 1.0,
+        }
+    }
+}
+
+/// Shared boss phase thresholds: 1 above 66% health, 2 above 33%, 3 below.
+pub fn boss_phase(current: f32, max: f32) -> u8 {
+    let ratio = (current / max.max(1.0)).clamp(0.0, 1.0);
+    if ratio < 0.33 {
+        3
+    } else if ratio < 0.66 {
+        2
+    } else {
+        1
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnemyProjectileKind {
     Laser,
@@ -333,4 +406,21 @@ pub struct EnemyProjectile {
 #[derive(Component, Debug, Clone)]
 pub struct EnemyAttackVfx {
     pub timer: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boss_phase_thresholds() {
+        assert_eq!(boss_phase(100.0, 100.0), 1);
+        assert_eq!(boss_phase(67.0, 100.0), 1);
+        assert_eq!(boss_phase(65.0, 100.0), 2);
+        assert_eq!(boss_phase(34.0, 100.0), 2);
+        assert_eq!(boss_phase(32.0, 100.0), 3);
+        assert_eq!(boss_phase(0.0, 100.0), 3);
+        // Degenerate max never divides by zero.
+        assert_eq!(boss_phase(0.0, 0.0), 3);
+    }
 }

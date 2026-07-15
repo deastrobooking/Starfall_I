@@ -725,6 +725,20 @@ Special tools are selected with keyboard `7`, `8`, `9`, `0`, or controller Selec
 
 ---
 
+**Faction boss controllers (2026-07):** every boss faction now has a distinct
+brain, keyed at `spawn_named_enemy`:
+- **DragonBoss** (DragonRoyalty/Exile) — flying orbit, fireball spreads,
+  breath cone, ground slam (unchanged).
+- **RiftBoss** (Scallarians + default) — hover-weave, teleport blinks with
+  portal flashes on a shrinking ring, rift-laser volleys, portal
+  reinforcements from phase 2 (drones, then soldiers), and an 8-way laser
+  nova on phase-3 blinks.
+- **MechBoss** (CorruptedHuman/WizardScientist) — grounded standoff strafing,
+  laser barrages, telegraphed committed charge dash ending in a damaging
+  shockwave, and cycling invulnerable reactor-shield windows from phase 2.
+All share `boss_phase()` thresholds (66%/33% HP) and are excluded from generic
+chase AI/attack; hitstop gates them like all sim systems.
+
 ## Enemy AI
 
 **Component:** `EnemyStateMachine`, `Enemy`
