@@ -13,8 +13,11 @@
 
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 use bevy::prelude::*;
+use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
+use crate::audio_player::{looks_like_mp3, AudioLibraryReloadEvent};
 use crate::audio_synth::{self, render_wav};
 use crate::events::{
     ChestOpenedEvent, ComboHitEvent, EnemyDamagedEvent, EnemyKilledEvent, LootCollectedEvent,
@@ -36,6 +39,46 @@ pub enum SfxKind {
     Chest,
     LevelUp,
     Reload,
+}
+
+pub const DEFAULT_USER_SFX_DIR: &str = "assets/user_sfx";
+
+/// Generic seam for the modular action system and future Forge-authored
+/// actions. Assigned MP3 clips play here without changing the retro bus.
+#[derive(Message, Debug, Clone)]
+pub struct ModularActionSfxEvent {
+    pub action_id: String,
+}
+
+impl ModularActionSfxEvent {
+    pub fn new(action_id: impl Into<String>) -> Self {
+        Self {
+            action_id: action_id.into(),
+        }
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct ActionSfxRegistry {
+    handles: HashMap<String, Handle<AudioSource>>,
+    source_paths: HashMap<String, PathBuf>,
+    cooldowns: HashMap<String, f32>,
+}
+
+impl ActionSfxRegistry {
+    pub fn assigned_count(&self) -> usize {
+        self.handles.len()
+    }
+
+    pub fn is_assigned(&self, action_id: &str) -> bool {
+        self.handles.contains_key(action_id)
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct ActionSfxManifest {
+    #[serde(default)]
+    actions: HashMap<String, String>,
 }
 
 /// Baked handles + per-kind cooldowns + the jitter LCG state.
@@ -88,6 +131,71 @@ fn bake_sfx_library(mut commands: Commands, mut sources: ResMut<Assets<AudioSour
         mix,
         jitter_state: 0x5F3759DF,
     });
+    commands.insert_resource(load_action_sfx_registry(&mut sources));
+}
+
+pub fn action_sfx_directory() -> PathBuf {
+    std::env::var_os("STARFALL_SFX_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_USER_SFX_DIR))
+}
+
+fn valid_action_id(action_id: &str) -> bool {
+    !action_id.is_empty()
+        && action_id.len() <= 96
+        && action_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn safe_mp3_path(directory: &Path, relative: &str) -> Option<PathBuf> {
+    let relative = Path::new(relative);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        || !relative
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("mp3"))
+    {
+        return None;
+    }
+    Some(directory.join(relative))
+}
+
+fn load_action_sfx_registry(sources: &mut Assets<AudioSource>) -> ActionSfxRegistry {
+    let directory = action_sfx_directory();
+    let _ = std::fs::create_dir_all(&directory);
+    let manifest = std::fs::read(directory.join("actions.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<ActionSfxManifest>(&bytes).ok())
+        .unwrap_or_default();
+    let mut registry = ActionSfxRegistry::default();
+    let mut assignments = manifest.actions.into_iter().collect::<Vec<_>>();
+    assignments.sort_by(|a, b| a.0.cmp(&b.0));
+    for (action_id, relative_path) in assignments {
+        if !valid_action_id(&action_id) {
+            continue;
+        }
+        let Some(source_path) = safe_mp3_path(&directory, &relative_path) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&source_path) else {
+            continue;
+        };
+        if !looks_like_mp3(&bytes) {
+            continue;
+        }
+        registry.handles.insert(
+            action_id.clone(),
+            sources.add(AudioSource {
+                bytes: bytes.into(),
+            }),
+        );
+        registry.source_paths.insert(action_id, source_path);
+    }
+    registry
 }
 
 fn tick_sfx_cooldowns(time: Res<Time>, library: Option<ResMut<SfxLibrary>>) {
@@ -99,24 +207,69 @@ fn tick_sfx_cooldowns(time: Res<Time>, library: Option<ResMut<SfxLibrary>>) {
     });
 }
 
-fn play(commands: &mut Commands, library: &mut SfxLibrary, settings: &GameSettings, kind: SfxKind) {
-    if settings.sfx_volume <= 0.01 {
+fn tick_action_sfx_cooldowns(time: Res<Time>, registry: Option<ResMut<ActionSfxRegistry>>) {
+    let Some(mut registry) = registry else {
+        return;
+    };
+    let dt = time.delta_secs();
+    registry.cooldowns.retain(|_, remaining| {
+        *remaining -= dt;
+        *remaining > 0.0
+    });
+}
+
+fn play(
+    commands: &mut Commands,
+    library: &mut SfxLibrary,
+    action_registry: &mut ActionSfxRegistry,
+    settings: &GameSettings,
+    action_id: &str,
+    kind: SfxKind,
+) {
+    if settings.sfx_volume <= 0.01 || settings.master_volume <= 0.01 {
         return;
     }
     if library.cooldowns.contains_key(&kind) {
         return;
     }
-    let Some(handle) = library.handles.get(&kind).cloned() else {
+    let custom = action_registry.handles.get(action_id).cloned();
+    let is_custom = custom.is_some();
+    let Some(handle) = custom.or_else(|| library.handles.get(&kind).cloned()) else {
         return;
     };
     library.cooldowns.insert(kind, SFX_COOLDOWN);
-    let level = library.mix.get(&kind).copied().unwrap_or(0.5) * settings.sfx_volume;
-    let speed = library.jitter();
+    let level = library.mix.get(&kind).copied().unwrap_or(0.5)
+        * settings.master_volume
+        * settings.sfx_volume;
+    let speed = if is_custom { 1.0 } else { library.jitter() };
     commands.spawn((
         AudioPlayer::new(handle),
         PlaybackSettings::DESPAWN
             .with_volume(Volume::Linear(level))
             .with_speed(speed),
+    ));
+}
+
+fn play_modular_action(
+    commands: &mut Commands,
+    registry: &mut ActionSfxRegistry,
+    settings: &GameSettings,
+    action_id: &str,
+) {
+    if settings.sfx_volume <= 0.01 || registry.cooldowns.contains_key(action_id) {
+        return;
+    }
+    let Some(handle) = registry.handles.get(action_id).cloned() else {
+        return;
+    };
+    registry
+        .cooldowns
+        .insert(action_id.to_string(), SFX_COOLDOWN);
+    commands.spawn((
+        AudioPlayer::new(handle),
+        PlaybackSettings::DESPAWN.with_volume(Volume::Linear(
+            (settings.master_volume * settings.sfx_volume * 0.55).clamp(0.0, 1.0),
+        )),
     ));
 }
 
@@ -127,6 +280,7 @@ fn combat_sfx_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
     library: Option<ResMut<SfxLibrary>>,
+    action_registry: Option<ResMut<ActionSfxRegistry>>,
     mut fired: MessageReader<WeaponFiredEvent>,
     mut combo: MessageReader<ComboHitEvent>,
     mut enemy_damaged: MessageReader<EnemyDamagedEvent>,
@@ -139,37 +293,141 @@ fn combat_sfx_system(
     mut reload: MessageReader<WeaponReloadedEvent>,
 ) {
     let Some(mut library) = library else { return };
+    let Some(mut action_registry) = action_registry else {
+        return;
+    };
     let lib = library.as_mut();
+    let actions = action_registry.as_mut();
 
     if fired.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Shoot);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "weapon.fire",
+            SfxKind::Shoot,
+        );
     }
     if combo.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Slash);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "melee.slash",
+            SfxKind::Slash,
+        );
     }
     if enemy_damaged.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Hit);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "combat.hit",
+            SfxKind::Hit,
+        );
     }
     if parry.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Parry);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "combat.parry",
+            SfxKind::Parry,
+        );
     }
     if killed.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Kill);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "combat.kill",
+            SfxKind::Kill,
+        );
     }
     if player_damaged.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Hurt);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "player.hurt",
+            SfxKind::Hurt,
+        );
     }
     if loot.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Loot);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "reward.loot",
+            SfxKind::Loot,
+        );
     }
     if chest.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Chest);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "reward.chest",
+            SfxKind::Chest,
+        );
     }
     if level_up.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::LevelUp);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "player.level_up",
+            SfxKind::LevelUp,
+        );
     }
     if reload.read().next().is_some() {
-        play(&mut commands, lib, &settings, SfxKind::Reload);
+        play(
+            &mut commands,
+            lib,
+            actions,
+            &settings,
+            "weapon.reload",
+            SfxKind::Reload,
+        );
+    }
+}
+
+fn modular_action_sfx_system(
+    mut commands: Commands,
+    settings: Res<GameSettings>,
+    registry: Option<ResMut<ActionSfxRegistry>>,
+    mut actions: MessageReader<ModularActionSfxEvent>,
+) {
+    let Some(mut registry) = registry else {
+        return;
+    };
+    for action in actions.read() {
+        if valid_action_id(&action.action_id) {
+            play_modular_action(&mut commands, &mut registry, &settings, &action.action_id);
+        }
+    }
+}
+
+fn reload_action_sfx_system(
+    mut reload_ev: MessageReader<AudioLibraryReloadEvent>,
+    mut sources: ResMut<Assets<AudioSource>>,
+    registry: Option<ResMut<ActionSfxRegistry>>,
+) {
+    if reload_ev.read().next().is_none() {
+        return;
+    }
+    let replacement = load_action_sfx_registry(&mut sources);
+    if let Some(mut registry) = registry {
+        *registry = replacement;
     }
 }
 
@@ -177,11 +435,57 @@ pub struct SfxPlugin;
 
 impl Plugin for SfxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, bake_sfx_library).add_systems(
-            Update,
-            (tick_sfx_cooldowns, combat_sfx_system)
-                .chain()
-                .run_if(in_state(AppState::Playing)),
+        app.add_message::<ModularActionSfxEvent>()
+            .add_message::<AudioLibraryReloadEvent>()
+            .add_systems(Startup, bake_sfx_library)
+            .add_systems(Update, reload_action_sfx_system)
+            .add_systems(
+                Update,
+                (
+                    tick_sfx_cooldowns,
+                    tick_action_sfx_cooldowns,
+                    combat_sfx_system,
+                    modular_action_sfx_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_ids_are_bounded_and_path_safe() {
+        assert!(valid_action_id("weapon.fire"));
+        assert!(valid_action_id("hoverboard_grind-01"));
+        assert!(!valid_action_id("../weapon.fire"));
+        assert!(!valid_action_id("weapon/fire"));
+        assert!(!valid_action_id(""));
+    }
+
+    #[test]
+    fn custom_sfx_paths_reject_escape_and_non_mp3_files() {
+        let root = Path::new("/tmp/starfall_sfx");
+        assert_eq!(
+            safe_mp3_path(root, "laser.mp3"),
+            Some(root.join("laser.mp3"))
+        );
+        assert!(safe_mp3_path(root, "../laser.mp3").is_none());
+        assert!(safe_mp3_path(root, "/outside/laser.mp3").is_none());
+        assert!(safe_mp3_path(root, "laser.wav").is_none());
+    }
+
+    #[test]
+    fn empty_registry_keeps_arcade_fallback_available() {
+        let registry = ActionSfxRegistry::default();
+        assert!(!registry.is_assigned("weapon.fire"));
+        assert_eq!(registry.assigned_count(), 0);
+        assert_eq!(
+            audio_synth::render_wav(&audio_synth::preset_shoot())[0..4],
+            *b"RIFF"
         );
     }
 }

@@ -1137,6 +1137,32 @@ Companions now carry an `owner: u8` matching `PlayerIndex`.
 
 ---
 
+## Music Deck And Modular Action Audio
+
+`MusicPlayerPlugin` is a bus separate from combat/reward SFX. At startup it
+scans `assets/user_music` (or `STARFALL_MUSIC_DIR`) for MP3 files, reads them
+into Bevy `AudioSource` assets, and plays the sorted playlist through a single
+tracked `MusicPlayback` entity. Natural track completion advances the deck;
+manual previous/next despawns only that music entity. Live sink volume is
+`master_volume * music_volume`, so changing music settings never mutes SFX.
+
+`F6` opens the player-facing deck. While open it owns P1's modal input capture:
+Left/Right or D-pad select tracks, Space/A pauses, `S` toggles deterministic
+shuffle, `R` rescans both custom libraries, and Escape/F6 closes. The overlay
+shows track status, both source folders, and the number of assigned action SFX.
+
+`SfxPlugin` still synthesizes all ten arcade sounds at startup. A separate
+`ActionSfxRegistry` reads `assets/user_sfx/actions.json` (or
+`STARFALL_SFX_DIR`) and maps validated modular IDs to MP3 one-shots. Standard
+combat readers request IDs such as `weapon.fire`, `melee.slash`, and
+`combat.parry`; an assigned MP3 wins, while a missing/invalid/unreadable clip
+falls back to the original synthesized handle. Generic engine/gameplay modules
+can emit `ModularActionSfxEvent` for additional manifest IDs. Paths must remain
+relative to the configured SFX directory, IDs are bounded to safe ASCII tokens,
+and custom one-shots play at original pitch on the SFX/master volume bus.
+
+See `docs/audio_modding.md` for the player workflow and manifest schema.
+
 ## Procedural World
 
 **Module:** `src/lsystem/` | **Plugin:** `WorldPlugin`

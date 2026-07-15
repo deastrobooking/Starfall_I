@@ -176,6 +176,11 @@ Party-shared exceptions:
   entities instead of unreliable world-wide enemy counts.
 - **Castle airships are encounter steps**: boss escapes and airship-deck raids are authored as `EncounterStep`s, so castle chapters can add a flying rematch without creating a separate top-level game state.
 - **PlayerInput abstraction**: All gameplay input is written into a `PlayerInput` component per player, keeping keyboard/gamepad mapping in `input_plugin.rs` and player behavior in feature plugins.
+- **Audio buses remain independent**: `MusicPlayerPlugin` owns playlist/import,
+  music entities, and `music_volume`; `SfxPlugin` owns procedural arcade effects,
+  modular MP3 overrides, cooldowns, and `sfx_volume`. Standard action playback
+  resolves custom-first/fallback-arcade, so a user manifest cannot erase the
+  baseline game feedback. Both buses multiply by `master_volume`.
 - **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, companion ownership, rewards, and feedback use `PlayerIndex` as the shared key. Shared campaign systems intentionally live in resources like `ChapterProgress` and `PerkTree`.
 - **Global perk tree**: `PerkTree` is a shared campaign resource. Level-ups award points, chapter select spends them, combat/movement systems read the resulting multipliers, and save/load persists the ranks.
 - **Robot pets as the vehicle spine**: `RobotPetCollection` is a shared campaign resource that stores rescued/store-built pets, enemy salvage parts, and the active combined form. The Robot Garage (`AppState::RobotGarage`) lets players assemble forms from collected pets. Assembled forms drive `GroundMode`/`AirMode` in the vehicle plugin at runtime. 3-D mech/ship controller runtimes are still future work.

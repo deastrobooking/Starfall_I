@@ -85,6 +85,12 @@ Handle these before widening content too much:
   repeated four-pad hardware smoke passes and recorded controller-only flows.
 - Performance budgets are informal. The 200-mile terrain and split-screen
   camera paths need profiling before dense content is multiplied.
+- Audio import slice is complete: MP3 decoding, `F6` Music Deck, external or
+  project-local music folders, hot rescan, independent music/SFX volumes,
+  validated `actions.json` modular SFX assignments, and procedural arcade
+  fallback. Next audio work is a button-based assignment browser/file picker,
+  saved playlist preferences, crossfades, metadata/artwork, spatial action
+  profiles, and measured four-player voice budgets.
 
 ## Immediate Milestones
 

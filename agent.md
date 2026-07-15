@@ -209,6 +209,11 @@ together.
   owner-mapped Bevy rumble. `Homing Star` now tracks/reacquires hostile targets
   with per-player SEEK/LOCK HUD feedback. `BeamSabre` has a persistent blade
   visual; authored animation/audio and hardware polish remain.
+- Audio has three preserved layers: `MusicPlayerPlugin` scans player MP3s from
+  `assets/user_music`/`STARFALL_MUSIC_DIR`; `ActionSfxRegistry` maps safe modular
+  IDs from `assets/user_sfx/actions.json`/`STARFALL_SFX_DIR`; and `SfxLibrary`
+  retains every synthesized arcade fallback. `F6` opens the music/import deck
+  and `R` hot reloads both custom libraries. Never replace the fallback bus.
 
 ## Agent Rules
 

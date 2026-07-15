@@ -59,6 +59,7 @@ use crate::resources::{
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::{settlement_build_def, SettlementBuildKind, SettlementEconomy};
+use crate::sfx::ModularActionSfxEvent;
 use crate::state::AppState;
 
 #[derive(Resource, Default)]
@@ -1760,6 +1761,7 @@ fn spring_jump_pad_system(
         &mut TraversalModeState,
         &mut PlayerStateMachine,
     )>,
+    mut action_sfx: MessageWriter<ModularActionSfxEvent>,
 ) {
     let dt = time.delta_secs();
     for (pad_transform, mut pad) in pad_q.iter_mut() {
@@ -1788,6 +1790,7 @@ fn spring_jump_pad_system(
         }
         if triggered {
             pad.cooldown_timer = pad.cooldown;
+            action_sfx.write(ModularActionSfxEvent::new("hoverboard.spring"));
         }
     }
 }
@@ -1819,6 +1822,7 @@ fn stunt_grind_rail_system(
         ),
         With<Player>,
     >,
+    mut action_sfx: MessageWriter<ModularActionSfxEvent>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut transform, input, mut movement, mut traversal, mut state, grinding) in
@@ -1838,6 +1842,7 @@ fn stunt_grind_rail_system(
                 movement.is_grounded = false;
                 commands.entity(entity).remove::<RailGrindState>();
                 state.force(crate::components::player::PlayerState::Jetpack);
+                action_sfx.write(ModularActionSfxEvent::new("hoverboard.grind_exit"));
                 continue;
             }
 
@@ -1855,6 +1860,7 @@ fn stunt_grind_rail_system(
                 movement.is_grounded = false;
                 commands.entity(entity).remove::<RailGrindState>();
                 state.force(crate::components::player::PlayerState::Jetpack);
+                action_sfx.write(ModularActionSfxEvent::new("hoverboard.grind_exit"));
                 continue;
             }
 
@@ -1904,6 +1910,7 @@ fn stunt_grind_rail_system(
             direction,
         });
         state.force(crate::components::player::PlayerState::Sprinting);
+        action_sfx.write(ModularActionSfxEvent::new("hoverboard.grind_start"));
     }
 }
 
@@ -1944,6 +1951,7 @@ fn stunt_combo_system(
     >,
     mut msg_ev: MessageWriter<UiMessageEvent>,
     mut rumble_ev: MessageWriter<GamepadRumbleRequest>,
+    mut action_sfx: MessageWriter<ModularActionSfxEvent>,
 ) {
     let dt = time.delta_secs();
     let mut gamepads = gamepad_q.iter().collect::<Vec<_>>();
@@ -1970,6 +1978,7 @@ fn stunt_combo_system(
             let multiplier = run.multiplier;
             let banked = bank_stunt_run(&mut run);
             if banked > 0 {
+                action_sfx.write(ModularActionSfxEvent::new("hoverboard.trick_land"));
                 msg_ev.write(UiMessageEvent {
                     text: format!(
                         "P{} STUNT LANDED +{}  x{multiplier:.2}  TOTAL {}",
@@ -18704,6 +18713,7 @@ mod tests {
     fn players_attach_to_grind_rails_and_can_jump_off() {
         let mut app = App::new();
         app.init_resource::<Time>();
+        app.add_message::<ModularActionSfxEvent>();
         app.add_systems(Update, stunt_grind_rail_system);
         let rail = app
             .world_mut()
@@ -18757,6 +18767,7 @@ mod tests {
     fn sonic_springs_launch_the_whole_local_party_on_contact() {
         let mut app = App::new();
         app.init_resource::<Time>();
+        app.add_message::<ModularActionSfxEvent>();
         app.add_systems(Update, spring_jump_pad_system);
         app.world_mut().spawn((
             Transform::default(),

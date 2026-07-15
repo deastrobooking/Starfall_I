@@ -9,6 +9,7 @@ use crate::physics::prelude::*;
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
+mod audio_player;
 mod audio_synth;
 mod chapters;
 mod character_blueprint;
@@ -154,6 +155,9 @@ fn main() {
         .add_plugins(combat_feedback::CombatFeedbackPlugin)
         // S3: procedural retro SFX bus (zero external assets).
         .add_plugins(sfx::SfxPlugin)
+        // Separate user music deck + MP3 import/reload tool. Arcade SFX remain
+        // active through SfxPlugin and can be overridden action by action.
+        .add_plugins(audio_player::MusicPlayerPlugin)
         // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
         .add_plugins(input_buffer::InputBufferPlugin)
         .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
