@@ -279,10 +279,13 @@ Goal: turn the existing geometry and combat foundations into reliable features.
 First runtime slice complete: guided loop adhesion with minimum entry speed,
 route checkpoints/recovery, tracking missile acquisition/steering/reacquisition,
 per-player SEEK/LOCK HUD feedback, larger beam profiles, and persistent Star
-Sabre blade visuals. Remaining production work:
+Sabre blade visuals. The stunt-road slice adds 18 elevated grind lines,
+same-frame four-player directional springs, jump-off rail transfers, and
+turn-strength banking on the large sweeper curves. Remaining production work:
 
 - Tune the existing loop adhesion, entry/exit handoff, camera, recovery, and
-  checkpoint behavior on representative ground, mountain, and aerial routes.
+  checkpoint behavior plus rail/spring camera handoff on representative ground,
+  mountain, and aerial routes.
 - Add automated grade, connectivity, ramp-direction, landing-clearance, barrier,
   and underside-artifact checks; extract road generation on a proven boundary.
 - Add world-obstacle casts to the existing swept target collision so fast

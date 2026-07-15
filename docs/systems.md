@@ -220,6 +220,17 @@ interior route waypoint is rounded with a quadratic-arc of short decks rolled
 unclamped pitch) offset beside the lane so NPC traffic passes underneath.
 Loop gates qualify on 1200-unit spans, and up to 28 three-position trick-ramp
 candidates are distributed across spans longer than 900 units.
+**Stunt park layer**: up to 18 long road spans receive an elevated luminous
+`StuntGrindRail`, structural posts, a directional `SpringJumpPad` approach, and
+alternating opposite-lane transfer springs. Springs trigger on contact for every
+local player inside the pad on the same frame and preserve the authored race
+direction; approach springs equip the Rocket Hoverboard. `RailGrindState` is
+per player, projects onto the closest point of the line, selects forward/reverse
+travel from incoming momentum, snaps the board above the rail, and preserves
+speed through either an automatic end launch or a player-requested jump-off.
+Sweeper overlays now use `spawn_banked_deck_segment` with turn-strength banking
+up to 0.34 radians, making the large curves read and drive like futuristic
+Mario-Kart-style velodrome turns rather than flat duplicate roads.
 **Clear corridor**: tree scatter skips anything within road half-width + 10 of
 the network — the props vehicles used to crash into. Buildings are reactive to
 the network: if the road centerline crosses a footprint, `spawn_building` emits

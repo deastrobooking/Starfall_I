@@ -201,7 +201,9 @@ together.
 - The July 2026 audit is `docs/game_review_2026-07.md`. Shared menu navigation
   now includes spatial D-pad/stick focus, repeat, Confirm, Back, and disabled
   skipping/styles. Speed roads include checkpoints, recovery, and guided
-  hoverboard loop traversal. `Homing Star` now tracks/reacquires hostile targets
+  hoverboard loop traversal plus 18 per-player bidirectional grind rails,
+  automatic four-player Sonic springs, jump-off rail transfers, and strongly
+  banked sweeper curves. `Homing Star` now tracks/reacquires hostile targets
   with per-player SEEK/LOCK HUD feedback. `BeamSabre` has a persistent blade
   visual; authored animation/audio and hardware polish remain.
 

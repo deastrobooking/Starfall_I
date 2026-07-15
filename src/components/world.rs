@@ -107,6 +107,35 @@ pub struct SlingShotPad {
     pub cooldown_timer: f32,
 }
 
+/// Automatic Sonic-style spring embedded in stunt roads. Unlike a slingshot,
+/// it fires on contact and preserves an authored forward race direction.
+#[derive(Component, Debug, Clone)]
+pub struct SpringJumpPad {
+    pub launch_velocity: Vec3,
+    pub radius: f32,
+    pub cooldown: f32,
+    pub cooldown_timer: f32,
+    pub force_hoverboard: bool,
+}
+
+/// An authored grind line. Players and hoverboards snap to the line when they
+/// land close to it, travel independently, and receive an exit impulse.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StuntGrindRail {
+    pub start: Vec3,
+    pub end: Vec3,
+    pub speed: f32,
+    pub snap_radius: f32,
+    pub exit_lift: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RailGrindState {
+    pub rail: Entity,
+    pub progress: f32,
+    pub direction: f32,
+}
+
 /// Hoverboard boost pad embedded into express roads and racing bridges.
 #[derive(Component, Debug, Clone)]
 pub struct BoardBoostPad {

@@ -216,7 +216,9 @@ impl Plugin for WorldPlugin {
                     moving_platform_system,
                     rotating_elevator_system,
                     sling_shot_system,
+                    spring_jump_pad_system,
                     board_boost_pad_system,
+                    stunt_grind_rail_system,
                     laser_turret_system,
                     laser_beam_cleanup_system,
                     collider_debug_toggle_system,
@@ -1733,6 +1735,162 @@ fn sling_shot_system(
                 break;
             }
         }
+    }
+}
+
+fn spring_jump_pad_system(
+    time: Res<Time>,
+    mut pad_q: Query<(&Transform, &mut SpringJumpPad)>,
+    mut player_q: Query<(
+        &Transform,
+        &mut PlayerMovement,
+        &mut TraversalModeState,
+        &mut PlayerStateMachine,
+    )>,
+) {
+    let dt = time.delta_secs();
+    for (pad_transform, mut pad) in pad_q.iter_mut() {
+        pad.cooldown_timer = (pad.cooldown_timer - dt).max(0.0);
+        if pad.cooldown_timer > 0.0 {
+            continue;
+        }
+        let mut triggered = false;
+        for (player_transform, mut movement, mut traversal, mut state) in player_q.iter_mut() {
+            let offset = player_transform.translation - pad_transform.translation;
+            let on_spring =
+                offset.with_y(0.0).length() <= pad.radius && offset.y >= -1.4 && offset.y <= 3.8;
+            if !on_spring || movement.velocity.y > 4.0 {
+                continue;
+            }
+            if pad.force_hoverboard {
+                traversal.active = TraversalMode::Hoverboard;
+            }
+            movement.ground_velocity = pad.launch_velocity.with_y(0.0);
+            movement.velocity.y = pad.launch_velocity.y.max(movement.jump_force * 1.15);
+            movement.is_grounded = false;
+            movement.coyote_timer = 0.0;
+            movement.jump_buffer_timer = 0.0;
+            state.force(crate::components::player::PlayerState::Jetpack);
+            triggered = true;
+        }
+        if triggered {
+            pad.cooldown_timer = pad.cooldown;
+        }
+    }
+}
+
+fn closest_point_on_stunt_rail(point: Vec3, rail: &StuntGrindRail) -> (f32, Vec3, f32) {
+    let delta = rail.end - rail.start;
+    let length_squared = delta.length_squared();
+    if length_squared <= 0.0001 {
+        return (0.0, rail.start, point.distance(rail.start));
+    }
+    let progress = ((point - rail.start).dot(delta) / length_squared).clamp(0.0, 1.0);
+    let closest = rail.start + delta * progress;
+    (progress, closest, point.distance(closest))
+}
+
+fn stunt_grind_rail_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    rail_q: Query<(Entity, &StuntGrindRail)>,
+    mut player_q: Query<
+        (
+            Entity,
+            &mut Transform,
+            &PlayerInput,
+            &mut PlayerMovement,
+            &mut TraversalModeState,
+            &mut PlayerStateMachine,
+            Option<&RailGrindState>,
+        ),
+        With<Player>,
+    >,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut transform, input, mut movement, mut traversal, mut state, grinding) in
+        player_q.iter_mut()
+    {
+        if let Some(grinding) = grinding {
+            let Ok((_, rail)) = rail_q.get(grinding.rail) else {
+                commands.entity(entity).remove::<RailGrindState>();
+                continue;
+            };
+            let delta = rail.end - rail.start;
+            let length = delta.length().max(0.001);
+            let direction = delta / length * grinding.direction;
+            if input.jump {
+                movement.ground_velocity = direction.with_y(0.0).normalize_or_zero() * rail.speed;
+                movement.velocity.y = movement.jump_force.max(rail.exit_lift);
+                movement.is_grounded = false;
+                commands.entity(entity).remove::<RailGrindState>();
+                state.force(crate::components::player::PlayerState::Jetpack);
+                continue;
+            }
+
+            let next_progress = grinding.progress + grinding.direction * rail.speed * dt / length;
+            if !(0.0..=1.0).contains(&next_progress) {
+                let exit = if grinding.direction > 0.0 {
+                    rail.end
+                } else {
+                    rail.start
+                };
+                transform.translation = exit + direction * 4.0 + Vec3::Y * 1.1;
+                movement.ground_velocity =
+                    direction.with_y(0.0).normalize_or_zero() * (rail.speed * 1.12);
+                movement.velocity.y = rail.exit_lift;
+                movement.is_grounded = false;
+                commands.entity(entity).remove::<RailGrindState>();
+                state.force(crate::components::player::PlayerState::Jetpack);
+                continue;
+            }
+
+            transform.translation = rail.start + delta * next_progress + Vec3::Y * 1.1;
+            movement.ground_velocity = direction.with_y(0.0).normalize_or_zero() * rail.speed;
+            movement.velocity.y = delta.y / length * rail.speed * grinding.direction;
+            movement.is_grounded = false;
+            traversal.active = TraversalMode::Hoverboard;
+            commands.entity(entity).insert(RailGrindState {
+                progress: next_progress,
+                ..*grinding
+            });
+            state.force(crate::components::player::PlayerState::Sprinting);
+            continue;
+        }
+
+        let nearest = rail_q
+            .iter()
+            .filter_map(|(rail_entity, rail)| {
+                let (progress, closest, distance) =
+                    closest_point_on_stunt_rail(transform.translation - Vec3::Y * 1.1, rail);
+                (distance <= rail.snap_radius && movement.velocity.y <= 3.5).then_some((
+                    distance,
+                    rail_entity,
+                    rail,
+                    progress,
+                    closest,
+                ))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((_, rail_entity, rail, progress, closest)) = nearest else {
+            continue;
+        };
+        let authored_direction = (rail.end - rail.start).normalize_or_zero();
+        let velocity = movement.ground_velocity + Vec3::Y * movement.velocity.y;
+        let direction = if velocity.dot(authored_direction) < -2.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        transform.translation = closest + Vec3::Y * 1.1;
+        movement.is_grounded = false;
+        traversal.active = TraversalMode::Hoverboard;
+        commands.entity(entity).insert(RailGrindState {
+            rail: rail_entity,
+            progress,
+            direction,
+        });
+        state.force(crate::components::player::PlayerState::Sprinting);
     }
 }
 
@@ -8482,19 +8640,20 @@ fn spawn_speed_road_network(
         seed + 30_000,
         terrain_seed,
     );
-    spawn_route_sweeper_curves(
-        commands,
-        meshes,
-        pal,
-        &deck_mesh,
-        seed + 41_000,
-        terrain_seed,
-    );
+    spawn_route_sweeper_curves(commands, pal, &deck_mesh, terrain_seed);
     spawn_hoverboard_trick_ramps(
         commands,
         meshes,
         pal,
         seed + 52_000,
+        terrain_seed,
+        &road_profiles,
+    );
+    spawn_stunt_park_features(
+        commands,
+        meshes,
+        pal,
+        seed + 58_000,
         terrain_seed,
         &road_profiles,
     );
@@ -9451,13 +9610,11 @@ fn spawn_settlement_speed_spur(
 #[allow(clippy::too_many_arguments)]
 fn spawn_route_sweeper_curves(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
     deck_mesh: &Handle<Mesh>,
-    seed: u64,
     terrain_seed: u64,
 ) {
-    for (ri, route) in mountain_routes().iter().enumerate() {
+    for route in mountain_routes() {
         for vi in 1..route.len().saturating_sub(1) {
             let (px, pz) = route[vi - 1];
             let (cx, cz) = route[vi];
@@ -9488,20 +9645,11 @@ fn spawn_route_sweeper_curves(
             let width = SPEED_ROAD_WIDTH * (1.04 + turn_strength * 0.08);
             let profile =
                 speed_road_route_profile(&curve, width, terrain_seed, SPEED_ROAD_CLEARANCE + 1.2);
+            let bank = -into.perp_dot(out).signum() * (0.13 + turn_strength * 0.17).min(0.34);
 
-            for (step, points) in profile.windows(2).enumerate() {
-                spawn_speed_road_deck_between(
-                    commands,
-                    meshes,
-                    pal,
-                    deck_mesh,
-                    points[0],
-                    points[1],
-                    width,
-                    true,
-                    seed + ri as u64 * 1_009 + vi as u64 * 67 + step as u64,
-                    terrain_seed,
-                    true,
+            for points in profile.windows(2) {
+                spawn_banked_deck_segment(
+                    commands, pal, deck_mesh, points[0], points[1], width, bank, true,
                 );
             }
         }
@@ -9585,6 +9733,198 @@ fn spawn_hoverboard_trick_ramps(
 
 fn hoverboard_trick_ramp_count() -> usize {
     28
+}
+
+const STUNT_GRIND_RAIL_LIMIT: usize = 18;
+
+fn stunt_grind_rail_count() -> usize {
+    mountain_routes()
+        .iter()
+        .flat_map(|route| route.windows(2))
+        .filter(|pair| Vec2::new(pair[1].0 - pair[0].0, pair[1].1 - pair[0].1).length() >= 1_050.0)
+        .count()
+        .min(STUNT_GRIND_RAIL_LIMIT)
+}
+
+fn spawn_sonic_spring_pad(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    position: Vec3,
+    direction: Vec3,
+    launch_speed: f32,
+    launch_lift: f32,
+    force_hoverboard: bool,
+) {
+    let direction = direction.with_y(0.0).normalize_or_zero();
+    let yaw = direction.x.atan2(direction.z);
+    commands.spawn((
+        Name::new("Sonic Spring Jump"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(3.0, 0.75))),
+            material: MeshMaterial3d(pal.crystal_dragon.clone()),
+            transform: Transform::from_translation(position)
+                .with_rotation(Quat::from_rotation_y(yaw)),
+            ..default()
+        },
+        SpringJumpPad {
+            launch_velocity: direction * launch_speed + Vec3::Y * launch_lift,
+            radius: 3.4,
+            cooldown: 0.16,
+            cooldown_timer: 0.0,
+            force_hoverboard,
+        },
+        WorldGeometry,
+        WalkableSurface,
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(0.375, 3.0),
+    ));
+    for layer in 0..3 {
+        commands.spawn((
+            Name::new("Spring Energy Coil"),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Torus {
+                    major_radius: 2.25 - layer as f32 * 0.22,
+                    minor_radius: 0.18,
+                })),
+                material: MeshMaterial3d(pal.crystal_aurora.clone()),
+                transform: Transform::from_translation(
+                    position + Vec3::Y * (0.55 + layer as f32 * 0.38),
+                ),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_stunt_grind_rail(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    start: Vec3,
+    end: Vec3,
+    seed: u64,
+) {
+    let delta = end - start;
+    let length = delta.length();
+    if length < 8.0 {
+        return;
+    }
+    let rotation = Quat::from_rotation_arc(Vec3::Y, delta / length);
+    commands.spawn((
+        Name::new("High Tech Grind Rail"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(0.38, length))),
+            material: MeshMaterial3d(if seed.is_multiple_of(2) {
+                pal.crystal_aurora.clone()
+            } else {
+                pal.crystal_emerald.clone()
+            }),
+            transform: Transform::from_translation(start.lerp(end, 0.5)).with_rotation(rotation),
+            ..default()
+        },
+        StuntGrindRail {
+            start,
+            end,
+            speed: 58.0 + (seed % 5) as f32 * 2.5,
+            snap_radius: 2.8,
+            exit_lift: 9.5,
+        },
+        WorldGeometry,
+    ));
+
+    let support_count = (length / 24.0).ceil() as usize;
+    for support in 0..=support_count {
+        let t = support as f32 / support_count.max(1) as f32;
+        let point = start.lerp(end, t);
+        let support_height = 3.0 + (t * std::f32::consts::PI).sin() * 1.8;
+        commands.spawn((
+            Name::new("Grind Rail Support"),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(0.28, support_height))),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(
+                    point - Vec3::Y * (support_height * 0.5 + 0.25),
+                ),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_stunt_park_features(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+    road_profiles: &[Vec<Vec3>],
+) {
+    let mut spawned = 0usize;
+    for (route_index, route) in mountain_routes().iter().enumerate() {
+        for (segment_index, pair) in route.windows(2).enumerate() {
+            if spawned >= STUNT_GRIND_RAIL_LIMIT {
+                return;
+            }
+            let a = Vec2::new(pair[0].0, pair[0].1);
+            let b = Vec2::new(pair[1].0, pair[1].1);
+            let delta = b - a;
+            let segment_length = delta.length();
+            if segment_length < 1_050.0 {
+                continue;
+            }
+            let direction_xz = delta / segment_length;
+            let direction = Vec3::new(direction_xz.x, 0.0, direction_xz.y);
+            let right = Vec3::new(direction.z, 0.0, -direction.x);
+            let feature_seed = seed + route_index as u64 * 1_009 + segment_index as u64 * 71;
+            let center_xz = a.lerp(b, 0.58 + (seeded(feature_seed, 3) - 0.5) * 0.12);
+            let lane_side = if (route_index + segment_index).is_multiple_of(2) {
+                -1.0
+            } else {
+                1.0
+            };
+            let rail_length = 92.0 + seeded(feature_seed, 7) * 54.0;
+            let rail_center = Vec3::new(center_xz.x, 0.0, center_xz.y)
+                + right * lane_side * SPEED_ROAD_TRAFFIC_LANE_OFFSET;
+            let rail_start_xz = rail_center - direction * (rail_length * 0.5);
+            let rail_end_xz = rail_center + direction * (rail_length * 0.5);
+            let road_height = |point: Vec3| {
+                road_profile_height_at(&road_profiles[route_index], point.x, point.z)
+                    .unwrap_or_else(|| {
+                        terrain_surface_y(point.x, point.z, terrain_seed) + SPEED_ROAD_CLEARANCE
+                    })
+            };
+            let rail_start = Vec3::new(
+                rail_start_xz.x,
+                road_height(rail_start_xz) + 3.0,
+                rail_start_xz.z,
+            );
+            let rail_end = Vec3::new(rail_end_xz.x, road_height(rail_end_xz) + 4.6, rail_end_xz.z);
+            spawn_stunt_grind_rail(commands, meshes, pal, rail_start, rail_end, feature_seed);
+
+            let spring_xz = rail_start_xz - direction * 17.0;
+            let spring = Vec3::new(spring_xz.x, road_height(spring_xz) + 0.75, spring_xz.z);
+            spawn_sonic_spring_pad(commands, meshes, pal, spring, direction, 39.0, 17.5, true);
+
+            // Alternate sites add a free-standing vertical trick spring on the
+            // opposite lane, creating Tony-Hawk-style transfer opportunities.
+            if spawned.is_multiple_of(2) {
+                let transfer_xz =
+                    rail_center - right * lane_side * SPEED_ROAD_TRAFFIC_LANE_OFFSET * 2.0;
+                let transfer = Vec3::new(
+                    transfer_xz.x,
+                    road_height(transfer_xz) + 0.75,
+                    transfer_xz.z,
+                );
+                spawn_sonic_spring_pad(
+                    commands, meshes, pal, transfer, direction, 20.0, 25.0, false,
+                );
+            }
+            spawned += 1;
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -18065,6 +18405,124 @@ mod tests {
     fn mountain_routes_generate_sweeper_curves_and_trick_ramps() {
         assert!(speed_road_sweeper_curve_count() >= 20);
         assert!(hoverboard_trick_ramp_count() >= 16);
+        assert!(stunt_grind_rail_count() >= 12);
+        assert!(stunt_grind_rail_count() <= STUNT_GRIND_RAIL_LIMIT);
+    }
+
+    #[test]
+    fn grind_rail_projection_clamps_to_authored_line() {
+        let rail = StuntGrindRail {
+            start: Vec3::ZERO,
+            end: Vec3::new(10.0, 5.0, 0.0),
+            speed: 60.0,
+            snap_radius: 3.0,
+            exit_lift: 9.0,
+        };
+        let (progress, closest, distance) =
+            closest_point_on_stunt_rail(Vec3::new(5.0, 4.5, 2.0), &rail);
+        assert!((0.5..0.7).contains(&progress));
+        assert!(distance < 3.0);
+        let (before, _, _) = closest_point_on_stunt_rail(Vec3::new(-30.0, 0.0, 0.0), &rail);
+        let (after, _, _) = closest_point_on_stunt_rail(Vec3::new(30.0, 8.0, 0.0), &rail);
+        assert_eq!(before, 0.0);
+        assert_eq!(after, 1.0);
+        assert!(closest.x > 5.0);
+    }
+
+    #[test]
+    fn players_attach_to_grind_rails_and_can_jump_off() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.add_systems(Update, stunt_grind_rail_system);
+        let rail = app
+            .world_mut()
+            .spawn(StuntGrindRail {
+                start: Vec3::ZERO,
+                end: Vec3::X * 30.0,
+                speed: 60.0,
+                snap_radius: 3.0,
+                exit_lift: 10.0,
+            })
+            .id();
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                Transform::from_xyz(4.0, 1.1, 0.5),
+                PlayerInput::default(),
+                PlayerMovement::default(),
+                TraversalModeState::default(),
+                PlayerStateMachine::default(),
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            app.world().get::<RailGrindState>(player).unwrap().rail,
+            rail
+        );
+        assert_eq!(
+            app.world()
+                .get::<TraversalModeState>(player)
+                .unwrap()
+                .active,
+            TraversalMode::Hoverboard
+        );
+
+        app.world_mut().get_mut::<PlayerInput>(player).unwrap().jump = true;
+        app.update();
+        assert!(app.world().get::<RailGrindState>(player).is_none());
+        assert!(
+            app.world()
+                .get::<PlayerMovement>(player)
+                .unwrap()
+                .velocity
+                .y
+                >= 10.0
+        );
+    }
+
+    #[test]
+    fn sonic_springs_launch_the_whole_local_party_on_contact() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.add_systems(Update, spring_jump_pad_system);
+        app.world_mut().spawn((
+            Transform::default(),
+            SpringJumpPad {
+                launch_velocity: Vec3::new(30.0, 18.0, 0.0),
+                radius: 3.5,
+                cooldown: 0.16,
+                cooldown_timer: 0.0,
+                force_hoverboard: true,
+            },
+        ));
+        let players = (0..4)
+            .map(|index| {
+                app.world_mut()
+                    .spawn((
+                        Transform::from_xyz(index as f32 * 0.4, 1.0, 0.0),
+                        PlayerMovement::default(),
+                        TraversalModeState::default(),
+                        PlayerStateMachine::default(),
+                    ))
+                    .id()
+            })
+            .collect::<Vec<_>>();
+
+        app.update();
+        for player in players {
+            let movement = app.world().get::<PlayerMovement>(player).unwrap();
+            assert_eq!(movement.ground_velocity, Vec3::X * 30.0);
+            assert!(movement.velocity.y >= 18.0);
+            assert_eq!(
+                app.world()
+                    .get::<TraversalModeState>(player)
+                    .unwrap()
+                    .active,
+                TraversalMode::Hoverboard
+            );
+        }
     }
 
     #[test]
