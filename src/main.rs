@@ -101,6 +101,7 @@ fn main() {
         // Global resources
         .init_resource::<WaveInfo>()
         .init_resource::<GameSettings>()
+        .init_resource::<resources::UiGameplayCapture>()
         .init_resource::<PlayerScore>()
         .init_resource::<CameraShake>()
         .init_resource::<PlaySessionTransition>()

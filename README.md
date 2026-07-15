@@ -238,6 +238,7 @@ Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
 - [Engine Upgrade Milestones](docs/engine_upgrade_milestones.md) — campaign/engine milestones `M#`; also defines the `MM#` / `AI#` naming convention
 - [Game Maker Toolchain](docs/game_maker_toolchain.md) — shared recipe, generator, validator, and scene-composer architecture
 - [Engine Tools Multistage Pass](docs/engine_tools_multistage_pass.md) — Blender capability triage and ET1–ET11 implementation program
+- [Parallel Review Triage — July 2026](docs/parallel_review_triage_2026-07.md) — evidence-based disposition of the external 156-item suggestion inventory
 
 ## Project Structure
 

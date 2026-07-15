@@ -57,6 +57,13 @@ impl DamageInfo {
         self.hit_direction = Some(direction);
         self
     }
+
+    /// Mark this hit as critical. Critical damage is resolved centrally so
+    /// every weapon path uses the same multiplier and feedback metadata.
+    pub fn critical(mut self) -> Self {
+        self.is_critical = true;
+        self
+    }
 }
 
 // ── Damage Result ─────────────────────────────────────────────────────────────
@@ -66,6 +73,7 @@ pub struct DamageResult {
     pub was_killed: bool,
     pub was_blocked: bool,
     pub was_parried: bool,
+    pub was_critical: bool,
 }
 
 // ── Damageable Component ──────────────────────────────────────────────────────
@@ -166,7 +174,8 @@ pub fn apply_damage(
     let multiplier = resistance_multiplier(damageable, info.damage_type);
     // Flat-toughness scaling: 0 defense → 1.0, 50 → 0.67, 100 → 0.5.
     let toughness = 100.0 / (100.0 + damageable.defense.max(0.0));
-    let final_damage = (info.amount * multiplier * toughness).max(1.0);
+    let critical_multiplier = if info.is_critical { 1.5 } else { 1.0 };
+    let final_damage = (info.amount * critical_multiplier * multiplier * toughness).max(1.0);
     let actual = health.apply_damage(final_damage);
 
     // Accumulate knockback for the victim's reaction system to drain.
@@ -181,6 +190,7 @@ pub fn apply_damage(
         was_killed: !health.is_alive(),
         was_blocked: false,
         was_parried: false,
+        was_critical: info.is_critical,
     }
 }
 
@@ -188,4 +198,41 @@ pub fn apply_damage(
 pub fn area_damage_falloff(base_damage: f32, distance: f32, radius: f32) -> f32 {
     let t = (distance / radius).clamp(0.0, 1.0);
     base_damage * (1.0 - t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn critical_damage_uses_shared_multiplier_and_reports_identity() {
+        let mut health = Health::new(100.0);
+        let mut damageable = Damageable::default();
+        let result = apply_damage(
+            &mut health,
+            &mut damageable,
+            &DamageInfo::new(20.0, DamageType::Laser).critical(),
+        );
+
+        assert_eq!(result.damage_amount, 30.0);
+        assert_eq!(health.current, 70.0);
+        assert!(result.was_critical);
+    }
+
+    #[test]
+    fn invulnerable_target_never_reports_a_critical_hit() {
+        let mut health = Health::new(100.0);
+        let mut damageable = Damageable {
+            is_invulnerable: true,
+            ..default()
+        };
+        let result = apply_damage(
+            &mut health,
+            &mut damageable,
+            &DamageInfo::new(20.0, DamageType::Laser).critical(),
+        );
+
+        assert_eq!(result.damage_amount, 0.0);
+        assert!(!result.was_critical);
+    }
 }

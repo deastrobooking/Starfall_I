@@ -45,8 +45,18 @@ eight siblings.
 **Known limitations:**
 - Chapter director spawns use the party center as the encounter anchor; bespoke chapter beats are still campaign-shared.
 - HUD stat/weapon panels, save snapshots, companions, crafting, chests, hidden rewards, enemy loot pickups, damage feedback, and vehicle buffs are keyed by `PlayerIndex`.
-- Vehicle buffs apply to the activating player, but the party still shares one active vehicle mode at a time. In Chapter 1, a boardable boat at the north dock locks one driver, boards nearby players into passenger seats, steers along the visible ocean wake route, and requires docking at the city or island before disembarking.
-- Dev-only armor element cycling applies to P1 from keyboard shortcuts; final equipment UI should expose per-player selection.
+- Vehicle buffs apply to the activating player, and another player cannot silently
+  steal an active ground/air mode. The party still shares one active vehicle.
+  In Chapter 1, the boat reserves unique seats, keeps one driver, admits nearby
+  late passengers, promotes the lowest-index passenger if the driver leaves,
+  and requires docking before disembarking.
+- Armor infusion cycling is per-player: every controller uses LT + D-pad
+  Left/Right; P1 can use Shift + `[` / `]`. Plain brackets remain primary weapon
+  cycling.
+- Crafting panels retain an independent recipe cursor for each player. The owner
+  uses D-pad/left stick to select, South/A to craft, and Select to close. A
+  per-player modal capture preserves those UI actions while suppressing movement,
+  combat, and vehicle/interact leakage.
 
 ---
 
@@ -688,7 +698,7 @@ sabre slashes (3.0). Player-receiving knockback is not yet drained (EC2).
 | Moon Bubble | 9 | 4.0s | Unlimited |
 | Sprite Turret | 0 | 10.0s | Unlimited |
 
-Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Projectile collision sweeps the full per-frame travel segment, preventing fast Rainbow Ray bolts from tunneling through targets. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Characters designed with `DariaCannon` arms can hold and release a charge shot. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
+Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Projectile collision sweeps the full per-frame travel segment, preventing fast Rainbow Ray bolts from tunneling through targets. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Tracking weapons display a pulsing world-space lock ring: gold for Homing Star and cyan for magic beams. Characters designed with `DariaCannon` arms can hold and release a charge shot. Charged hits resolve through the shared critical path at 1.5x damage and add a damage/element-scaled hot-pink impact core. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
 
 **Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T` or controller LB+North; LT+North, Guide, and L3+R3 remain fallbacks. RT/LMB performs the animated slash while active. Toggle attempts now display active, holstered, or locked feedback so a controller press never fails silently. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise the Star Sabre's effective wave tier for combo behavior: finishers gain single waves first, mid-chain slashes gain waves next, dual waves arrive at high tier, and level-5/tier-5 finishers throw a triple spread.
 

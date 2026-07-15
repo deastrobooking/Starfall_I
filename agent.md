@@ -21,6 +21,11 @@ together.
 ## Current Baseline
 
 - Current local engine baseline: Bevy `0.19.0`, Avian `0.7`, Rust 2021.
+- Starfall Forge ET1–ET2c lives in `src/engine_tools/mod.rs`: independent safe
+  tool mode, stable IDs, selection, transactional undo/redo, controller UI,
+  viewport picking, fly/orbit cameras, transform handles, snapping, primitive
+  drafts, and guarded world adapters are implemented. ET3 versioned persistence
+  and recovery is the next toolchain dependency.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
@@ -135,7 +140,9 @@ together.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
   `docs/improvements.md`, `docs/naming.md`, and
   `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md` and
-  `docs/playerengine.md`.
+  `docs/playerengine.md`. The evidence-based memory for the external 156-item
+  review is `docs/parallel_review_triage_2026-07.md`; do not treat its raw idea
+  inventory as verified defects or implicit product commitments.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
 - The July 2026 audit is `docs/game_review_2026-07.md`. Shared menu navigation

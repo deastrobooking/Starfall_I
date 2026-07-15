@@ -36,8 +36,8 @@ use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
     FastTravelDestination, GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerGuidance,
-    PlayerSelectState, ShopCatalog, ShopCategory, UiMessage, WaveInfo, WorldSiteRegistry,
-    HERO_ROSTER,
+    PlayerSelectState, ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage, WaveInfo,
+    WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
@@ -60,6 +60,7 @@ impl Plugin for UiPlugin {
                 (
                     register_menu_buttons,
                     menu_focus_navigation,
+                    keep_menu_focus_in_view,
                     menu_back_navigation,
                     menu_focus_style,
                 )
@@ -285,6 +286,12 @@ struct StartButton;
 #[derive(Component)]
 struct MenuFocusable;
 
+/// A vertically scrolling menu surface whose focused button must remain on-screen.
+/// Chapter Select currently owns one; other menus can opt in without duplicating
+/// controller-scroll math.
+#[derive(Component)]
+pub(crate) struct MenuScrollPanel;
+
 #[derive(Component)]
 pub(crate) struct MenuButtonDisabled;
 
@@ -414,6 +421,9 @@ struct GuidanceActionText;
 struct CraftingPanelState {
     visible: bool,
     owner: Option<u8>,
+    recipe_index: [usize; 4],
+    repeat_direction: i8,
+    repeat_timer: f32,
 }
 
 fn in_menu_state(state: Res<State<AppState>>) -> bool {
@@ -768,6 +778,60 @@ fn menu_focus_style(
     }
 }
 
+fn keep_menu_focus_in_view(
+    focus: Res<MenuFocus>,
+    focused_q: Query<(&GlobalTransform, &ComputedNode), With<MenuFocusable>>,
+    mut panel_q: Query<
+        (&GlobalTransform, &ComputedNode, &mut ScrollPosition),
+        With<MenuScrollPanel>,
+    >,
+) {
+    let Some(entity) = focus.entity else {
+        return;
+    };
+    let Ok((button_transform, button_node)) = focused_q.get(entity) else {
+        return;
+    };
+
+    for (panel_transform, panel_node, mut scroll) in panel_q.iter_mut() {
+        let max_y = menu_scroll_max(panel_node);
+        if max_y <= 0.0 {
+            continue;
+        }
+        let panel_center = panel_transform.translation().y;
+        let button_center = button_transform.translation().y;
+        let panel_half = panel_node.size().y * 0.5;
+        let button_half = button_node.size().y * 0.5;
+        let margin = 18.0;
+        let panel_min = panel_center - panel_half + margin;
+        let panel_max = panel_center + panel_half - margin;
+        let button_min = button_center - button_half;
+        let button_max = button_center + button_half;
+
+        let delta = focus_reveal_scroll_delta(panel_min, panel_max, button_min, button_max);
+        scroll.y = (scroll.y + delta).clamp(0.0, max_y);
+    }
+}
+
+fn menu_scroll_max(computed: &ComputedNode) -> f32 {
+    ((computed.content_size().y - computed.size().y) * computed.inverse_scale_factor()).max(0.0)
+}
+
+fn focus_reveal_scroll_delta(
+    viewport_min: f32,
+    viewport_max: f32,
+    item_min: f32,
+    item_max: f32,
+) -> f32 {
+    if item_min < viewport_min {
+        viewport_min - item_min
+    } else if item_max > viewport_max {
+        viewport_max - item_max
+    } else {
+        0.0
+    }
+}
+
 // ── UI Fallback Camera ────────────────────────────────────────────────────────
 fn spawn_menu_camera(mut commands: Commands, existing: Query<Entity, With<MenuCamera>>) {
     if !existing.is_empty() {
@@ -925,6 +989,14 @@ fn setup_pause_menu(
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.85, 1.0)),
+            ));
+            root.spawn((
+                Text::new("D-PAD / LEFT STICK: navigate   A: select   B: back / resume"),
+                TextFont {
+                    font_size: FontSize::Px(15.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.68, 0.78, 0.92)),
             ));
             root.spawn(Node {
                 height: Val::Px(8.0),
@@ -1210,17 +1282,22 @@ fn format_shop_item_row(item: &crate::resources::ShopItem) -> String {
 
 fn update_pause_menu_page_visibility(
     menu: Res<PauseMenuState>,
-    mut page_q: Query<(&PausePagePanel, &mut Visibility)>,
+    mut page_q: Query<(&PausePagePanel, &mut Visibility, &mut Node)>,
 ) {
     if !menu.is_changed() {
         return;
     }
-    for (panel, mut visibility) in page_q.iter_mut() {
-        *visibility = if panel.0 == menu.page {
+    for (panel, mut visibility, mut node) in page_q.iter_mut() {
+        let active = panel.0 == menu.page;
+        *visibility = if active {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+        // Hidden pages must leave layout as well as rendering; otherwise their
+        // controls still consume vertical space and can push the active page
+        // outside the viewport on 720p/split-screen displays.
+        node.display = if active { Display::Flex } else { Display::None };
     }
 }
 
@@ -1452,6 +1529,7 @@ fn setup_chapter_select(
             ScrollPosition::default(),
             ChapterSelectRoot,
             ChapterSelectScrollPanel,
+            MenuScrollPanel,
         ))
         .with_children(|p| {
             p.spawn((
@@ -1461,6 +1539,14 @@ fn setup_chapter_select(
                     ..default()
                 },
                 TextColor(Color::srgb(0.4, 0.85, 1.0)),
+            ));
+            p.spawn((
+                Text::new("D-PAD / LEFT STICK: navigate and scroll   A: select / start   B: back"),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.68, 0.78, 0.92)),
             ));
             p.spawn(Node {
                 flex_direction: FlexDirection::Row,
@@ -3620,7 +3706,9 @@ fn setup_hud(
             ))
             .with_children(|panel| {
                 panel.spawn((
-                    Text::new("[C] CRAFTING  –  press 1-5 to craft"),
+                    Text::new(
+                        "CRAFTING — D-PAD / STICK: choose   A: craft   SELECT: close   Keyboard: 1-5",
+                    ),
                     TextFont {
                         font_size: FontSize::Px(15.0),
                         ..default()
@@ -4402,8 +4490,10 @@ fn boss_alert_system(
 
 // ── Crafting Panel ────────────────────────────────────────────────────────────
 fn crafting_panel_system(
+    time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut panel_state: ResMut<CraftingPanelState>,
+    mut input_capture: ResMut<UiGameplayCapture>,
     mut panel_q: Query<&mut Node, With<CraftingPanelRoot>>,
     mut text_q: Query<&mut Text, With<CraftingPanelText>>,
     player_input_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
@@ -4411,13 +4501,18 @@ fn crafting_panel_system(
     mut queue: ResMut<CraftingQueue>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
+    let mut opened_this_frame = false;
     for (idx, input) in player_input_q.iter() {
         if input.crafting {
             let closing_same_owner = panel_state.visible && panel_state.owner == Some(idx.0);
             panel_state.visible = !closing_same_owner;
             panel_state.owner = panel_state.visible.then_some(idx.0);
+            panel_state.repeat_direction = 0;
+            panel_state.repeat_timer = 0.0;
+            opened_this_frame = panel_state.visible;
         }
     }
+    input_capture.owner = panel_state.visible.then_some(panel_state.owner).flatten();
 
     if let Ok(mut node) = panel_q.single_mut() {
         node.display = if panel_state.visible {
@@ -4428,21 +4523,45 @@ fn crafting_panel_system(
     }
 
     if !panel_state.visible {
+        input_capture.owner = None;
         return;
     }
 
     let Some(owner) = panel_state.owner else {
         panel_state.visible = false;
+        input_capture.owner = None;
         return;
     };
+
+    let owner_input = player_input_q
+        .iter()
+        .find_map(|(idx, input)| (idx.0 == owner).then_some(input));
 
     let Some((_, mut inventory, stats)) = player_q.iter_mut().find(|(idx, _, _)| idx.0 == owner)
     else {
         panel_state.visible = false;
         panel_state.owner = None;
+        input_capture.owner = None;
         return;
     };
     let recipes = all_recipes();
+    let selection_slot = usize::from(owner).min(panel_state.recipe_index.len() - 1);
+    panel_state.recipe_index[selection_slot] =
+        panel_state.recipe_index[selection_slot].min(recipes.len().saturating_sub(1));
+
+    if !opened_this_frame {
+        let direction = owner_input
+            .map(|input| crafting_navigation_direction(&mut panel_state, input, time.delta_secs()))
+            .unwrap_or(0);
+        if direction != 0 && !recipes.is_empty() {
+            panel_state.recipe_index[selection_slot] = cycle_index(
+                panel_state.recipe_index[selection_slot],
+                recipes.len(),
+                direction,
+            );
+        }
+    }
+    let selected_index = panel_state.recipe_index[selection_slot];
 
     // Build recipe display text
     let mut display = String::new();
@@ -4459,7 +4578,8 @@ fn crafting_panel_system(
             .map(|m| format!("{}×{}", m.quantity, m.item_id.replace('_', " ")))
             .collect();
         display.push_str(&format!(
-            "[{}] {} {}  →  {}×{}\n     {}\n",
+            "{} [{}] {} {}  →  {}×{}\n     {}\n",
+            if i == selected_index { "▶" } else { " " },
             i + 1,
             status,
             recipe.name,
@@ -4473,8 +4593,9 @@ fn crafting_panel_system(
         *t = Text::new(format!("P{} Crafting\n\n{}", owner + 1, display));
     }
 
-    // Handle 1-5 key presses to craft
-    let craft_index = if keyboard.just_pressed(KeyCode::Digit1) {
+    // Number keys retain direct access. The panel owner can also navigate with
+    // their own D-pad/left stick and activate with their own South/A button.
+    let keyboard_index = if keyboard.just_pressed(KeyCode::Digit1) {
         Some(0)
     } else if keyboard.just_pressed(KeyCode::Digit2) {
         Some(1)
@@ -4487,6 +4608,12 @@ fn crafting_panel_system(
     } else {
         None
     };
+    if let Some(index) = keyboard_index.filter(|index| *index < recipes.len()) {
+        panel_state.recipe_index[selection_slot] = index;
+    }
+    let controller_confirm =
+        !opened_this_frame && owner_input.is_some_and(|input| input.ui_confirm);
+    let craft_index = keyboard_index.or(controller_confirm.then_some(selected_index));
 
     if let Some(idx) = craft_index {
         if let Some(recipe) = recipes.get(idx) {
@@ -4510,6 +4637,66 @@ fn crafting_panel_system(
                 }
             }
         }
+    }
+}
+
+fn cycle_index(current: usize, len: usize, direction: i8) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if direction < 0 {
+        (current + len - 1) % len
+    } else if direction > 0 {
+        (current + 1) % len
+    } else {
+        current.min(len - 1)
+    }
+}
+
+fn crafting_navigation_direction(
+    state: &mut CraftingPanelState,
+    input: &PlayerInput,
+    delta_secs: f32,
+) -> i8 {
+    const INITIAL_REPEAT_DELAY: f32 = 0.34;
+    const REPEAT_INTERVAL: f32 = 0.11;
+
+    let just = if input.ui_up {
+        -1
+    } else if input.ui_down {
+        1
+    } else {
+        0
+    };
+    let held = if input.ui_vertical > 0.6 {
+        -1
+    } else if input.ui_vertical < -0.6 {
+        1
+    } else {
+        0
+    };
+
+    if just != 0 {
+        state.repeat_direction = just;
+        state.repeat_timer = INITIAL_REPEAT_DELAY;
+        return just;
+    }
+    if held != state.repeat_direction {
+        state.repeat_direction = held;
+        state.repeat_timer = INITIAL_REPEAT_DELAY;
+        return held;
+    }
+    if held == 0 {
+        state.repeat_direction = 0;
+        state.repeat_timer = 0.0;
+        return 0;
+    }
+    state.repeat_timer -= delta_secs;
+    if state.repeat_timer <= 0.0 {
+        state.repeat_timer = REPEAT_INTERVAL;
+        held
+    } else {
+        0
     }
 }
 
@@ -5211,5 +5398,41 @@ mod menu_navigation_tests {
             None
         );
         assert_eq!(focus.repeat_direction, None);
+    }
+
+    #[test]
+    fn focused_item_scrolls_only_when_outside_viewport() {
+        assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, 20.0, 40.0), 0.0);
+        assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, -5.0, 5.0), 15.0);
+        assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, 95.0, 105.0), -15.0);
+    }
+
+    #[test]
+    fn crafting_selection_wraps_in_both_directions() {
+        assert_eq!(cycle_index(0, 5, -1), 4);
+        assert_eq!(cycle_index(4, 5, 1), 0);
+        assert_eq!(cycle_index(2, 5, 0), 2);
+        assert_eq!(cycle_index(0, 0, 1), 0);
+    }
+
+    #[test]
+    fn crafting_stick_navigation_waits_then_repeats() {
+        let mut state = CraftingPanelState::default();
+        let input = PlayerInput {
+            ui_vertical: -1.0,
+            ..default()
+        };
+        assert_eq!(crafting_navigation_direction(&mut state, &input, 0.0), 1);
+        assert_eq!(crafting_navigation_direction(&mut state, &input, 0.2), 0);
+        assert_eq!(crafting_navigation_direction(&mut state, &input, 0.2), 1);
+    }
+
+    #[test]
+    fn crafting_selection_is_persistent_per_player() {
+        let mut state = CraftingPanelState::default();
+        state.recipe_index[0] = 3;
+        state.recipe_index[1] = 1;
+        assert_eq!(state.recipe_index[0], 3);
+        assert_eq!(state.recipe_index[1], 1);
     }
 }

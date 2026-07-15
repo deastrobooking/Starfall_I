@@ -47,7 +47,7 @@ use bevy::prelude::*;
 
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
 use crate::engine_tools::EngineToolMode;
-use crate::resources::GameSettings;
+use crate::resources::{GameSettings, UiGameplayCapture};
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct InputPlugin;
@@ -239,6 +239,7 @@ fn update_player_inputs(
     mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     time: Res<Time>,
     settings: Res<GameSettings>,
+    capture: Res<UiGameplayCapture>,
     native: Res<NativeControllerState>,
     mut trigger_history: Local<[TriggerAxisState; 4]>,
     mut players: Query<(&PlayerIndex, &mut PlayerInput), With<Player>>,
@@ -418,11 +419,15 @@ fn update_player_inputs(
             (is_p1 && keyboard.just_pressed(KeyCode::KeyG)) || (select_held && grapple_button_just);
 
         // ── Weapon cycle ──────────────────────────────────────────────────────
-        pi.weapon_next = (is_p1 && keyboard.just_pressed(KeyCode::BracketRight))
-            || (!select_held
-                && (btn_just(GamepadButton::RightTrigger)
-                    || native_just(NativeButton::RightShoulder))); // RB only — DPadRight freed for open_map
-        pi.weapon_prev = is_p1 && keyboard.just_pressed(KeyCode::BracketLeft);
+        let armor_keyboard_modifier =
+            keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+        pi.weapon_next =
+            (is_p1 && !armor_keyboard_modifier && keyboard.just_pressed(KeyCode::BracketRight))
+                || (!select_held
+                    && (btn_just(GamepadButton::RightTrigger)
+                        || native_just(NativeButton::RightShoulder))); // RB only — DPadRight freed for open_map
+        pi.weapon_prev =
+            is_p1 && !armor_keyboard_modifier && keyboard.just_pressed(KeyCode::BracketLeft);
 
         // ── Direct weapon slots (P1 keyboard) ────────────────────────────────
         pi.weapon_slot = if is_p1 {
@@ -501,7 +506,27 @@ fn update_player_inputs(
         };
 
         // ── DPad navigation (normal — skipped when Select modifier active) ────
-        let dpad_free = !select_held;
+        let armor_controller_modifier = left_trigger_held && !select_held;
+        pi.armor_element_delta = if is_p1
+            && armor_keyboard_modifier
+            && keyboard.just_pressed(KeyCode::BracketLeft)
+        {
+            -1
+        } else if is_p1 && armor_keyboard_modifier && keyboard.just_pressed(KeyCode::BracketRight) {
+            1
+        } else if armor_controller_modifier
+            && (btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft))
+        {
+            -1
+        } else if armor_controller_modifier
+            && (btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight))
+        {
+            1
+        } else {
+            0
+        };
+
+        let dpad_free = !select_held && !armor_controller_modifier;
 
         pi.interact = (is_p1 && keyboard.just_pressed(KeyCode::KeyE))
             || (dpad_free
@@ -551,9 +576,44 @@ fn update_player_inputs(
             || (native_just(NativeButton::LeftThumb) && native_held(NativeButton::RightThumb))
             || (native_just(NativeButton::RightThumb) && native_held(NativeButton::LeftThumb));
 
+        pi.ui_vertical = pi.move_axis.y;
+        pi.ui_up = (is_p1 && keyboard.just_pressed(KeyCode::ArrowUp))
+            || btn_just(GamepadButton::DPadUp)
+            || native_just(NativeButton::DPadUp);
+        pi.ui_down = (is_p1 && keyboard.just_pressed(KeyCode::ArrowDown))
+            || btn_just(GamepadButton::DPadDown)
+            || native_just(NativeButton::DPadDown);
+        pi.ui_confirm = (is_p1 && keyboard.just_pressed(KeyCode::Enter))
+            || btn_just(GamepadButton::South)
+            || native_just(NativeButton::South);
+
+        if capture.owner == Some(idx.0) {
+            suppress_gameplay_for_ui(&mut pi);
+        }
+
         trigger_history[history_slot].left = left_trigger_held;
         trigger_history[history_slot].right = right_trigger_held;
     }
+}
+
+fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
+    let preserved = (
+        input.gamepad_active,
+        input.crafting,
+        input.ui_vertical,
+        input.ui_up,
+        input.ui_down,
+        input.ui_confirm,
+    );
+    *input = PlayerInput::default();
+    (
+        input.gamepad_active,
+        input.crafting,
+        input.ui_vertical,
+        input.ui_up,
+        input.ui_down,
+        input.ui_confirm,
+    ) = preserved;
 }
 
 #[inline]
@@ -584,6 +644,30 @@ mod tests {
     fn trigger_axis_threshold_matches_controller_action_gate() {
         assert!(!axis_pressed(TRIGGER_AXIS_THRESHOLD));
         assert!(axis_pressed(TRIGGER_AXIS_THRESHOLD + 0.01));
+    }
+
+    #[test]
+    fn modal_ui_capture_preserves_navigation_but_clears_gameplay() {
+        let mut input = PlayerInput {
+            move_axis: Vec2::ONE,
+            fire: true,
+            jump: true,
+            enter_vehicle: true,
+            crafting: true,
+            ui_vertical: -1.0,
+            ui_down: true,
+            ui_confirm: true,
+            ..default()
+        };
+        suppress_gameplay_for_ui(&mut input);
+        assert_eq!(input.move_axis, Vec2::ZERO);
+        assert!(!input.fire);
+        assert!(!input.jump);
+        assert!(!input.enter_vehicle);
+        assert!(input.crafting);
+        assert_eq!(input.ui_vertical, -1.0);
+        assert!(input.ui_down);
+        assert!(input.ui_confirm);
     }
 }
 

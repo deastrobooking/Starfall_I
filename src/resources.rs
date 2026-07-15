@@ -47,6 +47,16 @@ impl WaveInfo {
     }
 }
 
+// ── UI input ownership ────────────────────────────────────────────────────────
+
+/// Captures one player's gameplay controls while an in-game modal panel uses
+/// that controller. Menu-specific input fields remain available on
+/// `PlayerInput`; movement, combat, and interaction actions are suppressed.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct UiGameplayCapture {
+    pub owner: Option<u8>,
+}
+
 // ── Game Settings ─────────────────────────────────────────────────────────────
 #[derive(Resource, Debug, Serialize, Deserialize)]
 pub struct GameSettings {

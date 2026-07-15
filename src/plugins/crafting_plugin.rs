@@ -236,3 +236,53 @@ pub fn start_craft(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crafting_queue_preserves_all_four_player_owners() {
+        let mut queue = CraftingQueue::default();
+        let stats = PlayerStats {
+            level: 2,
+            ..default()
+        };
+
+        for owner in 0..4 {
+            let mut inventory = Inventory::default();
+            inventory.add_item("scrap_metal", 5, 99);
+            inventory.add_item("energy_core", 2, 50);
+            start_craft("damage_mod", owner, &mut inventory, &stats, &mut queue)
+                .expect("every player can own a craft");
+        }
+
+        assert_eq!(queue.items.len(), 4);
+        assert_eq!(
+            queue
+                .items
+                .iter()
+                .map(|craft| craft.owner)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn failed_craft_does_not_consume_partial_materials() {
+        let mut queue = CraftingQueue::default();
+        let stats = PlayerStats {
+            level: 2,
+            ..default()
+        };
+        let mut inventory = Inventory::default();
+        inventory.add_item("scrap_metal", 5, 99);
+
+        assert_eq!(
+            start_craft("damage_mod", 3, &mut inventory, &stats, &mut queue),
+            Err("Insufficient materials")
+        );
+        assert!(inventory.has("scrap_metal", 5));
+        assert!(queue.items.is_empty());
+    }
+}

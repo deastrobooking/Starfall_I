@@ -3,7 +3,10 @@
 This is the durable next-work guide for future Codex sessions. Use
 `agent.md` for the short memory handoff, this file for production priorities,
 and `docs/engine_upgrade_milestones.md` for Bevy/physics-backend upgrade procedure.
-The current four-track audit is `docs/game_review_2026-07.md`.
+The current four-track audit is `docs/game_review_2026-07.md`. The evidence-based
+disposition of the external 156-item idea inventory is
+`docs/parallel_review_triage_2026-07.md`; use that triage instead of copying the
+raw suggestion list into milestones.
 
 ## Current Software Review
 
@@ -37,8 +40,9 @@ Handle these before widening content too much:
 
 - World generation is visually richer but still centralized in one very large
   plugin. New world content should be table-driven and share terrain helpers.
-- The main flow renders actions as Bevy buttons, but most activation is
-  mouse-driven. A shared focus/navigation/action layer is still required.
+- The main flow has shared spatial focus, D-pad/stick navigation, Confirm, Back,
+  repeat handling, and disabled-button styling. Remaining work is end-to-end
+  controller ownership and scroll/focus verification in complex panels.
 - A first `PlayerGuidance` HUD prompt now covers nearby interactions and city
   spy drones; future content should feed it instead of adding one-off hint text.
 - Robot pets have durable data, recipes, and a button-rendered Robot Garage screen
@@ -72,8 +76,8 @@ Handle these before widening content too much:
   condition land in M17.
 - Milestones M12–M17 are now defined in `docs/engine_upgrade_milestones.md`.
   Next immediate priority is M12 (settlement economy panel).
-- Controller support is coded, but still needs repeated hardware smoke passes
-  and an in-game diagnostics overlay.
+- Controller support and the F8 diagnostics overlay are coded, but still need
+  repeated four-pad hardware smoke passes and recorded controller-only flows.
 - Performance budgets are informal. The 200-mile terrain and split-screen
   camera paths need profiling before dense content is multiplied.
 
@@ -153,6 +157,13 @@ Primary files:
 ### N3: Multiplayer Ownership Completion
 
 Goal: remove remaining P1-only assumptions from player-facing play.
+
+**2026-07 ownership slice complete:** armor infusion now routes through
+per-player input, crafting has per-owner controller cursors plus modal gameplay
+capture, active party vehicles reject silent ownership takeover, and boat seats,
+late boarding, and replacement drivers are deterministic. Remaining work is a
+full inventory/equipment screen, deliberate pause/drop-in authority, save-backed
+equipment selection, and four-pad hardware acceptance.
 
 - Build per-player inventory/equipment UI before expanding armor complexity.
 - Decide pause/save authority UX for local multiplayer and document it.

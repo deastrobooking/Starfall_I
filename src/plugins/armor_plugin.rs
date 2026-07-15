@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::armor::*;
-use crate::components::player::{Player, PlayerIndex, PlayerStats};
+use crate::components::player::{Player, PlayerInput, PlayerStats};
 use crate::perks::PerkTree;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
@@ -90,34 +90,19 @@ fn apply_armor_health_bonus(
     }
 }
 
-/// Keyboard shortcuts to cycle elemental infusion (for testing/dev).
-/// In production this would be driven by a crafting/equipment UI.
-fn element_switch_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut player_q: Query<(&PlayerIndex, &mut ArmorSet), With<Player>>,
-) {
-    let direction = if keyboard.just_pressed(KeyCode::BracketLeft) {
-        Some(-1)
-    } else if keyboard.just_pressed(KeyCode::BracketRight) {
-        Some(1)
-    } else {
-        None
-    };
+/// Cycle each player's elemental infusion through the shared per-player input
+/// pipeline. This keeps controller ownership intact for all four couch players.
+fn element_switch_system(mut player_q: Query<(&PlayerInput, &mut ArmorSet), With<Player>>) {
+    for (input, mut armor) in player_q.iter_mut() {
+        armor.active_element = cycle_element(armor.active_element, input.armor_element_delta);
+    }
+}
 
-    let Some(direction) = direction else {
-        return;
-    };
-
-    for (index, mut armor) in player_q.iter_mut() {
-        if index.0 != 0 {
-            continue;
-        }
-        armor.active_element = if direction < 0 {
-            cycle_element_prev(armor.active_element)
-        } else {
-            cycle_element_next(armor.active_element)
-        };
-        break;
+fn cycle_element(element: ElementType, direction: i8) -> ElementType {
+    match direction.cmp(&0) {
+        std::cmp::Ordering::Less => cycle_element_prev(element),
+        std::cmp::Ordering::Greater => cycle_element_next(element),
+        std::cmp::Ordering::Equal => element,
     }
 }
 
@@ -140,5 +125,23 @@ fn cycle_element_prev(e: ElementType) -> ElementType {
         ElementType::Electric => ElementType::Ice,
         ElementType::DarkEnergy => ElementType::Electric,
         ElementType::Rift => ElementType::DarkEnergy,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn element_cycle_honors_each_direction_and_idle_input() {
+        assert_eq!(cycle_element(ElementType::Fire, -1), ElementType::None);
+        assert_eq!(cycle_element(ElementType::Fire, 0), ElementType::Fire);
+        assert_eq!(cycle_element(ElementType::Fire, 1), ElementType::Ice);
+    }
+
+    #[test]
+    fn element_cycle_wraps_in_both_directions() {
+        assert_eq!(cycle_element(ElementType::None, -1), ElementType::Rift);
+        assert_eq!(cycle_element(ElementType::Rift, 1), ElementType::None);
     }
 }

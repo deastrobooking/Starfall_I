@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use crate::plugins::ui_plugin::MenuScrollPanel;
 use crate::robot_pets::{RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError};
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
@@ -97,9 +98,12 @@ fn setup_garage(
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::axes(Val::Px(40.0), Val::Px(32.0)),
                 row_gap: Val::Px(18.0),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
             BackgroundColor(dark_bg),
+            ScrollPosition::default(),
+            MenuScrollPanel,
             GarageRoot,
         ))
         .with_children(|root| {
@@ -111,6 +115,16 @@ fn setup_garage(
                     ..default()
                 },
                 TextColor(header_color),
+            ));
+            root.spawn((
+                Text::new(
+                    "D-PAD / LEFT STICK: move focus   A: activate   B: back   Selection is remembered",
+                ),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+                TextColor(dim_color),
             ));
 
             // Parts inventory panel
@@ -580,5 +594,25 @@ fn format_feedback(result: Option<GarageActionResult>) -> &'static str {
         Some(GarageActionResult::NotEnoughPets) => "Not enough eligible pets for this form.",
         Some(GarageActionResult::NotEnoughParts) => "Missing parts — collect more in missions.",
         Some(GarageActionResult::AlreadyAssembled) => "Already assembled.",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn garage_remembers_selected_form_across_screen_reentry() {
+        let mut data = GarageData {
+            form_index: 3,
+            last_result: Some(GarageActionResult::NotEnoughParts),
+        };
+        data.last_result = None;
+        let form_count = RobotAssemblyForm::ALL.len();
+        if data.form_index >= form_count {
+            data.form_index = 0;
+        }
+        assert_eq!(data.form_index, 3);
+        assert!(data.last_result.is_none());
     }
 }

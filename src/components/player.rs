@@ -829,6 +829,14 @@ pub struct PlayerInput {
     pub enter_vehicle: bool,
     pub open_map: bool,
     pub sabre_toggle: bool,
+    /// Per-frame request to cycle this player's active armor infusion.
+    /// Negative selects the previous element; positive selects the next.
+    pub armor_element_delta: i8,
+    /// UI-only navigation survives modal gameplay-input capture.
+    pub ui_vertical: f32,
+    pub ui_up: bool,
+    pub ui_down: bool,
+    pub ui_confirm: bool,
     pub weapon_slot: Option<usize>,
     pub traversal_mode_switch: Option<TraversalMode>,
     /// Digit 7/8/9/0 or Select + D-pad → slots 0–3.

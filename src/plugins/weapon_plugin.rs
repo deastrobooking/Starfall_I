@@ -29,6 +29,14 @@ struct SabreBladeVisual {
     owner: Entity,
 }
 
+/// World-space confirmation that a homing projectile has acquired a target.
+/// It follows the enemy rather than the camera, so it remains readable in
+/// four-player split screen without another per-viewport UI layer.
+#[derive(Component)]
+struct TargetLockVisual {
+    missile: Entity,
+}
+
 // ── Projectile Asset Cache ────────────────────────────────────────────────────
 #[derive(Resource)]
 pub struct ProjectileAssets {
@@ -38,6 +46,7 @@ pub struct ProjectileAssets {
     pub sphere_lg: Handle<Mesh>,
     pub sphere_xl: Handle<Mesh>,
     pub flash_sphere: Handle<Mesh>,
+    pub lock_ring: Handle<Mesh>,
     // Base projectile materials
     pub mat_pistol: Handle<StandardMaterial>,
     pub mat_rifle: Handle<StandardMaterial>,
@@ -52,6 +61,9 @@ pub struct ProjectileAssets {
     pub mat_companion: Handle<StandardMaterial>,
     pub mat_melee_flash: Handle<StandardMaterial>,
     pub mat_hit_particle: Handle<StandardMaterial>,
+    pub mat_critical_hit: Handle<StandardMaterial>,
+    pub mat_missile_lock: Handle<StandardMaterial>,
+    pub mat_magic_lock: Handle<StandardMaterial>,
     // Charge blast materials (2-3x emissive of base)
     pub mat_charge_pistol: Handle<StandardMaterial>,
     pub mat_charge_rifle: Handle<StandardMaterial>,
@@ -81,11 +93,13 @@ impl Plugin for WeaponPlugin {
                     charge_spark_system,
                     special_weapon_system,
                     tracking_missile_system.before(projectile_update_system),
+                    sync_target_lock_visual.after(tracking_missile_system),
                     projectile_update_system,
                     melee_combo_system,
                     beam_sabre_update_system,
                     sync_sabre_blade_visual.after(beam_sabre_update_system),
                     hit_particle_spawn_system,
+                    critical_impact_spawn_system.after(hit_particle_spawn_system),
                     particle_update_system,
                 )
                     .run_if(in_state(AppState::Playing)),
@@ -123,6 +137,7 @@ fn setup_weapon_assets(
         sphere_lg: meshes.add(Sphere::new(0.42)),
         sphere_xl: meshes.add(Sphere::new(0.72)),
         flash_sphere: meshes.add(Sphere::new(0.9)),
+        lock_ring: meshes.add(Torus::new(0.82, 1.0)),
         // Base materials — emissive tuned for bloom
         mat_pistol: mk_proj_mat(m, 1.0, 0.95, 0.25, 4.0, 3.0, 0.4),
         mat_rifle: mk_proj_mat(m, 0.15, 0.9, 1.0, 0.4, 3.5, 5.0),
@@ -137,6 +152,9 @@ fn setup_weapon_assets(
         mat_companion: mk_proj_mat(m, 1.0, 0.55, 0.2, 4.0, 1.6, 0.4),
         mat_melee_flash: mk_proj_mat(m, 1.0, 0.95, 0.35, 5.0, 3.2, 0.6),
         mat_hit_particle: mk_proj_mat(m, 1.0, 0.85, 0.2, 4.0, 2.5, 0.4),
+        mat_critical_hit: mk_proj_mat(m, 1.0, 0.18, 0.72, 9.0, 0.8, 6.0),
+        mat_missile_lock: mk_translucent_mat(m, 1.0, 0.72, 0.12, 5.5, 2.2, 0.2),
+        mat_magic_lock: mk_translucent_mat(m, 0.28, 0.92, 1.0, 0.8, 4.8, 7.0),
         // Charge blast materials — ~2-3x emissive, near-white hot core
         mat_charge_pistol: mk_proj_mat(m, 1.0, 1.0, 0.6, 10.0, 8.0, 2.0),
         mat_charge_rifle: mk_proj_mat(m, 0.6, 0.95, 1.0, 2.0, 9.0, 12.0),
@@ -148,6 +166,24 @@ fn setup_weapon_assets(
         mat_charge_spark: mk_proj_mat(m, 1.0, 1.0, 0.8, 8.0, 6.0, 2.0),
         mat_muzzle_flash: mk_proj_mat(m, 1.0, 1.0, 1.0, 10.0, 10.0, 6.0),
     });
+}
+
+fn mk_translucent_mat(
+    materials: &mut Assets<StandardMaterial>,
+    r: f32,
+    g: f32,
+    b: f32,
+    er: f32,
+    eg: f32,
+    eb: f32,
+) -> Handle<StandardMaterial> {
+    materials.add(StandardMaterial {
+        base_color: Color::srgba(r, g, b, 0.82),
+        emissive: LinearRgba::new(er, eg, eb, 1.0),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    })
 }
 
 // ── Muzzle origin ─────────────────────────────────────────────────────────────
@@ -516,6 +552,7 @@ fn weapon_fire_system(
         let explosion_radius = weapon.explosion_radius * upgrades.gauntlet_explosion_radius_mult();
         let gravity_affected = weapon.weapon_type == WeaponType::Grenade;
         let stretch = weapon.proj_stretch();
+        let visual_profile = weapon.visual_profile();
         let effective_fire_rate = weapon.rank_effective_fire_rate();
         let damage_type = gauntlet_projectile_damage_type(
             &upgrades,
@@ -582,7 +619,12 @@ fn weapon_fire_system(
             }
         }
 
-        spawn_muzzle_flash(&mut commands, &proj_assets, pos);
+        spawn_muzzle_flash_scaled(
+            &mut commands,
+            &proj_assets,
+            pos,
+            visual_profile.muzzle_scale,
+        );
         sm.transition(PlayerState::Attacking);
         fired_ev.write(WeaponFiredEvent);
     }
@@ -614,11 +656,20 @@ fn charge_mat_handle(wt: WeaponType, assets: &ProjectileAssets) -> Handle<Standa
 }
 
 fn spawn_muzzle_flash(commands: &mut Commands, assets: &ProjectileAssets, pos: Vec3) {
+    spawn_muzzle_flash_scaled(commands, assets, pos, 1.0);
+}
+
+fn spawn_muzzle_flash_scaled(
+    commands: &mut Commands,
+    assets: &ProjectileAssets,
+    pos: Vec3,
+    scale: f32,
+) {
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(assets.flash_sphere.clone()),
             material: MeshMaterial3d(assets.mat_muzzle_flash.clone()),
-            transform: Transform::from_translation(pos).with_scale(Vec3::splat(0.35)),
+            transform: Transform::from_translation(pos).with_scale(Vec3::splat(0.35 * scale)),
             ..default()
         },
         HitParticle {
@@ -1244,6 +1295,64 @@ fn tracking_missile_system(
     }
 }
 
+fn sync_target_lock_visual(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Res<ProjectileAssets>,
+    missile_q: Query<(Entity, &TrackingMissile)>,
+    target_q: Query<&GlobalTransform, (With<Enemy>, Without<TargetLockVisual>)>,
+    mut visual_q: Query<(Entity, &TargetLockVisual, &mut Transform), Without<Enemy>>,
+) {
+    let mut represented = Vec::new();
+    for (visual_entity, visual, mut transform) in visual_q.iter_mut() {
+        let Ok((_, missile)) = missile_q.get(visual.missile) else {
+            commands.entity(visual_entity).despawn();
+            continue;
+        };
+        let Some(target) = missile.target else {
+            commands.entity(visual_entity).despawn();
+            continue;
+        };
+        let Ok(target_transform) = target_q.get(target) else {
+            commands.entity(visual_entity).despawn();
+            continue;
+        };
+
+        represented.push(visual.missile);
+        let pulse = 1.0 + (time.elapsed_secs() * 8.0 + missile.owner_player as f32).sin() * 0.12;
+        transform.translation = target_transform.translation() + Vec3::Y * 1.05;
+        transform.rotation *= Quat::from_rotation_y(time.delta_secs() * 2.8);
+        transform.scale = Vec3::splat(pulse * if missile.magic_beam { 1.35 } else { 1.15 });
+    }
+
+    for (missile_entity, missile) in missile_q.iter() {
+        if represented.contains(&missile_entity) {
+            continue;
+        }
+        let Some(target) = missile.target else {
+            continue;
+        };
+        let Ok(target_transform) = target_q.get(target) else {
+            continue;
+        };
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(assets.lock_ring.clone()),
+                material: MeshMaterial3d(if missile.magic_beam {
+                    assets.mat_magic_lock.clone()
+                } else {
+                    assets.mat_missile_lock.clone()
+                }),
+                transform: Transform::from_translation(target_transform.translation() + Vec3::Y),
+                ..default()
+            },
+            TargetLockVisual {
+                missile: missile_entity,
+            },
+        ));
+    }
+}
+
 fn acquire_tracking_target(
     origin: Vec3,
     forward: Vec3,
@@ -1305,7 +1414,12 @@ fn segment_point_distance_squared(start: Vec3, end: Vec3, point: Vec3) -> f32 {
 fn projectile_update_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut proj_q: Query<(Entity, &mut Transform, &mut Projectile)>,
+    mut proj_q: Query<(
+        Entity,
+        &mut Transform,
+        &mut Projectile,
+        Option<&ChargeBlastTag>,
+    )>,
     mut enemy_q: Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         (
@@ -1332,10 +1446,12 @@ fn projectile_update_system(
     >,
     mut enemy_damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut enemy_killed_ev: MessageWriter<EnemyKilledEvent>,
+    mut impact_ev: MessageWriter<CombatImpactEvent>,
 ) {
     let dt = time.delta_secs();
 
-    for (proj_entity, mut proj_transform, mut proj) in proj_q.iter_mut() {
+    for (proj_entity, mut proj_transform, mut proj, charge_blast) in proj_q.iter_mut() {
+        let is_critical = charge_blast.is_some();
         let previous_position = proj_transform.translation;
         proj_transform.translation += proj.direction * proj.speed * dt;
 
@@ -1352,9 +1468,11 @@ fn projectile_update_system(
                     proj.explosion_radius,
                     proj.damage,
                     proj.damage_type,
+                    is_critical,
                     &mut enemy_q,
                     &mut enemy_damaged_ev,
                     &mut enemy_killed_ev,
+                    &mut impact_ev,
                 );
                 damage_road_vehicles_in_radius(
                     &proj_transform.translation,
@@ -1375,9 +1493,11 @@ fn projectile_update_system(
                     proj.explosion_radius,
                     proj.damage,
                     proj.damage_type,
+                    is_critical,
                     &mut enemy_q,
                     &mut enemy_damaged_ev,
                     &mut enemy_killed_ev,
+                    &mut impact_ev,
                 );
                 damage_road_vehicles_in_radius(
                     &proj_transform.translation,
@@ -1419,14 +1539,23 @@ fn projectile_update_system(
                         .with_y(0.0)
                         .normalize_or_zero()
                         + Vec3::Y * 0.2;
-                    let info = DamageInfo::new(proj.damage, proj.damage_type)
+                    let mut info = DamageInfo::new(proj.damage, proj.damage_type)
                         .with_knockback(2.2)
                         .with_hit_direction(push);
+                    if is_critical {
+                        info = info.critical();
+                    }
                     let result = apply_damage(&mut e_health, &mut e_damageable, &info);
                     enemy_damaged_ev.write(EnemyDamagedEvent {
                         entity: e_entity,
                         damage: result.damage_amount,
                         position: e_transform.translation,
+                    });
+                    impact_ev.write(CombatImpactEvent {
+                        position: e_transform.translation,
+                        damage: result.damage_amount,
+                        damage_type: proj.damage_type,
+                        is_critical: result.was_critical,
                     });
                     if result.was_killed {
                         enemy_killed_ev.write(EnemyKilledEvent {
@@ -1482,9 +1611,11 @@ fn projectile_update_system(
                 radius,
                 dmg,
                 damage_type,
+                is_critical,
                 &mut enemy_q,
                 &mut enemy_damaged_ev,
                 &mut enemy_killed_ev,
+                &mut impact_ev,
             );
             damage_road_vehicles_in_radius(&pos, radius, dmg, damage_type, &mut road_vehicle_q);
         }
@@ -1499,6 +1630,7 @@ fn explode(
     radius: f32,
     base_damage: f32,
     damage_type: DamageType,
+    is_critical: bool,
     enemy_q: &mut Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         (
@@ -1510,6 +1642,7 @@ fn explode(
     >,
     damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
     killed_ev: &mut MessageWriter<EnemyKilledEvent>,
+    impact_ev: &mut MessageWriter<CombatImpactEvent>,
 ) {
     for (e_entity, e_transform, mut e_health, mut e_damageable, enemy) in enemy_q.iter_mut() {
         if !e_health.is_alive() {
@@ -1524,14 +1657,23 @@ fn explode(
                 + Vec3::Y * 0.35;
             // Blast knockback falls off with distance like the damage does.
             let force = 4.5 * (1.0 - (dist / radius).clamp(0.0, 1.0)) + 1.0;
-            let info = DamageInfo::new(damage, damage_type)
+            let mut info = DamageInfo::new(damage, damage_type)
                 .with_knockback(force)
                 .with_hit_direction(blast);
+            if is_critical {
+                info = info.critical();
+            }
             let result = apply_damage(&mut e_health, &mut e_damageable, &info);
             damaged_ev.write(EnemyDamagedEvent {
                 entity: e_entity,
                 damage: result.damage_amount,
                 position: e_transform.translation,
+            });
+            impact_ev.write(CombatImpactEvent {
+                position: e_transform.translation,
+                damage: result.damage_amount,
+                damage_type,
+                is_critical: result.was_critical,
             });
             if result.was_killed {
                 killed_ev.write(EnemyKilledEvent {
@@ -2083,6 +2225,41 @@ fn hit_particle_spawn_system(
                 },
             ));
         }
+    }
+}
+
+fn critical_impact_spawn_system(
+    mut commands: Commands,
+    assets: Res<ProjectileAssets>,
+    mut impact_ev: MessageReader<CombatImpactEvent>,
+) {
+    for impact in impact_ev.read() {
+        if !impact.is_critical {
+            continue;
+        }
+        // Critical hits get a short, unmistakable hot-pink core whose size
+        // reflects resolved (post-resistance) damage. The ordinary gold sparks
+        // still render beneath it, keeping normal and critical hits distinct.
+        let damage_scale = (impact.damage / 60.0).sqrt().clamp(0.85, 2.1);
+        let elemental_scale = match impact.damage_type {
+            DamageType::Explosive | DamageType::Fire => 1.25,
+            DamageType::Melee => 0.9,
+            _ => 1.0,
+        };
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(assets.flash_sphere.clone()),
+                material: MeshMaterial3d(assets.mat_critical_hit.clone()),
+                transform: Transform::from_translation(impact.position + Vec3::Y * 0.8)
+                    .with_scale(Vec3::splat(damage_scale * elemental_scale)),
+                ..default()
+            },
+            HitParticle {
+                lifetime: 0.14,
+                max_lifetime: 0.14,
+                velocity: Vec3::Y * 1.5,
+            },
+        ));
     }
 }
 

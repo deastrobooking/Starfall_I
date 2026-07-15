@@ -177,6 +177,13 @@ fn vehicle_input(
     mut state: ResMut<VehicleState>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
+    // Commands are deferred, so reserve seats locally as players board during
+    // this system run to prevent simultaneous requests claiming the same seat.
+    let mut reserved_boat_seats = player_q
+        .iter()
+        .filter_map(|(_, _, _, _, passenger)| passenger.map(|p| (p.boat, p.seat)))
+        .collect::<Vec<_>>();
+
     for (entity, idx, player_transform, pi, passenger) in player_q.iter() {
         // ── Ground vehicle toggle (M key / open_map) ──────────────────────────
         if pi.open_map {
@@ -190,6 +197,13 @@ fn vehicle_input(
             };
 
             if let Some(mode) = available_ground {
+                if vehicle_owned_by_other(&state, idx.0) {
+                    msg_ev.write(UiMessageEvent {
+                        text: vehicle_in_use_message(&state),
+                        duration: 1.8,
+                    });
+                    continue;
+                }
                 let currently_on = state.ground_mode == mode && state.active_owner == Some(idx.0);
                 if currently_on {
                     state.deactivate_ground();
@@ -254,6 +268,59 @@ fn vehicle_input(
                 continue;
             }
 
+            // A party boat has one driver. Players who board after departure
+            // become passengers instead of silently replacing its owner and
+            // creating a second driver.
+            if state.boat_active {
+                let Some(active_boat) = state.active_boat else {
+                    state.deactivate_all_vehicle();
+                    continue;
+                };
+                let Ok((_, boat_transform, boat)) = boat_q.get(active_boat) else {
+                    state.deactivate_all_vehicle();
+                    continue;
+                };
+                let occupied_seats = reserved_boat_seats
+                    .iter()
+                    .filter_map(|(boat, seat)| (*boat == active_boat).then_some(*seat))
+                    .collect::<Vec<_>>();
+                if player_transform
+                    .translation
+                    .distance(boat_transform.translation)
+                    > boat.passenger_radius
+                {
+                    msg_ev.write(UiMessageEvent {
+                        text: format!(
+                            "P{}: party boat is underway — meet it at a dock.",
+                            idx.0 + 1
+                        ),
+                        duration: 2.0,
+                    });
+                } else if let Some(seat) = first_available_boat_seat(&occupied_seats) {
+                    reserved_boat_seats.push((active_boat, seat));
+                    commands.entity(entity).insert(BoatPassenger {
+                        boat: active_boat,
+                        seat,
+                        is_driver: false,
+                    });
+                    msg_ev.write(UiMessageEvent {
+                        text: format!(
+                            "P{} boarded seat {} — P{} is driving",
+                            idx.0 + 1,
+                            seat + 1,
+                            state.active_owner.unwrap_or(0) + 1
+                        ),
+                        duration: 2.0,
+                    });
+                } else {
+                    msg_ev.write(UiMessageEvent {
+                        text: "Party boat is full (4/4).".into(),
+                        duration: 1.8,
+                    });
+                }
+                continue;
+            }
+
             // Embark nearby boat if present.
             if let Some((boat_entity, boat_transform, boat)) = boat_q
                 .iter()
@@ -274,14 +341,14 @@ fn vehicle_input(
                 state.active_boat = Some(boat_entity);
                 state.boat_heading = yaw_from_rotation(boat_transform.rotation);
                 let trip_distance = boat.dock_position.distance(boat.island_position);
-                board_nearby_players(
+                reserved_boat_seats.extend(board_nearby_players(
                     &mut commands,
                     &player_q,
                     boat_entity,
                     boat_transform,
                     boat,
                     entity,
-                );
+                ));
                 msg_ev.write(UiMessageEvent {
                     text: format!(
                         "P{} Boat: ON - steer along the wake ({:.0}m)",
@@ -296,6 +363,13 @@ fn vehicle_input(
             // Air mode toggle.
             let available_air = assembled_air_mode(&robot_pets, &loadout);
             if available_air != AirMode::None {
+                if vehicle_owned_by_other(&state, idx.0) {
+                    msg_ev.write(UiMessageEvent {
+                        text: vehicle_in_use_message(&state),
+                        duration: 1.8,
+                    });
+                    continue;
+                }
                 let currently_on =
                     state.air_mode == available_air && state.active_owner == Some(idx.0);
                 if currently_on {
@@ -346,6 +420,20 @@ fn air_mode_label(mode: AirMode) -> &'static str {
     }
 }
 
+fn vehicle_owned_by_other(state: &VehicleState, requester: u8) -> bool {
+    state.active_owner.is_some_and(|owner| owner != requester)
+        && (state.ground_mode != GroundMode::None
+            || state.air_mode != AirMode::None
+            || state.boat_active)
+}
+
+fn vehicle_in_use_message(state: &VehicleState) -> String {
+    format!(
+        "Party vehicle is in use by P{} — they must exit first.",
+        state.active_owner.unwrap_or(0) + 1
+    )
+}
+
 #[allow(clippy::type_complexity)]
 fn board_nearby_players(
     commands: &mut Commands,
@@ -363,7 +451,7 @@ fn board_nearby_players(
     boat_transform: &Transform,
     boat: &BoatVehicle,
     driver_entity: Entity,
-) {
+) -> Vec<(Entity, u8)> {
     let mut riders: Vec<(Entity, u8, bool)> = player_q
         .iter()
         .filter(|(_, _, player_transform, _, passenger)| {
@@ -377,13 +465,17 @@ fn board_nearby_players(
         .collect();
 
     riders.sort_by_key(|(_, index, is_driver)| (!*is_driver, *index));
+    let mut occupied = Vec::new();
     for (seat, (entity, _, is_driver)) in riders.into_iter().take(4).enumerate() {
+        let seat = seat as u8;
         commands.entity(entity).insert(BoatPassenger {
             boat: boat_entity,
-            seat: seat as u8,
+            seat,
             is_driver,
         });
+        occupied.push((boat_entity, seat));
     }
+    occupied
 }
 
 #[allow(clippy::type_complexity)]
@@ -549,7 +641,7 @@ fn boat_drive_system(
     mut state: ResMut<VehicleState>,
     mut queries: ParamSet<(
         Query<(&mut Transform, &BoatVehicle)>,
-        Query<(&PlayerIndex, &PlayerInput, &BoatPassenger), With<Player>>,
+        Query<(&PlayerIndex, &PlayerInput, &mut BoatPassenger), With<Player>>,
         Query<(&mut Transform, &mut PlayerMovement, &BoatPassenger), With<Player>>,
     )>,
 ) {
@@ -561,10 +653,24 @@ fn boat_drive_system(
     };
 
     let mut driver_axis = Vec2::ZERO;
-    for (idx, input, passenger) in queries.p1().iter() {
-        if passenger.boat == boat_entity && passenger.is_driver && idx.0 == owner {
+    let riders = queries
+        .p1()
+        .iter()
+        .filter(|(_, _, passenger)| passenger.boat == boat_entity)
+        .map(|(index, _, passenger)| (index.0, passenger.is_driver))
+        .collect::<Vec<_>>();
+    let Some(driver) = replacement_boat_driver(&riders, Some(owner)) else {
+        state.deactivate_all_vehicle();
+        return;
+    };
+    state.active_owner = Some(driver);
+    for (idx, input, mut passenger) in queries.p1().iter_mut() {
+        if passenger.boat != boat_entity {
+            continue;
+        }
+        passenger.is_driver = idx.0 == driver;
+        if passenger.is_driver {
             driver_axis = input.move_axis;
-            break;
         }
     }
 
@@ -619,6 +725,21 @@ fn boat_seat_offset(seat: u8) -> Vec3 {
         2 => Vec3::new(1.35, 1.02, -0.55),
         _ => Vec3::new(0.0, 1.02, -2.25),
     }
+}
+
+fn first_available_boat_seat(occupied: &[u8]) -> Option<u8> {
+    (0..4).find(|seat| !occupied.contains(seat))
+}
+
+fn replacement_boat_driver(riders: &[(u8, bool)], current_owner: Option<u8>) -> Option<u8> {
+    if let Some(owner) = current_owner.filter(|owner| {
+        riders
+            .iter()
+            .any(|(index, is_driver)| index == owner && *is_driver)
+    }) {
+        return Some(owner);
+    }
+    riders.iter().map(|(index, _)| *index).min()
 }
 
 #[cfg(test)]
@@ -685,5 +806,37 @@ mod tests {
         stats.armor = 135.0;
         apply_vehicle_armor_bonus(&mut stats, 40.0, 0.0);
         assert_eq!(stats.armor, 100.0);
+    }
+
+    #[test]
+    fn late_boat_boarding_uses_first_free_seat_without_driver_takeover() {
+        assert_eq!(first_available_boat_seat(&[0, 2]), Some(1));
+        assert_eq!(first_available_boat_seat(&[0, 1, 2, 3]), None);
+    }
+
+    #[test]
+    fn boat_driver_is_stable_then_promotes_lowest_player_index() {
+        assert_eq!(
+            replacement_boat_driver(&[(0, false), (2, true), (3, false)], Some(2)),
+            Some(2)
+        );
+        assert_eq!(
+            replacement_boat_driver(&[(3, false), (1, false)], Some(2)),
+            Some(1)
+        );
+        assert_eq!(replacement_boat_driver(&[], Some(2)), None);
+    }
+
+    #[test]
+    fn active_party_vehicle_cannot_be_silently_stolen() {
+        let state = VehicleState {
+            ground_mode: GroundMode::Motorcycle,
+            active_owner: Some(1),
+            ..default()
+        };
+
+        assert!(!vehicle_owned_by_other(&state, 1));
+        assert!(vehicle_owned_by_other(&state, 0));
+        assert!(vehicle_in_use_message(&state).contains("P2"));
     }
 }

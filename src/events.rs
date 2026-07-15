@@ -82,6 +82,17 @@ pub struct ComboFinishedEvent {
     pub combo_name: String,
 }
 
+/// Renderer-agnostic description of a confirmed combat impact. Keeping this
+/// separate from enemy lifecycle events lets VFX distinguish critical and
+/// elemental hits without coupling health logic to a particular renderer.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct CombatImpactEvent {
+    pub position: Vec3,
+    pub damage: f32,
+    pub damage_type: crate::damage::DamageType,
+    pub is_critical: bool,
+}
+
 // ── Loot / Chest ──────────────────────────────────────────────────────────────
 #[derive(Message, Debug)]
 pub struct LootCollectedEvent {
@@ -199,6 +210,7 @@ impl Plugin for EventsPlugin {
             // Combat
             .add_message::<ComboHitEvent>()
             .add_message::<ComboFinishedEvent>()
+            .add_message::<CombatImpactEvent>()
             // Loot
             .add_message::<LootCollectedEvent>()
             .add_message::<ChestOpenedEvent>()
