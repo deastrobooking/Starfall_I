@@ -6,7 +6,9 @@ use crate::character_parts::{
     spawn_arms, spawn_body, spawn_head, spawn_legs, spawn_shoulders, CharacterLoadout,
     CharacterVisualConfig, PartSlotTag,
 };
-use crate::character_studio::human_mesh::{PlayableStudioHuman, StudioBodyRegion, StudioHumanPart};
+use crate::character_studio::human_mesh::{
+    PlayableStudioHuman, StudioBodyRegion, StudioFaceFeature, StudioHumanPart,
+};
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
     CartoonPose, CharacterIkPose, HandEngine, HandGrip, HandPoseState, HandSide, IkTarget,
@@ -967,6 +969,40 @@ fn studio_human_animation_system(
         transform.translation = part.pivot + rotation * (part.rest.translation - part.pivot);
         transform.rotation = rotation * part.rest.rotation;
         transform.scale = part.rest.scale;
+
+        // Facial pieces have semantic tags from the procedural generator.
+        // A short, deterministic blink works in every locomotion state; attack
+        // poses add a readable shout and stronger brows without requiring an
+        // authored skeletal face rig.
+        let blink = (phase * 0.23).sin().abs().powf(38.0);
+        let attacking = matches!(pose, CartoonPose::Attack | CartoonPose::SabreSlash);
+        match part.face_feature {
+            Some(StudioFaceFeature::LeftEye | StudioFaceFeature::RightEye) => {
+                transform.scale.y *= (1.0 - blink * 0.90).max(0.08);
+            }
+            Some(StudioFaceFeature::LeftBrow) => {
+                transform.rotation *= Quat::from_rotation_z(if attacking { -0.16 } else { 0.0 });
+                transform.translation.y += blink * 0.008;
+            }
+            Some(StudioFaceFeature::RightBrow) => {
+                transform.rotation *= Quat::from_rotation_z(if attacking { 0.16 } else { 0.0 });
+                transform.translation.y += blink * 0.008;
+            }
+            Some(StudioFaceFeature::Mouth) => {
+                let talk = if attacking {
+                    2.2
+                } else if matches!(
+                    pose,
+                    CartoonPose::Run | CartoonPose::Sprint | CartoonPose::Fly
+                ) {
+                    1.0 + phase.sin().abs() * 0.35
+                } else {
+                    1.0
+                };
+                transform.scale.y *= talk;
+            }
+            None => {}
+        }
     }
 }
 
@@ -2778,6 +2814,7 @@ mod tests {
                     rest,
                     pivot: Vec3::new(0.3, 1.2, 0.0),
                     region: StudioBodyRegion::RightArm,
+                    face_feature: None,
                 },
             ))
             .id();

@@ -1,7 +1,8 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 // ── Archetypes ────────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum RobotArchetype {
     #[default]
     Scout,
@@ -15,7 +16,7 @@ pub enum RobotArchetype {
 }
 
 // ── Head Shape ────────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum HeadShape {
     #[default]
     Box,
@@ -25,7 +26,7 @@ pub enum HeadShape {
 }
 
 // ── Arm Style ─────────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ArmStyle {
     #[default]
     Cylinder,
@@ -34,7 +35,7 @@ pub enum ArmStyle {
 }
 
 // ── Leg Style ─────────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum LegStyle {
     #[default]
     Box,
@@ -43,7 +44,7 @@ pub enum LegStyle {
 }
 
 // ── Visor Style ───────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum VisorStyle {
     #[default]
     Slit,
@@ -52,7 +53,8 @@ pub enum VisorStyle {
 }
 
 // ── Robot Style ───────────────────────────────────────────────────────────────
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RobotStyle {
     // Base
     pub archetype: RobotArchetype,
@@ -120,9 +122,33 @@ pub struct RobotStyle {
     pub asymmetry: f32,
 
     // Colors
+    #[serde(with = "color_serde")]
     pub primary: Color,
+    #[serde(with = "color_serde")]
     pub secondary: Color,
+    #[serde(with = "color_serde")]
     pub emissive: Color,
+}
+
+mod color_serde {
+    use bevy::prelude::Color;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(color: &Color, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let c = color.to_srgba();
+        [c.red, c.green, c.blue, c.alpha].serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Color, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let [r, g, b, a] = <[f32; 4]>::deserialize(deserializer)?;
+        Ok(Color::srgba(r, g, b, a))
+    }
 }
 
 impl Default for RobotStyle {

@@ -8,7 +8,9 @@ runtime mesh entities directly.
 
 ## Player workflow
 
-1. Choose a male/female base and optional build or face preset.
+1. Choose a male/female base or a gameplay archetype: STAR HERO,
+   SHADOW RAIDER, MANA ADVENTURER, STREET RUNNER, or MECHA ROBOT. Presets are
+   editable seeds, never locked character classes.
 2. Sculpt body and face proportions with sliders or precise `-` / `+` steps.
 3. Use `R` on a row to restore only that field, or RESET ALL to return to a
    neutral model. Both are protected by the 64-step undo history.
@@ -17,7 +19,8 @@ runtime mesh entities directly.
 5. Mix wardrobe slots and colors. Palette fields show their actual color next
    to the value instead of only a numeric index.
 6. SAVE VERSION writes a new JSON preset. Existing versions remain available
-   through the scrollable library.
+   through the scrollable library. USE IN GAME assigns the exact generated
+   model to the active local-player slot.
 
 Controller layout:
 
@@ -53,8 +56,18 @@ implementation is upgraded.
 
 The generated base deliberately targets a broad 1980s cel-anime language:
 larger cranium, tapered lower face, wide eyes with upper lashes and catchlights,
-small readable nose, warm cheek marks, and graphic hair silhouettes. These are
-original procedural forms and are not tied to one show or artist.
+small readable nose, warm cheek marks, and graphic hair silhouettes. Eye
+spacing, eye tilt, brow angle, and lip fullness now join the original face
+controls. The mouth has separate cavity and upper/lower-lip geometry. Generated
+eyes, brows, and mouth carry semantic feature tags so runtime animation can
+blink, emote, breathe, and open the mouth during attacks independently of the
+head. These are original procedural forms and are not tied to one show or
+artist.
+
+The MECHA ROBOT preset preserves the generator's successful armored silhouette
+as a first-class character seed. STAR HERO and SHADOW RAIDER provide readable
+good-guy/bad-guy contrast; MANA ADVENTURER targets compact shared-camera fantasy
+play; STREET RUNNER demonstrates the city clothing stack.
 
 Wardrobe options currently include ten top silhouettes, eight bottoms, nine
 footwear silhouettes, nine hairstyles, gloves/gauntlets, and two full armor
@@ -100,7 +113,8 @@ Production shape keys must use the existing patch names:
 ```text
 body_height body_muscle body_weight shoulders_wide waist_width hips_wide limb_length
 face_jaw_wide face_chin_long face_nose_long face_nose_wide face_brow_heavy
-face_cheek_full face_eye_large face_mouth_wide
+face_cheek_full face_eye_large face_eye_spacing face_eye_tilt face_brow_angle
+face_mouth_wide face_lip_full
 ```
 
 This contract means a future Blender model can replace the preview renderer
@@ -112,17 +126,18 @@ The studio now has a viable modeling loop, but it is not yet a Blender-style
 mesh editor. The next upgrades should preserve constrained output while adding
 more visual authoring power:
 
-1. Add collapsible Body, Face, Hair, Wardrobe, and Materials tabs with named
+1. Add collapsible Body, Face, Hair, Wardrobe, and Materials tabs with preset
    presets and thumbnail grids. This is the largest remaining RPG-maker UX gap.
 2. Author a rigged humanoid base using the documented 17-bone and 15-shape-key
    contract. The loader/validator and fallback path are complete; the current
    AMP diagnostic asset has a valid skin but no shape keys or animation clips.
 3. Add region selection in the viewport: selecting the head, torso, arm, or leg
    should open the matching parameter group and outline that region.
-4. Add paired/asymmetric controls, including eye spacing, ear shape, hand/foot
-   scale, arm/leg length separately, and optional left/right details.
-5. Add animation preview poses (idle, run, jump, attack) and equipment clearance
-   checks before a character can be accepted into the game.
+4. Add paired/asymmetric controls for ear shape, hand/foot scale, arm/leg length
+   separately, and optional left/right details.
+5. Expand semantic facial animation from procedural blink/shout to expression
+   channels (joy, fear, anger, pain, phonemes), then add animation preview poses
+   and equipment-clearance checks before acceptance.
 6. Add named character projects, duplicate/rename, thumbnail capture, and an
    explicit APPLY TO PLAYER SLOT action. Keep version history for recovery.
 7. Export generated characters through a tested glTF/GLB path only after rig,

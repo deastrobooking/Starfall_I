@@ -102,11 +102,14 @@ the studio recipe separately so clothing, face, hair, colors, and morphs survive
 reload. Player spawning sends that recipe through `build_character_patch()` and
 `spawn_human()` while retaining the normal gameplay skeleton, collider, movement
 profiles, weapons, and camera setup. `StudioHumanPart` classifies generated mesh
-pieces into torso/head/arm/leg regions. `studio_human_animation_system` rotates
+pieces into torso/head/arm/leg regions and tags generated eyes, brows, and mouth
+geometry independently. `studio_human_animation_system` rotates
 those regions around authored body pivots for walking, running, sprinting,
 jumping, falling, shooting, Star Sabre attacks, hovering, gliding, flight, and
 air dash, while the visual root adds pose-specific lean, bob, stretch, and
-compression.
+compression. The facial layer provides deterministic blinking, combat brows,
+attack mouth opening, and exertion movement. Named good-guy, bad-guy, fantasy,
+street-clothes, and Mecha Robot presets remain editable `CharacterSpec` seeds.
 
 Locomotion animation thresholds use the same units as `PlayerMovement`: walk
 begins above `0.06`, run above `0.48`, and the explicit `Sprinting` state selects

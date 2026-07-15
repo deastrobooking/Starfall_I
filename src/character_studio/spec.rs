@@ -275,6 +275,7 @@ impl Default for BodySpec {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FaceSpec {
     pub jaw_width: f32,
     pub chin_length: f32,
@@ -283,7 +284,11 @@ pub struct FaceSpec {
     pub brow_depth: f32,
     pub cheek_fullness: f32,
     pub eye_size: f32,
+    pub eye_spacing: f32,
+    pub eye_tilt: f32,
+    pub brow_angle: f32,
     pub mouth_width: f32,
+    pub lip_fullness: f32,
 }
 
 impl Default for FaceSpec {
@@ -296,7 +301,11 @@ impl Default for FaceSpec {
             brow_depth: 0.5,
             cheek_fullness: 0.5,
             eye_size: 0.5,
+            eye_spacing: 0.5,
+            eye_tilt: 0.5,
+            brow_angle: 0.5,
             mouth_width: 0.5,
+            lip_fullness: 0.5,
         }
     }
 }
@@ -531,11 +540,15 @@ pub enum MorphField {
     BrowDepth,
     CheekFullness,
     EyeSize,
+    EyeSpacing,
+    EyeTilt,
+    BrowAngle,
     MouthWidth,
+    LipFullness,
 }
 
 impl MorphField {
-    pub const ALL: [MorphField; 15] = [
+    pub const ALL: [MorphField; 19] = [
         MorphField::Height,
         MorphField::Muscle,
         MorphField::Weight,
@@ -550,7 +563,11 @@ impl MorphField {
         MorphField::BrowDepth,
         MorphField::CheekFullness,
         MorphField::EyeSize,
+        MorphField::EyeSpacing,
+        MorphField::EyeTilt,
+        MorphField::BrowAngle,
         MorphField::MouthWidth,
+        MorphField::LipFullness,
     ];
 
     pub fn label(self) -> &'static str {
@@ -569,7 +586,11 @@ impl MorphField {
             MorphField::BrowDepth => "Brow",
             MorphField::CheekFullness => "Cheeks",
             MorphField::EyeSize => "Eyes",
+            MorphField::EyeSpacing => "Eye Spacing",
+            MorphField::EyeTilt => "Eye Tilt",
+            MorphField::BrowAngle => "Brow Angle",
             MorphField::MouthWidth => "Mouth",
+            MorphField::LipFullness => "Lip Fullness",
         }
     }
 
@@ -589,7 +610,11 @@ impl MorphField {
             MorphField::BrowDepth => spec.face.brow_depth,
             MorphField::CheekFullness => spec.face.cheek_fullness,
             MorphField::EyeSize => spec.face.eye_size,
+            MorphField::EyeSpacing => spec.face.eye_spacing,
+            MorphField::EyeTilt => spec.face.eye_tilt,
+            MorphField::BrowAngle => spec.face.brow_angle,
             MorphField::MouthWidth => spec.face.mouth_width,
+            MorphField::LipFullness => spec.face.lip_fullness,
         }
     }
 
@@ -610,7 +635,11 @@ impl MorphField {
             MorphField::BrowDepth => spec.face.brow_depth = v,
             MorphField::CheekFullness => spec.face.cheek_fullness = v,
             MorphField::EyeSize => spec.face.eye_size = v,
+            MorphField::EyeSpacing => spec.face.eye_spacing = v,
+            MorphField::EyeTilt => spec.face.eye_tilt = v,
+            MorphField::BrowAngle => spec.face.brow_angle = v,
             MorphField::MouthWidth => spec.face.mouth_width = v,
+            MorphField::LipFullness => spec.face.lip_fullness = v,
         }
     }
 }
@@ -650,6 +679,8 @@ mod tests {
         }"#;
         let old: CharacterSpec = serde_json::from_str(legacy).expect("legacy preset should load");
         assert_eq!(old.style.wardrobe.top, TopStyle::Jacket);
+        assert_eq!(old.face.eye_spacing, 0.5);
+        assert_eq!(old.face.lip_fullness, 0.5);
 
         let mut modern = old;
         modern.style.hair = HairStyle::Feathered;

@@ -11,6 +11,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use std::cell::Cell;
 use std::f32::consts::TAU;
 
 use super::generators::{CharacterPatch, CharacterSlot, SlotContent};
@@ -331,12 +332,25 @@ pub enum StudioBodyRegion {
     RightLeg,
 }
 
+/// Independently animated facial pieces. Keeping this semantic tag beside the
+/// generated geometry lets gameplay animate procedural faces without relying
+/// on fragile entity names or a particular future GLB hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StudioFaceFeature {
+    LeftEye,
+    RightEye,
+    LeftBrow,
+    RightBrow,
+    Mouth,
+}
+
 #[derive(Component, Debug, Clone)]
 pub struct StudioHumanPart {
     pub root: Entity,
     pub rest: Transform,
     pub pivot: Vec3,
     pub region: StudioBodyRegion,
+    pub face_feature: Option<StudioFaceFeature>,
 }
 
 #[derive(Component, Debug, Clone)]
@@ -395,6 +409,7 @@ pub fn spawn_human(
         ))
         .id();
 
+    let pending_face_feature = Cell::new(None);
     let mut part = |mesh: Mesh, mat: &Handle<StandardMaterial>, transform: Transform| {
         let (region, pivot) = classify_studio_part(&p, transform.translation);
         let e = commands
@@ -407,6 +422,7 @@ pub fn spawn_human(
                     rest: transform,
                     pivot,
                     region,
+                    face_feature: pending_face_feature.take(),
                 },
             ))
             .id();
@@ -582,7 +598,7 @@ pub fn spawn_human(
         &mats.skin,
         Transform::from_xyz(0.0, (p.shoulder_y + p.neck_top_y) * 0.5, 0.0),
     );
-    spawn_head(&mut part, patch, &p, &mats);
+    spawn_head(&mut part, &pending_face_feature, patch, &p, &mats);
 
     // ── Arms ─────────────────────────────────────────────────────────────────
     let upper_r = p.limb_radius(0.030);
@@ -966,6 +982,7 @@ fn spawn_hand(
 
 fn spawn_head(
     part: &mut impl FnMut(Mesh, &Handle<StandardMaterial>, Transform),
+    pending_face_feature: &Cell<Option<StudioFaceFeature>>,
     patch: &CharacterPatch,
     p: &Proportions,
     mats: &StudioMats,
@@ -1019,49 +1036,74 @@ fn spawn_head(
     );
     // Twin eyebrows (angled) — the old single bar read as a visor.
     let brow = spread(m(patch, "face_brow_heavy"), 1.0, 0.5);
+    let brow_angle = (m(patch, "face_brow_angle") - 0.5) * 0.42;
     for side in [-1.0f32, 1.0] {
+        pending_face_feature.set(Some(if side < 0.0 {
+            StudioFaceFeature::LeftBrow
+        } else {
+            StudioFaceFeature::RightBrow
+        }));
         part(
             ovoid(Vec3::new(hr * 0.17, hr * 0.038 * brow, hr * 0.045), 1.1),
             &mats.brow,
             Transform::from_translation(
                 head_c + Vec3::new(side * hr * 0.30, hr * 0.235, face_z + hr * 0.035),
             )
-            .with_rotation(Quat::from_rotation_z(side * 0.10)),
+            .with_rotation(Quat::from_rotation_z(side * (0.10 + brow_angle))),
         );
     }
     // Wide cel-anime eyes with a strong upper lash, large colored iris, dark
     // pupil, and twin catchlights. The layered depth remains legible under the
     // studio's moving light instead of depending on a painted texture.
     let eye = spread(m(patch, "face_eye_large"), 1.18, 0.30);
+    let eye_spacing = spread(m(patch, "face_eye_spacing"), 1.0, 0.22);
+    let eye_tilt = (m(patch, "face_eye_tilt") - 0.5) * 0.30;
     for side in [-1.0f32, 1.0] {
-        let eye_pos = head_c + Vec3::new(side * hr * 0.29, hr * 0.05, face_z + hr * 0.05);
+        let feature = if side < 0.0 {
+            StudioFaceFeature::LeftEye
+        } else {
+            StudioFaceFeature::RightEye
+        };
+        let eye_pos = head_c
+            + Vec3::new(
+                side * hr * 0.29 * eye_spacing,
+                hr * 0.05,
+                face_z + hr * 0.05,
+            );
+        pending_face_feature.set(Some(feature));
         part(
             ovoid(
                 Vec3::new(hr * 0.185 * eye, hr * 0.125 * eye, hr * 0.052),
                 1.0,
             ),
             &mats.eye_white,
-            Transform::from_translation(eye_pos),
+            Transform::from_translation(eye_pos)
+                .with_rotation(Quat::from_rotation_z(-side * eye_tilt)),
         );
+        pending_face_feature.set(Some(feature));
         part(
             ovoid(
                 Vec3::new(hr * 0.087 * eye, hr * 0.098 * eye, hr * 0.028),
                 1.0,
             ),
             &mats.iris,
-            Transform::from_translation(eye_pos + Vec3::new(0.0, 0.0, -hr * 0.038)),
+            Transform::from_translation(eye_pos + Vec3::new(0.0, 0.0, -hr * 0.038))
+                .with_rotation(Quat::from_rotation_z(-side * eye_tilt)),
         );
+        pending_face_feature.set(Some(feature));
         part(
             ovoid(Vec3::splat(hr * 0.034 * eye), 1.0),
             &mats.dark,
             Transform::from_translation(eye_pos + Vec3::new(0.0, 0.0, -hr * 0.058)),
         );
+        pending_face_feature.set(Some(feature));
         part(
             ovoid(Vec3::new(hr * 0.205 * eye, hr * 0.026, hr * 0.026), 1.0),
             &mats.brow,
             Transform::from_translation(eye_pos + Vec3::new(0.0, hr * 0.115 * eye, -hr * 0.060))
-                .with_rotation(Quat::from_rotation_z(-side * 0.07)),
+                .with_rotation(Quat::from_rotation_z(-side * (0.07 + eye_tilt))),
         );
+        pending_face_feature.set(Some(feature));
         part(
             ovoid(Vec3::splat(hr * 0.025 * eye), 1.0),
             &mats.highlight,
@@ -1069,6 +1111,7 @@ fn spawn_head(
                 eye_pos + Vec3::new(-side * hr * 0.035, hr * 0.035, -hr * 0.090),
             ),
         );
+        pending_face_feature.set(Some(feature));
         part(
             ovoid(Vec3::splat(hr * 0.010 * eye), 1.0),
             &mats.highlight,
@@ -1085,12 +1128,34 @@ fn spawn_head(
             ),
         );
     }
-    // Mouth.
+    // Mouth: separate oral cavity and upper/lower lips provide enough geometry
+    // for readable smiles, speech, and combat shouts.
     let mouth = spread(m(patch, "face_mouth_wide"), 1.0, 0.4);
+    let lip = spread(m(patch, "face_lip_full"), 1.0, 0.65);
+    let mouth_pos = head_c + Vec3::new(0.0, -hr * 0.52, face_z - hr * 0.02);
+    pending_face_feature.set(Some(StudioFaceFeature::Mouth));
     part(
-        ovoid(Vec3::new(hr * 0.26 * mouth, hr * 0.035, hr * 0.05), 1.0),
+        ovoid(Vec3::new(hr * 0.235 * mouth, hr * 0.040, hr * 0.038), 1.0),
+        &mats.dark,
+        Transform::from_translation(mouth_pos + Vec3::new(0.0, 0.0, hr * 0.012)),
+    );
+    pending_face_feature.set(Some(StudioFaceFeature::Mouth));
+    part(
+        ovoid(
+            Vec3::new(hr * 0.25 * mouth, hr * 0.030 * lip, hr * 0.045),
+            1.0,
+        ),
         &mats.lip,
-        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.52, face_z - hr * 0.02)),
+        Transform::from_translation(mouth_pos + Vec3::new(0.0, hr * 0.027 * lip, -hr * 0.01)),
+    );
+    pending_face_feature.set(Some(StudioFaceFeature::Mouth));
+    part(
+        ovoid(
+            Vec3::new(hr * 0.23 * mouth, hr * 0.038 * lip, hr * 0.048),
+            1.0,
+        ),
+        &mats.lip,
+        Transform::from_translation(mouth_pos + Vec3::new(0.0, -hr * 0.030 * lip, -hr * 0.012)),
     );
     // Ears — small and tucked.
     for side in [-1.0f32, 1.0] {

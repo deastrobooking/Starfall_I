@@ -185,7 +185,11 @@ impl PresetGenerator for FaceGenerator {
         patch.morphs.insert("face_brow_heavy", f.brow_depth);
         patch.morphs.insert("face_cheek_full", f.cheek_fullness);
         patch.morphs.insert("face_eye_large", f.eye_size);
+        patch.morphs.insert("face_eye_spacing", f.eye_spacing);
+        patch.morphs.insert("face_eye_tilt", f.eye_tilt);
+        patch.morphs.insert("face_brow_angle", f.brow_angle);
         patch.morphs.insert("face_mouth_wide", f.mouth_width);
+        patch.morphs.insert("face_lip_full", f.lip_fullness);
     }
 }
 
@@ -346,6 +350,133 @@ pub fn preset_female() -> CharacterSpec {
     spec
 }
 
+/// Bright, readable good-guy silhouette: fantasy tunic, heroic anime face,
+/// and saturated 1970s space-opera colours.
+pub fn preset_star_hero() -> CharacterSpec {
+    let mut spec = preset_male();
+    spec.body.height = 0.46;
+    spec.body.muscle = 0.62;
+    spec.body.limb_length = 0.44;
+    spec.face.eye_size = 0.68;
+    spec.face.eye_spacing = 0.54;
+    spec.face.eye_tilt = 0.58;
+    spec.face.brow_angle = 0.56;
+    spec.face.jaw_width = 0.48;
+    spec.face.lip_fullness = 0.42;
+    spec.style.hair = HairStyle::Feathered;
+    spec.style.hair_color = 3;
+    spec.style.primary_color = 0;
+    spec.style.secondary_color = 3;
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::Tunic,
+        bottom: BottomStyle::Pants,
+        feet: FootStyle::TallBoots,
+        hands: HandStyle::Gloves,
+        armor: ArmorStyle::None,
+    };
+    spec
+}
+
+/// Villain/bad-guy seed with a sharper face, dark street-military clothing,
+/// and crimson eyes. It remains fully editable after applying the preset.
+pub fn preset_shadow_raider() -> CharacterSpec {
+    let mut spec = preset_male();
+    spec.body.height = 0.62;
+    spec.body.muscle = 0.70;
+    spec.face.jaw_width = 0.66;
+    spec.face.chin_length = 0.64;
+    spec.face.cheek_fullness = 0.28;
+    spec.face.eye_size = 0.43;
+    spec.face.eye_spacing = 0.47;
+    spec.face.eye_tilt = 0.78;
+    spec.face.brow_angle = 0.82;
+    spec.face.brow_depth = 0.76;
+    spec.style.eye_color = 7;
+    spec.style.hair = HairStyle::Spiky;
+    spec.style.hair_color = 0;
+    spec.style.primary_color = 6;
+    spec.style.secondary_color = 1;
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::MotoJacket,
+        bottom: BottomStyle::CargoPants,
+        feet: FootStyle::CombatBoots,
+        hands: HandStyle::Gloves,
+        armor: ArmorStyle::None,
+    };
+    spec
+}
+
+/// Secret-of-Mana-style compact fantasy adventurer suitable for the shared
+/// camera and top-down cave levels.
+pub fn preset_mana_adventurer() -> CharacterSpec {
+    let mut spec = preset_female();
+    spec.body.height = 0.35;
+    spec.body.limb_length = 0.38;
+    spec.face.eye_size = 0.76;
+    spec.face.eye_spacing = 0.57;
+    spec.face.eye_tilt = 0.54;
+    spec.face.cheek_fullness = 0.64;
+    spec.face.lip_fullness = 0.48;
+    spec.style.hair = HairStyle::SidePonytail;
+    spec.style.hair_color = 4;
+    spec.style.primary_color = 2;
+    spec.style.secondary_color = 11;
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::Tunic,
+        bottom: BottomStyle::Shorts,
+        feet: FootStyle::Boots,
+        hands: HandStyle::Bare,
+        armor: ArmorStyle::None,
+    };
+    spec
+}
+
+/// Contemporary street-clothes seed for city characters and civilians.
+pub fn preset_street_runner() -> CharacterSpec {
+    let mut spec = preset_female();
+    spec.body.muscle = 0.58;
+    spec.body.limb_length = 0.58;
+    spec.face.eye_size = 0.62;
+    spec.face.eye_tilt = 0.60;
+    spec.face.brow_angle = 0.60;
+    spec.style.hair = HairStyle::Bob;
+    spec.style.hair_color = 7;
+    spec.style.primary_color = 9;
+    spec.style.secondary_color = 10;
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::BomberJacket,
+        bottom: BottomStyle::Jeans,
+        feet: FootStyle::HighTops,
+        hands: HandStyle::Bare,
+        armor: ArmorStyle::None,
+    };
+    spec
+}
+
+/// Promotes the generator's successful Mega-Man-like armored body into a
+/// named preset rather than leaving it hidden in the armor style selector.
+pub fn preset_mecha_robot() -> CharacterSpec {
+    let mut spec = preset_male();
+    spec.body.height = 0.52;
+    spec.body.muscle = 0.82;
+    spec.body.shoulder_width = 0.76;
+    spec.body.waist_width = 0.38;
+    spec.face.eye_size = 0.60;
+    spec.face.eye_tilt = 0.66;
+    spec.style.hair = HairStyle::Bald;
+    spec.style.eye_color = 6;
+    spec.style.primary_color = 0;
+    spec.style.secondary_color = 7;
+    spec.style.wardrobe = WardrobeSpec {
+        top: TopStyle::None,
+        bottom: BottomStyle::Pants,
+        feet: FootStyle::Boots,
+        hands: HandStyle::Gauntlets,
+        armor: ArmorStyle::MechaArmor,
+    };
+    spec
+}
+
 /// Physique modifiers — applied on top of the current spec, preserving sex,
 /// face and style.
 pub fn apply_athletic(spec: &mut CharacterSpec) {
@@ -413,7 +544,11 @@ pub fn randomize(spec: &mut CharacterSpec) {
     jitter(&mut spec.face.brow_depth, 0.30);
     jitter(&mut spec.face.cheek_fullness, 0.30);
     jitter(&mut spec.face.eye_size, 0.25);
+    jitter(&mut spec.face.eye_spacing, 0.20);
+    jitter(&mut spec.face.eye_tilt, 0.25);
+    jitter(&mut spec.face.brow_angle, 0.28);
     jitter(&mut spec.face.mouth_width, 0.25);
+    jitter(&mut spec.face.lip_fullness, 0.25);
     spec.style.skin_tone = rng.gen_range(0..8);
     spec.style.eye_color = rng.gen_range(0..6);
     spec.style.hair = super::spec::HairStyle::ALL[rng.gen_range(0..5)];
@@ -431,4 +566,52 @@ pub fn randomize(spec: &mut CharacterSpec) {
             ArmorStyle::None
         },
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn faction_and_genre_presets_keep_distinct_playable_silhouettes() {
+        let hero = preset_star_hero();
+        let villain = preset_shadow_raider();
+        let adventurer = preset_mana_adventurer();
+        let street = preset_street_runner();
+
+        assert_ne!(hero.style.primary_color, villain.style.primary_color);
+        assert!(villain.face.brow_angle > hero.face.brow_angle);
+        assert!(adventurer.face.eye_size > villain.face.eye_size);
+        assert_eq!(street.style.wardrobe.top, TopStyle::BomberJacket);
+        assert_eq!(street.style.wardrobe.bottom, BottomStyle::Jeans);
+    }
+
+    #[test]
+    fn mecha_robot_is_a_named_full_armor_preset() {
+        let spec = preset_mecha_robot();
+        let patch = build_character_patch(&spec);
+        assert_eq!(spec.style.wardrobe.armor, ArmorStyle::MechaArmor);
+        assert_eq!(
+            patch.slots.get(&CharacterSlot::Torso),
+            Some(&SlotContent::Mecha)
+        );
+        assert_eq!(
+            patch.slots.get(&CharacterSlot::Helmet),
+            Some(&SlotContent::Mecha)
+        );
+    }
+
+    #[test]
+    fn expanded_face_controls_reach_the_patch_contract() {
+        let mut spec = CharacterSpec::default();
+        spec.face.eye_spacing = 0.77;
+        spec.face.eye_tilt = 0.68;
+        spec.face.brow_angle = 0.81;
+        spec.face.lip_fullness = 0.63;
+        let patch = build_character_patch(&spec);
+        assert_eq!(patch.morph("face_eye_spacing"), 0.77);
+        assert_eq!(patch.morph("face_eye_tilt"), 0.68);
+        assert_eq!(patch.morph("face_brow_angle"), 0.81);
+        assert_eq!(patch.morph("face_lip_full"), 0.63);
+    }
 }

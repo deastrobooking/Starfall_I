@@ -72,6 +72,11 @@ impl Plugin for CharacterStudioPlugin {
 enum StudioAction {
     Male,
     Female,
+    StarHero,
+    ShadowRaider,
+    ManaAdventurer,
+    StreetRunner,
+    MechaRobot,
     Athletic,
     Heavy,
     Slim,
@@ -110,8 +115,15 @@ enum StudioNavDirection {
 
 /// Focusable rows. Action groups hold several buttons, while morph/style rows
 /// expose their own decrement/increment buttons.
-const ACTION_GROUPS: [&[StudioAction]; 8] = [
+const ACTION_GROUPS: [&[StudioAction]; 9] = [
     &[StudioAction::Male, StudioAction::Female],
+    &[
+        StudioAction::StarHero,
+        StudioAction::ShadowRaider,
+        StudioAction::ManaAdventurer,
+        StudioAction::StreetRunner,
+        StudioAction::MechaRobot,
+    ],
     &[
         StudioAction::Athletic,
         StudioAction::Heavy,
@@ -145,6 +157,11 @@ fn action_label(action: StudioAction) -> &'static str {
     match action {
         StudioAction::Male => "MALE",
         StudioAction::Female => "FEMALE",
+        StudioAction::StarHero => "STAR HERO",
+        StudioAction::ShadowRaider => "SHADOW RAIDER",
+        StudioAction::ManaAdventurer => "MANA ADVENTURER",
+        StudioAction::StreetRunner => "STREET RUNNER",
+        StudioAction::MechaRobot => "MECHA ROBOT",
         StudioAction::Athletic => "ATHLETIC",
         StudioAction::Heavy => "HEAVY",
         StudioAction::Slim => "SLIM",
@@ -895,6 +912,31 @@ fn apply_action(
             state.push_undo();
             state.spec = generators::preset_female();
             mark(state, "Preset: Female".into());
+        }
+        StudioAction::StarHero => {
+            state.push_undo();
+            state.spec = generators::preset_star_hero();
+            mark(state, "Good-guy preset: Star Hero".into());
+        }
+        StudioAction::ShadowRaider => {
+            state.push_undo();
+            state.spec = generators::preset_shadow_raider();
+            mark(state, "Bad-guy preset: Shadow Raider".into());
+        }
+        StudioAction::ManaAdventurer => {
+            state.push_undo();
+            state.spec = generators::preset_mana_adventurer();
+            mark(state, "Fantasy preset: Mana Adventurer".into());
+        }
+        StudioAction::StreetRunner => {
+            state.push_undo();
+            state.spec = generators::preset_street_runner();
+            mark(state, "Street-clothes preset: Street Runner".into());
+        }
+        StudioAction::MechaRobot => {
+            state.push_undo();
+            state.spec = generators::preset_mecha_robot();
+            mark(state, "Robot preset: Mecha Robot".into());
         }
         StudioAction::Athletic => {
             state.push_undo();
