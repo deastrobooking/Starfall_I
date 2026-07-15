@@ -1,3 +1,7 @@
+use super::creature::{
+    CreatureFaction, CreatureKind, CreatureRole, CreatureSpec, CreatureSurface, CreatureTopology,
+    CreatureValidation,
+};
 use super::designer::{HeadShape, LegStyle, RobotStyle, VisorStyle};
 use bevy::prelude::*;
 
@@ -15,18 +19,78 @@ pub fn spawn_robot(
     style: &RobotStyle,
     position: Vec3,
 ) -> Entity {
+    spawn_robot_with_material_response(commands, meshes, materials, style, position, (0.55, 0.45))
+}
+
+/// Metadata attached to the root produced from a `CreatureSpec`.
+#[derive(Component, Debug, Clone)]
+pub struct GeneratedCreature {
+    pub content_id: String,
+    pub schema_version: u32,
+    pub seed: u64,
+    pub kind: CreatureKind,
+    pub topology: CreatureTopology,
+    pub role: CreatureRole,
+    pub faction: CreatureFaction,
+    pub surface: CreatureSurface,
+}
+
+/// Validate and spawn a versioned creature recipe through the proven robot
+/// geometry factory. Existing `spawn_robot` callers remain unchanged.
+pub fn spawn_creature(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    spec: &CreatureSpec,
+    position: Vec3,
+) -> Result<Entity, CreatureValidation> {
+    let validation = spec.validate();
+    if !validation.is_publishable() {
+        return Err(validation);
+    }
+    let style = spec.compiled_style();
+    let root = spawn_robot_with_material_response(
+        commands,
+        meshes,
+        materials,
+        &style,
+        position,
+        spec.surface.material_response(),
+    );
+    commands.entity(root).insert(GeneratedCreature {
+        content_id: spec.content_id.clone(),
+        schema_version: spec.schema_version,
+        seed: spec.seed,
+        kind: spec.kind,
+        topology: spec.topology,
+        role: spec.role,
+        faction: spec.faction,
+        surface: spec.surface,
+    });
+    Ok(root)
+}
+
+fn spawn_robot_with_material_response(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    style: &RobotStyle,
+    position: Vec3,
+    material_response: (f32, f32),
+) -> Entity {
     let s = style.scale / 100.0; // unit normaliser
+    let (metallic, roughness) = material_response;
 
     let primary_mat = materials.add(StandardMaterial {
         base_color: style.primary,
-        metallic: 0.55,
-        perceptual_roughness: 0.45,
+        metallic,
+        perceptual_roughness: roughness,
         ..default()
     });
     let secondary_mat = materials.add(StandardMaterial {
         base_color: style.secondary,
-        metallic: 0.40,
-        perceptual_roughness: 0.55,
+        metallic: (metallic * 0.72).clamp(0.0, 1.0),
+        perceptual_roughness: (roughness + 0.10).clamp(0.0, 1.0),
         ..default()
     });
     let emissive_mat = materials.add(StandardMaterial {

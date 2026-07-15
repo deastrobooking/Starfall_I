@@ -111,6 +111,16 @@ compression. The facial layer provides deterministic blinking, combat brows,
 attack mouth opening, and exertion movement. Named good-guy, bad-guy, fantasy,
 street-clothes, and Mecha Robot presets remain editable `CharacterSpec` seeds.
 
+Robot and monster generation now has a compatible versioned recipe layer in
+`robots/creature.rs`. `CreatureSpec` preserves the complete legacy `RobotStyle`
+while adding deterministic seed, kind, topology, role, faction, surface, stable
+content ID, schema version, and validation report. Six curated forge seeds cover
+allied, hostile, retro-mecha, crystal, flying, and cave-creature silhouettes.
+`spawn_creature()` validates and compiles recipes through the existing robot
+factory, varies PBR response by surface, and attaches `GeneratedCreature`
+metadata to the root. Existing `spawn_robot()` callers and named drone/boss
+presets remain unchanged.
+
 Locomotion animation thresholds use the same units as `PlayerMovement`: walk
 begins above `0.06`, run above `0.48`, and the explicit `Sprinting` state selects
 the faster sprint cycle. The former run threshold of `28.0` was unreachable for

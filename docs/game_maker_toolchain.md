@@ -40,7 +40,7 @@ and explicit schema versioning. Art direction combines compact fantasy
 readability, colorful action robots, and original 1970s space-opera shapes
 without copying protected characters or assets.
 
-### GM2 — Robot and Monster Forge
+### GM2 — Robot and Monster Forge (foundation active)
 
 Unify the existing `src/robots` archetypes and drone factory behind a serializable
 `CreatureSpec`. Use composable morphology modules rather than separate hardcoded
@@ -56,6 +56,15 @@ models:
 Acceptance: create, save, reload, animate, validate, and spawn at least three
 distinct robots and three monsters from recipes; generated enemies must work
 with targeting, damage, navigation, and campaign saves.
+
+Foundation status: `src/robots/creature.rs` now provides schema-versioned JSON
+recipes, deterministic seeded generation, robot/monster kinds, six topologies,
+seven gameplay roles, six factions, five material responses, publish validation,
+and six curated seeds. `CreatureSpec::from_legacy` wraps any existing preset
+without losing its `RobotStyle`, while `spawn_creature` compiles topology into
+the existing procedural factory and adds stable runtime metadata. Remaining GM2
+work is the player-facing Forge workspace, topology-specific animation rigs,
+enemy-system binding, thumbnail publishing, and campaign asset registration.
 
 ### GM3 — World Kit Forge
 

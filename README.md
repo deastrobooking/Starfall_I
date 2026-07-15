@@ -100,6 +100,8 @@ Character design supports GLB-inspired base model buttons, visible prefab export
 
 The studio also includes a guarded external-rig diagnostic backend. It maps the skinned AMP GLB onto Starfall's canonical 17-joint humanoid contract and automatically falls back to the generated model if loading fails. Production Blender assets must add the documented 19 named shape keys before external rigs become the editable default; see `docs/character_studio.md`.
 
+The Game Maker toolchain now includes the GM2 robot/monster recipe foundation. Serializable `CreatureSpec` assets wrap all existing robot geometry while adding deterministic seeds, robot/monster type, topology, role, faction, material response, stable IDs, validation, and curated Star Guardian, Raider Gunner, Retro Mecha, Crystal Golem, Sky Manta, and Cave Crawler presets. Valid recipes spawn through the existing procedural robot factory, so the current drone and boss library remains compatible.
+
 Perk training is also in chapter select. Leveling up grants one perk point; spend points with:
 
 | Key | Perk |
