@@ -977,7 +977,7 @@ fn spawn_design_ui(
             ))
             .with_children(|panel| {
                 panel.spawn((
-                    Text::new(format!("CHARACTER BUILDER\n{}", hero_name.to_uppercase())),
+                    Text::new(format!("ROBOT BUILDER\n{}", hero_name.to_uppercase())),
                     TextFont {
                         font_size: FontSize::Px(25.0),
                         ..default()

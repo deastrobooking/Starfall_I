@@ -59,6 +59,14 @@ pub const FIXED_HZ: f64 = 64.0;
 #[derive(Resource, Default)]
 pub struct FixedTickCount(pub u64);
 
+/// EC1b render interpolation: world position captured at the START of the most
+/// recent fixed tick. Presentation systems (camera follow) lerp between this
+/// and the live transform by `Time<Fixed>::overstep_fraction()`, hiding the
+/// tick staircase at render rates above `FIXED_HZ`. Costs ≤1 tick of camera
+/// latency; only active while `SimConfig.fixed_motor` is on.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PreviousTickPosition(pub Vec3);
+
 /// EC1b runtime toggle for the experimental fixed-tick player motor.
 ///
 /// **Default OFF** → the motor runs in `Update` exactly as before (shipping path

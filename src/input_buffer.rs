@@ -133,6 +133,50 @@ pub struct FixedInput {
     pub edges: EdgeInput,
 }
 
+impl FixedInput {
+    /// Project this tick's buffered command onto a full [`PlayerInput`], using
+    /// `base` for any field the buffer doesn't own (pause/crafting/etc.).
+    ///
+    /// This is the EC1b seam: fixed-tick systems call it so edges fire exactly
+    /// once per tick regardless of render frame rate, while the legacy
+    /// `Update` path keeps reading the live `PlayerInput` untouched.
+    pub fn overlay(&self, base: &PlayerInput) -> PlayerInput {
+        let mut out = base.clone();
+        // Held/analog state: latest render-frame sample wins.
+        out.move_axis = self.held.move_axis;
+        out.fire = self.held.fire;
+        out.aim = self.held.aim;
+        out.sprint = self.held.sprint;
+        out.jetpack = self.held.jetpack;
+        out.grapple = self.held.grapple;
+        // Edges: accumulated since the previous tick, consumed exactly once.
+        out.jump = self.edges.jump;
+        out.dodge = self.edges.dodge;
+        out.parry = self.edges.parry;
+        out.grapple_just = self.edges.grapple;
+        out.fire_just = self.edges.fire;
+        out.melee_light = self.edges.melee_light;
+        out.melee_heavy = self.edges.melee_heavy;
+        out.interact = self.edges.interact;
+        out.reload = self.edges.reload;
+        out.weapon_next = self.edges.weapon_next;
+        out.weapon_prev = self.edges.weapon_prev;
+        out.sabre_toggle = self.edges.sabre_toggle;
+        out.enter_vehicle = self.edges.enter_vehicle;
+        out.look_delta = self.edges.look_delta;
+        if self.edges.weapon_slot.is_some() {
+            out.weapon_slot = self.edges.weapon_slot;
+        }
+        if self.edges.special_slot.is_some() {
+            out.special_slot = self.edges.special_slot;
+        }
+        if self.edges.traversal.is_some() {
+            out.traversal_mode_switch = self.edges.traversal;
+        }
+        out
+    }
+}
+
 /// Per-player input buffers, keyed by `PlayerIndex` (0..=3).
 #[derive(Resource, Default)]
 pub struct PlayerInputBuffers {
@@ -237,6 +281,35 @@ mod tests {
         assert_eq!(tick.held.move_axis, Vec2::new(0.0, 1.0));
         assert!(!tick.held.sprint);
         assert_eq!(tick.edges.look_delta, Vec2::new(5.0, 0.0));
+    }
+
+    #[test]
+    fn overlay_projects_buffer_onto_live_input() {
+        let mut buf = PlayerBuffer::default();
+        // Live input this frame: holding sprint, jump tapped two frames ago.
+        buf.latch(&input_with(|i| i.jump = true));
+        buf.latch(&input_with(|i| {
+            i.sprint = true;
+            i.move_axis = Vec2::new(0.0, 1.0);
+        }));
+        let tick = buf.consume();
+
+        // Base carries a field the buffer doesn't own (pause) and a stale edge
+        // (dodge) that must NOT leak through the overlay.
+        let mut base = PlayerInput::default();
+        base.pause = true;
+        base.dodge = true;
+
+        let eff = tick.overlay(&base);
+        assert!(eff.jump, "buffered jump edge must fire on this tick");
+        assert!(!eff.dodge, "buffer owns edges; stale live dodge must not leak");
+        assert!(eff.sprint, "held state comes from the latest latched sample");
+        assert_eq!(eff.move_axis, Vec2::new(0.0, 1.0));
+        assert!(eff.pause, "fields the buffer doesn't own pass through");
+
+        // Next tick with no new frames: the same press must not double-fire.
+        let next = buf.consume().overlay(&base);
+        assert!(!next.jump);
     }
 
     #[test]

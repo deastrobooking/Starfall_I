@@ -152,11 +152,20 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   and `flush_motor_translation` applies the sum to the compatibility controller
   once per frame in `PostUpdate` before `PhysicsCompatSet::CharacterController`.
   Smoke-tested: ON path boots + runs with no panic;
-  local suite was green at landing. **Still to do in EC1b polish:**
-  `PreviousTransform` render interpolation (expect minor judder >`FIXED_HZ` fps
-  until then); switch the motor to read the EC1a `FixedInput` buffer instead of
-  `PlayerInput` directly; revisit Avian stepping if per-frame coalescing proves
-  insufficient.
+  local suite was green at landing.
+- *EC1b polish (landed 2026-07-15)* — the fixed chain now consumes the EC1a
+  buffer: `FixedInput::overlay()` projects the latched command onto the live
+  `PlayerInput` (edges fire exactly once per tick; held/analog = latest sample;
+  unrelated fields pass through), consumed by `player_movement`,
+  `traversal_mode_switch_update`, and `grapple_hook_update` when
+  `fixed_motor` is on — OFF path byte-identical. Render interpolation:
+  `PreviousTickPosition` cached first in the fixed chain;
+  `player_camera_follow_system` lerps camera targets from tick-start toward the
+  live transform by `Time<Fixed>::overstep_fraction()` (≤1 tick camera latency,
+  hides the tick staircase above `FIXED_HZ`). 4 buffer unit tests; both paths
+  boot clean. **Remaining:** hardware feel test at 60/120/144 Hz (F10 A/B) →
+  then flip `SimConfig::default()` ON; revisit Avian stepping only if
+  coalescing proves insufficient.
 
 ### EC2 — Collision layers + frame-data combat
 **Goal:** Fighting-game precision inside the action RPG.

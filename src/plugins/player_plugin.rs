@@ -27,7 +27,8 @@ use crate::components::world::{
 };
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
-use crate::game_loop::{fixed_motor_off, fixed_motor_on, SimConfig};
+use crate::game_loop::{fixed_motor_off, fixed_motor_on, PreviousTickPosition, SimConfig};
+use crate::input_buffer::PlayerInputBuffers;
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::perks::PerkTree;
 use crate::physics::prelude::*;
@@ -308,6 +309,7 @@ impl Plugin for PlayerPlugin {
             .add_systems(
                 FixedUpdate,
                 (
+                    cache_previous_tick_positions,
                     traversal_mode_switch_update,
                     grapple_hook_update,
                     player_movement,
@@ -627,7 +629,7 @@ fn spawn_players(
                 SpeedLoopTraversalState::default(),
                 GrappleHookState::default(),
                 EdgeGrabState::new(),
-                ClimbState::default(),
+                (ClimbState::default(), PreviousTickPosition(spawn_pos)),
                 dodge_state,
                 ParryState::new(),
                 PlayerStateMachine::default(),
@@ -980,6 +982,8 @@ fn interpolate_viewport(
 fn player_camera_follow_system(
     mut commands: Commands,
     time: Res<Time>,
+    sim: Res<SimConfig>,
+    fixed_time: Res<Time<Fixed>>,
     mut transition: ResMut<CameraDisplayTransition>,
     shake: Res<CameraShake>,
     dungeon: Res<DungeonCrawlState>,
@@ -995,6 +999,7 @@ fn player_camera_follow_system(
             Option<&JetpackState>,
             Option<&TraversalModeState>,
             Option<&ClimbState>,
+            Option<&PreviousTickPosition>,
         ),
         (With<Player>, Without<PlayerCamera>),
     >,
@@ -1037,7 +1042,7 @@ fn player_camera_follow_system(
 
     let max_trauma = player_q
         .iter()
-        .map(|(index, _, _, _, _, _, _, _)| shake.trauma_for(index.0))
+        .map(|(index, _, _, _, _, _, _, _, _)| shake.trauma_for(index.0))
         .fold(0.0_f32, f32::max);
     let shake_offset = camera_shake_offset(max_trauma);
 
@@ -1046,7 +1051,7 @@ fn player_camera_follow_system(
         let party_focus = average_positions(
             &player_q
                 .iter()
-                .map(|(_, transform, _, _, _, _, _, _)| transform.translation)
+                .map(|(_, transform, _, _, _, _, _, _, _)| transform.translation)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or(dungeon.focus);
@@ -1059,12 +1064,36 @@ fn player_camera_follow_system(
 
     let lead_camera = player_q
         .iter()
-        .min_by_key(|(index, _, _, _, _, _, _, _)| index.0)
-        .map(|(_, _, camera_ref, _, _, _, _, _)| camera_ref.0);
+        .min_by_key(|(index, _, _, _, _, _, _, _, _)| index.0)
+        .map(|(_, _, camera_ref, _, _, _, _, _, _)| camera_ref.0);
 
-    for (index, player_transform, camera_ref, movement, grapple, jetpack, traversal, climb) in
-        player_q.iter()
+    for (
+        index,
+        player_transform,
+        camera_ref,
+        movement,
+        grapple,
+        jetpack,
+        traversal,
+        climb,
+        prev_tick,
+    ) in player_q.iter()
     {
+        // EC1b render interpolation: while the fixed motor is on, follow a
+        // position lerped from the last tick-start toward the live transform by
+        // the fixed-clock overstep, hiding the tick staircase above FIXED_HZ.
+        let interp_holder;
+        let player_transform = match prev_tick {
+            Some(prev) if sim.fixed_motor => {
+                let alpha = fixed_time.overstep_fraction();
+                interp_holder = Transform {
+                    translation: prev.0.lerp(player_transform.translation, alpha),
+                    ..*player_transform
+                };
+                &interp_holder
+            }
+            _ => player_transform,
+        };
         referenced.push(camera_ref.0);
         let player_shake = camera_shake_offset(shake.trauma_for(index.0));
 
@@ -1457,11 +1486,19 @@ fn boss_mode_player_slot_offset(index: u8) -> Vec3 {
 }
 
 fn traversal_mode_switch_update(
-    mut player_q: Query<(&PlayerInput, &mut TraversalModeState), With<Player>>,
+    sim: Res<SimConfig>,
+    buffers: Res<PlayerInputBuffers>,
+    mut player_q: Query<(&PlayerIndex, &PlayerInput, &mut TraversalModeState), With<Player>>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
-    for (input, mut traversal) in player_q.iter_mut() {
-        let Some(mode) = input.traversal_mode_switch else {
+    for (idx, input, mut traversal) in player_q.iter_mut() {
+        // EC1b: fixed tick reads the buffered edge; Update path reads live input.
+        let switch = if sim.fixed_motor {
+            buffers.fixed(idx.0).and_then(|f| f.edges.traversal)
+        } else {
+            input.traversal_mode_switch
+        };
+        let Some(mode) = switch else {
             continue;
         };
         if traversal.active == mode {
@@ -1476,6 +1513,17 @@ fn traversal_mode_switch_update(
 }
 
 // ── Movement & Physics ────────────────────────────────────────────────────────
+/// EC1b interpolation source: record each player's position at the start of the
+/// fixed tick, before the motor moves anything. Camera presentation lerps from
+/// here to the live transform by the fixed-clock overstep fraction.
+fn cache_previous_tick_positions(
+    mut q: Query<(&Transform, &mut PreviousTickPosition), With<Player>>,
+) {
+    for (transform, mut prev) in q.iter_mut() {
+        prev.0 = transform.translation;
+    }
+}
+
 /// Flush per-tick accumulated translation (EC1b fixed-motor mode) onto the
 /// controller once per frame, then clear it. Physics steps per-frame, so this is
 /// where many fixed ticks (or zero) collapse into a single move-and-slide input.
@@ -1494,6 +1542,7 @@ fn player_movement(
     shared_camera: Res<SharedEncounterCamera>,
     player_config: Res<LocalPlayerConfig>,
     sim: Res<SimConfig>,
+    buffers: Res<PlayerInputBuffers>,
     mut player_q: Query<
         (
             &mut KinematicCharacterController,
@@ -1509,7 +1558,7 @@ fn player_movement(
             &mut DodgeState,
             &Transform,
             &mut PlayerStateMachine,
-            &PlayerInput,
+            (&PlayerIndex, &PlayerInput),
             Option<&BoatPassenger>,
         ),
         With<Player>,
@@ -1530,10 +1579,23 @@ fn player_movement(
         dodge,
         transform,
         mut state,
-        pi,
+        (player_idx, pi),
         boat_passenger,
     ) in player_q.iter_mut()
     {
+        // EC1b: on the fixed tick, consume the latched command buffer so edge
+        // presses fire exactly once per tick at any render frame rate. The
+        // legacy Update path (fixed_motor off) keeps the live PlayerInput.
+        let buffered;
+        let pi = if sim.fixed_motor {
+            buffered = buffers
+                .fixed(player_idx.0)
+                .map(|f| f.overlay(pi))
+                .unwrap_or_else(|| pi.clone());
+            &buffered
+        } else {
+            pi
+        };
         if boat_passenger.is_some() {
             movement.velocity = Vec3::ZERO;
             movement.ground_velocity = Vec3::ZERO;
@@ -2442,11 +2504,13 @@ fn enemy_grapple_kind(
 fn grapple_hook_update(
     time: Res<Time>,
     route_registry: Res<WorldRouteRegistry>,
+    sim: Res<SimConfig>,
+    buffers: Res<PlayerInputBuffers>,
     mut player_q: Query<
         (
             Entity,
             &Transform,
-            &PlayerInput,
+            (&PlayerIndex, &PlayerInput),
             &TraversalModeState,
             &mut GrappleHookState,
             &mut PlayerStateMachine,
@@ -2475,10 +2539,18 @@ fn grapple_hook_update(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    for (entity, transform, input, traversal, mut grapple, mut state) in player_q.iter_mut() {
+    for (entity, transform, (idx, input), traversal, mut grapple, mut state) in
+        player_q.iter_mut()
+    {
         grapple.tick_foundation(dt);
 
-        if input.grapple_just && state.current != PlayerState::Dead && grapple.request_fire() {
+        // EC1b: fixed tick reads the buffered edge; Update path reads live input.
+        let grapple_just = if sim.fixed_motor {
+            buffers.fixed(idx.0).map(|f| f.edges.grapple).unwrap_or(false)
+        } else {
+            input.grapple_just
+        };
+        if grapple_just && state.current != PlayerState::Dead && grapple.request_fire() {
             state.force(PlayerState::Grappling);
         }
 
