@@ -44,9 +44,8 @@ four-viewport scenes on target hardware.
   evaluation, shadow sampling, and light cookies remain R2 work; duplicating
   Bevy's complete PBR lighting loop in every custom shader would increase
   maintenance and four-viewport fragment cost.
-- Energy and Shield are compiled engine foundations and Forge previews, not yet
-  gameplay replacements. Combat effects need per-player ownership, bounded
-  lifetimes, and effect pooling; armor shields need damage-event integration.
+- Energy and Shield now have gameplay integrations, but GPU/entity counters and
+  four-camera profiling are still required before raising effect density.
 - Water is intentionally procedural and texture-free. Depth-buffer shoreline
   foam, refraction, screen-space reflection, and underwater rendering require a
   measured render-graph pass.
@@ -54,22 +53,36 @@ four-viewport scenes on target hardware.
   post-process cost and require per-view texture dimensions rather than the
   hardcoded 1920×1080 texel size suggested by the review.
 
-## R2 plan
+## R2 delivered
 
-1. Convert primary beams, charge shots, tracking missiles, magic beams, and
-   Sabre trails to pooled Energy materials with element palettes.
-2. Drive Shield impact pulses from armor damage/parry events and verify each
-   local player's effect ownership.
-3. Add Ice/Snow and Lava domain materials using shared scene-light helpers and
-   texture-free noise budgets before considering sampled detail maps.
-4. Evaluate clustered point/spot lights through Bevy's current cluster lookup;
+1. Charge shots, Homing Star missiles/trails, magic tracking beams, Tri-Star
+   bursts, Sprite shots, Sabre blades, and Sabre waves use a five-handle shared
+   Energy palette. Fire rate cannot grow the material asset count, and elongated
+   trails retain their authored shape while their bounded entities fade.
+2. Primary and Sabre-wave projectiles now preserve their firing player entity.
+   `PlayerParryEvent` carries `PlayerIndex`, matching damage feedback ownership.
+3. Four persistent Shield material instances and meshes follow player slots
+   P1-P4. Damage and successful parry events pulse only the owning player's
+   shell; feedback changes uniforms rather than allocating per hit.
+4. `ice.wgsl` blends directional-lit blue ice and slope/noise frost with
+   branchless sparkles/Fresnel. `lava.wgsl` combines scene-lit cooled crust with
+   texture-free animated emissive seams. Both are typed materials registered in
+   Bevy and instantiated by Forge previews.
+5. Forge material resources are grouped in one typed system parameter so adding
+   material families does not exceed Bevy's direct-system parameter arity.
+
+## R2 remaining
+
+1. Evaluate clustered point/spot lights through Bevy's current cluster lookup;
    compare that path against a cheaper dominant-light CPU uniform on four-way
    split screen.
-5. Add per-view GPU timing labels and material/entity counters. Establish
+2. Add per-view GPU timing labels and material/entity counters. Establish
    measured one/two/four-camera budgets before enabling any full-screen outline,
    refraction, or heat-distortion pass.
-6. Expose typed Material payload fields in Forge with live sliders, palette
+3. Expose typed Material payload fields in Forge with live sliders, palette
    presets, validation bounds, preview meshes, and publish-to-runtime catalogs.
+4. Apply Ice/Lava to authored biome zones only after collision-safe placement
+   and one/two/four-camera measurements; Forge previews are the current rollout.
 
 ## Shader acceptance gates
 

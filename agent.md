@@ -36,11 +36,11 @@ together.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
-- Rendering R1 lives in `src/rendering.rs` and `assets/shaders/`: Toon, Grass,
-  and Water consume Bevy's live directional/ambient lights; toon bands and rim
-  masking are branchless; grass wind is UV-rooted and material-configurable;
-  Chapter 1 ocean/river water is procedural; Energy and Shield are compiled
-  Forge previews awaiting gameplay integration. Follow
+- Rendering R2 lives in `src/rendering.rs` and `assets/shaders/`: Toon, Grass,
+  Water, Energy, Shield, Ice/Snow, and Lava use Bevy 0.19 material contracts.
+  Weapon VFX reuse five bounded Energy handles; each local-player slot owns one
+  persistent damage/parry Shield handle. Forge compiles all material families.
+  Clustered-light and four-camera performance work remains in
   `docs/rendering_shader_pass.md`; do not copy legacy fixed-group WGSL examples
   or claim unmeasured millisecond budgets.
 - Robot pet foundation lives in `src/robot_pets.rs`: shared saved pet records,

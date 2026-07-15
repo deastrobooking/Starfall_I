@@ -37,7 +37,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let grid = (projection_x * weights.x + projection_y * weights.y + projection_z * weights.z)
         / max(weights.x + weights.y + weights.z, 0.001);
     let pulse = sin(globals.time * shield.pattern.z) * 0.12 + 0.88;
-    let impact = shield.edge.z * exp(-fract(globals.time * 0.8) * 5.0);
+    // CPU supplies an event-aligned decay envelope in edge.z. Keeping the
+    // envelope out of global-time phase makes four-player hits independent.
+    let impact = shield.edge.z;
     let intensity = grid * 0.44 * pulse + fresnel * shield.edge.y + impact;
     let alpha = shield.pattern.w * clamp(0.20 + grid * 0.42 + fresnel * 0.72, 0.0, 1.0);
     return vec4<f32>(shield.color.rgb * intensity, alpha);

@@ -62,6 +62,58 @@ impl Default for StarfallSpatialBundle {
 pub type PbrBundle = StarfallPbrBundle;
 pub type SpatialBundle = StarfallSpatialBundle;
 
+/// Custom-material equivalent of [`StarfallPbrBundle`] for emissive combat VFX.
+#[derive(Bundle)]
+pub struct EnergyPbrBundle {
+    pub mesh: Mesh3d,
+    pub material: MeshMaterial3d<EnergyMaterial>,
+    pub transform: Transform,
+    pub global_transform: GlobalTransform,
+    pub visibility: Visibility,
+    pub inherited_visibility: InheritedVisibility,
+    pub view_visibility: ViewVisibility,
+}
+
+impl Default for EnergyPbrBundle {
+    fn default() -> Self {
+        Self {
+            mesh: Mesh3d(default()),
+            material: MeshMaterial3d(default()),
+            transform: default(),
+            global_transform: default(),
+            visibility: default(),
+            inherited_visibility: default(),
+            view_visibility: default(),
+        }
+    }
+}
+
+/// Custom-material equivalent used by persistent per-player armor shells.
+#[derive(Bundle)]
+pub struct ShieldPbrBundle {
+    pub mesh: Mesh3d,
+    pub material: MeshMaterial3d<ShieldMaterial>,
+    pub transform: Transform,
+    pub global_transform: GlobalTransform,
+    pub visibility: Visibility,
+    pub inherited_visibility: InheritedVisibility,
+    pub view_visibility: ViewVisibility,
+}
+
+impl Default for ShieldPbrBundle {
+    fn default() -> Self {
+        Self {
+            mesh: Mesh3d(default()),
+            material: MeshMaterial3d(default()),
+            transform: default(),
+            global_transform: default(),
+            visibility: default(),
+            inherited_visibility: default(),
+            view_visibility: default(),
+        }
+    }
+}
+
 #[derive(Bundle)]
 pub struct StarfallCamera3dBundle {
     pub camera_3d: Camera3d,
@@ -293,6 +345,70 @@ impl Material for ShieldMaterial {
     }
 }
 
+// ── Ice / Snow Material ─────────────────────────────────────────────────────
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct IceMaterial {
+    #[uniform(0)]
+    pub settings: IceMaterialUniform,
+}
+
+#[derive(ShaderType, Debug, Clone, Copy)]
+pub struct IceMaterialUniform {
+    pub snow_color: Vec4,
+    pub ice_color: Vec4,
+    /// X detail scale, Y frost coverage, Z sparkle strength, W Fresnel strength.
+    pub surface: Vec4,
+}
+
+impl Default for IceMaterialUniform {
+    fn default() -> Self {
+        Self {
+            snow_color: Vec4::new(0.84, 0.94, 1.0, 1.0),
+            ice_color: Vec4::new(0.08, 0.42, 0.68, 1.0),
+            surface: Vec4::new(0.18, 0.42, 0.34, 0.38),
+        }
+    }
+}
+
+impl Material for IceMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/ice.wgsl".into()
+    }
+}
+
+// ── Lava Material ───────────────────────────────────────────────────────────
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct LavaMaterial {
+    #[uniform(0)]
+    pub settings: LavaMaterialUniform,
+}
+
+#[derive(ShaderType, Debug, Clone, Copy)]
+pub struct LavaMaterialUniform {
+    pub crust_color: Vec4,
+    pub hot_color: Vec4,
+    /// X flow speed, Y cell scale, Z seam width, W emissive strength.
+    pub motion: Vec4,
+}
+
+impl Default for LavaMaterialUniform {
+    fn default() -> Self {
+        Self {
+            crust_color: Vec4::new(0.055, 0.025, 0.018, 1.0),
+            hot_color: Vec4::new(1.0, 0.16, 0.015, 1.0),
+            motion: Vec4::new(0.34, 0.21, 0.24, 1.65),
+        }
+    }
+}
+
+impl Material for LavaMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/lava.wgsl".into()
+    }
+}
+
 #[cfg(test)]
 mod shader_contract_tests {
     use super::*;
@@ -302,6 +418,8 @@ mod shader_contract_tests {
     const WATER_SHADER: &str = include_str!("../assets/shaders/water.wgsl");
     const ENERGY_SHADER: &str = include_str!("../assets/shaders/energy.wgsl");
     const SHIELD_SHADER: &str = include_str!("../assets/shaders/shield.wgsl");
+    const ICE_SHADER: &str = include_str!("../assets/shaders/ice.wgsl");
+    const LAVA_SHADER: &str = include_str!("../assets/shaders/lava.wgsl");
 
     #[test]
     fn custom_shaders_use_bevy_material_bind_group_contract() {
@@ -311,6 +429,8 @@ mod shader_contract_tests {
             WATER_SHADER,
             ENERGY_SHADER,
             SHIELD_SHADER,
+            ICE_SHADER,
+            LAVA_SHADER,
         ] {
             assert!(shader.contains("#{MATERIAL_BIND_GROUP}"));
             assert!(!shader.contains("@group(1)"));
@@ -319,7 +439,13 @@ mod shader_contract_tests {
 
     #[test]
     fn scene_lit_surface_shaders_consume_bevy_lights() {
-        for shader in [TOON_SHADER, GRASS_SHADER, WATER_SHADER] {
+        for shader in [
+            TOON_SHADER,
+            GRASS_SHADER,
+            WATER_SHADER,
+            ICE_SHADER,
+            LAVA_SHADER,
+        ] {
             assert!(shader.contains("lights.n_directional_lights"));
             assert!(shader.contains("direction_to_light"));
         }
@@ -340,9 +466,13 @@ mod shader_contract_tests {
         let water = WaterMaterialUniform::default();
         let energy = EnergyMaterialUniform::default();
         let shield = ShieldMaterialUniform::default();
+        let ice = IceMaterialUniform::default();
+        let lava = LavaMaterialUniform::default();
         assert!((0.0..=1.0).contains(&water.surface.y));
         assert!((0.0..=1.0).contains(&water.surface.z));
         assert!((0.0..=1.0).contains(&energy.motion.w));
         assert!((0.0..=1.0).contains(&shield.pattern.w));
+        assert!((0.0..=1.0).contains(&ice.surface.y));
+        assert!(lava.motion.w > 0.0 && lava.motion.w <= 2.0);
     }
 }

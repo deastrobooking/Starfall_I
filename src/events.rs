@@ -22,6 +22,7 @@ pub struct PlayerDodgeEvent;
 
 #[derive(Message, Debug)]
 pub struct PlayerParryEvent {
+    pub player_index: Option<u8>,
     pub success: bool,
 }
 

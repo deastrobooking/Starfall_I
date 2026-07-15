@@ -32,7 +32,7 @@ use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfil
 use crate::perks::PerkTree;
 use crate::physics::prelude::*;
 use crate::player_mesh::attach_modular_player_mesh;
-use crate::rendering::Camera3dBundle;
+use crate::rendering::{Camera3dBundle, ShieldMaterial, ShieldMaterialUniform, ShieldPbrBundle};
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe, CameraShake,
     ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig, PlaySessionTransition,
@@ -105,14 +105,166 @@ struct GrappleCableVisual {
     owner: Entity,
 }
 
+#[derive(Component, Debug, Clone, Copy)]
+struct PlayerShieldVisual {
+    owner_index: u8,
+}
+
+/// Four stable material instances keep split-screen shield feedback owned and
+/// bounded. Damage only changes uniforms; it never allocates a new material.
+#[derive(Resource)]
+struct PlayerShieldVfxAssets {
+    mesh: Handle<Mesh>,
+    materials: [Handle<ShieldMaterial>; 4],
+    pulse_remaining: [f32; 4],
+    pulse_strength: [f32; 4],
+}
+
+fn setup_player_shield_vfx(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ShieldMaterial>>,
+) {
+    let colors = [
+        Vec4::new(0.12, 0.78, 1.0, 1.0),
+        Vec4::new(1.0, 0.34, 0.74, 1.0),
+        Vec4::new(0.40, 1.0, 0.42, 1.0),
+        Vec4::new(1.0, 0.72, 0.14, 1.0),
+    ];
+    let handles = std::array::from_fn(|index| {
+        materials.add(ShieldMaterial {
+            settings: ShieldMaterialUniform {
+                color: colors[index],
+                ..default()
+            },
+        })
+    });
+    commands.insert_resource(PlayerShieldVfxAssets {
+        mesh: meshes.add(Sphere::new(1.15)),
+        materials: handles,
+        pulse_remaining: [0.0; 4],
+        pulse_strength: [0.0; 4],
+    });
+}
+
+fn set_player_shield_pulse(
+    remaining: &mut [f32; 4],
+    strength: &mut [f32; 4],
+    player_index: Option<u8>,
+    duration: f32,
+    intensity: f32,
+) {
+    if let Some(index) = player_index.filter(|index| *index < 4) {
+        remaining[index as usize] = duration;
+        strength[index as usize] = intensity;
+    } else {
+        remaining.fill(duration);
+        strength.fill(intensity);
+    }
+}
+
+fn player_shield_feedback_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut assets: ResMut<PlayerShieldVfxAssets>,
+    mut shield_materials: ResMut<Assets<ShieldMaterial>>,
+    mut damaged: MessageReader<PlayerDamagedEvent>,
+    mut parried: MessageReader<PlayerParryEvent>,
+    players: Query<(&PlayerIndex, &GlobalTransform), With<Player>>,
+    mut visuals: Query<
+        (Entity, &PlayerShieldVisual, &mut Transform, &mut Visibility),
+        Without<Player>,
+    >,
+) {
+    let assets = &mut *assets;
+    for event in damaged.read() {
+        let strength = (0.38 + event.amount / 42.0).clamp(0.42, 1.0);
+        set_player_shield_pulse(
+            &mut assets.pulse_remaining,
+            &mut assets.pulse_strength,
+            event.player_index,
+            0.30,
+            strength,
+        );
+    }
+    for event in parried.read().filter(|event| event.success) {
+        set_player_shield_pulse(
+            &mut assets.pulse_remaining,
+            &mut assets.pulse_strength,
+            event.player_index,
+            0.42,
+            1.35,
+        );
+    }
+
+    let dt = time.delta_secs();
+    let mut represented = [false; 4];
+    for (entity, visual, mut transform, mut visibility) in visuals.iter_mut() {
+        let Some((_, player_transform)) = players
+            .iter()
+            .find(|(index, _)| index.0 == visual.owner_index)
+        else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        let slot = visual.owner_index as usize;
+        if slot >= represented.len() {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        represented[slot] = true;
+        assets.pulse_remaining[slot] = (assets.pulse_remaining[slot] - dt).max(0.0);
+        let envelope = (assets.pulse_remaining[slot] / 0.30).clamp(0.0, 1.0);
+        let impact = envelope * assets.pulse_strength[slot];
+        *visibility = if impact > 0.01 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        transform.translation = player_transform.translation() + Vec3::Y * 0.95;
+        transform.scale = Vec3::new(0.82, 1.18, 0.82) * (1.0 + impact * 0.08);
+        if let Some(mut material) = shield_materials.get_mut(&assets.materials[slot]) {
+            material.settings.edge.z = impact;
+            material.settings.pattern.w = 0.24 + impact.min(1.0) * 0.34;
+        }
+    }
+
+    for (index, player_transform) in players.iter() {
+        let slot = index.0 as usize;
+        if slot >= represented.len() || represented[slot] {
+            continue;
+        }
+        commands.spawn((
+            ShieldPbrBundle {
+                mesh: Mesh3d(assets.mesh.clone()),
+                material: MeshMaterial3d(assets.materials[slot].clone()),
+                transform: Transform::from_translation(
+                    player_transform.translation() + Vec3::Y * 0.95,
+                )
+                .with_scale(Vec3::new(0.82, 1.18, 0.82)),
+                visibility: Visibility::Hidden,
+                ..default()
+            },
+            PlayerShieldVisual {
+                owner_index: index.0,
+            },
+        ));
+    }
+}
+
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SharedEncounterCamera>()
             .init_resource::<DungeonCrawlState>()
             .init_resource::<CameraDisplayTransition>()
+            .add_systems(Startup, setup_player_shield_vfx)
             .add_systems(OnEnter(AppState::Playing), (spawn_players, grab_cursor))
             .add_systems(OnEnter(AppState::MainMenu), cleanup_players_for_menu)
             .add_systems(OnExit(AppState::Playing), release_cursor)
+            .add_systems(
+                Update,
+                player_shield_feedback_system.run_if(in_state(AppState::Playing)),
+            )
             // EC1b OFF path (default): the original single chain, unchanged.
             .add_systems(
                 Update,
@@ -2791,7 +2943,10 @@ pub fn damage_player(
 
     if parry.is_parrying {
         parry.is_parrying = false;
-        parry_ev.write(PlayerParryEvent { success: true });
+        parry_ev.write(PlayerParryEvent {
+            player_index,
+            success: true,
+        });
         return;
     }
 
@@ -2841,6 +2996,17 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shield_pulse_updates_only_the_owned_local_player() {
+        let mut remaining = [0.0; 4];
+        let mut strength = [0.0; 4];
+
+        set_player_shield_pulse(&mut remaining, &mut strength, Some(2), 0.42, 1.35);
+
+        assert_eq!(remaining, [0.0, 0.0, 0.42, 0.0]);
+        assert_eq!(strength, [0.0, 0.0, 1.35, 0.0]);
+    }
 
     #[test]
     fn movement_input_preserves_analog_strength() {

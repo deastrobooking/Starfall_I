@@ -231,7 +231,8 @@ thin glue.
 # Rendering shader pass
 
 The staged custom-material and shader plan is tracked in
-`docs/rendering_shader_pass.md`. Rendering R1 is delivered with branchless,
-scene-lit Toon; configurable GPU Grass; procedural world Water; and compiled
-Energy/Shield Forge previews. R2 owns combat/armor integration, ice/lava domain
-materials, clustered-light evaluation, and measured four-viewport GPU budgets.
+`docs/rendering_shader_pass.md`. Rendering R1 delivered branchless scene-lit
+Toon, configurable GPU Grass, and procedural world Water. R2 now integrates a
+bounded five-handle Energy combat palette, per-player damage/parry Shield
+pulses, and typed Ice/Snow plus Lava materials in Forge. Clustered-light
+evaluation, authoring sliders, and measured four-viewport GPU budgets remain.

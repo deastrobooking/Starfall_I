@@ -9,6 +9,7 @@ mod persistence;
 
 use std::collections::BTreeSet;
 
+use bevy::ecs::system::SystemParam;
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
 use bevy::input::keyboard::Key;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
@@ -25,14 +26,25 @@ use crate::components::world::{
 use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::rendering::{
-    EnergyMaterial, EnergyMaterialUniform, ShieldMaterial, ShieldMaterialUniform, ToonMaterial,
-    ToonMaterialUniform, WaterMaterial, WaterMaterialUniform,
+    EnergyMaterial, EnergyMaterialUniform, IceMaterial, IceMaterialUniform, LavaMaterial,
+    LavaMaterialUniform, ShieldMaterial, ShieldMaterialUniform, ToonMaterial, ToonMaterialUniform,
+    WaterMaterial, WaterMaterialUniform,
 };
 use crate::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
     ProjectLoadSource, ProjectStore, SceneObjectDraft, TransformDraft,
 };
+
+#[derive(SystemParam)]
+struct ForgeMaterialAssets<'w> {
+    toon: ResMut<'w, Assets<ToonMaterial>>,
+    water: ResMut<'w, Assets<WaterMaterial>>,
+    energy: ResMut<'w, Assets<EnergyMaterial>>,
+    shield: ResMut<'w, Assets<ShieldMaterial>>,
+    ice: ResMut<'w, Assets<IceMaterial>>,
+    lava: ResMut<'w, Assets<LavaMaterial>>,
+}
 
 pub struct EngineToolsPlugin;
 
@@ -639,10 +651,7 @@ fn enter_editor_workspace(
     mut camera_rig: ResMut<EditorCameraRig>,
     mut registry: ResMut<EditorRegistryState>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut toon_materials: ResMut<Assets<ToonMaterial>>,
-    mut water_materials: ResMut<Assets<WaterMaterial>>,
-    mut energy_materials: ResMut<Assets<EnergyMaterial>>,
-    mut shield_materials: ResMut<Assets<ShieldMaterial>>,
+    mut material_assets: ForgeMaterialAssets,
 ) {
     virtual_time.pause();
     physics_time.pause();
@@ -690,7 +699,7 @@ fn enter_editor_workspace(
         EditorWorkspaceRoot,
         Name::new("Forge Toon Material Preview"),
         Mesh3d(meshes.add(Sphere::new(0.75))),
-        MeshMaterial3d(toon_materials.add(ToonMaterial {
+        MeshMaterial3d(material_assets.toon.add(ToonMaterial {
             settings: ToonMaterialUniform::default(),
         })),
         Transform::from_translation(preview_center - preview_right * 1.8),
@@ -699,7 +708,7 @@ fn enter_editor_workspace(
         EditorWorkspaceRoot,
         Name::new("Forge Water Material Preview"),
         Mesh3d(meshes.add(Cuboid::new(1.4, 0.12, 1.4))),
-        MeshMaterial3d(water_materials.add(WaterMaterial {
+        MeshMaterial3d(material_assets.water.add(WaterMaterial {
             settings: WaterMaterialUniform::default(),
         })),
         Transform::from_translation(preview_center + Vec3::Y * 0.05),
@@ -708,7 +717,7 @@ fn enter_editor_workspace(
         EditorWorkspaceRoot,
         Name::new("Forge Energy Material Preview"),
         Mesh3d(meshes.add(Sphere::new(0.62))),
-        MeshMaterial3d(energy_materials.add(EnergyMaterial {
+        MeshMaterial3d(material_assets.energy.add(EnergyMaterial {
             settings: EnergyMaterialUniform::default(),
         })),
         Transform::from_translation(preview_center + preview_right * 1.8),
@@ -717,10 +726,28 @@ fn enter_editor_workspace(
         EditorWorkspaceRoot,
         Name::new("Forge Shield Material Preview"),
         Mesh3d(meshes.add(Sphere::new(0.82))),
-        MeshMaterial3d(shield_materials.add(ShieldMaterial {
+        MeshMaterial3d(material_assets.shield.add(ShieldMaterial {
             settings: ShieldMaterialUniform::default(),
         })),
         Transform::from_translation(preview_center + preview_right * 3.5),
+    ));
+    commands.spawn((
+        EditorWorkspaceRoot,
+        Name::new("Forge Ice Material Preview"),
+        Mesh3d(meshes.add(Sphere::new(0.72))),
+        MeshMaterial3d(material_assets.ice.add(IceMaterial {
+            settings: IceMaterialUniform::default(),
+        })),
+        Transform::from_translation(preview_center - preview_right * 1.8 + Vec3::Y * 1.9),
+    ));
+    commands.spawn((
+        EditorWorkspaceRoot,
+        Name::new("Forge Lava Material Preview"),
+        Mesh3d(meshes.add(Cuboid::new(1.4, 0.18, 1.4))),
+        MeshMaterial3d(material_assets.lava.add(LavaMaterial {
+            settings: LavaMaterialUniform::default(),
+        })),
+        Transform::from_translation(preview_center + Vec3::Y * 1.9),
     ));
 
     spawn_editor_workspace_ui(&mut commands);

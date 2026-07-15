@@ -11,7 +11,7 @@ use crate::damage::{
 use crate::events::*;
 use crate::hacking::HackedUnit;
 use crate::perks::PerkTree;
-use crate::rendering::PbrBundle;
+use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::resources::DungeonCrawlState;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
@@ -23,6 +23,9 @@ pub struct HitParticle {
     pub max_lifetime: f32,
     pub velocity: Vec3,
 }
+
+#[derive(Component)]
+struct PreserveParticleShape(Vec3);
 
 #[derive(Component)]
 struct SabreBladeVisual {
@@ -74,6 +77,13 @@ pub struct ProjectileAssets {
     // VFX
     pub mat_charge_spark: Handle<StandardMaterial>,
     pub mat_muzzle_flash: Handle<StandardMaterial>,
+    // Shared custom-shader palette. These five handles are reused by every
+    // projectile and transient effect; firing never allocates a material.
+    pub energy_plasma: Handle<EnergyMaterial>,
+    pub energy_laser: Handle<EnergyMaterial>,
+    pub energy_explosive: Handle<EnergyMaterial>,
+    pub energy_magic: Handle<EnergyMaterial>,
+    pub energy_sabre: Handle<EnergyMaterial>,
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -129,6 +139,7 @@ fn setup_weapon_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut energy_materials: ResMut<Assets<EnergyMaterial>>,
 ) {
     let m = &mut *materials;
     commands.insert_resource(ProjectileAssets {
@@ -165,7 +176,52 @@ fn setup_weapon_assets(
         // VFX
         mat_charge_spark: mk_proj_mat(m, 1.0, 1.0, 0.8, 8.0, 6.0, 2.0),
         mat_muzzle_flash: mk_proj_mat(m, 1.0, 1.0, 1.0, 10.0, 10.0, 6.0),
+        energy_plasma: mk_energy_mat(
+            &mut energy_materials,
+            Vec4::new(0.78, 1.0, 1.0, 1.0),
+            Vec4::new(0.05, 0.72, 1.0, 1.0),
+            Vec4::new(3.1, 6.4, 4.2, 0.88),
+        ),
+        energy_laser: mk_energy_mat(
+            &mut energy_materials,
+            Vec4::new(0.92, 1.0, 0.78, 1.0),
+            Vec4::new(0.12, 1.0, 0.42, 1.0),
+            Vec4::new(4.4, 7.2, 5.4, 0.90),
+        ),
+        energy_explosive: mk_energy_mat(
+            &mut energy_materials,
+            Vec4::new(1.0, 0.96, 0.62, 1.0),
+            Vec4::new(1.0, 0.18, 0.04, 1.0),
+            Vec4::new(2.2, 5.2, 6.0, 0.92),
+        ),
+        energy_magic: mk_energy_mat(
+            &mut energy_materials,
+            Vec4::new(0.92, 0.88, 1.0, 1.0),
+            Vec4::new(0.42, 0.12, 1.0, 1.0),
+            Vec4::new(3.6, 4.5, 3.0, 0.86),
+        ),
+        energy_sabre: mk_energy_mat(
+            &mut energy_materials,
+            Vec4::new(1.0, 1.0, 0.88, 1.0),
+            Vec4::new(0.18, 0.78, 1.0, 1.0),
+            Vec4::new(5.2, 8.0, 7.0, 0.94),
+        ),
     });
+}
+
+fn mk_energy_mat(
+    materials: &mut Assets<EnergyMaterial>,
+    core_color: Vec4,
+    edge_color: Vec4,
+    motion: Vec4,
+) -> Handle<EnergyMaterial> {
+    materials.add(EnergyMaterial {
+        settings: EnergyMaterialUniform {
+            core_color,
+            edge_color,
+            motion,
+        },
+    })
 }
 
 fn mk_translucent_mat(
@@ -374,6 +430,7 @@ fn weapon_fire_system(
     dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
+            Entity,
             &GlobalTransform,
             &PlayerIndex,
             &mut WeaponInventory,
@@ -398,6 +455,7 @@ fn weapon_fire_system(
     let perk_damage_mult = perks.damage_mult();
 
     for (
+        player_entity,
         player_transform,
         player_index,
         mut inv,
@@ -475,6 +533,7 @@ fn weapon_fire_system(
                 spawn_charge_blast(
                     &mut commands,
                     &proj_assets,
+                    player_entity,
                     pos,
                     aim_fwd,
                     cam.right().as_vec3(),
@@ -561,11 +620,6 @@ fn weapon_fire_system(
 
         let (mesh_h, base_mat_h) = base_proj_handles(weapon.weapon_type, &proj_assets);
         let magic_tracking = magic_caster.is_some() && !explosive_weapon;
-        let mat_h = if magic_tracking {
-            proj_assets.mat_laser.clone()
-        } else {
-            base_mat_h
-        };
         let projectile_stretch = if magic_tracking {
             Vec3::new(stretch.x.max(0.8), stretch.y.max(0.8), stretch.z.max(5.0))
         } else {
@@ -592,28 +646,41 @@ fn weapon_fire_system(
                 .looking_to(dir, Vec3::Y)
                 .with_scale(projectile_stretch);
 
-            let mut projectile_entity = commands.spawn((
-                PbrBundle {
-                    mesh: Mesh3d(mesh_h.clone()),
-                    material: MeshMaterial3d(mat_h.clone()),
-                    transform: proj_transform,
-                    ..default()
-                },
-                Projectile {
-                    damage,
-                    damage_type,
-                    speed,
-                    direction: dir,
-                    lifetime: 3.0,
-                    is_explosive,
-                    explosion_radius,
-                    weapon_type: ProjectileOwner::Player,
-                    owner: None,
-                    piercing: false,
-                    gravity_affected,
-                    vertical_velocity: if gravity_affected { 0.2 } else { 0.0 },
-                },
-            ));
+            let projectile = Projectile {
+                damage,
+                damage_type,
+                speed,
+                direction: dir,
+                lifetime: 3.0,
+                is_explosive,
+                explosion_radius,
+                weapon_type: ProjectileOwner::Player,
+                owner: Some(player_entity),
+                piercing: false,
+                gravity_affected,
+                vertical_velocity: if gravity_affected { 0.2 } else { 0.0 },
+            };
+            let mut projectile_entity = if magic_tracking {
+                commands.spawn((
+                    EnergyPbrBundle {
+                        mesh: Mesh3d(mesh_h.clone()),
+                        material: MeshMaterial3d(proj_assets.energy_magic.clone()),
+                        transform: proj_transform,
+                        ..default()
+                    },
+                    projectile,
+                ))
+            } else {
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(mesh_h.clone()),
+                        material: MeshMaterial3d(base_mat_h.clone()),
+                        transform: proj_transform,
+                        ..default()
+                    },
+                    projectile,
+                ))
+            };
             if magic_tracking {
                 projectile_entity.insert(TrackingMissile::magic_beam(player_index.0));
             }
@@ -644,14 +711,13 @@ fn base_proj_handles(
     }
 }
 
-fn charge_mat_handle(wt: WeaponType, assets: &ProjectileAssets) -> Handle<StandardMaterial> {
+fn charge_energy_handle(wt: WeaponType, assets: &ProjectileAssets) -> Handle<EnergyMaterial> {
     match wt {
-        WeaponType::Pistol => assets.mat_charge_pistol.clone(),
-        WeaponType::Rifle => assets.mat_charge_rifle.clone(),
-        WeaponType::Shotgun => assets.mat_charge_shotgun.clone(),
-        WeaponType::Rocket => assets.mat_charge_rocket.clone(),
-        WeaponType::Laser => assets.mat_charge_laser.clone(),
-        WeaponType::Grenade => assets.mat_charge_grenade.clone(),
+        WeaponType::Rocket | WeaponType::Grenade => assets.energy_explosive.clone(),
+        WeaponType::Laser => assets.energy_laser.clone(),
+        WeaponType::Pistol | WeaponType::Rifle | WeaponType::Shotgun => {
+            assets.energy_plasma.clone()
+        }
     }
 }
 
@@ -683,6 +749,7 @@ fn spawn_muzzle_flash_scaled(
 fn spawn_charge_blast(
     commands: &mut Commands,
     assets: &ProjectileAssets,
+    owner: Entity,
     pos: Vec3,
     dir: Vec3,
     right: Vec3,
@@ -692,13 +759,13 @@ fn spawn_charge_blast(
     explosion_radius: f32,
     base_speed: f32,
 ) {
-    let mat = charge_mat_handle(wt, assets);
+    let mat = charge_energy_handle(wt, assets);
 
     match wt {
         // Rifle: ultra-fast piercing bolt
         WeaponType::Rifle => {
             commands.spawn((
-                PbrBundle {
+                EnergyPbrBundle {
                     mesh: Mesh3d(assets.sphere_sm.clone()),
                     material: MeshMaterial3d(mat),
                     transform: Transform::from_translation(pos)
@@ -715,7 +782,7 @@ fn spawn_charge_blast(
                     is_explosive: false,
                     explosion_radius: 0.0,
                     weapon_type: ProjectileOwner::Player,
-                    owner: None,
+                    owner: Some(owner),
                     piercing: true,
                     gravity_affected: false,
                     vertical_velocity: 0.0,
@@ -726,7 +793,7 @@ fn spawn_charge_blast(
         // Laser: piercing bolt that explodes on expiry
         WeaponType::Laser => {
             commands.spawn((
-                PbrBundle {
+                EnergyPbrBundle {
                     mesh: Mesh3d(assets.sphere_sm.clone()),
                     material: MeshMaterial3d(mat),
                     transform: Transform::from_translation(pos)
@@ -743,7 +810,7 @@ fn spawn_charge_blast(
                     is_explosive: true,
                     explosion_radius,
                     weapon_type: ProjectileOwner::Player,
-                    owner: None,
+                    owner: Some(owner),
                     piercing: true,
                     gravity_affected: false,
                     vertical_velocity: 0.0,
@@ -762,7 +829,7 @@ fn spawn_charge_blast(
                 let sy = rng.gen_range(-0.38f32..0.38);
                 let shot_dir = (dir + right * sx + up * sy).normalize_or_zero();
                 commands.spawn((
-                    PbrBundle {
+                    EnergyPbrBundle {
                         mesh: Mesh3d(assets.sphere_sm.clone()),
                         material: MeshMaterial3d(mat.clone()),
                         transform: Transform::from_translation(pos)
@@ -779,7 +846,7 @@ fn spawn_charge_blast(
                         is_explosive: false,
                         explosion_radius: 0.0,
                         weapon_type: ProjectileOwner::Player,
-                        owner: None,
+                        owner: Some(owner),
                         piercing: false,
                         gravity_affected: false,
                         vertical_velocity: 0.0,
@@ -791,7 +858,7 @@ fn spawn_charge_blast(
         // All others: large explosive orb
         _ => {
             commands.spawn((
-                PbrBundle {
+                EnergyPbrBundle {
                     mesh: Mesh3d(assets.sphere_xl.clone()),
                     material: MeshMaterial3d(mat),
                     transform: Transform::from_translation(pos).with_scale(Vec3::splat(1.4)),
@@ -806,7 +873,7 @@ fn spawn_charge_blast(
                     is_explosive: true,
                     explosion_radius,
                     weapon_type: ProjectileOwner::Player,
-                    owner: None,
+                    owner: Some(owner),
                     piercing: false,
                     gravity_affected: false,
                     vertical_velocity: 0.0,
@@ -1005,9 +1072,9 @@ fn special_weapon_system(
                         gauntlet_projectile_damage_type(&upgrades, DamageType::Explosive);
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;
                     commands.spawn((
-                        PbrBundle {
+                        EnergyPbrBundle {
                             mesh: Mesh3d(proj_assets.sphere_md.clone()),
-                            material: MeshMaterial3d(proj_assets.mat_homing_star.clone()),
+                            material: MeshMaterial3d(proj_assets.energy_explosive.clone()),
                             transform: Transform::from_translation(pos),
                             ..default()
                         },
@@ -1060,9 +1127,9 @@ fn special_weapon_system(
                         let sy = rng.gen_range(-0.05f32..0.05);
                         let dir = (fwd + right * sx + up * sy).normalize();
                         commands.spawn((
-                            PbrBundle {
+                            EnergyPbrBundle {
                                 mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                                material: MeshMaterial3d(proj_assets.mat_energy.clone()),
+                                material: MeshMaterial3d(proj_assets.energy_plasma.clone()),
                                 transform: Transform::from_translation(pos)
                                     .looking_to(dir, Vec3::Y)
                                     .with_scale(Vec3::new(0.8, 0.8, 2.5)),
@@ -1077,7 +1144,7 @@ fn special_weapon_system(
                                 is_explosive: false,
                                 explosion_radius: 0.0,
                                 weapon_type: ProjectileOwner::TriStarBurst,
-                                owner: None,
+                                owner: Some(player_entity),
                                 piercing: true,
                                 gravity_affected: false,
                                 vertical_velocity: 0.0,
@@ -1162,9 +1229,9 @@ fn special_weapon_system(
                         let sy = rng.gen_range(-0.08f32..0.08);
                         let dir = (fwd + right * sx + up * sy).normalize();
                         commands.spawn((
-                            PbrBundle {
+                            EnergyPbrBundle {
                                 mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                                material: MeshMaterial3d(proj_assets.mat_sprite_shot.clone()),
+                                material: MeshMaterial3d(proj_assets.energy_magic.clone()),
                                 transform: Transform::from_translation(pos)
                                     .looking_to(dir, Vec3::Y)
                                     .with_scale(Vec3::new(0.8, 0.8, 2.0)),
@@ -1179,7 +1246,7 @@ fn special_weapon_system(
                                 is_explosive: false,
                                 explosion_radius: 0.0,
                                 weapon_type: ProjectileOwner::SpriteTurret,
-                                owner: None,
+                                owner: Some(player_entity),
                                 piercing: false,
                                 gravity_affected: false,
                                 vertical_velocity: 0.0,
@@ -1267,29 +1334,32 @@ fn tracking_missile_system(
 
         if missile.trail_timer <= 0.0 {
             missile.trail_timer = 0.055;
-            commands.spawn((
-                PbrBundle {
-                    mesh: Mesh3d(assets.sphere_sm.clone()),
-                    material: MeshMaterial3d(if missile.magic_beam {
-                        assets.mat_laser.clone()
-                    } else {
-                        assets.mat_homing_star.clone()
-                    }),
-                    transform: Transform::from_translation(
-                        transform.translation - projectile.direction * 0.55,
-                    )
+            let transform =
+                Transform::from_translation(transform.translation - projectile.direction * 0.55)
                     .with_scale(if missile.magic_beam {
                         Vec3::new(0.75, 0.75, 3.2)
                     } else {
                         Vec3::splat(1.35)
+                    });
+            let particle = HitParticle {
+                lifetime: 0.24,
+                max_lifetime: 0.24,
+                velocity: -projectile.direction * 1.8 + Vec3::Y * 0.35,
+            };
+            let trail_scale = transform.scale;
+            commands.spawn((
+                EnergyPbrBundle {
+                    mesh: Mesh3d(assets.sphere_sm.clone()),
+                    material: MeshMaterial3d(if missile.magic_beam {
+                        assets.energy_magic.clone()
+                    } else {
+                        assets.energy_explosive.clone()
                     }),
+                    transform,
                     ..default()
                 },
-                HitParticle {
-                    lifetime: 0.24,
-                    max_lifetime: 0.24,
-                    velocity: -projectile.direction * 1.8 + Vec3::Y * 0.35,
-                },
+                particle,
+                PreserveParticleShape(trail_scale),
             ));
         }
     }
@@ -2107,9 +2177,9 @@ fn beam_sabre_update_system(
                         .with_y(0.0)
                         .normalize_or_zero();
                     commands.spawn((
-                        PbrBundle {
+                        EnergyPbrBundle {
                             mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                            material: MeshMaterial3d(proj_assets.mat_melee_flash.clone()),
+                            material: MeshMaterial3d(proj_assets.energy_sabre.clone()),
                             transform: Transform::from_translation(origin)
                                 .looking_to(dir, Vec3::Y)
                                 .with_scale(Vec3::new(0.8, 0.8, 2.5)),
@@ -2126,7 +2196,7 @@ fn beam_sabre_update_system(
                             is_explosive: sabre.has_aoe_splash(),
                             explosion_radius: if sabre.has_aoe_splash() { 4.0 } else { 0.0 },
                             weapon_type: ProjectileOwner::Player,
-                            owner: None,
+                            owner: Some(entity),
                             piercing: sabre.is_piercing(),
                             gravity_affected: false,
                             vertical_velocity: 0.0,
@@ -2163,9 +2233,9 @@ fn sync_sabre_blade_visual(
             continue;
         }
         commands.spawn((
-            PbrBundle {
+            EnergyPbrBundle {
                 mesh: Mesh3d(assets.sphere_sm.clone()),
-                material: MeshMaterial3d(assets.mat_melee_flash.clone()),
+                material: MeshMaterial3d(assets.energy_sabre.clone()),
                 transform: sabre_blade_transform(player_transform, sabre),
                 ..default()
             },
@@ -2266,10 +2336,15 @@ fn critical_impact_spawn_system(
 fn particle_update_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut q: Query<(Entity, &mut Transform, &mut HitParticle)>,
+    mut q: Query<(
+        Entity,
+        &mut Transform,
+        &mut HitParticle,
+        Option<&PreserveParticleShape>,
+    )>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, mut particle) in q.iter_mut() {
+    for (entity, mut transform, mut particle, preserved_shape) in q.iter_mut() {
         particle.lifetime -= dt;
         if particle.lifetime <= 0.0 {
             commands.entity(entity).despawn();
@@ -2278,7 +2353,7 @@ fn particle_update_system(
         transform.translation += particle.velocity * dt;
         particle.velocity.y -= 18.0 * dt;
         let t = (particle.lifetime / particle.max_lifetime).max(0.05);
-        transform.scale = Vec3::splat(t);
+        transform.scale = preserved_shape.map_or(Vec3::splat(t), |shape| shape.0 * t);
     }
 }
 

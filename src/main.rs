@@ -146,6 +146,8 @@ fn main() {
         .add_plugins(MaterialPlugin::<rendering::WaterMaterial>::default())
         .add_plugins(MaterialPlugin::<rendering::EnergyMaterial>::default())
         .add_plugins(MaterialPlugin::<rendering::ShieldMaterial>::default())
+        .add_plugins(MaterialPlugin::<rendering::IceMaterial>::default())
+        .add_plugins(MaterialPlugin::<rendering::LavaMaterial>::default())
         // Game plugins
         .add_plugins((
             InputPlugin,
