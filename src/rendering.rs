@@ -137,14 +137,38 @@ pub type Camera3dBundle = StarfallCamera3dBundle;
 pub type DirectionalLightBundle = StarfallDirectionalLightBundle;
 pub type PointLightBundle = StarfallPointLightBundle;
 
-use bevy::render::render_resource::AsBindGroup;
+use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 
 // ── Toon Material ─────────────────────────────────────────────────────────────
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct ToonMaterial {
     #[uniform(0)]
-    pub color: LinearRgba,
+    pub settings: ToonMaterialUniform,
+}
+
+#[derive(ShaderType, Debug, Clone, Copy)]
+pub struct ToonMaterialUniform {
+    pub color: Vec4,
+    pub light_direction: Vec4,
+    /// X/Y are the shadow and light thresholds; Z/W are shadow and mid levels.
+    pub bands: Vec4,
+    /// RGB is the rim color and W is rim strength.
+    pub rim_color_strength: Vec4,
+    /// X is rim threshold and Y is rim exponent.
+    pub rim_shape: Vec4,
+}
+
+impl Default for ToonMaterialUniform {
+    fn default() -> Self {
+        Self {
+            color: Vec4::new(0.18, 0.72, 1.0, 1.0),
+            light_direction: Vec4::new(0.45, 1.0, 0.3, 0.0),
+            bands: Vec4::new(0.12, 0.52, 0.28, 0.64),
+            rim_color_strength: Vec4::new(0.55, 0.92, 1.0, 0.48),
+            rim_shape: Vec4::new(0.58, 2.4, 0.0, 0.0),
+        }
+    }
 }
 
 impl Material for ToonMaterial {

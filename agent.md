@@ -21,13 +21,17 @@ together.
 ## Current Baseline
 
 - Current local engine baseline: Bevy `0.19.0`, Avian `0.7`, Rust 2021.
-- Starfall Forge ET1–ET3a lives in `src/engine_tools/mod.rs` and
+- Starfall Forge ET1–ET3c lives in `src/engine_tools/mod.rs` and
   `src/engine_tools/persistence.rs`: independent safe
   tool mode, stable IDs, selection, transactional undo/redo, controller UI,
   viewport picking, fly/orbit cameras, transform handles, snapping, primitive
   drafts, guarded world adapters, versioned manifests, atomic draft save/load,
-  rotating recovery, validation, and publishing are implemented. ET3b registry
-  browsing/per-record files and safe road/building recipe regeneration are the
+  rotating recovery, validation, publishing, atomic per-record source files,
+  cross-file generation recovery, and a controller-focusable registry browser,
+  search/rename/create/duplicate/delete/source-move flow, typed payload boundary,
+  and live disk diagnostics are implemented. Material records seed the upgraded
+  `toon_v1` shader contract and Forge renders a live preview. ET4 production
+  workspace integration and safe ET5 road/building recipe regeneration are the
   next toolchain dependencies.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.

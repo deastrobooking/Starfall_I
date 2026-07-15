@@ -24,10 +24,11 @@ use crate::components::world::{
 };
 use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
+use crate::rendering::{ToonMaterial, ToonMaterialUniform};
 use crate::state::AppState;
 use persistence::{
-    AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject, ProjectLoadSource,
-    ProjectStore, SceneObjectDraft, TransformDraft,
+    validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
+    ProjectLoadSource, ProjectStore, SceneObjectDraft, TransformDraft,
 };
 
 pub struct EngineToolsPlugin;
@@ -48,6 +49,8 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorDragState>()
             .init_resource::<EditorPendingTransactions>()
             .init_resource::<EditorProjectSession>()
+            .init_resource::<EditorRegistryState>()
+            .init_resource::<EditorTextInputCapture>()
             .register_type::<EditorEntityId>()
             .add_systems(
                 Update,
@@ -411,6 +414,9 @@ struct EditorStatusText;
 #[derive(Component)]
 struct EditorSearchText;
 
+#[derive(Component)]
+struct EditorRegistryText;
+
 #[derive(Component, Debug, Clone, Copy)]
 struct EditorButton {
     order: usize,
@@ -452,6 +458,15 @@ enum EditorAction {
     PublishProject,
     LoadProject,
     RecoverProject,
+    RegistryPrevious,
+    RegistryNext,
+    RegistryRename,
+    ValidateProject,
+    CreateMaterialRecord,
+    DuplicateRecord,
+    DeleteRecord,
+    NormalizeSourcePath,
+    SearchRegistry,
 }
 
 #[derive(Resource, Default)]
@@ -548,6 +563,18 @@ struct EditorProjectSession {
     store: ProjectStore,
 }
 
+#[derive(Resource, Default)]
+struct EditorRegistryState {
+    selected: usize,
+    rename_active: bool,
+    rename_buffer: String,
+    search_active: bool,
+    search_text: String,
+}
+
+#[derive(Resource, Default)]
+struct EditorTextInputCapture(bool);
+
 impl Default for EditorProjectSession {
     fn default() -> Self {
         Self {
@@ -607,12 +634,17 @@ fn enter_editor_workspace(
     mut document: ResMut<EditorDocumentState>,
     mut filter: ResMut<EditorOutlinerFilter>,
     mut camera_rig: ResMut<EditorCameraRig>,
+    mut registry: ResMut<EditorRegistryState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut toon_materials: ResMut<Assets<ToonMaterial>>,
 ) {
     virtual_time.pause();
     physics_time.pause();
     focus.0 = 0;
     document.exit_armed = false;
     filter.active = false;
+    registry.rename_active = false;
+    registry.search_active = false;
     status.message = "Simulation paused; gameplay input captured by editor".into();
 
     if let Ok(mut cursor) = cursors.single_mut() {
@@ -644,6 +676,18 @@ fn enter_editor_workspace(
             ..default()
         }),
         camera_transform,
+    ));
+
+    commands.spawn((
+        EditorWorkspaceRoot,
+        Name::new("Forge Toon Material Preview"),
+        Mesh3d(meshes.add(Sphere::new(0.75))),
+        MeshMaterial3d(toon_materials.add(ToonMaterial {
+            settings: ToonMaterialUniform::default(),
+        })),
+        Transform::from_translation(
+            camera_transform.translation + camera_transform.forward() * 5.0,
+        ),
     ));
 
     spawn_editor_workspace_ui(&mut commands);
@@ -912,6 +956,57 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     spawn_editor_button(panel, 22, EditorAction::ScaleDown, "SCALE  −10%");
                     spawn_editor_button(panel, 23, EditorAction::ScaleUp, "SCALE  +10%");
                 });
+
+                spawn_editor_panel(body, "CONTENT REGISTRY", |panel| {
+                    panel.spawn((
+                        EditorRegistryText,
+                        Text::new("Loading project registry…"),
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.82, 0.88, 0.98)),
+                    ));
+                    spawn_editor_button(
+                        panel,
+                        33,
+                        EditorAction::RegistryPrevious,
+                        "◀ PREVIOUS RECORD",
+                    );
+                    spawn_editor_button(panel, 34, EditorAction::RegistryNext, "NEXT RECORD ▶");
+                    spawn_editor_button(
+                        panel,
+                        35,
+                        EditorAction::RegistryRename,
+                        "RENAME CONTENT ID",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        36,
+                        EditorAction::ValidateProject,
+                        "VALIDATE PROJECT",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        37,
+                        EditorAction::CreateMaterialRecord,
+                        "+ TOON MATERIAL",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        38,
+                        EditorAction::DuplicateRecord,
+                        "DUPLICATE RECORD",
+                    );
+                    spawn_editor_button(panel, 39, EditorAction::DeleteRecord, "DELETE RECORD");
+                    spawn_editor_button(
+                        panel,
+                        40,
+                        EditorAction::NormalizeSourcePath,
+                        "SYNC SOURCE PATH",
+                    );
+                    spawn_editor_button(panel, 41, EditorAction::SearchRegistry, "SEARCH RECORDS");
+                });
             });
 
             root.spawn((
@@ -1032,9 +1127,14 @@ fn editor_search_input(
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
     mut filter: ResMut<EditorOutlinerFilter>,
+    mut registry: ResMut<EditorRegistryState>,
+    mut session: ResMut<EditorProjectSession>,
+    mut document: ResMut<EditorDocumentState>,
     mut status: ResMut<EditorRuntimeStatus>,
+    mut capture: ResMut<EditorTextInputCapture>,
 ) {
-    if !filter.active {
+    capture.0 = filter.active || registry.rename_active || registry.search_active;
+    if !filter.active && !registry.rename_active && !registry.search_active {
         return;
     }
 
@@ -1046,6 +1146,105 @@ fn editor_search_input(
         .iter()
         .any(|gamepad| gamepad.just_pressed(GamepadButton::East))
         || native.just_pressed(NativeButton::East);
+
+    if registry.search_active {
+        if controller_clear {
+            registry.search_text.clear();
+            registry.search_active = false;
+            status.message = "Registry search cleared".into();
+            return;
+        }
+        if controller_accept {
+            registry.search_active = false;
+            status.message = "Registry search applied".into();
+            return;
+        }
+        for key in keys.get_just_pressed() {
+            match key {
+                Key::Character(value) => {
+                    for character in value.chars() {
+                        if (character.is_alphanumeric()
+                            || matches!(character, ' ' | '.' | '_' | '-'))
+                            && registry.search_text.len() < 48
+                        {
+                            registry.search_text.extend(character.to_lowercase());
+                        }
+                    }
+                }
+                Key::Backspace => {
+                    registry.search_text.pop();
+                }
+                Key::Enter => {
+                    registry.search_active = false;
+                    status.message = "Registry search applied".into();
+                }
+                Key::Escape => {
+                    registry.search_text.clear();
+                    registry.search_active = false;
+                    status.message = "Registry search cleared".into();
+                }
+                _ => {}
+            }
+        }
+        return;
+    }
+
+    if registry.rename_active {
+        let mut accept = controller_accept;
+        let mut cancel = controller_clear;
+        for key in keys.get_just_pressed() {
+            match key {
+                Key::Character(value) => {
+                    for character in value.chars() {
+                        if (character.is_alphanumeric() || matches!(character, '.' | '_' | '-'))
+                            && registry.rename_buffer.len() < 64
+                        {
+                            registry.rename_buffer.extend(character.to_lowercase());
+                        }
+                    }
+                }
+                Key::Backspace => {
+                    registry.rename_buffer.pop();
+                }
+                Key::Enter => accept = true,
+                Key::Escape => cancel = true,
+                _ => {}
+            }
+        }
+        if cancel {
+            registry.rename_active = false;
+            status.message = "Content rename cancelled".into();
+        } else if accept {
+            let old_id = session
+                .project
+                .records
+                .get(registry.selected)
+                .map(|record| record.content_id.clone());
+            let new_id = registry.rename_buffer.trim().to_owned();
+            match old_id {
+                Some(old_id) if old_id == new_id => {
+                    registry.rename_active = false;
+                    status.message = "Content ID unchanged".into();
+                }
+                Some(old_id) => match session.project.rename_content(&old_id, &new_id) {
+                    Ok(()) => {
+                        registry.rename_active = false;
+                        document.dirty = true;
+                        status.message = format!("Renamed {old_id} to {new_id}");
+                    }
+                    Err(error) => {
+                        status.message = format!("Rename rejected: {error:?}");
+                    }
+                },
+                None => {
+                    registry.rename_active = false;
+                    status.message = "No registry record selected".into();
+                }
+            }
+        }
+        return;
+    }
+
     if controller_clear {
         filter.text.clear();
         filter.active = false;
@@ -1094,8 +1293,10 @@ fn editor_controller_navigation(
     mut focus: ResMut<EditorFocus>,
     mut pending: ResMut<EditorPendingActions>,
     filter: Res<EditorOutlinerFilter>,
+    registry: Res<EditorRegistryState>,
+    text_capture: Res<EditorTextInputCapture>,
 ) {
-    if filter.active {
+    if filter.active || registry.rename_active || registry.search_active || text_capture.0 {
         return;
     }
     let command_modifier = keyboard.pressed(KeyCode::ControlLeft)
@@ -1509,6 +1710,11 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             set_editor_status(world, format!("Selected object #{}", ids[index].0));
         }
         EditorAction::FocusSearch => {
+            {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.rename_active = false;
+                registry.search_active = false;
+            }
             let mut filter = world.resource_mut::<EditorOutlinerFilter>();
             filter.active = !filter.active;
             let message = if filter.active {
@@ -1617,7 +1823,229 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
         EditorAction::PublishProject => save_editor_project(world, true),
         EditorAction::LoadProject => load_editor_project(world, false),
         EditorAction::RecoverProject => load_editor_project(world, true),
+        EditorAction::RegistryPrevious | EditorAction::RegistryNext => {
+            let search = world.resource::<EditorRegistryState>().search_text.clone();
+            let indices = filtered_registry_indices(
+                &world.resource::<EditorProjectSession>().project,
+                &search,
+            );
+            if indices.is_empty() {
+                set_editor_status(world, "No registry records match the search");
+                return;
+            }
+            let selected = {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                let current = indices.iter().position(|index| *index == registry.selected);
+                let position = if action == EditorAction::RegistryPrevious {
+                    current
+                        .and_then(|position| position.checked_sub(1))
+                        .unwrap_or(indices.len() - 1)
+                } else {
+                    current.map_or(0, |position| (position + 1) % indices.len())
+                };
+                registry.selected = indices[position];
+                registry.selected
+            };
+            let content_id = world.resource::<EditorProjectSession>().project.records[selected]
+                .content_id
+                .clone();
+            set_editor_status(world, format!("Selected registry record {content_id}"));
+        }
+        EditorAction::RegistryRename => {
+            let selected = world.resource::<EditorRegistryState>().selected;
+            let content_id = world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .get(selected)
+                .map(|record| record.content_id.clone());
+            if let Some(content_id) = content_id {
+                world.resource_mut::<EditorOutlinerFilter>().active = false;
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.search_active = false;
+                registry.rename_buffer = content_id;
+                registry.rename_active = true;
+                set_editor_status(
+                    world,
+                    "Edit the content ID; Enter/A accepts and Escape/B cancels",
+                );
+            } else {
+                set_editor_status(world, "No registry record selected");
+            }
+        }
+        EditorAction::ValidateProject => {
+            let (errors, source_diagnostics) = {
+                let session = world.resource::<EditorProjectSession>();
+                (
+                    validate_project(&session.project),
+                    session.store.source_diagnostics(&session.project),
+                )
+            };
+            let issue_count = errors.len() + source_diagnostics.len();
+            if issue_count == 0 {
+                set_editor_status(world, "Project validation passed with no errors");
+            } else {
+                let preview = errors
+                    .iter()
+                    .map(|error| format!("{error:?}"))
+                    .chain(source_diagnostics.iter().cloned())
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" • ");
+                set_editor_status(
+                    world,
+                    format!("Validation found {issue_count} issue(s): {preview}"),
+                );
+            }
+        }
+        EditorAction::CreateMaterialRecord => {
+            let result = world
+                .resource_mut::<EditorProjectSession>()
+                .project
+                .create_content(persistence::ContentCategory::Material, "New Toon Material");
+            match result {
+                Ok(content_id) => {
+                    let index = world
+                        .resource::<EditorProjectSession>()
+                        .project
+                        .records
+                        .iter()
+                        .position(|record| record.content_id == content_id)
+                        .unwrap_or(0);
+                    world.resource_mut::<EditorRegistryState>().selected = index;
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(world, format!("Created {content_id}"));
+                }
+                Err(error) => set_editor_status(world, format!("Create rejected: {error}")),
+            }
+        }
+        EditorAction::DuplicateRecord => {
+            let selected = world.resource::<EditorRegistryState>().selected;
+            let content_id = world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .get(selected)
+                .map(|record| record.content_id.clone());
+            let Some(content_id) = content_id else {
+                set_editor_status(world, "No registry record selected");
+                return;
+            };
+            let result = world
+                .resource_mut::<EditorProjectSession>()
+                .project
+                .duplicate_content(&content_id);
+            match result {
+                Ok(new_id) => {
+                    let index = world
+                        .resource::<EditorProjectSession>()
+                        .project
+                        .records
+                        .iter()
+                        .position(|record| record.content_id == new_id)
+                        .unwrap_or(selected);
+                    world.resource_mut::<EditorRegistryState>().selected = index;
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(world, format!("Duplicated as {new_id}"));
+                }
+                Err(error) => set_editor_status(world, format!("Duplicate rejected: {error}")),
+            }
+        }
+        EditorAction::DeleteRecord => {
+            let selected = world.resource::<EditorRegistryState>().selected;
+            let content_id = world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .get(selected)
+                .map(|record| record.content_id.clone());
+            let Some(content_id) = content_id else {
+                set_editor_status(world, "No registry record selected");
+                return;
+            };
+            let result = world
+                .resource_mut::<EditorProjectSession>()
+                .project
+                .delete_content(&content_id);
+            match result {
+                Ok(_) => {
+                    let count = world
+                        .resource::<EditorProjectSession>()
+                        .project
+                        .records
+                        .len();
+                    world.resource_mut::<EditorRegistryState>().selected =
+                        selected.min(count.saturating_sub(1));
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(
+                        world,
+                        format!("Deleted {content_id}; its source remains recoverable on disk"),
+                    );
+                }
+                Err(error) => set_editor_status(world, format!("Delete rejected: {error}")),
+            }
+        }
+        EditorAction::NormalizeSourcePath => {
+            let selected = world.resource::<EditorRegistryState>().selected;
+            let content_id = world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .get(selected)
+                .map(|record| record.content_id.clone());
+            let Some(content_id) = content_id else {
+                set_editor_status(world, "No registry record selected");
+                return;
+            };
+            let store = world.resource::<EditorProjectSession>().store.clone();
+            let result = store.move_source_to_canonical(
+                &mut world.resource_mut::<EditorProjectSession>().project,
+                &content_id,
+            );
+            match result {
+                Ok(path) => {
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(world, format!("Source path synchronized to {path}"));
+                }
+                Err(error) => set_editor_status(world, format!("Source move rejected: {error}")),
+            }
+        }
+        EditorAction::SearchRegistry => {
+            world.resource_mut::<EditorOutlinerFilter>().active = false;
+            let active = {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.rename_active = false;
+                registry.search_active = !registry.search_active;
+                registry.search_active
+            };
+            set_editor_status(
+                world,
+                if active {
+                    "Type a record ID, name, or category; Enter/A applies, Escape/B clears"
+                } else {
+                    "Registry search applied"
+                },
+            );
+        }
     }
+}
+
+fn filtered_registry_indices(project: &ForgeProject, search: &str) -> Vec<usize> {
+    let search = search.trim().to_lowercase();
+    project
+        .records
+        .iter()
+        .enumerate()
+        .filter_map(|(index, record)| {
+            let matches = search.is_empty()
+                || record.content_id.to_lowercase().contains(&search)
+                || record.display_name.to_lowercase().contains(&search)
+                || format!("{:?}", record.category)
+                    .to_lowercase()
+                    .contains(&search);
+            matches.then_some(index)
+        })
+        .collect()
 }
 
 impl From<EditorPrimitive> for DraftPrimitive {
@@ -1816,6 +2244,17 @@ fn load_editor_project(world: &mut World, recovery_only: bool) {
         .len()
         .saturating_sub(applied_adapters);
     world.resource_mut::<EditorProjectSession>().project = project;
+    {
+        let count = world
+            .resource::<EditorProjectSession>()
+            .project
+            .records
+            .len();
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.selected = registry.selected.min(count.saturating_sub(1));
+        registry.rename_active = false;
+        registry.search_active = false;
+    }
     {
         let mut document = world.resource_mut::<EditorDocumentState>();
         document.dirty = false;
@@ -2122,6 +2561,7 @@ fn set_editor_status(world: &mut World, message: impl Into<String>) {
     world.resource_mut::<EditorRuntimeStatus>().message = message.into();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_editor_workspace_text(
     selection: Res<EditorSelection>,
     status: Res<EditorRuntimeStatus>,
@@ -2129,11 +2569,14 @@ fn update_editor_workspace_text(
     filter: Res<EditorOutlinerFilter>,
     camera_rig: Res<EditorCameraRig>,
     gizmo: Res<EditorGizmoSettings>,
+    session: Res<EditorProjectSession>,
+    registry: Res<EditorRegistryState>,
     authorables: Query<(&EditorEntityId, Option<&Name>), With<Authorable>>,
     mut text_queries: ParamSet<(
         Query<&mut Text, With<EditorSummaryText>>,
         Query<&mut Text, With<EditorStatusText>>,
         Query<&mut Text, With<EditorSearchText>>,
+        Query<&mut Text, With<EditorRegistryText>>,
     )>,
 ) {
     let count = authorables.iter().count();
@@ -2200,6 +2643,80 @@ fn update_editor_workspace_text(
     };
     for mut text in &mut text_queries.p2() {
         *text = Text::new(filter_label.clone());
+    }
+
+    let records = &session.project.records;
+    let selected_index = registry.selected.min(records.len().saturating_sub(1));
+    let registry_indices = filtered_registry_indices(&session.project, &registry.search_text);
+    let record_listing = if registry_indices.is_empty() {
+        "— no matching records —".to_owned()
+    } else {
+        registry_indices
+            .iter()
+            .take(8)
+            .map(|index| {
+                let marker = if *index == selected_index { "▶" } else { " " };
+                format!("{marker} {}", records[*index].content_id)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let selected_details = records.get(selected_index).map_or_else(
+        || "No selected record".to_owned(),
+        |record| {
+            let state = if record.draft_hash.is_empty() {
+                "UNSAVED"
+            } else if record.published_hash.as_ref() == Some(&record.draft_hash) {
+                "PUBLISHED"
+            } else {
+                "DRAFT"
+            };
+            let hash = record.draft_hash.chars().take(8).collect::<String>();
+            format!(
+                "\n{:?} • {state}\n{}\nHash: {}",
+                record.category,
+                record.source_path,
+                if hash.is_empty() { "—" } else { &hash }
+            )
+        },
+    );
+    let validation_errors = validate_project(&session.project);
+    let source_diagnostics = session.store.source_diagnostics(&session.project);
+    let validation_count = validation_errors.len() + source_diagnostics.len();
+    let validation = if validation_count == 0 {
+        "VALIDATION: PASS".to_owned()
+    } else {
+        let details = validation_errors
+            .iter()
+            .map(|error| format!("• {error:?}"))
+            .chain(
+                source_diagnostics
+                    .iter()
+                    .map(|diagnostic| format!("• {diagnostic}")),
+            )
+            .take(4)
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("VALIDATION: {validation_count} ISSUE(S)\n{details}")
+    };
+    let rename = if registry.rename_active {
+        format!("\nRENAME: {}_", registry.rename_buffer)
+    } else {
+        String::new()
+    };
+    let search = if registry.search_text.is_empty() && !registry.search_active {
+        String::new()
+    } else {
+        let cursor = if registry.search_active { "_" } else { "" };
+        format!("\nSEARCH: {}{cursor}", registry.search_text)
+    };
+    for mut text in &mut text_queries.p3() {
+        *text = Text::new(format!(
+            "Project: {}\nRecords: {} • Matches: {}{search}\n\n{record_listing}{selected_details}{rename}\n\n{validation}",
+            session.project.display_name,
+            records.len(),
+            registry_indices.len()
+        ));
     }
 }
 
@@ -2420,6 +2937,7 @@ mod tests {
         world.init_resource::<EditorIdAllocator>();
         world.init_resource::<EditorUndoStack>();
         world.init_resource::<EditorDocumentState>();
+        world.init_resource::<EditorRegistryState>();
         world.insert_resource(EditorRuntimeStatus {
             message: String::new(),
         });
@@ -2603,5 +3121,71 @@ mod tests {
             EditorEntityId(72)
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn registry_actions_cycle_records_without_losing_selection() {
+        let (mut world, root) = persistence_test_world("registry_cycle");
+        world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Material, "Test")
+            .unwrap();
+
+        apply_editor_action(&mut world, EditorAction::RegistryNext);
+        assert_eq!(world.resource::<EditorRegistryState>().selected, 1);
+        apply_editor_action(&mut world, EditorAction::RegistryNext);
+        assert_eq!(world.resource::<EditorRegistryState>().selected, 0);
+        apply_editor_action(&mut world, EditorAction::RegistryPrevious);
+        assert_eq!(world.resource::<EditorRegistryState>().selected, 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn registry_lifecycle_actions_create_duplicate_and_delete_materials() {
+        let (mut world, root) = persistence_test_world("registry_lifecycle");
+        apply_editor_action(&mut world, EditorAction::CreateMaterialRecord);
+        assert_eq!(
+            world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .len(),
+            2
+        );
+        assert_eq!(world.resource::<EditorRegistryState>().selected, 1);
+
+        apply_editor_action(&mut world, EditorAction::DuplicateRecord);
+        assert_eq!(
+            world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .len(),
+            3
+        );
+        apply_editor_action(&mut world, EditorAction::DeleteRecord);
+        assert_eq!(
+            world
+                .resource::<EditorProjectSession>()
+                .project
+                .records
+                .len(),
+            2
+        );
+        assert!(world.resource::<EditorDocumentState>().dirty);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn registry_search_matches_ids_names_and_categories() {
+        let mut project = ForgeProject::default();
+        project
+            .create_content(persistence::ContentCategory::Material, "Anime Ink")
+            .unwrap();
+        assert_eq!(filtered_registry_indices(&project, "main_world"), [0]);
+        assert_eq!(filtered_registry_indices(&project, "anime"), [1]);
+        assert_eq!(filtered_registry_indices(&project, "material"), [1]);
+        assert!(filtered_registry_indices(&project, "missing").is_empty());
     }
 }

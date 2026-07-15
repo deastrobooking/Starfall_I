@@ -131,6 +131,13 @@ Party-shared exceptions:
 ## Key Design Choices
 
 - **Editable character recipes, not baked meshes**: `CharacterBlueprint` stores body sliders, procedural part recipes, materials, sockets, rig metadata, animation profiles, movement profiles, and gameplay stats. The current cartoon renderer consumes the body/material portions, while the data model leaves room for fuller mesh, rig, and editor tooling.
+- **Forge content is payload-driven, not ECS-serialized**: stable `ContentRecord`
+  manifests point to atomic per-record source documents. `ContentPayload` owns
+  the versioned Scene/Character/Creature/Road/Building/Cave/Material/UI codec
+  boundary, while Bevy `Entity` values remain transient. The first Material
+  payload contract maps to configurable three-band toon and rim-light settings;
+  Forge renders a live shader preview before those records are promoted into
+  the broader runtime material catalog.
 - **Kinematic controller physics**: Player movement is computed manually each
   frame through the local `KinematicCharacterController` compatibility component,
   then applied with Avian move-and-slide. This gives full control over wall

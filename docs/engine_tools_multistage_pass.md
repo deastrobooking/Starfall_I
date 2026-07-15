@@ -197,9 +197,60 @@ rename a referenced asset without breaking a level, and reject duplicate IDs.
   recovery, migration, dependency/reference rename, draft hashing, publishing,
   invalid records, and an editor-world primitive/adapter round trip.
 
-ET3b remains: split large projects into per-record source files, add registry
-browsing/rename UI, surface detailed validation reports in Forge, and introduce
-recipe regeneration contracts for roads and buildings.
+### ET3b registry/source slice delivered — July 2026
+
+- Scene registry records now write atomic per-record JSON source documents at
+  their project-relative `source_path`; unsafe traversal paths and duplicate
+  source paths are rejected.
+- The manifest retains an embedded scene recovery generation. Load verifies the
+  source document's content ID, schema, and deterministic draft hash. A mixed
+  generation caused by an interrupted source/manifest save falls back to the
+  matching embedded copy instead of loading inconsistent data.
+- Forge includes a third, scrollable `CONTENT REGISTRY` panel with project and
+  record summaries, category, draft/published state, source path, abbreviated
+  hash, and live structural/on-disk validation diagnostics.
+- Controller-focusable previous/next, rename, and validate buttons are orders
+  33–36 in the existing deterministic focus ring. Rename preserves dependency
+  references; keyboard text entry accepts Enter and controller A accepts the
+  current buffer, while Escape/controller B cancels.
+- Text input capture now consumes its accept/cancel event for the frame, so an
+  Enter/A used to complete filter or rename input cannot also activate the
+  focused toolbar button underneath it.
+- Tests cover authoritative source hydration, corrupt source diagnostics,
+  project-relative path enforcement, source-path uniqueness, interrupted
+  cross-file generations, and registry selection wraparound.
+
+### ET3c record lifecycle/material bridge delivered — July 2026
+
+- `ContentPayload` is now the versioned codec boundary for Scene, Character,
+  Creature, Road, Building, Cave, Material, and UI records. Non-scene recipes
+  use schema-versioned JSON field maps until their production workspaces replace
+  them with stronger domain schemas.
+- Forge can create seeded toon-material records, duplicate non-scene records,
+  dependency-check and remove records, and retain deleted sources on disk for
+  manual recovery. The single active scene cannot be duplicated or deleted by
+  this workspace.
+- Registry search filters by content ID, display name, or category. Previous and
+  next navigation cycle only through matches, and the search input shares the
+  frame-safe keyboard/controller capture used by rename and outliner filtering.
+- Content-ID rename migrates the payload map and dependencies. `SYNC SOURCE
+  PATH` performs a guarded filesystem rename to a canonical category/ID path,
+  rolls back a failed directory sync, and never overwrites another record.
+- All payload categories write through the per-record atomic source codec and
+  participate in draft hashing, source diagnostics, publishing, embedded
+  recovery, and schema migration.
+- Material recipes seed the configurable `toon_v1` contract: base color, light
+  direction, three lighting bands, and rim color/strength/shape. Forge spawns a
+  live preview orb so the Bevy 0.19 shader pipeline is compiled during editor
+  smoke tests.
+- `assets/shaders/toon.wgsl` now uses Bevy's default `VertexOutput` contract and
+  material bind-group macro, preserving skinning/morph/instancing compatibility
+  while replacing the placeholder hardcoded shader with configurable anime
+  bands and tinted rim light.
+
+ET3's registry foundation is now sufficient for ET4 production workspace
+integration. Road/building adapters remain read-only until ET5 supplies recipe
+regeneration contracts for dependent meshes and colliders.
 
 ## ET4 — Character and Creature production workspaces
 
@@ -308,7 +359,7 @@ after at least three Starfall workspaces share the APIs.
   generator-time budgets;
 - no editor preview/runtime output divergence.
 
-The next implementation slice is ET3b's registry browser and per-record source
-files, followed by ET4 Character/Creature production workspaces. Road/building
-adapters become editable only as their recipe compilers acquire safe
-regeneration boundaries.
+The next implementation slice is ET3c's complete record lifecycle and payload
+codec boundary, followed by ET4 Character/Creature production workspaces.
+Road/building adapters become editable only as their recipe compilers acquire
+safe regeneration boundaries.
