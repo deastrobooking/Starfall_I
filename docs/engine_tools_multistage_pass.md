@@ -363,10 +363,38 @@ destructively regenerated from a preview-only recipe.
   asset growth across regeneration. `CLEAR SANDBOX ROOT` removes the owned root
   and all linked children without touching shipped world geometry.
 
-ET5d remains direct topology editing: controller selection and movement of
-individual points/nodes, edge creation/removal, spline tangents and junctions,
-room doorway/socket placement, terrain projection, and explicit promotion of a
-published sandbox root into a scoped world-generation layer.
+### ET5d direct topology editing — controller slices delivered July 2026
+
+- The controller-scrollable World Kit panel selects previous/next road spline
+  points or biome/building/cave/city topology nodes and displays the stable ID
+  plus current XYZ recipe coordinates.
+- Six controller-focusable nudge controls move the selected element on X/Y/Z
+  using the shared 0.25/0.5/1/2-meter editor snap setting. Each nudge is one
+  recipe-snapshot transaction and therefore participates in the existing
+  bounded undo/redo history.
+- An active sandbox draws a gold three-axis viewport locator at the selected
+  recipe coordinate. The locator is derived editor visualization, never saved
+  geometry or an independently mutable ECS child.
+- Empty recipes reject movement safely. Invalid intermediate drafts remain
+  undoable while the ET5c sandbox compiler retains its last valid atomic root.
+- Typed graph-edge authoring marks a stable start node, selects a destination,
+  cycles Door/Stair/Tunnel/Portal, and connects or removes the exact undirected
+  typed edge through the same recipe undo stack. It rejects road recipes,
+  self-links, stale endpoints, duplicate edges, and nonexistent removals.
+- The marked endpoint is cyan and a live cyan guide connects it to the gold
+  selected destination. Removing a required cave connector may make the draft
+  invalid, but validation retains the previous compiled sandbox root until the
+  edge is restored or the edit is undone.
+- Direct viewport manipulation draws red/green/blue recipe-space handles on the
+  selected point or node. Mouse dragging projects onto the chosen screen-space
+  handle, snaps in the shared recipe-meter increments, and previews by safely
+  recompiling the sandbox. Mouse release restores the pre-drag snapshot and
+  commits one atomic recipe transaction, avoiding per-frame undo entries.
+
+ET5d remains in progress: spline tangents and junctions, room doorway/socket
+placement, terrain
+projection, structured validation highlights, and explicit promotion of a
+published sandbox root into a scoped world-generation layer are later slices.
 
 ## ET4 — Character and Creature production workspaces
 

@@ -455,9 +455,12 @@ campaign content, engine combat, and Forge promotion:
 1. **Recommended engine slice — EC2a:** define one `MoveDef`, drive one Star
    Sabre attack through startup/active/recovery and a cancel window, add hit/hurt
    layer tests, and preserve the current bounded feedback behavior.
-2. **Recommended tool slice — ET5d topology editing:** controller selection and
-   movement for spline/node/edge records inside the protected sandbox, including
-   invalid-edit rollback. Do not promote shipped roots in the same first slice.
+2. **Recommended tool slice — ET5d topology editing continuation:** snapped
+   controller movement, viewport locators, and typed endpoint-based graph edge
+   creation/removal are delivered. Direct pointer XYZ dragging now previews and
+   commits a single snapped recipe transaction. Next add spline tangent/junction
+   editing inside the protected sandbox, retaining the last valid root for
+   invalid drafts. Do not promote shipped roots yet.
 3. **Acceptance slice:** record boot → character → chapter/settings/garage →
    gameplay → pause/return using four pads, plus EC1 30/60/120/144 Hz comparison.
 

@@ -21,7 +21,7 @@ together.
 ## Current Baseline
 
 - Current local engine baseline: Bevy `0.19.0`, Avian `0.7`, Rust 2021.
-- Starfall Forge ET1–ET3c lives in `src/engine_tools/mod.rs` and
+- Starfall Forge ET1–ET5d first-slice work lives in `src/engine_tools/mod.rs` and
   `src/engine_tools/persistence.rs`: independent safe
   tool mode, stable IDs, selection, transactional undo/redo, controller UI,
   viewport picking, fly/orbit cameras, transform handles, snapping, primitive
@@ -30,9 +30,15 @@ together.
   cross-file generation recovery, and a controller-focusable registry browser,
   search/rename/create/duplicate/delete/source-move flow, typed payload boundary,
   and live disk diagnostics are implemented. Material records seed the upgraded
-  `toon_v1` shader contract and Forge renders a live preview. ET4 production
-  workspace integration and safe ET5 road/building recipe regeneration are the
-  next toolchain dependencies.
+  `toon_v1` shader contract and Forge renders a live preview. ET5d now provides
+  snapped controller selection/movement of road spline points and topology
+  nodes as undoable recipe transactions plus derived sandbox viewport markers.
+  Typed Door/Stair/Tunnel/Portal edge authoring marks two stable node IDs and
+  connects/removes exact edges with a live guide and last-valid-root retention.
+  Direct red/green/blue viewport handles project pointer movement into snapped
+  recipe-space XYZ and commit one snapshot transaction on release. Spline
+  junctions, terrain projection, and published-layer promotion remain; ET4
+  production workspace integration also remains.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
@@ -57,7 +63,13 @@ together.
   ET5c implements that boundary inside a protected editor sandbox: stable road
   spline points, typed room/zone nodes and portal edges, collision/navigation
   preflight, cached part assets, and atomic owned-root replacement. Shipped world
-  promotion remains ET5d and must require explicit published-layer scope.
+  promotion remains ET5d and must require explicit published-layer scope. The
+  first ET5d slice selects and snap-moves individual spline points/topology nodes
+  through recipe transactions and renders a gold sandbox locator. The next
+  controller slice adds typed endpoint edge connect/remove with a cyan live
+  guide. Direct topology dragging may mutate the draft for live preview only;
+  restore the before snapshot and commit one command on release. Never convert
+  derived sandbox parts into independently authored state.
   F11 reports camera/projectile/VFX/material counts. World Kit regeneration UI,
   clustered-light evaluation, and four-camera GPU timing work remain in
   `docs/rendering_shader_pass.md`; do not copy legacy fixed-group WGSL examples

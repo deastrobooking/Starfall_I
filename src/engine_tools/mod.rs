@@ -631,6 +631,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorCameraRig>()
             .init_resource::<EditorGizmoSettings>()
             .init_resource::<EditorDragState>()
+            .init_resource::<WorldKitTopologyDragState>()
             .init_resource::<EditorPendingTransactions>()
             .init_resource::<EditorProjectSession>()
             .init_resource::<PublishedMaterialCatalog>()
@@ -662,6 +663,7 @@ impl Plugin for EngineToolsPlugin {
                     editor_controller_navigation,
                     keep_editor_focus_in_view,
                     editor_gizmo_drag,
+                    world_kit_topology_gizmo_drag,
                     editor_viewport_picking,
                     apply_editor_actions,
                     sync_forge_material_preview,
@@ -1128,6 +1130,18 @@ enum EditorAction {
     RecipeSeedIncrease,
     ValidateSelectedRecipe,
     SeedDefaultTopology,
+    TopologyPrevious,
+    TopologyNext,
+    TopologyMoveXNegative,
+    TopologyMoveXPositive,
+    TopologyMoveYNegative,
+    TopologyMoveYPositive,
+    TopologyMoveZNegative,
+    TopologyMoveZPositive,
+    TopologyMarkEdgeStart,
+    TopologyCycleEdgeKind,
+    TopologyConnectEdge,
+    TopologyRemoveEdge,
     CompileSandboxRoot,
     ClearSandboxRoot,
 }
@@ -1253,6 +1267,21 @@ struct ActiveEditorDrag {
 #[derive(Resource, Default)]
 struct EditorDragState(Option<ActiveEditorDrag>);
 
+#[derive(Debug, Clone)]
+struct ActiveTopologyDrag {
+    content_id: String,
+    category: persistence::ContentCategory,
+    element_index: usize,
+    axis_index: usize,
+    start_cursor: Vec2,
+    screen_axis: Vec2,
+    recipe_units_per_pixel: f32,
+    before: Box<ProceduralRecipeDraft>,
+}
+
+#[derive(Resource, Default)]
+struct WorldKitTopologyDragState(Option<ActiveTopologyDrag>);
+
 #[derive(Resource, Default)]
 struct EditorPendingTransactions(Vec<EditorTransaction>);
 
@@ -1273,6 +1302,9 @@ struct EditorRegistryState {
     recipe_kind: usize,
     recipe_slot: usize,
     recipe_parameter: usize,
+    topology_element: usize,
+    topology_edge_start: Option<String>,
+    topology_edge_kind: usize,
     material_clipboard: Option<String>,
 }
 
@@ -2297,6 +2329,7 @@ fn sync_world_kit_sandbox(world: &mut World) {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn exit_editor_workspace(
     mut commands: Commands,
     roots: Query<Entity, With<EditorWorkspaceRoot>>,
@@ -2306,7 +2339,19 @@ fn exit_editor_workspace(
     mut virtual_time: ResMut<Time<Virtual>>,
     mut physics_time: ResMut<Time<Physics>>,
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    mut topology_drag: ResMut<WorldKitTopologyDragState>,
+    mut session: ResMut<EditorProjectSession>,
 ) {
+    if let Some(drag) = topology_drag.0.take() {
+        if let Some(recipe) = session
+            .project
+            .payloads
+            .get_mut(&drag.content_id)
+            .and_then(persistence::ContentPayload::procedural_recipe_mut)
+        {
+            *recipe = *drag.before;
+        }
+    }
     for entity in roots.iter().chain(editor_cameras.iter()) {
         commands.entity(entity).despawn();
     }
@@ -2736,6 +2781,78 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                             64,
                             EditorAction::SeedDefaultTopology,
                             "SEED DEFAULT TOPOLOGY",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            67,
+                            EditorAction::TopologyPrevious,
+                            "◀ PREVIOUS TOPOLOGY ITEM",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            68,
+                            EditorAction::TopologyNext,
+                            "NEXT TOPOLOGY ITEM ▶",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            69,
+                            EditorAction::TopologyMoveXNegative,
+                            "TOPOLOGY X  −SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            70,
+                            EditorAction::TopologyMoveXPositive,
+                            "TOPOLOGY X  +SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            71,
+                            EditorAction::TopologyMoveYNegative,
+                            "TOPOLOGY Y  −SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            72,
+                            EditorAction::TopologyMoveYPositive,
+                            "TOPOLOGY Y  +SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            73,
+                            EditorAction::TopologyMoveZNegative,
+                            "TOPOLOGY Z  −SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            74,
+                            EditorAction::TopologyMoveZPositive,
+                            "TOPOLOGY Z  +SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            75,
+                            EditorAction::TopologyMarkEdgeStart,
+                            "MARK EDGE START",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            76,
+                            EditorAction::TopologyCycleEdgeKind,
+                            "EDGE TYPE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            77,
+                            EditorAction::TopologyConnectEdge,
+                            "CONNECT TO SELECTED NODE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            78,
+                            EditorAction::TopologyRemoveEdge,
+                            "REMOVE MATCHING EDGE",
                         );
                         spawn_editor_button(
                             panel,
@@ -3345,6 +3462,217 @@ fn editor_gizmo_drag(
     }
 }
 
+fn topology_drag_amount(
+    cursor_delta: Vec2,
+    screen_axis: Vec2,
+    recipe_units_per_pixel: f32,
+    snap: f32,
+) -> f32 {
+    let raw = cursor_delta.dot(screen_axis) * recipe_units_per_pixel;
+    (raw / snap).round() * snap
+}
+
+fn topology_position_mut(
+    category: persistence::ContentCategory,
+    recipe: &mut ProceduralRecipeDraft,
+    element_index: usize,
+) -> Option<&mut [f32; 3]> {
+    if category == persistence::ContentCategory::Road {
+        recipe
+            .spline_points
+            .get_mut(element_index)
+            .map(|point| &mut point.position)
+    } else {
+        recipe
+            .topology_nodes
+            .get_mut(element_index)
+            .map(|node| &mut node.position)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn world_kit_topology_gizmo_drag(
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<EditorCamera>>,
+    sandbox_roots: Query<(&WorldKitGeneratedRoot, &GlobalTransform)>,
+    filter: Res<EditorOutlinerFilter>,
+    text_capture: Res<EditorTextInputCapture>,
+    editor_drag: Res<EditorDragState>,
+    settings: Res<EditorGizmoSettings>,
+    registry: Res<EditorRegistryState>,
+    mut session: ResMut<EditorProjectSession>,
+    mut drag_state: ResMut<WorldKitTopologyDragState>,
+    mut pending: ResMut<EditorPendingTransactions>,
+    mut status: ResMut<EditorRuntimeStatus>,
+) {
+    if filter.active
+        || text_capture.0
+        || registry.rename_active
+        || registry.search_active
+        || editor_drag.0.is_some()
+    {
+        return;
+    }
+    let (Ok(window), Ok((camera, camera_transform))) = (windows.single(), cameras.single()) else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    if mouse.just_pressed(MouseButton::Left)
+        && drag_state.0.is_none()
+        && cursor.y >= 126.0
+        && cursor.y <= window.height() - 68.0
+        && cursor.x >= 314.0
+        && cursor.x <= window.width() - 314.0
+    {
+        let Some(record) = session.project.records.get(registry.selected) else {
+            return;
+        };
+        let Some(recipe) = session
+            .project
+            .payloads
+            .get(&record.content_id)
+            .and_then(persistence::ContentPayload::procedural_recipe)
+        else {
+            return;
+        };
+        let count = topology_element_count(record.category, recipe);
+        if count == 0 {
+            return;
+        }
+        let element_index = registry.topology_element % count;
+        let Some((element_id, position, _)) =
+            selected_topology_element(record.category, recipe, element_index)
+        else {
+            return;
+        };
+        let Some((_, root_transform)) = sandbox_roots
+            .iter()
+            .find(|(root, _)| root.content_id == record.content_id)
+        else {
+            return;
+        };
+        let local = Vec3::from_array(position);
+        let center = root_transform.transform_point(local);
+        let Ok(center_screen) = camera.world_to_viewport(camera_transform, center) else {
+            return;
+        };
+        let mut hit: Option<(f32, usize, Vec2, f32)> = None;
+        for (axis_index, axis) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate() {
+            let endpoint = root_transform.transform_point(local + axis * 10.0);
+            let Ok(endpoint_screen) = camera.world_to_viewport(camera_transform, endpoint) else {
+                continue;
+            };
+            let screen_vector = endpoint_screen - center_screen;
+            let screen_length = screen_vector.length();
+            if screen_length <= 3.0 {
+                continue;
+            }
+            let distance = point_segment_distance(cursor, center_screen, endpoint_screen);
+            if distance <= 18.0
+                && hit
+                    .as_ref()
+                    .is_none_or(|(nearest, _, _, _)| distance < *nearest)
+            {
+                hit = Some((
+                    distance,
+                    axis_index,
+                    screen_vector / screen_length,
+                    10.0 / screen_length,
+                ));
+            }
+        }
+        if let Some((_, axis_index, screen_axis, recipe_units_per_pixel)) = hit {
+            status.message = format!("Dragging topology {element_id} axis {axis_index}");
+            drag_state.0 = Some(ActiveTopologyDrag {
+                content_id: record.content_id.clone(),
+                category: record.category,
+                element_index,
+                axis_index,
+                start_cursor: cursor,
+                screen_axis,
+                recipe_units_per_pixel,
+                before: Box::new(recipe.clone()),
+            });
+        }
+    }
+
+    let Some(drag) = drag_state.0.as_ref() else {
+        return;
+    };
+    if mouse.pressed(MouseButton::Left) {
+        let amount = topology_drag_amount(
+            cursor - drag.start_cursor,
+            drag.screen_axis,
+            drag.recipe_units_per_pixel,
+            settings.translation_snap(),
+        );
+        let mut preview = (*drag.before).clone();
+        if let Some(position) =
+            topology_position_mut(drag.category, &mut preview, drag.element_index)
+        {
+            position[drag.axis_index] += amount;
+            if let Some(recipe) = session
+                .project
+                .payloads
+                .get_mut(&drag.content_id)
+                .and_then(persistence::ContentPayload::procedural_recipe_mut)
+            {
+                *recipe = preview;
+                status.message = format!("Topology drag preview: {amount:+.2}m");
+            }
+        }
+    }
+
+    if mouse.just_released(MouseButton::Left) {
+        let drag = drag_state.0.take().expect("topology drag exists");
+        let after = session
+            .project
+            .payloads
+            .get(&drag.content_id)
+            .and_then(persistence::ContentPayload::procedural_recipe)
+            .cloned();
+        if let Some(recipe) = session
+            .project
+            .payloads
+            .get_mut(&drag.content_id)
+            .and_then(persistence::ContentPayload::procedural_recipe_mut)
+        {
+            *recipe = (*drag.before).clone();
+        }
+        let Some(after) = after else {
+            status.message = "Topology drag cancelled because its recipe disappeared".into();
+            return;
+        };
+        if *drag.before == after {
+            status.message = "Topology drag cancelled".into();
+            return;
+        }
+        pending.0.push(EditorTransaction {
+            description: "Drag World Kit topology element".into(),
+            commands: vec![EditorCommand::SetProceduralRecipe {
+                content_id: drag.content_id,
+                before: drag.before,
+                after: Box::new(after),
+            }],
+        });
+    } else if !mouse.pressed(MouseButton::Left) {
+        let drag = drag_state.0.take().expect("topology drag exists");
+        if let Some(recipe) = session
+            .project
+            .payloads
+            .get_mut(&drag.content_id)
+            .and_then(persistence::ContentPayload::procedural_recipe_mut)
+        {
+            *recipe = *drag.before;
+        }
+        status.message = "Topology drag cancelled".into();
+    }
+}
+
 fn point_segment_distance(point: Vec2, start: Vec2, end: Vec2) -> f32 {
     let segment = end - start;
     let length_squared = segment.length_squared();
@@ -3361,6 +3689,7 @@ fn editor_viewport_picking(
     keyboard: Res<ButtonInput<KeyCode>>,
     filter: Res<EditorOutlinerFilter>,
     drag: Res<EditorDragState>,
+    topology_drag: Res<WorldKitTopologyDragState>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<EditorCamera>>,
     authorables: Query<(
@@ -3372,7 +3701,11 @@ fn editor_viewport_picking(
     mut selection: ResMut<EditorSelection>,
     mut status: ResMut<EditorRuntimeStatus>,
 ) {
-    if filter.active || drag.0.is_some() || !mouse.just_pressed(MouseButton::Left) {
+    if filter.active
+        || drag.0.is_some()
+        || topology_drag.0.is_some()
+        || !mouse.just_pressed(MouseButton::Left)
+    {
         return;
     }
     let (Ok(window), Ok((camera, camera_transform))) = (windows.single(), cameras.single()) else {
@@ -3516,6 +3849,234 @@ fn selected_procedural_recipe(
         .procedural_recipe()?
         .clone();
     Some((record.content_id.clone(), record.category, recipe))
+}
+
+fn topology_element_count(
+    category: persistence::ContentCategory,
+    recipe: &ProceduralRecipeDraft,
+) -> usize {
+    if category == persistence::ContentCategory::Road {
+        recipe.spline_points.len()
+    } else {
+        recipe.topology_nodes.len()
+    }
+}
+
+fn selected_topology_element(
+    category: persistence::ContentCategory,
+    recipe: &ProceduralRecipeDraft,
+    selected: usize,
+) -> Option<(&str, [f32; 3], &'static str)> {
+    if category == persistence::ContentCategory::Road {
+        if recipe.spline_points.is_empty() {
+            return None;
+        }
+        let point = recipe
+            .spline_points
+            .get(selected % recipe.spline_points.len())?;
+        Some((&point.point_id, point.position, "spline point"))
+    } else {
+        if recipe.topology_nodes.is_empty() {
+            return None;
+        }
+        let node = recipe
+            .topology_nodes
+            .get(selected % recipe.topology_nodes.len())?;
+        Some((&node.node_id, node.position, "topology node"))
+    }
+}
+
+fn cycle_selected_topology_element(world: &mut World, direction: isize) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a World Kit recipe before editing topology");
+        return;
+    };
+    let count = topology_element_count(category, &recipe);
+    if count == 0 {
+        set_editor_status(world, "Seed topology before selecting a point or node");
+        return;
+    }
+    let selected = {
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.topology_element = if direction < 0 {
+            registry
+                .topology_element
+                .checked_sub(1)
+                .unwrap_or(count - 1)
+        } else {
+            (registry.topology_element + 1) % count
+        };
+        registry.topology_element
+    };
+    let (id, position, kind) = selected_topology_element(category, &recipe, selected)
+        .expect("nonempty topology has a selected element");
+    set_editor_status(
+        world,
+        format!(
+            "Selected {kind} {id} at [{:.2}, {:.2}, {:.2}]",
+            position[0], position[1], position[2]
+        ),
+    );
+}
+
+fn move_selected_topology_element(world: &mut World, axis: usize, direction: f32) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a World Kit recipe before editing topology");
+        return;
+    };
+    let count = topology_element_count(category, &recipe);
+    if count == 0 {
+        set_editor_status(world, "Seed topology before moving a point or node");
+        return;
+    }
+    let selected = world.resource::<EditorRegistryState>().topology_element % count;
+    let (id, _, kind) = selected_topology_element(category, &recipe, selected)
+        .expect("nonempty topology has a selected element");
+    let id = id.to_owned();
+    let snap = world.resource::<EditorGizmoSettings>().translation_snap();
+    execute_recipe_edit(
+        world,
+        format!("Move {kind} {id} axis {axis} by {:.2}m", direction * snap),
+        move |recipe| {
+            let position = if category == persistence::ContentCategory::Road {
+                &mut recipe.spline_points[selected].position
+            } else {
+                &mut recipe.topology_nodes[selected].position
+            };
+            position[axis] += direction * snap;
+        },
+    );
+}
+
+const TOPOLOGY_EDGE_KINDS: [WorldTopologyEdgeKind; 4] = [
+    WorldTopologyEdgeKind::Door,
+    WorldTopologyEdgeKind::Stair,
+    WorldTopologyEdgeKind::Tunnel,
+    WorldTopologyEdgeKind::Portal,
+];
+
+fn mark_topology_edge_start(world: &mut World) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a World Kit recipe before authoring an edge");
+        return;
+    };
+    if category == persistence::ContentCategory::Road {
+        set_editor_status(world, "Road splines do not use room/zone topology edges");
+        return;
+    }
+    let count = topology_element_count(category, &recipe);
+    if count == 0 {
+        set_editor_status(world, "Seed topology before marking an edge endpoint");
+        return;
+    }
+    let selected = world.resource::<EditorRegistryState>().topology_element % count;
+    let (node_id, _, _) = selected_topology_element(category, &recipe, selected)
+        .expect("nonempty topology has a selected node");
+    let node_id = node_id.to_owned();
+    world
+        .resource_mut::<EditorRegistryState>()
+        .topology_edge_start = Some(node_id.clone());
+    set_editor_status(
+        world,
+        format!("Marked {node_id} as edge start; select a destination node"),
+    );
+}
+
+fn cycle_topology_edge_kind(world: &mut World) {
+    let kind = {
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.topology_edge_kind = (registry.topology_edge_kind + 1) % TOPOLOGY_EDGE_KINDS.len();
+        TOPOLOGY_EDGE_KINDS[registry.topology_edge_kind]
+    };
+    set_editor_status(world, format!("Topology edge type: {kind:?}"));
+}
+
+fn edit_topology_edge(world: &mut World, connect: bool) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a World Kit recipe before authoring an edge");
+        return;
+    };
+    if category == persistence::ContentCategory::Road {
+        set_editor_status(world, "Road splines do not use room/zone topology edges");
+        return;
+    }
+    let count = topology_element_count(category, &recipe);
+    if count == 0 {
+        set_editor_status(world, "Seed topology before authoring an edge");
+        return;
+    }
+    let (start, kind, selected) = {
+        let registry = world.resource::<EditorRegistryState>();
+        (
+            registry.topology_edge_start.clone(),
+            TOPOLOGY_EDGE_KINDS[registry.topology_edge_kind % TOPOLOGY_EDGE_KINDS.len()],
+            registry.topology_element % count,
+        )
+    };
+    let Some(start) = start else {
+        set_editor_status(
+            world,
+            "Mark an edge start node before connecting or removing",
+        );
+        return;
+    };
+    let (end, _, _) = selected_topology_element(category, &recipe, selected)
+        .expect("nonempty topology has a selected node");
+    let end = end.to_owned();
+    if start == end {
+        set_editor_status(world, "An edge must connect two different topology nodes");
+        return;
+    }
+    let start_exists = recipe
+        .topology_nodes
+        .iter()
+        .any(|node| node.node_id == start);
+    if !start_exists {
+        world
+            .resource_mut::<EditorRegistryState>()
+            .topology_edge_start = None;
+        set_editor_status(world, "Marked edge start no longer exists; mark it again");
+        return;
+    }
+    let matches_edge = |edge: &WorldTopologyEdgeDraft| {
+        edge.kind == kind
+            && ((edge.from == start && edge.to == end) || (edge.from == end && edge.to == start))
+    };
+    let existing = recipe.topology_edges.iter().position(matches_edge);
+    if connect && existing.is_some() {
+        set_editor_status(
+            world,
+            format!("{kind:?} edge {start} ↔ {end} already exists"),
+        );
+        return;
+    }
+    let removal_index = if connect {
+        None
+    } else {
+        let Some(index) = existing else {
+            set_editor_status(world, format!("No {kind:?} edge {start} ↔ {end} exists"));
+            return;
+        };
+        Some(index)
+    };
+    let description = if connect {
+        format!("Connect {kind:?} edge {start} to {end}")
+    } else {
+        format!("Remove {kind:?} edge {start} to {end}")
+    };
+    execute_recipe_edit(world, description, move |recipe| {
+        if connect {
+            recipe.topology_edges.push(WorldTopologyEdgeDraft {
+                from: start,
+                to: end,
+                kind,
+            });
+        } else {
+            recipe
+                .topology_edges
+                .remove(removal_index.expect("remove operation has an edge index"));
+        }
+    });
 }
 
 fn execute_recipe_edit(
@@ -4240,6 +4801,8 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     current.map_or(0, |position| (position + 1) % indices.len())
                 };
                 registry.selected = indices[position];
+                registry.topology_element = 0;
+                registry.topology_edge_start = None;
                 registry.selected
             };
             let content_id = world.resource::<EditorProjectSession>().project.records[selected]
@@ -4471,6 +5034,8 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     registry.selected = index;
                     registry.recipe_slot = 0;
                     registry.recipe_parameter = 0;
+                    registry.topology_element = 0;
+                    registry.topology_edge_start = None;
                     world.resource_mut::<EditorDocumentState>().dirty = true;
                     world.resource_mut::<WorldKitPreviewState>().signature = None;
                     set_editor_status(world, format!("Created {content_id}"));
@@ -4609,10 +5174,27 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 set_editor_status(world, "Select a World Kit recipe before seeding topology");
                 return;
             };
+            {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.topology_element = 0;
+                registry.topology_edge_start = None;
+            }
             execute_recipe_edit(world, "Seed default World Kit topology", move |recipe| {
                 seed_default_topology(category, recipe);
             });
         }
+        EditorAction::TopologyPrevious => cycle_selected_topology_element(world, -1),
+        EditorAction::TopologyNext => cycle_selected_topology_element(world, 1),
+        EditorAction::TopologyMoveXNegative => move_selected_topology_element(world, 0, -1.0),
+        EditorAction::TopologyMoveXPositive => move_selected_topology_element(world, 0, 1.0),
+        EditorAction::TopologyMoveYNegative => move_selected_topology_element(world, 1, -1.0),
+        EditorAction::TopologyMoveYPositive => move_selected_topology_element(world, 1, 1.0),
+        EditorAction::TopologyMoveZNegative => move_selected_topology_element(world, 2, -1.0),
+        EditorAction::TopologyMoveZPositive => move_selected_topology_element(world, 2, 1.0),
+        EditorAction::TopologyMarkEdgeStart => mark_topology_edge_start(world),
+        EditorAction::TopologyCycleEdgeKind => cycle_topology_edge_kind(world),
+        EditorAction::TopologyConnectEdge => edit_topology_edge(world, true),
+        EditorAction::TopologyRemoveEdge => edit_topology_edge(world, false),
         EditorAction::CompileSandboxRoot => {
             let Some((content_id, _, _)) = selected_procedural_recipe(world) else {
                 set_editor_status(
@@ -5385,14 +5967,35 @@ fn update_editor_workspace_text(
                     let specs = persistence::procedural_parameter_specs(record.category);
                     let parameter = specs[registry.recipe_parameter % specs.len()];
                     let value = persistence::procedural_parameter_value(recipe, parameter);
+                    let topology_selection = selected_topology_element(
+                        record.category,
+                        recipe,
+                        registry.topology_element,
+                    )
+                    .map(|(id, position, kind)| {
+                        format!(
+                            "{kind} {id} @ [{:.2}, {:.2}, {:.2}]",
+                            position[0], position[1], position[2]
+                        )
+                    })
+                    .unwrap_or_else(|| "— seed topology to edit —".into());
+                    let edge_start = registry
+                        .topology_edge_start
+                        .as_deref()
+                        .unwrap_or("— mark a node —");
+                    let edge_kind = TOPOLOGY_EDGE_KINDS
+                        [registry.topology_edge_kind % TOPOLOGY_EDGE_KINDS.len()];
                     format!(
-                        "\nWORLD KIT: {} • Seed {} • Rev {}\nTopology: {} points • {} nodes • {} edges\nSlot {}: {}\n{}: {:.2}  [{:.2}–{:.2}]",
+                        "\nWORLD KIT: {} • Seed {} • Rev {}\nTopology: {} points • {} nodes • {} edges\nSelected: {}\nEdge: {:?} from {}\nSlot {}: {}\n{}: {:.2}  [{:.2}–{:.2}]",
                         world_recipe_label(record.category),
                         recipe.seed,
                         recipe.revision,
                         recipe.spline_points.len(),
                         recipe.topology_nodes.len(),
                         recipe.topology_edges.len(),
+                        topology_selection,
+                        edge_kind,
+                        edge_start,
                         slot,
                         material,
                         parameter.label,
@@ -5492,6 +6095,9 @@ fn draw_editor_gizmos(
     mut gizmos: Gizmos,
     selection: Res<EditorSelection>,
     settings: Res<EditorGizmoSettings>,
+    session: Res<EditorProjectSession>,
+    registry: Res<EditorRegistryState>,
+    sandbox_roots: Query<(&WorldKitGeneratedRoot, &GlobalTransform)>,
     authorables: Query<
         (
             &EditorEntityId,
@@ -5515,6 +6121,57 @@ fn draw_editor_gizmos(
             Vec3::new(20.0, 0.02, coordinate),
             grid_color,
         );
+    }
+
+    if let Some(record) = session.project.records.get(registry.selected) {
+        if let Some(recipe) = session
+            .project
+            .payloads
+            .get(&record.content_id)
+            .and_then(persistence::ContentPayload::procedural_recipe)
+        {
+            if let Some((_, position, _)) =
+                selected_topology_element(record.category, recipe, registry.topology_element)
+            {
+                if let Some((_, root_transform)) = sandbox_roots
+                    .iter()
+                    .find(|(root, _)| root.content_id == record.content_id)
+                {
+                    let local = Vec3::from_array(position);
+                    let center = root_transform.transform_point(local);
+                    for (axis, color) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().zip([
+                        Color::srgb(1.0, 0.18, 0.18),
+                        Color::srgb(0.25, 1.0, 0.35),
+                        Color::srgb(0.22, 0.55, 1.0),
+                    ]) {
+                        let endpoint = root_transform.transform_point(local + axis * 10.0);
+                        gizmos.arrow(center, endpoint, color);
+                    }
+                    gizmos.line(
+                        center + Vec3::Y * 1.25,
+                        center + Vec3::Y * 1.8,
+                        Color::srgb(1.0, 0.82, 0.18),
+                    );
+                    if let Some(start_id) = registry.topology_edge_start.as_deref() {
+                        if let Some(start_node) = recipe
+                            .topology_nodes
+                            .iter()
+                            .find(|node| node.node_id == start_id)
+                        {
+                            let start = root_transform
+                                .transform_point(Vec3::from_array(start_node.position));
+                            let start_color = Color::srgb(0.18, 0.92, 1.0);
+                            for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                                gizmos.line(start - axis * 0.55, start + axis * 0.55, start_color);
+                            }
+                            if start != center {
+                                gizmos.line(start, center, start_color);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     for (id, transform, bounds, access) in &authorables {
@@ -5689,6 +6346,7 @@ mod tests {
         world.init_resource::<EditorUndoStack>();
         world.init_resource::<EditorDocumentState>();
         world.init_resource::<EditorRegistryState>();
+        world.init_resource::<EditorGizmoSettings>();
         world.insert_resource(EditorRuntimeStatus {
             message: String::new(),
         });
@@ -5818,6 +6476,41 @@ mod tests {
         assert_eq!(settings.translation_snap(), 0.25);
         settings.snap_index = 3;
         assert_eq!(settings.translation_snap(), 2.0);
+    }
+
+    #[test]
+    fn topology_drag_projects_onto_axis_and_snaps_in_recipe_meters() {
+        assert_eq!(
+            topology_drag_amount(Vec2::new(17.0, 9.0), Vec2::X, 0.1, 0.5),
+            1.5
+        );
+        assert_eq!(
+            topology_drag_amount(Vec2::new(17.0, 9.0), Vec2::Y, 0.1, 0.5),
+            1.0
+        );
+        assert_eq!(
+            topology_drag_amount(Vec2::new(-13.0, 4.0), Vec2::X, 0.1, 0.25),
+            -1.25
+        );
+    }
+
+    #[test]
+    fn topology_position_mut_targets_only_the_selected_recipe_element() {
+        let mut road = ProceduralRecipeDraft::default();
+        seed_default_topology(persistence::ContentCategory::Road, &mut road);
+        let untouched = road.spline_points[0].position;
+        topology_position_mut(persistence::ContentCategory::Road, &mut road, 1).unwrap()[0] += 3.0;
+        assert_eq!(road.spline_points[0].position, untouched);
+        assert_eq!(road.spline_points[1].position[0], 3.0);
+
+        let mut cave = ProceduralRecipeDraft::default();
+        seed_default_topology(persistence::ContentCategory::Cave, &mut cave);
+        topology_position_mut(persistence::ContentCategory::Cave, &mut cave, 2).unwrap()[1] += 2.0;
+        assert_eq!(cave.topology_nodes[2].position[1], 7.0);
+        assert!(
+            topology_position_mut(persistence::ContentCategory::Cave, &mut cave, usize::MAX)
+                .is_none()
+        );
     }
 
     #[test]
@@ -6350,6 +7043,192 @@ mod tests {
         let (_, _, recipe) = selected_procedural_recipe(&world).unwrap();
         assert!(recipe.spline_points.is_empty());
         assert!(recipe.topology_nodes.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn topology_selection_wraps_and_snapped_moves_are_undoable() {
+        let (mut world, root) = persistence_test_world("topology_direct_edit");
+        let road_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Road, "Speed Network")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+        let point_count = world.resource::<EditorProjectSession>().project.payloads[&road_id]
+            .procedural_recipe()
+            .unwrap()
+            .spline_points
+            .len();
+
+        apply_editor_action(&mut world, EditorAction::TopologyPrevious);
+        assert_eq!(
+            world.resource::<EditorRegistryState>().topology_element,
+            point_count - 1
+        );
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+        assert_eq!(world.resource::<EditorRegistryState>().topology_element, 0);
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+        assert_eq!(world.resource::<EditorRegistryState>().topology_element, 1);
+
+        let before = world.resource::<EditorProjectSession>().project.payloads[&road_id]
+            .procedural_recipe()
+            .unwrap()
+            .spline_points[1]
+            .position;
+        apply_editor_action(&mut world, EditorAction::TopologyMoveZPositive);
+        let after = world.resource::<EditorProjectSession>().project.payloads[&road_id]
+            .procedural_recipe()
+            .unwrap()
+            .spline_points[1]
+            .position;
+        assert_eq!(after[2], before[2] + 0.5);
+        assert!(validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
+
+        apply_editor_action(&mut world, EditorAction::Undo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .spline_points[1]
+                .position,
+            before
+        );
+        apply_editor_action(&mut world, EditorAction::Redo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .spline_points[1]
+                .position,
+            after
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn topology_move_without_seeded_elements_is_safe() {
+        let (mut world, root) = persistence_test_world("topology_empty_edit");
+        world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Cave, "Empty Cave")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::TopologyMoveXPositive);
+        assert!(world
+            .resource::<EditorRuntimeStatus>()
+            .message
+            .contains("Seed topology"));
+        assert_eq!(world.resource::<EditorUndoStack>().undo.len(), 0);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn typed_topology_edges_connect_remove_and_undo_as_recipe_transactions() {
+        let (mut world, root) = persistence_test_world("topology_edge_authoring");
+        let biome_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Biome, "Main World")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+        apply_editor_action(&mut world, EditorAction::TopologyMarkEdgeStart);
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+        apply_editor_action(&mut world, EditorAction::TopologyConnectEdge);
+
+        let recipe = world.resource::<EditorProjectSession>().project.payloads[&biome_id]
+            .procedural_recipe()
+            .unwrap();
+        assert_eq!(recipe.topology_edges.len(), 1);
+        assert_eq!(recipe.topology_edges[0].from, "core");
+        assert_eq!(recipe.topology_edges[0].to, "water");
+        assert_eq!(recipe.topology_edges[0].kind, WorldTopologyEdgeKind::Door);
+        assert!(validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
+
+        apply_editor_action(&mut world, EditorAction::TopologyConnectEdge);
+        assert!(world
+            .resource::<EditorRuntimeStatus>()
+            .message
+            .contains("already exists"));
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&biome_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_edges
+                .len(),
+            1
+        );
+
+        apply_editor_action(&mut world, EditorAction::TopologyRemoveEdge);
+        assert!(
+            world.resource::<EditorProjectSession>().project.payloads[&biome_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_edges
+                .is_empty()
+        );
+        apply_editor_action(&mut world, EditorAction::Undo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&biome_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_edges
+                .len(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_cave_edge_removal_retains_last_valid_sandbox_root() {
+        let (mut world, root) = persistence_test_world("topology_edge_sandbox_guard");
+        let cave_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Cave, "Secret Network")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+        apply_editor_action(&mut world, EditorAction::CompileSandboxRoot);
+        let valid_root = world
+            .query_filtered::<Entity, With<WorldKitGeneratedRoot>>()
+            .iter(&world)
+            .next()
+            .unwrap();
+
+        apply_editor_action(&mut world, EditorAction::TopologyMarkEdgeStart);
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+        apply_editor_action(&mut world, EditorAction::TopologyCycleEdgeKind);
+        apply_editor_action(&mut world, EditorAction::TopologyCycleEdgeKind);
+        assert_eq!(
+            TOPOLOGY_EDGE_KINDS[world.resource::<EditorRegistryState>().topology_edge_kind],
+            WorldTopologyEdgeKind::Tunnel
+        );
+        apply_editor_action(&mut world, EditorAction::TopologyRemoveEdge);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&cave_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_edges
+                .len(),
+            2
+        );
+        assert!(!validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
+
+        sync_world_kit_sandbox(&mut world);
+        let retained_root = world
+            .query_filtered::<Entity, With<WorldKitGeneratedRoot>>()
+            .iter(&world)
+            .next()
+            .unwrap();
+        assert_eq!(retained_root, valid_root);
+        assert!(world
+            .resource::<EditorRuntimeStatus>()
+            .message
+            .contains("retained last valid"));
         let _ = std::fs::remove_dir_all(root);
     }
 
