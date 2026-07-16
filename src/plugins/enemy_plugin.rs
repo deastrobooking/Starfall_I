@@ -63,7 +63,7 @@ impl Plugin for EnemyPlugin {
                     enemy_killed_reward,
                     robot_salvage_reward_system,
                     enemy_loot_drop_system,
-                    loot_bob_system,
+                    loot_homing_system,
                     loot_pickup_system,
                 )
                     .run_if(in_state(AppState::Playing)),
@@ -1607,18 +1607,50 @@ fn enemy_loot_drop_system(
                     quantity,
                     credits: 0,
                     pickup_radius: 2.5,
-                    base_y,
+                    velocity: Vec3::new(
+                        (drop_index as f32 - extra_rolls as f32 * 0.5) * 2.4,
+                        5.5,
+                        0.0,
+                    ),
+                    age: 0.0,
                 },
             ));
         }
     }
 }
 
-// ── Loot Bob Animation ────────────────────────────────────────────────────────
-fn loot_bob_system(time: Res<Time>, mut loot_q: Query<(&mut Transform, &WorldLoot)>) {
-    for (mut transform, loot) in loot_q.iter_mut() {
-        transform.translation.y = loot.base_y + (time.elapsed_secs() * 2.5).sin() * 0.25;
-        transform.rotation = Quat::from_rotation_y(time.elapsed_secs());
+// ── Automatic Loot Magnet ─────────────────────────────────────────────────────
+fn loot_homing_system(
+    time: Res<Time>,
+    player_q: Query<&Transform, With<Player>>,
+    mut loot_q: Query<(&mut Transform, &mut WorldLoot), Without<Player>>,
+) {
+    let dt = time.delta_secs().min(0.05);
+    for (mut transform, mut loot) in loot_q.iter_mut() {
+        loot.age += dt;
+        let Some(player_transform) = player_q.iter().min_by(|a, b| {
+            a.translation
+                .distance_squared(transform.translation)
+                .total_cmp(&b.translation.distance_squared(transform.translation))
+        }) else {
+            continue;
+        };
+
+        let target = player_transform.translation + Vec3::Y * 0.85;
+        let offset = target - transform.translation;
+        let distance = offset.length();
+        if loot.age < 0.18 {
+            // A brief readable prize pop before attraction takes over.
+            loot.velocity.y -= 12.0 * dt;
+        } else if distance > 0.001 {
+            let homing_speed = (12.0 + distance * 0.42).clamp(12.0, 48.0);
+            let desired_velocity = offset / distance * homing_speed;
+            let steering = 1.0 - (-10.0 * dt).exp();
+            loot.velocity = loot.velocity.lerp(desired_velocity, steering);
+        }
+
+        transform.translation += loot.velocity * dt;
+        transform.rotate_y(5.5 * dt);
     }
 }
 
@@ -1627,13 +1659,13 @@ fn loot_pickup_system(
     mut commands: Commands,
     player_q: Query<(Entity, &PlayerIndex, &Transform), With<Player>>,
     mut inventory_q: Query<&mut Inventory, With<Player>>,
-    loot_q: Query<(Entity, &Transform, &WorldLoot)>,
+    mut loot_q: Query<(Entity, &Transform, &mut WorldLoot)>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
     mut loot_ev: MessageWriter<LootCollectedEvent>,
 ) {
     let item_defs = crate::components::inventory::all_items();
 
-    for (entity, loot_transform, loot) in loot_q.iter() {
+    for (entity, loot_transform, mut loot) in loot_q.iter_mut() {
         let Some((player_entity, player_index, _)) = player_q
             .iter()
             .filter_map(|(player_entity, player_index, player_transform)| {
@@ -1672,7 +1704,13 @@ fn loot_pickup_system(
                 loot_type: loot.item_id.to_string(),
                 amount: picked,
             });
-            commands.entity(entity).despawn();
+            if leftover == 0 {
+                commands.entity(entity).despawn();
+            } else {
+                // Keep the uncollected remainder alive for another player or
+                // for this player after inventory space becomes available.
+                loot.quantity = leftover;
+            }
         }
     }
 }

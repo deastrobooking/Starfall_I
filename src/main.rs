@@ -43,6 +43,7 @@ mod robot_pets;
 mod robots;
 mod settlement_economy;
 mod sfx;
+mod shop_transactions;
 mod state;
 mod upgrades;
 

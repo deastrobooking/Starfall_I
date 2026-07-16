@@ -409,7 +409,10 @@ pub struct WorldLoot {
     pub quantity: u32,
     pub credits: u32,
     pub pickup_radius: f32,
-    pub base_y: f32,
+    /// World-space homing velocity. Loot starts with a short upward pop and
+    /// then steers toward the nearest player like a reversed homing missile.
+    pub velocity: Vec3,
+    pub age: f32,
 }
 
 /// Usable boat placed at an authored dock. Press the vehicle input near it to

@@ -51,6 +51,8 @@ pub struct PlayerProgression {
     pub perks: PerkTree,
     pub upgrades: UpgradeLedger,
     pub weapon_ranks: WeaponRanks,
+    /// Per-player shop purchases and equipped choices (PX3).
+    pub shop: crate::shop_transactions::ShopOwnership,
 }
 
 impl PlayerStats {
@@ -190,6 +192,24 @@ impl Default for SpeedLoopTraversalState {
 pub struct RoadRecoveryState {
     pub last_checkpoint: Option<Vec3>,
     pub cooldown: f32,
+}
+
+/// General safety state for rare terrain-collider seam/tunneling misses.
+/// Gameplay still uses physics for normal grounding; this cache is consulted
+/// only after the player has fallen materially beneath the rendered terrain.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TerrainRecoveryState {
+    pub last_safe_position: Vec3,
+    pub cooldown: f32,
+}
+
+impl TerrainRecoveryState {
+    pub fn new(spawn_position: Vec3) -> Self {
+        Self {
+            last_safe_position: spawn_position,
+            cooldown: 0.0,
+        }
+    }
 }
 
 /// Per-player skate/road combo. Points stay provisional until a clean landing,

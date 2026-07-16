@@ -11,6 +11,7 @@ use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, Shoul
 use crate::character_studio::spec::CharacterSpec;
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::armor::{ArmorSet, ElementType};
+use crate::shop_transactions::ShopOwnership;
 use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::{
     Player, PlayerIndex, PlayerProgression, PlayerStats, TraversalMode, TraversalModeState,
@@ -317,6 +318,9 @@ pub struct PlayerSaveData {
     pub tech_upgrades: Option<UpgradeLedger>,
     #[serde(default)]
     pub weapon_ranks: Option<[u32; 6]>,
+    /// `None` identifies saves written before the PX3 shop existed.
+    #[serde(default)]
+    pub shop: Option<ShopOwnership>,
 }
 
 impl PlayerSaveData {
@@ -353,6 +357,7 @@ impl PlayerSaveData {
             perk_tree: Some(progression.perks.clone()),
             tech_upgrades: Some(progression.upgrades.clone()),
             weapon_ranks: Some(progression.weapon_ranks.ranks),
+            shop: Some(progression.shop.clone()),
         }
     }
 
@@ -377,6 +382,7 @@ impl PlayerSaveData {
             perk_tree: None,
             tech_upgrades: None,
             weapon_ranks: None,
+            shop: None,
         }
     }
 
@@ -428,6 +434,9 @@ impl PlayerSaveData {
         }
         if let Some(ranks) = self.weapon_ranks {
             progression.weapon_ranks.ranks = ranks;
+        }
+        if let Some(shop) = &self.shop {
+            progression.shop.clone_from(shop);
         }
     }
 }
@@ -920,6 +929,7 @@ fn hydrate_progress_from_disk(
                 weapon_ranks: WeaponRanks {
                     ranks: data.weapon_ranks,
                 },
+                shop: ShopOwnership::default(),
             };
             if let Some(saved) = player_save_for(&data, index as u8) {
                 saved.apply_progression(&mut progression);
@@ -1168,6 +1178,7 @@ mod tests {
             perk_tree: None,
             tech_upgrades: None,
             weapon_ranks: None,
+            shop: None,
         }
     }
 
@@ -1535,6 +1546,7 @@ mod tests {
             perk_tree: None,
             tech_upgrades: None,
             weapon_ranks: None,
+            shop: None,
         };
         let mut stats = PlayerStats::default();
         let mut health = Health::new(100.0);
@@ -1599,6 +1611,37 @@ mod tests {
             3
         );
         assert_eq!(progression.weapon_ranks.ranks, [1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn shop_ownership_round_trips_per_player_and_defaults_for_legacy_saves() {
+        let mut saved = player_save(1, 3, 150, 40, 80.0, 120.0);
+        saved.shop = Some(ShopOwnership {
+            owned: vec!["scout_visor".to_string(), "nova_plating".to_string()],
+            equipped_armor: Some("nova_plating".to_string()),
+            ..Default::default()
+        });
+
+        let json = serde_json::to_string(&saved).unwrap();
+        let decoded: PlayerSaveData = serde_json::from_str(&json).unwrap();
+        let mut progression = PlayerProgression::default();
+        decoded.apply_progression(&mut progression);
+        assert!(progression.shop.owns("scout_visor"));
+        assert_eq!(
+            progression.shop.equipped_armor.as_deref(),
+            Some("nova_plating")
+        );
+
+        // A legacy record written before the shop existed has no field at all;
+        // it must load as "nothing owned" without touching progression that
+        // already has purchases.
+        let mut legacy_value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        legacy_value.as_object_mut().unwrap().remove("shop");
+        let legacy: PlayerSaveData = serde_json::from_value(legacy_value).unwrap();
+        assert!(legacy.shop.is_none());
+        let mut kept = progression.clone();
+        legacy.apply_progression(&mut kept);
+        assert!(kept.shop.owns("scout_visor"));
     }
 
     // ── Disk hardening tests ─────────────────────────────────────────────────

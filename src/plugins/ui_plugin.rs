@@ -36,6 +36,7 @@ use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::plugins::input_plugin::{GamepadAssignments, NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
+use crate::shop_transactions;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
@@ -53,6 +54,7 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiMessage>()
+            .init_resource::<ShopUiState>()
             .init_resource::<PlayerGuidance>()
             .init_resource::<CraftingPanelState>()
             .init_resource::<LoadoutPanelState>()
@@ -125,7 +127,12 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                (pause_menu_action_system, update_pause_menu_page_visibility)
+                (
+                    pause_menu_action_system,
+                    shop_action_system,
+                    shop_panel_refresh_system.after(shop_action_system),
+                    update_pause_menu_page_visibility,
+                )
                     .run_if(in_state(AppState::Paused)),
             )
             .add_systems(
@@ -283,6 +290,46 @@ impl Default for PauseMenuState {
             page: PausePage::Main,
             resume_lockout: 0.0,
             resume_armed: true,
+        }
+    }
+}
+/// PX3 shop actions raised by focusable pause-menu buttons. Kept separate from
+/// `PauseAction` so the shop flow does not widen `pause_menu_action_system`.
+#[derive(Component, Clone, Copy)]
+struct ShopButton(ShopAction);
+#[derive(Clone, Copy)]
+enum ShopAction {
+    Category(ShopCategory),
+    Select(&'static str),
+    OwnerCycle,
+    ConfirmBuy,
+    Equip,
+    Unequip,
+    CloseDetail,
+}
+#[derive(Component)]
+struct ShopHeaderText;
+#[derive(Component)]
+struct ShopCardList;
+#[derive(Component)]
+struct ShopDetailPanel;
+/// Live pause-shop browsing state: active category tab, which joined player is
+/// shopping (per-player ownership), and the card selected for the detail /
+/// confirmation panel. `dirty` requests a card/detail rebuild.
+#[derive(Resource)]
+struct ShopUiState {
+    category: ShopCategory,
+    owner: u8,
+    selected: Option<&'static str>,
+    dirty: bool,
+}
+impl Default for ShopUiState {
+    fn default() -> Self {
+        Self {
+            category: ShopCategory::Outfits,
+            owner: 0,
+            selected: None,
+            dirty: true,
         }
     }
 }
@@ -1217,7 +1264,6 @@ fn despawn_project_hub(mut commands: Commands, roots: Query<Entity, With<Project
 fn setup_pause_menu(
     mut commands: Commands,
     mut menu: ResMut<PauseMenuState>,
-    shop: Res<ShopCatalog>,
     settings: Res<GameSettings>,
 ) {
     menu.page = PausePage::Main;
@@ -1354,7 +1400,7 @@ fn setup_pause_menu(
             ))
             .with_children(|page| {
                 page.spawn((
-                    Text::new("SHOP / GARAGE BROWSER"),
+                    Text::new("STAR SHOP"),
                     TextFont {
                         font_size: FontSize::Px(30.0),
                         ..default()
@@ -1362,33 +1408,62 @@ fn setup_pause_menu(
                     TextColor(Color::srgb(0.9, 0.95, 1.0)),
                 ));
                 page.spawn((
-                    Text::new("Browse base outfits, armor shells, weapons, and vehicle frames. Purchase/equip actions will wire into this catalog next."),
+                    Text::new(""),
                     TextFont {
-                        font_size: FontSize::Px(15.0),
+                        font_size: FontSize::Px(16.0),
                         ..default()
                     },
-                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                    TextColor(Color::srgb(0.94, 0.76, 0.36)),
+                    ShopHeaderText,
                 ));
-                for category in ShopCategory::ALL {
-                    page.spawn((
-                        Text::new(format!("{}:", category.label().to_uppercase())),
-                        TextFont {
-                            font_size: FontSize::Px(16.0),
+                page.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|tabs| {
+                    for category in ShopCategory::ALL {
+                        spawn_shop_button(
+                            tabs,
+                            category.label().to_uppercase(),
+                            ShopAction::Category(category),
+                            Color::srgb(0.16, 0.30, 0.42),
+                        );
+                    }
+                    spawn_shop_button(
+                        tabs,
+                        "SWITCH PLAYER".to_string(),
+                        ShopAction::OwnerCycle,
+                        Color::srgb(0.30, 0.24, 0.44),
+                    );
+                });
+                page.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::FlexStart,
+                    column_gap: Val::Px(14.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn((
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(6.0),
                             ..default()
                         },
-                        TextColor(Color::srgb(0.94, 0.76, 0.36)),
+                        ShopCardList,
                     ));
-                    for item in shop.items_for(category).take(4) {
-                        page.spawn((
-                            Text::new(format_shop_item_row(item)),
-                            TextFont {
-                                font_size: FontSize::Px(14.0),
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.86, 0.90, 1.0)),
-                        ));
-                    }
-                }
+                    row.spawn((
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(6.0),
+                            max_width: Val::Px(360.0),
+                            padding: UiRect::all(Val::Px(10.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.06, 0.08, 0.11, 0.9)),
+                        ShopDetailPanel,
+                    ));
+                });
                 spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
 
@@ -1527,23 +1602,313 @@ fn spawn_settings_button(
         });
 }
 
-fn format_shop_item_row(item: &crate::resources::ShopItem) -> String {
-    let preview = item
-        .preview_loadout
-        .map(|loadout| {
-            format!(
-                " preview: {} / {} / {} / {}",
-                loadout.arms.label(),
-                loadout.legs.label(),
-                loadout.shoulders.label(),
-                loadout.head.label()
-            )
-        })
-        .unwrap_or_default();
-    format!(
-        "{}  {} cr | {}{}",
-        item.name, item.price_credits, item.summary, preview
-    )
+fn spawn_shop_button(
+    parent: &mut ChildSpawnerCommands,
+    label: String,
+    action: ShopAction,
+    color: Color,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                min_width: Val::Px(120.0),
+                height: Val::Px(38.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::horizontal(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(color),
+            ShopButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(15.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+fn shop_card_color(state: shop_transactions::CardState) -> Color {
+    use shop_transactions::CardState;
+    match state {
+        CardState::Equipped => Color::srgb(0.10, 0.40, 0.22),
+        CardState::Owned => Color::srgb(0.12, 0.28, 0.46),
+        CardState::Affordable => Color::srgb(0.42, 0.32, 0.10),
+        CardState::Unaffordable => Color::srgb(0.22, 0.22, 0.26),
+        CardState::Locked => Color::srgb(0.30, 0.18, 0.14),
+    }
+}
+
+fn shop_preview_line(item: &crate::resources::ShopItem) -> Option<String> {
+    item.preview_loadout.map(|loadout| {
+        format!(
+            "Preview: {} / {} / {} / {}",
+            loadout.arms.label(),
+            loadout.legs.label(),
+            loadout.shoulders.label(),
+            loadout.head.label()
+        )
+    })
+}
+
+/// Executes PX3 shop button presses: category tabs, owner cycling, card
+/// selection, and the confirmed buy/equip/unequip transactions. All rules run
+/// through `shop_transactions`, so the UI cannot bypass funds/duplicate
+/// protection.
+fn shop_action_system(
+    button_q: Query<(&Interaction, &ShopButton), (Changed<Interaction>, With<Button>)>,
+    mut ui: ResMut<ShopUiState>,
+    catalog: Res<ShopCatalog>,
+    mut player_q: Query<(&PlayerIndex, &mut PlayerStats, &mut PlayerProgression), With<Player>>,
+    mut select: ResMut<PlayerSelectState>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let mut action = None;
+    for (interaction, button) in button_q.iter() {
+        if *interaction == Interaction::Pressed {
+            action = Some(button.0);
+        }
+    }
+    let Some(action) = action else {
+        return;
+    };
+    ui.dirty = true;
+
+    let mut toast = |text: String| {
+        msg_ev.write(UiMessageEvent {
+            text,
+            duration: 2.0,
+        });
+    };
+
+    match action {
+        ShopAction::Category(category) => {
+            ui.category = category;
+            ui.selected = None;
+        }
+        ShopAction::Select(item_id) => {
+            ui.selected = Some(item_id);
+        }
+        ShopAction::CloseDetail => {
+            ui.selected = None;
+        }
+        ShopAction::OwnerCycle => {
+            let mut indices: Vec<u8> = player_q.iter().map(|(idx, _, _)| idx.0).collect();
+            indices.sort_unstable();
+            if let Some(next) = indices
+                .iter()
+                .find(|idx| **idx > ui.owner)
+                .or_else(|| indices.first())
+            {
+                ui.owner = *next;
+            }
+        }
+        ShopAction::ConfirmBuy | ShopAction::Equip | ShopAction::Unequip => {
+            let Some(item) = ui
+                .selected
+                .and_then(|id| catalog.items.iter().find(|item| item.id == id))
+            else {
+                return;
+            };
+            let Some((_, mut stats, mut progression)) = player_q
+                .iter_mut()
+                .find(|(idx, _, _)| idx.0 == ui.owner)
+            else {
+                toast("That player is not in the game right now.".to_string());
+                return;
+            };
+            let result = match action {
+                ShopAction::ConfirmBuy => {
+                    shop_transactions::buy(&mut progression.shop, &mut stats.credits, item)
+                        .map(|()| format!("Purchased {}!", item.name))
+                }
+                ShopAction::Equip => shop_transactions::equip(&mut progression.shop, item)
+                    .map(|()| format!("Equipped {}.", item.name)),
+                _ => shop_transactions::unequip(&mut progression.shop, item)
+                    .map(|()| format!("Unequipped {}.", item.name)),
+            };
+            match result {
+                Ok(message) => {
+                    // Outfit chassis presets apply to the owner's slot config so
+                    // the equipped look persists into the next spawn.
+                    if item.category == ShopCategory::Outfits {
+                        if let Some(slot) = select.slots.get_mut(ui.owner as usize) {
+                            slot.part_loadout = match action {
+                                ShopAction::Equip => item.preview_loadout,
+                                ShopAction::Unequip => None,
+                                _ => slot.part_loadout,
+                            };
+                        }
+                    }
+                    toast(message);
+                }
+                Err(err) => toast(err.message()),
+            }
+        }
+    }
+}
+
+/// Rebuilds the shop header, card list, and detail panel whenever the state is
+/// dirty or the pause menu was just (re)spawned.
+#[allow(clippy::too_many_arguments)]
+fn shop_panel_refresh_system(
+    mut commands: Commands,
+    mut ui: ResMut<ShopUiState>,
+    catalog: Res<ShopCatalog>,
+    player_q: Query<(&PlayerIndex, &PlayerStats, &PlayerProgression), With<Player>>,
+    list_q: Query<Entity, With<ShopCardList>>,
+    detail_q: Query<Entity, With<ShopDetailPanel>>,
+    added_q: Query<Entity, Added<ShopCardList>>,
+    children_q: Query<&Children>,
+    mut header_q: Query<&mut Text, With<ShopHeaderText>>,
+) {
+    if !ui.dirty && added_q.is_empty() {
+        return;
+    }
+    ui.dirty = false;
+    let (Ok(list), Ok(detail)) = (list_q.single(), detail_q.single()) else {
+        return;
+    };
+
+    let Some((_, stats, progression)) = player_q
+        .iter()
+        .find(|(idx, _, _)| idx.0 == ui.owner)
+        .or_else(|| player_q.iter().next())
+    else {
+        return;
+    };
+    let credits = stats.credits;
+    let ownership = progression.shop.clone();
+
+    if let Ok(mut header) = header_q.single_mut() {
+        *header = Text::new(format!(
+            "SHOPPING AS P{} — {} CREDITS — {}",
+            ui.owner + 1,
+            credits,
+            ui.category.label().to_uppercase()
+        ));
+    }
+
+    for panel in [list, detail] {
+        if let Ok(children) = children_q.get(panel) {
+            for child in children.iter() {
+                commands.entity(child).despawn();
+            }
+        }
+    }
+
+    let selected = ui.selected;
+    let category = ui.category;
+    commands.entity(list).with_children(|cards| {
+        for item in catalog.items_for(category) {
+            let state = shop_transactions::card_state(&ownership, item, credits);
+            spawn_shop_button(
+                cards,
+                format!(
+                    "{} · {} CR · [{}]",
+                    item.name,
+                    item.price_credits,
+                    state.badge()
+                ),
+                ShopAction::Select(item.id),
+                shop_card_color(state),
+            );
+        }
+    });
+
+    let detail_item = selected.and_then(|id| catalog.items.iter().find(|item| item.id == id));
+    commands.entity(detail).with_children(|panel| {
+        let text = |panel: &mut ChildSpawnerCommands, value: String, size: f32, color: Color| {
+            panel.spawn((
+                Text::new(value),
+                TextFont {
+                    font_size: FontSize::Px(size),
+                    ..default()
+                },
+                TextColor(color),
+            ));
+        };
+        let Some(item) = detail_item else {
+            text(
+                panel,
+                "Pick an item card to preview it.".to_string(),
+                15.0,
+                Color::srgb(0.72, 0.82, 1.0),
+            );
+            return;
+        };
+        let state = shop_transactions::card_state(&ownership, item, credits);
+        text(panel, item.name.to_string(), 20.0, Color::srgb(0.9, 0.95, 1.0));
+        text(
+            panel,
+            item.summary.to_string(),
+            14.0,
+            Color::srgb(0.82, 0.88, 1.0),
+        );
+        if let Some(preview) = shop_preview_line(item) {
+            text(panel, preview, 13.0, Color::srgb(0.70, 0.86, 0.92));
+        }
+        let equipped_now = ownership
+            .equipped_for(item.category)
+            .and_then(|id| catalog.items.iter().find(|other| other.id == id))
+            .map(|other| other.name)
+            .unwrap_or("none");
+        text(
+            panel,
+            format!("Currently equipped: {equipped_now}"),
+            13.0,
+            Color::srgb(0.70, 0.78, 0.94),
+        );
+        use shop_transactions::CardState;
+        match state {
+            CardState::Affordable => spawn_shop_button(
+                panel,
+                format!("BUY ({} CR)", item.price_credits),
+                ShopAction::ConfirmBuy,
+                Color::srgb(0.46, 0.34, 0.08),
+            ),
+            CardState::Unaffordable => text(
+                panel,
+                format!(
+                    "Save up {} more credits to buy this.",
+                    item.price_credits.saturating_sub(credits)
+                ),
+                13.0,
+                Color::srgb(0.94, 0.72, 0.52),
+            ),
+            CardState::Owned => spawn_shop_button(
+                panel,
+                "EQUIP".to_string(),
+                ShopAction::Equip,
+                Color::srgb(0.10, 0.40, 0.22),
+            ),
+            CardState::Equipped => spawn_shop_button(
+                panel,
+                "UNEQUIP".to_string(),
+                ShopAction::Unequip,
+                Color::srgb(0.34, 0.26, 0.10),
+            ),
+            CardState::Locked => text(
+                panel,
+                "Vehicle frames are party-shared and get built in the Robot Garage."
+                    .to_string(),
+                13.0,
+                Color::srgb(0.94, 0.72, 0.52),
+            ),
+        }
+        spawn_shop_button(
+            panel,
+            "CLOSE".to_string(),
+            ShopAction::CloseDetail,
+            Color::srgb(0.20, 0.26, 0.34),
+        );
+    });
 }
 
 fn update_pause_menu_page_visibility(

@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
-use crate::chapters::chapter_map_location;
+use crate::chapters::{chapter_map_location, EVEREST_RANGE_HALF_EXTENT};
 use crate::character_blueprint::{
     CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
@@ -39,11 +39,13 @@ use crate::rendering::{
 };
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
-    ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig, PlaySessionTransition,
-    PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig, WorldRouteRegistry, WorldRouteState,
+    ChapterProgress, CurrentChapter, DungeonCrawlState, GameSettings, LocalPlayerConfig,
+    PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
+    WorldRouteRegistry, WorldRouteState,
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
+use crate::plugins::world_plugin::terrain_surface_y;
 
 /// Route the player's visual through the new native modular humanoid
 /// ([`crate::player_mesh`]) instead of the legacy `character_parts` meshes.
@@ -287,6 +289,7 @@ impl Plugin for PlayerPlugin {
                     player_movement.run_if(hitstop_inactive),
                     speed_loop_traversal_system.run_if(hitstop_inactive),
                     road_checkpoint_recovery_system.run_if(hitstop_inactive),
+                    terrain_fall_recovery_system.run_if(hitstop_inactive),
                     grapple_hook_impact_system.run_if(hitstop_inactive),
                     shared_encounter_camera_mode_system,
                     shared_encounter_party_pull_system,
@@ -323,6 +326,7 @@ impl Plugin for PlayerPlugin {
                     player_movement,
                     speed_loop_traversal_system,
                     road_checkpoint_recovery_system,
+                    terrain_fall_recovery_system,
                     grapple_hook_impact_system,
                 )
                     .chain()
@@ -754,6 +758,7 @@ fn spawn_players(
             ))
             .insert((
                 RoadRecoveryState::default(),
+                TerrainRecoveryState::new(spawn_pos),
                 StuntRunState::default(),
                 StuntRaceProgress::default(),
                 ArmorSet::default(),
@@ -2537,6 +2542,88 @@ fn road_checkpoint_recovery_system(
             movement.motor_accum = Vec3::ZERO;
             recovery.cooldown = 1.0;
         }
+    }
+}
+
+/// Recovers rare kinematic-controller misses beneath the main heightfield.
+/// This is intentionally a deep-penetration guard rather than a replacement
+/// for collision: ordinary jumps, slopes, flight, roads, and climbing continue
+/// to be resolved by the character controller.
+fn terrain_fall_recovery_system(
+    time: Res<Time>,
+    settings: Res<GameSettings>,
+    dungeon: Res<DungeonCrawlState>,
+    mut player_q: Query<
+        (
+            &mut Transform,
+            &mut KinematicCharacterController,
+            &mut PlayerMovement,
+            &mut GrappleHookState,
+            &mut EdgeGrabState,
+            &mut ClimbState,
+            &mut PreviousTickPosition,
+            &mut TerrainRecoveryState,
+        ),
+        With<Player>,
+    >,
+) {
+    const RECOVERY_DEPTH: f32 = 8.0;
+    const RECOVERY_LIFT: f32 = 1.6;
+
+    let dt = time.delta_secs();
+    for (
+        mut transform,
+        mut controller,
+        mut movement,
+        mut grapple,
+        mut edge_grab,
+        mut climb,
+        mut previous,
+        mut recovery,
+    ) in player_q.iter_mut()
+    {
+        recovery.cooldown = (recovery.cooldown - dt).max(0.0);
+        let position = transform.translation;
+        let inside_main_terrain = position.x.abs() <= EVEREST_RANGE_HALF_EXTENT
+            && position.z.abs() <= EVEREST_RANGE_HALF_EXTENT;
+        if dungeon.active || !inside_main_terrain {
+            continue;
+        }
+
+        let surface_y = terrain_surface_y(position.x, position.z, settings.world_seed);
+        // The controller's grounded flag can lag for a frame after tunnelling.
+        // Only remember positions that are still on or above the authored surface.
+        if movement.is_grounded && position.y >= surface_y - 1.0 {
+            recovery.last_safe_position = position;
+        }
+
+        let fell_through = position.y < surface_y - RECOVERY_DEPTH && movement.velocity.y <= 0.0;
+        if recovery.cooldown > 0.0 || !fell_through {
+            continue;
+        }
+
+        let safe = recovery.last_safe_position;
+        let safe_inside = safe.x.abs() <= EVEREST_RANGE_HALF_EXTENT
+            && safe.z.abs() <= EVEREST_RANGE_HALF_EXTENT;
+        let safe_surface_y = terrain_surface_y(safe.x, safe.z, settings.world_seed);
+        let safe_is_valid = safe_inside && safe.y >= safe_surface_y - 1.0;
+        let recovered_position = if safe_is_valid {
+            safe + Vec3::Y * RECOVERY_LIFT
+        } else {
+            Vec3::new(position.x, surface_y + RECOVERY_LIFT, position.z)
+        };
+
+        transform.translation = recovered_position;
+        previous.0 = recovered_position;
+        controller.translation = Some(Vec3::ZERO);
+        movement.velocity = Vec3::ZERO;
+        movement.ground_velocity *= 0.25;
+        movement.motor_accum = Vec3::ZERO;
+        movement.is_grounded = false;
+        grapple.begin_recovery();
+        edge_grab.is_hanging = false;
+        climb.is_climbing = false;
+        recovery.cooldown = 0.8;
     }
 }
 
