@@ -17,8 +17,8 @@ use crate::components::discoverable::{
 use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot};
 use crate::components::player::{
-    ClimbState, JetpackState, Player, PlayerIndex, PlayerInput, PlayerStats, TraversalMode,
-    TraversalModeState,
+    AimReticleState, AimSolution, ClimbState, JetpackState, Player, PlayerCamera, PlayerCameraRef,
+    PlayerIndex, PlayerInput, PlayerProgression, PlayerStats, TraversalMode, TraversalModeState,
 };
 use crate::components::weapon::{
     BeamSabre, SpecialWeaponInventory, TrackingMissile, WeaponInventory, WeaponRanks, WeaponType,
@@ -29,11 +29,12 @@ use crate::components::world::{
 };
 use crate::damage::Health;
 use crate::discussion::DiscussionState;
+use crate::engine_tools::EngineToolMode;
 use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
 use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
-use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
+use crate::plugins::input_plugin::{GamepadAssignments, NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::{save_current_session, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
@@ -58,6 +59,7 @@ impl Plugin for UiPlugin {
             .init_resource::<DiscussionState>()
             .init_resource::<PauseMenuState>()
             .init_resource::<MenuFocus>()
+            .init_resource::<ChapterProgressionOwner>()
             .add_systems(Startup, spawn_menu_camera)
             .add_systems(
                 Update,
@@ -75,6 +77,11 @@ impl Plugin for UiPlugin {
                 OnEnter(AppState::MainMenu),
                 (cleanup_play_ui_for_menu, setup_main_menu),
             )
+            .add_systems(
+                OnEnter(AppState::ProjectHub),
+                (despawn_menu, setup_project_hub).chain(),
+            )
+            .add_systems(OnExit(AppState::ProjectHub), despawn_project_hub)
             .add_systems(
                 OnEnter(AppState::PlayerSelect),
                 (despawn_menu, setup_player_select),
@@ -137,7 +144,7 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                hud_update_system
+                (hud_update_system, aim_reticle_system)
                     .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
@@ -202,12 +209,19 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                player_select_update.run_if(in_state(AppState::PlayerSelect)),
+                project_hub_action_system.run_if(in_state(AppState::ProjectHub)),
+            )
+            .add_systems(
+                Update,
+                (player_select_controller_join, player_select_update)
+                    .chain()
+                    .run_if(in_state(AppState::PlayerSelect)),
             )
             .add_systems(
                 Update,
                 (
                     chapter_select_action_buttons,
+                    chapter_select_progression_owner_buttons,
                     chapter_select_fast_travel_buttons,
                     cave_fast_travel_buttons,
                     chapter_select_perk_buttons,
@@ -230,6 +244,8 @@ impl Plugin for UiPlugin {
 struct MenuCamera;
 #[derive(Component)]
 struct MainMenuRoot;
+#[derive(Component)]
+struct ProjectHubRoot;
 #[derive(Component)]
 struct HudRoot;
 #[derive(Component)]
@@ -284,6 +300,15 @@ struct VolumeText;
 struct FinalPushText;
 #[derive(Component)]
 struct StartButton;
+#[derive(Component)]
+struct EditorStartButton;
+#[derive(Component, Clone, Copy)]
+struct ProjectHubButton(ProjectHubAction);
+#[derive(Clone, Copy)]
+enum ProjectHubAction {
+    OpenCurrent,
+    Back,
+}
 
 /// Shared marker applied automatically to every Bevy UI button while a menu is
 /// active. Individual screens keep owning their actions; this layer only owns
@@ -398,6 +423,14 @@ struct DamageVignette {
 }
 #[derive(Component)]
 struct BossAlertText;
+#[derive(Component, Clone, Copy)]
+struct AimReticle {
+    player_index: u8,
+}
+#[derive(Component, Clone, Copy)]
+struct AimReticleBar {
+    player_index: u8,
+}
 #[derive(Component)]
 struct CraftingPanelRoot;
 #[derive(Component)]
@@ -767,6 +800,7 @@ fn menu_back_navigation(
 
     match state.get() {
         AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
+        AppState::ProjectHub => next_state.set(AppState::MainMenu),
         AppState::PlayerSelect => next_state.set(AppState::MainMenu),
         AppState::CharacterDesign => next_state.set(match design_data.return_target {
             CharacterDesignReturnTarget::PlayerSelect => AppState::PlayerSelect,
@@ -1013,17 +1047,169 @@ fn setup_main_menu(mut commands: Commands) {
                     TextColor(Color::WHITE),
                 ));
             });
+            p.spawn((
+                Button,
+                Node {
+                    width: Val::Px(260.0),
+                    height: Val::Px(62.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.34, 0.16, 0.56)),
+                BorderColor::all(Color::srgb(0.72, 0.42, 1.0)),
+                EditorStartButton,
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("START EDITOR"),
+                    TextFont {
+                        font_size: FontSize::Px(24.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
         });
 }
 
 fn menu_start_button(
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
+    editor_q: Query<
+        &Interaction,
+        (
+            Changed<Interaction>,
+            With<EditorStartButton>,
+            Without<StartButton>,
+        ),
+    >,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     for interaction in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
             next_state.set(AppState::PlayerSelect);
         }
+    }
+    for interaction in editor_q.iter() {
+        if *interaction == Interaction::Pressed {
+            next_state.set(AppState::ProjectHub);
+        }
+    }
+}
+
+fn setup_project_hub(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(16.0),
+                padding: UiRect::all(Val::Px(32.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.012, 0.014, 0.034, 1.0)),
+            ProjectHubRoot,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Text::new("STARFALL FORGE — PROJECT HUB"),
+                TextFont {
+                    font_size: FontSize::Px(42.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.78, 0.58, 1.0)),
+            ));
+            root.spawn((
+                Text::new("Open the current versioned project in the protected editor workspace."),
+                TextFont {
+                    font_size: FontSize::Px(17.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.72, 0.82, 1.0)),
+            ));
+            root.spawn((
+                Text::new("Starfall Main World\nstarfall_forge/project.json\nAtomic save • recovery snapshots • draft/published validation"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextLayout::justify(Justify::Center),
+                TextColor(Color::srgb(0.88, 0.90, 1.0)),
+            ));
+            spawn_project_hub_button(
+                root,
+                "OPEN CURRENT PROJECT",
+                ProjectHubAction::OpenCurrent,
+                Color::srgb(0.28, 0.16, 0.54),
+            );
+            spawn_project_hub_button(
+                root,
+                "BACK",
+                ProjectHubAction::Back,
+                Color::srgb(0.22, 0.26, 0.38),
+            );
+        });
+}
+
+fn spawn_project_hub_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    action: ProjectHubAction,
+    color: Color,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(310.0),
+                height: Val::Px(52.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(color),
+            BorderColor::all(Color::srgb(0.62, 0.48, 0.86)),
+            ProjectHubButton(action),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(18.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+fn project_hub_action_system(
+    interactions: Query<(&Interaction, &ProjectHubButton), (Changed<Interaction>, With<Button>)>,
+    mut next_state: ResMut<NextState<AppState>>,
+    mut next_tool_mode: ResMut<NextState<EngineToolMode>>,
+) {
+    for (interaction, button) in interactions.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match button.0 {
+            ProjectHubAction::OpenCurrent => {
+                next_state.set(AppState::Playing);
+                next_tool_mode.set(EngineToolMode::Editing);
+            }
+            ProjectHubAction::Back => next_state.set(AppState::MainMenu),
+        }
+    }
+}
+
+fn despawn_project_hub(mut commands: Commands, roots: Query<Entity, With<ProjectHubRoot>>) {
+    for entity in roots.iter() {
+        commands.entity(entity).despawn();
     }
 }
 
@@ -1553,6 +1739,10 @@ struct ChapterPerkButton(&'static str);
 struct ChapterUpgradeButton(TechUpgradeId);
 #[derive(Component, Clone, Copy)]
 struct ChapterWeaponRankButton(usize);
+#[derive(Component, Clone, Copy)]
+struct ChapterProgressionOwnerButton(u8);
+#[derive(Resource, Debug, Clone, Copy, Default)]
+struct ChapterProgressionOwner(u8);
 // Legacy single-block text — kept so old queries don't break; no longer spawned.
 #[derive(Component)]
 struct PerkPanelText;
@@ -1583,14 +1773,25 @@ struct EconomyPanelSiteRow(pub usize); // index into map_settlements()
 fn setup_chapter_select(
     mut commands: Commands,
     progress: Res<ChapterProgress>,
-    perks: Res<PerkTree>,
-    upgrades: Res<UpgradeLedger>,
+    select: Res<PlayerSelectState>,
+    mut owner: ResMut<ChapterProgressionOwner>,
     robot_pets: Res<RobotPetCollection>,
-    weapon_ranks: Res<WeaponRanks>,
     world_site_registry: Res<WorldSiteRegistry>,
     economy: Res<SettlementEconomy>,
 ) {
     let chapters = all_chapters();
+    if !select
+        .slots
+        .get(owner.0 as usize)
+        .is_some_and(|slot| slot.joined)
+    {
+        owner.0 = select
+            .slots
+            .iter()
+            .position(|slot| slot.joined)
+            .unwrap_or(0) as u8;
+    }
+    let selected_progression = selected_progression(&select, *owner);
     commands
         .spawn((
             Node {
@@ -1642,6 +1843,11 @@ fn setup_chapter_select(
                     ChapterSelectAction::CharacterEditor,
                 );
                 spawn_chapter_action_button(row, "ROBOT GARAGE", ChapterSelectAction::RobotGarage);
+                for (index, slot) in select.slots.iter().enumerate() {
+                    if slot.joined {
+                        spawn_progression_owner_button(row, index as u8, owner.0 == index as u8);
+                    }
+                }
             });
             p.spawn(Node {
                 width: Val::Percent(100.0),
@@ -1752,7 +1958,10 @@ fn setup_chapter_select(
             .with_children(|pp| {
                 // Header
                 pp.spawn((
-                    Text::new(format_perk_header(&perks)),
+                    Text::new(format_owner_header(
+                        *owner,
+                        format_perk_header(&selected_progression.perks),
+                    )),
                     TextFont {
                         font_size: FontSize::Px(13.5),
                         ..default()
@@ -1780,7 +1989,7 @@ fn setup_chapter_select(
                         ))
                         .with_children(|row| {
                             row.spawn((
-                                Text::new(format_perk_row(def, &perks)),
+                                Text::new(format_perk_row(def, &selected_progression.perks)),
                                 TextFont {
                                     font_size: FontSize::Px(12.5),
                                     ..default()
@@ -1808,7 +2017,10 @@ fn setup_chapter_select(
             .with_children(|up| {
                 // Header
                 up.spawn((
-                    Text::new(format_upgrade_header(&upgrades)),
+                    Text::new(format_owner_header(
+                        *owner,
+                        format_upgrade_header(&selected_progression.upgrades),
+                    )),
                     TextFont {
                         font_size: FontSize::Px(13.5),
                         ..default()
@@ -1834,7 +2046,11 @@ fn setup_chapter_select(
                     ))
                     .with_children(|row| {
                         row.spawn((
-                            Text::new(format_upgrade_row(&def, &upgrades, &robot_pets)),
+                            Text::new(format_upgrade_row(
+                                &def,
+                                &selected_progression.upgrades,
+                                &robot_pets,
+                            )),
                             TextFont {
                                 font_size: FontSize::Px(12.0),
                                 ..default()
@@ -1887,7 +2103,7 @@ fn setup_chapter_select(
                             Text::new(format_weapon_rank_row(
                                 slot,
                                 *weapon_type,
-                                &weapon_ranks,
+                                &selected_progression.weapon_ranks,
                                 &robot_pets,
                             )),
                             TextFont {
@@ -1983,6 +2199,46 @@ fn spawn_chapter_action_button(
                 TextColor(Color::WHITE),
             ));
         });
+}
+
+fn spawn_progression_owner_button(parent: &mut ChildSpawnerCommands, player: u8, selected: bool) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(if selected {
+                Color::srgba(0.16, 0.38, 0.62, 0.95)
+            } else {
+                Color::srgba(0.06, 0.10, 0.18, 0.9)
+            }),
+            BorderColor::all(Color::srgba(0.35, 0.7, 1.0, 0.7)),
+            ChapterProgressionOwnerButton(player),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                Text::new(format!("P{} UPGRADES", player + 1)),
+                TextFont {
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+fn selected_progression(
+    select: &PlayerSelectState,
+    owner: ChapterProgressionOwner,
+) -> &PlayerProgression {
+    &select.slots[owner.0.min(3) as usize].progression
+}
+
+fn format_owner_header(owner: ChapterProgressionOwner, header: String) -> String {
+    format!("P{}  {header}", owner.0 + 1)
 }
 
 fn spawn_fast_travel_map(
@@ -2550,6 +2806,29 @@ fn chapter_select_action_buttons(
     }
 }
 
+fn chapter_select_progression_owner_buttons(
+    interaction_q: Query<
+        (&Interaction, &ChapterProgressionOwnerButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut owner: ResMut<ChapterProgressionOwner>,
+    mut button_q: Query<(&ChapterProgressionOwnerButton, &mut BackgroundColor), With<Button>>,
+) {
+    let Some(selected) = interaction_q.iter().find_map(|(interaction, button)| {
+        (*interaction == Interaction::Pressed).then_some(button.0)
+    }) else {
+        return;
+    };
+    owner.0 = selected;
+    for (button, mut background) in button_q.iter_mut() {
+        background.0 = if button.0 == selected {
+            Color::srgba(0.16, 0.38, 0.62, 0.95)
+        } else {
+            Color::srgba(0.06, 0.10, 0.18, 0.9)
+        };
+    }
+}
+
 fn chapter_select_fast_travel_buttons(
     progress: Res<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
@@ -2642,30 +2921,36 @@ fn chapter_select_controller_scroll(
 
 fn chapter_select_perk_buttons(
     interaction_q: Query<(&Interaction, &ChapterPerkButton), (Changed<Interaction>, With<Button>)>,
-    mut perks: ResMut<PerkTree>,
+    owner: Res<ChapterProgressionOwner>,
+    mut select: ResMut<PlayerSelectState>,
 ) {
     for (interaction, button) in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
-            perks.try_spend(button.0);
+            select.slots[owner.0.min(3) as usize]
+                .progression
+                .perks
+                .try_spend(button.0);
         }
     }
 }
 
 fn chapter_select_perk_panel_update(
-    perks: Res<PerkTree>,
+    owner: Res<ChapterProgressionOwner>,
+    select: Res<PlayerSelectState>,
     mut header_q: Query<&mut Text, (With<PerkPointsHeader>, Without<PerkRowText>)>,
     mut row_q: Query<(&PerkRowText, &mut Text), Without<PerkPointsHeader>>,
 ) {
-    if !perks.is_changed() {
+    if !(owner.is_changed() || select.is_changed()) {
         return;
     }
+    let perks = &selected_progression(&select, *owner).perks;
     for mut text in header_q.iter_mut() {
-        *text = Text::new(format_perk_header(&perks));
+        *text = Text::new(format_owner_header(*owner, format_perk_header(perks)));
     }
     let defs = all_perks();
     for (row, mut text) in row_q.iter_mut() {
         if let Some(def) = defs.iter().find(|d| d.id == row.0) {
-            *text = Text::new(format_perk_row(def, &perks));
+            *text = Text::new(format_perk_row(def, perks));
         }
     }
 }
@@ -2675,32 +2960,38 @@ fn chapter_select_upgrade_buttons(
         (&Interaction, &ChapterUpgradeButton),
         (Changed<Interaction>, With<Button>),
     >,
-    mut upgrades: ResMut<UpgradeLedger>,
+    owner: Res<ChapterProgressionOwner>,
+    mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
 ) {
     for (interaction, button) in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
-            let _ = upgrades.try_purchase(button.0, &mut robot_pets);
+            let _ = select.slots[owner.0.min(3) as usize]
+                .progression
+                .upgrades
+                .try_purchase(button.0, &mut robot_pets);
         }
     }
 }
 
 fn chapter_select_upgrade_panel_update(
-    upgrades: Res<UpgradeLedger>,
+    owner: Res<ChapterProgressionOwner>,
+    select: Res<PlayerSelectState>,
     robot_pets: Res<RobotPetCollection>,
     mut header_q: Query<&mut Text, (With<UpgradeReserveHeader>, Without<UpgradeRowText>)>,
     mut row_q: Query<(&UpgradeRowText, &mut Text), Without<UpgradeReserveHeader>>,
 ) {
-    if !(upgrades.is_changed() || robot_pets.is_changed()) {
+    if !(owner.is_changed() || select.is_changed() || robot_pets.is_changed()) {
         return;
     }
+    let upgrades = &selected_progression(&select, *owner).upgrades;
     for mut text in header_q.iter_mut() {
-        *text = Text::new(format_upgrade_header(&upgrades));
+        *text = Text::new(format_owner_header(*owner, format_upgrade_header(upgrades)));
     }
     let defs = all_tech_upgrades();
     for (row, mut text) in row_q.iter_mut() {
         if let Some(def) = defs.iter().find(|d| d.id == row.0) {
-            *text = Text::new(format_upgrade_row(def, &upgrades, &robot_pets));
+            *text = Text::new(format_upgrade_row(def, upgrades, &robot_pets));
         }
     }
 }
@@ -2710,12 +3001,19 @@ fn chapter_select_weapon_rank_buttons(
         (&Interaction, &ChapterWeaponRankButton),
         (Changed<Interaction>, With<Button>),
     >,
-    mut weapon_ranks: ResMut<WeaponRanks>,
+    owner: Res<ChapterProgressionOwner>,
+    mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
 ) {
     for (interaction, button) in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
-            purchase_weapon_rank(button.0, &mut weapon_ranks, &mut robot_pets);
+            purchase_weapon_rank(
+                button.0,
+                &mut select.slots[owner.0.min(3) as usize]
+                    .progression
+                    .weapon_ranks,
+                &mut robot_pets,
+            );
         }
     }
 }
@@ -2743,14 +3041,16 @@ fn purchase_weapon_rank(
 }
 
 fn chapter_select_weapon_rank_panel_update(
-    weapon_ranks: Res<WeaponRanks>,
+    owner: Res<ChapterProgressionOwner>,
+    select: Res<PlayerSelectState>,
     robot_pets: Res<RobotPetCollection>,
     mut header_q: Query<&mut Text, (With<WeaponRankHeader>, Without<WeaponRankRowText>)>,
     mut row_q: Query<(&WeaponRankRowText, &mut Text), Without<WeaponRankHeader>>,
 ) {
-    if !(weapon_ranks.is_changed() || robot_pets.is_changed()) {
+    if !(owner.is_changed() || select.is_changed() || robot_pets.is_changed()) {
         return;
     }
+    let weapon_ranks = &selected_progression(&select, *owner).weapon_ranks;
     for mut text in header_q.iter_mut() {
         *text = Text::new(format_weapon_rank_header(&robot_pets));
     }
@@ -2760,7 +3060,7 @@ fn chapter_select_weapon_rank_panel_update(
         *text = Text::new(format_weapon_rank_row(
             slot,
             weapon_type,
-            &weapon_ranks,
+            weapon_ranks,
             &robot_pets,
         ));
     }
@@ -3279,6 +3579,7 @@ fn spawn_player_select_button(
 fn player_select_update(
     interaction_q: Query<(&Interaction, &PlayerSelectButton), (Changed<Interaction>, With<Button>)>,
     mut select: ResMut<PlayerSelectState>,
+    assignments: Res<GamepadAssignments>,
     mut config: ResMut<LocalPlayerConfig>,
     mut design_data: ResMut<CharacterDesignData>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -3419,10 +3720,16 @@ fn player_select_update(
     for (mut t, marker) in input_q.iter_mut() {
         let i = marker.0 as usize;
         let s = &select.slots[i];
-        if s.joined {
-            *t = Text::new(format!("PLAYER {}", i + 1));
+        if let Some(gamepad) = assignments.gamepad_for_player(i as u8) {
+            *t = Text::new(format!("CONTROLLER {}", gamepad.index()));
+        } else if assignments.native_player() == Some(i as u8) {
+            *t = Text::new("NATIVE CONTROLLER");
+        } else if s.joined && i == 0 {
+            *t = Text::new("KEYBOARD / MOUSE");
+        } else if s.joined {
+            *t = Text::new(format!("PLAYER {} — RECONNECT", i + 1));
         } else {
-            *t = Text::new("OPEN SLOT");
+            *t = Text::new("PRESS START");
         }
     }
 
@@ -3452,6 +3759,47 @@ fn player_select_update(
                 "ready the crew"
             }
         ));
+    }
+}
+
+fn player_select_controller_join(
+    gamepads: Query<(Entity, &Gamepad)>,
+    native: Res<NativeControllerState>,
+    mut assignments: ResMut<GamepadAssignments>,
+    mut select: ResMut<PlayerSelectState>,
+) {
+    select.slots[0].joined = true;
+    let mut pressed: Vec<Entity> = gamepads
+        .iter()
+        .filter_map(|(entity, gamepad)| {
+            gamepad.just_pressed(GamepadButton::Start).then_some(entity)
+        })
+        .collect();
+    pressed.sort_by_key(|entity| entity.index());
+
+    for gamepad in pressed.iter().copied() {
+        let joined = std::array::from_fn(|index| select.slots[index].joined);
+        if let Some(player_index) = assignments.assign_next(gamepad, &joined) {
+            let slot = &mut select.slots[player_index as usize];
+            if !slot.joined {
+                slot.joined = true;
+                slot.character_index = player_index as usize % HERO_ROSTER.len();
+                slot.ready = false;
+            }
+        }
+    }
+
+    // The macOS native fallback can rescue controllers whose Bevy mapping does
+    // not report Start. Do not claim it separately when Bevy handled a Start in
+    // the same frame (both readings may describe the same physical device).
+    if pressed.is_empty() && native.just_pressed(NativeButton::Start) {
+        let joined = std::array::from_fn(|index| select.slots[index].joined);
+        if let Some(player_index) = assignments.assign_native_next(&joined) {
+            let slot = &mut select.slots[player_index as usize];
+            slot.joined = true;
+            slot.character_index = player_index as usize % HERO_ROSTER.len();
+            slot.ready = false;
+        }
     }
 }
 
@@ -3530,40 +3878,48 @@ fn setup_hud(
                 ));
             });
 
-            // ── Crosshair ─────────────────────────────────────────────────────────
-            root.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(50.0),
-                top: Val::Percent(50.0),
-                margin: UiRect::all(Val::Px(-8.0)),
-                width: Val::Px(16.0),
-                height: Val::Px(16.0),
-                ..default()
-            })
-            .with_children(|ch| {
-                ch.spawn((
+            // ── Per-player aim reticles ──────────────────────────────────────────
+            for player_index in 0..active {
+                let (left, top) = reticle_center_percent(player_index, active);
+                root.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        top: Val::Px(7.0),
+                        left: Val::Percent(left),
+                        top: Val::Percent(top),
+                        margin: UiRect::all(Val::Px(-8.0)),
                         width: Val::Px(16.0),
-                        height: Val::Px(2.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
-                ));
-                ch.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(7.0),
-                        top: Val::Px(0.0),
-                        width: Val::Px(2.0),
                         height: Val::Px(16.0),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
-                ));
-            });
+                    AimReticle { player_index },
+                ))
+                .with_children(|ch| {
+                    for node in [
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(7.0),
+                            width: Val::Px(16.0),
+                            height: Val::Px(2.0),
+                            ..default()
+                        },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(7.0),
+                            top: Val::Px(0.0),
+                            width: Val::Px(2.0),
+                            height: Val::Px(16.0),
+                            ..default()
+                        },
+                    ] {
+                        ch.spawn((
+                            node,
+                            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
+                            AimReticleBar { player_index },
+                        ));
+                    }
+                });
+            }
 
             // ── Message popup (center top) ────────────────────────────────────────
             root.spawn(Node {
@@ -4159,6 +4515,68 @@ fn spawn_bar(
                 ));
             });
         });
+}
+
+fn reticle_center_percent(player_index: u8, active: u8) -> (f32, f32) {
+    match (player_index, active) {
+        (_, 0 | 1) => (50.0, 50.0),
+        (0, 2) => (50.0, 25.0),
+        (1, 2) => (50.0, 75.0),
+        (0, 3 | 4) => (25.0, 25.0),
+        (1, 3 | 4) => (75.0, 25.0),
+        (2, 3) => (50.0, 75.0),
+        (2, 4) => (25.0, 75.0),
+        (3, 4) => (75.0, 75.0),
+        _ => (50.0, 50.0),
+    }
+}
+
+fn reticle_color(state: AimReticleState) -> Color {
+    match state {
+        AimReticleState::Idle => Color::srgba(1.0, 1.0, 1.0, 0.72),
+        AimReticleState::Aiming => Color::srgba(0.25, 0.82, 1.0, 0.95),
+        AimReticleState::Target => Color::srgba(1.0, 0.78, 0.18, 0.98),
+        AimReticleState::Locked => Color::srgba(0.20, 1.0, 0.48, 1.0),
+        AimReticleState::Obstructed => Color::srgba(1.0, 0.30, 0.22, 0.92),
+        AimReticleState::Charging => Color::srgba(0.85, 0.34, 1.0, 1.0),
+    }
+}
+
+fn aim_reticle_system(
+    player_q: Query<
+        (
+            &PlayerIndex,
+            &AimSolution,
+            &WeaponInventory,
+            &PlayerCameraRef,
+        ),
+        With<Player>,
+    >,
+    camera_q: Query<(&Camera, &GlobalTransform), With<PlayerCamera>>,
+    mut reticle_q: Query<(&AimReticle, &mut Node)>,
+    mut bar_q: Query<(&AimReticleBar, &mut BackgroundColor)>,
+) {
+    for (marker, mut node) in reticle_q.iter_mut() {
+        let Some((_, aim, weapons, camera_ref)) = player_q
+            .iter()
+            .find(|(index, _, _, _)| index.0 == marker.player_index)
+        else {
+            continue;
+        };
+        if let Ok((camera, camera_transform)) = camera_q.get(camera_ref.0) {
+            if let Ok(position) = camera.world_to_viewport(camera_transform, aim.aim_point) {
+                node.left = Val::Px(position.x - 8.0);
+                node.top = Val::Px(position.y - 8.0);
+                node.margin = UiRect::ZERO;
+            }
+        }
+        let color = reticle_color(aim.reticle_state(weapons.active().charge_progress > 0.05));
+        for (bar, mut background) in bar_q.iter_mut() {
+            if bar.player_index == marker.player_index {
+                background.0 = color;
+            }
+        }
+    }
 }
 
 // ── HUD Update ────────────────────────────────────────────────────────────────
@@ -5826,6 +6244,7 @@ fn update_controller_diag(
     state: Res<ControllerDiagState>,
     players: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
     gamepads: Query<(Entity, &Gamepad)>,
+    assignments: Res<GamepadAssignments>,
     native: Res<NativeControllerState>,
     mut text_q: Query<&mut Text, With<ControllerDiagText>>,
 ) {
@@ -5835,9 +6254,6 @@ fn update_controller_diag(
     let Ok(mut text) = text_q.single_mut() else {
         return;
     };
-
-    let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
-    gps.sort_by_key(|(e, _)| e.index());
 
     let mut lines = Vec::with_capacity(8);
     lines.push("── Controller Diagnostics [F8] ──".to_string());
@@ -5849,33 +6265,40 @@ fn update_controller_diag(
         .collect::<Vec<_>>()
     {
         let i = idx.0 as usize;
-        let gp_info = if let Some((_, gp)) = gps.get(i) {
-            let ls = Vec2::new(
-                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickX)
-                    .unwrap_or(0.0),
-                gp.get(bevy::input::gamepad::GamepadAxis::LeftStickY)
-                    .unwrap_or(0.0),
-            );
-            let rs = Vec2::new(
-                gp.get(bevy::input::gamepad::GamepadAxis::RightStickX)
-                    .unwrap_or(0.0),
-                gp.get(bevy::input::gamepad::GamepadAxis::RightStickY)
-                    .unwrap_or(0.0),
-            );
-            format!(
-                "GP{}  L({:+.2},{:+.2}) R({:+.2},{:+.2})",
-                i, ls.x, ls.y, rs.x, rs.y
-            )
-        } else if i == 0 && native.connected {
-            format!(
-                "Native({}) L({:+.2},{:+.2})",
-                &native.name[..native.name.len().min(12)],
-                native.move_axis.x,
-                native.move_axis.y
-            )
-        } else {
-            "KB/no pad".to_string()
-        };
+        let assigned = assignments.gamepad_for_player(idx.0);
+        let gp_info =
+            if let Some((entity, gp)) = assigned.and_then(|entity| gamepads.get(entity).ok()) {
+                let ls = Vec2::new(
+                    gp.get(bevy::input::gamepad::GamepadAxis::LeftStickX)
+                        .unwrap_or(0.0),
+                    gp.get(bevy::input::gamepad::GamepadAxis::LeftStickY)
+                        .unwrap_or(0.0),
+                );
+                let rs = Vec2::new(
+                    gp.get(bevy::input::gamepad::GamepadAxis::RightStickX)
+                        .unwrap_or(0.0),
+                    gp.get(bevy::input::gamepad::GamepadAxis::RightStickY)
+                        .unwrap_or(0.0),
+                );
+                format!(
+                    "PAD {} → P{}  L({:+.2},{:+.2}) R({:+.2},{:+.2})",
+                    entity.index(),
+                    i + 1,
+                    ls.x,
+                    ls.y,
+                    rs.x,
+                    rs.y
+                )
+            } else if assignments.native_player() == Some(idx.0) && native.connected {
+                format!(
+                    "Native({}) L({:+.2},{:+.2})",
+                    &native.name[..native.name.len().min(12)],
+                    native.move_axis.x,
+                    native.move_axis.y
+                )
+            } else {
+                "KB/no pad".to_string()
+            };
 
         let mut actions = String::new();
         if pi.fire {
@@ -6229,5 +6652,14 @@ mod menu_navigation_tests {
         assert_eq!(quick.item_id.as_deref(), Some("health_pack"));
         assert_eq!(traversal.active, TraversalMode::Hoverboard);
         assert_eq!(armor.active_element.display_name(), "None");
+    }
+
+    #[test]
+    fn reticle_centers_match_split_screen_viewports() {
+        assert_eq!(reticle_center_percent(0, 1), (50.0, 50.0));
+        assert_eq!(reticle_center_percent(0, 2), (50.0, 25.0));
+        assert_eq!(reticle_center_percent(1, 2), (50.0, 75.0));
+        assert_eq!(reticle_center_percent(0, 4), (25.0, 25.0));
+        assert_eq!(reticle_center_percent(3, 4), (75.0, 75.0));
     }
 }

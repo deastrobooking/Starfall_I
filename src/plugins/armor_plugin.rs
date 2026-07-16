@@ -1,10 +1,8 @@
 use bevy::prelude::*;
 
 use crate::components::armor::*;
-use crate::components::player::{Player, PlayerInput, PlayerStats};
-use crate::perks::PerkTree;
+use crate::components::player::{Player, PlayerInput, PlayerProgression, PlayerStats};
 use crate::state::AppState;
-use crate::upgrades::UpgradeLedger;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct ArmorPlugin;
@@ -25,20 +23,19 @@ impl Plugin for ArmorPlugin {
 }
 
 fn sync_armor_upgrade_state(
-    upgrades: Res<UpgradeLedger>,
-    mut player_q: Query<&mut ArmorSet, With<Player>>,
+    mut player_q: Query<(&mut ArmorSet, &PlayerProgression), With<Player>>,
 ) {
-    let state = ArmorUpgradeState {
-        shield_defense_bonus: upgrades.armor_shield_defense_bonus(),
-        hardened_reduction: upgrades.armor_hardened_reduction(),
-        retaliation_damage: upgrades.armor_retaliation_damage(),
-        retaliation_radius: upgrades.armor_retaliation_radius(),
-        speed_mult: upgrades.armor_speed_mult(),
-        strength_mult: upgrades.armor_strength_mult(),
-        jump_mult: upgrades.armor_jump_mult(),
-    };
-
-    for mut armor in player_q.iter_mut() {
+    for (mut armor, progression) in player_q.iter_mut() {
+        let upgrades = &progression.upgrades;
+        let state = ArmorUpgradeState {
+            shield_defense_bonus: upgrades.armor_shield_defense_bonus(),
+            hardened_reduction: upgrades.armor_hardened_reduction(),
+            retaliation_damage: upgrades.armor_retaliation_damage(),
+            retaliation_radius: upgrades.armor_retaliation_radius(),
+            speed_mult: upgrades.armor_speed_mult(),
+            strength_mult: upgrades.armor_strength_mult(),
+            jump_mult: upgrades.armor_jump_mult(),
+        };
         if armor.upgrade_state != state {
             armor.upgrade_state = state;
         }
@@ -47,19 +44,25 @@ fn sync_armor_upgrade_state(
 
 /// Keep player max health in sync with total armor health bonuses.
 fn apply_armor_health_bonus(
-    perks: Res<PerkTree>,
-    upgrades: Res<UpgradeLedger>,
-    mut player_q: Query<(&ArmorSet, &mut PlayerStats, &mut crate::damage::Health), With<Player>>,
+    mut player_q: Query<
+        (
+            &ArmorSet,
+            &mut PlayerStats,
+            &mut crate::damage::Health,
+            &PlayerProgression,
+        ),
+        With<Player>,
+    >,
 ) {
-    for (armor, mut stats, mut health) in player_q.iter_mut() {
+    for (armor, mut stats, mut health, progression) in player_q.iter_mut() {
         let bonus = armor.total_health_bonus();
         let stamina_bonus = armor.total_stamina_bonus();
         // Recalculate max health from stable sources so armor/perks cannot stack.
         let new_max = 100.0
             + (stats.level.saturating_sub(1) as f32 * 10.0)
             + bonus
-            + perks.hp_bonus()
-            + upgrades.armor_health_bonus();
+            + progression.perks.hp_bonus()
+            + progression.upgrades.armor_health_bonus();
         if (stats.max_health - new_max).abs() > 0.1 {
             let ratio = health.current / health.max;
             stats.max_health = new_max;

@@ -36,8 +36,17 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-CI mirrors these commands without the `dynamic` feature. The `dynamic` feature
-is for local incremental development only.
+The active `.github/workflows/rust.yml` workflow mirrors these commands on
+`macos-latest` for pushes to `main` and all pull requests, without the `dynamic`
+feature. The workflow has read-only repository permissions, cancels superseded
+runs on the same ref, and caches Cargo artifacts. The `dynamic` feature is for
+local incremental development only.
+
+The July 16, 2026 hardening audit found that this workflow had been fully
+commented out even though the docs described it as active. The workflow was
+restored as the first audit action. Local gates remain required because a
+workflow file change is not proven remotely until GitHub reports a successful
+run.
 
 Manual macOS smoke validation is required for engine bumps:
 

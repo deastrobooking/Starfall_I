@@ -30,7 +30,7 @@ Angelo, Joseph, Gabriella, Nova, Aurora, and Fortuna. The default join order
 still starts on the brothers for P1-P4, but the selectable roster is now all
 eight siblings.
 
-**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon, movement, camera shake, damage flash, and interaction systems can resolve the correct player.
+**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. `GamepadAssignments` maps controller entities to stable `PlayerIndex` identities after Start-to-join; runtime input no longer depends on gamepad enumeration order. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon, movement, camera shake, damage flash, and interaction systems can resolve the correct player.
 
 **Controller feel:** gamepad movement uses circular deadzone remapping and preserves analog stick magnitude in `PlayerMovement`, so partial tilt produces partial travel speed. Right-stick look uses a quadratic curve for low-deflection precision. LT/RT aim/fire supports both Bevy digital trigger buttons and `LeftZ` / `RightZ` analog trigger axes, with frame-local just-press tracking for single-shot weapons.
 

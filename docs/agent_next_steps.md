@@ -8,6 +8,10 @@ disposition of the external 156-item idea inventory is
 `docs/parallel_review_triage_2026-07.md`; use that triage instead of copying the
 raw suggestion list into milestones.
 
+The current player-facing and creator-workflow priority is
+`docs/player_creator_experience_plan.md`. Its PX1 authoritative aiming slice is
+the next implementation task; it temporarily precedes further EC2 expansion.
+
 ## Current Software Review
 
 The project is in a strong prototype-to-production transition state:
@@ -79,8 +83,9 @@ Handle these before widening content too much:
 - Engine M11 final war first slice is complete: `FinalWarRegistry`, pressure
   accumulation, coordinated raid trigger, save/load. Narrative beats and win
   condition land in M17.
-- Milestones M12–M17 are now defined in `docs/engine_upgrade_milestones.md`.
-  Next immediate priority is M12 (settlement economy panel).
+- Milestones M12–M17 remain the campaign strategy track. The M12 economy panel
+  and economy tick have already landed in code, so do not treat the older
+  "next immediate priority" wording as current.
 - Controller support and the F8 diagnostics overlay are coded, but still need
   repeated four-pad hardware smoke passes and recorded controller-only flows.
 - Performance budgets are informal. The 200-mile terrain and split-screen
@@ -341,15 +346,29 @@ Verification:
 
 Goal: Pay down technical debt and increase stability for save data, input mapping, error handling, and app setup.
 
-- Add an explicit schema version or magic header to `SaveData` to make future save-format upgrades reliable, checking the version on load and surfacing corrupt saves gracefully.
-- Tie multiplayer gamepad assignment to persistent `GamepadConnectionEvent` tracking rather than sorting by volatile `Entity::index()`, which loses deterministic tracking across reconnects.
+- Keep `.github/workflows/rust.yml` active and aligned with the four local Rust
+  gates. It was restored on July 16, 2026 after an audit found the entire file
+  commented out despite documentation claiming CI was active. Confirm the first
+  remote push/pull-request run is green.
+- `SaveData` now has schema version 3 and rotating slots, but writes are not yet
+  crash-safe and corrupt JSON is skipped silently. Next, write each slot to a
+  same-directory temporary file, flush/sync as appropriate, atomically rename
+  it into place, and surface parse/read failures without discarding valid older
+  rotation slots.
+- Explicit `GamepadAssignments` and Start-to-join ownership are delivered;
+  reconnect releases and reclaims the stable player slot rather than assigning
+  gameplay by gamepad query order. The remaining work is four-controller
+  hardware acceptance, not a second assignment implementation.
 - Audit `unwrap`/`expect` usage (especially generated physics colliders in `src/plugins/world_plugin.rs` and save path lookups) providing fallback behaviors or explicit typed errors instead of silent panics.
 - Unclutter `src/main.rs` by migrating plugin-specific `init_resource` calls and localized configurations into their respective plugin `build()` configurations.
 - Move towards platform-agnostic save paths via standard library/directory hooks instead of writing `starfall_i_save.json` to the current working directory.
 
 Verification:
 
-- Intentionally modifying data in `starfall_i_save.json` surfaces a clear console log rather than failing silently.
+- GitHub Actions runs format, check, strict all-target Clippy, and tests for a
+  pull request and a `main` push.
+- Intentionally corrupting the newest rotating save surfaces a clear warning and
+  loads the newest valid older slot rather than failing silently.
 - Disconnecting and reconnecting Player 2's controller correctly preserves their slot without drifting entity IDs.
 - Removing or locking the save footprint does not panic the game.
 - `cargo clippy --all-targets -- -D warnings` allows tighter linting rules on a module-by-module basis.
@@ -449,24 +468,10 @@ Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol",
 
 ## Suggested Next Commit Scope
 
-For the next coding pass, choose one bounded vertical slice rather than mixing
-campaign content, engine combat, and Forge promotion:
-
-1. **Recommended engine slice — EC2a:** define one `MoveDef`, drive one Star
-   Sabre attack through startup/active/recovery and a cancel window, add hit/hurt
-   layer tests, and preserve the current bounded feedback behavior.
-2. **Recommended tool slice — ET5d topology editing continuation:** snapped
-   controller movement, viewport locators, and typed endpoint-based graph edge
-   creation/removal are delivered. Direct pointer XYZ dragging now previews and
-   commits a single snapped recipe transaction. Automatic/explicit Hermite
-   tangents, typed road junction connectors, and typed node sockets with
-   controller placement and socket-bound edge endpoints are also delivered.
-   Terrain projection now uses the shipped collider surface with persisted
-   world origin/clearance, controller project-selected/project-all actions, and
-   undoable last-valid-root protection. Next add structured validation
-   highlights inside the protected sandbox. Do not promote shipped roots yet.
-3. **Acceptance slice:** record boot → character → chapter/settings/garage →
-   gameplay → pause/return using four pads, plus EC1 30/60/120/144 Hz comparison.
-
-Whichever slice is selected must add focused tests, update its owning roadmap,
-and pass the repository verification gates before a new feature branch begins.
+Implement **PX1 authoritative aiming** from
+`docs/player_creator_experience_plan.md`: one per-player aim solution shared by
+the reticle and weapon firing, including camera pitch, muzzle correction,
+soft-lock state, split-screen ownership, and focused tests. Follow PX1 with the
+PM1 Start Game / Start Editor launcher and project-hub shell, then PX3 shop
+transactions. Do not widen EC2 or promote shipped Forge roots in the same
+commit.

@@ -13,6 +13,7 @@ transition hooks, ensuring no stray node hierarchies survive state changes.
 | State | Setup system | Teardown system |
 |---|---|---|
 | `AppState::MainMenu` | `setup_main_menu` | `despawn_menu` (on enter PlayerSelect) |
+| `AppState::ProjectHub` | `setup_project_hub` | `despawn_project_hub` |
 | `AppState::PlayerSelect` | `setup_player_select` | `despawn_player_select` |
 | `AppState::ChapterSelect` | `setup_chapter_select` | `despawn_chapter_select` |
 | `AppState::Playing` | `setup_hud`, `setup_controller_diag`, `setup_command_overlay` | `cleanup_play_ui_for_menu` (on enter MainMenu) |

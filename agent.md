@@ -184,6 +184,12 @@ together.
 - Player input is controller-first local multiplayer: preserve analog movement
   magnitude, keep circular deadzone remapping, support LT/RT button and axis
   paths, and treat controller smoke testing as required for movement changes.
+  `GamepadAssignments` is the controller ownership authority: Start in Player
+  Select claims the next available `PlayerIndex`, disconnect releases only the
+  device binding, and runtime input/F8 diagnostics must not return to query-order
+  mapping. Save schema v3 stores per-player `PlayerProgression` alongside the
+  already-individual stats, inventory, loadout, and traversal selection; see
+  `docs/controller_player_ownership.md` for the remaining consumer migration.
 - Roadmap labels are intentionally namespaced: Engine M# refers to
   `docs/engine_upgrade_milestones.md`; Motion MM# refers to
   `docs/playerengine.md`; future enemy behavior planning should use Enemy AI
@@ -210,7 +216,13 @@ together.
 - Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
   `docs/improvements.md`, `docs/naming.md`, and
   `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md` and
-  `docs/playerengine.md`. The evidence-based memory for the external 156-item
+  `docs/playerengine.md`. The current PX#/PM# player experience and repeatable
+  creator-workflow plan is `docs/player_creator_experience_plan.md`; PX1
+  authoritative per-player aiming and the PM1 Start Editor / Project Hub shell
+  are delivered. Manual four-pad aiming/editor-launch acceptance remains; the
+  next bounded choice is the PM1 multi-project path/browser or PX3 shop
+  transactions.
+  The evidence-based memory for the external 156-item
   review is `docs/parallel_review_triage_2026-07.md`; do not treat its raw idea
   inventory as verified defects or implicit product commitments. Its July 15
   follow-up reconciliation also supersedes the later six-item deficiency memo:

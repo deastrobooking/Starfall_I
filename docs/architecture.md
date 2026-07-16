@@ -67,6 +67,8 @@ src/
 
 ```
 MainMenu ──► PlayerSelect ◄─────────────────────────────────────────┐
+   │
+   └──────► ProjectHub ──► Playing + EngineToolMode::Editing
                   │                                                  │
                   ▼                                                  │
             CharacterDesign ────────────────────────────────────────┘

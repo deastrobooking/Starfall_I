@@ -1,3 +1,4 @@
+use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
 
 use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary};
@@ -13,7 +14,6 @@ use crate::events::*;
 use crate::game_rng::GameRng;
 use crate::hacking::HackedUnit;
 use crate::hitstop::HitstopState;
-use crate::perks::PerkTree;
 use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::resources::DungeonCrawlState;
 use crate::state::AppState;
@@ -98,6 +98,13 @@ impl Plugin for WeaponPlugin {
             .add_systems(Startup, setup_weapon_assets)
             .add_systems(
                 Update,
+                update_aim_solution_system
+                    .before(weapon_fire_system)
+                    .before(special_weapon_system)
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
                 (
                     apply_weapon_ranks_system,
                     weapon_select_system,
@@ -117,6 +124,118 @@ impl Plugin for WeaponPlugin {
                 )
                     .run_if(in_state(AppState::Playing)),
             );
+    }
+}
+
+const AIM_MAX_DISTANCE: f32 = 120.0;
+
+fn direction_to_aim_point(muzzle: Vec3, aim_point: Vec3, fallback: Vec3) -> Vec3 {
+    let direction = (aim_point - muzzle).normalize_or_zero();
+    if direction.length_squared() > 0.001 {
+        direction
+    } else {
+        fallback.normalize_or(Vec3::NEG_Z)
+    }
+}
+
+fn update_aim_solution_system(
+    spatial_query: SpatialQuery,
+    mut player_q: Query<
+        (
+            Entity,
+            &GlobalTransform,
+            &PlayerInput,
+            &PlayerCameraRef,
+            &PlayerProgression,
+            &mut AimSolution,
+        ),
+        With<Player>,
+    >,
+    cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
+    enemy_q: Query<
+        (Entity, &GlobalTransform, &Health),
+        (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>),
+    >,
+) {
+    for (player_entity, player_transform, input, camera_ref, progression, mut aim) in
+        player_q.iter_mut()
+    {
+        let upgrades = &progression.upgrades;
+        let Ok(camera_transform) = cam_q.get(camera_ref.0) else {
+            continue;
+        };
+        let camera_origin = camera_transform.translation();
+        let camera_forward = camera_transform
+            .forward()
+            .as_vec3()
+            .normalize_or(Vec3::NEG_Z);
+        let muzzle_origin = star_muzzle_origin(player_transform, camera_forward);
+        let filter = SpatialQueryFilter::from_excluded_entities([player_entity]);
+        let world_hit = Dir3::new(camera_forward).ok().and_then(|direction| {
+            spatial_query.cast_ray(camera_origin, direction, AIM_MAX_DISTANCE, false, &filter)
+        });
+        let unobstructed_distance = world_hit
+            .as_ref()
+            .map(|hit| hit.distance)
+            .unwrap_or(AIM_MAX_DISTANCE);
+
+        let range = AIM_MAX_DISTANCE + upgrades.gauntlet_aim_range_bonus();
+        let base_cone = if input.aim { 0.78 } else { 0.90 };
+        let cone_cos = (base_cone - upgrades.gauntlet_aim_cone_relax()).clamp(0.62, 0.96);
+        let mut best: Option<(f32, Entity, Vec3)> = None;
+        for (entity, transform, health) in enemy_q.iter() {
+            if !health.is_alive() {
+                continue;
+            }
+            let target_point = transform.translation() + Vec3::Y * 0.9;
+            let offset = target_point - camera_origin;
+            let distance = offset.length();
+            if distance <= 0.01 || distance > range {
+                continue;
+            }
+            let dot = offset.normalize_or_zero().dot(camera_forward);
+            if dot < cone_cos {
+                continue;
+            }
+            let target_direction = Dir3::new(offset.normalize_or_zero()).ok();
+            let visible = target_direction.is_some_and(|direction| {
+                spatial_query
+                    .cast_ray(camera_origin, direction, distance + 0.75, false, &filter)
+                    .is_none_or(|hit| hit.entity == entity || hit.distance + 0.75 >= distance)
+            });
+            if !visible {
+                continue;
+            }
+            let score = dot * 3.0 - distance / range;
+            if best.is_none_or(|(best_score, _, _)| score > best_score) {
+                best = Some((score, entity, target_point));
+            }
+        }
+
+        let (target, aim_point, obstructed) = if let Some((_, entity, point)) = best {
+            (Some(entity), point, false)
+        } else if let Some(hit) = world_hit {
+            (
+                None,
+                camera_origin + camera_forward * hit.distance,
+                hit.distance + 0.01 < AIM_MAX_DISTANCE,
+            )
+        } else {
+            (
+                None,
+                camera_origin + camera_forward * AIM_MAX_DISTANCE,
+                false,
+            )
+        };
+        *aim = AimSolution {
+            camera_origin,
+            muzzle_origin,
+            aim_point,
+            direction: direction_to_aim_point(muzzle_origin, aim_point, camera_forward),
+            target,
+            actively_aiming: input.aim,
+            obstructed: obstructed && unobstructed_distance < AIM_MAX_DISTANCE,
+        };
     }
 }
 
@@ -292,60 +411,6 @@ fn combat_forward(
     }
 }
 
-// ── Soft aim assist ───────────────────────────────────────────────────────────
-// Nudges fire direction toward the nearest enemy within a narrow cone.
-fn aim_assist_direction(
-    raw_forward: Vec3,
-    muzzle_pos: Vec3,
-    enemy_q: &Query<
-        (&GlobalTransform, &Health),
-        (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>),
-    >,
-    actively_aiming: bool,
-    range_bonus: f32,
-    cone_relax: f32,
-    strength_bonus: f32,
-) -> Vec3 {
-    const ASSIST_RANGE: f32 = 90.0;
-
-    let assist_range = ASSIST_RANGE + range_bonus;
-    let base_cone = if actively_aiming { 0.78 } else { 0.90 };
-    let assist_cone_cos = (base_cone - cone_relax).clamp(0.62, 0.96);
-    let assist_strength = if actively_aiming {
-        1.0
-    } else {
-        (0.72 + strength_bonus).clamp(0.65, 0.95)
-    };
-    let mut best_score = f32::NEG_INFINITY;
-    let mut best_dir: Option<Vec3> = None;
-
-    for (e_transform, health) in enemy_q.iter() {
-        if !health.is_alive() {
-            continue;
-        }
-        // Enemies are rooted at their feet; aim into the torso so the reticle
-        // and projectile collision agree visually.
-        let to = e_transform.translation() + Vec3::Y * 0.9 - muzzle_pos;
-        let distance = to.length();
-        if distance > assist_range || distance <= 0.01 {
-            continue;
-        }
-        let to_norm = to.normalize_or_zero();
-        let dot = to_norm.dot(raw_forward);
-        let score = dot * 3.0 - distance / assist_range;
-        if dot >= assist_cone_cos && score > best_score {
-            best_score = score;
-            best_dir = Some(to_norm);
-        }
-    }
-
-    if let Some(target_dir) = best_dir {
-        (raw_forward * (1.0 - assist_strength) + target_dir * assist_strength).normalize_or_zero()
-    } else {
-        raw_forward
-    }
-}
-
 fn gauntlet_projectile_damage_type(upgrades: &UpgradeLedger, fallback: DamageType) -> DamageType {
     if upgrades.gauntlet_has_rift() {
         DamageType::Rift
@@ -370,15 +435,11 @@ fn primary_fallback_damage_type(weapon_type: WeaponType, is_explosive: bool) -> 
 
 // ── Apply weapon ranks ────────────────────────────────────────────────────────
 fn apply_weapon_ranks_system(
-    ranks: Res<WeaponRanks>,
-    mut player_q: Query<&mut WeaponInventory, With<Player>>,
+    mut player_q: Query<(&PlayerProgression, &mut WeaponInventory), With<Player>>,
 ) {
-    if !ranks.is_changed() {
-        return;
-    }
-    for mut inv in player_q.iter_mut() {
+    for (progression, mut inv) in player_q.iter_mut() {
         for (i, weapon) in inv.slots.iter_mut().enumerate() {
-            weapon.rank = ranks.ranks[i];
+            weapon.rank = progression.weapon_ranks.ranks[i];
         }
     }
 }
@@ -429,49 +490,45 @@ fn weapon_fire_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
-    perks: Res<PerkTree>,
-    upgrades: Res<UpgradeLedger>,
-    dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
             Entity,
-            &GlobalTransform,
             &PlayerIndex,
             &mut WeaponInventory,
             &SpecialWeaponInventory,
             &mut PlayerStateMachine,
             &PlayerInput,
             &PlayerCameraRef,
+            &AimSolution,
             &ArmorSet,
+            &PlayerProgression,
             Option<&ArmCannonUser>,
             Option<&MagicBeamCaster>,
         ),
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
-    enemy_q: Query<
-        (&GlobalTransform, &Health),
-        (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>),
-    >,
     mut fired_ev: MessageWriter<WeaponFiredEvent>,
 ) {
     let dt = time.delta_secs();
-    let perk_damage_mult = perks.damage_mult();
-
     for (
         player_entity,
-        player_transform,
         player_index,
         mut inv,
         special_inv,
         mut sm,
         pi,
         cam_ref,
+        aim,
         armor,
+        progression,
         arm_cannon,
         magic_caster,
     ) in player_q.iter_mut()
     {
+        let perks = &progression.perks;
+        let upgrades = &progression.upgrades;
+        let perk_damage_mult = perks.damage_mult();
         // A selected special weapon owns RT until normal weapon cycling or a
         // direct primary slot clears the selection.
         if special_inv.active_slot.is_some() {
@@ -494,17 +551,8 @@ fn weapon_fire_system(
         } else if charge_released {
             weapon.charge_held = false;
             if weapon.charge_progress >= 1.0 && weapon.fire_timer <= 0.0 {
-                let raw_fwd = combat_forward(player_transform, cam, pi, dungeon.active);
-                let pos = star_muzzle_origin(player_transform, raw_fwd);
-                let aim_fwd = aim_assist_direction(
-                    raw_fwd,
-                    pos,
-                    &enemy_q,
-                    pi.aim,
-                    upgrades.gauntlet_aim_range_bonus(),
-                    upgrades.gauntlet_aim_cone_relax(),
-                    upgrades.gauntlet_aim_strength_bonus(),
-                );
+                let pos = aim.muzzle_origin;
+                let aim_fwd = aim.direction;
 
                 let explosive_weapon =
                     weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket;
@@ -531,7 +579,7 @@ fn weapon_fire_system(
                     weapon.charge_explosion_radius() * upgrades.gauntlet_explosion_radius_mult();
                 let base_speed = weapon.speed * upgrades.gauntlet_projectile_speed_mult();
                 let damage_type = gauntlet_projectile_damage_type(
-                    &upgrades,
+                    upgrades,
                     primary_fallback_damage_type(wt, explosive_weapon),
                 );
                 spawn_charge_blast(
@@ -571,19 +619,10 @@ fn weapon_fire_system(
             continue;
         }
 
-        let raw_fwd = combat_forward(player_transform, cam, pi, dungeon.active);
-        let pos = star_muzzle_origin(player_transform, raw_fwd);
+        let pos = aim.muzzle_origin;
         let right = cam.right().as_vec3();
         let up = cam.up().as_vec3();
-        let aim_fwd = aim_assist_direction(
-            raw_fwd,
-            pos,
-            &enemy_q,
-            pi.aim,
-            upgrades.gauntlet_aim_range_bonus(),
-            upgrades.gauntlet_aim_cone_relax(),
-            upgrades.gauntlet_aim_strength_bonus(),
-        );
+        let aim_fwd = aim.direction;
 
         let explosive_weapon = weapon.is_explosive || weapon.weapon_type == WeaponType::Rocket;
         let tech_damage_mult = if explosive_weapon {
@@ -619,7 +658,7 @@ fn weapon_fire_system(
         let visual_profile = weapon.visual_profile();
         let effective_fire_rate = weapon.rank_effective_fire_rate();
         let damage_type = gauntlet_projectile_damage_type(
-            &upgrades,
+            upgrades,
             primary_fallback_damage_type(weapon.weapon_type, explosive_weapon),
         );
 
@@ -909,22 +948,17 @@ fn charge_spark_system(
     mut game_rng: ResMut<GameRng>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
-    player_q: Query<(&GlobalTransform, &WeaponInventory, &PlayerCameraRef), With<Player>>,
-    cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
+    player_q: Query<(&WeaponInventory, &AimSolution), With<Player>>,
 ) {
     use rand::Rng;
     let rng = game_rng.cosmetic();
 
-    for (player_transform, inv, cam_ref) in player_q.iter() {
+    for (inv, aim) in player_q.iter() {
         let weapon = inv.active();
         if weapon.charge_progress < 0.1 {
             continue;
         }
-        let Ok(cam) = cam_q.get(cam_ref.0) else {
-            continue;
-        };
-        let fwd = cam.forward().as_vec3();
-        let pos = star_muzzle_origin(player_transform, fwd);
+        let pos = aim.muzzle_origin;
 
         let count = (weapon.charge_progress * 3.5) as u32 + 1;
         for _ in 0..count {
@@ -971,11 +1005,17 @@ fn weapon_reload_system(
 }
 
 fn apply_perk_ammo_caps_system(
-    perks: Res<PerkTree>,
-    mut player_q: Query<(&mut WeaponInventory, &mut SpecialWeaponInventory), With<Player>>,
+    mut player_q: Query<
+        (
+            &mut WeaponInventory,
+            &mut SpecialWeaponInventory,
+            &PlayerProgression,
+        ),
+        With<Player>,
+    >,
 ) {
-    let ammo_mult = perks.ammo_mult();
-    for (mut weapons, mut specials) in player_q.iter_mut() {
+    for (mut weapons, mut specials, progression) in player_q.iter_mut() {
+        let ammo_mult = progression.perks.ammo_mult();
         for weapon in weapons.slots.iter_mut() {
             let base_max = Weapon::new(weapon.weapon_type).max_ammo;
             rescale_ammo_cap(&mut weapon.ammo, &mut weapon.max_ammo, base_max, ammo_mult);
@@ -1012,18 +1052,17 @@ fn special_weapon_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
-    perks: Res<PerkTree>,
-    upgrades: Res<UpgradeLedger>,
     mut player_q: Query<
         (
             Entity,
-            &GlobalTransform,
             &PlayerIndex,
             &mut SpecialWeaponInventory,
             &PlayerInput,
             &PlayerCameraRef,
+            &AimSolution,
             &ArmorSet,
             &BeamSabre,
+            &PlayerProgression,
         ),
         With<Player>,
     >,
@@ -1032,10 +1071,11 @@ fn special_weapon_system(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    let perk_damage_mult = perks.damage_mult();
-    for (player_entity, player_transform, player_index, mut inv, pi, cam_ref, armor, sabre) in
+    for (player_entity, player_index, mut inv, pi, cam_ref, aim, armor, sabre, progression) in
         player_q.iter_mut()
     {
+        let upgrades = &progression.upgrades;
+        let perk_damage_mult = progression.perks.damage_mult();
         inv.slot7.cooldown_timer = (inv.slot7.cooldown_timer - dt).max(0.0);
         inv.slot8.cooldown_timer = (inv.slot8.cooldown_timer - dt).max(0.0);
         inv.slot9.cooldown_timer = (inv.slot9.cooldown_timer - dt).max(0.0);
@@ -1063,8 +1103,8 @@ fn special_weapon_system(
             continue;
         };
 
-        let fwd = cam.forward().as_vec3();
-        let pos = star_muzzle_origin(player_transform, fwd);
+        let fwd = aim.direction;
+        let pos = aim.muzzle_origin;
         let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
 
         match slot {
@@ -1076,7 +1116,7 @@ fn special_weapon_system(
                         * upgrades.missile_damage_mult()
                         * upgrades.gauntlet_explosive_damage_mult();
                     let damage_type =
-                        gauntlet_projectile_damage_type(&upgrades, DamageType::Explosive);
+                        gauntlet_projectile_damage_type(upgrades, DamageType::Explosive);
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;
                     commands.spawn((
                         EnergyPbrBundle {
@@ -1121,8 +1161,7 @@ fn special_weapon_system(
                         * armor_damage_mult
                         * upgrades.beam_damage_mult()
                         * upgrades.gauntlet_energy_damage_mult();
-                    let damage_type =
-                        gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
+                    let damage_type = gauntlet_projectile_damage_type(upgrades, DamageType::Plasma);
                     inv.slot8.cooldown_timer = inv.slot8.cooldown;
                     use rand::Rng;
                     let rng = game_rng.combat();
@@ -1179,7 +1218,7 @@ fn special_weapon_system(
                         * upgrades.missile_damage_mult()
                         * upgrades.gauntlet_explosive_damage_mult();
                     let damage_type =
-                        gauntlet_projectile_damage_type(&upgrades, DamageType::Explosive);
+                        gauntlet_projectile_damage_type(upgrades, DamageType::Explosive);
                     inv.slot9.cooldown_timer = inv.slot9.cooldown;
                     commands.spawn((
                         PbrBundle {
@@ -1223,8 +1262,7 @@ fn special_weapon_system(
                         * armor_damage_mult
                         * upgrades.turret_damage_mult()
                         * upgrades.gauntlet_energy_damage_mult();
-                    let damage_type =
-                        gauntlet_projectile_damage_type(&upgrades, DamageType::Plasma);
+                    let damage_type = gauntlet_projectile_damage_type(upgrades, DamageType::Plasma);
                     inv.slot0.cooldown_timer = inv.slot0.cooldown;
                     use rand::Rng;
                     let rng = game_rng.combat();
@@ -1807,7 +1845,6 @@ fn melee_combo_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     dungeon: Res<DungeonCrawlState>,
-    upgrades: Res<UpgradeLedger>,
     mut player_q: Query<
         (
             &GlobalTransform,
@@ -1816,6 +1853,7 @@ fn melee_combo_system(
             &PlayerInput,
             &PlayerCameraRef,
             &ArmorSet,
+            &PlayerProgression,
         ),
         With<Player>,
     >,
@@ -1830,7 +1868,10 @@ fn melee_combo_system(
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_transform, mut combo, mut sm, pi, cam_ref, armor) in player_q.iter_mut() {
+    for (player_transform, mut combo, mut sm, pi, cam_ref, armor, progression) in
+        player_q.iter_mut()
+    {
+        let upgrades = &progression.upgrades;
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
         };
@@ -2086,8 +2127,6 @@ fn beam_sabre_update_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
-    perks: Res<PerkTree>,
-    upgrades: Res<UpgradeLedger>,
     dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
@@ -2098,6 +2137,7 @@ fn beam_sabre_update_system(
             &PlayerInput,
             &PlayerCameraRef,
             &ArmorSet,
+            &PlayerProgression,
             Option<&BeamSabreLocked>,
         ),
         With<Player>,
@@ -2112,11 +2152,22 @@ fn beam_sabre_update_system(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    let perk_damage_mult =
-        perks.damage_mult() * upgrades.beam_damage_mult() * upgrades.gauntlet_energy_damage_mult();
-    for (entity, player_transform, mut sabre, mut sm, pi, cam_ref, armor, locked_marker) in
-        player_q.iter_mut()
+    for (
+        entity,
+        player_transform,
+        mut sabre,
+        mut sm,
+        pi,
+        cam_ref,
+        armor,
+        progression,
+        locked_marker,
+    ) in player_q.iter_mut()
     {
+        let upgrades = &progression.upgrades;
+        let perk_damage_mult = progression.perks.damage_mult()
+            * upgrades.beam_damage_mult()
+            * upgrades.gauntlet_energy_damage_mult();
         if upgrades.blade_boots_unlock_sabre() && !sabre.unlocked {
             sabre.unlocked = true;
             if locked_marker.is_some() {
@@ -2134,7 +2185,7 @@ fn beam_sabre_update_system(
         } else {
             DamageType::Melee
         };
-        let wave_damage_type = gauntlet_projectile_damage_type(&upgrades, DamageType::Laser);
+        let wave_damage_type = gauntlet_projectile_damage_type(upgrades, DamageType::Laser);
 
         if pi.sabre_toggle {
             if sabre.unlocked {
@@ -2465,6 +2516,28 @@ mod tracking_missile_tests {
             Vec3::new(0.4, 1.0, 9.0),
         );
         assert!(distance < 1.75_f32.powi(2));
+    }
+
+    #[test]
+    fn muzzle_correction_preserves_vertical_camera_aim() {
+        let camera_forward = Vec3::new(0.0, 0.5, -0.866_025_4).normalize();
+        let camera_origin = Vec3::new(0.0, 3.0, 6.0);
+        let muzzle = Vec3::new(0.7, 1.2, 0.0);
+        let aim_point = camera_origin + camera_forward * AIM_MAX_DISTANCE;
+        let direction = direction_to_aim_point(muzzle, aim_point, camera_forward);
+
+        assert!(direction.y > 0.45);
+        assert!(direction.z < -0.8);
+        assert!((direction.length() - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn zero_length_aim_uses_camera_fallback() {
+        let fallback = Vec3::new(0.0, 0.2, -1.0).normalize();
+        assert_eq!(
+            direction_to_aim_point(Vec3::ONE, Vec3::ONE, fallback),
+            fallback
+        );
     }
 
     #[test]

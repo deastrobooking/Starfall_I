@@ -7,6 +7,7 @@ use crate::character_parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use crate::character_studio::spec::CharacterSpec;
+use crate::components::player::PlayerProgression;
 use crate::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
@@ -1204,6 +1205,8 @@ pub struct PlayerSlotConfig {
     pub blueprint: Option<CharacterBlueprint>,
     /// Exact Advanced Character Studio recipe used by the runtime mesh builder.
     pub studio_spec: Option<CharacterSpec>,
+    /// Save-backed perks, tech upgrades, and weapon ranks owned by this player.
+    pub progression: PlayerProgression,
 }
 
 impl Default for PlayerSlotConfig {
@@ -1227,6 +1230,7 @@ impl Default for PlayerSlotConfig {
             part_loadout: None,
             blueprint: None,
             studio_spec: None,
+            progression: PlayerProgression::default(),
         }
     }
 }

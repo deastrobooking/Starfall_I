@@ -20,6 +20,8 @@ is FOR and whether it's **living** (kept current, edit it) or a **snapshot**
 | [engine_upgrade_milestones.md](engine_upgrade_milestones.md) | `M#` | Campaign/engine strategy milestones + upgrade procedure + naming table |
 | [playerengine.md](playerengine.md) | `MM#` | Motion mechanics / traversal / skeletal-animation roadmap |
 | [agent_next_steps.md](agent_next_steps.md) | — | Near-term priorities + work rules for agents |
+| [player_creator_experience_plan.md](player_creator_experience_plan.md) | `PX#` / `PM#` | Aiming, weapon presentation, shop UX, editor launcher, projects, presets, and multi-level support |
+| [controller_player_ownership.md](controller_player_ownership.md) | `PO#` | Start-to-join controller assignment and per-player persistence ownership |
 
 ## Subsystem references (living)
 

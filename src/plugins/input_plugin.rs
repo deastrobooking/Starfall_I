@@ -2,10 +2,8 @@
 ///
 /// Each frame `update_player_inputs` writes a `PlayerInput` on every live
 /// player entity:
-///   P1 — keyboard + mouse + gamepad 0
-///   P2 — gamepad 1
-///   P3 — gamepad 2
-///   P4 — gamepad 3
+///   P1 — keyboard + mouse, plus the controller that claims P1
+///   P2–P4 — controllers explicitly assigned by pressing Start in the lobby
 ///
 /// Controller layout (works for Xbox, DualSense, DualShock, 8BitDo, Switch Pro,
 /// Stadia, and any HID-compliant gamepad via Bevy's gilrs backend):
@@ -55,6 +53,7 @@ pub struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
             .add_systems(PreUpdate, poll_native_controllers.after(InputSystems))
             .add_systems(
                 PreUpdate,
@@ -68,7 +67,63 @@ impl Plugin for InputPlugin {
                     .after(poll_native_controllers)
                     .run_if(in_state(EngineToolMode::Editing)),
             )
-            .add_systems(Update, log_gamepad_connections);
+            .add_systems(
+                Update,
+                (log_gamepad_connections, release_disconnected_gamepads),
+            );
+    }
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+pub struct GamepadAssignments {
+    players: [Option<Entity>; 4],
+    native_player: Option<u8>,
+}
+
+impl GamepadAssignments {
+    pub fn gamepad_for_player(&self, player_index: u8) -> Option<Entity> {
+        self.players.get(player_index as usize).copied().flatten()
+    }
+
+    pub fn player_for_gamepad(&self, gamepad: Entity) -> Option<u8> {
+        self.players
+            .iter()
+            .position(|assigned| *assigned == Some(gamepad))
+            .map(|index| index as u8)
+    }
+
+    pub fn assign_next(&mut self, gamepad: Entity, joined: &[bool; 4]) -> Option<u8> {
+        if let Some(player) = self.player_for_gamepad(gamepad) {
+            return Some(player);
+        }
+        let slot = (0..4)
+            .find(|index| joined[*index] && self.players[*index].is_none())
+            .or_else(|| (0..4).find(|index| self.players[*index].is_none()))?;
+        self.players[slot] = Some(gamepad);
+        Some(slot as u8)
+    }
+
+    pub fn assign_native_next(&mut self, joined: &[bool; 4]) -> Option<u8> {
+        if self.native_player.is_some() {
+            return self.native_player;
+        }
+        let slot = (0..4)
+            .find(|index| joined[*index] && self.players[*index].is_none())
+            .or_else(|| (0..4).find(|index| self.players[*index].is_none()))?;
+        self.native_player = Some(slot as u8);
+        Some(slot as u8)
+    }
+
+    pub fn native_player(&self) -> Option<u8> {
+        self.native_player
+    }
+
+    fn release(&mut self, gamepad: Entity) {
+        for assigned in &mut self.players {
+            if *assigned == Some(gamepad) {
+                *assigned = None;
+            }
+        }
     }
 }
 
@@ -229,6 +284,17 @@ fn log_gamepad_connections(mut events: MessageReader<GamepadConnectionEvent>) {
     }
 }
 
+fn release_disconnected_gamepads(
+    mut events: MessageReader<GamepadConnectionEvent>,
+    mut assignments: ResMut<GamepadAssignments>,
+) {
+    for event in events.read() {
+        if matches!(event.connection, GamepadConnection::Disconnected) {
+            assignments.release(event.gamepad);
+        }
+    }
+}
+
 // ── Main input system ─────────────────────────────────────────────────────────
 #[allow(clippy::too_many_arguments)]
 fn update_player_inputs(
@@ -241,6 +307,7 @@ fn update_player_inputs(
     settings: Res<GameSettings>,
     capture: Res<UiGameplayCapture>,
     native: Res<NativeControllerState>,
+    assignments: Res<GamepadAssignments>,
     mut trigger_history: Local<[TriggerAxisState; 4]>,
     mut players: Query<(&PlayerIndex, &mut PlayerInput), With<Player>>,
 ) {
@@ -254,11 +321,6 @@ fn update_player_inputs(
     }
     let mouse_look = raw_mouse * sens;
 
-    // Sort by Entity::index() for a stable cross-frame assignment order.
-    // Using index() (the numeric part) matches what ui_plugin does and is
-    // more stable than sorting by the full Entity value across reconnects.
-    let mut gps: Vec<(Entity, &Gamepad)> = gamepads.iter().collect();
-    gps.sort_by_key(|(e, _)| e.index());
     let pressed_button_events: Vec<(Entity, GamepadButton)> = button_events
         .read()
         .filter(|event| event.state == ButtonState::Pressed)
@@ -270,15 +332,15 @@ fn update_player_inputs(
 
         let i = idx.0 as usize;
         let history_slot = i.min(trigger_history.len() - 1);
-        let gp_entry = gps.get(i).copied();
-        let gp_entity = gp_entry.map(|(entity, _)| entity);
-        let gp: Option<&Gamepad> = gp_entry.map(|(_, gamepad)| gamepad);
+        let gp_entity = assignments.gamepad_for_player(idx.0);
+        let gp: Option<&Gamepad> =
+            gp_entity.and_then(|entity| gamepads.get(entity).ok().map(|v| v.1));
         let is_p1 = i == 0;
         // On macOS, Bevy can report a controller while its SDL/gilrs button
         // mapping is still wrong for a specific device. Merge the native
         // GameController reading for P1 whenever it exists so correctly mapped
         // native buttons can rescue those cases.
-        let use_native = is_p1 && native.connected;
+        let use_native = native.connected && assignments.native_player() == Some(idx.0);
 
         pi.gamepad_active = gp.is_some() || use_native;
 
@@ -691,6 +753,38 @@ mod tests {
         assert!(input.ui_down);
         assert!(input.ui_right);
         assert!(input.ui_confirm);
+    }
+
+    #[test]
+    fn start_assigns_controllers_to_next_available_players() {
+        let mut world = World::new();
+        let first = world.spawn_empty().id();
+        let second = world.spawn_empty().id();
+        let mut assignments = GamepadAssignments::default();
+        let joined = [true, false, false, false];
+
+        assert_eq!(assignments.assign_next(first, &joined), Some(0));
+        assert_eq!(assignments.assign_next(second, &joined), Some(1));
+        assert_eq!(assignments.gamepad_for_player(0), Some(first));
+        assert_eq!(assignments.gamepad_for_player(1), Some(second));
+        assert_eq!(assignments.assign_next(first, &joined), Some(0));
+    }
+
+    #[test]
+    fn released_controller_can_reclaim_joined_slot() {
+        let mut world = World::new();
+        let original = world.spawn_empty().id();
+        let reconnected = world.spawn_empty().id();
+        let mut assignments = GamepadAssignments::default();
+        assert_eq!(
+            assignments.assign_next(original, &[true, true, false, false]),
+            Some(0)
+        );
+        assignments.release(original);
+        assert_eq!(
+            assignments.assign_next(reconnected, &[true, true, false, false]),
+            Some(0)
+        );
     }
 }
 

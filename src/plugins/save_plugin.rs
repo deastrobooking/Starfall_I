@@ -11,7 +11,7 @@ use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandReg
 use crate::components::armor::{ArmorSet, ElementType};
 use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::{
-    Player, PlayerIndex, PlayerStats, TraversalMode, TraversalModeState,
+    Player, PlayerIndex, PlayerProgression, PlayerStats, TraversalMode, TraversalModeState,
 };
 use crate::components::weapon::{SpecialWeaponInventory, WeaponInventory, WeaponRanks};
 use crate::damage::Health;
@@ -72,6 +72,7 @@ pub struct SaveParams<'w, 's> {
             &'static Inventory,
             &'static QuickItemSlot,
             &'static TraversalModeState,
+            &'static PlayerProgression,
         ),
         With<Player>,
     >,
@@ -198,6 +199,12 @@ pub struct PlayerSaveData {
     pub quick_item_id: Option<String>,
     #[serde(default)]
     pub traversal_mode: u8,
+    #[serde(default)]
+    pub perk_tree: Option<PerkTree>,
+    #[serde(default)]
+    pub tech_upgrades: Option<UpgradeLedger>,
+    #[serde(default)]
+    pub weapon_ranks: Option<[u32; 6]>,
 }
 
 impl PlayerSaveData {
@@ -212,6 +219,7 @@ impl PlayerSaveData {
         inventory: &Inventory,
         quick: &QuickItemSlot,
         traversal: &TraversalModeState,
+        progression: &PlayerProgression,
     ) -> Self {
         Self {
             player_index,
@@ -230,6 +238,9 @@ impl PlayerSaveData {
             inventory: Some(inventory.clone()),
             quick_item_id: quick.item_id.clone(),
             traversal_mode: traversal_mode_index(traversal.active),
+            perk_tree: Some(progression.perks.clone()),
+            tech_upgrades: Some(progression.upgrades.clone()),
+            weapon_ranks: Some(progression.weapon_ranks.ranks),
         }
     }
 
@@ -251,6 +262,9 @@ impl PlayerSaveData {
             inventory: None,
             quick_item_id: None,
             traversal_mode: 0,
+            perk_tree: None,
+            tech_upgrades: None,
+            weapon_ranks: None,
         }
     }
 
@@ -291,6 +305,18 @@ impl PlayerSaveData {
             quick.item_id = None;
         }
         traversal.active = traversal_mode_from_index(self.traversal_mode);
+    }
+
+    fn apply_progression(&self, progression: &mut PlayerProgression) {
+        if let Some(perks) = &self.perk_tree {
+            progression.perks.clone_from(perks);
+        }
+        if let Some(upgrades) = &self.tech_upgrades {
+            progression.upgrades.clone_from(upgrades);
+        }
+        if let Some(ranks) = self.weapon_ranks {
+            progression.weapon_ranks.ranks = ranks;
+        }
     }
 }
 
@@ -348,7 +374,7 @@ impl Default for SaveData {
             command_assets: Vec::new(),
             hacking: HackingRegistry::default(),
             final_war: FinalWarSaveRecord::default(),
-            save_version: 2,
+            save_version: 3,
             campaign_complete: false,
         }
     }
@@ -635,6 +661,7 @@ fn collect_player_saves(
             &Inventory,
             &QuickItemSlot,
             &TraversalModeState,
+            &PlayerProgression,
         ),
         With<Player>,
     >,
@@ -642,9 +669,29 @@ fn collect_player_saves(
     let mut players: Vec<_> = player_q
         .iter()
         .map(
-            |(index, stats, health, weapons, specials, armor, inventory, quick, traversal)| {
+            |(
+                index,
+                stats,
+                health,
+                weapons,
+                specials,
+                armor,
+                inventory,
+                quick,
+                traversal,
+                progression,
+            )| {
                 PlayerSaveData::from_runtime(
-                    index.0, stats, health, weapons, specials, armor, inventory, quick, traversal,
+                    index.0,
+                    stats,
+                    health,
+                    weapons,
+                    specials,
+                    armor,
+                    inventory,
+                    quick,
+                    traversal,
+                    progression,
                 )
             },
         )
@@ -693,6 +740,22 @@ fn hydrate_progress_from_disk(
     mut regs: LoadRegistriesParam,
 ) {
     if let Some(data) = load_save() {
+        for (index, slot) in select.slots.iter_mut().enumerate() {
+            let mut progression = PlayerProgression {
+                perks: PerkTree {
+                    points_unspent: data.perk_points_unspent,
+                    ranks: data.perk_ranks.clone(),
+                },
+                upgrades: data.tech_upgrades.clone(),
+                weapon_ranks: WeaponRanks {
+                    ranks: data.weapon_ranks,
+                },
+            };
+            if let Some(saved) = player_save_for(&data, index as u8) {
+                saved.apply_progression(&mut progression);
+            }
+            slot.progression = progression;
+        }
         *robot_pets = data.robot_pets.clone();
         *settlement_economy = data.settlement_economy.clone();
         *upgrades = data.tech_upgrades.clone();
@@ -948,6 +1011,9 @@ mod tests {
             inventory: Some(Inventory::default()),
             quick_item_id: None,
             traversal_mode: 0,
+            perk_tree: None,
+            tech_upgrades: None,
+            weapon_ranks: None,
         }
     }
 
@@ -1312,6 +1378,9 @@ mod tests {
             }),
             quick_item_id: Some("health_pack".to_string()),
             traversal_mode: 3,
+            perk_tree: None,
+            tech_upgrades: None,
+            weapon_ranks: None,
         };
         let mut stats = PlayerStats::default();
         let mut health = Health::new(100.0);
@@ -1349,5 +1418,32 @@ mod tests {
         assert_eq!(inventory.count("health_pack"), 2);
         assert_eq!(quick.item_id.as_deref(), Some("health_pack"));
         assert_eq!(traversal.active, TraversalMode::Hoverboard);
+    }
+
+    #[test]
+    fn player_progression_round_trip_is_owned_by_player_index() {
+        let mut saved = player_save(2, 5, 200, 40, 80.0, 120.0);
+        saved.perk_tree = Some(PerkTree {
+            points_unspent: 3,
+            ranks: vec![("star_focus".to_string(), 2)],
+        });
+        saved.tech_upgrades = Some(UpgradeLedger {
+            ranks: vec![(TechUpgradeId::NovaMissileForge, 3)],
+            rejuvenation_charge: 24.0,
+        });
+        saved.weapon_ranks = Some([1, 2, 3, 4, 5, 6]);
+
+        let json = serde_json::to_string(&saved).unwrap();
+        let decoded: PlayerSaveData = serde_json::from_str(&json).unwrap();
+        let mut progression = PlayerProgression::default();
+        decoded.apply_progression(&mut progression);
+
+        assert_eq!(decoded.player_index, 2);
+        assert_eq!(progression.perks.rank("star_focus"), 2);
+        assert_eq!(
+            progression.upgrades.rank(TechUpgradeId::NovaMissileForge),
+            3
+        );
+        assert_eq!(progression.weapon_ranks.ranks, [1, 2, 3, 4, 5, 6]);
     }
 }

@@ -5,6 +5,8 @@ use bevy::prelude::*;
 pub enum AppState {
     #[default]
     MainMenu,
+    /// Creator-facing launcher for opening a validated Forge workspace.
+    ProjectHub,
     PlayerSelect,
     CharacterDesign,
     /// Human character generator studio — in-game mesh generation from preset

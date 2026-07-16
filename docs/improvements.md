@@ -48,7 +48,11 @@ For the current agent-facing execution order, use `docs/agent_next_steps.md`.
 - Chapter encounter placement now uses the party center, and airship deck placement uses `PlayerIndex` slots instead of query order.
 - Dev armor element cycling no longer calls `get_single_mut`; keyboard cycling targets P1 only.
 - Engine dependencies are upgraded through Bevy 0.19.0 with Avian 0.7 on the current engine branch, with buffered gameplay events migrated to Bevy messages and the changed hierarchy, camera, cursor, render-import, ambient-light, text, and physics APIs handled.
-- Engine milestone guidance now lives in `docs/engine_upgrade_milestones.md`, `agent.md` points future agents there, and GitHub Actions mirrors the local format/check/clippy/test gates.
+- Engine milestone guidance now lives in `docs/engine_upgrade_milestones.md` and
+  `agent.md` points future agents there. A July 16, 2026 audit discovered that
+  the GitHub Actions file had later been fully commented out; it is active again
+  and mirrors the local format/check/clippy/test gates on macOS. A successful
+  remote run is still required to confirm repository-side execution.
 - The multiplayer ownership policy is now documented in architecture/systems docs, and the first save tests cover per-player records, legacy hydration, `player_index` lookup, sorted save output, and clamped runtime application.
 - Default player visuals now move away from tiny voxel/chibi blocks toward taller Dreamcast-anime sci-fantasy heroes with capsule limbs, layered armor, expressive eyes/hair, and glow accents.
 - Robot pets now have a campaign-shared saved data model, enemy-salvage part rewards, named robot-part materials, store-build recipes, and combination gates for cars, motorcycles, tanks, boats, submarines, space jets, giant mechs, spaceships, and megaships.

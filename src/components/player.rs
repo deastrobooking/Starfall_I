@@ -1,5 +1,9 @@
 use bevy::prelude::*;
 
+use crate::components::weapon::WeaponRanks;
+use crate::perks::PerkTree;
+use crate::upgrades::UpgradeLedger;
+
 // ── Marker ────────────────────────────────────────────────────────────────────
 /// Marks the player entity (the physics body).
 #[derive(Component, Default)]
@@ -35,6 +39,17 @@ impl Default for PlayerStats {
             level: 1,
         }
     }
+}
+
+/// Save-backed progression owned by one local player.
+///
+/// Legacy campaign resources seed this component when old saves are loaded;
+/// new saves persist an independent copy for every `PlayerIndex`.
+#[derive(Component, Debug, Clone, Default)]
+pub struct PlayerProgression {
+    pub perks: PerkTree,
+    pub upgrades: UpgradeLedger,
+    pub weapon_ranks: WeaponRanks,
 }
 
 impl PlayerStats {
@@ -906,6 +921,64 @@ pub struct PlayerInput {
     pub gamepad_active: bool,
 }
 
+// ── Per-player aiming ────────────────────────────────────────────────────────
+/// Authoritative ranged-weapon aim computed from this player's camera.
+///
+/// HUD reticles and weapon systems consume this same component so presentation
+/// cannot disagree with the projectile's actual direction.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AimSolution {
+    pub camera_origin: Vec3,
+    pub muzzle_origin: Vec3,
+    pub aim_point: Vec3,
+    pub direction: Vec3,
+    pub target: Option<Entity>,
+    pub actively_aiming: bool,
+    pub obstructed: bool,
+}
+
+impl Default for AimSolution {
+    fn default() -> Self {
+        Self {
+            camera_origin: Vec3::ZERO,
+            muzzle_origin: Vec3::ZERO,
+            aim_point: Vec3::NEG_Z * 120.0,
+            direction: Vec3::NEG_Z,
+            target: None,
+            actively_aiming: false,
+            obstructed: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AimReticleState {
+    Idle,
+    Aiming,
+    Target,
+    Locked,
+    Obstructed,
+    Charging,
+}
+
+impl AimSolution {
+    pub fn reticle_state(self, charging: bool) -> AimReticleState {
+        if charging {
+            AimReticleState::Charging
+        } else if self.target.is_some() && self.actively_aiming {
+            AimReticleState::Locked
+        } else if self.target.is_some() {
+            AimReticleState::Target
+        } else if self.obstructed {
+            AimReticleState::Obstructed
+        } else if self.actively_aiming {
+            AimReticleState::Aiming
+        } else {
+            AimReticleState::Idle
+        }
+    }
+}
+
 // ── Camera-player link ────────────────────────────────────────────────────────
 /// Entity of this player's `PlayerCamera` child. Set during spawn.
 #[derive(Component, Debug, Clone, Copy)]
@@ -979,5 +1052,20 @@ mod tests {
         assert!(!jetpack.register_jump_tap());
         assert!(jetpack.register_jump_tap());
         assert!(!jetpack.hover_mode_enabled);
+    }
+
+    #[test]
+    fn aim_reticle_state_prioritizes_charge_and_lock_feedback() {
+        let mut aim = AimSolution {
+            actively_aiming: true,
+            obstructed: true,
+            ..default()
+        };
+        assert_eq!(aim.reticle_state(false), AimReticleState::Obstructed);
+
+        let mut world = World::new();
+        aim.target = Some(world.spawn_empty().id());
+        assert_eq!(aim.reticle_state(false), AimReticleState::Locked);
+        assert_eq!(aim.reticle_state(true), AimReticleState::Charging);
     }
 }

@@ -31,7 +31,6 @@ use crate::game_loop::{fixed_motor_off, fixed_motor_on, PreviousTickPosition, Si
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::hitstop::hitstop_inactive;
 use crate::input_buffer::PlayerInputBuffers;
-use crate::perks::PerkTree;
 use crate::physics::prelude::*;
 use crate::player_mesh::attach_modular_player_mesh;
 use crate::rendering::{
@@ -45,7 +44,6 @@ use crate::resources::{
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
-use crate::upgrades::UpgradeLedger;
 
 /// Route the player's visual through the new native modular humanoid
 /// ([`crate::player_mesh`]) instead of the legacy `character_parts` meshes.
@@ -611,8 +609,6 @@ fn spawn_players(
     progress: Res<ChapterProgress>,
     robot_pets: Res<RobotPetCollection>,
     part_loadout: Res<PlayerPartLoadout>,
-    perks: Res<PerkTree>,
-    upgrades: Res<UpgradeLedger>,
     window_q: Query<&Window, With<PrimaryWindow>>,
     chapter_anchor_q: Query<(&WorldAnchor, &Transform)>,
     existing_players: Query<Entity, With<Player>>,
@@ -697,13 +693,23 @@ fn spawn_players(
         starter_inventory.add_item("armor_shard", 2, 10);
 
         // Apply perk and tech-upgrade HP bonuses to the authoritative max_health.
-        player_stats.max_health += perks.hp_bonus() + upgrades.armor_health_bonus();
+        let player_progression = slot.progression.clone();
+        player_stats.max_health +=
+            player_progression.perks.hp_bonus() + player_progression.upgrades.armor_health_bonus();
+        for (weapon, rank) in weapon_inventory
+            .slots
+            .iter_mut()
+            .zip(player_progression.weapon_ranks.ranks)
+        {
+            weapon.rank = rank;
+        }
 
         let player = commands
             .spawn((
                 Player,
                 PlayerIndex(i),
                 PlayerInput::default(),
+                AimSolution::default(),
                 Transform::from_translation(spawn_pos),
                 GlobalTransform::default(),
                 Visibility::Visible,
@@ -729,6 +735,7 @@ fn spawn_players(
                 player_stats.clone(),
                 player_movement,
             ))
+            .insert(player_progression)
             .insert((
                 hero_profile,
                 hero_powers,
@@ -3045,7 +3052,6 @@ fn grapple_hook_impact_system(
 // ── Dodge Update ──────────────────────────────────────────────────────────────
 fn player_dodge_update(
     time: Res<Time>,
-    perks: Res<PerkTree>,
     mut player_q: Query<
         (
             &mut DodgeState,
@@ -3054,16 +3060,18 @@ fn player_dodge_update(
             &Transform,
             &mut PlayerStateMachine,
             &PlayerInput,
+            &PlayerProgression,
         ),
         With<Player>,
     >,
     mut dodge_ev: MessageWriter<PlayerDodgeEvent>,
 ) {
     let dt = time.delta_secs();
-    let dodge_cost_mult = perks.dodge_cost_mult();
-    for (mut dodge, mut stats, mut damageable, transform, mut state, pi) in player_q.iter_mut() {
+    for (mut dodge, mut stats, mut damageable, transform, mut state, pi, progression) in
+        player_q.iter_mut()
+    {
         dodge.cooldown_timer = (dodge.cooldown_timer - dt).max(0.0);
-        let dodge_cost = dodge.dodge_cost * dodge_cost_mult;
+        let dodge_cost = dodge.dodge_cost * progression.perks.dodge_cost_mult();
 
         if dodge.is_dodging {
             dodge.dodge_timer -= dt;
@@ -3112,12 +3120,18 @@ fn movement_input_from_axes(forward: Vec3, right: Vec3, axes: Vec2) -> (Vec3, f3
 // ── Parry Update ──────────────────────────────────────────────────────────────
 fn player_parry_update(
     time: Res<Time>,
-    perks: Res<PerkTree>,
-    mut player_q: Query<(&mut ParryState, &mut PlayerStateMachine, &PlayerInput), With<Player>>,
+    mut player_q: Query<
+        (
+            &mut ParryState,
+            &mut PlayerStateMachine,
+            &PlayerInput,
+            &PlayerProgression,
+        ),
+        With<Player>,
+    >,
 ) {
     let dt = time.delta_secs();
-    let parry_window_bonus = perks.parry_window_bonus();
-    for (mut parry, state, pi) in player_q.iter_mut() {
+    for (mut parry, state, pi, progression) in player_q.iter_mut() {
         parry.cooldown_timer = (parry.cooldown_timer - dt).max(0.0);
 
         if parry.is_parrying {
@@ -3133,7 +3147,7 @@ fn player_parry_update(
             && state.current != PlayerState::Dead
         {
             parry.is_parrying = true;
-            parry.parry_timer = parry.parry_window + parry_window_bonus;
+            parry.parry_timer = parry.parry_window + progression.perks.parry_window_bonus();
             parry.cooldown_timer = parry.parry_cooldown;
         }
     }
@@ -3179,20 +3193,18 @@ fn player_stamina_regen(
 
 fn player_perk_health_regen(
     time: Res<Time>,
-    perks: Res<PerkTree>,
-    mut upgrades: ResMut<UpgradeLedger>,
-    mut q: Query<(&mut Health, &PlayerStateMachine), With<Player>>,
+    mut q: Query<(&mut Health, &PlayerStateMachine, &mut PlayerProgression), With<Player>>,
 ) {
-    let regen = perks.regen_per_sec() + upgrades.rejuvenation_regen_per_sec();
-    if regen <= 0.0 {
-        return;
-    }
     let dt = time.delta_secs();
-    for (mut health, state) in q.iter_mut() {
+    for (mut health, state, mut progression) in q.iter_mut() {
+        let regen =
+            progression.perks.regen_per_sec() + progression.upgrades.rejuvenation_regen_per_sec();
         if state.current != PlayerState::Dead && health.is_alive() && health.current < health.max {
             let missing = health.max - health.current;
             let requested = (regen * dt).min(missing);
-            let healed = upgrades.consume_rejuvenation_for_heal(requested);
+            let healed = progression
+                .upgrades
+                .consume_rejuvenation_for_heal(requested);
             if healed > 0.0 {
                 health.current = (health.current + healed).min(health.max);
             }
@@ -3216,11 +3228,10 @@ fn player_invulnerability_update(time: Res<Time>, mut q: Query<&mut Damageable, 
 
 // ── Level Up ──────────────────────────────────────────────────────────────────
 fn player_level_up(
-    mut q: Query<(&mut PlayerStats, &mut Health), With<Player>>,
-    mut perks: ResMut<PerkTree>,
+    mut q: Query<(&mut PlayerStats, &mut Health, &mut PlayerProgression), With<Player>>,
     mut level_ev: MessageWriter<PlayerLevelUpEvent>,
 ) {
-    for (mut stats, mut health) in q.iter_mut() {
+    for (mut stats, mut health, mut progression) in q.iter_mut() {
         let xp_needed = stats.xp_for_next_level();
         if stats.experience >= xp_needed {
             stats.experience -= xp_needed;
@@ -3230,7 +3241,7 @@ fn player_level_up(
             health.max = stats.max_health;
             health.current = health.max;
             stats.stamina = stats.max_stamina;
-            perks.award(1);
+            progression.perks.award(1);
             level_ev.write(PlayerLevelUpEvent { level: stats.level });
         }
     }
