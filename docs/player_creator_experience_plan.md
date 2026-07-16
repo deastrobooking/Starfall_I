@@ -117,8 +117,18 @@ Compose → Validate → Save → Playtest → Publish → Set Startup/Campaign 
 PX1 and the PM1 launcher shell are delivered. The first PX3 ownership foundation
 is also delivered: Chapter Select can target a joined P1-P4 profile, purchases
 are stored per slot, runtime combat/stat consumers use that player's progression,
-and v3 saves reload it by stable `PlayerIndex`. Next, build the bounded PX3 shop
-transaction/card flow on this owner contract. After that, complete the PM1
-project browser/path model before the larger PM2/PM3 persistence migration.
-Manual one-to-four-player aim, ownership, and editor-launch smoke acceptance
-remains required.
+and saves (v4 schema) reload it by stable `PlayerIndex`. The bounded PX3 shop
+transaction/card flow is now delivered on this owner contract (July 16, 2026):
+the pause-menu Star Shop has controller-focusable category tabs and item cards
+with EQUIPPED/OWNED/BUY/SAVE UP/GARAGE states, a detail panel with preview and
+currently-equipped comparison, a select-then-buy confirmation step, and per-player
+buy/equip/unequip running through the pure `shop_transactions` contract
+(insufficient-funds, duplicate-purchase, and locked-category protection enforced
+below the UI). Outfits/Armor/Weapons are owned per player and persist per
+`PlayerIndex` in the save's shop record (`serde(default)`, legacy saves load as
+nothing-owned); Vehicles remain party-shared showcase entries built in the Robot
+Garage. Tech upgrades, perk training, and the Robot Garage should adopt the same
+transaction contract in a later slice. Next, complete the PM1 project
+browser/path model before the larger PM2/PM3 persistence migration. Manual
+one-to-four-player aim, ownership, shop purchase/equip, and editor-launch smoke
+acceptance remains required.
