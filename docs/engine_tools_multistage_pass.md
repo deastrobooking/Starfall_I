@@ -390,10 +390,38 @@ destructively regenerated from a preview-only recipe.
   handle, snaps in the shared recipe-meter increments, and previews by safely
   recompiling the sandbox. Mouse release restores the pre-drag snapshot and
   commits one atomic recipe transaction, avoiding per-frame undo entries.
+- Road spline points now persist optional Hermite derivatives with serde
+  defaults, so existing recipes remain automatic and readable. The compiler
+  deterministically resolves automatic neighbor tangents, samples explicit or
+  automatic cubic curves within the 192-part sandbox budget, and validates
+  sampled grade instead of trusting only straight control-point chords.
+- Controller controls select tangent X/Y/Z, adjust from the resolved automatic
+  value, or reset to automatic. A magenta viewport arrow shows the resolved
+  derivative. Typed Merge/Split/Cross/Loop-Link records mark two stable road
+  point IDs, validate unique bounded links, draw a cyan pending guide, compile
+  connector decks, and participate in recipe undo/redo.
+- Building/cave/city/biome nodes now own version-compatible typed sockets:
+  Doorway, Stair Landing, Encounter, Item, and Portal. Each stable socket ID
+  stores its owning node ID, bounded local position, facing, and size. Optional
+  socket IDs on topology edges preserve old center-to-center recipes while new
+  connectors compile from authored doorway/portal endpoints.
+- Controller controls create, cycle, select, snap-move, and delete sockets. The
+  selected socket and facing render orange; marking an edge captures the active
+  start socket and uses the destination node's active socket. Deletion clears
+  dependent bindings in the same undoable recipe snapshot. Validation enforces
+  node ownership, room bounds, facing/size safety, endpoint ownership, and a
+  combined 192-part node/socket/edge compiler budget.
+- Every world recipe now persists a backward-compatible terrain-projection
+  origin and clearance. Controller controls move the world origin in bounded
+  250m steps, tune clearance with the shared snap setting, and project either
+  the selected element or the complete topology through one undoable recipe
+  transaction. Projection samples the exact piecewise-planar height used by the
+  shipped terrain trimesh: roads place their centerline at clearance, while
+  rooms/zones place their bottom face at clearance. A green target and vertical
+  guide preview the selected result before projection, and sandbox regeneration
+  remains protected by validation and last-valid-root retention.
 
-ET5d remains in progress: spline tangents and junctions, room doorway/socket
-placement, terrain
-projection, structured validation highlights, and explicit promotion of a
+ET5d remains in progress: structured validation highlights and explicit promotion of a
 published sandbox root into a scoped world-generation layer are later slices.
 
 ## ET4 — Character and Creature production workspaces

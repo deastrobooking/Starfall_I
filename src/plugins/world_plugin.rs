@@ -6557,7 +6557,7 @@ fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     terrain_height_uncarved(x, z, seed)
 }
 
-fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
+pub(crate) fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
     // Gameplay must query the same piecewise-planar surface used by the
     // rendered trimesh collider. Sampling the analytic height function here
     // can disagree by dozens of units on sharp ridges because the terrain mesh

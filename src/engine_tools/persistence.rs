@@ -530,9 +530,15 @@ pub struct ProceduralRecipeDraft {
     #[serde(default)]
     pub spline_points: Vec<RoadSplinePointDraft>,
     #[serde(default)]
+    pub road_junctions: Vec<RoadJunctionDraft>,
+    #[serde(default)]
     pub topology_nodes: Vec<WorldTopologyNodeDraft>,
     #[serde(default)]
+    pub topology_sockets: Vec<WorldTopologySocketDraft>,
+    #[serde(default)]
     pub topology_edges: Vec<WorldTopologyEdgeDraft>,
+    #[serde(default)]
+    pub terrain_projection: TerrainProjectionDraft,
     #[serde(default)]
     pub fields: BTreeMap<String, serde_json::Value>,
 }
@@ -545,9 +551,30 @@ impl Default for ProceduralRecipeDraft {
             revision: 0,
             material_slots: BTreeMap::new(),
             spline_points: Vec::new(),
+            road_junctions: Vec::new(),
             topology_nodes: Vec::new(),
+            topology_sockets: Vec::new(),
             topology_edges: Vec::new(),
+            terrain_projection: TerrainProjectionDraft::default(),
             fields: BTreeMap::new(),
+        }
+    }
+}
+
+/// Maps recipe-local X/Z coordinates onto the shipped world terrain. Projecting
+/// is an explicit authoring operation: legacy recipes keep their authored Y
+/// values until the user invokes it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct TerrainProjectionDraft {
+    pub world_origin: [f32; 2],
+    pub clearance: f32,
+}
+
+impl Default for TerrainProjectionDraft {
+    fn default() -> Self {
+        Self {
+            world_origin: [0.0, 0.0],
+            clearance: 1.0,
         }
     }
 }
@@ -558,6 +585,29 @@ pub struct RoadSplinePointDraft {
     pub position: [f32; 3],
     #[serde(default = "one_f32")]
     pub width_scale: f32,
+    /// Hermite derivative in recipe meters. Zero selects the deterministic
+    /// automatic tangent derived from neighboring control points.
+    #[serde(default)]
+    pub tangent: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RoadJunctionKind {
+    #[default]
+    Merge,
+    Split,
+    Cross,
+    LoopLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoadJunctionDraft {
+    pub junction_id: String,
+    pub from_point: String,
+    pub to_point: String,
+    #[serde(default)]
+    pub kind: RoadJunctionKind,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -582,6 +632,28 @@ pub struct WorldTopologyNodeDraft {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum WorldTopologySocketKind {
+    #[default]
+    Doorway,
+    StairLanding,
+    Encounter,
+    Item,
+    Portal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorldTopologySocketDraft {
+    pub socket_id: String,
+    pub node_id: String,
+    #[serde(default)]
+    pub kind: WorldTopologySocketKind,
+    pub local_position: [f32; 3],
+    pub facing: [f32; 3],
+    pub size: [f32; 2],
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum WorldTopologyEdgeKind {
     #[default]
     Door,
@@ -596,10 +668,59 @@ pub struct WorldTopologyEdgeDraft {
     pub to: String,
     #[serde(default)]
     pub kind: WorldTopologyEdgeKind,
+    #[serde(default)]
+    pub from_socket: Option<String>,
+    #[serde(default)]
+    pub to_socket: Option<String>,
 }
 
 fn one_f32() -> f32 {
     1.0
+}
+
+pub fn resolved_road_tangent(points: &[RoadSplinePointDraft], index: usize) -> [f32; 3] {
+    let Some(point) = points.get(index) else {
+        return [0.0; 3];
+    };
+    if point.tangent.iter().any(|value| value.abs() > 1.0e-4) {
+        return point.tangent;
+    }
+    if points.len() < 2 {
+        return [0.0; 3];
+    }
+    let (from, to, scale) = if index == 0 {
+        (points[0].position, points[1].position, 1.0)
+    } else if index + 1 == points.len() {
+        (points[index - 1].position, points[index].position, 1.0)
+    } else {
+        (points[index - 1].position, points[index + 1].position, 0.5)
+    };
+    [
+        (to[0] - from[0]) * scale,
+        (to[1] - from[1]) * scale,
+        (to[2] - from[2]) * scale,
+    ]
+}
+
+pub fn sample_road_spline_span(
+    points: &[RoadSplinePointDraft],
+    span: usize,
+    t: f32,
+) -> Option<[f32; 3]> {
+    let start = points.get(span)?;
+    let end = points.get(span + 1)?;
+    let m0 = resolved_road_tangent(points, span);
+    let m1 = resolved_road_tangent(points, span + 1);
+    let t = t.clamp(0.0, 1.0);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = t3 - t2;
+    Some(std::array::from_fn(|axis| {
+        h00 * start.position[axis] + h10 * m0[axis] + h01 * end.position[axis] + h11 * m1[axis]
+    }))
 }
 
 pub fn procedural_material_slots(category: ContentCategory) -> &'static [&'static str] {
@@ -1011,6 +1132,18 @@ fn validate_procedural_recipe(
     recipe: &ProceduralRecipeDraft,
     errors: &mut Vec<ProjectValidationError>,
 ) {
+    if !recipe
+        .terrain_projection
+        .world_origin
+        .iter()
+        .all(|value| value.is_finite() && (-10_000.0..=10_000.0).contains(value))
+        || !recipe.terrain_projection.clearance.is_finite()
+        || !(-250.0..=250.0).contains(&recipe.terrain_projection.clearance)
+    {
+        errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+            "{content_id}: terrain projection origin must stay inside the 20km world and clearance inside -250–250m"
+        )));
+    }
     let specs = procedural_parameter_specs(category);
     for spec in specs {
         let Some(raw) = recipe.fields.get(spec.key) else {
@@ -1100,11 +1233,13 @@ fn validate_procedural_topology(
                 )));
             }
             if !point.position.iter().all(|value| value.is_finite())
+                || !point.tangent.iter().all(|value| value.is_finite())
                 || !point.width_scale.is_finite()
                 || !(0.5..=2.0).contains(&point.width_scale)
+                || point.tangent.iter().map(|value| value * value).sum::<f32>() > 250_000.0
             {
                 errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
-                    "{content_id}: spline point {} has invalid position/width scale",
+                    "{content_id}: spline point {} has invalid position/tangent/width scale",
                     point.point_id
                 )));
             }
@@ -1133,15 +1268,75 @@ fn validate_procedural_topology(
                 )));
             }
         }
+        for span in 0..recipe.spline_points.len().saturating_sub(1) {
+            let mut previous = recipe.spline_points[span].position;
+            for sample in 1..=8 {
+                let current =
+                    sample_road_spline_span(&recipe.spline_points, span, sample as f32 / 8.0)
+                        .unwrap_or(previous);
+                let dx = (current[0] - previous[0]) as f64;
+                let dy = (current[1] - previous[1]) as f64;
+                let dz = (current[2] - previous[2]) as f64;
+                let horizontal = dx.hypot(dz);
+                if horizontal <= 0.01 || dy.abs().atan2(horizontal) > max_grade + 1.0e-6 {
+                    errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                        "{content_id}: curved spline span {span} exceeds maximum road grade"
+                    )));
+                    break;
+                }
+                previous = current;
+            }
+        }
+
+        if recipe.road_junctions.len() > 64 {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: road junctions exceed the 64-link compiler budget"
+            )));
+        }
+        let point_ids = recipe
+            .spline_points
+            .iter()
+            .map(|point| point.point_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut junction_ids = BTreeSet::new();
+        let mut junction_links = BTreeSet::new();
+        for junction in &recipe.road_junctions {
+            let (a, b) = if junction.from_point <= junction.to_point {
+                (&junction.from_point, &junction.to_point)
+            } else {
+                (&junction.to_point, &junction.from_point)
+            };
+            let link = format!("{:?}:{a}:{b}", junction.kind);
+            if junction.junction_id.trim().is_empty()
+                || !junction_ids.insert(junction.junction_id.as_str())
+                || junction.from_point == junction.to_point
+                || !point_ids.contains(junction.from_point.as_str())
+                || !point_ids.contains(junction.to_point.as_str())
+                || !junction_links.insert(link)
+            {
+                errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                    "{content_id}: road junction IDs/links must be unique and reference two points"
+                )));
+            }
+        }
     } else if !recipe.spline_points.is_empty() {
         errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
             "{content_id}: spline points are only valid for Road recipes"
         )));
+    } else if !recipe.road_junctions.is_empty() {
+        errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+            "{content_id}: road junctions are only valid for Road recipes"
+        )));
     }
 
-    if recipe.topology_nodes.len() > 96 || recipe.topology_edges.len() > 192 {
+    if recipe.topology_nodes.len() > 96
+        || recipe.topology_sockets.len() > 192
+        || recipe.topology_edges.len() > 192
+        || recipe.topology_nodes.len() + recipe.topology_sockets.len() + recipe.topology_edges.len()
+            > 192
+    {
         errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
-            "{content_id}: topology exceeds the 96-node/192-edge compiler budget"
+            "{content_id}: topology exceeds the 96-node/192-part compiler budget"
         )));
         return;
     }
@@ -1164,11 +1359,49 @@ fn validate_procedural_topology(
             )));
         }
     }
+    let mut sockets = BTreeMap::new();
+    for socket in &recipe.topology_sockets {
+        let node = nodes.get(&socket.node_id).copied();
+        let facing_length = socket.facing.iter().map(|value| value * value).sum::<f32>();
+        let inside_node = node.is_some_and(|node| {
+            (0..3).all(|axis| socket.local_position[axis].abs() <= node.size[axis] * 0.5 + 0.01)
+        });
+        if socket.socket_id.trim().is_empty()
+            || sockets.insert(socket.socket_id.clone(), socket).is_some()
+            || node.is_none()
+            || !socket.local_position.iter().all(|value| value.is_finite())
+            || !inside_node
+            || !socket.facing.iter().all(|value| value.is_finite())
+            || !(0.25..=4.0).contains(&facing_length)
+            || !socket
+                .size
+                .iter()
+                .all(|value| value.is_finite() && (0.25..=20.0).contains(value))
+        {
+            errors.push(ProjectValidationError::InvalidProceduralRecipe(format!(
+                "{content_id}: topology socket {} has invalid ID/node/transform/size",
+                socket.socket_id
+            )));
+        }
+    }
     let mut adjacency = BTreeMap::<String, Vec<String>>::new();
     let mut edge_ids = BTreeSet::new();
     for edge in &recipe.topology_edges {
-        let valid =
-            edge.from != edge.to && nodes.contains_key(&edge.from) && nodes.contains_key(&edge.to);
+        let from_socket_valid = edge.from_socket.as_ref().is_none_or(|socket_id| {
+            sockets
+                .get(socket_id)
+                .is_some_and(|socket| socket.node_id == edge.from)
+        });
+        let to_socket_valid = edge.to_socket.as_ref().is_none_or(|socket_id| {
+            sockets
+                .get(socket_id)
+                .is_some_and(|socket| socket.node_id == edge.to)
+        });
+        let valid = edge.from != edge.to
+            && nodes.contains_key(&edge.from)
+            && nodes.contains_key(&edge.to)
+            && from_socket_valid
+            && to_socket_valid;
         let (a, b) = if edge.from <= edge.to {
             (&edge.from, &edge.to)
         } else {
@@ -2387,11 +2620,13 @@ mod tests {
                 point_id: "same".into(),
                 position: [0.0, 0.0, 0.0],
                 width_scale: 1.0,
+                tangent: [0.0; 3],
             },
             RoadSplinePointDraft {
                 point_id: "same".into(),
                 position: [0.0, 50.0, 10.0],
                 width_scale: 1.0,
+                tangent: [0.0; 3],
             },
         ];
         let errors = validate_project(&project);
@@ -2404,6 +2639,209 @@ mod tests {
             error,
             ProjectValidationError::InvalidProceduralRecipe(message)
                 if message.contains("maximum road grade")
+        )));
+    }
+
+    #[test]
+    fn automatic_road_tangents_and_hermite_samples_are_deterministic() {
+        let points = vec![
+            RoadSplinePointDraft {
+                point_id: "a".into(),
+                position: [0.0, 0.0, 0.0],
+                width_scale: 1.0,
+                tangent: [0.0; 3],
+            },
+            RoadSplinePointDraft {
+                point_id: "b".into(),
+                position: [10.0, 0.0, 10.0],
+                width_scale: 1.0,
+                tangent: [0.0; 3],
+            },
+            RoadSplinePointDraft {
+                point_id: "c".into(),
+                position: [20.0, 0.0, 0.0],
+                width_scale: 1.0,
+                tangent: [0.0; 3],
+            },
+        ];
+        assert_eq!(resolved_road_tangent(&points, 1), [10.0, 0.0, 0.0]);
+        assert_eq!(
+            sample_road_spline_span(&points, 0, 0.0),
+            Some([0.0, 0.0, 0.0])
+        );
+        assert_eq!(
+            sample_road_spline_span(&points, 0, 1.0),
+            Some([10.0, 0.0, 10.0])
+        );
+        let midpoint = sample_road_spline_span(&points, 0, 0.5).unwrap();
+        assert_ne!(midpoint, [5.0, 0.0, 5.0]);
+        assert_eq!(midpoint, sample_road_spline_span(&points, 0, 0.5).unwrap());
+    }
+
+    #[test]
+    fn road_junction_preflight_rejects_missing_endpoints_and_duplicate_links() {
+        let mut project = ForgeProject::default();
+        let road_id = project
+            .create_content(ContentCategory::Road, "Junction Test")
+            .unwrap();
+        let recipe = project.payloads[&road_id].procedural_recipe().unwrap();
+        assert!(recipe.road_junctions.is_empty());
+        let recipe = project
+            .payloads
+            .get_mut(&road_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe.spline_points = vec![
+            RoadSplinePointDraft {
+                point_id: "a".into(),
+                position: [0.0, 0.0, 0.0],
+                width_scale: 1.0,
+                tangent: [0.0; 3],
+            },
+            RoadSplinePointDraft {
+                point_id: "b".into(),
+                position: [0.0, 0.0, 20.0],
+                width_scale: 1.0,
+                tangent: [0.0; 3],
+            },
+        ];
+        recipe.road_junctions = vec![
+            RoadJunctionDraft {
+                junction_id: "bad".into(),
+                from_point: "a".into(),
+                to_point: "missing".into(),
+                kind: RoadJunctionKind::Merge,
+            },
+            RoadJunctionDraft {
+                junction_id: "duplicate".into(),
+                from_point: "b".into(),
+                to_point: "a".into(),
+                kind: RoadJunctionKind::Merge,
+            },
+            RoadJunctionDraft {
+                junction_id: "duplicate".into(),
+                from_point: "a".into(),
+                to_point: "b".into(),
+                kind: RoadJunctionKind::Merge,
+            },
+        ];
+        let errors = validate_project(&project);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("junction IDs/links")
+        )));
+    }
+
+    #[test]
+    fn topology_sockets_validate_node_bounds_and_edge_ownership() {
+        let mut project = ForgeProject::default();
+        let building_id = project
+            .create_content(ContentCategory::Building, "Socket Rooms")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&building_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe.topology_nodes = vec![
+            WorldTopologyNodeDraft {
+                node_id: "entrance".into(),
+                kind: WorldTopologyNodeKind::Entrance,
+                position: [0.0, 0.0, 0.0],
+                size: [4.0, 4.0, 4.0],
+            },
+            WorldTopologyNodeDraft {
+                node_id: "room".into(),
+                kind: WorldTopologyNodeKind::Room,
+                position: [8.0, 0.0, 0.0],
+                size: [4.0, 4.0, 4.0],
+            },
+        ];
+        recipe.topology_sockets = vec![
+            WorldTopologySocketDraft {
+                socket_id: "entrance.out".into(),
+                node_id: "entrance".into(),
+                kind: WorldTopologySocketKind::Doorway,
+                local_position: [2.0, 0.0, 0.0],
+                facing: [1.0, 0.0, 0.0],
+                size: [2.0, 3.0],
+            },
+            WorldTopologySocketDraft {
+                socket_id: "room.in".into(),
+                node_id: "room".into(),
+                kind: WorldTopologySocketKind::Doorway,
+                local_position: [-2.0, 0.0, 0.0],
+                facing: [-1.0, 0.0, 0.0],
+                size: [2.0, 3.0],
+            },
+        ];
+        recipe.topology_edges = vec![WorldTopologyEdgeDraft {
+            from: "entrance".into(),
+            to: "room".into(),
+            kind: WorldTopologyEdgeKind::Door,
+            from_socket: Some("entrance.out".into()),
+            to_socket: Some("room.in".into()),
+        }];
+        assert!(validate_project(&project).is_empty());
+
+        let recipe = project
+            .payloads
+            .get_mut(&building_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe.topology_sockets[1].local_position[0] = 12.0;
+        recipe.topology_edges[0].to_socket = Some("entrance.out".into());
+        let errors = validate_project(&project);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("topology socket")
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("topology edges")
+        )));
+    }
+
+    #[test]
+    fn terrain_projection_settings_are_backward_compatible_and_bounded() {
+        let legacy: ProceduralRecipeDraft = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "seed": 42,
+                "revision": 0,
+                "material_slots": {},
+                "spline_points": [],
+                "topology_nodes": [],
+                "topology_edges": [],
+                "fields": {}
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.terrain_projection, TerrainProjectionDraft::default());
+
+        let mut project = ForgeProject::default();
+        let city_id = project
+            .create_content(ContentCategory::City, "Terrain Projection")
+            .unwrap();
+        let recipe = project
+            .payloads
+            .get_mut(&city_id)
+            .unwrap()
+            .procedural_recipe_mut()
+            .unwrap();
+        recipe.terrain_projection.world_origin = [10_001.0, 0.0];
+        recipe.terrain_projection.clearance = 251.0;
+        let errors = validate_project(&project);
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidProceduralRecipe(message)
+                if message.contains("terrain projection origin")
         )));
     }
 

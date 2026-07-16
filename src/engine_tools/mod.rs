@@ -33,9 +33,10 @@ use crate::rendering::{
 use crate::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
-    GenericRecipeDraft, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore,
-    RoadSplinePointDraft, SceneObjectDraft, TransformDraft, WorldTopologyEdgeDraft,
-    WorldTopologyEdgeKind, WorldTopologyNodeDraft, WorldTopologyNodeKind,
+    GenericRecipeDraft, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore, RoadJunctionDraft,
+    RoadJunctionKind, RoadSplinePointDraft, SceneObjectDraft, TransformDraft,
+    WorldTopologyEdgeDraft, WorldTopologyEdgeKind, WorldTopologyNodeDraft, WorldTopologyNodeKind,
+    WorldTopologySocketDraft, WorldTopologySocketKind,
 };
 
 #[derive(SystemParam)]
@@ -1142,6 +1143,32 @@ enum EditorAction {
     TopologyCycleEdgeKind,
     TopologyConnectEdge,
     TopologyRemoveEdge,
+    RoadTangentNextAxis,
+    RoadTangentDecrease,
+    RoadTangentIncrease,
+    RoadTangentReset,
+    RoadMarkJunctionStart,
+    RoadCycleJunctionKind,
+    RoadConnectJunction,
+    RoadRemoveJunction,
+    SocketNext,
+    SocketCycleKind,
+    SocketCreate,
+    SocketDelete,
+    SocketMoveXNegative,
+    SocketMoveXPositive,
+    SocketMoveYNegative,
+    SocketMoveYPositive,
+    SocketMoveZNegative,
+    SocketMoveZPositive,
+    TerrainOriginXNegative,
+    TerrainOriginXPositive,
+    TerrainOriginZNegative,
+    TerrainOriginZPositive,
+    TerrainClearanceDecrease,
+    TerrainClearanceIncrease,
+    TerrainProjectSelected,
+    TerrainProjectAll,
     CompileSandboxRoot,
     ClearSandboxRoot,
 }
@@ -1304,7 +1331,13 @@ struct EditorRegistryState {
     recipe_parameter: usize,
     topology_element: usize,
     topology_edge_start: Option<String>,
+    topology_edge_start_socket: Option<String>,
     topology_edge_kind: usize,
+    topology_socket: usize,
+    topology_socket_kind: usize,
+    road_tangent_axis: usize,
+    road_junction_start: Option<String>,
+    road_junction_kind: usize,
     material_clipboard: Option<String>,
 }
 
@@ -2856,6 +2889,157 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                         );
                         spawn_editor_button(
                             panel,
+                            79,
+                            EditorAction::RoadTangentNextAxis,
+                            "ROAD TANGENT AXIS",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            80,
+                            EditorAction::RoadTangentDecrease,
+                            "TANGENT VALUE  −",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            81,
+                            EditorAction::RoadTangentIncrease,
+                            "TANGENT VALUE  +",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            82,
+                            EditorAction::RoadTangentReset,
+                            "RESET AUTO TANGENT",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            83,
+                            EditorAction::RoadMarkJunctionStart,
+                            "MARK ROAD JUNCTION START",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            84,
+                            EditorAction::RoadCycleJunctionKind,
+                            "ROAD JUNCTION TYPE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            85,
+                            EditorAction::RoadConnectJunction,
+                            "CONNECT ROAD JUNCTION",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            86,
+                            EditorAction::RoadRemoveJunction,
+                            "REMOVE ROAD JUNCTION",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            87,
+                            EditorAction::SocketNext,
+                            "NEXT NODE SOCKET",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            88,
+                            EditorAction::SocketCycleKind,
+                            "NEW SOCKET TYPE",
+                        );
+                        spawn_editor_button(panel, 89, EditorAction::SocketCreate, "+ NODE SOCKET");
+                        spawn_editor_button(
+                            panel,
+                            90,
+                            EditorAction::SocketDelete,
+                            "DELETE NODE SOCKET",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            91,
+                            EditorAction::SocketMoveXNegative,
+                            "SOCKET X  −SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            92,
+                            EditorAction::SocketMoveXPositive,
+                            "SOCKET X  +SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            93,
+                            EditorAction::SocketMoveYNegative,
+                            "SOCKET Y  −SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            94,
+                            EditorAction::SocketMoveYPositive,
+                            "SOCKET Y  +SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            95,
+                            EditorAction::SocketMoveZNegative,
+                            "SOCKET Z  −SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            96,
+                            EditorAction::SocketMoveZPositive,
+                            "SOCKET Z  +SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            97,
+                            EditorAction::TerrainOriginXNegative,
+                            "TERRAIN ORIGIN X  −250M",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            98,
+                            EditorAction::TerrainOriginXPositive,
+                            "TERRAIN ORIGIN X  +250M",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            99,
+                            EditorAction::TerrainOriginZNegative,
+                            "TERRAIN ORIGIN Z  −250M",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            100,
+                            EditorAction::TerrainOriginZPositive,
+                            "TERRAIN ORIGIN Z  +250M",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            101,
+                            EditorAction::TerrainClearanceDecrease,
+                            "TERRAIN CLEARANCE  −SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            102,
+                            EditorAction::TerrainClearanceIncrease,
+                            "TERRAIN CLEARANCE  +SNAP",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            103,
+                            EditorAction::TerrainProjectSelected,
+                            "PROJECT SELECTED TO TERRAIN",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            104,
+                            EditorAction::TerrainProjectAll,
+                            "PROJECT ALL TO TERRAIN",
+                        );
+                        spawn_editor_button(
+                            panel,
                             65,
                             EditorAction::CompileSandboxRoot,
                             "COMPILE SANDBOX ROOT",
@@ -3906,6 +4090,7 @@ fn cycle_selected_topology_element(world: &mut World, direction: isize) {
         } else {
             (registry.topology_element + 1) % count
         };
+        registry.topology_socket = 0;
         registry.topology_element
     };
     let (id, position, kind) = selected_topology_element(category, &recipe, selected)
@@ -3948,12 +4133,298 @@ fn move_selected_topology_element(world: &mut World, axis: usize, direction: f32
     );
 }
 
+fn terrain_projection_y(
+    category: persistence::ContentCategory,
+    recipe: &ProceduralRecipeDraft,
+    element_index: usize,
+) -> Option<f32> {
+    let (position, half_height) = if category == persistence::ContentCategory::Road {
+        (recipe.spline_points.get(element_index)?.position, 0.0)
+    } else {
+        let node = recipe.topology_nodes.get(element_index)?;
+        (node.position, node.size[1] * 0.5)
+    };
+    let projection = recipe.terrain_projection;
+    let world_x = projection.world_origin[0] + position[0];
+    let world_z = projection.world_origin[1] + position[2];
+    Some(
+        crate::plugins::world_plugin::terrain_surface_y(world_x, world_z, recipe.seed)
+            + half_height
+            + projection.clearance,
+    )
+}
+
+fn adjust_terrain_origin(world: &mut World, axis: usize, direction: f32) {
+    let Some((_, _, _)) = selected_procedural_recipe(world) else {
+        set_editor_status(
+            world,
+            "Select a World Kit recipe before moving its terrain origin",
+        );
+        return;
+    };
+    let delta = direction * 250.0;
+    execute_recipe_edit(
+        world,
+        format!("Move terrain origin {} by {delta:.0}m", ["X", "Z"][axis]),
+        move |recipe| {
+            recipe.terrain_projection.world_origin[axis] =
+                (recipe.terrain_projection.world_origin[axis] + delta).clamp(-10_000.0, 10_000.0);
+        },
+    );
+}
+
+fn adjust_terrain_clearance(world: &mut World, direction: f32) {
+    let Some((_, _, _)) = selected_procedural_recipe(world) else {
+        set_editor_status(
+            world,
+            "Select a World Kit recipe before changing terrain clearance",
+        );
+        return;
+    };
+    let delta = direction * world.resource::<EditorGizmoSettings>().translation_snap();
+    execute_recipe_edit(
+        world,
+        format!("Adjust terrain clearance by {delta:.2}m"),
+        move |recipe| {
+            recipe.terrain_projection.clearance =
+                (recipe.terrain_projection.clearance + delta).clamp(-250.0, 250.0);
+        },
+    );
+}
+
+fn project_recipe_to_terrain(world: &mut World, all: bool) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a World Kit recipe before terrain projection");
+        return;
+    };
+    let count = topology_element_count(category, &recipe);
+    if count == 0 {
+        set_editor_status(world, "Seed topology before terrain projection");
+        return;
+    }
+    let selected = world.resource::<EditorRegistryState>().topology_element % count;
+    let indices = if all {
+        (0..count).collect::<Vec<_>>()
+    } else {
+        vec![selected]
+    };
+    let projected = indices
+        .iter()
+        .filter_map(|index| terrain_projection_y(category, &recipe, *index).map(|y| (*index, y)))
+        .collect::<Vec<_>>();
+    let description = if all {
+        format!("Project {} topology elements to terrain", projected.len())
+    } else {
+        let (id, _, kind) = selected_topology_element(category, &recipe, selected)
+            .expect("nonempty topology has a selected element");
+        format!("Project {kind} {id} to terrain")
+    };
+    execute_recipe_edit(world, description, move |recipe| {
+        for (index, y) in projected {
+            if let Some(position) = topology_position_mut(category, recipe, index) {
+                position[1] = y;
+            }
+        }
+    });
+}
+
 const TOPOLOGY_EDGE_KINDS: [WorldTopologyEdgeKind; 4] = [
     WorldTopologyEdgeKind::Door,
     WorldTopologyEdgeKind::Stair,
     WorldTopologyEdgeKind::Tunnel,
     WorldTopologyEdgeKind::Portal,
 ];
+
+const TOPOLOGY_SOCKET_KINDS: [WorldTopologySocketKind; 5] = [
+    WorldTopologySocketKind::Doorway,
+    WorldTopologySocketKind::StairLanding,
+    WorldTopologySocketKind::Encounter,
+    WorldTopologySocketKind::Item,
+    WorldTopologySocketKind::Portal,
+];
+
+fn socket_indices_for_node(recipe: &ProceduralRecipeDraft, node_id: &str) -> Vec<usize> {
+    recipe
+        .topology_sockets
+        .iter()
+        .enumerate()
+        .filter_map(|(index, socket)| (socket.node_id == node_id).then_some(index))
+        .collect()
+}
+
+fn selected_socket_index(
+    recipe: &ProceduralRecipeDraft,
+    node_id: &str,
+    selected: usize,
+) -> Option<usize> {
+    let indices = socket_indices_for_node(recipe, node_id);
+    if indices.is_empty() {
+        return None;
+    }
+    indices.get(selected % indices.len()).copied()
+}
+
+fn selected_topology_node_id(
+    category: persistence::ContentCategory,
+    recipe: &ProceduralRecipeDraft,
+    selected: usize,
+) -> Option<&str> {
+    if category == persistence::ContentCategory::Road {
+        return None;
+    }
+    selected_topology_element(category, recipe, selected).map(|(id, _, _)| id)
+}
+
+fn cycle_selected_socket(world: &mut World) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a topology node before choosing a socket");
+        return;
+    };
+    let selected_node = world.resource::<EditorRegistryState>().topology_element;
+    let Some(node_id) = selected_topology_node_id(category, &recipe, selected_node) else {
+        set_editor_status(world, "Road points do not use room doorway sockets");
+        return;
+    };
+    let indices = socket_indices_for_node(&recipe, node_id);
+    if indices.is_empty() {
+        set_editor_status(world, "This node has no sockets; create one first");
+        return;
+    }
+    let selected = {
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.topology_socket = (registry.topology_socket + 1) % indices.len();
+        registry.topology_socket
+    };
+    let socket = &recipe.topology_sockets[indices[selected]];
+    set_editor_status(
+        world,
+        format!("Selected {:?} socket {}", socket.kind, socket.socket_id),
+    );
+}
+
+fn cycle_topology_socket_kind(world: &mut World) {
+    let kind = {
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.topology_socket_kind =
+            (registry.topology_socket_kind + 1) % TOPOLOGY_SOCKET_KINDS.len();
+        TOPOLOGY_SOCKET_KINDS[registry.topology_socket_kind]
+    };
+    set_editor_status(world, format!("New topology socket type: {kind:?}"));
+}
+
+fn create_topology_socket(world: &mut World) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a topology node before creating a socket");
+        return;
+    };
+    let registry = world.resource::<EditorRegistryState>();
+    let Some(node_id) = selected_topology_node_id(category, &recipe, registry.topology_element)
+    else {
+        set_editor_status(world, "Road points do not use room doorway sockets");
+        return;
+    };
+    let node_id = node_id.to_owned();
+    let node = recipe
+        .topology_nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .expect("selected topology node exists");
+    let kind = TOPOLOGY_SOCKET_KINDS[registry.topology_socket_kind % TOPOLOGY_SOCKET_KINDS.len()];
+    let kind_id = format!("{kind:?}").to_lowercase();
+    let mut suffix = socket_indices_for_node(&recipe, &node_id).len() + 1;
+    let socket_id = loop {
+        let candidate = format!("{node_id}.socket.{kind_id}.{suffix}");
+        if !recipe
+            .topology_sockets
+            .iter()
+            .any(|socket| socket.socket_id == candidate)
+        {
+            break candidate;
+        }
+        suffix += 1;
+    };
+    let local_position = [0.0, 0.0, node.size[2] * 0.5];
+    execute_recipe_edit(world, format!("Create socket {socket_id}"), move |recipe| {
+        recipe.topology_sockets.push(WorldTopologySocketDraft {
+            socket_id,
+            node_id,
+            kind,
+            local_position,
+            facing: [0.0, 0.0, 1.0],
+            size: match kind {
+                WorldTopologySocketKind::Doorway | WorldTopologySocketKind::StairLanding => {
+                    [2.5, 3.2]
+                }
+                _ => [1.5, 1.5],
+            },
+        });
+    });
+}
+
+fn move_selected_topology_socket(world: &mut World, axis: usize, direction: f32) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a topology socket before moving it");
+        return;
+    };
+    let registry = world.resource::<EditorRegistryState>();
+    let Some(node_id) = selected_topology_node_id(category, &recipe, registry.topology_element)
+    else {
+        set_editor_status(world, "Road points do not use room doorway sockets");
+        return;
+    };
+    let Some(socket_index) = selected_socket_index(&recipe, node_id, registry.topology_socket)
+    else {
+        set_editor_status(world, "Create a socket on this node before moving it");
+        return;
+    };
+    let node = recipe
+        .topology_nodes
+        .iter()
+        .find(|node| node.node_id == node_id)
+        .expect("selected socket node exists");
+    let half_extent = node.size[axis] * 0.5;
+    let socket_id = recipe.topology_sockets[socket_index].socket_id.clone();
+    let step = world.resource::<EditorGizmoSettings>().translation_snap();
+    execute_recipe_edit(world, format!("Move socket {socket_id}"), move |recipe| {
+        let socket = &mut recipe.topology_sockets[socket_index];
+        socket.local_position[axis] =
+            (socket.local_position[axis] + direction * step).clamp(-half_extent, half_extent);
+        let facing = Vec3::from_array(socket.facing);
+        if facing.length_squared() <= 0.25 {
+            socket.facing = [0.0, 0.0, 1.0];
+        }
+    });
+}
+
+fn delete_selected_topology_socket(world: &mut World) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a topology socket before deleting it");
+        return;
+    };
+    let registry = world.resource::<EditorRegistryState>();
+    let Some(node_id) = selected_topology_node_id(category, &recipe, registry.topology_element)
+    else {
+        set_editor_status(world, "Road points do not use room doorway sockets");
+        return;
+    };
+    let Some(socket_index) = selected_socket_index(&recipe, node_id, registry.topology_socket)
+    else {
+        set_editor_status(world, "This node has no socket to delete");
+        return;
+    };
+    let socket_id = recipe.topology_sockets[socket_index].socket_id.clone();
+    execute_recipe_edit(world, format!("Delete socket {socket_id}"), move |recipe| {
+        recipe.topology_sockets.remove(socket_index);
+        for edge in &mut recipe.topology_edges {
+            if edge.from_socket.as_deref() == Some(socket_id.as_str()) {
+                edge.from_socket = None;
+            }
+            if edge.to_socket.as_deref() == Some(socket_id.as_str()) {
+                edge.to_socket = None;
+            }
+        }
+    });
+}
 
 fn mark_topology_edge_start(world: &mut World) {
     let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
@@ -3973,12 +4444,25 @@ fn mark_topology_edge_start(world: &mut World) {
     let (node_id, _, _) = selected_topology_element(category, &recipe, selected)
         .expect("nonempty topology has a selected node");
     let node_id = node_id.to_owned();
-    world
-        .resource_mut::<EditorRegistryState>()
-        .topology_edge_start = Some(node_id.clone());
+    let start_socket = {
+        let registry = world.resource::<EditorRegistryState>();
+        selected_socket_index(&recipe, &node_id, registry.topology_socket)
+            .map(|index| recipe.topology_sockets[index].socket_id.clone())
+    };
+    {
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.topology_edge_start = Some(node_id.clone());
+        registry.topology_edge_start_socket = start_socket.clone();
+    }
     set_editor_status(
         world,
-        format!("Marked {node_id} as edge start; select a destination node"),
+        format!(
+            "Marked {node_id}{}; select a destination node",
+            start_socket
+                .as_deref()
+                .map(|socket| format!(" via {socket}"))
+                .unwrap_or_default()
+        ),
     );
 }
 
@@ -4005,12 +4489,14 @@ fn edit_topology_edge(world: &mut World, connect: bool) {
         set_editor_status(world, "Seed topology before authoring an edge");
         return;
     }
-    let (start, kind, selected) = {
+    let (start, stored_start_socket, kind, selected, socket_selection) = {
         let registry = world.resource::<EditorRegistryState>();
         (
             registry.topology_edge_start.clone(),
+            registry.topology_edge_start_socket.clone(),
             TOPOLOGY_EDGE_KINDS[registry.topology_edge_kind % TOPOLOGY_EDGE_KINDS.len()],
             registry.topology_element % count,
+            registry.topology_socket,
         )
     };
     let Some(start) = start else {
@@ -4032,12 +4518,20 @@ fn edit_topology_edge(world: &mut World, connect: bool) {
         .iter()
         .any(|node| node.node_id == start);
     if !start_exists {
-        world
-            .resource_mut::<EditorRegistryState>()
-            .topology_edge_start = None;
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.topology_edge_start = None;
+        registry.topology_edge_start_socket = None;
         set_editor_status(world, "Marked edge start no longer exists; mark it again");
         return;
     }
+    let start_socket = stored_start_socket.filter(|socket_id| {
+        recipe
+            .topology_sockets
+            .iter()
+            .any(|socket| socket.socket_id == socket_id.as_str() && socket.node_id == start)
+    });
+    let end_socket = selected_socket_index(&recipe, &end, socket_selection)
+        .map(|index| recipe.topology_sockets[index].socket_id.clone());
     let matches_edge = |edge: &WorldTopologyEdgeDraft| {
         edge.kind == kind
             && ((edge.from == start && edge.to == end) || (edge.from == end && edge.to == start))
@@ -4070,11 +4564,204 @@ fn edit_topology_edge(world: &mut World, connect: bool) {
                 from: start,
                 to: end,
                 kind,
+                from_socket: start_socket,
+                to_socket: end_socket,
             });
         } else {
             recipe
                 .topology_edges
                 .remove(removal_index.expect("remove operation has an edge index"));
+        }
+    });
+}
+
+const ROAD_JUNCTION_KINDS: [RoadJunctionKind; 4] = [
+    RoadJunctionKind::Merge,
+    RoadJunctionKind::Split,
+    RoadJunctionKind::Cross,
+    RoadJunctionKind::LoopLink,
+];
+
+fn cycle_road_tangent_axis(world: &mut World) {
+    let axis = {
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.road_tangent_axis = (registry.road_tangent_axis + 1) % 3;
+        registry.road_tangent_axis
+    };
+    set_editor_status(
+        world,
+        format!("Road tangent axis: {}", ["X", "Y", "Z"][axis]),
+    );
+}
+
+fn adjust_selected_road_tangent(world: &mut World, direction: f32) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a Road recipe before editing tangents");
+        return;
+    };
+    if category != persistence::ContentCategory::Road || recipe.spline_points.is_empty() {
+        set_editor_status(world, "Select a seeded Road recipe before editing tangents");
+        return;
+    }
+    let registry = world.resource::<EditorRegistryState>();
+    let point_index = registry.topology_element % recipe.spline_points.len();
+    let axis = registry.road_tangent_axis % 3;
+    let step = world.resource::<EditorGizmoSettings>().translation_snap();
+    let point_id = recipe.spline_points[point_index].point_id.clone();
+    let automatic = persistence::resolved_road_tangent(&recipe.spline_points, point_index);
+    execute_recipe_edit(
+        world,
+        format!("Adjust road tangent {point_id} {}", ["X", "Y", "Z"][axis]),
+        move |recipe| {
+            let point = &mut recipe.spline_points[point_index];
+            if point.tangent.iter().all(|value| value.abs() <= 1.0e-4) {
+                point.tangent = automatic;
+            }
+            point.tangent[axis] += direction * step;
+        },
+    );
+}
+
+fn reset_selected_road_tangent(world: &mut World) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a Road recipe before resetting tangents");
+        return;
+    };
+    if category != persistence::ContentCategory::Road || recipe.spline_points.is_empty() {
+        set_editor_status(
+            world,
+            "Select a seeded Road recipe before resetting tangents",
+        );
+        return;
+    }
+    let point_index =
+        world.resource::<EditorRegistryState>().topology_element % recipe.spline_points.len();
+    let point_id = recipe.spline_points[point_index].point_id.clone();
+    execute_recipe_edit(
+        world,
+        format!("Reset road tangent {point_id}"),
+        move |recipe| {
+            recipe.spline_points[point_index].tangent = [0.0; 3];
+        },
+    );
+}
+
+fn mark_road_junction_start(world: &mut World) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a Road recipe before authoring a junction");
+        return;
+    };
+    if category != persistence::ContentCategory::Road || recipe.spline_points.is_empty() {
+        set_editor_status(
+            world,
+            "Select a seeded Road recipe before authoring a junction",
+        );
+        return;
+    }
+    let index =
+        world.resource::<EditorRegistryState>().topology_element % recipe.spline_points.len();
+    let point_id = recipe.spline_points[index].point_id.clone();
+    world
+        .resource_mut::<EditorRegistryState>()
+        .road_junction_start = Some(point_id.clone());
+    set_editor_status(
+        world,
+        format!("Marked road point {point_id}; select a junction destination"),
+    );
+}
+
+fn cycle_road_junction_kind(world: &mut World) {
+    let kind = {
+        let mut registry = world.resource_mut::<EditorRegistryState>();
+        registry.road_junction_kind = (registry.road_junction_kind + 1) % ROAD_JUNCTION_KINDS.len();
+        ROAD_JUNCTION_KINDS[registry.road_junction_kind]
+    };
+    set_editor_status(world, format!("Road junction type: {kind:?}"));
+}
+
+fn edit_road_junction(world: &mut World, connect: bool) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a Road recipe before authoring a junction");
+        return;
+    };
+    if category != persistence::ContentCategory::Road || recipe.spline_points.is_empty() {
+        set_editor_status(
+            world,
+            "Select a seeded Road recipe before authoring a junction",
+        );
+        return;
+    }
+    let (start, kind, selected) = {
+        let registry = world.resource::<EditorRegistryState>();
+        (
+            registry.road_junction_start.clone(),
+            ROAD_JUNCTION_KINDS[registry.road_junction_kind % ROAD_JUNCTION_KINDS.len()],
+            registry.topology_element % recipe.spline_points.len(),
+        )
+    };
+    let Some(start) = start else {
+        set_editor_status(world, "Mark a road junction start point first");
+        return;
+    };
+    let end = recipe.spline_points[selected].point_id.clone();
+    if start == end {
+        set_editor_status(world, "A road junction must connect two different points");
+        return;
+    }
+    if !recipe
+        .spline_points
+        .iter()
+        .any(|point| point.point_id == start)
+    {
+        world
+            .resource_mut::<EditorRegistryState>()
+            .road_junction_start = None;
+        set_editor_status(world, "Marked road junction start no longer exists");
+        return;
+    }
+    let matches = |junction: &RoadJunctionDraft| {
+        junction.kind == kind
+            && ((junction.from_point == start && junction.to_point == end)
+                || (junction.from_point == end && junction.to_point == start))
+    };
+    let existing = recipe.road_junctions.iter().position(matches);
+    if connect && existing.is_some() {
+        set_editor_status(
+            world,
+            format!("{kind:?} junction {start} ↔ {end} already exists"),
+        );
+        return;
+    }
+    let removal_index = if connect {
+        None
+    } else {
+        let Some(index) = existing else {
+            set_editor_status(
+                world,
+                format!("No {kind:?} junction {start} ↔ {end} exists"),
+            );
+            return;
+        };
+        Some(index)
+    };
+    let description = if connect {
+        format!("Connect {kind:?} road junction {start} to {end}")
+    } else {
+        format!("Remove {kind:?} road junction {start} to {end}")
+    };
+    execute_recipe_edit(world, description, move |recipe| {
+        if connect {
+            let kind_id = format!("{kind:?}").to_lowercase();
+            recipe.road_junctions.push(RoadJunctionDraft {
+                junction_id: format!("junction.{start}.{end}.{kind_id}"),
+                from_point: start,
+                to_point: end,
+                kind,
+            });
+        } else {
+            recipe
+                .road_junctions
+                .remove(removal_index.expect("remove operation has a junction index"));
         }
     });
 }
@@ -4183,7 +4870,9 @@ fn seed_default_topology(
     recipe: &mut ProceduralRecipeDraft,
 ) {
     recipe.spline_points.clear();
+    recipe.road_junctions.clear();
     recipe.topology_nodes.clear();
+    recipe.topology_sockets.clear();
     recipe.topology_edges.clear();
     if category == persistence::ContentCategory::Road {
         recipe.spline_points = [
@@ -4197,6 +4886,7 @@ fn seed_default_topology(
             point_id: point_id.into(),
             position,
             width_scale: 1.0,
+            tangent: [0.0; 3],
         })
         .collect();
         return;
@@ -4213,6 +4903,20 @@ fn seed_default_topology(
         from: from.into(),
         to: to.into(),
         kind,
+        from_socket: None,
+        to_socket: None,
+    };
+    let socket = |socket_id: &str,
+                  node_id: &str,
+                  kind: WorldTopologySocketKind,
+                  local_position: [f32; 3],
+                  facing: [f32; 3]| WorldTopologySocketDraft {
+        socket_id: socket_id.into(),
+        node_id: node_id.into(),
+        kind,
+        local_position,
+        facing,
+        size: [2.5, 3.2],
     };
     match category {
         persistence::ContentCategory::Building => {
@@ -4247,6 +4951,24 @@ fn seed_default_topology(
                 edge("lobby", "upper", WorldTopologyEdgeKind::Stair),
                 edge("upper", "suite", WorldTopologyEdgeKind::Door),
             ];
+            recipe.topology_sockets = vec![
+                socket(
+                    "entrance.doorway.out",
+                    "entrance",
+                    WorldTopologySocketKind::Doorway,
+                    [4.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                ),
+                socket(
+                    "lobby.doorway.in",
+                    "lobby",
+                    WorldTopologySocketKind::Doorway,
+                    [-5.0, 0.0, 0.0],
+                    [-1.0, 0.0, 0.0],
+                ),
+            ];
+            recipe.topology_edges[0].from_socket = Some("entrance.doorway.out".into());
+            recipe.topology_edges[0].to_socket = Some("lobby.doorway.in".into());
         }
         persistence::ContentCategory::Cave => {
             recipe.topology_nodes = vec![
@@ -4280,6 +5002,24 @@ fn seed_default_topology(
                 edge("chamber", "travel_a", WorldTopologyEdgeKind::Tunnel),
                 edge("travel_a", "travel_b", WorldTopologyEdgeKind::Portal),
             ];
+            recipe.topology_sockets = vec![
+                socket(
+                    "entrance.tunnel.out",
+                    "entrance",
+                    WorldTopologySocketKind::Doorway,
+                    [5.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                ),
+                socket(
+                    "chamber.tunnel.in",
+                    "chamber",
+                    WorldTopologySocketKind::Doorway,
+                    [-6.0, 0.0, 0.0],
+                    [-1.0, 0.0, 0.0],
+                ),
+            ];
+            recipe.topology_edges[0].from_socket = Some("entrance.tunnel.out".into());
+            recipe.topology_edges[0].to_socket = Some("chamber.tunnel.in".into());
         }
         persistence::ContentCategory::Biome => {
             recipe.topology_nodes = vec![
@@ -4390,17 +5130,61 @@ fn compile_world_kit(
         if recipe.spline_points.len() < 2 {
             return Err("seed or author at least two spline points".into());
         }
-        for (index, points) in recipe.spline_points.windows(2).enumerate() {
-            let width = parameter("width") * (points[0].width_scale + points[1].width_scale) * 0.5;
+        let spans = recipe.spline_points.len() - 1;
+        let sample_budget = 192usize.saturating_sub(recipe.road_junctions.len());
+        let samples_per_span = (sample_budget / spans).clamp(1, 8);
+        for span in 0..spans {
+            let mut start = Vec3::from_array(recipe.spline_points[span].position);
+            for sample in 1..=samples_per_span {
+                let t = sample as f32 / samples_per_span as f32;
+                let end = Vec3::from_array(
+                    persistence::sample_road_spline_span(&recipe.spline_points, span, t)
+                        .ok_or_else(|| format!("road span {span} cannot be sampled"))?,
+                );
+                let width_scale = recipe.spline_points[span].width_scale
+                    + (recipe.spline_points[span + 1].width_scale
+                        - recipe.spline_points[span].width_scale)
+                        * t;
+                let part = segment_part(
+                    format!("Road curve {span}.{sample}"),
+                    start,
+                    end,
+                    parameter("width") * width_scale,
+                    0.8,
+                    "deck",
+                )
+                .ok_or_else(|| format!("road curve {span}.{sample} is degenerate"))?;
+                parts.push(part);
+                start = end;
+            }
+        }
+        let points = recipe
+            .spline_points
+            .iter()
+            .map(|point| (point.point_id.as_str(), Vec3::from_array(point.position)))
+            .collect::<BTreeMap<_, _>>();
+        for junction in &recipe.road_junctions {
+            let Some(start) = points.get(junction.from_point.as_str()).copied() else {
+                return Err(format!(
+                    "junction {} is missing its start point",
+                    junction.junction_id
+                ));
+            };
+            let Some(end) = points.get(junction.to_point.as_str()).copied() else {
+                return Err(format!(
+                    "junction {} is missing its destination point",
+                    junction.junction_id
+                ));
+            };
             let part = segment_part(
-                format!("Road segment {index}"),
-                Vec3::from_array(points[0].position),
-                Vec3::from_array(points[1].position),
-                width,
-                0.8,
+                format!("{:?} junction {}", junction.kind, junction.junction_id),
+                start,
+                end,
+                parameter("width") * 0.65,
+                0.7,
                 "deck",
             )
-            .ok_or_else(|| format!("road segment {index} is degenerate"))?;
+            .ok_or_else(|| format!("junction {} is degenerate", junction.junction_id))?;
             parts.push(part);
         }
     } else {
@@ -4433,9 +5217,40 @@ fn compile_world_kit(
             .iter()
             .map(|node| (node.node_id.as_str(), Vec3::from_array(node.position)))
             .collect::<BTreeMap<_, _>>();
+        let mut sockets = BTreeMap::new();
+        for socket in &recipe.topology_sockets {
+            let Some(node_position) = nodes.get(socket.node_id.as_str()).copied() else {
+                return Err(format!("socket {} has no owning node", socket.socket_id));
+            };
+            let position = node_position + Vec3::from_array(socket.local_position);
+            sockets.insert(socket.socket_id.as_str(), position);
+            let facing = Vec3::from_array(socket.facing).normalize_or(Vec3::Z);
+            let yaw = facing.x.atan2(facing.z);
+            let material_slot = match category {
+                persistence::ContentCategory::Building => "trim",
+                persistence::ContentCategory::Cave => "accent",
+                persistence::ContentCategory::City => "landmark",
+                _ => "detail",
+            };
+            parts.push(CompiledWorldKitPart {
+                name: format!("{:?} socket {}", socket.kind, socket.socket_id),
+                transform: Transform::from_translation(position)
+                    .with_rotation(Quat::from_rotation_y(yaw)),
+                size: Vec3::new(socket.size[0], socket.size[1], 0.35),
+                material_slot,
+            });
+        }
         for (index, edge) in recipe.topology_edges.iter().enumerate() {
-            let start = nodes[edge.from.as_str()];
-            let end = nodes[edge.to.as_str()];
+            let start = edge
+                .from_socket
+                .as_deref()
+                .and_then(|socket| sockets.get(socket).copied())
+                .unwrap_or(nodes[edge.from.as_str()]);
+            let end = edge
+                .to_socket
+                .as_deref()
+                .and_then(|socket| sockets.get(socket).copied())
+                .unwrap_or(nodes[edge.to.as_str()]);
             let (width, slot) = match category {
                 persistence::ContentCategory::Building => (parameter("stair_width"), "floor"),
                 persistence::ContentCategory::Cave => (parameter("tunnel_width") * 0.55, "floor"),
@@ -4803,6 +5618,9 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 registry.selected = indices[position];
                 registry.topology_element = 0;
                 registry.topology_edge_start = None;
+                registry.topology_edge_start_socket = None;
+                registry.topology_socket = 0;
+                registry.road_junction_start = None;
                 registry.selected
             };
             let content_id = world.resource::<EditorProjectSession>().project.records[selected]
@@ -5036,6 +5854,9 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     registry.recipe_parameter = 0;
                     registry.topology_element = 0;
                     registry.topology_edge_start = None;
+                    registry.topology_edge_start_socket = None;
+                    registry.topology_socket = 0;
+                    registry.road_junction_start = None;
                     world.resource_mut::<EditorDocumentState>().dirty = true;
                     world.resource_mut::<WorldKitPreviewState>().signature = None;
                     set_editor_status(world, format!("Created {content_id}"));
@@ -5178,6 +5999,9 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 let mut registry = world.resource_mut::<EditorRegistryState>();
                 registry.topology_element = 0;
                 registry.topology_edge_start = None;
+                registry.topology_edge_start_socket = None;
+                registry.topology_socket = 0;
+                registry.road_junction_start = None;
             }
             execute_recipe_edit(world, "Seed default World Kit topology", move |recipe| {
                 seed_default_topology(category, recipe);
@@ -5195,6 +6019,32 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
         EditorAction::TopologyCycleEdgeKind => cycle_topology_edge_kind(world),
         EditorAction::TopologyConnectEdge => edit_topology_edge(world, true),
         EditorAction::TopologyRemoveEdge => edit_topology_edge(world, false),
+        EditorAction::RoadTangentNextAxis => cycle_road_tangent_axis(world),
+        EditorAction::RoadTangentDecrease => adjust_selected_road_tangent(world, -1.0),
+        EditorAction::RoadTangentIncrease => adjust_selected_road_tangent(world, 1.0),
+        EditorAction::RoadTangentReset => reset_selected_road_tangent(world),
+        EditorAction::RoadMarkJunctionStart => mark_road_junction_start(world),
+        EditorAction::RoadCycleJunctionKind => cycle_road_junction_kind(world),
+        EditorAction::RoadConnectJunction => edit_road_junction(world, true),
+        EditorAction::RoadRemoveJunction => edit_road_junction(world, false),
+        EditorAction::SocketNext => cycle_selected_socket(world),
+        EditorAction::SocketCycleKind => cycle_topology_socket_kind(world),
+        EditorAction::SocketCreate => create_topology_socket(world),
+        EditorAction::SocketDelete => delete_selected_topology_socket(world),
+        EditorAction::SocketMoveXNegative => move_selected_topology_socket(world, 0, -1.0),
+        EditorAction::SocketMoveXPositive => move_selected_topology_socket(world, 0, 1.0),
+        EditorAction::SocketMoveYNegative => move_selected_topology_socket(world, 1, -1.0),
+        EditorAction::SocketMoveYPositive => move_selected_topology_socket(world, 1, 1.0),
+        EditorAction::SocketMoveZNegative => move_selected_topology_socket(world, 2, -1.0),
+        EditorAction::SocketMoveZPositive => move_selected_topology_socket(world, 2, 1.0),
+        EditorAction::TerrainOriginXNegative => adjust_terrain_origin(world, 0, -1.0),
+        EditorAction::TerrainOriginXPositive => adjust_terrain_origin(world, 0, 1.0),
+        EditorAction::TerrainOriginZNegative => adjust_terrain_origin(world, 1, -1.0),
+        EditorAction::TerrainOriginZPositive => adjust_terrain_origin(world, 1, 1.0),
+        EditorAction::TerrainClearanceDecrease => adjust_terrain_clearance(world, -1.0),
+        EditorAction::TerrainClearanceIncrease => adjust_terrain_clearance(world, 1.0),
+        EditorAction::TerrainProjectSelected => project_recipe_to_terrain(world, false),
+        EditorAction::TerrainProjectAll => project_recipe_to_terrain(world, true),
         EditorAction::CompileSandboxRoot => {
             let Some((content_id, _, _)) = selected_procedural_recipe(world) else {
                 set_editor_status(
@@ -5985,17 +6835,95 @@ fn update_editor_workspace_text(
                         .unwrap_or("— mark a node —");
                     let edge_kind = TOPOLOGY_EDGE_KINDS
                         [registry.topology_edge_kind % TOPOLOGY_EDGE_KINDS.len()];
+                    let authoring = if record.category == persistence::ContentCategory::Road
+                        && !recipe.spline_points.is_empty()
+                    {
+                        let point_index =
+                            registry.topology_element % recipe.spline_points.len();
+                        let point = &recipe.spline_points[point_index];
+                        let tangent = persistence::resolved_road_tangent(
+                            &recipe.spline_points,
+                            point_index,
+                        );
+                        let mode = if point.tangent.iter().all(|value| value.abs() <= 1.0e-4) {
+                            "AUTO"
+                        } else {
+                            "EXPLICIT"
+                        };
+                        let tangent_axis = registry.road_tangent_axis % 3;
+                        let junction_kind = ROAD_JUNCTION_KINDS
+                            [registry.road_junction_kind % ROAD_JUNCTION_KINDS.len()];
+                        let junction_start = registry
+                            .road_junction_start
+                            .as_deref()
+                            .unwrap_or("— mark a road point —");
+                        format!(
+                            "Tangent {mode}: [{:.1}, {:.1}, {:.1}] • axis {}={:.1}\nJunction: {junction_kind:?} from {junction_start}",
+                            tangent[0],
+                            tangent[1],
+                            tangent[2],
+                            ["X", "Y", "Z"][tangent_axis],
+                            tangent[tangent_axis]
+                        )
+                    } else {
+                        let socket = selected_topology_node_id(
+                            record.category,
+                            recipe,
+                            registry.topology_element,
+                        )
+                        .and_then(|node_id| {
+                            selected_socket_index(recipe, node_id, registry.topology_socket)
+                        })
+                        .map(|index| &recipe.topology_sockets[index]);
+                        let socket_label = socket.map_or_else(
+                            || format!(
+                                "— no socket • new {:?} —",
+                                TOPOLOGY_SOCKET_KINDS[registry.topology_socket_kind
+                                    % TOPOLOGY_SOCKET_KINDS.len()]
+                            ),
+                            |socket| {
+                                format!(
+                                    "{:?} {} @ [{:.1}, {:.1}, {:.1}]",
+                                    socket.kind,
+                                    socket.socket_id,
+                                    socket.local_position[0],
+                                    socket.local_position[1],
+                                    socket.local_position[2]
+                                )
+                            },
+                        );
+                        format!(
+                            "Socket: {socket_label}\nEdge: {edge_kind:?} from {edge_start}{}",
+                            registry
+                                .topology_edge_start_socket
+                                .as_deref()
+                                .map(|socket| format!(" via {socket}"))
+                                .unwrap_or_default()
+                        )
+                    };
+                    let terrain_target = terrain_projection_y(
+                        record.category,
+                        recipe,
+                        registry.topology_element
+                            % topology_element_count(record.category, recipe).max(1),
+                    )
+                    .map(|height| format!("{height:.2}m"))
+                    .unwrap_or_else(|| "—".into());
                     format!(
-                        "\nWORLD KIT: {} • Seed {} • Rev {}\nTopology: {} points • {} nodes • {} edges\nSelected: {}\nEdge: {:?} from {}\nSlot {}: {}\n{}: {:.2}  [{:.2}–{:.2}]",
+                        "\nWORLD KIT: {} • Seed {} • Rev {}\nTopology: {} points • {} junctions • {} nodes • {} sockets • {} edges\nTerrain origin: [{:.0}, {:.0}] • clearance {:.2}m • selected target {terrain_target}\nSelected: {}\n{}\nSlot {}: {}\n{}: {:.2}  [{:.2}–{:.2}]",
                         world_recipe_label(record.category),
                         recipe.seed,
                         recipe.revision,
                         recipe.spline_points.len(),
+                        recipe.road_junctions.len(),
                         recipe.topology_nodes.len(),
+                        recipe.topology_sockets.len(),
                         recipe.topology_edges.len(),
+                        recipe.terrain_projection.world_origin[0],
+                        recipe.terrain_projection.world_origin[1],
+                        recipe.terrain_projection.clearance,
                         topology_selection,
-                        edge_kind,
-                        edge_start,
+                        authoring,
                         slot,
                         material,
                         parameter.label,
@@ -6139,6 +7067,28 @@ fn draw_editor_gizmos(
                 {
                     let local = Vec3::from_array(position);
                     let center = root_transform.transform_point(local);
+                    let element_count = topology_element_count(record.category, recipe);
+                    let element_index = registry.topology_element % element_count.max(1);
+                    if let Some(target_y) =
+                        terrain_projection_y(record.category, recipe, element_index)
+                    {
+                        let target =
+                            root_transform.transform_point(Vec3::new(local.x, target_y, local.z));
+                        let terrain_color = Color::srgb(0.35, 1.0, 0.58);
+                        gizmos.line(
+                            target - Vec3::X * 0.5,
+                            target + Vec3::X * 0.5,
+                            terrain_color,
+                        );
+                        gizmos.line(
+                            target - Vec3::Z * 0.5,
+                            target + Vec3::Z * 0.5,
+                            terrain_color,
+                        );
+                        if center.distance_squared(target) > 0.0001 {
+                            gizmos.line(center, target, terrain_color);
+                        }
+                    }
                     for (axis, color) in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().zip([
                         Color::srgb(1.0, 0.18, 0.18),
                         Color::srgb(0.25, 1.0, 0.35),
@@ -6152,14 +7102,77 @@ fn draw_editor_gizmos(
                         center + Vec3::Y * 1.8,
                         Color::srgb(1.0, 0.82, 0.18),
                     );
+                    if record.category == persistence::ContentCategory::Road {
+                        let point_index = registry.topology_element % recipe.spline_points.len();
+                        let tangent = Vec3::from_array(persistence::resolved_road_tangent(
+                            &recipe.spline_points,
+                            point_index,
+                        ));
+                        let tangent_end = root_transform.transform_point(local + tangent);
+                        gizmos.arrow(center, tangent_end, Color::srgb(1.0, 0.24, 0.82));
+                        if let Some(start_id) = registry.road_junction_start.as_deref() {
+                            if let Some(start_point) = recipe
+                                .spline_points
+                                .iter()
+                                .find(|point| point.point_id == start_id)
+                            {
+                                let start = root_transform
+                                    .transform_point(Vec3::from_array(start_point.position));
+                                let start_color = Color::srgb(0.18, 0.92, 1.0);
+                                for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                                    gizmos.line(
+                                        start - axis * 0.55,
+                                        start + axis * 0.55,
+                                        start_color,
+                                    );
+                                }
+                                if start != center {
+                                    gizmos.line(start, center, start_color);
+                                }
+                            }
+                        }
+                    } else if let Some(node_id) = selected_topology_node_id(
+                        record.category,
+                        recipe,
+                        registry.topology_element,
+                    ) {
+                        if let Some(socket_index) =
+                            selected_socket_index(recipe, node_id, registry.topology_socket)
+                        {
+                            let socket = &recipe.topology_sockets[socket_index];
+                            let socket_center = root_transform
+                                .transform_point(local + Vec3::from_array(socket.local_position));
+                            let socket_color = Color::srgb(1.0, 0.48, 0.12);
+                            for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                                gizmos.line(
+                                    socket_center - axis * 0.35,
+                                    socket_center + axis * 0.35,
+                                    socket_color,
+                                );
+                            }
+                            let facing = Vec3::from_array(socket.facing).normalize_or(Vec3::Z);
+                            gizmos.arrow(socket_center, socket_center + facing * 0.9, socket_color);
+                        }
+                    }
                     if let Some(start_id) = registry.topology_edge_start.as_deref() {
                         if let Some(start_node) = recipe
                             .topology_nodes
                             .iter()
                             .find(|node| node.node_id == start_id)
                         {
-                            let start = root_transform
-                                .transform_point(Vec3::from_array(start_node.position));
+                            let start_local = Vec3::from_array(start_node.position)
+                                + registry
+                                    .topology_edge_start_socket
+                                    .as_deref()
+                                    .and_then(|socket_id| {
+                                        recipe
+                                            .topology_sockets
+                                            .iter()
+                                            .find(|socket| socket.socket_id == socket_id)
+                                    })
+                                    .map(|socket| Vec3::from_array(socket.local_position))
+                                    .unwrap_or(Vec3::ZERO);
+                            let start = root_transform.transform_point(start_local);
                             let start_color = Color::srgb(0.18, 0.92, 1.0);
                             for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
                                 gizmos.line(start - axis * 0.55, start + axis * 0.55, start_color);
@@ -7043,6 +8056,7 @@ mod tests {
         let (_, _, recipe) = selected_procedural_recipe(&world).unwrap();
         assert!(recipe.spline_points.is_empty());
         assert!(recipe.topology_nodes.is_empty());
+        assert!(recipe.topology_sockets.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -7122,6 +8136,76 @@ mod tests {
             .message
             .contains("Seed topology"));
         assert_eq!(world.resource::<EditorUndoStack>().undo.len(), 0);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn terrain_projection_is_controller_driven_transactional_and_collider_exact() {
+        let (mut world, root) = persistence_test_world("terrain_projection_authoring");
+        let building_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Building, "Mountain Rooms")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+        apply_editor_action(&mut world, EditorAction::TerrainOriginXPositive);
+        apply_editor_action(&mut world, EditorAction::TerrainOriginZNegative);
+        apply_editor_action(&mut world, EditorAction::TerrainClearanceIncrease);
+
+        let (before, expected_selected) = {
+            let recipe = world.resource::<EditorProjectSession>().project.payloads[&building_id]
+                .procedural_recipe()
+                .unwrap();
+            assert_eq!(recipe.terrain_projection.world_origin, [250.0, -250.0]);
+            assert_eq!(recipe.terrain_projection.clearance, 1.5);
+            (
+                recipe.topology_nodes[0].position[1],
+                terrain_projection_y(persistence::ContentCategory::Building, recipe, 0).unwrap(),
+            )
+        };
+        apply_editor_action(&mut world, EditorAction::TerrainProjectSelected);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&building_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_nodes[0]
+                .position[1],
+            expected_selected
+        );
+        apply_editor_action(&mut world, EditorAction::Undo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&building_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_nodes[0]
+                .position[1],
+            before
+        );
+        apply_editor_action(&mut world, EditorAction::Redo);
+
+        let expected_all = {
+            let recipe = world.resource::<EditorProjectSession>().project.payloads[&building_id]
+                .procedural_recipe()
+                .unwrap();
+            (0..recipe.topology_nodes.len())
+                .map(|index| {
+                    terrain_projection_y(persistence::ContentCategory::Building, recipe, index)
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        apply_editor_action(&mut world, EditorAction::TerrainProjectAll);
+        let recipe = world.resource::<EditorProjectSession>().project.payloads[&building_id]
+            .procedural_recipe()
+            .unwrap();
+        assert!(recipe
+            .topology_nodes
+            .iter()
+            .zip(expected_all)
+            .all(|(node, expected)| node.position[1] == expected));
+        assert!(validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
+        assert!(compile_world_kit(persistence::ContentCategory::Building, recipe).is_ok());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -7233,6 +8317,180 @@ mod tests {
     }
 
     #[test]
+    fn road_tangents_and_junctions_are_transactional_and_compile_curves() {
+        let (mut world, root) = persistence_test_world("road_tangent_junction_authoring");
+        let road_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Road, "Curve Network")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+
+        let automatic = {
+            let recipe = world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap();
+            persistence::resolved_road_tangent(&recipe.spline_points, 1)
+        };
+        apply_editor_action(&mut world, EditorAction::RoadTangentIncrease);
+        let explicit = world.resource::<EditorProjectSession>().project.payloads[&road_id]
+            .procedural_recipe()
+            .unwrap()
+            .spline_points[1]
+            .tangent;
+        assert_eq!(explicit[0], automatic[0] + 0.5);
+        apply_editor_action(&mut world, EditorAction::Undo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .spline_points[1]
+                .tangent,
+            [0.0; 3]
+        );
+
+        apply_editor_action(&mut world, EditorAction::RoadMarkJunctionStart);
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+        apply_editor_action(&mut world, EditorAction::RoadConnectJunction);
+        let (_, _, recipe) = selected_procedural_recipe(&world).unwrap();
+        assert_eq!(recipe.road_junctions.len(), 1);
+        assert_eq!(recipe.road_junctions[0].kind, RoadJunctionKind::Merge);
+        assert!(validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
+        let compiled = compile_world_kit(persistence::ContentCategory::Road, &recipe).unwrap();
+        assert_eq!(compiled.len(), 25);
+        assert!(compiled.iter().any(|part| part.name.contains("junction")));
+        assert!(compiled.iter().any(|part| part.name.contains("Road curve")));
+
+        apply_editor_action(&mut world, EditorAction::RoadRemoveJunction);
+        assert!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .road_junctions
+                .is_empty()
+        );
+        apply_editor_action(&mut world, EditorAction::Undo);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .road_junctions
+                .len(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn doorway_sockets_bind_edges_compile_offsets_and_delete_safely() {
+        let (mut world, root) = persistence_test_world("doorway_socket_authoring");
+        let building_id = world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .create_content(persistence::ContentCategory::Building, "Socket Building")
+            .unwrap();
+        world.resource_mut::<EditorRegistryState>().selected = 1;
+        apply_editor_action(&mut world, EditorAction::SeedDefaultTopology);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&building_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_sockets
+                .len(),
+            2
+        );
+
+        apply_editor_action(&mut world, EditorAction::SocketCreate);
+        apply_editor_action(&mut world, EditorAction::SocketNext);
+        let created_id = world.resource::<EditorProjectSession>().project.payloads[&building_id]
+            .procedural_recipe()
+            .unwrap()
+            .topology_sockets[2]
+            .socket_id
+            .clone();
+        apply_editor_action(&mut world, EditorAction::SocketMoveYPositive);
+        assert_eq!(
+            world.resource::<EditorProjectSession>().project.payloads[&building_id]
+                .procedural_recipe()
+                .unwrap()
+                .topology_sockets[2]
+                .local_position[1],
+            0.5
+        );
+        apply_editor_action(&mut world, EditorAction::TopologyMarkEdgeStart);
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+        apply_editor_action(&mut world, EditorAction::TopologyCycleEdgeKind);
+        apply_editor_action(&mut world, EditorAction::TopologyConnectEdge);
+
+        let (_, _, recipe) = selected_procedural_recipe(&world).unwrap();
+        let stair = recipe
+            .topology_edges
+            .iter()
+            .find(|edge| {
+                edge.kind == WorldTopologyEdgeKind::Stair
+                    && edge.from == "entrance"
+                    && edge.to == "lobby"
+            })
+            .unwrap();
+        assert_eq!(stair.from_socket.as_deref(), Some(created_id.as_str()));
+        assert_eq!(stair.to_socket.as_deref(), Some("lobby.doorway.in"));
+        assert!(validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
+        let compiled = compile_world_kit(persistence::ContentCategory::Building, &recipe).unwrap();
+        let connector = compiled
+            .iter()
+            .find(|part| part.name == "Stair connector 3")
+            .unwrap();
+        assert_ne!(connector.transform.translation, Vec3::new(-6.0, 0.0, 0.0));
+
+        apply_editor_action(&mut world, EditorAction::TopologyPrevious);
+        apply_editor_action(&mut world, EditorAction::SocketNext);
+        apply_editor_action(&mut world, EditorAction::SocketDelete);
+        let recipe = world.resource::<EditorProjectSession>().project.payloads[&building_id]
+            .procedural_recipe()
+            .unwrap();
+        assert!(!recipe
+            .topology_sockets
+            .iter()
+            .any(|socket| socket.socket_id == created_id));
+        assert!(recipe
+            .topology_edges
+            .iter()
+            .find(|edge| {
+                edge.kind == WorldTopologyEdgeKind::Stair
+                    && edge.from == "entrance"
+                    && edge.to == "lobby"
+            })
+            .unwrap()
+            .from_socket
+            .is_none());
+        apply_editor_action(&mut world, EditorAction::Undo);
+        let recipe = world.resource::<EditorProjectSession>().project.payloads[&building_id]
+            .procedural_recipe()
+            .unwrap();
+        assert!(recipe
+            .topology_sockets
+            .iter()
+            .any(|socket| socket.socket_id == created_id));
+        assert_eq!(
+            recipe
+                .topology_edges
+                .iter()
+                .find(|edge| {
+                    edge.kind == WorldTopologyEdgeKind::Stair
+                        && edge.from == "entrance"
+                        && edge.to == "lobby"
+                })
+                .unwrap()
+                .from_socket
+                .as_deref(),
+            Some(created_id.as_str())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn sandbox_root_swap_is_atomic_bounded_and_reuses_assets() {
         let (mut world, root) = persistence_test_world("sandbox_atomic_swap");
         let road_id = world
@@ -7253,7 +8511,7 @@ mod tests {
                 .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
                 .iter(&world)
                 .count(),
-            3
+            24
         );
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
         assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
@@ -7272,7 +8530,7 @@ mod tests {
                 .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
                 .iter(&world)
                 .count(),
-            3
+            24
         );
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
         assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);

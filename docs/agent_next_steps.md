@@ -458,9 +458,13 @@ campaign content, engine combat, and Forge promotion:
 2. **Recommended tool slice — ET5d topology editing continuation:** snapped
    controller movement, viewport locators, and typed endpoint-based graph edge
    creation/removal are delivered. Direct pointer XYZ dragging now previews and
-   commits a single snapped recipe transaction. Next add spline tangent/junction
-   editing inside the protected sandbox, retaining the last valid root for
-   invalid drafts. Do not promote shipped roots yet.
+   commits a single snapped recipe transaction. Automatic/explicit Hermite
+   tangents, typed road junction connectors, and typed node sockets with
+   controller placement and socket-bound edge endpoints are also delivered.
+   Terrain projection now uses the shipped collider surface with persisted
+   world origin/clearance, controller project-selected/project-all actions, and
+   undoable last-valid-root protection. Next add structured validation
+   highlights inside the protected sandbox. Do not promote shipped roots yet.
 3. **Acceptance slice:** record boot → character → chapter/settings/garage →
    gameplay → pause/return using four pads, plus EC1 30/60/120/144 Hz comparison.
 

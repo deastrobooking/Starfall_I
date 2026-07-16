@@ -37,8 +37,17 @@ together.
   connects/removes exact edges with a live guide and last-valid-root retention.
   Direct red/green/blue viewport handles project pointer movement into snapped
   recipe-space XYZ and commit one snapshot transaction on release. Spline
-  junctions, terrain projection, and published-layer promotion remain; ET4
-  production workspace integration also remains.
+  points now carry backward-compatible automatic/explicit Hermite derivatives;
+  sampled curves and typed Merge/Split/Cross/Loop-Link connectors compile under
+  the sandbox budget. Building/cave/city/biome nodes now own typed Doorway,
+  Stair Landing, Encounter, Item, and Portal sockets with stable IDs, bounded
+  local transforms, controller editing, viewport facing guides, and optional
+  edge endpoint bindings that preserve legacy center-to-center recipes. Terrain
+  projection persists a bounded world origin/clearance and projects selected or
+  complete topology against the exact shipped terrain-collider surface through
+  controller-driven undoable edits and green viewport targets. Structured
+  validation highlighting and published-layer promotion remain; ET4 production
+  workspace integration also remains.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
 - Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
