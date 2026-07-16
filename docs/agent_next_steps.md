@@ -265,7 +265,11 @@ Goal: make the core hero feel reliable before adding many more levels.
   it only when a test needs a missing signal or assignment detail.
 - Complete EC2 `MoveDef` frame data, cancel windows, hit/hurt layers, per-move
   i-frames, and player-received knockback. Bounded hitstop and the first reaction
-  feedback layer are already delivered.
+  feedback layer are already delivered. Star Sabre and ranged-weapon coverage is
+  delivered (July 16, 2026): `MoveLibrary` carries a sabre chain, sabre wave, and
+  all six ranged primaries as data (`RangedMoveDef`), synced onto weapon slots
+  and consumed by sabre cadence/knockback/damage and projectile stats; special
+  weapons and enemy ranged attacks still use component tuning.
 - Add manual smoke notes for at least two Xbox-style controllers and one
   PlayStation-style controller when available.
 
@@ -303,7 +307,9 @@ real Bevy gamepad rumble requests. Remaining production work:
 - Add a persistent race HUD/leaderboard, timed starts, opponent lap timing,
   authored trick names, landing-failure penalties, and stunt/race audio cues.
 - Add automated grade, connectivity, ramp-direction, landing-clearance, barrier,
-  and underside-artifact checks; extract road generation on a proven boundary.
+  and underside-artifact checks. Road generation extraction is delivered: the
+  speed-road subsystem (56 items) lives in `src/plugins/world_plugin/roads.rs`;
+  gameplay road-vehicle systems remain in `world_plugin.rs`.
 - Add world-obstacle casts to the existing swept target collision so fast
   tracking missiles cannot pass through thin city or dungeon walls.
 - Move the existing beam, lock-ring, trail, Star Sabre blade, and impact visuals
@@ -350,18 +356,29 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
   gates. It was restored on July 16, 2026 after an audit found the entire file
   commented out despite documentation claiming CI was active. Confirm the first
   remote push/pull-request run is green.
-- `SaveData` now has schema version 3 and rotating slots, but writes are not yet
-  crash-safe and corrupt JSON is skipped silently. Next, write each slot to a
-  same-directory temporary file, flush/sync as appropriate, atomically rename
-  it into place, and surface parse/read failures without discarding valid older
-  rotation slots.
+- Save hardening delivered (July 16, 2026): `SaveData` is schema version 4 with
+  a monotonic `save_generation`; every slot and the settings file write through
+  a same-directory temp file with flush/sync and atomic rename; load inspects
+  all three slots and picks the valid record with the highest generation while
+  warning about corrupt/unreadable slots; v3 files migrate in place and
+  unsupported future versions are rejected explicitly; rotation resumes at the
+  slot after the newest loaded record. Saves now live in the platform data dir
+  (`dirs::data_dir()/starfall_i`) with a non-destructive first-run migration of
+  legacy working-directory files. Covered by tests for interrupted writes,
+  corrupt newest slots, generation ordering, legacy v3, and future versions.
 - Explicit `GamepadAssignments` and Start-to-join ownership are delivered;
   reconnect releases and reclaims the stable player slot rather than assigning
   gameplay by gamepad query order. The remaining work is four-controller
   hardware acceptance, not a second assignment implementation.
-- Audit `unwrap`/`expect` usage (especially generated physics colliders in `src/plugins/world_plugin.rs` and save path lookups) providing fallback behaviors or explicit typed errors instead of silent panics.
+- Reachable production panic audit delivered (July 16, 2026): terrain trimesh
+  collider failure now warns with mesh identity and spawns terrain without
+  physics instead of crashing; terrain height cache locks recover from poison;
+  the shared-camera anchor falls back through threats → players → `Vec3::ZERO`.
+  All remaining `unwrap`/`expect` hits in `src/` were audited and are either
+  guarded by adjacent checks, on const data, or inside `#[cfg(test)]`.
 - Unclutter `src/main.rs` by migrating plugin-specific `init_resource` calls and localized configurations into their respective plugin `build()` configurations.
-- Move towards platform-agnostic save paths via standard library/directory hooks instead of writing `starfall_i_save.json` to the current working directory.
+- Platform-agnostic save paths delivered with the save-hardening slice above;
+  legacy working-directory files are migrated once, never overwritten.
 
 Verification:
 

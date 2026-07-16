@@ -38,7 +38,7 @@ use crate::rendering::{
     SpatialBundle,
 };
 use crate::resources::{
-    is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe, CameraShake,
+    is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     ChapterProgress, CurrentChapter, DungeonCrawlState, LocalPlayerConfig, PlaySessionTransition,
     PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig, WorldRouteRegistry, WorldRouteState,
 };
@@ -279,7 +279,6 @@ impl Plugin for PlayerPlugin {
                 (
                     dedupe_player_entities,
                     player_look,
-                    camera_shake_system,
                     update_camera_post_processing,
                     update_rocket_hoverboard_visuals,
                     traversal_mode_switch_update.run_if(hitstop_inactive),
@@ -302,7 +301,6 @@ impl Plugin for PlayerPlugin {
                 (
                     dedupe_player_entities,
                     player_look,
-                    camera_shake_system,
                     update_camera_post_processing,
                     update_rocket_hoverboard_visuals,
                     shared_encounter_camera_mode_system,
@@ -870,7 +868,6 @@ fn spawn_players(
                     transform: player_camera_transform(
                         &Transform::from_translation(spawn_pos),
                         0.0,
-                        Vec3::ZERO,
                     ),
                     camera: Camera {
                         order: i as isize,
@@ -1164,24 +1161,6 @@ fn player_look(
     }
 }
 
-// ── Camera Shake ──────────────────────────────────────────────────────────────
-fn camera_shake_system(
-    time: Res<Time>,
-    mut shake: ResMut<CameraShake>,
-    mut damage_ev: MessageReader<PlayerDamagedEvent>,
-) {
-    for ev in damage_ev.read() {
-        let trauma = (ev.amount / 25.0).clamp(0.12, 0.65);
-        if let Some(player_index) = ev.player_index {
-            shake.add_player_trauma(player_index, trauma);
-        } else {
-            shake.add_trauma(trauma);
-        }
-    }
-
-    shake.decay(time.delta_secs() * 2.0);
-}
-
 fn interpolate_viewport(
     from: Option<Viewport>,
     to: Option<Viewport>,
@@ -1229,7 +1208,6 @@ fn player_camera_follow_system(
     sim: Res<SimConfig>,
     fixed_time: Res<Time<Fixed>>,
     mut transition: ResMut<CameraDisplayTransition>,
-    shake: Res<CameraShake>,
     dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
     window_q: Query<&Window, With<PrimaryWindow>>,
@@ -1238,11 +1216,9 @@ fn player_camera_follow_system(
             &PlayerIndex,
             &Transform,
             &PlayerCameraRef,
-            Option<&PlayerMovement>,
             Option<&GrappleHookState>,
             Option<&JetpackState>,
             Option<&TraversalModeState>,
-            Option<&ClimbState>,
             Option<&PreviousTickPosition>,
         ),
         (With<Player>, Without<PlayerCamera>),
@@ -1285,44 +1261,29 @@ fn player_camera_follow_system(
     let p = transition.progress;
     let s = 3.0 * p * p - 2.0 * p * p * p; // Smoothstep S-curve
 
-    let max_trauma = player_q
-        .iter()
-        .map(|(index, _, _, _, _, _, _, _, _)| shake.trauma_for(index.0))
-        .fold(0.0_f32, f32::max);
-    let shake_offset = camera_shake_offset(max_trauma);
-
     // Compute target single screen/unified shared viewport transform
     let shared_target_transform = if transition.last_was_dungeon {
         let party_focus = average_positions(
             &player_q
                 .iter()
-                .map(|(_, transform, _, _, _, _, _, _, _)| transform.translation)
+                .map(|(_, transform, _, _, _, _, _)| transform.translation)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or(dungeon.focus);
         let dungeon_focus =
             clamp_to_dungeon_focus(party_focus, dungeon.focus, dungeon.radius * 0.62);
-        dungeon_crawl_camera_transform(dungeon_focus, dungeon.radius, shake_offset)
+        dungeon_crawl_camera_transform(dungeon_focus, dungeon.radius)
     } else {
-        shared_boss_camera_transform(shared_camera.focus, shared_camera.radius, shake_offset)
+        shared_boss_camera_transform(shared_camera.focus, shared_camera.radius)
     };
 
     let lead_camera = player_q
         .iter()
-        .min_by_key(|(index, _, _, _, _, _, _, _, _)| index.0)
-        .map(|(_, _, camera_ref, _, _, _, _, _, _)| camera_ref.0);
+        .min_by_key(|(index, _, _, _, _, _, _)| index.0)
+        .map(|(_, _, camera_ref, _, _, _, _)| camera_ref.0);
 
-    for (
-        index,
-        player_transform,
-        camera_ref,
-        movement,
-        grapple,
-        jetpack,
-        traversal,
-        climb,
-        prev_tick,
-    ) in player_q.iter()
+    for (index, player_transform, camera_ref, grapple, jetpack, traversal, prev_tick) in
+        player_q.iter()
     {
         // EC1b render interpolation: while the fixed motor is on, follow a
         // position lerped from the last tick-start toward the live transform by
@@ -1340,16 +1301,10 @@ fn player_camera_follow_system(
             _ => player_transform,
         };
         referenced.push(camera_ref.0);
-        let player_shake = camera_shake_offset(shake.trauma_for(index.0));
-
         if let Ok((camera_entity, mut camera_transform, pitch, mut camera, mut projection)) =
             cam_q.get_mut(camera_ref.0)
         {
-            let mut local_ind_transform =
-                player_camera_transform(player_transform, pitch.0, player_shake);
-            let horizontal_speed = movement.map(|m| m.ground_velocity.length()).unwrap_or(0.0);
-            let vertical_speed = movement.map(|m| m.velocity.y.abs()).unwrap_or(0.0);
-            let speed_pullback = (horizontal_speed + vertical_speed * 0.35).clamp(0.0, 2.6);
+            let mut local_ind_transform = player_camera_transform(player_transform, pitch.0);
             let hook_pullback = grapple
                 .map(|g| if g.is_active() { 3.0 } else { 0.0 })
                 .unwrap_or(0.0);
@@ -1376,29 +1331,16 @@ fn player_camera_follow_system(
                     }
                 })
                 .unwrap_or(0.0);
-            // Climbing: pull well back and lift so the face above (and drop
-            // below) stays readable while scaling walls.
-            let climb_pullback = climb
-                .map(|c| if c.is_climbing { 4.6 } else { 0.0 })
-                .unwrap_or(0.0);
             local_ind_transform.translation += player_transform.rotation
                 * Vec3::new(
                     0.0,
-                    flight_lift + speed_pullback * 0.18 + climb_pullback * 0.45,
-                    hook_pullback
-                        + board_pullback
-                        + speed_pullback
-                        + climb_pullback
-                        + stunt_intensity * 0.85,
+                    flight_lift,
+                    hook_pullback + board_pullback + stunt_intensity * 0.85,
                 );
             if let Projection::Perspective(ref mut perspective) = *projection {
-                let target_fov = (58.0
-                    + speed_pullback * 4.0
-                    + hook_pullback * 1.2
-                    + board_pullback * 1.6
-                    + stunt_intensity * 2.1
-                    + climb_pullback * 2.2)
-                    .to_radians();
+                let target_fov =
+                    (58.0 + hook_pullback * 1.2 + board_pullback * 1.6 + stunt_intensity * 2.1)
+                        .to_radians();
                 perspective.fov += (target_fov - perspective.fov) * (1.0 - (-dt * 8.0).exp());
             }
             let is_lead = Some(camera_entity) == lead_camera;
@@ -1414,7 +1356,13 @@ fn player_camera_follow_system(
                 // Fully split-screen mode
                 camera.is_active = true;
                 camera.viewport = player_viewport(index.0, active_players, win_w, win_h);
-                *camera_transform = local_ind_transform;
+                camera_transform.translation = smooth_camera_position(
+                    camera_transform.translation,
+                    local_ind_transform.translation,
+                    dt,
+                );
+                camera_transform.rotation = local_ind_transform.rotation;
+                camera_transform.scale = Vec3::ONE;
             } else {
                 // In transition: Keep both active to perform the blending
                 camera.is_active = true;
@@ -1464,12 +1412,8 @@ fn player_camera_follow_system(
     }
 }
 
-fn player_camera_transform(
-    player_transform: &Transform,
-    pitch: f32,
-    shake_offset: Vec3,
-) -> Transform {
-    let local_offset = third_person_camera_offset() + shake_offset;
+fn player_camera_transform(player_transform: &Transform, pitch: f32) -> Transform {
+    let local_offset = third_person_camera_offset();
     Transform {
         translation: player_transform.translation + player_transform.rotation * local_offset,
         rotation: player_transform.rotation * Quat::from_rotation_x(pitch),
@@ -1477,34 +1421,24 @@ fn player_camera_transform(
     }
 }
 
-fn camera_shake_offset(trauma: f32) -> Vec3 {
-    if trauma > 0.01 {
-        use rand::Rng;
-        // Presentation-only randomness (screen shake offset): exempt from the
-        // deterministic GameRng seam — cannot affect simulation state.
-        let mut rng = rand::thread_rng();
-        let mag = trauma * trauma * 0.18;
-        Vec3::new(
-            rng.gen_range(-1.0f32..1.0) * mag,
-            rng.gen_range(-0.5f32..0.5) * mag,
-            rng.gen_range(-1.0f32..1.0) * mag,
-        )
-    } else {
-        Vec3::ZERO
+fn smooth_camera_position(current: Vec3, target: Vec3, dt: f32) -> Vec3 {
+    if current.distance_squared(target) > 24.0 * 24.0 {
+        return target;
     }
+    current.lerp(target, 1.0 - (-dt.max(0.0) * 20.0).exp())
 }
 
-fn shared_boss_camera_transform(focus: Vec3, radius: f32, shake_offset: Vec3) -> Transform {
+fn shared_boss_camera_transform(focus: Vec3, radius: f32) -> Transform {
     let distance = (radius * 1.25).clamp(34.0, 96.0);
     let height = (radius * 0.72 + 14.0).clamp(24.0, 72.0);
-    let translation = focus + Vec3::new(0.0, height, distance) + shake_offset;
+    let translation = focus + Vec3::new(0.0, height, distance);
     Transform::from_translation(translation).looking_at(focus + Vec3::Y * 2.2, Vec3::Y)
 }
 
-fn dungeon_crawl_camera_transform(focus: Vec3, radius: f32, shake_offset: Vec3) -> Transform {
+fn dungeon_crawl_camera_transform(focus: Vec3, radius: f32) -> Transform {
     let height = (radius * 1.12).clamp(46.0, 92.0);
     let z_offset = (radius * 0.22).clamp(10.0, 22.0);
-    let translation = focus + Vec3::new(0.0, height, z_offset) + shake_offset;
+    let translation = focus + Vec3::new(0.0, height, z_offset);
     Transform::from_translation(translation).looking_at(focus + Vec3::Y * 1.0, Vec3::Y)
 }
 
@@ -1641,7 +1575,9 @@ fn nearby_drone_threats(
 }
 
 fn shared_encounter_frame(players: &[Vec3], threats: &[Vec3]) -> (Vec3, Vec3, f32) {
-    let anchor = average_positions(threats).unwrap_or_else(|| average_positions(players).unwrap());
+    let anchor = average_positions(threats)
+        .or_else(|| average_positions(players))
+        .unwrap_or(Vec3::ZERO);
     let mut weighted = Vec::with_capacity(players.len() + threats.len() * 2);
     weighted.extend_from_slice(players);
     for threat in threats {
@@ -3555,4 +3491,15 @@ mod tests {
         assert!(entry.distance(exit) < 0.001);
         assert!((top.y - entry.y - 48.0).abs() < 0.001);
     }
+}
+#[test]
+fn camera_follow_damps_small_locomotion_corrections_and_snaps_large_warps() {
+    let current = Vec3::ZERO;
+    let nearby = Vec3::new(0.0, 0.2, 0.4);
+    let smoothed = smooth_camera_position(current, nearby, 1.0 / 60.0);
+    assert!(smoothed.length() > 0.0);
+    assert!(smoothed.length() < nearby.length());
+
+    let warp = Vec3::new(30.0, 0.0, 0.0);
+    assert_eq!(smooth_camera_position(current, warp, 1.0 / 60.0), warp);
 }

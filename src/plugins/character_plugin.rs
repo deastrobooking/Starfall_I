@@ -168,6 +168,20 @@ struct PoseSample {
     wall_clasp_time: f32,
 }
 
+/// Natural locomotion keeps the arms close to the torso and swings them along
+/// the character's forward axis. Returning explicit shoulder pitches keeps the
+/// Studio, joint-rig, and fallback cartoon renderers on the same motion contract.
+fn locomotion_arm_pitches(pose: CartoonPose, phase: f32, agility: f32) -> (f32, f32) {
+    let amplitude = match pose {
+        CartoonPose::Walk => 0.48,
+        CartoonPose::Run => 0.82,
+        CartoonPose::Sprint => 1.02,
+        _ => 0.0,
+    } * agility.clamp(0.82, 1.18);
+    let swing = (phase * 1.1).sin() * amplitude;
+    (swing, -swing)
+}
+
 #[derive(Clone, Copy, Default)]
 struct PoseInput {
     state: Option<PlayerState>,
@@ -897,7 +911,8 @@ fn studio_human_animation_system(
         let rotation = match pose {
             CartoonPose::Walk => match part.region {
                 StudioBodyRegion::LeftArm | StudioBodyRegion::RightArm => {
-                    Quat::from_rotation_x(-wave * side * 0.48)
+                    let (left, right) = locomotion_arm_pitches(pose, phase, 1.0);
+                    Quat::from_rotation_x(if side < 0.0 { left } else { right })
                 }
                 StudioBodyRegion::LeftLeg | StudioBodyRegion::RightLeg => {
                     Quat::from_rotation_x(wave * side * 0.52)
@@ -913,7 +928,8 @@ fn studio_human_animation_system(
                 };
                 match part.region {
                     StudioBodyRegion::LeftArm | StudioBodyRegion::RightArm => {
-                        Quat::from_rotation_x(-wave * side * amount)
+                        let (left, right) = locomotion_arm_pitches(pose, phase, 1.0);
+                        Quat::from_rotation_x(if side < 0.0 { left } else { right })
                     }
                     StudioBodyRegion::LeftLeg | StudioBodyRegion::RightLeg => {
                         Quat::from_rotation_x(wave * side * amount * 0.92)
@@ -1050,6 +1066,8 @@ fn apply_joint_pose(
                 CartoonPose::Sprint => -0.22,
                 _ => 0.0,
             };
+            let (left_arm_pitch, right_arm_pitch) =
+                locomotion_arm_pitches(sample.pose, sample.phase, sample.agility);
             match marker.kind {
                 JointKind::Pelvis => {
                     transform.translation.y += wave.abs() * 0.055 * run_scale.max(0.4);
@@ -1064,16 +1082,16 @@ fn apply_joint_pose(
                         Quat::from_rotation_x(lean * 0.45) * Quat::from_rotation_y(step * 0.08);
                 }
                 JointKind::LeftShoulder => {
-                    transform.rotation *= Quat::from_rotation_x(step * 1.10 * run_scale);
+                    transform.rotation *= Quat::from_rotation_x(left_arm_pitch);
                 }
                 JointKind::RightShoulder => {
-                    transform.rotation *= Quat::from_rotation_x(-step * 1.10 * run_scale);
+                    transform.rotation *= Quat::from_rotation_x(right_arm_pitch);
                 }
                 JointKind::LeftElbow => {
-                    transform.rotation *= Quat::from_rotation_x(-0.18 - step.abs() * 0.30);
+                    transform.rotation *= Quat::from_rotation_x(-0.46 - step.abs() * 0.16);
                 }
                 JointKind::RightElbow => {
-                    transform.rotation *= Quat::from_rotation_x(-0.18 - step.abs() * 0.30);
+                    transform.rotation *= Quat::from_rotation_x(-0.46 - step.abs() * 0.16);
                 }
                 JointKind::LeftHip => {
                     transform.rotation *= Quat::from_rotation_x(-step * 0.86 * run_scale);
@@ -1714,6 +1732,8 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
 
         // ── Run ──────────────────────────────────────────────────────────────
         CartoonPose::Run => {
+            let (left_arm_pitch, right_arm_pitch) =
+                locomotion_arm_pitches(sample.pose, sample.phase, sample.agility);
             match part.kind {
                 CartoonPartKind::Body => {
                     transform.translation.y += wave.abs() * 0.10;
@@ -1730,10 +1750,10 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                         Quat::from_rotation_y(step * 0.10) * Quat::from_rotation_x(-0.08);
                 }
                 CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
-                    transform.rotation *= Quat::from_rotation_x(step * 1.35 * swing);
+                    transform.rotation *= Quat::from_rotation_x(left_arm_pitch);
                 }
                 CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
-                    transform.rotation *= Quat::from_rotation_x(-step * 1.35 * swing);
+                    transform.rotation *= Quat::from_rotation_x(right_arm_pitch);
                 }
                 CartoonPartKind::LeftLeg
                 | CartoonPartKind::LeftFoot
@@ -1773,6 +1793,8 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
 
         // ── Jump ─────────────────────────────────────────────────────────────
         CartoonPose::Sprint => {
+            let (left_arm_pitch, right_arm_pitch) =
+                locomotion_arm_pitches(sample.pose, sample.phase, sample.agility);
             match part.kind {
                 CartoonPartKind::Body => {
                     transform.translation.y += wave.abs() * 0.12;
@@ -1789,12 +1811,10 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                         Quat::from_rotation_y(step * 0.13) * Quat::from_rotation_x(-0.14);
                 }
                 CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(step * 1.58 * swing) * Quat::from_rotation_z(-0.10);
+                    transform.rotation *= Quat::from_rotation_x(left_arm_pitch);
                 }
                 CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(-step * 1.58 * swing) * Quat::from_rotation_z(0.10);
+                    transform.rotation *= Quat::from_rotation_x(right_arm_pitch);
                 }
                 CartoonPartKind::LeftLeg
                 | CartoonPartKind::LeftFoot
@@ -2735,6 +2755,19 @@ mod tests {
         let mut sprint = locomotion_pose_input(0.70);
         sprint.state = Some(PlayerState::Sprinting);
         assert_eq!(select_cartoon_pose(sprint), CartoonPose::Sprint);
+    }
+
+    #[test]
+    fn running_arms_swing_forward_and_back_without_outward_flare() {
+        let (left, right) = locomotion_arm_pitches(CartoonPose::Run, 1.0, 1.0);
+        assert!(left.abs() > 0.4);
+        assert!((left + right).abs() < f32::EPSILON);
+        assert!(left.abs() <= 0.82);
+
+        let (sprint_left, sprint_right) = locomotion_arm_pitches(CartoonPose::Sprint, 1.0, 1.0);
+        assert!(sprint_left.abs() > left.abs());
+        assert!((sprint_left + sprint_right).abs() < f32::EPSILON);
+        assert!(sprint_left.abs() <= 1.02);
     }
 
     #[test]

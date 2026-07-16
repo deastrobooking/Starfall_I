@@ -11,7 +11,7 @@
 //! * **Damage numbers** — split-screen aware floating numbers, spawned per
 //!   active player camera via `world_to_viewport`.
 //! * **Outgoing-hit shake + rumble** — proximity-scaled trauma on the existing
-//!   per-player `CameraShake`, plus the (stub) rumble hook.
+//!   per-player rumble hook. Camera motion stays stable by design.
 
 use bevy::prelude::*;
 
@@ -19,7 +19,6 @@ use crate::components::enemy::DeadEnemy;
 use crate::components::player::{Player, PlayerCamera, PlayerIndex};
 use crate::events::{EnemyDamagedEvent, EnemyKilledEvent};
 use crate::plugins::input_plugin::trigger_player_rumble;
-use crate::resources::CameraShake;
 use crate::state::AppState;
 
 // ── Flinch ────────────────────────────────────────────────────────────────────
@@ -263,17 +262,16 @@ fn cleanup_damage_numbers(mut commands: Commands, numbers: Query<Entity, With<Da
     }
 }
 
-// ── Outgoing-hit shake + rumble ───────────────────────────────────────────────
+// ── Outgoing-hit rumble ──────────────────────────────────────────────────────
 
-fn outgoing_hit_shake(
-    mut shake: ResMut<CameraShake>,
+fn outgoing_hit_rumble(
     mut damaged: MessageReader<EnemyDamagedEvent>,
     mut kills: MessageReader<EnemyKilledEvent>,
     players: Query<(&PlayerIndex, &Transform), With<Player>>,
 ) {
     // Proximity attribution: whoever is close to the impact feels it. Keeps
     // co-op fair without threading attacker identity through the damage path.
-    let mut add = |position: Vec3, base: f32| {
+    let add = |position: Vec3, base: f32| {
         for (index, transform) in players.iter() {
             let dist = transform.translation.distance(position);
             let falloff = (1.0 - dist / 46.0).clamp(0.0, 1.0);
@@ -281,7 +279,6 @@ fn outgoing_hit_shake(
                 continue;
             }
             let amount = base * falloff;
-            shake.add_player_trauma(index.0, amount);
             trigger_player_rumble(index.0 as usize, amount);
         }
     };
@@ -312,7 +309,7 @@ impl Plugin for CombatFeedbackPlugin {
                     tick_death_dissolve,
                     spawn_damage_numbers,
                     tick_damage_numbers,
-                    outgoing_hit_shake,
+                    outgoing_hit_rumble,
                 )
                     .run_if(in_state(AppState::Playing)),
             );

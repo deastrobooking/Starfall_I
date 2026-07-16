@@ -1,6 +1,3 @@
-// Starfall intentionally carries design data, future robot presets, and event
-// fields before every gameplay path consumes them.
-#![allow(dead_code)]
 // Bevy systems naturally use broad query/resource signatures. Keep clippy strict
 // for correctness-oriented lints while allowing those ECS-heavy shapes.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -67,10 +64,9 @@ use plugins::{
 };
 use raids::RaidRegistry;
 use resources::{
-    CameraShake, CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData,
-    CharacterDesignSnapshot, GameSettings, LocalPlayerConfig, PlaySessionTransition,
-    PlayerPartLoadout, PlayerScore, PlayerSelectState, ShopCatalog, WaveInfo, WorldRouteRegistry,
-    WorldSiteRegistry,
+    CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData, CharacterDesignSnapshot,
+    GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerPartLoadout, PlayerScore,
+    PlayerSelectState, ShopCatalog, WaveInfo, WorldRouteRegistry, WorldSiteRegistry,
 };
 use robot_pets::RobotPetCollection;
 use settlement_economy::SettlementEconomy;
@@ -110,7 +106,6 @@ fn main() {
         .init_resource::<GameSettings>()
         .init_resource::<resources::UiGameplayCapture>()
         .init_resource::<PlayerScore>()
-        .init_resource::<CameraShake>()
         .init_resource::<PlaySessionTransition>()
         .init_resource::<LocalPlayerConfig>()
         .init_resource::<PlayerSelectState>()

@@ -20,6 +20,10 @@
 ///  Y / Triangle / X — parry                    (North)
 ///  LB + Y / Triangle — toggle Star Sabre; RT swings it
 ///  (LT + Y and Guide/Home remain alternate mappings)
+///  LB + DPad Up       — enable Rocket Hoverboard
+///  LB + DPad Left     — return to Grapple traversal
+///  LB + DPad Down     — enable Hover Jet
+///  LB + DPad Right    — enable Flight
 ///  L3 (left click)  — melee heavy              (LeftThumb)
 ///  R3 (right click) — melee light              (RightThumb)
 ///  Select/Back/Share/View — crafting (alone), loadout (LB+Select), or special modifier (+ DPad)
@@ -44,6 +48,7 @@ use bevy::input::InputSystems;
 use bevy::prelude::*;
 
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
+use crate::components::player::TraversalMode;
 use crate::engine_tools::EngineToolMode;
 use crate::resources::{GameSettings, UiGameplayCapture};
 
@@ -590,7 +595,21 @@ fn update_player_inputs(
             0
         };
 
-        let dpad_free = !select_held && !armor_controller_modifier;
+        // ── Direct ride/traversal selection ─────────────────────────────────
+        // LB is already the movement modifier, so pairing it with D-pad keeps
+        // ride selection available to every assigned player without consuming
+        // a face button. The chord suppresses the D-pad's normal vehicle,
+        // interaction, weapon-cycle, and map actions for this frame.
+        let ride_controller_modifier = left_shoulder_held && !select_held && !left_trigger_held;
+        pi.traversal_mode_switch = controller_traversal_mode(
+            ride_controller_modifier,
+            btn_just(GamepadButton::DPadUp) || native_just(NativeButton::DPadUp),
+            btn_just(GamepadButton::DPadDown) || native_just(NativeButton::DPadDown),
+            btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft),
+            btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight),
+        );
+
+        let dpad_free = !select_held && !armor_controller_modifier && !ride_controller_modifier;
 
         pi.interact = (is_p1 && keyboard.just_pressed(KeyCode::KeyE))
             || (dpad_free
@@ -671,6 +690,29 @@ fn update_player_inputs(
     }
 }
 
+fn controller_traversal_mode(
+    modifier: bool,
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+) -> Option<TraversalMode> {
+    if !modifier {
+        return None;
+    }
+    if up {
+        Some(TraversalMode::Hoverboard)
+    } else if left {
+        Some(TraversalMode::Grapple)
+    } else if down {
+        Some(TraversalMode::HoverJet)
+    } else if right {
+        Some(TraversalMode::Flight)
+    } else {
+        None
+    }
+}
+
 fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
     let preserved = (
         input.gamepad_active,
@@ -725,6 +767,30 @@ mod tests {
     fn trigger_axis_threshold_matches_controller_action_gate() {
         assert!(!axis_pressed(TRIGGER_AXIS_THRESHOLD));
         assert!(axis_pressed(TRIGGER_AXIS_THRESHOLD + 0.01));
+    }
+
+    #[test]
+    fn lb_dpad_assigns_each_traversal_mode_without_unmodified_leakage() {
+        assert_eq!(
+            controller_traversal_mode(true, true, false, false, false),
+            Some(TraversalMode::Hoverboard)
+        );
+        assert_eq!(
+            controller_traversal_mode(true, false, false, true, false),
+            Some(TraversalMode::Grapple)
+        );
+        assert_eq!(
+            controller_traversal_mode(true, false, true, false, false),
+            Some(TraversalMode::HoverJet)
+        );
+        assert_eq!(
+            controller_traversal_mode(true, false, false, false, true),
+            Some(TraversalMode::Flight)
+        );
+        assert_eq!(
+            controller_traversal_mode(false, true, false, false, false),
+            None
+        );
     }
 
     #[test]

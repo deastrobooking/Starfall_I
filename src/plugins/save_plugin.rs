@@ -1,8 +1,10 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::character_blueprint::CharacterBlueprint;
 use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
@@ -30,10 +32,15 @@ use crate::settlement_economy::SettlementEconomy;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 
+const SAVE_FILE_LEGACY: &str = "starfall_i_save.json";
 const SAVE_FILE_A: &str = "starfall_i_save_a.json";
 const SAVE_FILE_B: &str = "starfall_i_save_b.json";
 const SAVE_FILE_C: &str = "starfall_i_save_c.json";
 const SETTINGS_FILE: &str = "starfall_i_settings.json";
+const SAVE_DIR_NAME: &str = "starfall_i";
+/// Current on-disk schema version. v4 introduced `save_generation`, the
+/// monotonic counter that decides which rotating slot is newest on load.
+const SAVE_VERSION: u32 = 4;
 
 // ── Save Rotation State ───────────────────────────────────────────────────────
 /// Tracks which save slot (0=A, 1=B, 2=C) to write to next.
@@ -42,16 +49,113 @@ pub struct SaveRotationState {
     pub current_slot: u8,
 }
 
-fn save_slot_path(slot: u8) -> PathBuf {
+fn slot_file_name(slot: u8) -> &'static str {
     match slot % 3 {
-        0 => PathBuf::from(SAVE_FILE_A),
-        1 => PathBuf::from(SAVE_FILE_B),
-        _ => PathBuf::from(SAVE_FILE_C),
+        0 => SAVE_FILE_A,
+        1 => SAVE_FILE_B,
+        _ => SAVE_FILE_C,
     }
+}
+
+fn save_slot_path_in(root: &Path, slot: u8) -> PathBuf {
+    root.join(slot_file_name(slot))
 }
 
 fn next_save_slot(current: u8) -> u8 {
     (current + 1) % 3
+}
+
+// ── Save Directory ────────────────────────────────────────────────────────────
+/// Platform-appropriate save directory (e.g. `~/Library/Application Support/
+/// starfall_i` on macOS, `~/.local/share/starfall_i` on Linux). Falls back to
+/// the current working directory when no platform data dir is available.
+/// Resolved once per process; the first resolution migrates any legacy save
+/// files left in the working directory by older builds so no progress is lost.
+fn save_root() -> &'static Path {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let root = dirs::data_dir()
+            .map(|dir| dir.join(SAVE_DIR_NAME))
+            .unwrap_or_else(|| PathBuf::from("."));
+        migrate_legacy_files(&root);
+        root
+    })
+}
+
+/// Copies legacy working-directory save/settings files into `root` on first
+/// run with the platform location. Non-destructive: the originals stay behind
+/// as a backup, and existing files in `root` are never overwritten.
+fn migrate_legacy_files(root: &Path) {
+    let copy_legacy = |from: &Path, to: &Path| {
+        if let Some(parent) = to.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                warn!("Failed to create save directory {}: {}", parent.display(), e);
+                return;
+            }
+        }
+        match fs::copy(from, to) {
+            Ok(_) => info!(
+                "Migrated legacy save file {} to {}",
+                from.display(),
+                to.display()
+            ),
+            Err(e) => warn!(
+                "Failed to migrate legacy save file {}: {}",
+                from.display(),
+                e
+            ),
+        }
+    };
+
+    let has_new_slots = (0u8..3).any(|slot| save_slot_path_in(root, slot).exists());
+    if !has_new_slots {
+        for slot in 0u8..3 {
+            let legacy = PathBuf::from(slot_file_name(slot));
+            if legacy.exists() {
+                copy_legacy(&legacy, &save_slot_path_in(root, slot));
+            }
+        }
+        // Pre-rotation builds wrote a single save file; adopt it as slot A if
+        // no rotating slot claimed that name.
+        let legacy_single = PathBuf::from(SAVE_FILE_LEGACY);
+        let slot_a = save_slot_path_in(root, 0);
+        if legacy_single.exists() && !slot_a.exists() {
+            copy_legacy(&legacy_single, &slot_a);
+        }
+    }
+
+    let legacy_settings = PathBuf::from(SETTINGS_FILE);
+    let new_settings = root.join(SETTINGS_FILE);
+    if legacy_settings.exists() && !new_settings.exists() {
+        copy_legacy(&legacy_settings, &new_settings);
+    }
+}
+
+// ── Atomic Write ──────────────────────────────────────────────────────────────
+/// Writes `contents` to `path` via a same-directory temporary file that is
+/// flushed, synced, and then atomically renamed over the destination, so an
+/// interrupted write can never corrupt an existing save.
+fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    let temp = PathBuf::from(temp);
+    let mut file = File::create(&temp).map_err(|e| e.to_string())?;
+    file.write_all(contents.as_bytes())
+        .map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    fs::rename(&temp, path).map_err(|e| e.to_string())?;
+    // Best-effort directory sync so the rename itself is durable.
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        }
+    }
+    Ok(())
 }
 
 // ── Save SystemParam Bundle ───────────────────────────────────────────────────
@@ -169,6 +273,10 @@ pub struct SaveData {
     pub final_war: FinalWarSaveRecord,
     #[serde(default)]
     pub save_version: u32,
+    /// Monotonic counter bumped on every write; the loader picks the valid
+    /// slot with the highest generation. v3 and earlier saves default to 0.
+    #[serde(default)]
+    pub save_generation: u64,
     #[serde(default)]
     pub campaign_complete: bool,
 }
@@ -374,7 +482,8 @@ impl Default for SaveData {
             command_assets: Vec::new(),
             hacking: HackingRegistry::default(),
             final_war: FinalWarSaveRecord::default(),
-            save_version: 3,
+            save_version: SAVE_VERSION,
+            save_generation: 0,
             campaign_complete: false,
         }
     }
@@ -385,18 +494,38 @@ fn default_max_stat() -> f32 {
 }
 
 // ── Settings Persistence ──────────────────────────────────────────────────────
+fn settings_path() -> PathBuf {
+    save_root().join(SETTINGS_FILE)
+}
+
 pub fn save_settings(settings: &GameSettings) -> Result<(), String> {
     let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    fs::write(PathBuf::from(SETTINGS_FILE), json).map_err(|e| e.to_string())
+    write_atomic(&settings_path(), &json)
 }
 
 pub fn load_settings() -> Option<GameSettings> {
-    let path = PathBuf::from(SETTINGS_FILE);
+    let path = settings_path();
     if !path.exists() {
         return None;
     }
-    let json = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&json).ok()
+    let json = match fs::read_to_string(&path) {
+        Ok(json) => json,
+        Err(e) => {
+            warn!("Failed to read settings file {}: {}", path.display(), e);
+            return None;
+        }
+    };
+    match serde_json::from_str(&json) {
+        Ok(settings) => Some(settings),
+        Err(e) => {
+            warn!(
+                "Ignoring corrupt settings file {}: {}",
+                path.display(),
+                e
+            );
+            None
+        }
+    }
 }
 
 fn load_settings_on_startup(mut settings: ResMut<GameSettings>) {
@@ -440,30 +569,95 @@ impl Plugin for SavePlugin {
     }
 }
 
-// (save_slot_path is defined above near the constants)
-
 // ── Save ──────────────────────────────────────────────────────────────────────
-pub fn save_game(
-    players: Vec<PlayerSaveData>,
-    wave: &WaveInfo,
-    progress: &ChapterProgress,
-    perks: &PerkTree,
-    select: &PlayerSelectState,
-    robot_pets: &RobotPetCollection,
-    settlement_economy: &SettlementEconomy,
-    upgrades: &UpgradeLedger,
-    part_loadout: &PlayerPartLoadout,
-    weapon_ranks: &WeaponRanks,
-    world_site_registry: &WorldSiteRegistry,
-    world_route_registry: &WorldRouteRegistry,
-    raid_registry: &RaidRegistry,
-    command_registry: &CommandRegistry,
-    hacking_registry: &HackingRegistry,
-    final_war_registry: &FinalWarRegistry,
-) -> Result<(), String> {
-    save_game_to_slot(
-        0,
-        players,
+/// Plain snapshot of everything a save write reads, replacing the former
+/// sixteen-parameter save function signatures.
+pub struct SaveSnapshot<'a> {
+    pub players: Vec<PlayerSaveData>,
+    pub wave: &'a WaveInfo,
+    pub progress: &'a ChapterProgress,
+    pub perks: &'a PerkTree,
+    pub select: &'a PlayerSelectState,
+    pub robot_pets: &'a RobotPetCollection,
+    pub settlement_economy: &'a SettlementEconomy,
+    pub upgrades: &'a UpgradeLedger,
+    pub part_loadout: &'a PlayerPartLoadout,
+    pub weapon_ranks: &'a WeaponRanks,
+    pub world_site_registry: &'a WorldSiteRegistry,
+    pub world_route_registry: &'a WorldRouteRegistry,
+    pub raid_registry: &'a RaidRegistry,
+    pub command_registry: &'a CommandRegistry,
+    pub hacking_registry: &'a HackingRegistry,
+    pub final_war_registry: &'a FinalWarRegistry,
+}
+
+impl<'a> SaveSnapshot<'a> {
+    pub fn from_params(sp: &'a SaveParams, players: Vec<PlayerSaveData>) -> Self {
+        Self {
+            players,
+            wave: &sp.wave,
+            progress: &sp.progress,
+            perks: &sp.perks,
+            select: &sp.select,
+            robot_pets: &sp.robot_pets,
+            settlement_economy: &sp.settlement_economy,
+            upgrades: &sp.upgrades,
+            part_loadout: &sp.part_loadout,
+            weapon_ranks: &sp.weapon_ranks,
+            world_site_registry: &sp.world_site_registry,
+            world_route_registry: &sp.world_route_registry,
+            raid_registry: &sp.raid_registry,
+            command_registry: &sp.command_registry,
+            hacking_registry: &sp.hacking_registry,
+            final_war_registry: &sp.final_war_registry,
+        }
+    }
+}
+
+pub fn save_game(snapshot: SaveSnapshot) -> Result<(), String> {
+    save_game_to_slot(0, snapshot)
+}
+
+pub fn save_game_to_slot(slot: u8, snapshot: SaveSnapshot) -> Result<(), String> {
+    write_save_to_slot(save_root(), slot, snapshot)
+}
+
+fn write_save_to_slot(root: &Path, slot: u8, snapshot: SaveSnapshot) -> Result<(), String> {
+    let mut data = build_save_data(snapshot);
+    data.save_generation = next_generation_in(root);
+    write_save_data(root, slot, &data)
+}
+
+fn write_save_data(root: &Path, slot: u8, data: &SaveData) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    write_atomic(&save_slot_path_in(root, slot), &json)
+}
+
+/// Minimal probe used to read a slot's generation without requiring the rest
+/// of the record to deserialize.
+#[derive(Deserialize)]
+struct GenerationProbe {
+    #[serde(default)]
+    save_generation: u64,
+}
+
+/// Generation for the next write: one past the highest generation currently on
+/// disk across all rotating slots (corrupt/missing slots are simply skipped).
+fn next_generation_in(root: &Path) -> u64 {
+    (0u8..3)
+        .filter_map(|slot| {
+            fs::read_to_string(save_slot_path_in(root, slot))
+                .ok()
+                .and_then(|json| serde_json::from_str::<GenerationProbe>(&json).ok())
+                .map(|probe| probe.save_generation)
+        })
+        .max()
+        .map_or(1, |generation| generation.saturating_add(1))
+}
+
+fn build_save_data(snapshot: SaveSnapshot) -> SaveData {
+    let SaveSnapshot {
+        mut players,
         wave,
         progress,
         perks,
@@ -479,68 +673,7 @@ pub fn save_game(
         command_registry,
         hacking_registry,
         final_war_registry,
-    )
-}
-
-pub fn save_game_to_slot(
-    slot: u8,
-    players: Vec<PlayerSaveData>,
-    wave: &WaveInfo,
-    progress: &ChapterProgress,
-    perks: &PerkTree,
-    select: &PlayerSelectState,
-    robot_pets: &RobotPetCollection,
-    settlement_economy: &SettlementEconomy,
-    upgrades: &UpgradeLedger,
-    part_loadout: &PlayerPartLoadout,
-    weapon_ranks: &WeaponRanks,
-    world_site_registry: &WorldSiteRegistry,
-    world_route_registry: &WorldRouteRegistry,
-    raid_registry: &RaidRegistry,
-    command_registry: &CommandRegistry,
-    hacking_registry: &HackingRegistry,
-    final_war_registry: &FinalWarRegistry,
-) -> Result<(), String> {
-    let data = build_save_data(
-        players,
-        wave,
-        progress,
-        perks,
-        select,
-        robot_pets,
-        settlement_economy,
-        upgrades,
-        part_loadout,
-        weapon_ranks,
-        world_site_registry,
-        world_route_registry,
-        raid_registry,
-        command_registry,
-        hacking_registry,
-        final_war_registry,
-    );
-    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    fs::write(save_slot_path(slot), json).map_err(|e| e.to_string())
-}
-
-fn build_save_data(
-    mut players: Vec<PlayerSaveData>,
-    wave: &WaveInfo,
-    progress: &ChapterProgress,
-    perks: &PerkTree,
-    select: &PlayerSelectState,
-    robot_pets: &RobotPetCollection,
-    settlement_economy: &SettlementEconomy,
-    upgrades: &UpgradeLedger,
-    part_loadout: &PlayerPartLoadout,
-    weapon_ranks: &WeaponRanks,
-    world_site_registry: &WorldSiteRegistry,
-    world_route_registry: &WorldRouteRegistry,
-    raid_registry: &RaidRegistry,
-    command_registry: &CommandRegistry,
-    hacking_registry: &HackingRegistry,
-    final_war_registry: &FinalWarRegistry,
-) -> SaveData {
+    } = snapshot;
     players.sort_by_key(|player| player.player_index);
     SaveData {
         wave_number: wave.wave_number,
@@ -580,19 +713,69 @@ fn build_save_data(
 }
 
 pub fn load_save() -> Option<SaveData> {
-    // Try slots A, B, C in order; return the first that parses successfully.
+    load_newest_save_in(save_root()).map(|(_, data)| data)
+}
+
+/// Inspects all rotating slots and returns the valid record with the highest
+/// save generation, along with the slot it was read from. Corrupt, unreadable,
+/// or unsupported slots are logged and skipped so any surviving slot recovers.
+fn load_newest_save_in(root: &Path) -> Option<(u8, SaveData)> {
+    let mut newest: Option<(u8, SaveData)> = None;
     for slot in 0u8..3 {
-        let path = save_slot_path(slot);
-        if !path.exists() {
+        let Some(data) = read_save_slot(root, slot) else {
             continue;
-        }
-        if let Ok(json) = fs::read_to_string(&path) {
-            if let Ok(data) = serde_json::from_str::<SaveData>(&json) {
-                return Some(data);
-            }
+        };
+        let is_newer = newest
+            .as_ref()
+            .map_or(true, |(_, best)| data.save_generation > best.save_generation);
+        if is_newer {
+            newest = Some((slot, data));
         }
     }
-    None
+    newest
+}
+
+fn read_save_slot(root: &Path, slot: u8) -> Option<SaveData> {
+    let path = save_slot_path_in(root, slot);
+    if !path.exists() {
+        return None;
+    }
+    let json = match fs::read_to_string(&path) {
+        Ok(json) => json,
+        Err(e) => {
+            warn!("Failed to read save slot {}: {}", path.display(), e);
+            return None;
+        }
+    };
+    let data = match serde_json::from_str::<SaveData>(&json) {
+        Ok(data) => data,
+        Err(e) => {
+            warn!("Ignoring corrupt save slot {}: {}", path.display(), e);
+            return None;
+        }
+    };
+    migrate_save_data(data, &path)
+}
+
+/// Validates `save_version`: older supported schemas are migrated in place,
+/// while records from a newer build are rejected with a warning instead of
+/// being misread or silently skipped.
+fn migrate_save_data(mut data: SaveData, path: &Path) -> Option<SaveData> {
+    if data.save_version > SAVE_VERSION {
+        warn!(
+            "Ignoring save slot {} with unsupported save_version {} (this build supports up to {})",
+            path.display(),
+            data.save_version,
+            SAVE_VERSION
+        );
+        return None;
+    }
+    if data.save_version < SAVE_VERSION {
+        // v3 and earlier predate the generation counter; serde's default has
+        // already assigned generation 0, so they sort as the oldest records.
+        data.save_version = SAVE_VERSION;
+    }
+    Some(data)
 }
 
 fn hydrate_character_blueprints(
@@ -705,24 +888,7 @@ pub fn save_current_session(sp: &SaveParams) -> Result<(), String> {
     if players.is_empty() {
         return Err("No active players to save".to_string());
     }
-    save_game(
-        players,
-        &sp.wave,
-        &sp.progress,
-        &sp.perks,
-        &sp.select,
-        &sp.robot_pets,
-        &sp.settlement_economy,
-        &sp.upgrades,
-        &sp.part_loadout,
-        &sp.weapon_ranks,
-        &sp.world_site_registry,
-        &sp.world_route_registry,
-        &sp.raid_registry,
-        &sp.command_registry,
-        &sp.hacking_registry,
-        &sp.final_war_registry,
-    )
+    save_game(SaveSnapshot::from_params(sp, players))
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
@@ -738,8 +904,12 @@ fn hydrate_progress_from_disk(
     mut world_site_registry: ResMut<WorldSiteRegistry>,
     mut world_route_registry: ResMut<WorldRouteRegistry>,
     mut regs: LoadRegistriesParam,
+    mut rotation: ResMut<SaveRotationState>,
 ) {
-    if let Some(data) = load_save() {
+    if let Some((loaded_slot, data)) = load_newest_save_in(save_root()) {
+        // Resume rotation after the newest record so the next autosave
+        // overwrites the oldest slot instead of the freshest one.
+        rotation.current_slot = next_save_slot(loaded_slot);
         for (index, slot) in select.slots.iter_mut().enumerate() {
             let mut progression = PlayerProgression {
                 perks: PerkTree {
@@ -922,25 +1092,7 @@ fn autosave_system(
     if players.is_empty() {
         return;
     }
-    match save_game_to_slot(
-        slot,
-        players,
-        &sp.wave,
-        &sp.progress,
-        &sp.perks,
-        &sp.select,
-        &sp.robot_pets,
-        &sp.settlement_economy,
-        &sp.upgrades,
-        &sp.part_loadout,
-        &sp.weapon_ranks,
-        &sp.world_site_registry,
-        &sp.world_route_registry,
-        &sp.raid_registry,
-        &sp.command_registry,
-        &sp.hacking_registry,
-        &sp.final_war_registry,
-    ) {
+    match save_game_to_slot(slot, SaveSnapshot::from_params(&sp, players)) {
         Ok(()) => {
             msg_ev.write(UiMessageEvent {
                 text: format!("Game autosaved (slot {}).", (b'A' + slot) as char),
@@ -1093,27 +1245,27 @@ mod tests {
             head: HeadPreset::CombatHelmet,
         };
 
-        let data = build_save_data(
-            vec![
+        let data = build_save_data(SaveSnapshot {
+            players: vec![
                 player_save(2, 8, 700, 90, 44.0, 150.0),
                 player_save(0, 4, 300, 20, 88.0, 110.0),
             ],
-            &wave,
-            &progress,
-            &perks,
-            &select,
-            &robot_pets,
-            &settlement_economy,
-            &upgrades,
-            &part_loadout,
-            &WeaponRanks::default(),
-            &WorldSiteRegistry::default(),
-            &WorldRouteRegistry::default(),
-            &RaidRegistry::default(),
-            &CommandRegistry::default(),
-            &HackingRegistry::default(),
-            &FinalWarRegistry::default(),
-        );
+            wave: &wave,
+            progress: &progress,
+            perks: &perks,
+            select: &select,
+            robot_pets: &robot_pets,
+            settlement_economy: &settlement_economy,
+            upgrades: &upgrades,
+            part_loadout: &part_loadout,
+            weapon_ranks: &WeaponRanks::default(),
+            world_site_registry: &WorldSiteRegistry::default(),
+            world_route_registry: &WorldRouteRegistry::default(),
+            raid_registry: &RaidRegistry::default(),
+            command_registry: &CommandRegistry::default(),
+            hacking_registry: &HackingRegistry::default(),
+            final_war_registry: &FinalWarRegistry::default(),
+        });
 
         assert_eq!(data.wave_number, 7);
         assert_eq!(data.completed_chapters, vec![1, 2, 3]);
@@ -1445,5 +1597,160 @@ mod tests {
             3
         );
         assert_eq!(progression.weapon_ranks.ranks, [1, 2, 3, 4, 5, 6]);
+    }
+
+    // ── Disk hardening tests ─────────────────────────────────────────────────
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Unique temp directory per test so save slots never collide across tests
+    /// or with real player data.
+    fn test_save_root(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "starfall_save_{label}_{}_{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test save root should be creatable");
+        root
+    }
+
+    fn save_with_generation(generation: u64) -> SaveData {
+        SaveData {
+            save_generation: generation,
+            wave_number: 1 + generation as u32,
+            ..SaveData::default()
+        }
+    }
+
+    #[test]
+    fn interrupted_partial_write_leaves_previous_slot_readable() {
+        let root = test_save_root("partial_write");
+        write_save_data(&root, 0, &save_with_generation(1)).unwrap();
+
+        // Simulate a crash mid-write: a partial temp file exists but the
+        // rename never happened.
+        let mut temp = save_slot_path_in(&root, 0).into_os_string();
+        temp.push(".tmp");
+        fs::write(PathBuf::from(&temp), b"{\"save_version\": 4, \"wav").unwrap();
+
+        let (slot, data) = load_newest_save_in(&root).expect("previous save should survive");
+        assert_eq!(slot, 0);
+        assert_eq!(data.save_generation, 1);
+        assert_eq!(data.wave_number, 2);
+
+        // A subsequent successful write still lands atomically over the slot.
+        write_save_data(&root, 0, &save_with_generation(2)).unwrap();
+        let (_, data) = load_newest_save_in(&root).expect("rewritten save should load");
+        assert_eq!(data.save_generation, 2);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn corrupt_newest_slot_falls_back_to_next_highest_generation() {
+        let root = test_save_root("corrupt_fallback");
+        write_save_data(&root, 0, &save_with_generation(1)).unwrap();
+        write_save_data(&root, 1, &save_with_generation(2)).unwrap();
+        write_save_data(&root, 2, &save_with_generation(3)).unwrap();
+
+        // Corrupt the newest slot (C); recovery should pick B (generation 2).
+        fs::write(save_slot_path_in(&root, 2), b"{ not valid json").unwrap();
+
+        let (slot, data) = load_newest_save_in(&root).expect("valid older slot should recover");
+        assert_eq!(slot, 1);
+        assert_eq!(data.save_generation, 2);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn generation_ordering_wins_over_slot_order() {
+        let root = test_save_root("generation_order");
+        // Slot A holds an old record; slot C holds the newest. The legacy
+        // loader would have returned stale slot A here.
+        write_save_data(&root, 0, &save_with_generation(1)).unwrap();
+        write_save_data(&root, 2, &save_with_generation(5)).unwrap();
+
+        let (slot, data) = load_newest_save_in(&root).expect("save should load");
+        assert_eq!(slot, 2);
+        assert_eq!(data.save_generation, 5);
+        // Rotation resumes after the newest slot, wrapping C -> A.
+        assert_eq!(next_save_slot(slot), 0);
+        // The next write is stamped one past the highest generation on disk.
+        assert_eq!(next_generation_in(&root), 6);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn legacy_v3_save_still_loads_and_migrates_to_v4() {
+        let root = test_save_root("legacy_v3");
+        // Build a genuine v3 record: version 3 and no save_generation field.
+        let mut value = serde_json::to_value(SaveData {
+            wave_number: 9,
+            completed_chapters: vec![1, 2],
+            ..SaveData::default()
+        })
+        .unwrap();
+        value["save_version"] = serde_json::json!(3);
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("save_generation")
+            .expect("current schema should carry save_generation");
+        fs::write(
+            save_slot_path_in(&root, 0),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let (slot, data) = load_newest_save_in(&root).expect("v3 save should migrate");
+        assert_eq!(slot, 0);
+        assert_eq!(data.save_version, SAVE_VERSION);
+        assert_eq!(data.save_generation, 0);
+        assert_eq!(data.wave_number, 9);
+        assert_eq!(data.completed_chapters, vec![1, 2]);
+        // The first post-migration write supersedes the legacy record.
+        assert_eq!(next_generation_in(&root), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unsupported_future_version_is_rejected_not_misread() {
+        let root = test_save_root("future_version");
+        let future = SaveData {
+            save_version: 99,
+            save_generation: 40,
+            ..SaveData::default()
+        };
+        write_save_data(&root, 0, &future).unwrap();
+
+        // Alone, the future record is rejected rather than misread or panicked on.
+        assert!(load_newest_save_in(&root).is_none());
+
+        // With a supported record present, that record still recovers even
+        // though the future one carries a higher generation.
+        write_save_data(&root, 1, &save_with_generation(2)).unwrap();
+        let (slot, data) = load_newest_save_in(&root).expect("supported slot should recover");
+        assert_eq!(slot, 1);
+        assert_eq!(data.save_generation, 2);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn settings_write_is_atomic_over_existing_file() {
+        let root = test_save_root("settings_atomic");
+        let path = root.join(SETTINGS_FILE);
+        let json = serde_json::to_string_pretty(&GameSettings::default()).unwrap();
+        write_atomic(&path, &json).unwrap();
+        // Leftover partial temp from an interrupted write must not shadow the
+        // real file.
+        let mut temp = path.clone().into_os_string();
+        temp.push(".tmp");
+        fs::write(PathBuf::from(temp), b"{ partial").unwrap();
+        let loaded: GameSettings =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let _ = serde_json::to_string(&loaded).unwrap();
+        let _ = fs::remove_dir_all(&root);
     }
 }

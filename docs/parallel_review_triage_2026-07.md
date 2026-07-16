@@ -161,6 +161,7 @@ must not displace four-player campaign completion or the game-maker toolchain.
   rewards, feedback, and vehicle/passenger actions;
 - no gameplay input or simulation leakage while Starfall Forge is open;
 - representative split-screen combat meeting frame/effect budgets;
-- save interruption, corruption, migration, and recovery tests after ET3;
+- save interruption, corruption, migration, and recovery tests (delivered
+  July 16, 2026 with the v4 atomic-save hardening in `save_plugin.rs`);
 - `cargo test`, strict all-target Clippy, debug/release builds, and startup/editor
   smoke tests remain green.

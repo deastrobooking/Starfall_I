@@ -56,9 +56,12 @@ eight siblings.
 - The in-game Star Loadout is a per-player modal button GUI opened with `I` or
   LB+Select. Weapons, Armor, Items, Specials, and Rides use owner-scoped D-pad/
   stick focus and A/Confirm; only the owner's gameplay input is captured.
-- Rocket Hoverboard is the production Hoverboard traversal profile: fast
+- Rocket Hoverboard is the production Hoverboard traversal profile. Every
+  assigned player can enable it directly with LB + D-pad Up or through
+  Loadout → Rides; LB + D-pad Left/Down/Right selects Grapple, Hover Jet, or
+  Flight. It provides fast
   ground momentum and loop adhesion plus airborne steering, jump-held rocket
-  lift, LB boost flight, fuel drain, camera pullback, a persistent rider pose,
+  lift, LB boost flight, fuel drain, a persistent rider pose,
   and visible metallic/emissive twin-thruster board geometry.
 - Crafting panels retain an independent recipe cursor for each player. The owner
   uses D-pad/left stick to select, South/A to craft, and Select to close. A
@@ -746,7 +749,17 @@ proximity-scaled outgoing **camera shake**, and the rumble hook. See
 
 Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Projectile collision sweeps the full per-frame travel segment, preventing fast Rainbow Ray bolts from tunneling through targets. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Tracking weapons display a pulsing world-space lock ring: gold for Homing Star and cyan for magic beams. Characters designed with `DariaCannon` arms can hold and release a charge shot. Charged hits resolve through the shared critical path at 1.5x damage and add a damage/element-scaled hot-pink impact core. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
 
-**Star Sabre** (`BeamSabre`): locked until Ch.1 discoverable. Toggle `T` or controller LB+North; LT+North, Guide, and L3+R3 remain fallbacks. RT/LMB performs the animated slash while active. Toggle attempts now display active, holstered, or locked feedback so a controller press never fails silently. Levels 1–5 increase slash damage, wave damage, slash count, and at level 3+ gains piercing; level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise the Star Sabre's effective wave tier for combo behavior: finishers gain single waves first, mid-chain slashes gain waves next, dual waves arrive at high tier, and level-5/tier-5 finishers throw a triple spread.
+**Star Sabre / Beam Sabre** (`BeamSabre`): controller ownership follows the
+assigned `PlayerIndex`. It is locked until the Ch.1 discoverable; toggle `T` or
+controller LB+North/Y, with LT+North/Y, Guide, and L3+R3 as fallbacks. RT/LMB
+performs the animated slash while active. Normal beam weapons use that same
+player's LT aim and RT fire inputs. Toggle attempts display active, holstered,
+or locked feedback so a controller press never fails silently. Levels 1–5
+increase slash damage, wave damage, slash count, and at level 3+ gains piercing;
+level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise
+the Star Sabre's effective wave tier for combo behavior: finishers gain single
+waves first, mid-chain slashes gain waves next, dual waves arrive at high tier,
+and level-5/tier-5 finishers throw a triple spread.
 
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 

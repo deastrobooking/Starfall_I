@@ -106,6 +106,7 @@ impl Plugin for WeaponPlugin {
             .add_systems(
                 Update,
                 (
+                    apply_ranged_move_defs_system.before(weapon_fire_system),
                     apply_weapon_ranks_system,
                     weapon_select_system,
                     weapon_fire_system,
@@ -444,6 +445,41 @@ fn apply_weapon_ranks_system(
     }
 }
 
+// ── Apply ranged MoveDefs ─────────────────────────────────────────────────────
+/// EC2: sync the data-driven ranged tuning (`MoveLibrary.ranged`, authored in
+/// `assets/combat/moves.json`) onto every `WeaponInventory` slot. The
+/// `Weapon::new` compile-time stats become fallbacks; the library is the
+/// source of truth. Runs when the library (re)loads and for newly spawned
+/// inventories, and never touches runtime state (ammo, timers, rank, charge).
+fn apply_ranged_move_defs_system(
+    library: Res<MoveLibrary>,
+    mut inv_q: Query<&mut WeaponInventory>,
+) {
+    let library_changed = library.is_changed();
+    for mut inv in inv_q.iter_mut() {
+        if library_changed || inv.is_added() {
+            apply_ranged_defs(&library, &mut inv);
+        }
+    }
+}
+
+/// Copy each slot's `RangedMoveDef` balance fields onto the live `Weapon`.
+/// Identity/behavior fields (weapon type, automatic trigger, explosive flag,
+/// ammo pools) stay on the component; frame-data-style balance moves here.
+fn apply_ranged_defs(library: &MoveLibrary, inv: &mut WeaponInventory) {
+    for (slot, weapon) in inv.slots.iter_mut().enumerate() {
+        let Some(def) = library.ranged_slot(slot) else {
+            continue;
+        };
+        weapon.damage = def.damage;
+        weapon.fire_rate = def.fire_rate;
+        weapon.speed = def.projectile_speed;
+        weapon.spread = def.spread;
+        weapon.pellets = def.pellets;
+        weapon.explosion_radius = def.explosion_radius;
+    }
+}
+
 // ── Weapon Select ─────────────────────────────────────────────────────────────
 fn weapon_select_system(
     mut player_q: Query<
@@ -490,6 +526,7 @@ fn weapon_fire_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
+    library: Res<MoveLibrary>,
     mut player_q: Query<
         (
             Entity,
@@ -538,6 +575,11 @@ fn weapon_fire_system(
             continue;
         };
 
+        // EC2: per-slot projectile lifetime from the move library (legacy
+        // hardcoded value was a shared 3.0 s).
+        let projectile_lifetime = library
+            .ranged_slot(inv.active_slot)
+            .map_or(3.0, |def| def.projectile_lifetime);
         let weapon = inv.active_mut();
         weapon.fire_timer = (weapon.fire_timer - dt).max(0.0);
 
@@ -695,7 +737,7 @@ fn weapon_fire_system(
                 damage_type,
                 speed,
                 direction: dir,
-                lifetime: 3.0,
+                lifetime: projectile_lifetime,
                 is_explosive,
                 explosion_radius,
                 weapon_type: ProjectileOwner::Player,
@@ -2123,10 +2165,24 @@ fn execute_melee_hit(
 }
 
 // ── Star Sabre ────────────────────────────────────────────────────────────────
+/// Level-scaling multipliers applied on top of the authored sabre MoveDefs:
+/// `BeamSabre::set_level` keeps the level tables, and the `MoveLibrary`
+/// carries the level-1 base numbers, so `(slash, wave)` scales stay 1.0 at
+/// level 1 and edits to `moves.json` retune every level proportionally.
+fn sabre_level_scale(sabre: &BeamSabre) -> (f32, f32) {
+    let base = BeamSabre::default();
+    (
+        sabre.slash_damage / base.slash_damage,
+        sabre.wave_damage / base.wave_damage,
+    )
+}
+
 fn beam_sabre_update_system(
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
+    library: Res<MoveLibrary>,
+    mut hitstop: ResMut<HitstopState>,
     dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
@@ -2211,6 +2267,10 @@ fn beam_sabre_update_system(
             continue;
         }
 
+        // EC2: sabre frame data comes from the move library; `BeamSabre`
+        // keeps runtime state (level scaling, cooldown, slash progress).
+        let (slash_scale, wave_scale) = sabre_level_scale(&sabre);
+
         sabre.cooldown_timer = (sabre.cooldown_timer - dt).max(0.0);
 
         if sabre.is_slashing {
@@ -2218,6 +2278,12 @@ fn beam_sabre_update_system(
             if sabre.slash_timer <= 0.0 {
                 sabre.slash_index += 1;
                 if sabre.slash_index < sabre.slash_count {
+                    let Some(def) = library.sabre_slash(sabre.slash_index as usize) else {
+                        sabre.is_slashing = false;
+                        sabre.slash_index = 0;
+                        sm.transition(PlayerState::Idle);
+                        continue;
+                    };
                     let radius = if dungeon.active { 5.2 } else { 3.5 };
                     let offset = if dungeon.active { 2.0 } else { 2.5 };
                     let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
@@ -2227,15 +2293,16 @@ fn beam_sabre_update_system(
                         radius,
                         offset,
                         arc_cos,
-                        sabre.slash_damage * armor_damage_mult,
+                        def.damage * slash_scale * armor_damage_mult,
                         blade_damage_type,
-                        3.0,
+                        def.knockback,
                         &mut enemy_q,
                         &mut damaged_ev,
                         &mut killed_ev,
                     );
                     spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
-                    sabre.slash_timer = 0.25;
+                    hitstop.remaining = hitstop.remaining.max(def.hitstop);
+                    sabre.slash_timer = def.total_duration();
                 } else {
                     sabre.is_slashing = false;
                     sabre.slash_index = 0;
@@ -2246,10 +2313,13 @@ fn beam_sabre_update_system(
         }
 
         if pi.fire_just && sabre.cooldown_timer <= 0.0 {
+            let Some(def) = library.sabre_slash(0) else {
+                continue;
+            };
             sabre.is_slashing = true;
             sabre.slash_index = 0;
             sabre.cooldown_timer = sabre.cooldown;
-            sabre.slash_timer = 0.25;
+            sabre.slash_timer = def.total_duration();
             sm.force(PlayerState::Attacking);
 
             let radius = if dungeon.active { 5.2 } else { 3.5 };
@@ -2261,16 +2331,18 @@ fn beam_sabre_update_system(
                 radius,
                 offset,
                 arc_cos,
-                sabre.slash_damage * armor_damage_mult,
+                def.damage * slash_scale * armor_damage_mult,
                 blade_damage_type,
-                3.0,
+                def.knockback,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,
             );
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
+            hitstop.remaining = hitstop.remaining.max(def.hitstop);
 
             if sabre.fires_dual_wave() || dungeon.active {
+                let wave = &library.sabre_wave;
                 let right = cam.right().as_vec3();
                 let wave_offsets: &[f32] = if sabre.fires_dual_wave() {
                     &[-0.4, 0.4]
@@ -2291,15 +2363,20 @@ fn beam_sabre_update_system(
                             ..default()
                         },
                         Projectile {
-                            damage: sabre.wave_damage
+                            damage: wave.damage
+                                * wave_scale
                                 * armor_damage_mult
                                 * if dungeon.active { 0.72 } else { 1.0 },
                             damage_type: wave_damage_type,
-                            speed: 20.0,
+                            speed: wave.projectile_speed,
                             direction: dir,
-                            lifetime: 1.5,
+                            lifetime: wave.projectile_lifetime,
                             is_explosive: sabre.has_aoe_splash(),
-                            explosion_radius: if sabre.has_aoe_splash() { 4.0 } else { 0.0 },
+                            explosion_radius: if sabre.has_aoe_splash() {
+                                wave.explosion_radius
+                            } else {
+                                0.0
+                            },
                             weapon_type: ProjectileOwner::Player,
                             owner: Some(entity),
                             piercing: sabre.is_piercing(),
@@ -2578,5 +2655,129 @@ mod tracking_missile_tests {
         let primaries = app.world().get::<WeaponInventory>(entity).unwrap();
         assert_eq!(specials.active_slot, None);
         assert_eq!(primaries.active_slot, 1);
+    }
+}
+
+#[cfg(test)]
+mod move_def_wiring_tests {
+    use super::*;
+
+    #[test]
+    fn ranged_defaults_mirror_legacy_weapon_new_tuning() {
+        // The MoveLibrary numbers were derived from Weapon::new; if either
+        // side drifts, the data-driven path would change gameplay feel.
+        let lib = MoveLibrary::defaults();
+        let slot_order = [
+            WeaponType::Pistol,
+            WeaponType::Rifle,
+            WeaponType::Shotgun,
+            WeaponType::Rocket,
+            WeaponType::Laser,
+            WeaponType::Grenade,
+        ];
+        for (slot, wt) in slot_order.into_iter().enumerate() {
+            let legacy = Weapon::new(wt);
+            let def = lib.ranged_slot(slot).expect("every slot authored");
+            assert_eq!(def.name, wt.display_name(), "slot {slot} name");
+            assert!((def.damage - legacy.damage).abs() < 1e-6, "slot {slot} damage");
+            assert!(
+                (def.fire_rate - legacy.fire_rate).abs() < 1e-6,
+                "slot {slot} fire_rate"
+            );
+            assert!(
+                (def.projectile_speed - legacy.speed).abs() < 1e-6,
+                "slot {slot} speed"
+            );
+            assert!((def.spread - legacy.spread).abs() < 1e-6, "slot {slot} spread");
+            assert_eq!(def.pellets, legacy.pellets, "slot {slot} pellets");
+            assert!(
+                (def.explosion_radius - legacy.explosion_radius).abs() < 1e-6,
+                "slot {slot} explosion radius"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_ranged_defs_overwrites_stats_but_preserves_runtime_state() {
+        let mut lib = MoveLibrary::defaults();
+        lib.ranged[0].damage = 99.0;
+        lib.ranged[0].fire_rate = 0.5;
+        lib.ranged[0].pellets = 3;
+
+        let mut inv = WeaponInventory::default();
+        {
+            let pistol = &mut inv.slots[0];
+            pistol.ammo = 7;
+            pistol.fire_timer = 0.42;
+            pistol.rank = 2;
+            pistol.charge_progress = 0.6;
+        }
+
+        apply_ranged_defs(&lib, &mut inv);
+
+        let pistol = &inv.slots[0];
+        assert_eq!(pistol.damage, 99.0);
+        assert_eq!(pistol.fire_rate, 0.5);
+        assert_eq!(pistol.pellets, 3);
+        // Runtime state must survive a data reload.
+        assert_eq!(pistol.ammo, 7);
+        assert_eq!(pistol.fire_timer, 0.42);
+        assert_eq!(pistol.rank, 2);
+        assert_eq!(pistol.charge_progress, 0.6);
+        // Identity/behavior flags stay owned by Weapon::new.
+        assert_eq!(pistol.weapon_type, WeaponType::Pistol);
+        assert!(!pistol.automatic);
+        assert!(!pistol.is_explosive);
+    }
+
+    #[test]
+    fn ranged_move_defs_sync_on_spawn_and_on_library_edits() {
+        let mut app = App::new();
+        let mut library = MoveLibrary::defaults();
+        library.ranged[0].damage = 111.0;
+        app.insert_resource(library);
+        app.add_systems(Update, apply_ranged_move_defs_system);
+
+        let entity = app.world_mut().spawn(WeaponInventory::default()).id();
+        app.update();
+        let inv = app.world().get::<WeaponInventory>(entity).unwrap();
+        assert_eq!(inv.slots[0].damage, 111.0);
+
+        // A library edit (hot reload path) re-syncs existing inventories.
+        app.world_mut().resource_mut::<MoveLibrary>().ranged[1].fire_rate = 9.0;
+        app.update();
+        let inv = app.world().get::<WeaponInventory>(entity).unwrap();
+        assert_eq!(inv.slots[1].fire_rate, 9.0);
+    }
+
+    #[test]
+    fn sabre_level_scaling_reproduces_legacy_damage_tables() {
+        // BeamSabre::set_level tables, expressed as multipliers over the
+        // authored level-1 MoveDef base, must reproduce the legacy numbers.
+        let lib = MoveLibrary::defaults();
+        let slash = lib.sabre_slash(0).expect("sabre chain authored");
+        let wave = &lib.sabre_wave;
+        for (level, legacy_slash, legacy_wave) in [
+            (1, 25.0_f32, 40.0_f32),
+            (2, 35.0, 60.0),
+            (3, 50.0, 80.0),
+            (4, 65.0, 100.0),
+            (5, 85.0, 150.0),
+        ] {
+            let mut sabre = BeamSabre::default();
+            sabre.set_level(level);
+            let (slash_scale, wave_scale) = sabre_level_scale(&sabre);
+            assert!(
+                (slash.damage * slash_scale - legacy_slash).abs() < 1e-3,
+                "level {level} slash damage"
+            );
+            assert!(
+                (wave.damage * wave_scale - legacy_wave).abs() < 1e-3,
+                "level {level} wave damage"
+            );
+        }
+        // Legacy inter-slash cadence was a hardcoded 0.25 s.
+        assert!((slash.total_duration() - 0.25).abs() < 1e-4);
+        assert!((slash.knockback - 3.0).abs() < 1e-6);
     }
 }
