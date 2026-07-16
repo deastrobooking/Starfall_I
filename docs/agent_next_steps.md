@@ -382,8 +382,9 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
 
 Verification:
 
-- GitHub Actions runs format, check, strict all-target Clippy, and tests for a
-  pull request and a `main` push.
+- GitHub Actions runs format, check, and all-target Clippy with every warning
+  except the intentional content-catalog `dead_code` inventory denied, plus
+  tests for a pull request and a `main` push.
 - Intentionally corrupting the newest rotating save surfaces a clear warning and
   loads the newest valid older slot rather than failing silently.
 - Disconnecting and reconnecting Player 2's controller correctly preserves their slot without drifting entity IDs.

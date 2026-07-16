@@ -803,7 +803,11 @@ pub(super) fn speed_road_sky_access_chunks(profile: &[Vec3], terrain_seed: u64) 
     access
 }
 
-pub(super) fn speed_road_sky_approach(merge: Vec3, forward: Vec2, terrain_seed: u64) -> Option<(Vec2, f32)> {
+pub(super) fn speed_road_sky_approach(
+    merge: Vec3,
+    forward: Vec2,
+    terrain_seed: u64,
+) -> Option<(Vec2, f32)> {
     let right = Vec2::new(forward.y, -forward.x);
     let mut best: Option<(f32, f32, f32, f32)> = None;
     for side in [-1.0_f32, 1.0] {
@@ -836,7 +840,10 @@ pub(super) fn speed_road_sky_approach(merge: Vec3, forward: Vec2, terrain_seed: 
     (outer_ground + 0.5 < merge.y).then_some((outer, outer_ground))
 }
 
-pub(super) fn speed_road_valid_sky_access_chunks(profile: &[Vec3], terrain_seed: u64) -> Vec<usize> {
+pub(super) fn speed_road_valid_sky_access_chunks(
+    profile: &[Vec3],
+    terrain_seed: u64,
+) -> Vec<usize> {
     speed_road_sky_access_chunks(profile, terrain_seed)
         .into_iter()
         .filter(|&chunk| {

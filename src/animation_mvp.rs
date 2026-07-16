@@ -1,0 +1,330 @@
+//! First production animation slice for the procedural humanoid rig.
+//!
+//! The graph supplies authored-looking base motion for the torso, shoulders,
+//! and hips. The existing procedural pass continues to own hands, weapon
+//! sockets, knees, ankles, and IK, which keeps gameplay poses usable while the
+//! clip library grows.
+
+use std::{collections::HashMap, f32::consts::PI, time::Duration};
+
+use bevy::{
+    animation::{animated_field, AnimatedBy, AnimationTargetId},
+    prelude::*,
+};
+
+use crate::components::character::{CartoonAnimator, CartoonPose, JointKind, SkeletonRig};
+
+const GRAPH_POSES: [CartoonPose; 8] = [
+    CartoonPose::Idle,
+    CartoonPose::Walk,
+    CartoonPose::Run,
+    CartoonPose::Sprint,
+    CartoonPose::Jump,
+    CartoonPose::Fall,
+    CartoonPose::WallSlide,
+    CartoonPose::Hang,
+];
+
+const GRAPH_JOINTS: [JointKind; 6] = [
+    JointKind::Spine,
+    JointKind::Chest,
+    JointKind::LeftShoulder,
+    JointKind::RightShoulder,
+    JointKind::LeftHip,
+    JointKind::RightHip,
+];
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CharacterAnimationBackend {
+    #[default]
+    Procedural,
+    GraphMvp,
+}
+
+#[derive(Component, Debug, Default)]
+pub(crate) struct GraphPlaybackState {
+    current: Option<CartoonPose>,
+}
+
+#[derive(Resource)]
+pub(crate) struct CharacterAnimationLibrary {
+    graph: Handle<AnimationGraph>,
+    nodes: HashMap<CartoonPose, AnimationNodeIndex>,
+}
+
+pub struct CharacterAnimationMvpPlugin;
+
+impl Plugin for CharacterAnimationMvpPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, build_animation_library)
+            .add_systems(Update, attach_animation_graph_to_new_rigs);
+    }
+}
+
+fn build_animation_library(
+    mut commands: Commands,
+    mut clips: ResMut<Assets<AnimationClip>>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
+) {
+    let handles = GRAPH_POSES.map(|pose| clips.add(build_clip(pose)));
+    let (graph, node_indices) = AnimationGraph::from_clips(handles);
+    let nodes = GRAPH_POSES.into_iter().zip(node_indices).collect();
+
+    commands.insert_resource(CharacterAnimationLibrary {
+        graph: graphs.add(graph),
+        nodes,
+    });
+}
+
+fn attach_animation_graph_to_new_rigs(
+    mut commands: Commands,
+    library: Res<CharacterAnimationLibrary>,
+    rigs: Query<(Entity, &SkeletonRig), Added<SkeletonRig>>,
+) {
+    for (root, rig) in &rigs {
+        let mut player = AnimationPlayer::default();
+        let mut transitions = AnimationTransitions::new();
+        transitions
+            .play(
+                &mut player,
+                library.nodes[&CartoonPose::Idle],
+                Duration::ZERO,
+            )
+            .repeat();
+
+        commands.entity(root).insert((
+            AnimationGraphHandle(library.graph.clone()),
+            player,
+            transitions,
+            GraphPlaybackState {
+                current: Some(CartoonPose::Idle),
+            },
+            CharacterAnimationBackend::GraphMvp,
+        ));
+
+        for joint_kind in GRAPH_JOINTS {
+            if let Some(&joint) = rig.joints.get(&joint_kind) {
+                commands
+                    .entity(joint)
+                    .insert((target_id(joint_kind), AnimatedBy(root)));
+            }
+        }
+    }
+}
+
+/// Synchronizes gameplay pose selection with the graph. Unsupported action
+/// poses deliberately stop graph playback so the procedural system has full
+/// authority until a dedicated clip is added.
+pub(crate) fn drive_graph_animation(
+    library: Option<Res<CharacterAnimationLibrary>>,
+    mut players: Query<(
+        &CartoonAnimator,
+        &mut CharacterAnimationBackend,
+        &mut GraphPlaybackState,
+        &mut AnimationPlayer,
+        &mut AnimationTransitions,
+    )>,
+) {
+    let Some(library) = library else {
+        return;
+    };
+
+    for (animator, mut backend, mut state, mut player, mut transitions) in &mut players {
+        let Some(&node) = library.nodes.get(&animator.pose) else {
+            if state.current.is_some() {
+                player.stop_all();
+                state.current = None;
+            }
+            *backend = CharacterAnimationBackend::Procedural;
+            continue;
+        };
+
+        *backend = CharacterAnimationBackend::GraphMvp;
+        if state.current == Some(animator.pose) {
+            continue;
+        }
+
+        transitions
+            .play(&mut player, node, transition_duration(animator.pose))
+            .repeat()
+            .set_speed(playback_speed(animator.pose, animator.speed));
+        state.current = Some(animator.pose);
+    }
+}
+
+fn transition_duration(pose: CartoonPose) -> Duration {
+    match pose {
+        CartoonPose::Jump | CartoonPose::Fall | CartoonPose::WallSlide | CartoonPose::Hang => {
+            Duration::from_millis(80)
+        }
+        _ => Duration::from_millis(140),
+    }
+}
+
+fn playback_speed(pose: CartoonPose, movement_speed: f32) -> f32 {
+    match pose {
+        CartoonPose::Idle => 1.0,
+        CartoonPose::Walk => (movement_speed / 3.0).clamp(0.75, 1.35),
+        CartoonPose::Run => (movement_speed / 6.0).clamp(0.8, 1.45),
+        CartoonPose::Sprint => (movement_speed / 9.0).clamp(0.9, 1.5),
+        _ => 1.0,
+    }
+}
+
+fn target_id(joint: JointKind) -> AnimationTargetId {
+    AnimationTargetId::from_name(&Name::new(format!("StarfallMvp::{joint:?}")))
+}
+
+fn build_clip(pose: CartoonPose) -> AnimationClip {
+    let duration = clip_duration(pose);
+    let mut clip = AnimationClip::default();
+
+    for joint in GRAPH_JOINTS {
+        let [start, middle, end] = joint_rotations(pose, joint);
+        clip.add_curve_to_target(
+            target_id(joint),
+            AnimatableCurve::new(
+                animated_field!(Transform::rotation),
+                UnevenSampleAutoCurve::new(
+                    [0.0, duration * 0.5, duration]
+                        .into_iter()
+                        .zip([start, middle, end]),
+                )
+                .expect("MVP rotation clips always contain ordered samples"),
+            ),
+        );
+    }
+
+    clip
+}
+
+fn clip_duration(pose: CartoonPose) -> f32 {
+    match pose {
+        CartoonPose::Idle => 2.4,
+        CartoonPose::Walk => 0.82,
+        CartoonPose::Run => 0.58,
+        CartoonPose::Sprint => 0.46,
+        CartoonPose::Jump => 0.55,
+        CartoonPose::Fall => 0.7,
+        CartoonPose::WallSlide => 0.8,
+        CartoonPose::Hang => 1.2,
+        _ => 1.0,
+    }
+}
+
+fn q(x: f32, y: f32, z: f32) -> Quat {
+    Quat::from_euler(EulerRot::XYZ, x, y, z)
+}
+
+fn joint_rotations(pose: CartoonPose, joint: JointKind) -> [Quat; 3] {
+    use JointKind::{Chest, LeftHip, LeftShoulder, RightHip, RightShoulder, Spine};
+
+    let (a, b) = match pose {
+        CartoonPose::Idle => match joint {
+            Spine => (q(-0.015, -0.025, 0.0), q(0.02, 0.025, 0.0)),
+            Chest => (q(0.01, 0.03, 0.0), q(-0.015, -0.03, 0.0)),
+            LeftShoulder => (q(0.035, 0.0, 0.0), q(-0.035, 0.0, 0.0)),
+            RightShoulder => (q(-0.035, 0.0, 0.0), q(0.035, 0.0, 0.0)),
+            _ => (Quat::IDENTITY, Quat::IDENTITY),
+        },
+        CartoonPose::Walk => locomotion_rotation(joint, 0.44, 0.38, -0.035, 0.07),
+        CartoonPose::Run => locomotion_rotation(joint, 0.76, 0.66, -0.11, 0.11),
+        CartoonPose::Sprint => locomotion_rotation(joint, 0.96, 0.84, -0.2, 0.14),
+        CartoonPose::Jump => match joint {
+            Spine | Chest => (q(-0.08, 0.0, 0.0), q(-0.14, 0.0, 0.0)),
+            LeftShoulder | RightShoulder => (q(-0.42, 0.0, 0.0), q(-0.62, 0.0, 0.0)),
+            LeftHip | RightHip => (q(0.2, 0.0, 0.0), q(0.36, 0.0, 0.0)),
+            _ => (Quat::IDENTITY, Quat::IDENTITY),
+        },
+        CartoonPose::Fall => match joint {
+            Spine | Chest => (q(0.06, 0.0, 0.0), q(0.11, 0.0, 0.0)),
+            LeftShoulder => (q(-0.2, 0.0, -0.16), q(-0.08, 0.0, -0.22)),
+            RightShoulder => (q(-0.2, 0.0, 0.16), q(-0.08, 0.0, 0.22)),
+            LeftHip => (q(-0.12, 0.0, 0.0), q(0.1, 0.0, 0.0)),
+            RightHip => (q(0.1, 0.0, 0.0), q(-0.12, 0.0, 0.0)),
+            _ => (Quat::IDENTITY, Quat::IDENTITY),
+        },
+        CartoonPose::WallSlide => match joint {
+            Spine | Chest => (q(-0.06, -0.08, 0.0), q(-0.1, 0.08, 0.0)),
+            LeftShoulder => (q(-0.78, 0.0, -0.08), q(-0.62, 0.0, -0.12)),
+            RightShoulder => (q(0.22, 0.0, 0.0), q(0.34, 0.0, 0.0)),
+            LeftHip => (q(0.34, 0.0, 0.0), q(0.2, 0.0, 0.0)),
+            RightHip => (q(-0.1, 0.0, 0.0), q(-0.22, 0.0, 0.0)),
+            _ => (Quat::IDENTITY, Quat::IDENTITY),
+        },
+        CartoonPose::Hang => match joint {
+            Spine | Chest => (q(0.08, 0.0, 0.0), q(0.12, 0.0, 0.0)),
+            LeftShoulder => (q(-PI * 0.72, 0.0, -0.08), q(-PI * 0.76, 0.0, -0.05)),
+            RightShoulder => (q(-PI * 0.72, 0.0, 0.08), q(-PI * 0.76, 0.0, 0.05)),
+            LeftHip => (q(-0.08, 0.0, 0.0), q(0.08, 0.0, 0.0)),
+            RightHip => (q(0.08, 0.0, 0.0), q(-0.08, 0.0, 0.0)),
+            _ => (Quat::IDENTITY, Quat::IDENTITY),
+        },
+        _ => (Quat::IDENTITY, Quat::IDENTITY),
+    };
+
+    [a, b, a]
+}
+
+fn locomotion_rotation(
+    joint: JointKind,
+    arm_swing: f32,
+    hip_swing: f32,
+    lean: f32,
+    twist: f32,
+) -> (Quat, Quat) {
+    use JointKind::{Chest, LeftHip, LeftShoulder, RightHip, RightShoulder, Spine};
+
+    match joint {
+        Spine => (q(lean, -twist * 0.45, 0.0), q(lean, twist * 0.45, 0.0)),
+        Chest => (q(lean * 0.35, -twist, 0.0), q(lean * 0.35, twist, 0.0)),
+        LeftShoulder => (q(arm_swing, 0.0, 0.0), q(-arm_swing, 0.0, 0.0)),
+        RightShoulder => (q(-arm_swing, 0.0, 0.0), q(arm_swing, 0.0, 0.0)),
+        LeftHip => (q(-hip_swing, 0.0, 0.0), q(hip_swing, 0.0, 0.0)),
+        RightHip => (q(hip_swing, 0.0, 0.0), q(-hip_swing, 0.0, 0.0)),
+        _ => (Quat::IDENTITY, Quat::IDENTITY),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mvp_graph_covers_the_core_locomotion_set() {
+        for pose in GRAPH_POSES {
+            let clip = build_clip(pose);
+            assert!(clip.duration() > 0.0);
+            assert_eq!(clip.curves().len(), GRAPH_JOINTS.len());
+            for joint in GRAPH_JOINTS {
+                assert_eq!(clip.curves_for_target(target_id(joint)).unwrap().len(), 1);
+            }
+        }
+        assert!(!GRAPH_POSES.contains(&CartoonPose::Attack));
+        assert!(!GRAPH_POSES.contains(&CartoonPose::SabreSlash));
+    }
+
+    #[test]
+    fn run_and_sprint_shoulders_swing_fore_and_aft() {
+        for pose in [CartoonPose::Run, CartoonPose::Sprint] {
+            let [left_a, left_b, _] = joint_rotations(pose, JointKind::LeftShoulder);
+            let [right_a, right_b, _] = joint_rotations(pose, JointKind::RightShoulder);
+            let (left_a_x, _, left_a_z) = left_a.to_euler(EulerRot::XYZ);
+            let (left_b_x, _, left_b_z) = left_b.to_euler(EulerRot::XYZ);
+            let (right_a_x, _, right_a_z) = right_a.to_euler(EulerRot::XYZ);
+            let (right_b_x, _, right_b_z) = right_b.to_euler(EulerRot::XYZ);
+
+            assert!(left_a_x * left_b_x < 0.0);
+            assert!(right_a_x * right_b_x < 0.0);
+            assert!(left_a_z.abs() < 0.001 && left_b_z.abs() < 0.001);
+            assert!(right_a_z.abs() < 0.001 && right_b_z.abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn movement_playback_speed_is_bounded() {
+        assert_eq!(playback_speed(CartoonPose::Run, 0.0), 0.8);
+        assert_eq!(playback_speed(CartoonPose::Run, 100.0), 1.45);
+        assert_eq!(playback_speed(CartoonPose::Idle, 100.0), 1.0);
+    }
+}

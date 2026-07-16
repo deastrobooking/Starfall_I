@@ -391,7 +391,10 @@ mod tests {
         assert!((slash.knockback - 3.0).abs() < 1e-6, "legacy knockback");
         assert_eq!(slash.hitstop, 0.0, "sabre shipped without hitstop");
         // Clamping: high slash indices reuse the last authored entry.
-        assert_eq!(lib.sabre_slash(7).unwrap().name, lib.sabre.last().unwrap().name);
+        assert_eq!(
+            lib.sabre_slash(7).unwrap().name,
+            lib.sabre.last().unwrap().name
+        );
         // Legacy wave projectile: speed 20, lifetime 1.5, base damage 40, AoE 4.
         let wave = &lib.sabre_wave;
         assert!((wave.projectile_speed - 20.0).abs() < 1e-6);
@@ -451,7 +454,8 @@ mod tests {
             "heavy": serde_json::to_value(&lib.heavy).unwrap(),
         });
         let back: MoveLibrary = serde_json::from_value(legacy).unwrap();
-        back.validate().expect("legacy file plus defaults must validate");
+        back.validate()
+            .expect("legacy file plus defaults must validate");
         assert_eq!(back.sabre.len(), lib.sabre.len());
         assert_eq!(back.ranged.len(), RANGED_SLOTS);
         assert!((back.sabre_wave.projectile_speed - 20.0).abs() < 1e-6);

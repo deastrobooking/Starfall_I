@@ -47,8 +47,8 @@ use bevy::input::ButtonState;
 use bevy::input::InputSystems;
 use bevy::prelude::*;
 
-use crate::components::player::{Player, PlayerIndex, PlayerInput};
 use crate::components::player::TraversalMode;
+use crate::components::player::{Player, PlayerIndex, PlayerInput};
 use crate::engine_tools::EngineToolMode;
 use crate::resources::{GameSettings, UiGameplayCapture};
 
@@ -62,14 +62,18 @@ impl Plugin for InputPlugin {
             .add_systems(PreUpdate, poll_native_controllers.after(InputSystems))
             .add_systems(
                 PreUpdate,
+                release_disconnected_native_controller.after(poll_native_controllers),
+            )
+            .add_systems(
+                PreUpdate,
                 update_player_inputs
-                    .after(poll_native_controllers)
+                    .after(release_disconnected_native_controller)
                     .run_if(in_state(EngineToolMode::Playing)),
             )
             .add_systems(
                 PreUpdate,
                 clear_player_inputs
-                    .after(poll_native_controllers)
+                    .after(release_disconnected_native_controller)
                     .run_if(in_state(EngineToolMode::Editing)),
             )
             .add_systems(
@@ -86,6 +90,10 @@ pub struct GamepadAssignments {
 }
 
 impl GamepadAssignments {
+    fn player_is_unassigned(&self, player_index: usize) -> bool {
+        self.players[player_index].is_none() && self.native_player != Some(player_index as u8)
+    }
+
     pub fn gamepad_for_player(&self, player_index: u8) -> Option<Entity> {
         self.players.get(player_index as usize).copied().flatten()
     }
@@ -102,8 +110,8 @@ impl GamepadAssignments {
             return Some(player);
         }
         let slot = (0..4)
-            .find(|index| joined[*index] && self.players[*index].is_none())
-            .or_else(|| (0..4).find(|index| self.players[*index].is_none()))?;
+            .find(|index| joined[*index] && self.player_is_unassigned(*index))
+            .or_else(|| (0..4).find(|index| self.player_is_unassigned(*index)))?;
         self.players[slot] = Some(gamepad);
         Some(slot as u8)
     }
@@ -121,6 +129,10 @@ impl GamepadAssignments {
 
     pub fn native_player(&self) -> Option<u8> {
         self.native_player
+    }
+
+    fn release_native(&mut self) {
+        self.native_player = None;
     }
 
     fn release(&mut self, gamepad: Entity) {
@@ -252,6 +264,20 @@ impl NativeControllerState {
 
 fn poll_native_controllers(mut native: ResMut<NativeControllerState>) {
     native_controller_backend::poll(&mut native);
+}
+
+/// Native GameController devices do not emit Bevy's connection messages. Keep
+/// their replaceable device binding subject to the same disconnect/reclaim
+/// contract as normal gamepads.
+fn release_disconnected_native_controller(
+    native: Res<NativeControllerState>,
+    mut assignments: ResMut<GamepadAssignments>,
+    mut was_connected: Local<bool>,
+) {
+    if *was_connected && !native.connected {
+        assignments.release_native();
+    }
+    *was_connected = native.connected;
 }
 
 // ── Deadzone — normalized circular remapping ──────────────────────────────────
@@ -849,6 +875,54 @@ mod tests {
         assignments.release(original);
         assert_eq!(
             assignments.assign_next(reconnected, &[true, true, false, false]),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn native_and_bevy_gamepads_cannot_claim_the_same_player() {
+        let mut world = World::new();
+        let gamepad = world.spawn_empty().id();
+        let mut assignments = GamepadAssignments::default();
+
+        assert_eq!(
+            assignments.assign_native_next(&[true, false, false, false]),
+            Some(0)
+        );
+        assert_eq!(
+            assignments.assign_next(gamepad, &[true, false, false, false]),
+            Some(1)
+        );
+        assert_eq!(assignments.native_player(), Some(0));
+        assert_eq!(assignments.gamepad_for_player(1), Some(gamepad));
+    }
+
+    #[test]
+    fn native_disconnect_releases_the_player_for_reclaim() {
+        let mut app = App::new();
+        app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, release_disconnected_native_controller);
+        app.world_mut()
+            .resource_mut::<NativeControllerState>()
+            .connected = true;
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_native_next(&[true, false, false, false]),
+            Some(0)
+        );
+        app.update();
+        app.world_mut()
+            .resource_mut::<NativeControllerState>()
+            .connected = false;
+        app.update();
+
+        let reconnected = app.world_mut().spawn_empty().id();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_next(reconnected, &[true, false, false, false]),
             Some(0)
         );
     }

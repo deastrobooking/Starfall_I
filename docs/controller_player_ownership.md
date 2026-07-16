@@ -17,7 +17,9 @@ is a replaceable input device assigned to that identity.
 - Runtime input and F8 diagnostics resolve through `GamepadAssignments`; they
   must never infer ownership from gamepad query/enumeration order.
 - The native macOS controller fallback may claim a slot only when Bevy did not
-  report a Start press in the same frame.
+  report a Start press in the same frame. Native and Bevy bindings share one
+  occupancy check, so they cannot claim the same player; native disconnects
+  release their binding for the same Start-to-reclaim flow.
 
 ## PO2 — Individual save ownership
 

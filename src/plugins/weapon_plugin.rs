@@ -2679,7 +2679,10 @@ mod move_def_wiring_tests {
             let legacy = Weapon::new(wt);
             let def = lib.ranged_slot(slot).expect("every slot authored");
             assert_eq!(def.name, wt.display_name(), "slot {slot} name");
-            assert!((def.damage - legacy.damage).abs() < 1e-6, "slot {slot} damage");
+            assert!(
+                (def.damage - legacy.damage).abs() < 1e-6,
+                "slot {slot} damage"
+            );
             assert!(
                 (def.fire_rate - legacy.fire_rate).abs() < 1e-6,
                 "slot {slot} fire_rate"
@@ -2688,7 +2691,10 @@ mod move_def_wiring_tests {
                 (def.projectile_speed - legacy.speed).abs() < 1e-6,
                 "slot {slot} speed"
             );
-            assert!((def.spread - legacy.spread).abs() < 1e-6, "slot {slot} spread");
+            assert!(
+                (def.spread - legacy.spread).abs() < 1e-6,
+                "slot {slot} spread"
+            );
             assert_eq!(def.pellets, legacy.pellets, "slot {slot} pellets");
             assert!(
                 (def.explosion_radius - legacy.explosion_radius).abs() < 1e-6,

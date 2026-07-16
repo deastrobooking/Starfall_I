@@ -233,6 +233,16 @@ rodio; without it any first sound panicked `UnrecognizedFormat`).
 **Acceptance:** base locomotion uses authored clips; procedural IK corrects to
 ground/targets; motor state drives blend weights.
 
+**MVP slice shipped 2026-07-16:** `src/animation_mvp.rs` now builds a shared
+Bevy `AnimationGraph` with independent per-player playback, speed scaling, and
+crossfades for idle, walk, run, sprint, jump, fall, wall slide/climb, and hang.
+The graph owns torso/shoulder/hip base motion while procedural wrists, weapon
+sockets, legs, and IK continue to layer afterward. Unsupported combat and
+traversal poses stop graph playback and safely fall back to the existing
+procedural animator. Next EC4 work is in-game visual tuning, then dedicated
+combat/grapple clips and foot-contact validation before deciding on skinned
+production meshes.
+
 ### EC5 — 4-player polish
 **Goal:** Close the couch-co-op gaps.
 - Off-screen player arrows; in-game drop-in/drop-out; per-player in-world

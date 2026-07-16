@@ -89,7 +89,11 @@ fn migrate_legacy_files(root: &Path) {
     let copy_legacy = |from: &Path, to: &Path| {
         if let Some(parent) = to.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                warn!("Failed to create save directory {}: {}", parent.display(), e);
+                warn!(
+                    "Failed to create save directory {}: {}",
+                    parent.display(),
+                    e
+                );
                 return;
             }
         }
@@ -518,11 +522,7 @@ pub fn load_settings() -> Option<GameSettings> {
     match serde_json::from_str(&json) {
         Ok(settings) => Some(settings),
         Err(e) => {
-            warn!(
-                "Ignoring corrupt settings file {}: {}",
-                path.display(),
-                e
-            );
+            warn!("Ignoring corrupt settings file {}: {}", path.display(), e);
             None
         }
     }
@@ -727,7 +727,7 @@ fn load_newest_save_in(root: &Path) -> Option<(u8, SaveData)> {
         };
         let is_newer = newest
             .as_ref()
-            .map_or(true, |(_, best)| data.save_generation > best.save_generation);
+            .is_none_or(|(_, best)| data.save_generation > best.save_generation);
         if is_newer {
             newest = Some((slot, data));
         }
@@ -1086,7 +1086,6 @@ fn autosave_system(
     save_state.last_save_timer = 0.0;
 
     let slot = rotation.current_slot;
-    rotation.current_slot = next_save_slot(slot);
 
     let players = collect_player_saves(&sp.player_q);
     if players.is_empty() {
@@ -1094,6 +1093,9 @@ fn autosave_system(
     }
     match save_game_to_slot(slot, SaveSnapshot::from_params(&sp, players)) {
         Ok(()) => {
+            // Advance only after the slot is durably replaced. A failed write
+            // retries the same recovery slot instead of silently skipping it.
+            rotation.current_slot = next_save_slot(slot);
             msg_ev.write(UiMessageEvent {
                 text: format!("Game autosaved (slot {}).", (b'A' + slot) as char),
                 duration: 1.5,

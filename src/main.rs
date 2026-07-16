@@ -6,6 +6,7 @@ use crate::physics::prelude::*;
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
 
+mod animation_mvp;
 mod audio_player;
 mod audio_synth;
 mod chapters;

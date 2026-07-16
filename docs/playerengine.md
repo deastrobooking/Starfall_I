@@ -570,6 +570,26 @@ that IK resolves into joint rotations, not mesh transforms.
 Goal: define the runtime graph that will later host authored clips, procedural
 layers, and imported glTF animations.
 
+Implementation status as of 2026-07-16:
+
+- `CharacterAnimationMvpPlugin` creates one shared Bevy `AnimationGraph` and an
+  independent `AnimationPlayer`/`AnimationTransitions` pair for every player
+  skeleton, so local players never share playback state.
+- The first canonical clip set covers idle, walk, run, sprint, jump, fall, wall
+  slide/climb, and hang. Movement speed scales walk/run/sprint playback and pose
+  changes crossfade over bounded 80-140 ms windows.
+- Graph clips own only spine, chest, shoulder, and hip base rotations. The
+  existing procedural layer remains authoritative for knees, ankles, wrists,
+  weapon sockets, and contact IK; gameplay root motion remains disabled.
+- Run and sprint arms swing fore/aft on the local X axis, with tests guarding
+  against the previous sideways-arm motion.
+- Poses without an MVP graph clip (including attack, sabre, grapple, and dodge)
+  stop graph playback and use the procedural fallback rather than retaining a
+  stale locomotion clip.
+- Next validation gate: tune these clips during four-controller play, verify
+  wall/hang contacts and weapon sockets visually, then add dedicated grapple,
+  sabre, ranged-recoil, dodge, land, damage, and death clips.
+
 - Keep `CartoonPose` as the compact state bridge for now, but begin separating
   animation output into base clip/pose, additive overlays, and IK/contact solve.
 - Define blend weights for ground locomotion, airborne, wall, ledge, grapple,
