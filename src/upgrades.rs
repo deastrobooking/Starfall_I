@@ -1,5 +1,6 @@
 //! Campaign tech upgrades for weapons, turrets, health, and future mech systems.
 
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use serde::{Deserialize, Serialize};
 
 use crate::robot_pets::{PartCost, RobotPartKind, RobotPetCollection};

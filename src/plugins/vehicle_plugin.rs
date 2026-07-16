@@ -85,6 +85,7 @@ pub struct VehicleState {
     pub mech_armor_bonus: f32,
 }
 
+#[allow(dead_code)] // Mode query helpers for HUD/UI consumers that key off enum modes directly today.
 impl VehicleState {
     pub fn motorcycle_active(&self) -> bool {
         self.ground_mode == GroundMode::Motorcycle

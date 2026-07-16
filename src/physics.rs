@@ -48,6 +48,7 @@ pub enum PhysicsCompatSet {
 pub enum RigidBody {
     Fixed,
     KinematicPositionBased,
+    #[allow(dead_code)]
     Dynamic,
 }
 

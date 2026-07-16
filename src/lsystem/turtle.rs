@@ -1,3 +1,4 @@
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 /// 3-D turtle graphics interpreter for L-system strings.
 ///
 /// Symbol table

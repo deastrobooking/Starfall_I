@@ -185,6 +185,7 @@ impl GlbReferenceProfile {
 }
 
 struct HeroDesign {
+    #[allow(dead_code)]
     profile: GlbReferenceProfile,
     /// X scale of torso/shoulders/hips (broad vs lean).
     width: f32,

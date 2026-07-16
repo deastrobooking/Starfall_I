@@ -44,6 +44,7 @@ struct TargetLockVisual {
 }
 
 // ── Projectile Asset Cache ────────────────────────────────────────────────────
+#[allow(dead_code)] // Full material palette pre-built at startup; several variants await their VFX consumers.
 #[derive(Resource)]
 pub struct ProjectileAssets {
     // Mesh sizes
@@ -1046,6 +1047,7 @@ fn weapon_reload_system(
     }
 }
 
+#[allow(dead_code)] // orphaned by the unlimited-ammo change; retained for ammo-cap re-enable
 fn apply_perk_ammo_caps_system(
     mut player_q: Query<
         (
@@ -1069,11 +1071,13 @@ fn apply_perk_ammo_caps_system(
     }
 }
 
+#[allow(dead_code)] // orphaned by the unlimited-ammo change; retained for ammo-cap re-enable
 fn rescale_special_ammo_cap(weapon: &mut SpecialWeapon, ammo_mult: f32) {
     let base_max = SpecialWeapon::new(weapon.slot).max_ammo;
     rescale_ammo_cap(&mut weapon.ammo, &mut weapon.max_ammo, base_max, ammo_mult);
 }
 
+#[allow(dead_code)] // orphaned by the unlimited-ammo change; retained for ammo-cap re-enable
 fn rescale_ammo_cap(current: &mut u32, max: &mut u32, base_max: u32, ammo_mult: f32) {
     let new_max = ((base_max as f32 * ammo_mult).round() as u32).max(1);
     if *max == new_max {

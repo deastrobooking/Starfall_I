@@ -550,6 +550,7 @@ pub fn spawn_cartoon_character(
     root
 }
 
+#[allow(dead_code)] // superseded by the modular player mesh path; kept as reference fallback
 pub fn spawn_native_playable_character(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,

@@ -17,6 +17,7 @@ use rand::SeedableRng;
 
 #[derive(Resource)]
 pub struct GameRng {
+    #[allow(dead_code)]
     pub seed: u64,
     combat: StdRng,
     loot: StdRng,

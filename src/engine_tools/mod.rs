@@ -5,6 +5,7 @@
 //! Forge, and the future Level Scene Composer without serializing transient ECS
 //! entities or depending on Bevy's runtime `Entity` values.
 
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 mod persistence;
 
 use std::collections::{BTreeMap, BTreeSet};

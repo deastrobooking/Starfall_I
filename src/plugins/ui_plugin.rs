@@ -35,7 +35,7 @@ use crate::perks::{all_perks, PerkTree};
 use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::plugins::input_plugin::{GamepadAssignments, NativeButton, NativeControllerState};
-use crate::plugins::save_plugin::{save_current_session, SaveParams};
+use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
@@ -291,6 +291,7 @@ struct GameOverRoot;
 #[derive(Component)]
 struct VictoryRoot;
 #[derive(Component)]
+#[allow(dead_code)]
 struct SettingsPanelRoot;
 #[derive(Component)]
 struct DifficultyText;
@@ -1745,8 +1746,10 @@ struct ChapterProgressionOwnerButton(u8);
 struct ChapterProgressionOwner(u8);
 // Legacy single-block text — kept so old queries don't break; no longer spawned.
 #[derive(Component)]
+#[allow(dead_code)]
 struct PerkPanelText;
 #[derive(Component)]
+#[allow(dead_code)]
 struct TechUpgradePanelText;
 // New per-row markers for the structured panels.
 #[derive(Component)]
@@ -6109,6 +6112,9 @@ fn settings_panel_input_system(
     }
     if !changed {
         return;
+    }
+    if let Err(e) = save_settings(&settings) {
+        warn!("Failed to persist settings: {e}");
     }
     let diff_str = difficulty_text(&settings);
     for mut text in text_q.p0().iter_mut() {

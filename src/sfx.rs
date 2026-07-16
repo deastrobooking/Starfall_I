@@ -70,6 +70,7 @@ impl ActionSfxRegistry {
         self.handles.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_assigned(&self, action_id: &str) -> bool {
         self.handles.contains_key(action_id)
     }

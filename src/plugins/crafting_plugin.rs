@@ -16,6 +16,7 @@ pub struct CraftingMaterial {
 pub struct CraftingRecipe {
     pub id: &'static str,
     pub name: &'static str,
+    #[allow(dead_code)]
     pub category: RecipeCategory,
     pub materials: Vec<CraftingMaterial>,
     pub result_item: &'static str,
@@ -28,6 +29,7 @@ pub struct CraftingRecipe {
 pub enum RecipeCategory {
     Weapon,
     Armor,
+    #[allow(dead_code)]
     Base,
     Consumable,
     Upgrade,
@@ -159,8 +161,10 @@ pub struct CraftingQueue {
 #[derive(Debug)]
 pub struct ActiveCraft {
     pub owner: u8,
+    #[allow(dead_code)] // Kept for crafting UI progress display (recipe name + fraction) planned in the garage/store pass.
     pub recipe_id: String,
     pub timer: f32,
+    #[allow(dead_code)]
     pub duration: f32,
     pub result_item: String,
     pub result_qty: u32,

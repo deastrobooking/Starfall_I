@@ -2491,6 +2491,7 @@ fn starter_clear_zone(x: f32, z: f32, padding: f32) -> bool {
 
 // ── Shared material palette ───────────────────────────────────────────────────
 struct Palette {
+    #[allow(dead_code)]
     ground: Handle<StandardMaterial>,
 
     downtown_a: Handle<StandardMaterial>,
@@ -4448,6 +4449,7 @@ struct ScientistTempleSpec {
     gate_label: &'static str,
     reward_id: &'static str,
     reward_label: &'static str,
+    #[allow(dead_code)]
     scientist: &'static str,
     x: f32,
     z: f32,

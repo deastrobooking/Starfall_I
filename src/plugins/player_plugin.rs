@@ -109,6 +109,7 @@ fn third_person_camera_offset() -> Vec3 {
 }
 
 #[derive(Component, Debug, Clone, Copy)]
+#[allow(dead_code)]
 struct GrappleCableVisual {
     owner: Entity,
 }
@@ -1563,6 +1564,7 @@ fn shared_encounter_camera_mode_system(
     }
 }
 
+#[allow(dead_code)]
 fn nearby_drone_threats(
     players: &[Vec3],
     drone_q: &Query<&Transform, (With<FlyingDrone>, Without<BossEnemy>, Without<DeadEnemy>)>,

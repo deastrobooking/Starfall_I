@@ -64,6 +64,7 @@ pub(super) fn speed_road_required_terrain_lift(
     needed_lift.max(0.0)
 }
 
+#[allow(dead_code)]
 pub(super) fn mountain_speed_road_segment_count() -> usize {
     mountain_routes()
         .iter()
@@ -148,6 +149,7 @@ pub(super) fn distance_to_speed_road_network(x: f32, z: f32, seed: u64) -> f32 {
     best
 }
 
+#[allow(dead_code)]
 pub(super) fn speed_road_loop_gate_count() -> usize {
     let route_gate_count = mountain_routes()
         .iter()
@@ -1309,10 +1311,12 @@ pub(super) fn settlement_speed_ring_point(
     Vec3::new(x, y, z)
 }
 
+#[allow(dead_code)]
 pub(super) fn stunt_race_gate_count() -> usize {
     map_settlements().len() * 4
 }
 
+#[allow(dead_code)]
 pub(super) fn stunt_race_opponent_count() -> usize {
     map_settlements().len() * 2
 }
@@ -1424,6 +1428,7 @@ pub(super) fn quadratic_bezier_xz(a: Vec2, control: Vec2, b: Vec2, t: f32) -> Ve
     a * inv * inv + control * 2.0 * inv * t + b * t * t
 }
 
+#[allow(dead_code)]
 pub(super) fn speed_road_sweeper_curve_count() -> usize {
     mountain_routes()
         .iter()
@@ -1500,6 +1505,7 @@ pub(super) fn hoverboard_trick_ramp_count() -> usize {
 
 pub(super) const STUNT_GRIND_RAIL_LIMIT: usize = 18;
 
+#[allow(dead_code)]
 pub(super) fn stunt_grind_rail_count() -> usize {
     mountain_routes()
         .iter()
@@ -1942,6 +1948,7 @@ pub(super) fn spawn_npc_road_vehicles(
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn road_vehicle_route_path(route: &[(f32, f32)], terrain_seed: u64) -> Vec<Vec3> {
     let forward = speed_road_route_profile(
         route,

@@ -3,6 +3,7 @@
 //! continues to own the canonical [`JointKind`] skeleton, while an imported
 //! scene may supply a skinned visual when it satisfies this mapping.
 
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use std::collections::{HashMap, HashSet};
 
 use crate::components::character::JointKind;

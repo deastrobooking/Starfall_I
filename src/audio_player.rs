@@ -20,6 +20,7 @@ pub struct AudioLibraryReloadEvent;
 #[derive(Debug, Clone)]
 pub struct MusicTrack {
     pub name: String,
+    #[allow(dead_code)]
     pub source_path: PathBuf,
     pub handle: Handle<AudioSource>,
 }

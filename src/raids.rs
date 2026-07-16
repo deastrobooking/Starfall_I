@@ -163,6 +163,7 @@ impl RaidRegistry {
         })
     }
 
+    #[allow(dead_code)]
     pub fn active_spawn_requests(&self) -> Vec<(RaidId, WorldSiteId, RaidKind, u8)> {
         self.raids
             .iter()

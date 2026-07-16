@@ -107,6 +107,7 @@ impl PerkTree {
     pub fn damage_mult(&self) -> f32 {
         1.0 + 0.05 * self.rank("star_focus") as f32
     }
+    #[allow(dead_code)] // orphaned by the unlimited-ammo change; retained for ammo-cap re-enable
     pub fn ammo_mult(&self) -> f32 {
         1.0 + 0.15 * self.rank("star_charges") as f32
     }

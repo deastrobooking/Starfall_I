@@ -17,6 +17,7 @@
 //! This module is intentionally self-contained (it depends only on `bevy` and
 //! `std`) so the `examples/modular_character.rs` demo can include it directly.
 
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::prelude::*;

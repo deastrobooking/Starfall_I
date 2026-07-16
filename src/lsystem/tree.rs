@@ -1,3 +1,4 @@
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 /// Tree species definitions and Bevy spawn helpers.
 ///
 /// Four species, each backed by a distinct L-system:

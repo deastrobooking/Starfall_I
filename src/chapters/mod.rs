@@ -8,6 +8,7 @@
 //! platformer/RPG setup. Each chapter sets a biome, then seeds star tools,
 //! companion recruits, alien waves, dragon bosses, and mirror-human rivals.
 
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use bevy::prelude::*;
 use std::sync::OnceLock;
 

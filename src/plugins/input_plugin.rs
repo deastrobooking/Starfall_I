@@ -224,6 +224,7 @@ impl NativeControllerState {
         self.just_pressed_mask & button.mask() != 0
     }
 
+    #[allow(dead_code)]
     pub fn start_or_confirm_just_pressed(&self) -> bool {
         self.just_pressed(NativeButton::Start)
             || self.just_pressed(NativeButton::South)

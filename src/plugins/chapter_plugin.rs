@@ -1332,6 +1332,7 @@ fn chapter_complete_check(
 }
 
 /// Public helper — list completed chapter ids (for save/load).
+#[allow(dead_code)]
 pub fn completed_chapters(progress: &ChapterProgress) -> Vec<u8> {
     progress.completed.clone()
 }

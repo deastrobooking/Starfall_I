@@ -1,3 +1,4 @@
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use bevy::prelude::*;
 
 // ── Enemy Type ────────────────────────────────────────────────────────────────

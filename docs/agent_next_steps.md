@@ -379,6 +379,16 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
 - Unclutter `src/main.rs` by migrating plugin-specific `init_resource` calls and localized configurations into their respective plugin `build()` configurations.
 - Platform-agnostic save paths delivered with the save-hardening slice above;
   legacy working-directory files are migrated once, never overwritten.
+- Dead-code triage delivered (July 16, 2026): the crate-level
+  `#![allow(dead_code)]` is gone; design/roadmap scaffolding modules carry one
+  commented module-level allow each, active runtime files carry item-level
+  allows, and `cargo clippy --all-targets -- -D warnings` passes clean. The
+  triage surfaced and fixed a real defect: pause-menu settings changes were
+  never persisted (`save_settings` had no callers); the settings panel now
+  saves atomically on every change. Known deliberate orphans kept under
+  item-level allows: the perk ammo-cap path (superseded by the unlimited-ammo
+  change) and `spawn_native_playable_character` (superseded by the modular
+  player mesh).
 
 Verification:
 

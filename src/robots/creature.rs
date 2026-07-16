@@ -3,6 +3,7 @@
 //! `CreatureSpec` wraps the existing `RobotStyle` instead of replacing it, so
 //! every working drone and legacy preset remains available to the new forge.
 
+#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
