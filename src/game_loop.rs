@@ -21,7 +21,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::components::weapon::Projectile;
-use crate::plugins::weapon_plugin::HitParticle;
+use crate::plugins::weapon_plugin::{HitParticle, SabreTechniqueVfx, SABRE_VFX_ENTITY_BUDGET};
 use crate::plugins::world_plugin::{
     BuildingClusterLodProxy, TerrainHighLodPatch, TerrainProxyLodPatch,
 };
@@ -168,6 +168,7 @@ struct RenderPerfCounts<'w, 's> {
     cameras: Query<'w, 's, &'static Camera>,
     projectiles: Query<'w, 's, (), With<Projectile>>,
     transient_vfx: Query<'w, 's, (), With<HitParticle>>,
+    sabre_vfx: Query<'w, 's, (), With<SabreTechniqueVfx>>,
     lod_profiles: Query<'w, 's, (), With<SpatialLod>>,
     lod_renderables: Query<'w, 's, (), With<ManagedSpatialLod>>,
     lod_proxies: Query<'w, 's, (), With<SpatialLodProxy>>,
@@ -274,7 +275,8 @@ fn update_perf_overlay(
         .unwrap_or(0.0);
     let cameras = render.active_cameras();
     let projectiles = render.projectiles.iter().count();
-    let transient_vfx = render.transient_vfx.iter().count();
+    let sabre_vfx = render.sabre_vfx.iter().count();
+    let transient_vfx = render.transient_vfx.iter().count() + sabre_vfx;
     let standard_materials = render.standard.len();
     let custom_materials = render.custom_materials();
     let lod_profiles = render.lod_profiles.iter().count();
@@ -302,7 +304,7 @@ fn update_perf_overlay(
     // Budgets (EC0): 60 FPS = 16.67 ms/frame; sim < 2–4 ms target (EC1 splits this out).
     for mut text in &mut text_q {
         *text = Text::new(format!(
-            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nmats:  {custom_materials} custom / {standard_materials} standard\nlod:   {lod_profiles} profiles / {lod_renderables} meshes / {lod_proxies} proxies\nterrain visible: {terrain_high_visible}/{terrain_high_total} high  {terrain_proxy_visible}/{terrain_proxy_total} proxy\nbuilding proxy:  {building_proxy_visible}/{building_proxy_total} visible\nsim:   {} ticks @{:.0}Hz",
+            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nsaber: {sabre_vfx}/{SABRE_VFX_ENTITY_BUDGET}\nmats:  {custom_materials} custom / {standard_materials} standard\nlod:   {lod_profiles} profiles / {lod_renderables} meshes / {lod_proxies} proxies\nterrain visible: {terrain_high_visible}/{terrain_high_total} high  {terrain_proxy_visible}/{terrain_proxy_total} proxy\nbuilding proxy:  {building_proxy_visible}/{building_proxy_total} visible\nsim:   {} ticks @{:.0}Hz",
             ticks.0, FIXED_HZ,
         ));
     }

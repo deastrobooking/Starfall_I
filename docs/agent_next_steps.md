@@ -583,6 +583,12 @@ Code-side presentation delivered with this slice:
 
 The Star Loadout relic catalog is delivered with discovered/locked shape cues,
 effect, input, source hint, per-player ownership, and save-ID coverage tests.
-The next bounded implementation slice is distinct budgeted VFX for Cyclone,
-Comet Dash, Meteor Pound, each element, and Starheart; keep the current
-procedural effects as the low-effect fallback for four-player split screen.
+Distinct budgeted VFX are also delivered for Cyclone, Comet Dash, Meteor Pound,
+energy waves, each element, and Starheart. They reuse shared meshes/materials
+and enforce a global 24-transient-entity ceiling (six per player in the
+four-player worst case). The next action is the focused hardware acceptance
+pass above. F11 now reports total combat VFX plus `saber: current/24`, and a
+regression test proves late-joining players inherit campaign-discovered Saber
+relics without duplicating existing ownership. Capture one-, two-, and
+four-player readings before raising this budget or adding transparent particles
+and dynamic lights.

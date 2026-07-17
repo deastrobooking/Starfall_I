@@ -8,6 +8,8 @@
 
 use bevy::prelude::*;
 
+use crate::engine_tools::creature_records;
+use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::mesh_modifiers::MeshModifier;
 use crate::platform_paths;
 use crate::robots::creature::{CreatureFaction, CreatureKind, CreatureRole, CreatureSpec, CreatureTopology, CreatureSurface};
@@ -47,6 +49,7 @@ struct ForgeState {
     labels_dirty: bool,
     status: String,
     armed_modifier: usize,
+    param_cursor: usize,
 }
 
 impl Default for ForgeState {
@@ -58,6 +61,7 @@ impl Default for ForgeState {
             labels_dirty: true,
             status: "Welcome to the Creature Forge".to_string(),
             armed_modifier: 0,
+            param_cursor: 0,
         }
     }
 }
@@ -77,10 +81,12 @@ impl ForgeState {
     }
 }
 
-/// Saved spec files found in the forge library directory.
+/// Saved spec files found in the forge library directory, plus the creature
+/// records of the active project (the authoritative, published path).
 #[derive(Resource, Default)]
 struct ForgeLibrary {
     files: Vec<String>,
+    project_creatures: Vec<(String, String)>,
     dirty: bool,
 }
 
@@ -104,10 +110,15 @@ enum ForgeAction {
     ModifierKind,
     ModifierAdd,
     ModifierRemove,
+    ModParamCycle,
+    ModValueDown,
+    ModValueUp,
     NewSeed,
     Validate,
     Undo,
     Reset,
+    SaveToProject,
+    LoadProjectCreature(usize),
     SaveVersion,
     LoadFile(usize),
     Back,
@@ -274,10 +285,12 @@ fn setup_creature_forge(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: ResMut<ForgeState>,
     mut library: ResMut<ForgeLibrary>,
+    registry: Res<ForgeProjectRegistry>,
 ) {
     state.dirty = true;
     state.labels_dirty = true;
     library.files = scan_forge_library();
+    library.project_creatures = creature_records::list_active_project(&registry);
     library.dirty = true;
 
     commands.spawn((
@@ -519,6 +532,11 @@ fn spawn_forge_ui(commands: &mut Commands) {
                         forge_button(row, "ADD MOD".into(), ForgeAction::ModifierAdd);
                         forge_button(row, "REMOVE MOD".into(), ForgeAction::ModifierRemove);
                     });
+                    forge_row(panel, |row| {
+                        forge_button(row, "MOD PARAM".into(), ForgeAction::ModParamCycle);
+                        forge_button(row, "VALUE −".into(), ForgeAction::ModValueDown);
+                        forge_button(row, "VALUE +".into(), ForgeAction::ModValueUp);
+                    });
                 },
             );
 
@@ -531,7 +549,10 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 |panel| {
                     forge_row(panel, |row| {
                         forge_button(row, "VALIDATE".into(), ForgeAction::Validate);
-                        forge_button(row, "SAVE VERSION".into(), ForgeAction::SaveVersion);
+                        forge_button(row, "SAVE TO PROJECT".into(), ForgeAction::SaveToProject);
+                    });
+                    forge_row(panel, |row| {
+                        forge_button(row, "EXPORT PRESET".into(), ForgeAction::SaveVersion);
                     });
                     forge_row(panel, |row| {
                         forge_button(row, "UNDO".into(), ForgeAction::Undo);
@@ -549,6 +570,7 @@ fn forge_action_system(
     interactions: Query<(&Interaction, &ForgeButton), (Changed<Interaction>, With<Button>)>,
     mut state: ResMut<ForgeState>,
     mut library: ResMut<ForgeLibrary>,
+    registry: Res<ForgeProjectRegistry>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let mut action = None;
@@ -702,6 +724,68 @@ fn forge_action_system(
             state.spec = CreatureSpec::default();
             state.mark("Reset to default creature");
         }
+        ForgeAction::SaveToProject => {
+            let mut spec = state.spec.clone();
+            match creature_records::save_to_active_project(&registry, &mut spec) {
+                Ok(content_id) => {
+                    state.spec = spec;
+                    library.project_creatures = creature_records::list_active_project(&registry);
+                    library.dirty = true;
+                    state.status = format!(
+                        "Saved {content_id} to {}",
+                        creature_records::active_project_label(&registry)
+                    );
+                    state.labels_dirty = true;
+                }
+                Err(error) => {
+                    state.status = error;
+                    state.labels_dirty = true;
+                }
+            }
+        }
+        ForgeAction::LoadProjectCreature(index) => {
+            let Some((content_id, _)) = library.project_creatures.get(index).cloned() else {
+                return;
+            };
+            match creature_records::load_from_active_project(&registry, &content_id) {
+                Ok(spec) => {
+                    state.push_undo();
+                    state.spec = spec;
+                    state.mark(format!("Loaded {content_id} from project"));
+                }
+                Err(error) => {
+                    state.status = format!("Load failed: {error}");
+                    state.labels_dirty = true;
+                }
+            }
+        }
+        ForgeAction::ModParamCycle => {
+            let Some(last) = state.spec.style.modifiers.last().copied() else {
+                state.status = "Add a modifier first".into();
+                state.labels_dirty = true;
+                return;
+            };
+            state.param_cursor = (state.param_cursor + 1) % last.param_count();
+            let cursor = state.param_cursor;
+            state.status = format!("{}: {}", last.label(), last.param_label(cursor));
+            state.labels_dirty = true;
+        }
+        ForgeAction::ModValueDown | ForgeAction::ModValueUp => {
+            let direction = if action == ForgeAction::ModValueUp { 1 } else { -1 };
+            if state.spec.style.modifiers.is_empty() {
+                state.status = "Add a modifier first".into();
+                state.labels_dirty = true;
+                return;
+            }
+            state.push_undo();
+            let cursor = state.param_cursor;
+            let Some(last) = state.spec.style.modifiers.last_mut() else {
+                return;
+            };
+            last.adjust_param(cursor, direction);
+            let message = format!("{}: {}", last.label(), last.param_label(cursor));
+            state.mark(message);
+        }
         ForgeAction::SaveVersion => match save_forge_version(&state.spec, &library.files) {
             Ok(name) => {
                 library.files = scan_forge_library();
@@ -850,16 +934,28 @@ fn forge_label_refresh_system(
 
     if library.dirty {
         library.dirty = false;
-        // Rebuild the LOAD button list: drop previous LoadFile buttons, then
-        // append one per saved version file.
+        // Rebuild the LOAD button list: drop previous load buttons, then list
+        // the active project's creatures (authoritative) ahead of the
+        // exported preset files.
         for (entity, button) in library_buttons.iter() {
-            if matches!(button.0, ForgeAction::LoadFile(_)) {
+            if matches!(
+                button.0,
+                ForgeAction::LoadFile(_) | ForgeAction::LoadProjectCreature(_)
+            ) {
                 commands.entity(entity).despawn();
             }
         }
         if let Ok(list) = library_list.single() {
+            let project_creatures = library.project_creatures.clone();
             let files = library.files.clone();
             commands.entity(list).with_children(|panel| {
+                for (index, (_, display_name)) in project_creatures.iter().enumerate() {
+                    forge_button(
+                        panel,
+                        format!("PROJ {display_name}"),
+                        ForgeAction::LoadProjectCreature(index),
+                    );
+                }
                 for (index, name) in files.iter().enumerate() {
                     forge_button(panel, format!("LOAD {name}"), ForgeAction::LoadFile(index));
                 }

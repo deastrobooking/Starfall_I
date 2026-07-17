@@ -807,6 +807,19 @@ status distinguishes ready, recharge percentage, and active overdrive. Saber
 status shows the live named technique first, otherwise the owned wave/spin/dash/
 pound set, elemental-gem count, and Legendary Starheart ownership.
 
+Saber presentation uses shared projectile meshes and material handles rather
+than creating materials per attack. Cyclone emits crossed rotating rings,
+Comet Dash emits three directional streaks, Meteor Pound emits an expanding
+ground ring plus vertical impact column, and energy waves emit a short muzzle
+ring. Solar Fire, Storm, Frost, and Void choose distinct shared colors for both
+technique effects and waves; Starheart adds a second pink tilted ring. Transient
+Saber VFX are capped globally at 24 entities so simultaneous four-player use
+degrades by dropping excess decorations while attacks and damage still resolve.
+F11 counts these entities in total combat VFX and displays the dedicated Saber
+count against its cap. Player spawning seeds campaign-discovered Saber relics
+into the joining player's save-backed ledger; automated coverage verifies that
+existing ownership remains idempotent and unrelated discoveries are excluded.
+
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 
 Special tools are selected with keyboard `7`, `8`, `9`, `0`, or controller Select + D-pad Up/Down/Left/Right, then fired with RT/LMB. Homing Star—the tracking missile—is Select+D-pad Up. Its name replaces the primary weapon name in the HUD while selected. RB, D-pad Left, or primary number keys return RT to primary weapons.

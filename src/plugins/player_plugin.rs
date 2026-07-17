@@ -602,6 +602,17 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
 }
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
+fn seed_discovered_sabre_relics(
+    progress: &ChapterProgress,
+    player_progression: &mut PlayerProgression,
+) -> usize {
+    crate::upgrades::SABRE_RELIC_IDS
+        .into_iter()
+        .filter(|relic_id| progress.has_discoverable(relic_id))
+        .filter(|relic_id| player_progression.upgrades.unlock_relic(*relic_id))
+        .count()
+}
+
 fn spawn_players(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -700,11 +711,7 @@ fn spawn_players(
         let mut player_progression = slot.progression.clone();
         // Campaign discoveries are party-wide, while the resulting ownership
         // is copied into each player's save-backed progression component.
-        for relic_id in crate::upgrades::SABRE_RELIC_IDS {
-            if progress.has_discoverable(relic_id) {
-                player_progression.upgrades.unlock_relic(relic_id);
-            }
-        }
+        seed_discovered_sabre_relics(&progress, &mut player_progression);
         player_stats.max_health +=
             player_progression.perks.hp_bonus() + player_progression.upgrades.armor_health_bonus();
         for (weapon, rank) in weapon_inventory
@@ -3455,6 +3462,23 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn late_joining_player_inherits_only_discovered_sabre_relics() {
+        let mut chapter = ChapterProgress::default();
+        chapter.unlock("solar_sabre_glyph");
+        chapter.unlock("storm_gem");
+        chapter.unlock("unrelated_world_secret");
+        let mut player = PlayerProgression::default();
+        player.upgrades.unlock_relic("cyclone_slash_blueprint");
+
+        assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 2);
+        assert!(player.upgrades.has_relic("solar_sabre_glyph"));
+        assert!(player.upgrades.has_relic("storm_gem"));
+        assert!(player.upgrades.has_relic("cyclone_slash_blueprint"));
+        assert!(!player.upgrades.has_relic("unrelated_world_secret"));
+        assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 0);
+    }
 
     #[test]
     fn quick_item_heals_and_consumes_only_one_stack_item() {

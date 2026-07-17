@@ -114,9 +114,24 @@ with one-press LOAD per saved version. All creator panels — Creature Forge's
 four and the level workspace's Outliner/Inspector/Registry — are now movable,
 minimizable tool windows (`src/tool_windows.rs`: drag by title bar with
 screen-bounds clamping, minimize/restore collapsing to the title bar),
-making the Forge a proper multi-window tool. Remaining: window layouts are
-not yet persisted per user, and Forge specs do not yet publish into the
-active project's Creature content records.
+making the Forge a proper multi-window tool.
+
+**Forge production integration, first slice (July 17, 2026):** creature
+authoring now flows through the project contract. SAVE TO PROJECT validates
+the spec first (any `Error`-severity issue blocks with the reasons in the
+status line), assigns a fresh `starfall.creature-N` content id when the spec
+still carries the factory default, and upserts a `ContentCategory::Creature`
+record + payload into the active `ForgeProject` via `ProjectStore` — atomic
+writes, recovery snapshots, draft hashes, and the lock document included
+(`engine_tools/creature_records.rs`). The LIBRARY window lists the active
+project's creatures (PROJ rows, authoritative) above the exported preset
+files; SAVE VERSION is renamed EXPORT PRESET and remains an import/export
+side channel only. The Forge also gained World-Kit-parity modifier parameter
+editing (MOD PARAM / VALUE −/+ on the shared `MeshModifier` param contract),
+and grabbing any tool window now raises it above its siblings. Remaining
+Forge work: controller-first navigation of every Forge control, window
+layout persistence per user/workspace, thumbnails, and the publish/runtime
+bridge that lets spawners consume published creature records by content id.
 
 ### PM2 — Project packages and reproducible presets
 

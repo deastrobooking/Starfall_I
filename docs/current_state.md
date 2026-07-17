@@ -48,6 +48,13 @@
   Saber technique, owned wave/technique unlocks, elemental gem count, and
   Starheart ownership. Hoverboard overdrive and Saber actions emit modular SFX
   ids with synthesized fallbacks when no custom MP3 is assigned.
+- Saber techniques now have bounded procedural silhouettes: crossed Cyclone
+  rings, Comet Dash streaks, a Meteor Pound ring/column, and wave muzzle rings.
+  Elemental gems select shared effect/wave materials and Starheart adds a pink
+  signature ring. A global 24-entity transient budget protects the four-player
+  split-screen case without allocating per-use materials. F11 includes these
+  entities in total combat VFX and reports a dedicated `saber: current/24`
+  reading for the acceptance pass.
 - Starfall Forge has a title launcher and project hub, persistent project
   registry, stable recipe/content IDs, atomic project/source saves and recovery,
   validation/publishing, immutable presets and lock documents, deterministic
@@ -76,7 +83,8 @@
    render costs before adding streaming complexity or denser content.
 6. Hardware-test and tune the new hoverboard/Saber pass: steep ascents, crests,
    banked curves, B overdrive, board-to-feet alignment, Saber wave discovery,
-   technique inputs, and per-player save/reload ownership.
+   technique inputs/VFX readability, elemental and Starheart differentiation,
+   four-player effect-budget behavior, and per-player save/reload ownership.
 7. Continue PM1–PM3 creator gaps: templates/import/recovery/settings, preset
    thumbnails and validation capture, and per-level metadata/budgets plus
    rename/delete/reorder.

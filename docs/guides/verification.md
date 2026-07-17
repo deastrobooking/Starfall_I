@@ -38,7 +38,7 @@ root. Reports sanitize local home/install paths and retain the newest five.
 | F8 | controller diagnostics | `ui_plugin` |
 | F9 | collider debug draw | `world_plugin` |
 | F10 | fixed-tick motor A/B toggle | `game_loop` |
-| F11 | perf overlay (FPS, frame ms, entities, sim ticks, cameras, materials) | `game_loop` |
+| F11 | perf overlay (FPS, frame ms, entities, sim ticks, cameras, materials, total combat VFX, Saber VFX/cap) | `game_loop` |
 
 ## Profiling
 

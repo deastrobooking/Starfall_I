@@ -21,8 +21,8 @@ use crate::physics::{
 };
 use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::resources::DungeonCrawlState;
-use crate::state::AppState;
 use crate::sfx::ModularActionSfxEvent;
+use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
@@ -35,6 +35,32 @@ pub struct HitParticle {
 
 #[derive(Component)]
 struct PreserveParticleShape(Vec3);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct SabreTechniqueVfx {
+    lifetime: f32,
+    max_lifetime: f32,
+    velocity: Vec3,
+    spin: Vec3,
+    base_scale: Vec3,
+    expansion: f32,
+}
+
+#[derive(Resource, Debug, Clone, Copy)]
+struct SabreVfxBudget {
+    max_entities: usize,
+}
+
+pub(crate) const SABRE_VFX_ENTITY_BUDGET: usize = 24;
+
+impl Default for SabreVfxBudget {
+    fn default() -> Self {
+        // Six transient shapes per local player in the four-player worst case.
+        Self {
+            max_entities: SABRE_VFX_ENTITY_BUDGET,
+        }
+    }
+}
 
 #[derive(Component)]
 struct SabreBladeVisual {
@@ -102,6 +128,7 @@ pub struct WeaponPlugin;
 impl Plugin for WeaponPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponRanks>()
+            .init_resource::<SabreVfxBudget>()
             .add_systems(Startup, setup_weapon_assets)
             .add_systems(
                 Update,
@@ -127,6 +154,7 @@ impl Plugin for WeaponPlugin {
                     melee_combo_system,
                     beam_sabre_update_system,
                     sync_sabre_blade_visual.after(beam_sabre_update_system),
+                    sabre_technique_vfx_system.after(beam_sabre_update_system),
                     hit_particle_spawn_system,
                     critical_impact_spawn_system.after(hit_particle_spawn_system),
                     particle_update_system,
@@ -2302,6 +2330,228 @@ fn sabre_level_scale(sabre: &BeamSabre) -> (f32, f32) {
     )
 }
 
+fn sabre_vfx_material(
+    upgrades: &UpgradeLedger,
+    assets: &ProjectileAssets,
+) -> Handle<StandardMaterial> {
+    if upgrades.has_relic("solar_fire_gem") {
+        assets.mat_melee_flash.clone()
+    } else if upgrades.has_relic("storm_gem") {
+        assets.mat_charge_laser.clone()
+    } else if upgrades.has_relic("frost_gem") {
+        assets.mat_energy.clone()
+    } else if upgrades.has_relic("void_gem") {
+        assets.mat_moon_bubble.clone()
+    } else {
+        assets.mat_homing_star.clone()
+    }
+}
+
+fn sabre_wave_material(
+    upgrades: &UpgradeLedger,
+    assets: &ProjectileAssets,
+) -> Handle<EnergyMaterial> {
+    if upgrades.has_relic("solar_fire_gem") {
+        assets.energy_explosive.clone()
+    } else if upgrades.has_relic("storm_gem") {
+        assets.energy_laser.clone()
+    } else if upgrades.has_relic("frost_gem") {
+        assets.energy_plasma.clone()
+    } else if upgrades.has_relic("void_gem") {
+        assets.energy_magic.clone()
+    } else {
+        assets.energy_sabre.clone()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_spawn_sabre_vfx(
+    commands: &mut Commands,
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+    transform: Transform,
+    lifetime: f32,
+    velocity: Vec3,
+    spin: Vec3,
+    expansion: f32,
+    active: &mut usize,
+    budget: usize,
+) -> bool {
+    if !reserve_sabre_vfx_slot(active, budget) {
+        return false;
+    }
+    let base_scale = transform.scale;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(mesh),
+            material: MeshMaterial3d(material),
+            transform,
+            ..default()
+        },
+        SabreTechniqueVfx {
+            lifetime,
+            max_lifetime: lifetime,
+            velocity,
+            spin,
+            base_scale,
+            expansion,
+        },
+    ));
+    true
+}
+
+fn reserve_sabre_vfx_slot(active: &mut usize, budget: usize) -> bool {
+    if *active >= budget {
+        return false;
+    }
+    *active += 1;
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_sabre_technique_vfx(
+    commands: &mut Commands,
+    assets: &ProjectileAssets,
+    upgrades: &UpgradeLedger,
+    technique: SabreTechnique,
+    origin: Vec3,
+    forward: Vec3,
+    active: &mut usize,
+    budget: usize,
+) {
+    let material = sabre_vfx_material(upgrades, assets);
+    let right = Vec3::Y.cross(forward).normalize_or_zero();
+    match technique {
+        SabreTechnique::CycloneSlash => {
+            for tilt in [-0.22_f32, 0.22] {
+                try_spawn_sabre_vfx(
+                    commands,
+                    assets.lock_ring.clone(),
+                    material.clone(),
+                    Transform::from_translation(origin + Vec3::Y * 0.25)
+                        .with_rotation(Quat::from_rotation_x(tilt))
+                        .with_scale(Vec3::splat(3.6)),
+                    0.44,
+                    Vec3::Y * 0.35,
+                    Vec3::new(0.0, 9.0, 0.0),
+                    0.38,
+                    active,
+                    budget,
+                );
+            }
+        }
+        SabreTechnique::CometDash => {
+            for (distance, side) in [(0.8, -0.55), (2.8, 0.55), (4.8, -0.35)] {
+                let position = origin + forward * distance + right * side;
+                try_spawn_sabre_vfx(
+                    commands,
+                    assets.sphere_lg.clone(),
+                    material.clone(),
+                    Transform::from_translation(position)
+                        .looking_to(forward, Vec3::Y)
+                        .with_scale(Vec3::new(0.65, 0.28, 3.4)),
+                    0.30,
+                    forward * 8.0,
+                    Vec3::ZERO,
+                    0.12,
+                    active,
+                    budget,
+                );
+            }
+        }
+        SabreTechnique::MeteorPound => {
+            try_spawn_sabre_vfx(
+                commands,
+                assets.lock_ring.clone(),
+                material.clone(),
+                Transform::from_translation(origin - Vec3::Y * 0.65).with_scale(Vec3::splat(4.2)),
+                0.52,
+                Vec3::NEG_Y * 1.5,
+                Vec3::new(0.0, 5.0, 0.0),
+                0.75,
+                active,
+                budget,
+            );
+            try_spawn_sabre_vfx(
+                commands,
+                assets.sphere_lg.clone(),
+                material,
+                Transform::from_translation(origin - Vec3::Y * 0.1)
+                    .with_scale(Vec3::new(1.1, 3.8, 1.1)),
+                0.40,
+                Vec3::NEG_Y * 5.0,
+                Vec3::new(0.0, 3.0, 0.0),
+                0.25,
+                active,
+                budget,
+            );
+        }
+        SabreTechnique::Ready => {}
+    }
+
+    if technique != SabreTechnique::Ready && upgrades.has_relic("legendary_starheart_gem") {
+        try_spawn_sabre_vfx(
+            commands,
+            assets.lock_ring.clone(),
+            assets.mat_critical_hit.clone(),
+            Transform::from_translation(origin + Vec3::Y * 0.35)
+                .with_rotation(Quat::from_rotation_z(0.78))
+                .with_scale(Vec3::splat(2.2)),
+            0.34,
+            Vec3::Y * 0.8,
+            Vec3::new(4.0, 7.0, 2.0),
+            0.55,
+            active,
+            budget,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_sabre_wave_vfx(
+    commands: &mut Commands,
+    assets: &ProjectileAssets,
+    upgrades: &UpgradeLedger,
+    origin: Vec3,
+    forward: Vec3,
+    active: &mut usize,
+    budget: usize,
+) {
+    try_spawn_sabre_vfx(
+        commands,
+        assets.lock_ring.clone(),
+        sabre_vfx_material(upgrades, assets),
+        Transform::from_translation(origin + forward * 0.55)
+            .looking_to(forward, Vec3::Y)
+            .with_scale(Vec3::splat(1.45)),
+        0.24,
+        forward * 2.0,
+        Vec3::new(0.0, 0.0, 8.0),
+        0.45,
+        active,
+        budget,
+    );
+
+    if upgrades.has_relic("legendary_starheart_gem") {
+        try_spawn_sabre_vfx(
+            commands,
+            assets.lock_ring.clone(),
+            assets.mat_critical_hit.clone(),
+            Transform::from_translation(origin + forward * 0.45)
+                .looking_to(forward, Vec3::Y)
+                .with_rotation(Quat::from_rotation_z(0.78))
+                .with_scale(Vec3::splat(1.05)),
+            0.28,
+            forward * 2.5,
+            Vec3::new(0.0, 0.0, -9.0),
+            0.65,
+            active,
+            budget,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn beam_sabre_update_system(
     time: Res<Time>,
     spatial_query: SpatialQuery,
@@ -2310,6 +2560,8 @@ fn beam_sabre_update_system(
     library: Res<MoveLibrary>,
     mut hitstop: ResMut<HitstopState>,
     dungeon: Res<DungeonCrawlState>,
+    vfx_budget: Res<SabreVfxBudget>,
+    vfx_q: Query<Entity, With<SabreTechniqueVfx>>,
     mut player_q: Query<
         (
             Entity,
@@ -2337,6 +2589,7 @@ fn beam_sabre_update_system(
     mut action_sfx: MessageWriter<ModularActionSfxEvent>,
 ) {
     let dt = time.delta_secs();
+    let mut active_vfx = vfx_q.iter().count();
     for (
         entity,
         player_transform,
@@ -2482,6 +2735,16 @@ fn beam_sabre_update_system(
             sabre.technique_timer = 0.48;
             sabre.technique = SabreTechnique::CycloneSlash;
             sm.force(PlayerState::Attacking);
+            spawn_sabre_technique_vfx(
+                &mut commands,
+                &proj_assets,
+                upgrades,
+                SabreTechnique::CycloneSlash,
+                origin,
+                fwd,
+                &mut active_vfx,
+                vfx_budget.max_entities,
+            );
             spawn_melee_flash(&mut commands, &proj_assets, origin);
             hitstop.remaining = hitstop.remaining.max(0.055);
             action_sfx.write(ModularActionSfxEvent::new("sabre.cyclone"));
@@ -2514,6 +2777,16 @@ fn beam_sabre_update_system(
                     &mut killed_ev,
                 );
                 sabre.technique = SabreTechnique::MeteorPound;
+                spawn_sabre_technique_vfx(
+                    &mut commands,
+                    &proj_assets,
+                    upgrades,
+                    SabreTechnique::MeteorPound,
+                    origin,
+                    fwd,
+                    &mut active_vfx,
+                    vfx_budget.max_entities,
+                );
                 action_sfx.write(ModularActionSfxEvent::new("sabre.meteor_pound"));
             } else if upgrades.sabre_dash_unlocked() {
                 movement.ground_velocity = fwd * 1.78;
@@ -2535,6 +2808,16 @@ fn beam_sabre_update_system(
                     );
                 }
                 sabre.technique = SabreTechnique::CometDash;
+                spawn_sabre_technique_vfx(
+                    &mut commands,
+                    &proj_assets,
+                    upgrades,
+                    SabreTechnique::CometDash,
+                    origin,
+                    fwd,
+                    &mut active_vfx,
+                    vfx_budget.max_entities,
+                );
                 action_sfx.write(ModularActionSfxEvent::new("sabre.comet_dash"));
             }
             sabre.cooldown_timer = sabre.cooldown * 1.35;
@@ -2578,7 +2861,17 @@ fn beam_sabre_update_system(
 
             if upgrades.sabre_wave_unlocked() {
                 action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
+                spawn_sabre_wave_vfx(
+                    &mut commands,
+                    &proj_assets,
+                    upgrades,
+                    origin,
+                    fwd,
+                    &mut active_vfx,
+                    vfx_budget.max_entities,
+                );
                 let wave = &library.sabre_wave;
+                let wave_material = sabre_wave_material(upgrades, &proj_assets);
                 let right = cam.right().as_vec3();
                 let wave_offsets: &[f32] = if sabre.fires_dual_wave() {
                     &[-0.4, 0.4]
@@ -2592,7 +2885,7 @@ fn beam_sabre_update_system(
                     commands.spawn((
                         EnergyPbrBundle {
                             mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                            material: MeshMaterial3d(proj_assets.energy_sabre.clone()),
+                            material: MeshMaterial3d(wave_material.clone()),
                             transform: Transform::from_translation(origin)
                                 .looking_to(dir, Vec3::Y)
                                 .with_scale(Vec3::new(0.8, 0.8, 2.5)),
@@ -2671,8 +2964,7 @@ fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transfo
         && matches!(
             sabre.technique,
             SabreTechnique::CycloneSlash | SabreTechnique::CometDash
-        )
-    {
+        ) {
         (1.0 - sabre.technique_timer / 0.48).clamp(0.0, 1.0) * std::f32::consts::TAU
     } else {
         0.0
@@ -2691,6 +2983,32 @@ fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transfo
     Transform::from_translation(player.translation() + Vec3::Y * 1.15 + forward * 0.9 + right * 0.5)
         .looking_to(blade_direction, Vec3::Y)
         .with_scale(Vec3::new(1.8, 1.8, 18.0))
+}
+
+fn sabre_technique_vfx_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut vfx_q: Query<(Entity, &mut Transform, &mut SabreTechniqueVfx)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut transform, mut vfx) in vfx_q.iter_mut() {
+        vfx.lifetime -= dt;
+        if vfx.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        transform.translation += vfx.velocity * dt;
+        transform.rotate(Quat::from_euler(
+            EulerRot::XYZ,
+            vfx.spin.x * dt,
+            vfx.spin.y * dt,
+            vfx.spin.z * dt,
+        ));
+        let remaining = (vfx.lifetime / vfx.max_lifetime).clamp(0.0, 1.0);
+        let progress = 1.0 - remaining;
+        transform.scale = vfx.base_scale * (1.0 + vfx.expansion * progress) * remaining.sqrt();
+    }
 }
 
 // ── Hit Particles ─────────────────────────────────────────────────────────────
@@ -3061,5 +3379,17 @@ mod move_def_wiring_tests {
         // Legacy inter-slash cadence was a hardcoded 0.25 s.
         assert!((slash.total_duration() - 0.25).abs() < 1e-4);
         assert!((slash.knockback - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sabre_vfx_budget_never_reserves_more_than_its_cap() {
+        let budget = SabreVfxBudget::default();
+        let mut active = 0;
+        for _ in 0..budget.max_entities {
+            assert!(reserve_sabre_vfx_slot(&mut active, budget.max_entities));
+        }
+        assert_eq!(active, budget.max_entities);
+        assert!(!reserve_sabre_vfx_slot(&mut active, budget.max_entities));
+        assert_eq!(active, budget.max_entities);
     }
 }

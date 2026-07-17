@@ -43,6 +43,10 @@ performance-aware effects—is accepted.
 ## Already delivered or superseded
 
 - Reusable app construction and startup/plugin smoke coverage already exist.
+- The first performance-budgeted technique VFX slice is delivered for Cyclone,
+  Comet Dash, Meteor Pound, elemental Saber waves, and Starheart. It reuses
+  shared opaque materials/meshes and caps transient Saber decoration at 24
+  entities globally; transparent particles and dynamic lights remain gated.
 - Projectile/world obstruction, typed collision layers, swept impacts, radial
   cover checks, player-combo broad phase, and Saber candidate resolution are
   already implemented; remaining collision work is active-window/hurtbox depth.

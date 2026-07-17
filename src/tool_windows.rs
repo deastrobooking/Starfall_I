@@ -47,11 +47,16 @@ struct ToolWindowMinimizeGlyph {
     window: Entity,
 }
 
+/// Monotonic sibling z-order: grabbing a window raises it above the others.
+#[derive(Resource, Default)]
+struct ToolWindowRaiseOrder(i32);
+
 pub struct ToolWindowsPlugin;
 
 impl Plugin for ToolWindowsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (tool_window_drag_system, tool_window_minimize_system));
+        app.init_resource::<ToolWindowRaiseOrder>()
+            .add_systems(Update, (tool_window_drag_system, tool_window_minimize_system));
     }
 }
 
@@ -77,6 +82,8 @@ fn px_or_zero(value: Val) -> f32 {
 }
 
 fn tool_window_drag_system(
+    mut commands: Commands,
+    mut raise_order: ResMut<ToolWindowRaiseOrder>,
     primary: Query<&Window, With<PrimaryWindow>>,
     bars: Query<(&Interaction, &ToolWindowTitleBar), With<Button>>,
     mut windows: Query<(&mut ToolWindow, &mut Node)>,
@@ -105,6 +112,9 @@ fn tool_window_drag_system(
                     pointer_start: cursor,
                     window_start: Vec2::new(px_or_zero(node.left), px_or_zero(node.top)),
                 });
+                // Grabbing a window raises it above its sibling windows.
+                raise_order.0 += 1;
+                commands.entity(bar.window).insert(ZIndex(raise_order.0));
             }
             Some(drag) => {
                 let target = drag_target(drag.window_start, drag.pointer_start, cursor, bounds);
