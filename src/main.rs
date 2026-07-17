@@ -48,6 +48,7 @@ mod sfx;
 mod shop_transactions;
 mod spatial_lod;
 mod state;
+mod tool_windows;
 mod upgrades;
 
 use character_blueprint::{BodyRecipe, CartoonAppearanceRecipe};
@@ -148,6 +149,8 @@ fn main() {
         .add_plugins(EngineToolsPlugin)
         // N11a: camera-aware hierarchical distance culling for world assets.
         .add_plugins(spatial_lod::SpatialLodPlugin)
+        // Movable/minimizable tool windows shared by creator screens.
+        .add_plugins(tool_windows::ToolWindowsPlugin)
         // EC0: engine-core loop scaffolding (GameSet ordering + profiling overlay).
         .add_plugins(game_loop::GameLoopPlugin)
         // EC2: bounded hitstop + hit-reaction feedback (flinch, flashes,

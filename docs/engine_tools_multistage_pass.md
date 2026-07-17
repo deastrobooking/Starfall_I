@@ -531,7 +531,9 @@ after at least three Starfall workspaces share the APIs.
   generator-time budgets;
 - no editor preview/runtime output divergence.
 
-The next implementation slice is ET4 Character/Creature production workspaces,
-followed by ET5 safe world-recipe regeneration.
-Road/building adapters become editable only as their recipe compilers acquire
-safe regeneration boundaries.
+ET5 safe World Kit recipe regeneration and the subsequent topology, projection,
+material, preset, modifier, multi-level, and playtest slices are delivered.
+The next tool work is the remaining PM1–PM3 workflow gaps and ET4
+Character/Creature production panels, using the existing transaction and
+validation services. Road/building promotion remains explicit and may expand
+only where recipe compilers have safe regeneration boundaries.

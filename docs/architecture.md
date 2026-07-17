@@ -197,14 +197,22 @@ Party-shared exceptions:
   modular MP3 overrides, cooldowns, and `sfx_volume`. Standard action playback
   resolves custom-first/fallback-arcade, so a user manifest cannot erase the
   baseline game feedback. Both buses multiply by `master_volume`.
-- **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, companion ownership, rewards, and feedback use `PlayerIndex` as the shared key. Shared campaign systems intentionally live in resources like `ChapterProgress` and `PerkTree`.
+- **PlayerIndex ownership**: Per-player save records, progression, HUD panels,
+  crafting ownership, companion ownership, rewards, and feedback use
+  `PlayerIndex` as the shared key. Shared campaign systems intentionally live
+  in resources such as `ChapterProgress`, `WorldSiteRegistry`, and
+  `RobotPetCollection`.
 - **Per-player progression**: `PlayerProgression` owns perks, tech upgrades,
   weapon ranks, and shop state for each `PlayerIndex`. Chapter Select selects an
   explicit player before spending, runtime systems read the owning component,
   and schema-v4 `players[]` persists it. Legacy top-level resources seed old
   saves only.
 - **Robot pets as the vehicle spine**: `RobotPetCollection` is a shared campaign resource that stores rescued/store-built pets, enemy salvage parts, and the active combined form. The Robot Garage (`AppState::RobotGarage`) lets players assemble forms from collected pets. Assembled forms drive `GroundMode`/`AirMode` in the vehicle plugin at runtime. 3-D mech/ship controller runtimes are still future work.
-- **Tech upgrades as the production upgrade spine**: `UpgradeLedger` is a shared campaign resource for beam, missile, turret, health, rejuvenation, and mech-link ranks. Chapter select spends robot salvage on ranks; weapon, armor, and player regen systems consume those ranks. `MechCommandLink` rank gates GiantMech, SpaceShip, and MegaShip forms in the Robot Garage. Rejuvenation healing spends a saved reserve so it is a paid survival system instead of free passive regen.
+- **Tech upgrades as the production upgrade spine**: each player's
+  `PlayerProgression.upgrades` owns beam, missile, turret, health,
+  rejuvenation, and mech-link ranks. Chapter Select spends through an explicit
+  player owner; weapon, armor, and regeneration systems consume that owner's
+  ledger. The top-level `UpgradeLedger` remains a legacy compatibility mirror.
 - **Assembly-driven vehicle modes**: `VehicleState` uses `GroundMode` (None/Motorcycle/Tank/GiantMech) and `AirMode` (None/Jet/Ship) enums. `vehicle_input()` checks `RobotPetCollection.active_assembly` first, falling back to `PlayerLoadout` blueprints. Each mode applies its own speed/jetpack/armor buffs via `apply_vehicle_buffs()`. M toggles ground mode, J toggles air/boat mode.
 - **Chassis persistence**: `CharacterPartStyle` is serializable. `PlayerPartLoadout` (body/arms/legs/shoulders slot choices) is saved and hydrated through all save paths using `#[serde(default)]` for backward compatibility.
 - **Reclaimable world state via WorldSite**: the 200-mile Everest Range world can be liberated, defended, rebuilt, and attacked again. `WorldSiteRegistry` (a `Resource` holding `Vec<WorldSite>`) is the single canonical list of named world positions with state, owner, and liberation progress. Save data compacts this to `Vec<WorldSiteSaveRecord>` (id/state/owner/enemies_defeated). At runtime, `WorldSiteEnemySentinel` entities anchor each enemy-held site; `world_site_enemy_spawner_system` triggers a spawn when the player enters the sentinel radius; `site_liberation_system` flips the site to `Liberated` and spawns a `SiteCommandTerminal` when all tagged defenders are dead. Chapter-select badges on the fast-travel map update color to reflect each site's current `WorldSiteState`.

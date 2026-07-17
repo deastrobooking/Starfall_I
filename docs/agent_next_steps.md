@@ -3,7 +3,8 @@
 This is the durable next-work guide for future Codex sessions. Use
 `agent.md` for the short memory handoff, this file for production priorities,
 and `docs/engine_upgrade_milestones.md` for Bevy/physics-backend upgrade procedure.
-The current four-track audit is `docs/game_review_2026-07.md`. The evidence-based
+The canonical current baseline is `docs/current_state.md`. The dated four-track
+audit is `docs/game_review_2026-07.md`. The evidence-based
 disposition of the external 156-item idea inventory is
 `docs/parallel_review_triage_2026-07.md`; use that triage instead of copying the
 raw suggestion list into milestones.
@@ -140,8 +141,8 @@ repeat, Confirm, Back, and disabled skipping/styles. What remains:
 
 - Decide whether player select needs independent per-controller cursors or keeps
   party-shared menu authority, then hardware-test that policy.
-- Apply it to Main Menu, Player Select, Chapter Select, Pause, Game Over/Victory,
-  Robot Garage, and Character Design.
+- Record controller-only acceptance across Main Menu, Player Select, Chapter
+  Select, Pause, Game Over/Victory, Robot Garage, and Character Design.
 - Preserve mouse input and keep player-select ownership explicit for four controllers.
 
 - Replace compact chapter-select tech shortcuts with tabbed controller-friendly
@@ -153,8 +154,9 @@ repeat, Confirm, Back, and disabled skipping/styles. What remains:
   feedback.
 - Add runtime 3-D mech/ship controllers so assembled forms produce visible 3-D
   vehicles, not just buffed humanoid movement.
-- Keep `RobotPetCollection` and `UpgradeLedger` campaign-shared until a
-  deliberate per-player design changes that policy.
+- Keep `RobotPetCollection` campaign-shared. Read upgrade ranks from the
+  selected/runtime player's `PlayerProgression`; the top-level `UpgradeLedger`
+  is a legacy-save compatibility mirror.
 
 Verification:
 
@@ -444,14 +446,27 @@ Primary files:
 
 Goal: Unblock content creators by removing hardcoded visual recipes from Rust.
 
-- Implement hot-reloading for character presets, level configs, and robot pet geometries using RON/JSON asset loaders.
-- Integrate immediate-mode dev UI (e.g. `bevy_inspector_egui` or custom) to provide a dev-only in-engine tweaker for character sliders, terrain color palettes, and lighting variables.
-- Establish a prop-placement and level-design workflow that either serializes developer camera actions into world state or integrates directly via Blender glTF scenes.
+Status: the Forge project registry, atomic manifests/sources/recovery, stable
+content IDs, recipe validation/publishing, typed material and World Kit
+authoring, immutable presets/locks, modifier stacks, multi-level projects, and
+startup-level playtest are delivered. Do not start a second inspector/editor
+stack beside Forge.
+
+- Finish PM1 templates, package import/recovery/settings, and typed project
+  names/paths through Forge.
+- Add preset thumbnails, lock validation-configuration capture, and an explicit
+  regenerate-with-same-seed action.
+- Add per-level terrain/spawn/encounter/lighting metadata and budgets plus level
+  rename/delete/reorder.
+- Build Character/Creature production panels on the shared recipe, transaction,
+  validation, and modifier services rather than serializing ECS state.
 
 Verification:
 
-- Changing a JSON/RON configuration file automatically updates the respective entities in the live game without recompiling.
-- Egui-based dev panel successfully mutates game state/variables at runtime.
+- Project reload reproduces the same validated output from locked sources and
+  seeds.
+- Controller-only create/edit/validate/save/playtest works without mutating the
+  shipped world when validation or persistence fails.
 
 Primary files:
 
@@ -473,7 +488,8 @@ The original full-resolution terrain and building colliders remain live.
 Transparent materials are excluded from skyline merging, and F11 reports
 visible/total high terrain, terrain proxy, and building proxy counts. See
 [`guides/spatial-lod.md`](guides/spatial-lod.md). Physics and gameplay remain
-loaded; measured chunk streaming is the next slice.
+loaded; profiling is the gate before choosing whether measured chunk streaming
+is the next slice.
 
 - Profile `N11b` at the world center and outer fast-travel anchors in one- and
   four-player layouts before choosing `N11c` streaming radii.
@@ -523,10 +539,8 @@ Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol",
 
 ## Suggested Next Commit Scope
 
-Implement **PX1 authoritative aiming** from
-`docs/player_creator_experience_plan.md`: one per-player aim solution shared by
-the reticle and weapon firing, including camera pitch, muzzle correction,
-soft-lock state, split-screen ownership, and focused tests. Follow PX1 with the
-PM1 Start Game / Start Editor launcher and project-hub shell, then PX3 shop
-transactions. Do not widen EC2 or promote shipped Forge roots in the same
-commit.
+Add a reusable app-construction seam and the first startup/plugin smoke tests.
+Keep the slice behavior-preserving: centralize app creation, prove core state
+and message/plugin registration, and retain the current binary entry point.
+Once green, use that seam to support one small world or UI extraction; do not
+combine it with gameplay tuning or shipped-world Forge promotion.

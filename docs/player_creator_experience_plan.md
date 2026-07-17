@@ -168,7 +168,8 @@ animation MVP.
 
 ### PM3 — Multi-level project support
 
-Replace the current single-scene workspace restriction with separate level
+The original PM3 goal was to replace the single-scene workspace restriction
+with separate level
 scene documents and an `active_level_id`. A level stores terrain reference,
 published kit instances, player spawns, encounters, gameplay graphs,
 checkpoints, fast travel, camera volumes, lighting/audio/biome profiles, and
