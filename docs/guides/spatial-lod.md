@@ -1,9 +1,10 @@
 # Spatial LOD And Distance Culling
 
-`N11a` establishes the first reusable large-world rendering service. It wraps
+`N11a` establishes the reusable large-world rendering service. It wraps
 Bevy's camera-aware `VisibilityRange` behind Starfall-owned authoring profiles,
 propagates one profile across a render hierarchy, and exposes live coverage in
-the F11 performance overlay.
+the F11 performance overlay. `N11b` adds the first real mesh tiers: detailed
+procedural trees crossfade into inexpensive shared trunk/canopy proxies.
 
 This slice is render-only. A culled mesh stops being submitted for rendering,
 but its entity, collider, gameplay state, and simulation remain loaded. That
@@ -26,9 +27,17 @@ root. Do not manually add a second `VisibilityRange` to a managed mesh.
 
 Built-in presets:
 
-- `SpatialLod::foliage()` fades trees from 1,350 to 1,550 world units.
+- `SpatialLod::foliage_high()` renders detailed tree meshes through the
+  850–1,050 crossfade.
+- `SpatialLod::foliage_proxy()` fades the lightweight replacement in from
+  850–1,050, then out from 1,350–1,550.
 - `SpatialLod::landmark(height)` gives taller city shells a farther skyline
   range, capped at 6,000 world units.
+
+Use `SpatialLod::tier(min, fade_in_end, fade_out_start, max)` for additional
+multi-mesh groups. The fade-out margin of one tier must equal the fade-in margin
+of the next tier. A profile placed directly on a descendant overrides an
+inherited root profile, which allows imported scene hierarchies to mix tiers.
 
 The visibility test considers every active camera. In local split-screen, a
 mesh remains rendered while any player camera can see it within its range.
@@ -36,7 +45,8 @@ mesh remains rendered while any player camera can see it within its range.
 ## Verify changes
 
 1. Start a gameplay session and press F11.
-2. Confirm `lod` reports non-zero profile and mesh counts after the world loads.
+2. Confirm `lod` reports non-zero profile, mesh, and proxy counts after the
+   world loads.
 3. Travel away from dense foliage or a city and verify distant meshes fade
    without colliders or walkable surfaces disappearing.
 4. Repeat with multiple local players and approach the same asset from different
@@ -47,7 +57,7 @@ profile bounds, hierarchy propagation, and clean removal.
 
 ## Next slices
 
-`N11b` adds actual lower-detail mesh tiers or impostors so distant objects cost
-less before they are fully culled. `N11c` adds biome/chunk streaming with
-explicit simulation ownership; only that later slice may unload colliders and
-gameplay entities, with safety margins around every active player.
+`N11b` should next expand the proven tier system to skyline building clusters
+and terrain patches. `N11c` adds biome/chunk streaming with explicit simulation
+ownership; only that later slice may unload colliders and gameplay entities,
+with safety margins around every active player.

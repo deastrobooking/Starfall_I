@@ -12,7 +12,7 @@
 /// Call `spawn_tree()` to instantiate a species at an arbitrary world position.
 use bevy::prelude::*;
 
-use crate::spatial_lod::SpatialLod;
+use crate::spatial_lod::{SpatialLod, SpatialLodProxy};
 
 use super::{turtle::TurtleResult, LSystem};
 use crate::components::world::WorldGeometry;
@@ -212,6 +212,50 @@ fn leaf_material(kind: TreeKind) -> Option<StandardMaterial> {
 #[derive(Component)]
 pub struct TreeRoot;
 
+#[derive(Debug, Clone, Copy)]
+struct TreeProxyShape {
+    trunk_center_y: f32,
+    trunk_height: f32,
+    trunk_radius: f32,
+    canopy_center: Vec3,
+    canopy_half_extents: Vec3,
+}
+
+fn tree_proxy_shape(geometry: &TurtleResult) -> TreeProxyShape {
+    let mut branch_min = Vec3::splat(f32::INFINITY);
+    let mut branch_max = Vec3::splat(f32::NEG_INFINITY);
+    let mut trunk_radius = 0.04f32;
+    for branch in &geometry.branches {
+        branch_min = branch_min.min(branch.start).min(branch.end);
+        branch_max = branch_max.max(branch.start).max(branch.end);
+        trunk_radius = trunk_radius.max(branch.radius);
+    }
+    if !branch_min.is_finite() || !branch_max.is_finite() {
+        branch_min = Vec3::ZERO;
+        branch_max = Vec3::Y;
+    }
+
+    let mut canopy_min = Vec3::splat(f32::INFINITY);
+    let mut canopy_max = Vec3::splat(f32::NEG_INFINITY);
+    for leaf in &geometry.leaves {
+        let radius = Vec3::splat(leaf.size);
+        canopy_min = canopy_min.min(leaf.position - radius);
+        canopy_max = canopy_max.max(leaf.position + radius);
+    }
+    if !canopy_min.is_finite() || !canopy_max.is_finite() {
+        canopy_min = branch_min;
+        canopy_max = branch_max;
+    }
+
+    TreeProxyShape {
+        trunk_center_y: (branch_min.y + branch_max.y) * 0.5,
+        trunk_height: (branch_max.y - branch_min.y).max(0.1),
+        trunk_radius: (trunk_radius * 1.2).max(0.05),
+        canopy_center: (canopy_min + canopy_max) * 0.5,
+        canopy_half_extents: ((canopy_max - canopy_min) * 0.5).max(Vec3::splat(0.1)),
+    }
+}
+
 /// Instantiate a tree from a pre-built `TreeTemplate` at `position` with the
 /// given Y-axis `rotation_y` (radians).
 ///
@@ -267,7 +311,7 @@ pub fn spawn_tree(
             },
             WorldGeometry,
             TreeRoot,
-            SpatialLod::foliage(),
+            SpatialLod::foliage_high(),
         ))
         .id();
 
@@ -301,5 +345,70 @@ pub fn spawn_tree(
         }
     }
 
+    // N11b: a two-primitive proxy replaces dozens of merged branches and leaf
+    // clusters after the near tier fades. The primitive handles and materials
+    // are shared by the whole species, so this adds no per-tree mesh assets.
+    let proxy = tree_proxy_shape(&template.geometry);
+    commands.entity(root).with_children(|parent| {
+        parent.spawn((
+            PbrBundle {
+                mesh: Mesh3d(template.branch_mesh.clone()),
+                material: MeshMaterial3d(template.bark_mat.clone()),
+                transform: Transform::from_xyz(0.0, proxy.trunk_center_y, 0.0).with_scale(
+                    Vec3::new(proxy.trunk_radius, proxy.trunk_height, proxy.trunk_radius),
+                ),
+                ..default()
+            },
+            WorldGeometry,
+            SpatialLod::foliage_proxy(),
+            SpatialLodProxy,
+        ));
+
+        if let Some(leaf_mat) = &template.leaf_mat {
+            parent.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(template.leaf_mesh.clone()),
+                    material: MeshMaterial3d(leaf_mat.clone()),
+                    transform: Transform::from_translation(proxy.canopy_center)
+                        .with_scale(proxy.canopy_half_extents),
+                    ..default()
+                },
+                WorldGeometry,
+                SpatialLod::foliage_proxy(),
+                SpatialLodProxy,
+            ));
+        }
+    });
+
     root
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lsystem::turtle::{BranchSegment, LeafCluster};
+
+    #[test]
+    fn proxy_shape_encloses_authored_canopy_and_trunk() {
+        let geometry = TurtleResult {
+            branches: vec![BranchSegment {
+                start: Vec3::ZERO,
+                end: Vec3::new(0.0, 8.0, 0.0),
+                radius: 0.5,
+                depth: 0,
+            }],
+            leaves: vec![LeafCluster {
+                position: Vec3::new(2.0, 7.0, -1.0),
+                size: 2.0,
+                depth: 2,
+            }],
+        };
+
+        let proxy = tree_proxy_shape(&geometry);
+        assert_eq!(proxy.trunk_center_y, 4.0);
+        assert_eq!(proxy.trunk_height, 8.0);
+        assert!(proxy.trunk_radius >= 0.5);
+        assert_eq!(proxy.canopy_center, Vec3::new(2.0, 7.0, -1.0));
+        assert_eq!(proxy.canopy_half_extents, Vec3::splat(2.0));
+    }
 }

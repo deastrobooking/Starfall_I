@@ -71,7 +71,6 @@ pub fn spawn_creature(
     Ok(root)
 }
 
-
 /// Add one robot part mesh, applying the style's non-destructive modifier
 /// stack to the base primitive first (Creature Forge shares the same stack
 /// contract as World Kit and Character Studio).
@@ -132,7 +131,11 @@ fn spawn_robot_with_material_response(
     // ── Torso: Capsule3d main body ─────────────────────────────────────────────
     let torso = commands
         .spawn(PbrBundle {
-            mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(tw * 0.46, th * 0.55))),
+            mesh: Mesh3d(add_part(
+                meshes,
+                &style.modifiers,
+                Capsule3d::new(tw * 0.46, th * 0.55),
+            )),
             material: MeshMaterial3d(primary_mat.clone()),
             transform: Transform::from_xyz(0.0, th * 0.5, 0.0).with_scale(Vec3::new(
                 1.0,
@@ -249,7 +252,11 @@ fn spawn_robot_with_material_response(
         // Upper arm capsule
         let arm = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(at * 0.46, al * 0.44))),
+                mesh: Mesh3d(add_part(
+                    meshes,
+                    &style.modifiers,
+                    Capsule3d::new(at * 0.46, al * 0.44),
+                )),
                 material: MeshMaterial3d(primary_mat.clone()),
                 transform: Transform::from_xyz(arm_x, th * 0.65, 0.0),
                 ..default()
@@ -271,7 +278,11 @@ fn spawn_robot_with_material_response(
         // Forearm capsule
         let forearm = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(at * 0.40, al * 0.44))),
+                mesh: Mesh3d(add_part(
+                    meshes,
+                    &style.modifiers,
+                    Capsule3d::new(at * 0.40, al * 0.44),
+                )),
                 material: MeshMaterial3d(primary_mat.clone()),
                 transform: Transform::from_xyz(arm_x, th * 0.65 - al * 0.48, 0.0),
                 ..default()
@@ -297,7 +308,11 @@ fn spawn_robot_with_material_response(
             let cs = style.cannon_size * s;
             let cannon = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(add_part(meshes, &style.modifiers, Cylinder::new(cs * 0.30, cs * 2.0))),
+                    mesh: Mesh3d(add_part(
+                        meshes,
+                        &style.modifiers,
+                        Cylinder::new(cs * 0.30, cs * 2.0),
+                    )),
                     material: MeshMaterial3d(emissive_mat.clone()),
                     transform: Transform::from_xyz(arm_x, th * 0.5, td * 0.6)
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
@@ -317,7 +332,11 @@ fn spawn_robot_with_material_response(
                 // Floating disc
                 let pad = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(add_part(meshes, &style.modifiers, Cylinder::new(lt * 0.80, lt * 0.28))),
+                        mesh: Mesh3d(add_part(
+                            meshes,
+                            &style.modifiers,
+                            Cylinder::new(lt * 0.80, lt * 0.28),
+                        )),
                         material: MeshMaterial3d(secondary_mat.clone()),
                         transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.42, 0.0),
                         ..default()
@@ -327,7 +346,11 @@ fn spawn_robot_with_material_response(
                 // Strut: thin Capsule3d
                 let strut = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(lt * 0.12, ll * 0.44))),
+                        mesh: Mesh3d(add_part(
+                            meshes,
+                            &style.modifiers,
+                            Capsule3d::new(lt * 0.12, ll * 0.44),
+                        )),
                         material: MeshMaterial3d(primary_mat.clone()),
                         transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.18, 0.0),
                         ..default()
@@ -339,7 +362,11 @@ fn spawn_robot_with_material_response(
                 // Thigh
                 let thigh = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(lt * 0.46, ll * 0.42))),
+                        mesh: Mesh3d(add_part(
+                            meshes,
+                            &style.modifiers,
+                            Capsule3d::new(lt * 0.46, ll * 0.42),
+                        )),
                         material: MeshMaterial3d(primary_mat.clone()),
                         transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.20, 0.0)
                             .with_rotation(Quat::from_rotation_z(side * 0.15)),
@@ -360,7 +387,11 @@ fn spawn_robot_with_material_response(
                 // Shin angled forward
                 let shin = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(lt * 0.38, ll * 0.42))),
+                        mesh: Mesh3d(add_part(
+                            meshes,
+                            &style.modifiers,
+                            Capsule3d::new(lt * 0.38, ll * 0.42),
+                        )),
                         material: MeshMaterial3d(primary_mat.clone()),
                         transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.68, lt * 0.24)
                             .with_rotation(Quat::from_rotation_x(-0.38)),
@@ -373,7 +404,11 @@ fn spawn_robot_with_material_response(
                 // Thigh
                 let thigh = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(lt * 0.46, ll * 0.42))),
+                        mesh: Mesh3d(add_part(
+                            meshes,
+                            &style.modifiers,
+                            Capsule3d::new(lt * 0.46, ll * 0.42),
+                        )),
                         material: MeshMaterial3d(primary_mat.clone()),
                         transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.20, 0.0),
                         ..default()
@@ -393,7 +428,11 @@ fn spawn_robot_with_material_response(
                 // Shin
                 let shin = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(lt * 0.38, ll * 0.42))),
+                        mesh: Mesh3d(add_part(
+                            meshes,
+                            &style.modifiers,
+                            Capsule3d::new(lt * 0.38, ll * 0.42),
+                        )),
                         material: MeshMaterial3d(primary_mat.clone()),
                         transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.68, 0.0),
                         ..default()
@@ -403,7 +442,11 @@ fn spawn_robot_with_material_response(
                 // Foot: horizontal Capsule3d
                 let foot = commands
                     .spawn(PbrBundle {
-                        mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(lt * 0.40, lt * 1.30))),
+                        mesh: Mesh3d(add_part(
+                            meshes,
+                            &style.modifiers,
+                            Capsule3d::new(lt * 0.40, lt * 1.30),
+                        )),
                         material: MeshMaterial3d(secondary_mat.clone()),
                         transform: Transform::from_xyz(side * tw * 0.25, -ll * 0.92, lt * 0.18)
                             .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
@@ -422,7 +465,11 @@ fn spawn_robot_with_material_response(
         for side in [-1.0_f32, 1.0] {
             let wing = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(ws * 0.04, ws * 0.46))),
+                    mesh: Mesh3d(add_part(
+                        meshes,
+                        &style.modifiers,
+                        Capsule3d::new(ws * 0.04, ws * 0.46),
+                    )),
                     material: MeshMaterial3d(secondary_mat.clone()),
                     transform: Transform::from_xyz(side * (tw * 0.5 + ws * 0.25), th * 0.75, 0.0)
                         .with_rotation(
@@ -456,7 +503,11 @@ fn spawn_robot_with_material_response(
         for side in [-1.0_f32, 1.0] {
             let horn = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(hl * 0.08, hl * 0.78))),
+                    mesh: Mesh3d(add_part(
+                        meshes,
+                        &style.modifiers,
+                        Capsule3d::new(hl * 0.08, hl * 0.78),
+                    )),
                     material: MeshMaterial3d(secondary_mat.clone()),
                     transform: Transform::from_xyz(side * hs * 0.36, th + hs + hl * 0.5, 0.0)
                         .with_rotation(Quat::from_rotation_z(side * 0.30))
@@ -479,7 +530,11 @@ fn spawn_robot_with_material_response(
             let radius = ((0.07 - t * 0.05) * tl).max(0.012 * tl);
             let segment = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(radius, seg_len * 0.82))),
+                    mesh: Mesh3d(add_part(
+                        meshes,
+                        &style.modifiers,
+                        Capsule3d::new(radius, seg_len * 0.82),
+                    )),
                     material: MeshMaterial3d(secondary_mat.clone()),
                     transform: Transform::from_xyz(
                         0.0,
@@ -501,7 +556,11 @@ fn spawn_robot_with_material_response(
         for side in [-1.0_f32, 1.0] {
             let ant = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(ant_l * 0.032, ant_l * 0.88))),
+                    mesh: Mesh3d(add_part(
+                        meshes,
+                        &style.modifiers,
+                        Capsule3d::new(ant_l * 0.032, ant_l * 0.88),
+                    )),
                     material: MeshMaterial3d(primary_mat.clone()),
                     transform: Transform::from_xyz(side * hs * 0.30, th + hs * 1.22, 0.0)
                         .with_rotation(Quat::from_rotation_z(side * 0.20)),
@@ -511,7 +570,11 @@ fn spawn_robot_with_material_response(
             commands.entity(root).add_child(ant);
             let tip = commands
                 .spawn(PbrBundle {
-                    mesh: Mesh3d(add_part(meshes, &style.modifiers, Sphere::new(ant_l * 0.09))),
+                    mesh: Mesh3d(add_part(
+                        meshes,
+                        &style.modifiers,
+                        Sphere::new(ant_l * 0.09),
+                    )),
                     material: MeshMaterial3d(emissive_mat.clone()),
                     transform: Transform::from_xyz(
                         side * hs * 0.30 + side * ant_l * 0.20 * 0.20,
@@ -530,7 +593,11 @@ fn spawn_robot_with_material_response(
         let bp = style.backpack_size * s;
         let pack = commands
             .spawn(PbrBundle {
-                mesh: Mesh3d(add_part(meshes, &style.modifiers, Capsule3d::new(bp * 0.52, bp * 1.20))),
+                mesh: Mesh3d(add_part(
+                    meshes,
+                    &style.modifiers,
+                    Capsule3d::new(bp * 0.52, bp * 1.20),
+                )),
                 material: MeshMaterial3d(secondary_mat.clone()),
                 transform: Transform::from_xyz(0.0, th * 0.65, -td * 0.55 - bp * 0.4)
                     .with_scale(Vec3::new(1.15, 1.0, 0.72)),

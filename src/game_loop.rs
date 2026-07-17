@@ -25,7 +25,7 @@ use crate::plugins::weapon_plugin::HitParticle;
 use crate::rendering::{
     EnergyMaterial, IceMaterial, LavaMaterial, ShieldMaterial, ToonMaterial, WaterMaterial,
 };
-use crate::spatial_lod::{ManagedSpatialLod, SpatialLod};
+use crate::spatial_lod::{ManagedSpatialLod, SpatialLod, SpatialLodProxy};
 
 /// Canonical per-frame gameplay ordering. Systems opt in with `.in_set(GameSet::X)`.
 ///
@@ -167,6 +167,7 @@ struct RenderPerfCounts<'w, 's> {
     transient_vfx: Query<'w, 's, (), With<HitParticle>>,
     lod_profiles: Query<'w, 's, (), With<SpatialLod>>,
     lod_renderables: Query<'w, 's, (), With<ManagedSpatialLod>>,
+    lod_proxies: Query<'w, 's, (), With<SpatialLodProxy>>,
     standard: Res<'w, Assets<StandardMaterial>>,
     toon: Res<'w, Assets<ToonMaterial>>,
     water: Res<'w, Assets<WaterMaterial>>,
@@ -272,11 +273,12 @@ fn update_perf_overlay(
     let custom_materials = render.custom_materials();
     let lod_profiles = render.lod_profiles.iter().count();
     let lod_renderables = render.lod_renderables.iter().count();
+    let lod_proxies = render.lod_proxies.iter().count();
 
     // Budgets (EC0): 60 FPS = 16.67 ms/frame; sim < 2–4 ms target (EC1 splits this out).
     for mut text in &mut text_q {
         *text = Text::new(format!(
-            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nmats:  {custom_materials} custom / {standard_materials} standard\nlod:   {lod_profiles} profiles / {lod_renderables} meshes\nsim:   {} ticks @{:.0}Hz",
+            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nmats:  {custom_materials} custom / {standard_materials} standard\nlod:   {lod_profiles} profiles / {lod_renderables} meshes / {lod_proxies} proxies\nsim:   {} ticks @{:.0}Hz",
             ticks.0, FIXED_HZ,
         ));
     }
