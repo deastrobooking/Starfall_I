@@ -778,16 +778,31 @@ proximity-scaled outgoing **camera shake**, and the rumble hook. See
 Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Player and enemy projectile collision sweeps the full per-frame travel segment through typed Avian layers. Candidate impacts resolve nearest-first, piercing player shots continue through hostile sensor hurtboxes but stop at world geometry, and explosive shots detonate at the resolved surface. Radial player explosives, enemy fireballs, and boss shockwaves require World-layer line of sight to each target before applying falloff, so walls provide real blast cover. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Tracking weapons display a pulsing world-space lock ring: gold for Homing Star and cyan for magic beams. Characters designed with `DariaCannon` arms can hold and release a charge shot. Charged hits resolve through the shared critical path at 1.5x damage and add a damage/element-scaled hot-pink impact core. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
 
 **Star Sabre / Beam Sabre** (`BeamSabre`): controller ownership follows the
-assigned `PlayerIndex`. It is locked until the Ch.1 discoverable; toggle `T` or
+assigned `PlayerIndex`. The base Saber is starter equipment; toggle `T` or
 controller LB+North/Y, with LT+North/Y, Guide, and L3+R3 as fallbacks. RT/LMB
 performs the animated slash while active. Normal beam weapons use that same
-player's LT aim and RT fire inputs. Toggle attempts display active, holstered,
-or locked feedback so a controller press never fails silently. Levels 1–5
+player's LT aim and RT fire inputs. Levels 1–5
 increase slash damage, wave damage, slash count, and at level 3+ gains piercing;
 level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise
 the Star Sabre's effective wave tier for combo behavior: finishers gain single
 waves first, mid-chain slashes gain waves next, dual waves arrive at high tier,
 and level-5/tier-5 finishers throw a triple spread.
+
+The Solar Sabre Glyph is now the energy-wave upgrade rather than the base weapon
+unlock. Save-backed `UpgradeLedger.relics` holds extensible gem/blueprint ids per
+player. Cyclone Slash (heavy/L3) performs a full radial cut; Comet Dash (B/East,
+or Q on keyboard) performs two advancing cuts; Meteor Pound turns that input
+into an airborne radial slam. Solar Fire, Storm, Frost, and Void gems stack
+damage and select supported damage types, while the Legendary Starheart Gem
+adds a larger multiplier. Eight initial objects are distributed around the
+Great Scientist sites as ordinary `HiddenReward` pickups. Collection grants the
+campaign discovery to the active party and mirrors ownership into each player's
+save record; later-created players inherit already-discovered Saber relics.
+
+The per-player HUD has dedicated traversal and Saber status lines. Hoverboard
+status distinguishes ready, recharge percentage, and active overdrive. Saber
+status shows the live named technique first, otherwise the owned wave/spin/dash/
+pound set, elemental-gem count, and Legendary Starheart ownership.
 
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 
@@ -991,11 +1006,13 @@ Current temple rewards:
 | Temple | Reward | Runtime effect |
 |---|---|---|
 | Temple of the Sky Equation | Ancient Flight Core | Improves air control and jetpack/flight fuel, force, regen, and vertical velocity |
-| Solar Sabre Observatory | Solar Sabre Glyph | Boosts hand/sabre-style melee pressure, Rainbow Ray damage/ammo, and Tri-Star Burst capacity |
+| Solar Sabre Observatory | Solar Sabre Glyph | Unlocks Star Saber energy waves and also boosts hand/sabre-style pressure, Rainbow Ray, and Tri-Star Burst |
 | Nova Missile Foundry | Nova Missile Matrix | Boosts Nova Orb missile damage, explosion radius, ammo, and Homing Star capacity |
 | Aegis Frame Archive | Aegis Armor Frame | Grants armor rewards and improves traversal reliability through stronger snap/step and extra wall-jump charge |
 
-Temple reward IDs are reapplied to newly spawned players by `apply_scientist_temple_progress()`, so movement and weapon upgrades persist through save/load without adding a new save section.
+Legacy temple effects are reapplied by `apply_scientist_temple_progress()`.
+Saber gems and blueprints additionally persist per player through the
+serde-defaulted `UpgradeLedger.relics` field, preserving old-save compatibility.
 
 ## Traversal Courses
 
@@ -1208,6 +1225,9 @@ falls back to the original synthesized handle. Generic engine/gameplay modules
 can emit `ModularActionSfxEvent` for additional manifest IDs. Paths must remain
 relative to the configured SFX directory, IDs are bounded to safe ASCII tokens,
 and custom one-shots play at original pitch on the SFX/master volume bus.
+Unassigned modular actions now select a synthesized fallback instead of going
+silent. The current traversal/Saber ids are `hoverboard.overdrive`,
+`sabre.cyclone`, `sabre.comet_dash`, `sabre.meteor_pound`, and `sabre.wave`.
 
 See `docs/audio_modding.md` for the player workflow and manifest schema.
 

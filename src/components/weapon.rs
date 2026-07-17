@@ -434,10 +434,31 @@ impl SpecialWeaponInventory {
 }
 
 // ── Star Sabre ────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SabreTechnique {
+    #[default]
+    Ready,
+    CycloneSlash,
+    CometDash,
+    MeteorPound,
+}
+
+impl SabreTechnique {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "READY",
+            Self::CycloneSlash => "CYCLONE",
+            Self::CometDash => "COMET DASH",
+            Self::MeteorPound => "METEOR POUND",
+        }
+    }
+}
+
 #[derive(Component, Debug, Clone)]
 pub struct BeamSabre {
     pub active: bool,
-    /// Starfall I: Star Sabre is locked until the Ch.1 discoverable is collected.
+    /// The base Star Sabre is part of the starter kit. World relics unlock its
+    /// waves and advanced techniques instead of withholding the core weapon.
     pub unlocked: bool,
     pub level: u32,
     pub slash_damage: f32,
@@ -448,6 +469,8 @@ pub struct BeamSabre {
     pub slash_timer: f32,
     pub slash_index: u32,
     pub is_slashing: bool,
+    pub technique_timer: f32,
+    pub technique: SabreTechnique,
 }
 
 /// Marker on the player while the Star Sabre has not been discovered yet.
@@ -468,7 +491,7 @@ impl Default for BeamSabre {
     fn default() -> Self {
         Self {
             active: false,
-            unlocked: false,
+            unlocked: true,
             level: 1,
             slash_damage: 25.0,
             wave_damage: 40.0,
@@ -478,6 +501,8 @@ impl Default for BeamSabre {
             slash_timer: 0.0,
             slash_index: 0,
             is_slashing: false,
+            technique_timer: 0.0,
+            technique: SabreTechnique::Ready,
         }
     }
 }

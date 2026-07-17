@@ -40,6 +40,11 @@ and `reward.chest`. Modular systems may emit additional IDs through
 `hoverboard.spring`, `hoverboard.grind_start`, `hoverboard.grind_exit`, and
 `hoverboard.trick_land`.
 
+The hoverboard/Saber progression pass also emits `hoverboard.overdrive`,
+`sabre.cyclone`, `sabre.comet_dash`, `sabre.meteor_pound`, and `sabre.wave`.
+If an id is absent from `actions.json`, the game uses the appropriate synthesized
+arcade fallback so the action remains audible during prototyping.
+
 Action IDs may contain ASCII letters, digits, `.`, `_`, and `-`. MP3 paths must
 be relative and cannot contain `..`. Missing, rejected, unreadable, or malformed standard
 assignments automatically use Starfall's synthesized arcade effect.

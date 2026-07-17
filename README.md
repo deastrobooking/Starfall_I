@@ -149,14 +149,14 @@ Keyboard and mouse:
 | `E` near wall while falling/hanging | Hang or climb up |
 | `E` | Interact; trigger nearby slingshots |
 | `G` | Grapple hook wind-up foundation |
-| `Q` | Dodge or drop from hang; momentum roll while moving fast on ground |
+| `Q` | Dodge/drop; Rocket Hoverboard overdrive; Saber Comet Dash/Meteor Pound after blueprint |
 | `LMB` | Fire active star beam / Star Sabre slash |
 | `RMB` | Aim |
 | `Shift` | Sprint |
 | `R` | Reload active star beam |
 | `V` / `B` | Light / heavy mana combo; heavy input stomps while airborne |
 | `F` | Parry |
-| `T` | Toggle Star Sabre after unlock |
+| `T` | Toggle the starter Star Sabre |
 | `1-6` | Select primary star beam |
 | `7` | Homing Star |
 | `8` | Tri-Star Burst |
@@ -190,7 +190,7 @@ Controller:
 | Left stick | Analog move |
 | Right stick | Look |
 | South | Jump, wall jump, hold for jetpack; triple-tap to switch flight/hover control; trigger slingshots |
-| East | Dodge / drop; momentum roll while moving fast on ground |
+| East | Dodge/drop; Rocket Hoverboard overdrive; Saber Comet Dash/Meteor Pound after blueprint |
 | West | Reload active star beam |
 | North | Parry |
 | RT | Fire star beam |
@@ -213,7 +213,7 @@ Controller:
 | Select + D-Pad Right | Sprite Turret |
 | Start | Pause |
 | Guide / L3 + R3 | Additional Star Sabre toggle fallback |
-| R3 / L3 | Light / heavy combo; airborne heavy input stomps |
+| R3 / L3 | Light / heavy combo; L3 performs Saber Cyclone Slash after blueprint |
 
 ## Star Beam Loadout
 

@@ -17,8 +17,9 @@ use crate::components::discoverable::{
 use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot};
 use crate::components::player::{
-    AimReticleState, AimSolution, ClimbState, JetpackState, Player, PlayerCamera, PlayerCameraRef,
-    PlayerIndex, PlayerInput, PlayerProgression, PlayerStats, TraversalMode, TraversalModeState,
+    AimReticleState, AimSolution, BoardBoostState, ClimbState, JetpackState, Player, PlayerCamera,
+    PlayerCameraRef, PlayerIndex, PlayerInput, PlayerProgression, PlayerStats, TraversalMode,
+    TraversalModeState,
 };
 use crate::components::weapon::{
     BeamSabre, SpecialWeaponInventory, TrackingMissile, WeaponInventory, WeaponRanks, WeaponType,
@@ -52,9 +53,70 @@ use crate::upgrades::{all_tech_upgrades, format_part_costs, TechUpgradeId, Upgra
 
 pub struct UiPlugin;
 
+/// Semantic star-tech UI palette. Screens consume roles from this resource so
+/// art-direction changes do not require hunting through hundreds of widgets.
+#[derive(Resource, Debug, Clone)]
+pub struct UiTheme {
+    pub canvas: Color,
+    pub panel: Color,
+    pub panel_strong: Color,
+    pub border: Color,
+    pub text_primary: Color,
+    pub text_muted: Color,
+    pub play: Color,
+    pub create: Color,
+    pub objective: Color,
+    pub success: Color,
+    pub danger: Color,
+    pub locked: Color,
+    pub health: Color,
+    pub armor: Color,
+    pub stamina: Color,
+    pub energy: Color,
+    pub climb: Color,
+    pub players: [Color; 4],
+}
+
+impl UiTheme {
+    pub fn player_accent(&self, player_index: u8) -> Color {
+        self.players[player_index.min(3) as usize]
+    }
+}
+
+impl Default for UiTheme {
+    fn default() -> Self {
+        Self {
+            canvas: Color::srgba(0.008, 0.012, 0.030, 1.0),
+            panel: Color::srgba(0.035, 0.050, 0.105, 0.82),
+            panel_strong: Color::srgba(0.045, 0.065, 0.140, 0.96),
+            border: Color::srgb(0.20, 0.55, 0.82),
+            text_primary: Color::srgb(0.90, 0.95, 1.0),
+            text_muted: Color::srgb(0.58, 0.70, 0.84),
+            play: Color::srgb(0.00, 0.42, 0.78),
+            create: Color::srgb(0.46, 0.20, 0.68),
+            objective: Color::srgb(1.00, 0.82, 0.22),
+            success: Color::srgb(0.24, 0.92, 0.52),
+            danger: Color::srgb(1.00, 0.28, 0.22),
+            locked: Color::srgb(0.31, 0.35, 0.43),
+            health: Color::srgb(0.22, 0.86, 0.42),
+            armor: Color::srgb(0.20, 0.55, 1.00),
+            stamina: Color::srgb(0.98, 0.72, 0.10),
+            energy: Color::srgb(0.05, 0.90, 0.95),
+            climb: Color::srgb(0.98, 0.50, 0.16),
+            players: [
+                Color::srgb(0.25, 0.82, 1.00),
+                Color::srgb(0.88, 0.34, 1.00),
+                Color::srgb(0.30, 1.00, 0.55),
+                Color::srgb(1.00, 0.66, 0.18),
+            ],
+        }
+    }
+}
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<UiMessage>()
+        app.init_resource::<UiTheme>()
+            .init_resource::<UiMessage>()
             .init_resource::<ShopUiState>()
             .init_resource::<PlayerGuidance>()
             .init_resource::<CraftingPanelState>()
@@ -450,6 +512,8 @@ enum PlayerHudTextKind {
     WeaponName,
     Ammo,
     SpecialAmmo,
+    TraversalStatus,
+    SabreStatus,
 }
 
 #[derive(Component)]
@@ -1043,7 +1107,7 @@ fn cleanup_play_ui_for_menu(
     }
 }
 
-fn setup_main_menu(mut commands: Commands) {
+fn setup_main_menu(mut commands: Commands, theme: Res<UiTheme>) {
     commands
         .spawn((
             Node {
@@ -1056,7 +1120,7 @@ fn setup_main_menu(mut commands: Commands) {
                 padding: UiRect::all(Val::Px(32.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.01, 0.012, 0.028, 1.0)),
+            BackgroundColor(theme.canvas),
             MainMenuRoot,
         ))
         .with_children(|p| {
@@ -1066,7 +1130,7 @@ fn setup_main_menu(mut commands: Commands) {
                     font_size: FontSize::Px(72.0),
                     ..default()
                 },
-                TextColor(Color::srgb(1.0, 0.9, 0.25)),
+                TextColor(theme.objective),
             ));
             p.spawn((
                 Text::new("Everest Range"),
@@ -1074,12 +1138,20 @@ fn setup_main_menu(mut commands: Commands) {
                     font_size: FontSize::Px(24.0),
                     ..default()
                 },
-                TextColor(Color::srgb(0.65, 0.8, 1.0)),
+                TextColor(theme.text_muted),
             ));
             p.spawn(Node {
                 height: Val::Px(24.0),
                 ..default()
             });
+            p.spawn((
+                Text::new("PLAY"),
+                TextFont {
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(theme.player_accent(0)),
+            ));
             p.spawn((
                 Button,
                 Node {
@@ -1090,8 +1162,8 @@ fn setup_main_menu(mut commands: Commands) {
                     border: UiRect::all(Val::Px(2.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.0, 0.36, 0.72)),
-                BorderColor::all(Color::srgb(0.25, 0.72, 1.0)),
+                BackgroundColor(theme.play),
+                BorderColor::all(theme.player_accent(0)),
                 StartButton,
             ))
             .with_children(|btn| {
@@ -1101,9 +1173,17 @@ fn setup_main_menu(mut commands: Commands) {
                         font_size: FontSize::Px(24.0),
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(theme.text_primary),
                 ));
             });
+            p.spawn((
+                Text::new("CREATE"),
+                TextFont {
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(theme.player_accent(1)),
+            ));
             p.spawn((
                 Button,
                 Node {
@@ -1114,8 +1194,8 @@ fn setup_main_menu(mut commands: Commands) {
                     border: UiRect::all(Val::Px(2.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.34, 0.16, 0.56)),
-                BorderColor::all(Color::srgb(0.72, 0.42, 1.0)),
+                BackgroundColor(theme.create),
+                BorderColor::all(theme.player_accent(1)),
                 EditorStartButton,
             ))
             .with_children(|btn| {
@@ -1125,7 +1205,7 @@ fn setup_main_menu(mut commands: Commands) {
                         font_size: FontSize::Px(24.0),
                         ..default()
                     },
-                    TextColor(Color::WHITE),
+                    TextColor(theme.text_primary),
                 ));
             });
         });
@@ -3742,16 +3822,11 @@ enum PlayerSelectAction {
     Begin,
 }
 
-fn slot_label_color(i: u8) -> Color {
-    match i {
-        0 => Color::srgb(0.3, 0.8, 1.0),
-        1 => Color::srgb(0.8, 0.3, 1.0),
-        2 => Color::srgb(0.3, 1.0, 0.5),
-        _ => Color::srgb(1.0, 0.65, 0.2),
-    }
-}
-
-fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectState>) {
+fn setup_player_select(
+    mut commands: Commands,
+    mut select: ResMut<PlayerSelectState>,
+    theme: Res<UiTheme>,
+) {
     // P1 is always present. Preserve saved/customized blueprints when this
     // screen is re-entered from the in-game character designer.
     if select.slots.iter().any(|slot| slot.joined) {
@@ -3852,7 +3927,7 @@ fn setup_player_select(mut commands: Commands, mut select: ResMut<PlayerSelectSt
                                 font_size: FontSize::Px(30.0),
                                 ..default()
                             },
-                            TextColor(slot_label_color(i)),
+                            TextColor(theme.player_accent(i)),
                         ));
 
                         // Character name / join prompt
@@ -4250,6 +4325,7 @@ fn player_select_controller_join(
 fn setup_hud(
     mut commands: Commands,
     config: Res<LocalPlayerConfig>,
+    theme: Res<UiTheme>,
     existing_hud: Query<Entity, With<HudRoot>>,
 ) {
     if !existing_hud.is_empty() {
@@ -4278,7 +4354,7 @@ fn setup_hud(
                         alpha: 0.0,
                     },
                 ));
-                spawn_player_hud_panel(root, player_index);
+                spawn_player_hud_panel(root, player_index, &theme);
             }
 
             // ── Top-right wave/enemy ──────────────────────────────────────────────
@@ -4801,20 +4877,26 @@ fn damage_vignette_node(player_index: u8, active: u8) -> Node {
     node
 }
 
-fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8) {
+fn spawn_player_hud_panel(
+    parent: &mut ChildSpawnerCommands,
+    player_index: u8,
+    theme: &UiTheme,
+) {
     parent
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(16.0),
-                top: Val::Px(16.0 + f32::from(player_index) * 144.0),
+                top: Val::Px(16.0 + f32::from(player_index) * 166.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(5.0),
                 width: Val::Px(246.0),
                 padding: UiRect::all(Val::Px(8.0)),
+                border: UiRect::left(Val::Px(3.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.04, 0.05, 0.10, 0.78)),
+            BackgroundColor(theme.panel),
+            BorderColor::all(theme.player_accent(player_index)),
         ))
         .with_children(|panel| {
             panel.spawn((
@@ -4823,7 +4905,7 @@ fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8) {
                     font_size: FontSize::Px(15.0),
                     ..default()
                 },
-                TextColor(slot_label_color(player_index)),
+                TextColor(theme.player_accent(player_index)),
                 PlayerHudText {
                     player_index,
                     kind: PlayerHudTextKind::Header,
@@ -4834,35 +4916,35 @@ fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8) {
                 player_index,
                 "HP",
                 PlayerHudBarKind::Health,
-                Color::srgb(0.2, 0.8, 0.2),
+                theme.health,
             );
             spawn_bar(
                 panel,
                 player_index,
                 "AR",
                 PlayerHudBarKind::Armor,
-                Color::srgb(0.2, 0.5, 1.0),
+                theme.armor,
             );
             spawn_bar(
                 panel,
                 player_index,
                 "ST",
                 PlayerHudBarKind::Stamina,
-                Color::srgb(0.9, 0.7, 0.0),
+                theme.stamina,
             );
             spawn_bar(
                 panel,
                 player_index,
                 "JP",
                 PlayerHudBarKind::Jetpack,
-                Color::srgb(0.0, 0.9, 0.9),
+                theme.energy,
             );
             spawn_bar(
                 panel,
                 player_index,
                 "CL",
                 PlayerHudBarKind::Climb,
-                Color::srgb(0.95, 0.55, 0.15),
+                theme.climb,
             );
             spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Credits, "¢ 0", 13.0);
             spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Level, "LVL 1", 13.0);
@@ -4892,6 +4974,20 @@ fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8) {
                 player_index,
                 PlayerHudTextKind::SpecialAmmo,
                 "7:Star 8:Tri 9:Moon 0:Sprite",
+                10.0,
+            );
+            spawn_player_hud_text(
+                panel,
+                player_index,
+                PlayerHudTextKind::TraversalStatus,
+                "TRAVERSAL: GRAPPLE",
+                10.0,
+            );
+            spawn_player_hud_text(
+                panel,
+                player_index,
+                PlayerHudTextKind::SabreStatus,
+                "SABER: BASE",
                 10.0,
             );
         });
@@ -5035,6 +5131,7 @@ fn hud_update_system(
             &SpecialWeaponInventory,
             &ArmorSet,
             &BeamSabre,
+            (&TraversalModeState, &BoardBoostState, &PlayerProgression),
         ),
         With<Player>,
     >,
@@ -5048,7 +5145,19 @@ fn hud_update_system(
         Query<&mut Text, With<EnemyCountText>>,
     )>,
 ) {
-    for (index, health, stats, jetpack, climb, weapons, special, armor, sabre) in player_q.iter() {
+    for (
+        index,
+        health,
+        stats,
+        jetpack,
+        climb,
+        weapons,
+        special,
+        armor,
+        sabre,
+        (traversal, board_boost, progression),
+    ) in player_q.iter()
+    {
         for (mut node, bar) in bar_q
             .iter_mut()
             .filter(|(_, bar)| bar.player_index == index.0)
@@ -5105,6 +5214,12 @@ fn hud_update_system(
                 }
                 PlayerHudTextKind::Ammo => "∞ AMMO".to_string(),
                 PlayerHudTextKind::SpecialAmmo => format!("SPECIALS ∞{}", lock_label),
+                PlayerHudTextKind::TraversalStatus => {
+                    traversal_status_text(traversal, board_boost)
+                }
+                PlayerHudTextKind::SabreStatus => {
+                    sabre_status_text(sabre, &progression.upgrades)
+                }
             });
         }
     }
@@ -5115,6 +5230,56 @@ fn hud_update_system(
     if let Ok(mut t) = text_sets.p2().single_mut() {
         *t = Text::new(format!("Enemies: {}", wave.enemy_count));
     }
+}
+
+fn traversal_status_text(traversal: &TraversalModeState, boost: &BoardBoostState) -> String {
+    if traversal.active != TraversalMode::Hoverboard {
+        return format!("TRAVERSAL: {}", traversal.active.label().to_uppercase());
+    }
+    if boost.timer > 0.0 {
+        return "BOARD: OVERDRIVE".into();
+    }
+    if boost.manual_cooldown <= 0.0 {
+        return "BOARD: B/EAST BOOST READY".into();
+    }
+    let total = traversal.hoverboard_manual_boost_duration + 0.28;
+    let ready = (1.0 - boost.manual_cooldown / total).clamp(0.0, 1.0);
+    format!("BOARD: BOOST {:02}%", (ready * 100.0).round() as u32)
+}
+
+fn sabre_status_text(sabre: &BeamSabre, upgrades: &UpgradeLedger) -> String {
+    if sabre.technique_timer > 0.0 {
+        return format!("SABER: {}", sabre.technique.label());
+    }
+    let mut techniques = Vec::new();
+    if upgrades.sabre_wave_unlocked() {
+        techniques.push("WAVE");
+    }
+    if upgrades.sabre_spin_unlocked() {
+        techniques.push("SPIN");
+    }
+    if upgrades.sabre_dash_unlocked() {
+        techniques.push("DASH");
+    }
+    if upgrades.sabre_pound_unlocked() {
+        techniques.push("POUND");
+    }
+    if techniques.is_empty() {
+        techniques.push("BASE");
+    }
+    let gem_count = ["solar_fire_gem", "storm_gem", "frost_gem", "void_gem"]
+        .into_iter()
+        .filter(|id| upgrades.has_relic(id))
+        .count();
+    let legendary = if upgrades.has_relic("legendary_starheart_gem") {
+        " + STARHEART"
+    } else {
+        ""
+    };
+    format!(
+        "SABER: {} • GEMS {gem_count}/4{legendary}",
+        techniques.join("/")
+    )
 }
 
 fn puzzle_objective_hud_system(
@@ -7107,5 +7272,54 @@ mod menu_navigation_tests {
         assert_eq!(reticle_center_percent(1, 2), (50.0, 75.0));
         assert_eq!(reticle_center_percent(0, 4), (25.0, 25.0));
         assert_eq!(reticle_center_percent(3, 4), (75.0, 75.0));
+    }
+
+    #[test]
+    fn traversal_hud_reports_board_boost_readiness_and_active_state() {
+        let traversal = TraversalModeState {
+            active: TraversalMode::Hoverboard,
+            ..default()
+        };
+        let mut boost = BoardBoostState::default();
+        assert_eq!(
+            traversal_status_text(&traversal, &boost),
+            "BOARD: B/EAST BOOST READY"
+        );
+
+        boost.timer = 0.4;
+        boost.manual_cooldown = 0.8;
+        assert_eq!(traversal_status_text(&traversal, &boost), "BOARD: OVERDRIVE");
+    }
+
+    #[test]
+    fn sabre_hud_lists_owned_progression_and_live_technique() {
+        let mut upgrades = UpgradeLedger::default();
+        upgrades.unlock_relic("solar_sabre_glyph");
+        upgrades.unlock_relic("cyclone_slash_blueprint");
+        upgrades.unlock_relic("storm_gem");
+        upgrades.unlock_relic("legendary_starheart_gem");
+        let mut sabre = BeamSabre::default();
+
+        let status = sabre_status_text(&sabre, &upgrades);
+        assert!(status.contains("WAVE/SPIN"));
+        assert!(status.contains("GEMS 1/4 + STARHEART"));
+
+        sabre.technique = crate::components::weapon::SabreTechnique::CycloneSlash;
+        sabre.technique_timer = 0.3;
+        assert_eq!(sabre_status_text(&sabre, &upgrades), "SABER: CYCLONE");
+    }
+
+    #[test]
+    fn ui_theme_keeps_semantic_signals_and_player_accents_distinct() {
+        let theme = UiTheme::default();
+        assert_ne!(theme.play, theme.create);
+        assert_ne!(theme.objective, theme.danger);
+        assert_ne!(theme.success, theme.locked);
+        for left in 0..theme.players.len() {
+            for right in left + 1..theme.players.len() {
+                assert_ne!(theme.players[left], theme.players[right]);
+            }
+        }
+        assert_eq!(theme.player_accent(99), theme.players[3]);
     }
 }

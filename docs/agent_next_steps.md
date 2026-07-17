@@ -559,8 +559,29 @@ Examples: "M7 Connected Platformer Route Network", "MM3 Zip Pull", "AI2 Patrol",
 
 ## Suggested Next Commit Scope
 
-Add a reusable app-construction seam and the first startup/plugin smoke tests.
-Keep the slice behavior-preserving: centralize app creation, prove core state
-and message/plugin registration, and retain the current binary entry point.
-Once green, use that seam to support one small world or UI extraction; do not
-combine it with gameplay tuning or shipped-world Forge promotion.
+Run the focused hoverboard/Saber acceptance pass before more feature work:
+
+- Ride a flat road, steep mountain face, crest, banked curve, ramp, and loop;
+  verify the board resists gravity without floating away and remains below the
+  soles across procedural/imported character scales.
+- Compare cruise, sprint/rocket, jump, and B/East overdrive; tune only the
+  `TraversalModeState` constants after controller hardware feedback.
+- Verify a new player starts with the Saber, gains waves from Solar Sabre Glyph,
+  and gains Cyclone, Comet Dash, Meteor Pound, elemental gems, and Starheart
+  independently as their world objects are collected.
+- Save/reload two players and confirm the party relic grant is present in both
+  owned ledgers, then join a later player and confirm discovered relics seed
+  correctly.
+
+Code-side presentation delivered with this slice:
+
+- Per-player HUD reports board boost ready/recharge/overdrive, live named Saber
+  techniques, owned techniques, gem count, and Legendary Starheart.
+- Hoverboard/Saber actions emit safe modular audio ids and use procedural
+  fallbacks until authored MP3 assignments exist.
+
+After controller acceptance, the next bounded implementation slice is an
+upgrade-catalog panel in Star Loadout: show each world relic's discovered/locked
+state, effect, input, and source hint. Follow it with distinct budgeted VFX for
+Cyclone, Comet Dash, Meteor Pound, each element, and Starheart; keep the current
+procedural effects as the low-effect fallback for four-player split screen.

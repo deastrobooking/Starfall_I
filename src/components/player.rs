@@ -472,6 +472,11 @@ pub struct TraversalModeState {
     pub hoverboard_rocket_forward_mult: f32,
     pub hoverboard_rocket_lift_mult: f32,
     pub hoverboard_rocket_fuel_mult: f32,
+    pub hoverboard_jump_mult: f32,
+    pub hoverboard_gravity_mult: f32,
+    pub hoverboard_uphill_assist: f32,
+    pub hoverboard_manual_boost_mult: f32,
+    pub hoverboard_manual_boost_duration: f32,
 }
 
 impl Default for TraversalModeState {
@@ -483,6 +488,11 @@ impl Default for TraversalModeState {
             hoverboard_rocket_forward_mult: 1.28,
             hoverboard_rocket_lift_mult: 0.82,
             hoverboard_rocket_fuel_mult: 0.68,
+            hoverboard_jump_mult: 1.32,
+            hoverboard_gravity_mult: 0.42,
+            hoverboard_uphill_assist: 8.5,
+            hoverboard_manual_boost_mult: 2.35,
+            hoverboard_manual_boost_duration: 0.72,
         }
     }
 }
@@ -492,6 +502,7 @@ pub struct BoardBoostState {
     pub timer: f32,
     pub speed_mult: f32,
     pub direction: Vec3,
+    pub manual_cooldown: f32,
 }
 
 impl Default for BoardBoostState {
@@ -500,6 +511,7 @@ impl Default for BoardBoostState {
             timer: 0.0,
             speed_mult: 1.0,
             direction: Vec3::ZERO,
+            manual_cooldown: 0.0,
         }
     }
 }
@@ -1064,6 +1076,10 @@ mod tests {
         assert!(traversal.hoverboard_rocket_forward_mult > 1.0);
         assert!(traversal.hoverboard_rocket_lift_mult > 0.0);
         assert!(traversal.hoverboard_rocket_fuel_mult < 1.0);
+        assert!(traversal.hoverboard_jump_mult > 1.0);
+        assert!(traversal.hoverboard_gravity_mult < 0.5);
+        assert!(traversal.hoverboard_uphill_assist > 5.0);
+        assert!(traversal.hoverboard_manual_boost_mult > 2.0);
     }
 
     #[test]

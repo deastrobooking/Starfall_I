@@ -8,7 +8,9 @@ use crate::components::discoverable::{
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
 use crate::components::mods::{ArmorMod, PlayerLoadout, WeaponMod};
-use crate::components::player::{JetpackState, Player, PlayerIndex, PlayerMovement, PlayerStats};
+use crate::components::player::{
+    JetpackState, Player, PlayerIndex, PlayerMovement, PlayerProgression, PlayerStats,
+};
 use crate::components::weapon::{
     BeamSabre, BeamSabreLocked, MeleeCombo, SpecialWeaponInventory, WeaponInventory,
 };
@@ -612,6 +614,7 @@ fn discoverable_pickup_system(
             &mut JetpackState,
             &mut WeaponInventory,
             &mut MeleeCombo,
+            &mut PlayerProgression,
         ),
         With<Player>,
     >,
@@ -876,6 +879,7 @@ fn discoverable_pickup_system(
                         mut jetpack,
                         mut weapons,
                         mut melee,
+                        _progression,
                     )) = reward_player_q.get_mut(player_entity)
                     {
                         special_label = grant_reward_stats(
@@ -898,6 +902,14 @@ fn discoverable_pickup_system(
                     }
                     if let Some(ability_id) = special_ability {
                         progress.unlock(ability_id);
+                        if crate::upgrades::is_sabre_relic(ability_id) {
+                            // World relics are campaign discoveries. Mirror the
+                            // unlock into every active player's owned ledger so
+                            // local co-op never races for a one-use pickup.
+                            for (.., mut progression) in reward_player_q.iter_mut() {
+                                progression.upgrades.unlock_relic(ability_id);
+                            }
+                        }
                     }
                 }
 

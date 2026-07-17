@@ -405,16 +405,41 @@ fn combat_sfx_system(
 fn modular_action_sfx_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
+    library: Option<ResMut<SfxLibrary>>,
     registry: Option<ResMut<ActionSfxRegistry>>,
     mut actions: MessageReader<ModularActionSfxEvent>,
 ) {
+    let Some(mut library) = library else {
+        return;
+    };
     let Some(mut registry) = registry else {
         return;
     };
     for action in actions.read() {
         if valid_action_id(&action.action_id) {
-            play_modular_action(&mut commands, &mut registry, &settings, &action.action_id);
+            if registry.is_assigned(&action.action_id) {
+                play_modular_action(&mut commands, &mut registry, &settings, &action.action_id);
+            } else {
+                play(
+                    &mut commands,
+                    &mut library,
+                    &mut registry,
+                    &settings,
+                    &action.action_id,
+                    modular_fallback_kind(&action.action_id),
+                );
+            }
         }
+    }
+}
+
+fn modular_fallback_kind(action_id: &str) -> SfxKind {
+    if action_id.starts_with("sabre.") || action_id.contains("slash") {
+        SfxKind::Slash
+    } else if action_id.contains("loot") || action_id.contains("reward") {
+        SfxKind::Loot
+    } else {
+        SfxKind::Shoot
     }
 }
 
@@ -488,5 +513,12 @@ mod tests {
             audio_synth::render_wav(&audio_synth::preset_shoot())[0..4],
             *b"RIFF"
         );
+    }
+
+    #[test]
+    fn modular_actions_select_readable_procedural_fallbacks() {
+        assert_eq!(modular_fallback_kind("sabre.cyclone"), SfxKind::Slash);
+        assert_eq!(modular_fallback_kind("hoverboard.overdrive"), SfxKind::Shoot);
+        assert_eq!(modular_fallback_kind("world.reward"), SfxKind::Loot);
     }
 }

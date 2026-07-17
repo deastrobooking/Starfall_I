@@ -39,6 +39,15 @@
 - Authoritative per-player aiming, viewport reticles, Homing Star tracking,
   Star Sabre controls, procedural weapon poses, loot attraction, road ramp
   alignment tests, and the MVP animation/rig bridge are present.
+- The Rocket Hoverboard now has reduced airborne gravity, a stronger board
+  jump/rocket profile, B/East overdrive, uphill wave assistance, contact-normal
+  banking, and a larger sole-height visual. The Star Saber is starter equipment;
+  the Solar Glyph unlocks waves and save-backed world blueprints/gems unlock
+  cyclone, double-dash/pound, elemental, and legendary upgrades per player.
+- Each player HUD now reports hoverboard boost readiness/recharge, the live
+  Saber technique, owned wave/technique unlocks, elemental gem count, and
+  Starheart ownership. Hoverboard overdrive and Saber actions emit modular SFX
+  ids with synthesized fallbacks when no custom MP3 is assigned.
 - Starfall Forge has a title launcher and project hub, persistent project
   registry, stable recipe/content IDs, atomic project/source saves and recovery,
   validation/publishing, immutable presets and lock documents, deterministic
@@ -59,9 +68,9 @@
    controller-only menu flows.
 5. Profile N11 large-world entity, simulation, terrain, and one-to-four-camera
    render costs before adding streaming complexity or denser content.
-6. Tune the playable MVP: camera/animation feel, road and ramp traversal,
-   weapon presentation, shop usability, loot collection, and mountain collision
-   using repeatable test routes.
+6. Hardware-test and tune the new hoverboard/Saber pass: steep ascents, crests,
+   banked curves, B overdrive, board-to-feet alignment, Saber wave discovery,
+   technique inputs, and per-player save/reload ownership.
 7. Continue PM1–PM3 creator gaps: templates/import/recovery/settings, preset
    thumbnails and validation capture, and per-level metadata/budgets plus
    rename/delete/reorder.

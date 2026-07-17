@@ -44,6 +44,7 @@ use crate::resources::{
     PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
     WorldRouteRegistry, WorldRouteState,
 };
+use crate::sfx::ModularActionSfxEvent;
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
 
@@ -629,9 +630,9 @@ fn spawn_players(
         .single()
         .map(|w| (w.physical_width(), w.physical_height()))
         .unwrap_or((1280, 720));
-    let board_deck_mesh = meshes.add(Cuboid::new(0.62, 0.12, 1.75));
-    let board_rail_mesh = meshes.add(Cuboid::new(0.10, 0.10, 1.42));
-    let board_thruster_mesh = meshes.add(Cuboid::new(0.30, 0.20, 0.22));
+    let board_deck_mesh = meshes.add(Cuboid::new(0.84, 0.13, 2.18));
+    let board_rail_mesh = meshes.add(Cuboid::new(0.11, 0.11, 1.82));
+    let board_thruster_mesh = meshes.add(Cuboid::new(0.34, 0.22, 0.28));
     let board_flame_mesh = meshes.add(Cuboid::new(0.18, 0.14, 0.48));
     let board_shell = materials.add(StandardMaterial {
         base_color: Color::srgb(0.055, 0.075, 0.13),
@@ -696,7 +697,14 @@ fn spawn_players(
         starter_inventory.add_item("armor_shard", 2, 10);
 
         // Apply perk and tech-upgrade HP bonuses to the authoritative max_health.
-        let player_progression = slot.progression.clone();
+        let mut player_progression = slot.progression.clone();
+        // Campaign discoveries are party-wide, while the resulting ownership
+        // is copied into each player's save-backed progression component.
+        for relic_id in crate::upgrades::SABRE_RELIC_IDS {
+            if progress.has_discoverable(relic_id) {
+                player_progression.upgrades.unlock_relic(relic_id);
+            }
+        }
         player_stats.max_health +=
             player_progression.perks.hp_bonus() + player_progression.upgrades.armor_health_bonus();
         for (weapon, rank) in weapon_inventory
@@ -923,7 +931,10 @@ fn attach_rocket_hoverboard(
         player_root
             .spawn((
                 SpatialBundle {
-                    transform: Transform::from_xyz(0.0, -0.88, 0.0),
+                    // The board root is at sole height, not calf height. Keeping
+                    // this on the player root also makes it follow every imported
+                    // or procedural rig without depending on a named foot bone.
+                    transform: Transform::from_xyz(0.0, -1.24, 0.0),
                     visibility: Visibility::Hidden,
                     ..default()
                 },
@@ -941,19 +952,19 @@ fn attach_rocket_hoverboard(
                     board.spawn(PbrBundle {
                         mesh: Mesh3d(rail_mesh.clone()),
                         material: MeshMaterial3d(trim.clone()),
-                        transform: Transform::from_xyz(side * 0.30, 0.09, 0.0),
+                        transform: Transform::from_xyz(side * 0.40, 0.09, 0.0),
                         ..default()
                     });
                     board.spawn(PbrBundle {
                         mesh: Mesh3d(thruster_mesh.clone()),
                         material: MeshMaterial3d(shell.clone()),
-                        transform: Transform::from_xyz(side * 0.23, -0.08, 0.66),
+                        transform: Transform::from_xyz(side * 0.31, -0.08, 0.84),
                         ..default()
                     });
                     board.spawn(PbrBundle {
                         mesh: Mesh3d(flame_mesh.clone()),
                         material: MeshMaterial3d(flame.clone()),
-                        transform: Transform::from_xyz(side * 0.23, -0.08, 0.94),
+                        transform: Transform::from_xyz(side * 0.31, -0.08, 1.20),
                         ..default()
                     });
                 }
@@ -972,13 +983,18 @@ fn update_rocket_hoverboard_visuals(
             &BoardBoostState,
             &PlayerInput,
             &StuntRunState,
+            &KinematicCharacterControllerOutput,
+            &Transform,
         ),
         With<Player>,
     >,
-    mut boards: Query<(&RocketHoverboardVisual, &mut Visibility, &mut Transform)>,
+    mut boards: Query<
+        (&RocketHoverboardVisual, &mut Visibility, &mut Transform),
+        Without<Player>,
+    >,
 ) {
     for (board, mut visibility, mut transform) in boards.iter_mut() {
-        let Some((_, traversal, movement, jetpack, boost, input, stunt)) =
+        let Some((_, traversal, movement, jetpack, boost, input, stunt, output, player_transform)) =
             players.iter().find(|(index, ..)| index.0 == board.owner)
         else {
             *visibility = Visibility::Hidden;
@@ -996,18 +1012,26 @@ fn update_rocket_hoverboard_visuals(
         let speed = movement.ground_velocity.length();
         let rocket = jetpack.is_active || !movement.is_grounded;
         let pulse = (time.elapsed_secs() * if rocket { 18.0 } else { 8.0 }).sin();
-        transform.translation.y = -0.88 + pulse * if rocket { 0.035 } else { 0.012 };
+        transform.translation.y = -1.24 + pulse * if rocket { 0.045 } else { 0.016 };
         let aerial_spin = if !movement.is_grounded {
             stunt.spin_degrees.to_radians()
         } else {
             0.0
         };
+        let turn_bank = -input.move_axis.x * if speed > 0.35 { 0.42 } else { 0.24 };
         let aerial_roll = if !movement.is_grounded {
             -input.move_axis.x * 0.34
         } else {
-            pulse * 0.025
+            turn_bank + pulse * 0.018
         };
-        transform.rotation = Quat::from_rotation_y(aerial_spin)
+        let surface_tilt = ground_normal_from_controller_output(output)
+            .map(|normal| {
+                let local_normal = player_transform.rotation.inverse() * normal;
+                Quat::from_rotation_arc(Vec3::Y, local_normal)
+            })
+            .unwrap_or(Quat::IDENTITY);
+        transform.rotation = surface_tilt
+            * Quat::from_rotation_y(aerial_spin)
             * Quat::from_rotation_x(
                 (-movement.velocity.y * 0.12 - speed * 0.018).clamp(-0.30, 0.24),
             )
@@ -1750,6 +1774,7 @@ fn player_movement(
     player_config: Res<LocalPlayerConfig>,
     sim: Res<SimConfig>,
     buffers: Res<PlayerInputBuffers>,
+    mut action_sfx: MessageWriter<ModularActionSfxEvent>,
     mut player_q: Query<
         (
             &mut KinematicCharacterController,
@@ -1837,6 +1862,7 @@ fn player_movement(
         jetpack.air_dash_timer = (jetpack.air_dash_timer - dt).max(0.0);
         jetpack.air_dash_cooldown_timer = (jetpack.air_dash_cooldown_timer - dt).max(0.0);
         board_boost.timer = (board_boost.timer - dt).max(0.0);
+        board_boost.manual_cooldown = (board_boost.manual_cooldown - dt).max(0.0);
         if board_boost.timer <= 0.0 {
             board_boost.speed_mult = 1.0;
             board_boost.direction = Vec3::ZERO;
@@ -1885,6 +1911,26 @@ fn player_movement(
             )
         };
         let (mut input, mut input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
+        if traversal.active == TraversalMode::Hoverboard
+            && pi.dodge
+            && board_boost.manual_cooldown <= 0.0
+        {
+            let boost_direction = if input.length_squared() > 0.05 {
+                input
+            } else {
+                fwd
+            };
+            board_boost.timer = traversal.hoverboard_manual_boost_duration;
+            board_boost.manual_cooldown = traversal.hoverboard_manual_boost_duration + 0.28;
+            board_boost.speed_mult = traversal.hoverboard_manual_boost_mult;
+            board_boost.direction = boost_direction.normalize_or_zero();
+            let minimum_launch = movement.sprint_speed * traversal.hoverboard_speed_mult * 1.85;
+            let along = movement.ground_velocity.dot(board_boost.direction);
+            if along < minimum_launch {
+                movement.ground_velocity += board_boost.direction * (minimum_launch - along);
+            }
+            action_sfx.write(ModularActionSfxEvent::new("hoverboard.overdrive"));
+        }
         let board_boost_active =
             board_boost.timer > 0.0 && board_boost.direction.length_squared() > 0.25;
         if board_boost_active && input_strength < 0.20 {
@@ -1944,6 +1990,7 @@ fn player_movement(
 
         if movement.is_grounded
             && pi.dodge
+            && traversal.active != TraversalMode::Hoverboard
             && movement.ground_velocity.length() >= platformer.roll_min_speed
         {
             platformer.rolling = true;
@@ -1968,7 +2015,22 @@ fn player_movement(
             if let Some(ground_normal) = ground_normal_from_controller_output(output) {
                 let downhill = downhill_direction(ground_normal);
                 let slope = (1.0 - ground_normal.y.clamp(0.0, 1.0)).max(0.0);
-                movement.ground_velocity += downhill * slope * dt * 2.4;
+                if traversal.active == TraversalMode::Hoverboard {
+                    let uphill = -downhill;
+                    let uphill_intent = input.dot(uphill).max(0.0);
+                    // Preserve the downhill surf, but add enough uphill drive and
+                    // crest lift to make steep terrain read as a rideable wave.
+                    movement.ground_velocity += downhill * slope * dt * 1.35;
+                    movement.ground_velocity +=
+                        uphill * slope * uphill_intent * traversal.hoverboard_uphill_assist * dt;
+                    if slope > 0.06 && uphill_intent > 0.18 {
+                        let wave_lift =
+                            slope * uphill_intent * movement.ground_velocity.length() * 0.16;
+                        movement.velocity.y = movement.velocity.y.max(wave_lift.min(0.30));
+                    }
+                } else {
+                    movement.ground_velocity += downhill * slope * dt * 2.4;
+                }
             }
         }
 
@@ -2147,7 +2209,12 @@ fn player_movement(
             started_jump = true;
             state.force(PlayerState::Jetpack);
         } else if movement.jump_buffer_timer > 0.0 && movement.coyote_timer > 0.0 {
-            movement.velocity.y = movement.jump_force;
+            movement.velocity.y = movement.jump_force
+                * if traversal.active == TraversalMode::Hoverboard {
+                    traversal.hoverboard_jump_mult
+                } else {
+                    1.0
+                };
             movement.jump_buffer_timer = 0.0;
             movement.coyote_timer = 0.0;
             movement.wall_jump_lock_timer = 0.0;
@@ -2303,6 +2370,9 @@ fn player_movement(
             };
             if movement.velocity.y.abs() < 0.08 {
                 gravity *= movement.apex_gravity_mult;
+            }
+            if traversal.active == TraversalMode::Hoverboard {
+                gravity *= traversal.hoverboard_gravity_mult;
             }
             movement.velocity.y -= gravity;
             movement.velocity.y = movement.velocity.y.max(-movement.max_fall_speed);

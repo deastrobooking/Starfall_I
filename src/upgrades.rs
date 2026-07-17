@@ -5,6 +5,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::robot_pets::{PartCost, RobotPartKind, RobotPetCollection};
 
+pub const SABRE_RELIC_IDS: [&str; 9] = [
+    "solar_sabre_glyph",
+    "cyclone_slash_blueprint",
+    "comet_dash_blueprint",
+    "meteor_pound_blueprint",
+    "solar_fire_gem",
+    "storm_gem",
+    "frost_gem",
+    "void_gem",
+    "legendary_starheart_gem",
+];
+
+pub fn is_sabre_relic(id: &str) -> bool {
+    SABRE_RELIC_IDS.contains(&id)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TechUpgradeId {
     BeamCapacitors,
@@ -211,9 +227,56 @@ pub struct UpgradeLedger {
     pub ranks: Vec<(TechUpgradeId, u32)>,
     #[serde(default)]
     pub rejuvenation_charge: f32,
+    /// Save-backed world relics, elemental gems, and technique blueprints.
+    /// String ids keep authored discoveries extensible and old saves compatible.
+    #[serde(default)]
+    pub relics: Vec<String>,
 }
 
 impl UpgradeLedger {
+    pub fn unlock_relic(&mut self, id: impl Into<String>) -> bool {
+        let id = id.into();
+        if self.relics.iter().any(|owned| owned == &id) {
+            return false;
+        }
+        self.relics.push(id);
+        self.relics.sort();
+        true
+    }
+
+    pub fn has_relic(&self, id: &str) -> bool {
+        self.relics.iter().any(|owned| owned == id)
+    }
+
+    pub fn sabre_wave_unlocked(&self) -> bool {
+        self.has_relic("solar_sabre_glyph")
+    }
+
+    pub fn sabre_spin_unlocked(&self) -> bool {
+        self.has_relic("cyclone_slash_blueprint")
+    }
+
+    pub fn sabre_dash_unlocked(&self) -> bool {
+        self.has_relic("comet_dash_blueprint")
+    }
+
+    pub fn sabre_pound_unlocked(&self) -> bool {
+        self.has_relic("meteor_pound_blueprint")
+    }
+
+    pub fn sabre_elemental_damage_mult(&self) -> f32 {
+        let gems = ["solar_fire_gem", "storm_gem", "frost_gem", "void_gem"]
+            .into_iter()
+            .filter(|id| self.has_relic(id))
+            .count() as f32;
+        1.0 + gems * 0.12
+            + if self.has_relic("legendary_starheart_gem") {
+                0.35
+            } else {
+                0.0
+            }
+    }
+
     pub fn rank(&self, id: TechUpgradeId) -> u32 {
         self.ranks
             .iter()
@@ -627,5 +690,24 @@ mod tests {
         assert!(upgrades.armor_strength_mult() > 1.0);
         assert!(upgrades.gauntlet_has_rift());
         assert!(upgrades.gauntlet_extra_pellets() > 0);
+    }
+
+    #[test]
+    fn sabre_relics_are_idempotent_and_compose_damage() {
+        let mut upgrades = UpgradeLedger::default();
+        assert!(upgrades.unlock_relic("solar_sabre_glyph"));
+        assert!(!upgrades.unlock_relic("solar_sabre_glyph"));
+        assert!(upgrades.sabre_wave_unlocked());
+
+        upgrades.unlock_relic("cyclone_slash_blueprint");
+        upgrades.unlock_relic("comet_dash_blueprint");
+        upgrades.unlock_relic("meteor_pound_blueprint");
+        upgrades.unlock_relic("solar_fire_gem");
+        upgrades.unlock_relic("legendary_starheart_gem");
+
+        assert!(upgrades.sabre_spin_unlocked());
+        assert!(upgrades.sabre_dash_unlocked());
+        assert!(upgrades.sabre_pound_unlocked());
+        assert!(upgrades.sabre_elemental_damage_mult() > 1.45);
     }
 }

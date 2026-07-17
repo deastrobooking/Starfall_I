@@ -22,6 +22,7 @@ use crate::physics::{
 use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::resources::DungeonCrawlState;
 use crate::state::AppState;
+use crate::sfx::ModularActionSfxEvent;
 use crate::upgrades::UpgradeLedger;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
@@ -2319,6 +2320,8 @@ fn beam_sabre_update_system(
             &PlayerCameraRef,
             &ArmorSet,
             &PlayerProgression,
+            &mut PlayerMovement,
+            &TraversalModeState,
             Option<&BeamSabreLocked>,
         ),
         With<Player>,
@@ -2331,6 +2334,7 @@ fn beam_sabre_update_system(
     mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
+    mut action_sfx: MessageWriter<ModularActionSfxEvent>,
 ) {
     let dt = time.delta_secs();
     for (
@@ -2342,13 +2346,16 @@ fn beam_sabre_update_system(
         cam_ref,
         armor,
         progression,
+        mut movement,
+        traversal,
         locked_marker,
     ) in player_q.iter_mut()
     {
         let upgrades = &progression.upgrades;
         let perk_damage_mult = progression.perks.damage_mult()
             * upgrades.beam_damage_mult()
-            * upgrades.gauntlet_energy_damage_mult();
+            * upgrades.gauntlet_energy_damage_mult()
+            * upgrades.sabre_elemental_damage_mult();
         if upgrades.blade_boots_unlock_sabre() && !sabre.unlocked {
             sabre.unlocked = true;
             if locked_marker.is_some() {
@@ -2361,7 +2368,13 @@ fn beam_sabre_update_system(
         let fwd = combat_forward(player_transform, cam, pi, dungeon.active);
         let origin = star_muzzle_origin(player_transform, fwd);
         let armor_damage_mult = armor.modified_outgoing_damage(perk_damage_mult);
-        let blade_damage_type = if upgrades.blade_boot_rank() > 0 {
+        let blade_damage_type = if upgrades.has_relic("solar_fire_gem") {
+            DamageType::Fire
+        } else if upgrades.has_relic("storm_gem") {
+            DamageType::Electric
+        } else if upgrades.has_relic("void_gem") {
+            DamageType::Rift
+        } else if upgrades.blade_boot_rank() > 0 {
             DamageType::Laser
         } else {
             DamageType::Melee
@@ -2397,6 +2410,10 @@ fn beam_sabre_update_system(
         let (slash_scale, wave_scale) = sabre_level_scale(&sabre);
 
         sabre.cooldown_timer = (sabre.cooldown_timer - dt).max(0.0);
+        sabre.technique_timer = (sabre.technique_timer - dt).max(0.0);
+        if sabre.technique_timer <= 0.0 {
+            sabre.technique = SabreTechnique::Ready;
+        }
 
         if sabre.is_slashing {
             sabre.slash_timer -= dt;
@@ -2439,6 +2456,95 @@ fn beam_sabre_update_system(
             continue;
         }
 
+        // Technique blueprints add new verbs to the starter Saber. Heavy input
+        // performs a 360-degree cyclone; B performs a double dash slash on the
+        // ground or a meteor pound while airborne.
+        if pi.melee_heavy && upgrades.sabre_spin_unlocked() && sabre.cooldown_timer <= 0.0 {
+            let Some(def) = library.sabre_slash(0) else {
+                continue;
+            };
+            execute_melee_hit(
+                &spatial_query,
+                origin,
+                fwd,
+                5.4,
+                0.0,
+                -1.0,
+                def.damage * slash_scale * armor_damage_mult * 1.45,
+                blade_damage_type,
+                def.knockback * 1.35,
+                None,
+                &mut enemy_q,
+                &mut damaged_ev,
+                &mut killed_ev,
+            );
+            sabre.cooldown_timer = sabre.cooldown * 1.15;
+            sabre.technique_timer = 0.48;
+            sabre.technique = SabreTechnique::CycloneSlash;
+            sm.force(PlayerState::Attacking);
+            spawn_melee_flash(&mut commands, &proj_assets, origin);
+            hitstop.remaining = hitstop.remaining.max(0.055);
+            action_sfx.write(ModularActionSfxEvent::new("sabre.cyclone"));
+            continue;
+        }
+
+        if pi.dodge
+            && traversal.active != TraversalMode::Hoverboard
+            && sabre.cooldown_timer <= 0.0
+            && (upgrades.sabre_dash_unlocked() || upgrades.sabre_pound_unlocked())
+        {
+            let Some(def) = library.sabre_slash(0) else {
+                continue;
+            };
+            if !movement.is_grounded && upgrades.sabre_pound_unlocked() {
+                movement.velocity.y = -1.85;
+                execute_melee_hit(
+                    &spatial_query,
+                    origin,
+                    fwd,
+                    5.0,
+                    0.0,
+                    -1.0,
+                    def.damage * slash_scale * armor_damage_mult * 1.75,
+                    blade_damage_type,
+                    def.knockback * 1.8,
+                    None,
+                    &mut enemy_q,
+                    &mut damaged_ev,
+                    &mut killed_ev,
+                );
+                sabre.technique = SabreTechnique::MeteorPound;
+                action_sfx.write(ModularActionSfxEvent::new("sabre.meteor_pound"));
+            } else if upgrades.sabre_dash_unlocked() {
+                movement.ground_velocity = fwd * 1.78;
+                for dash_offset in [1.8, 4.8] {
+                    execute_melee_hit(
+                        &spatial_query,
+                        origin + fwd * dash_offset,
+                        fwd,
+                        3.6,
+                        0.8,
+                        -0.15,
+                        def.damage * slash_scale * armor_damage_mult * 0.92,
+                        blade_damage_type,
+                        def.knockback,
+                        None,
+                        &mut enemy_q,
+                        &mut damaged_ev,
+                        &mut killed_ev,
+                    );
+                }
+                sabre.technique = SabreTechnique::CometDash;
+                action_sfx.write(ModularActionSfxEvent::new("sabre.comet_dash"));
+            }
+            sabre.cooldown_timer = sabre.cooldown * 1.35;
+            sabre.technique_timer = 0.42;
+            sm.force(PlayerState::Attacking);
+            spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.0);
+            hitstop.remaining = hitstop.remaining.max(0.06);
+            continue;
+        }
+
         if pi.fire_just && sabre.cooldown_timer <= 0.0 {
             let Some(def) = library.sabre_slash(0) else {
                 continue;
@@ -2470,7 +2576,8 @@ fn beam_sabre_update_system(
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
             hitstop.remaining = hitstop.remaining.max(def.hitstop);
 
-            if sabre.fires_dual_wave() || dungeon.active {
+            if upgrades.sabre_wave_unlocked() {
+                action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
                 let wave = &library.sabre_wave;
                 let right = cam.right().as_vec3();
                 let wave_offsets: &[f32] = if sabre.fires_dual_wave() {
@@ -2560,6 +2667,16 @@ fn sync_sabre_blade_visual(
 fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transform {
     let forward = player.forward().as_vec3().with_y(0.0).normalize_or_zero();
     let right = player.right().as_vec3().with_y(0.0).normalize_or_zero();
+    let technique_spin = if sabre.technique_timer > 0.0
+        && matches!(
+            sabre.technique,
+            SabreTechnique::CycloneSlash | SabreTechnique::CometDash
+        )
+    {
+        (1.0 - sabre.technique_timer / 0.48).clamp(0.0, 1.0) * std::f32::consts::TAU
+    } else {
+        0.0
+    };
     let swing = if sabre.is_slashing {
         if sabre.slash_index.is_multiple_of(2) {
             0.72
@@ -2569,7 +2686,8 @@ fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transfo
     } else {
         0.22
     };
-    let blade_direction = (forward + right * swing + Vec3::Y * 0.12).normalize_or_zero();
+    let spin_direction = Quat::from_rotation_y(technique_spin) * forward;
+    let blade_direction = (spin_direction + right * swing + Vec3::Y * 0.12).normalize_or_zero();
     Transform::from_translation(player.translation() + Vec3::Y * 1.15 + forward * 0.9 + right * 0.5)
         .looking_to(blade_direction, Vec3::Y)
         .with_scale(Vec3::new(1.8, 1.8, 18.0))

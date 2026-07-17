@@ -1593,6 +1593,7 @@ mod tests {
         saved.tech_upgrades = Some(UpgradeLedger {
             ranks: vec![(TechUpgradeId::NovaMissileForge, 3)],
             rejuvenation_charge: 24.0,
+            relics: vec!["solar_sabre_glyph".into()],
         });
         saved.weapon_ranks = Some([1, 2, 3, 4, 5, 6]);
 
@@ -1603,6 +1604,7 @@ mod tests {
 
         assert_eq!(decoded.player_index, 2);
         assert_eq!(progression.perks.rank("star_focus"), 2);
+        assert!(progression.upgrades.sabre_wave_unlocked());
         assert_eq!(
             progression.upgrades.rank(TechUpgradeId::NovaMissileForge),
             3

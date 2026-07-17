@@ -4693,6 +4693,57 @@ fn spawn_great_scientist_temples(
     for spec in great_scientist_temple_specs() {
         spawn_great_scientist_temple(commands, meshes, materials, pal, seed, *spec);
     }
+
+    // A reusable first set of Saber progression objects. These are ordinary
+    // save-backed HiddenRewards, so future chapters can author more gems and
+    // blueprints without another bespoke pickup system.
+    for (id, label, x, z) in [
+        (
+            "cyclone_slash_blueprint",
+            "Cyclone Slash Blueprint",
+            -2040.0,
+            6315.0,
+        ),
+        (
+            "comet_dash_blueprint",
+            "Comet Dash Blueprint",
+            -2185.0,
+            6480.0,
+        ),
+        (
+            "meteor_pound_blueprint",
+            "Meteor Pound Blueprint",
+            -1940.0,
+            6560.0,
+        ),
+        ("solar_fire_gem", "Solar Fire Gem", -6250.0, -1710.0),
+        ("storm_gem", "Storm Gem", 7040.0, -5060.0),
+        ("frost_gem", "Frost Gem", -6760.0, -1930.0),
+        ("void_gem", "Void Gem", 7380.0, -5410.0),
+        (
+            "legendary_starheart_gem",
+            "Legendary Starheart Gem",
+            3100.0,
+            7000.0,
+        ),
+    ] {
+        let position = Vec3::new(x, terrain_surface_y(x, z, seed) + 2.0, z);
+        spawn_discoverable_beacon(
+            commands,
+            meshes,
+            materials,
+            DiscoverableKind::HiddenReward {
+                reward_id: id,
+                credits: 40,
+                experience: 35,
+                armor: 0,
+                power_up: Some(id),
+                special_ability: Some(id),
+            },
+            label,
+            position,
+        );
+    }
 }
 
 fn scientist_temple_materials(
