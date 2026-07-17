@@ -43,6 +43,7 @@ use crate::final_war::{
     win_condition_system,
 };
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
+use crate::modular_character::bake_character_mesh;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
 use crate::raids::{
@@ -80,6 +81,9 @@ struct ColliderDebugVisual;
 struct DebugColliderBox {
     size: Vec3,
 }
+
+#[derive(Component)]
+struct BuildingLodClustered;
 
 /// Physics backends normally multiply collider shapes by `GlobalTransform` scale.
 /// Scaled unit-cube roads/bridges below already specify collider half-extents
@@ -204,7 +208,10 @@ impl Plugin for WorldPlugin {
             .init_resource::<RaidRegistry>()
             .init_resource::<DiscussionState>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
-            .add_systems(OnEnter(AppState::Playing), generate_city)
+            .add_systems(
+                OnEnter(AppState::Playing),
+                (generate_city, build_building_cluster_lods).chain(),
+            )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
             .add_systems(
                 Update,
@@ -3370,6 +3377,110 @@ fn spawn_lighting(
         },
         WorldGeometry,
     ));
+}
+
+/// N11b: merge nearby minimal building shells that share a material into a
+/// single far-distance draw-call proxy. Original entities and colliders stay
+/// intact and render only in the near tier.
+fn build_building_cluster_lods(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    buildings: Query<
+        (
+            Entity,
+            &Mesh3d,
+            &MeshMaterial3d<StandardMaterial>,
+            &Transform,
+            &Building,
+        ),
+        (
+            Without<ChildOf>,
+            Without<EnterableBuilding>,
+            Without<BuildingLodClustered>,
+            Without<crate::spatial_lod::SpatialLodProxy>,
+        ),
+    >,
+) {
+    const CLUSTER_SIZE: f32 = 800.0;
+
+    struct Part {
+        entity: Entity,
+        mesh: Handle<Mesh>,
+        transform: Transform,
+        height: f32,
+    }
+
+    struct Cluster {
+        material: Handle<StandardMaterial>,
+        parts: Vec<Part>,
+    }
+
+    let mut clusters: HashMap<(i32, i32, WorldZone, AssetId<StandardMaterial>), Cluster> =
+        HashMap::new();
+    for (entity, mesh, material, transform, building) in &buildings {
+        let cell_x = (transform.translation.x / CLUSTER_SIZE).floor() as i32;
+        let cell_z = (transform.translation.z / CLUSTER_SIZE).floor() as i32;
+        clusters
+            .entry((cell_x, cell_z, building.zone, material.id()))
+            .or_insert_with(|| Cluster {
+                material: material.0.clone(),
+                parts: Vec::new(),
+            })
+            .parts
+            .push(Part {
+                entity,
+                mesh: mesh.0.clone(),
+                transform: *transform,
+                height: building.height,
+            });
+    }
+
+    for ((cell_x, cell_z, _, _), mut cluster) in clusters {
+        if cluster.parts.len() < 2 {
+            continue;
+        }
+        cluster.parts.sort_by_key(|part| part.entity.to_bits());
+        let origin = Vec3::new(
+            (cell_x as f32 + 0.5) * CLUSTER_SIZE,
+            0.0,
+            (cell_z as f32 + 0.5) * CLUSTER_SIZE,
+        );
+        let max_height = cluster
+            .parts
+            .iter()
+            .map(|part| part.height)
+            .fold(0.0_f32, f32::max);
+        let models = cluster
+            .parts
+            .iter()
+            .map(|part| {
+                (
+                    part.mesh.clone(),
+                    Mat4::from_translation(-origin) * part.transform.to_matrix(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let proxy_mesh = bake_character_mesh(&meshes, &models);
+        let proxy_handle = meshes.add(proxy_mesh);
+
+        for part in &cluster.parts {
+            commands.entity(part.entity).insert((
+                BuildingLodClustered,
+                crate::spatial_lod::SpatialLod::building_high(max_height),
+            ));
+        }
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(proxy_handle),
+                material: MeshMaterial3d(cluster.material),
+                transform: Transform::from_translation(origin),
+                ..default()
+            },
+            WorldGeometry,
+            crate::spatial_lod::SpatialLod::building_proxy(max_height),
+            crate::spatial_lod::SpatialLodProxy,
+        ));
+    }
 }
 
 // ── Ground plane ─────────────────────────────────────────────────────────────

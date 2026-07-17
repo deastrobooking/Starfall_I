@@ -60,6 +60,30 @@ impl SpatialLod {
         Self::new(max_distance - 320.0, max_distance)
     }
 
+    pub fn building_high(height: f32) -> Self {
+        let fade_in_end = (1_400.0 + height.max(0.0) * 12.0).clamp(1_600.0, 3_000.0);
+        Self::new(fade_in_end - 300.0, fade_in_end)
+    }
+
+    pub fn building_proxy(height: f32) -> Self {
+        let high = Self::building_high(height);
+        let far = Self::landmark(height);
+        Self::tier(
+            high.fade_start,
+            high.max_distance,
+            far.fade_start,
+            far.max_distance,
+        )
+    }
+
+    pub fn terrain_high() -> Self {
+        Self::new(2_600.0, 3_200.0)
+    }
+
+    pub fn terrain_proxy() -> Self {
+        Self::tier(2_600.0, 3_200.0, 14_000.0, 16_000.0)
+    }
+
     fn visibility_range(self) -> VisibilityRange {
         VisibilityRange {
             start_margin: self.min_distance..self.fade_in_end,
@@ -212,6 +236,16 @@ mod tests {
         assert_eq!(proxy.fade_in_end, 700.0);
         assert_eq!(proxy.fade_start, 700.0);
         assert_eq!(proxy.max_distance, 700.0);
+
+        let building_high = SpatialLod::building_high(80.0);
+        let building_proxy = SpatialLod::building_proxy(80.0);
+        assert_eq!(building_high.fade_start, building_proxy.min_distance);
+        assert_eq!(building_high.max_distance, building_proxy.fade_in_end);
+
+        let terrain_high = SpatialLod::terrain_high();
+        let terrain_proxy = SpatialLod::terrain_proxy();
+        assert_eq!(terrain_high.fade_start, terrain_proxy.min_distance);
+        assert_eq!(terrain_high.max_distance, terrain_proxy.fade_in_end);
     }
 
     #[test]
