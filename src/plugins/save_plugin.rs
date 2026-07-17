@@ -38,7 +38,6 @@ const SAVE_FILE_A: &str = "starfall_i_save_a.json";
 const SAVE_FILE_B: &str = "starfall_i_save_b.json";
 const SAVE_FILE_C: &str = "starfall_i_save_c.json";
 const SETTINGS_FILE: &str = "starfall_i_settings.json";
-const SAVE_DIR_NAME: &str = "starfall_i";
 /// Current on-disk schema version. v4 introduced `save_generation`, the
 /// monotonic counter that decides which rotating slot is newest on load.
 const SAVE_VERSION: u32 = 4;
@@ -75,9 +74,7 @@ fn next_save_slot(current: u8) -> u8 {
 fn save_root() -> &'static Path {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
-        let root = dirs::data_dir()
-            .map(|dir| dir.join(SAVE_DIR_NAME))
-            .unwrap_or_else(|| PathBuf::from("."));
+        let root = crate::platform_paths::data_root();
         migrate_legacy_files(&root);
         root
     })

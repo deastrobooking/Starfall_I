@@ -376,6 +376,16 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
   the shared-camera anchor falls back through threats → players → `Vec3::ZERO`.
   All remaining `unwrap`/`expect` hits in `src/` were audited and are either
   guarded by adjacent checks, on const data, or inside `#[cfg(test)]`.
+- Follow-up multi-agent findings reconciled (July 17, 2026): the raw panic-like
+  count was dominated by tests, and no production `get_single`/`get_single_mut`
+  calls were found. Crash reports now use the platform data root, sanitize
+  install/home paths, rotate timestamped files, and retain five. Terrain and
+  sky-road seed caches are bounded to four entries and recover poisoned locks;
+  malformed empty L-system rule symbols are ignored safely. See
+  `docs/codebase_alignment_2026-07.md` for accepted and stale findings.
+- Before further hotspot extraction, create a reusable app-construction seam
+  and startup/plugin smoke tests. Then split world terrain/settlement/dungeon,
+  UI screen/HUD, and Forge panel boundaries in small ordering-preserving slices.
 - Unclutter `src/main.rs` by migrating plugin-specific `init_resource` calls and localized configurations into their respective plugin `build()` configurations.
 - Platform-agnostic save paths delivered with the save-hardening slice above;
   legacy working-directory files are migrated once, never overwritten.

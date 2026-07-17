@@ -886,13 +886,14 @@ pub(super) fn speed_road_valid_sky_access_chunks(
 }
 
 pub(super) fn sky_road_access_corridors(terrain_seed: u64) -> Arc<Vec<(Vec2, Vec3)>> {
-    let cache = SKY_ROAD_ACCESS_CORRIDORS.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = SKY_ROAD_ACCESS_CORRIDORS
+        .get_or_init(|| Mutex::new(BoundedSeedCache::new(MAX_CACHED_WORLD_SEEDS)));
     if let Some(corridors) = cache
         .lock()
-        .expect("sky-road access cache poisoned")
-        .get(&terrain_seed)
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(terrain_seed)
     {
-        return Arc::clone(corridors);
+        return corridors;
     }
 
     let profiles = speed_road_network_profiles(terrain_seed);
@@ -912,12 +913,10 @@ pub(super) fn sky_road_access_corridors(terrain_seed: u64) -> Arc<Vec<(Vec2, Vec
         }
     }
     let corridors = Arc::new(corridors);
-    let mut cache = cache.lock().expect("sky-road access cache poisoned");
-    Arc::clone(
-        cache
-            .entry(terrain_seed)
-            .or_insert_with(|| Arc::clone(&corridors)),
-    )
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.insert(terrain_seed, corridors)
 }
 
 /// Branch ramps connect sustained aerial runs directly to nearby ground. The

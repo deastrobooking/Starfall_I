@@ -51,9 +51,11 @@ impl LSystem {
             axiom: axiom.to_string(),
             rules: rules
                 .iter()
-                .map(|(s, e)| Rule {
-                    symbol: s.chars().next().expect("rule symbol must be non-empty"),
-                    expansion: e.to_string(),
+                .filter_map(|(symbol, expansion)| {
+                    symbol.chars().next().map(|symbol| Rule {
+                        symbol,
+                        expansion: expansion.to_string(),
+                    })
                 })
                 .collect(),
             iterations,
@@ -96,5 +98,17 @@ impl LSystem {
     pub fn evaluate(&self) -> turtle::TurtleResult {
         let s = self.generate();
         self.turtle().interpret(&s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_rule_symbols_are_ignored_without_panicking() {
+        let system = LSystem::new("F", &[("", "X"), ("F", "FF")], 1, 20.0, 1.0, 0.7, 0.1, 0.6);
+        assert_eq!(system.rules.len(), 1);
+        assert_eq!(system.generate(), "FF");
     }
 }

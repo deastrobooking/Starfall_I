@@ -37,8 +37,7 @@ use crate::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
     GenericRecipeDraft, LevelTemplate, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore,
-    RoadJunctionDraft,
-    RoadJunctionKind, RoadSplinePointDraft, SceneObjectDraft, TransformDraft,
+    RoadJunctionDraft, RoadJunctionKind, RoadSplinePointDraft, SceneObjectDraft, TransformDraft,
     WorldTopologyEdgeDraft, WorldTopologyEdgeKind, WorldTopologyNodeDraft, WorldTopologyNodeKind,
     WorldTopologySocketDraft, WorldTopologySocketKind,
 };

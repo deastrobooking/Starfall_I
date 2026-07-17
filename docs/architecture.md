@@ -3,14 +3,18 @@
 Current UI/road/movement/weapon audit: `docs/game_review_2026-07.md`.
 
 Bevy 0.19 + Avian 3D, with a local physics compatibility shim in
-`src/physics.rs`. Plugin-per-feature structure; all game logic lives in
-`src/plugins/`.
+`src/physics.rs`. Feature plugins coordinate gameplay while reusable engine,
+data, editor, and platform modules live at the crate root.
 
 ## Module Map
 
 ```
 src/
   main.rs                   App bootstrap, plugin registration, global resources
+  game_loop.rs              Fixed-tick configuration, GameSet ordering, diagnostics overlay
+  input_buffer.rs           Per-player render-to-fixed command buffering
+  spatial_lod.rs            Shared distance/visibility LOD profiles and helpers
+  platform_paths.rs         Platform data root plus sanitized, bounded crash reports
   state.rs                  AppState enum (MainMenu → ChapterSelect → Playing → GameOver)
   events.rs                 All game events + EventsPlugin
   damage.rs                 Health, Damageable, DamageInfo, apply_damage(), area_damage_falloff()
@@ -49,8 +53,8 @@ src/
     character_plugin.rs     Idle/walk/jump/hang cartoon pose animation; swap_character_parts
     chapter_plugin.rs       Chapter director, secret cave beacons, relic puzzles, relic-fragment obstacle courses, castle airship escalation
     ui_plugin.rs            HUD, menus, chapter select, perk training, upgrade shop, damage numbers
-    world_plugin.rs         Deterministic terrain generation, mixed ancient/new city facades, secret cave systems, prop placement, lighting; world site props, enemy sentinels, liberation system
-    save_plugin.rs          F5 manual save + 30s autosave -> starfall_i_save.json; persists PlayerPartLoadout + world site/route/raid/command/hacking registries via SaveParams SystemParam
+    world_plugin.rs         Deterministic 64-patch terrain/LOD, cities, caves, props, lighting and world sites; speed-road generation is extracted under world_plugin/roads.rs
+    save_plugin.rs          F5 manual save + 30s autosave -> rotating schema-v4 slots in the platform data root; persists per-player and campaign registries via SaveParams
     armor_plugin.rs         Armor repair / equip systems
     chest_plugin.rs         Chest spawn, interact, loot roll
     crafting_plugin.rs      Crafting menu, recipe matching
@@ -60,6 +64,8 @@ src/
     vehicle_plugin.rs       Vehicle enter/exit; GroundMode (Motorcycle/Tank/GiantMech) and AirMode (Jet/Ship) driven by assembly or blueprint
     robot_garage_plugin.rs  Assembly form browser; auto-selects eligible pets; MechCommandLink gating
   lsystem/                  L-system string rewriting + 3-D turtle for procedural trees
+  engine_tools/             Forge project/level persistence, validation, editor runtime and panels
+  mesh_modifiers/           Reusable procedural mesh modifier pipeline
   robots/                   Robot style presets (designer.rs, factory.rs presets.rs)
 ```
 
@@ -136,6 +142,19 @@ Party-shared exceptions:
   party-wide.
 
 ## Key Design Choices
+
+- **Platform-owned persistence and diagnostics**: saves and crash reports use
+  `dirs::data_dir()/starfall_i` (with a working-directory fallback). Save slots
+  are atomic and rotating. Crash reports are path-sanitized, timestamped, and
+  bounded to the newest five files.
+- **Bounded deterministic world caches**: terrain height grids and sky-road
+  access corridors are keyed by world seed, recover poisoned locks, and retain
+  at most four recently used seeds. Render terrain uses 64 high/low patches
+  while physics keeps the full-resolution collider.
+- **Mechanical hotspot extraction**: large feature plugins are split only at
+  stable subsystem boundaries with ordering preserved and tests passing. Roads
+  are the first world extraction; terrain, settlements, and dungeons follow
+  after an app smoke-test seam exists.
 
 - **Editable character recipes, not baked meshes**: `CharacterBlueprint` stores body sliders, procedural part recipes, materials, sockets, rig metadata, animation profiles, movement profiles, and gameplay stats. The current cartoon renderer consumes the body/material portions, while the data model leaves room for fuller mesh, rig, and editor tooling.
 - **Forge content is payload-driven, not ECS-serialized**: stable `ContentRecord`

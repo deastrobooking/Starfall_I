@@ -34,6 +34,7 @@ mod mesh_modifiers;
 mod modular_character;
 mod perks;
 mod physics;
+mod platform_paths;
 mod player_mesh;
 mod plugins;
 mod procedural_meshes;
@@ -216,8 +217,7 @@ fn install_crash_logger() {
     std::panic::set_hook(Box::new(move |panic_info| {
         let backtrace = std::backtrace::Backtrace::force_capture();
         let log = format!("Starfall I crash\n\n{panic_info}\n\nBacktrace:\n{backtrace}\n");
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("starfall_crash.log");
-        let _ = std::fs::write(path, log);
+        let _ = platform_paths::write_crash_report(&log);
         default_hook(panic_info);
     }));
 }

@@ -71,6 +71,11 @@ promise first:
   coverage including visible/total terrain and building proxy counts.
   Transparent materials stay out of skyline merges. Measured simulation/chunk
   streaming remains follow-up work.
+- The July 17 reliability alignment bounded terrain and sky-road caches to four
+  recent world seeds, made their lock recovery non-fatal, and moved sanitized
+  rotating crash reports into the platform data root. Further monolith
+  extraction is staged behind an app/plugin smoke-test seam rather than bundled
+  into an unverified rewrite.
 - Bevy 0.19 is available: the official news post announced it on June 19, 2026,
   and GitHub's `v0.19.0` release tag is marked latest. Its relevant wins matter
   now, not only later:

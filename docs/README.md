@@ -1,7 +1,7 @@
 # Starfall I — Documentation Map
 
-Seventeen docs accumulated across workstreams. This index says what each one
-is FOR and whether it's **living** (kept current, edit it) or a **snapshot**
+Documentation has accumulated across several workstreams. This index says what
+each document is FOR and whether it's **living** (kept current, edit it) or a **snapshot**
 (point-in-time review/triage — read for history, don't update).
 
 ## Start here
@@ -41,4 +41,5 @@ is FOR and whether it's **living** (kept current, edit it) or a **snapshot**
 | [game_review_2026-06.md](game_review_2026-06.md) | Jun 2026 | Full-game triage: city physics, dead logic, gameplay top-10 (most items since fixed — see roadmap statuses) |
 | [game_review_2026-07.md](game_review_2026-07.md) | Jul 2026 | Follow-up review |
 | [parallel_review_triage_2026-07.md](parallel_review_triage_2026-07.md) | Jul 2026 | Parallel review triage |
+| [codebase_alignment_2026-07.md](codebase_alignment_2026-07.md) | Jul 2026 | Code-review reconciliation: accepted fixes, stale findings, and staged follow-up |
 | [improvements.md](improvements.md) | May 2026 | Early backlog (superseded by roadmaps) |

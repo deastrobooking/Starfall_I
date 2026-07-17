@@ -12,7 +12,7 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError, TextureFormat,
 };
 use bevy::shader::ShaderRef;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::f32::consts::TAU;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -6015,11 +6015,53 @@ fn spawn_dungeon_turrets(
 const TERRAIN_WORLD_SIZE: f32 = EVEREST_RANGE_WORLD_SIZE;
 const TERRAIN_MESH_RESOLUTION: usize = 320;
 const TERRAIN_MESH_CELL_SIZE: f32 = TERRAIN_WORLD_SIZE / TERRAIN_MESH_RESOLUTION as f32;
+const MAX_CACHED_WORLD_SEEDS: usize = 4;
 const EVEREST_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/everest.png");
 static EVEREST_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
-static TERRAIN_MESH_HEIGHT_GRIDS: OnceLock<Mutex<HashMap<u64, Arc<Vec<f32>>>>> = OnceLock::new();
-static SKY_ROAD_ACCESS_CORRIDORS: OnceLock<Mutex<HashMap<u64, Arc<Vec<(Vec2, Vec3)>>>>> =
+static TERRAIN_MESH_HEIGHT_GRIDS: OnceLock<Mutex<BoundedSeedCache<Vec<f32>>>> = OnceLock::new();
+static SKY_ROAD_ACCESS_CORRIDORS: OnceLock<Mutex<BoundedSeedCache<Vec<(Vec2, Vec3)>>>> =
     OnceLock::new();
+
+/// Small LRU used by world-generation caches. Forge may preview many seeds in
+/// one process; keeping only recent seeds prevents those previews from growing
+/// memory for the lifetime of the application.
+struct BoundedSeedCache<T> {
+    capacity: usize,
+    values: HashMap<u64, Arc<T>>,
+    recency: VecDeque<u64>,
+}
+
+impl<T> BoundedSeedCache<T> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            values: HashMap::new(),
+            recency: VecDeque::new(),
+        }
+    }
+
+    fn get(&mut self, seed: u64) -> Option<Arc<T>> {
+        let value = Arc::clone(self.values.get(&seed)?);
+        self.recency.retain(|cached| *cached != seed);
+        self.recency.push_back(seed);
+        Some(value)
+    }
+
+    fn insert(&mut self, seed: u64, value: Arc<T>) -> Arc<T> {
+        if let Some(existing) = self.get(seed) {
+            return existing;
+        }
+        while self.values.len() >= self.capacity {
+            let Some(oldest) = self.recency.pop_front() else {
+                break;
+            };
+            self.values.remove(&oldest);
+        }
+        self.recency.push_back(seed);
+        self.values.insert(seed, Arc::clone(&value));
+        value
+    }
+}
 
 const ROUTE_CORE_AURORA: &[(f32, f32)] = &[
     (22.0, 28.0),
@@ -6579,13 +6621,14 @@ pub(crate) fn terrain_surface_y(x: f32, z: f32, seed: u64) -> f32 {
 }
 
 fn terrain_mesh_height_grid(seed: u64) -> Arc<Vec<f32>> {
-    let cache = TERRAIN_MESH_HEIGHT_GRIDS.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = TERRAIN_MESH_HEIGHT_GRIDS
+        .get_or_init(|| Mutex::new(BoundedSeedCache::new(MAX_CACHED_WORLD_SEEDS)));
     if let Some(heights) = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(&seed)
+        .get(seed)
     {
-        return Arc::clone(heights);
+        return heights;
     }
 
     let stride = TERRAIN_MESH_RESOLUTION + 1;
@@ -6601,7 +6644,7 @@ fn terrain_mesh_height_grid(seed: u64) -> Arc<Vec<f32>> {
     let mut cache = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(cache.entry(seed).or_insert_with(|| Arc::clone(&heights)))
+    cache.insert(seed, heights)
 }
 
 /// Cut a broad, blended shelf into the mountain mesh beneath authored roads.
@@ -17529,5 +17572,19 @@ mod tests {
         assert!(proxy.count_vertices() * 10 < high.count_vertices());
         assert_eq!(high.indices().unwrap().len(), 40 * 40 * 6);
         assert_eq!(proxy.indices().unwrap().len(), 10 * 10 * 6);
+    }
+
+    #[test]
+    fn seed_cache_is_bounded_and_refreshes_recent_entries() {
+        let mut cache = BoundedSeedCache::new(2);
+        cache.insert(1, Arc::new("one"));
+        cache.insert(2, Arc::new("two"));
+        assert_eq!(cache.get(1).as_deref(), Some(&"one"));
+
+        cache.insert(3, Arc::new("three"));
+        assert!(cache.get(2).is_none());
+        assert_eq!(cache.get(1).as_deref(), Some(&"one"));
+        assert_eq!(cache.get(3).as_deref(), Some(&"three"));
+        assert_eq!(cache.values.len(), 2);
     }
 }

@@ -78,9 +78,8 @@ impl ForgeProject {
             });
         }
         let first_id = self.levels[0].level_id.clone();
-        let has = |levels: &[LevelDocument], id: &str| {
-            levels.iter().any(|level| level.level_id == id)
-        };
+        let has =
+            |levels: &[LevelDocument], id: &str| levels.iter().any(|level| level.level_id == id);
         if !has(&self.levels, &self.active_level_id) {
             self.active_level_id = first_id.clone();
         }
@@ -1071,8 +1070,8 @@ impl LevelTemplate {
     /// Seed scene content for a fresh level. `first_editor_id` must be unique
     /// across the whole project so level objects never collide.
     pub fn seed_scene(self, first_editor_id: u64) -> EditorSceneDraft {
-        let place = |offset: u64, primitive: DraftPrimitive, x: f32, y: f32, z: f32| {
-            SceneObjectDraft {
+        let place =
+            |offset: u64, primitive: DraftPrimitive, x: f32, y: f32, z: f32| SceneObjectDraft {
                 editor_id: first_editor_id + offset,
                 name: format!("{} {}", self.label(), offset + 1),
                 primitive,
@@ -1082,8 +1081,7 @@ impl LevelTemplate {
                 },
                 material_id: None,
                 modifiers: Vec::new(),
-            }
-        };
+            };
         let objects = match self {
             Self::EmptyTestArena => vec![place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0)],
             Self::OpenWorldChapter => vec![
