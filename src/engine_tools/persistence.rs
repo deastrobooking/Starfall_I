@@ -21,6 +21,14 @@ pub struct ForgeProject {
     pub scene: EditorSceneDraft,
     #[serde(default)]
     pub payloads: BTreeMap<String, ContentPayload>,
+    /// PM3: all level scene documents. `scene` mirrors the active level.
+    #[serde(default)]
+    pub levels: Vec<LevelDocument>,
+    #[serde(default)]
+    pub active_level_id: String,
+    /// The level a fresh playtest/campaign boots into.
+    #[serde(default)]
+    pub startup_level_id: String,
 }
 
 impl Default for ForgeProject {
@@ -49,11 +57,119 @@ impl Default for ForgeProject {
             }],
             scene,
             payloads,
+            levels: Vec::new(),
+            active_level_id: String::new(),
+            startup_level_id: String::new(),
         }
     }
 }
 
 impl ForgeProject {
+    /// PM3: guarantee level invariants. Legacy single-scene projects adopt
+    /// their scene as the "Main World" level; empty/missing active and
+    /// startup ids fall back to the first level.
+    fn ensure_level_invariants(&mut self) {
+        if self.levels.is_empty() {
+            self.levels.push(LevelDocument {
+                level_id: "level.main_world".into(),
+                display_name: "Main World".into(),
+                template: LevelTemplate::OpenWorldChapter,
+                scene: self.scene.clone(),
+            });
+        }
+        let first_id = self.levels[0].level_id.clone();
+        let has = |levels: &[LevelDocument], id: &str| {
+            levels.iter().any(|level| level.level_id == id)
+        };
+        if !has(&self.levels, &self.active_level_id) {
+            self.active_level_id = first_id.clone();
+        }
+        if !has(&self.levels, &self.startup_level_id) {
+            self.startup_level_id = first_id;
+        }
+    }
+
+    /// Load direction: fix invariants, then mirror the active level's scene
+    /// into the workspace.
+    pub fn normalize_levels(&mut self) {
+        self.ensure_level_invariants();
+        if let Some(active) = self.active_level() {
+            self.scene = active.scene.clone();
+        }
+    }
+
+    /// Save direction: fix invariants, then stash the working scene into the
+    /// active level document (the workspace is the source of truth here).
+    pub fn sync_active_level(&mut self) {
+        self.ensure_level_invariants();
+        self.stash_active_level();
+    }
+
+    pub fn active_level(&self) -> Option<&LevelDocument> {
+        self.levels
+            .iter()
+            .find(|level| level.level_id == self.active_level_id)
+    }
+
+    /// Copy the working scene back into the active level document.
+    pub fn stash_active_level(&mut self) {
+        let scene = self.scene.clone();
+        let active = self.active_level_id.clone();
+        if let Some(level) = self
+            .levels
+            .iter_mut()
+            .find(|level| level.level_id == active)
+        {
+            level.scene = scene;
+        }
+    }
+
+    /// Stash the working scene, then make `level_id` active and mirror its
+    /// scene into the workspace.
+    pub fn activate_level(&mut self, level_id: &str) -> Result<(), String> {
+        if !self.levels.iter().any(|level| level.level_id == level_id) {
+            return Err(format!("Unknown level {level_id}"));
+        }
+        self.stash_active_level();
+        self.active_level_id = level_id.to_string();
+        self.normalize_levels();
+        Ok(())
+    }
+
+    /// Highest editor id used by any level, for collision-free seeding.
+    pub fn max_editor_id(&self) -> u64 {
+        self.levels
+            .iter()
+            .flat_map(|level| level.scene.objects.iter())
+            .chain(self.scene.objects.iter())
+            .map(|object| object.editor_id)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Create a new level from a template, make it active, and return its id.
+    pub fn create_level(&mut self, template: LevelTemplate) -> String {
+        let level_id = (1..)
+            .map(|n| format!("level.{}-{n}", template.slug()))
+            .find(|candidate| !self.levels.iter().any(|level| &level.level_id == candidate))
+            .expect("unbounded numbering always finds a free level id");
+        let number = self
+            .levels
+            .iter()
+            .filter(|level| level.template == template)
+            .count()
+            + 1;
+        self.stash_active_level();
+        self.levels.push(LevelDocument {
+            level_id: level_id.clone(),
+            display_name: format!("{} {number}", template.label()),
+            template,
+            scene: template.seed_scene(self.max_editor_id() + 1),
+        });
+        self.active_level_id = level_id.clone();
+        self.normalize_levels();
+        level_id
+    }
     pub fn refresh_hashes(&mut self) -> Result<(), ProjectIoError> {
         for record in &self.records {
             if record.category == ContentCategory::Scene {
@@ -903,6 +1019,131 @@ pub struct EditorSceneDraft {
     pub adapter_overrides: Vec<AdapterOverrideDraft>,
 }
 
+/// PM3: the seven starting level templates. Each seeds a small recognizable
+/// arrangement of editor primitives so a new level opens composed, not blank.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LevelTemplate {
+    EmptyTestArena,
+    OpenWorldChapter,
+    Dungeon,
+    Airship,
+    BossArena,
+    RacingCourse,
+    SettlementHub,
+}
+
+impl LevelTemplate {
+    pub const ALL: [Self; 7] = [
+        Self::EmptyTestArena,
+        Self::OpenWorldChapter,
+        Self::Dungeon,
+        Self::Airship,
+        Self::BossArena,
+        Self::RacingCourse,
+        Self::SettlementHub,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::EmptyTestArena => "Empty Test Arena",
+            Self::OpenWorldChapter => "Open-World Chapter",
+            Self::Dungeon => "Dungeon",
+            Self::Airship => "Airship",
+            Self::BossArena => "Boss Arena",
+            Self::RacingCourse => "Racing Course",
+            Self::SettlementHub => "Settlement Hub",
+        }
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::EmptyTestArena => "test-arena",
+            Self::OpenWorldChapter => "open-world",
+            Self::Dungeon => "dungeon",
+            Self::Airship => "airship",
+            Self::BossArena => "boss-arena",
+            Self::RacingCourse => "racing-course",
+            Self::SettlementHub => "settlement-hub",
+        }
+    }
+
+    /// Seed scene content for a fresh level. `first_editor_id` must be unique
+    /// across the whole project so level objects never collide.
+    pub fn seed_scene(self, first_editor_id: u64) -> EditorSceneDraft {
+        let place = |offset: u64, primitive: DraftPrimitive, x: f32, y: f32, z: f32| {
+            SceneObjectDraft {
+                editor_id: first_editor_id + offset,
+                name: format!("{} {}", self.label(), offset + 1),
+                primitive,
+                transform: TransformDraft {
+                    translation: [x, y, z],
+                    ..TransformDraft::default()
+                },
+                material_id: None,
+                modifiers: Vec::new(),
+            }
+        };
+        let objects = match self {
+            Self::EmptyTestArena => vec![place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0)],
+            Self::OpenWorldChapter => vec![
+                place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0),
+                place(1, DraftPrimitive::Beacon, 0.0, 1.0, -40.0),
+                place(2, DraftPrimitive::Beacon, 40.0, 1.0, 0.0),
+            ],
+            Self::Dungeon => vec![
+                place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0),
+                place(1, DraftPrimitive::Pillar, -4.0, 2.5, -6.0),
+                place(2, DraftPrimitive::Pillar, 4.0, 2.5, -6.0),
+                place(3, DraftPrimitive::Pillar, -4.0, 2.5, -14.0),
+                place(4, DraftPrimitive::Pillar, 4.0, 2.5, -14.0),
+                place(5, DraftPrimitive::Beacon, 0.0, 1.0, -20.0),
+            ],
+            Self::Airship => vec![
+                place(0, DraftPrimitive::Empty, 0.0, 8.0, 0.0),
+                place(1, DraftPrimitive::Cube, 0.0, 6.0, -6.0),
+                place(2, DraftPrimitive::Cube, 0.0, 6.0, 6.0),
+                place(3, DraftPrimitive::Beacon, 0.0, 9.0, 0.0),
+            ],
+            Self::BossArena => vec![
+                place(0, DraftPrimitive::Empty, 0.0, 0.0, 12.0),
+                place(1, DraftPrimitive::Pillar, -10.0, 2.5, 0.0),
+                place(2, DraftPrimitive::Pillar, 10.0, 2.5, 0.0),
+                place(3, DraftPrimitive::Beacon, 0.0, 1.0, -12.0),
+            ],
+            Self::RacingCourse => vec![
+                place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0),
+                place(1, DraftPrimitive::Beacon, 0.0, 1.0, -30.0),
+                place(2, DraftPrimitive::Beacon, 20.0, 1.0, -60.0),
+                place(3, DraftPrimitive::Beacon, 40.0, 1.0, -90.0),
+            ],
+            Self::SettlementHub => vec![
+                place(0, DraftPrimitive::Empty, 0.0, 0.0, 8.0),
+                place(1, DraftPrimitive::Cube, -6.0, 1.25, 0.0),
+                place(2, DraftPrimitive::Cube, 6.0, 1.25, 0.0),
+                place(3, DraftPrimitive::Cube, 0.0, 1.25, -8.0),
+                place(4, DraftPrimitive::Beacon, 0.0, 1.0, 0.0),
+            ],
+        };
+        EditorSceneDraft {
+            objects,
+            adapter_overrides: Vec::new(),
+        }
+    }
+}
+
+/// PM3: one level scene document. The active level's scene is mirrored into
+/// `ForgeProject::scene` while the editor works on it and stashed back on
+/// save/switch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LevelDocument {
+    pub level_id: String,
+    pub display_name: String,
+    pub template: LevelTemplate,
+    #[serde(default)]
+    pub scene: EditorSceneDraft,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SceneObjectDraft {
     pub editor_id: u64,
@@ -967,6 +1208,8 @@ pub enum ProjectValidationError {
     InvalidMaterial(String),
     InvalidMaterialBinding(String),
     InvalidProceduralRecipe(String),
+    InvalidLevelId(String),
+    DuplicateLevelId(String),
 }
 
 #[derive(Debug)]
@@ -1109,6 +1352,19 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
             }
         }
     }
+    let mut level_ids = BTreeSet::new();
+    for level in &project.levels {
+        if level.level_id.trim().is_empty() {
+            errors.push(ProjectValidationError::InvalidLevelId(
+                level.level_id.clone(),
+            ));
+        } else if !level_ids.insert(level.level_id.clone()) {
+            errors.push(ProjectValidationError::DuplicateLevelId(
+                level.level_id.clone(),
+            ));
+        }
+    }
+
     let mut adapter_keys = BTreeSet::new();
     for adapter in &project.scene.adapter_overrides {
         if adapter.adapter_key.trim().is_empty() {
@@ -1633,6 +1889,7 @@ pub fn migrate_project(mut project: ForgeProject) -> Result<ForgeProject, Projec
     {
         project.refresh_hashes()?;
     }
+    project.normalize_levels();
     Ok(project)
 }
 
@@ -1896,6 +2153,9 @@ impl ProjectStore {
     }
 
     pub fn save(&self, project: &mut ForgeProject) -> Result<(), ProjectIoError> {
+        // PM3: the working scene is the source of truth on save; stash it
+        // into the active level document before hashing/validation.
+        project.sync_active_level();
         project.refresh_hashes()?;
         let errors = validate_project(project);
         if !errors.is_empty() {
@@ -2141,6 +2401,109 @@ mod tests {
         ));
         let store = ProjectStore::new(root.join("project.json"), 3);
         (root, store)
+    }
+
+    #[test]
+    fn legacy_single_scene_projects_normalize_into_a_main_world_level() {
+        let mut project = ForgeProject::default();
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 9,
+            name: "Legacy Block".into(),
+            primitive: DraftPrimitive::Cube,
+            transform: TransformDraft::default(),
+            material_id: None,
+            modifiers: Vec::new(),
+        });
+        assert!(project.levels.is_empty());
+        let project = migrate_project(project).expect("migration succeeds");
+        assert_eq!(project.levels.len(), 1);
+        assert_eq!(project.active_level_id, "level.main_world");
+        assert_eq!(project.startup_level_id, "level.main_world");
+        assert_eq!(project.levels[0].scene, project.scene);
+        assert_eq!(project.levels[0].scene.objects.len(), 1);
+    }
+
+    #[test]
+    fn create_level_seeds_template_and_switching_stashes_edits() {
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        let main_id = project.active_level_id.clone();
+
+        // Author something in the main level, then create a dungeon.
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 50,
+            name: "Authored".into(),
+            primitive: DraftPrimitive::Pillar,
+            transform: TransformDraft::default(),
+            material_id: None,
+            modifiers: Vec::new(),
+        });
+        let dungeon_id = project.create_level(LevelTemplate::Dungeon);
+        assert_eq!(project.active_level_id, dungeon_id);
+        // The working scene now mirrors the seeded dungeon.
+        assert!(!project.scene.objects.is_empty());
+        assert!(project.scene.objects[0].name.contains("Dungeon"));
+        // Seeded ids never collide with authored ids across levels.
+        let mut all_ids: Vec<u64> = project
+            .levels
+            .iter()
+            .flat_map(|level| level.scene.objects.iter().map(|o| o.editor_id))
+            .collect();
+        let count = all_ids.len();
+        all_ids.sort_unstable();
+        all_ids.dedup();
+        assert_eq!(count, all_ids.len());
+
+        // The main level kept its authored edit through the stash.
+        project.activate_level(&main_id).expect("switch back");
+        assert!(project
+            .scene
+            .objects
+            .iter()
+            .any(|object| object.name == "Authored"));
+
+        // Startup stays on the first level until explicitly changed.
+        assert_eq!(project.startup_level_id, main_id);
+        assert!(project.activate_level("level.missing").is_err());
+    }
+
+    #[test]
+    fn levels_round_trip_through_store_and_validation_rejects_duplicates() {
+        let (root, store) = test_store("levels_round_trip");
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        let boss_id = project.create_level(LevelTemplate::BossArena);
+        store.save(&mut project).expect("save succeeds");
+
+        let loaded = store.load().expect("load succeeds");
+        assert_eq!(loaded.levels.len(), 2);
+        assert_eq!(loaded.active_level_id, boss_id);
+        assert_eq!(
+            loaded.scene,
+            loaded.active_level().expect("active exists").scene
+        );
+
+        let mut duplicated = loaded.clone();
+        let mut copy = duplicated.levels[0].clone();
+        copy.scene = EditorSceneDraft::default();
+        duplicated.levels.push(copy);
+        assert!(validate_project(&duplicated)
+            .iter()
+            .any(|error| matches!(error, ProjectValidationError::DuplicateLevelId(_))));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn every_template_seeds_a_unique_scene() {
+        for template in LevelTemplate::ALL {
+            let scene = template.seed_scene(100);
+            assert!(
+                !scene.objects.is_empty(),
+                "{} must seed content",
+                template.label()
+            );
+            assert!(scene.objects.iter().all(|object| object.editor_id >= 100));
+        }
     }
 
     #[test]

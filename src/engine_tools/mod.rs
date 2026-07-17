@@ -36,7 +36,8 @@ use crate::rendering::{
 use crate::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
-    GenericRecipeDraft, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore, RoadJunctionDraft,
+    GenericRecipeDraft, LevelTemplate, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore,
+    RoadJunctionDraft,
     RoadJunctionKind, RoadSplinePointDraft, SceneObjectDraft, TransformDraft,
     WorldTopologyEdgeDraft, WorldTopologyEdgeKind, WorldTopologyNodeDraft, WorldTopologyNodeKind,
     WorldTopologySocketDraft, WorldTopologySocketKind,
@@ -650,6 +651,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorPresetLibrary>()
             .init_resource::<EditorArmedModifier>()
             .init_resource::<EditorModifierParamCursor>()
+            .init_resource::<EditorArmedLevelTemplate>()
             .register_type::<EditorEntityId>()
             .add_systems(Startup, bootstrap_published_content_catalogs)
             .add_systems(
@@ -1131,6 +1133,10 @@ enum EditorAction {
     ModifierCycleParam,
     ModifierValueDown,
     ModifierValueUp,
+    LevelCycleTemplate,
+    LevelNew,
+    LevelNext,
+    LevelSetStartup,
     SearchRegistry,
     MaterialCycleFamily,
     MaterialCyclePreset,
@@ -1391,6 +1397,10 @@ struct EditorArmedModifier(usize);
 /// modifier on the selected object.
 #[derive(Resource, Default)]
 struct EditorModifierParamCursor(usize);
+
+/// PM3: which level template the NEW LEVEL button is armed with.
+#[derive(Resource, Default)]
+struct EditorArmedLevelTemplate(usize);
 
 /// Default instances for each armable modifier kind, in cycle order.
 fn armed_modifier_template(index: usize) -> crate::mesh_modifiers::MeshModifier {
@@ -2663,6 +2673,10 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                 spawn_editor_button(bar, 30, EditorAction::LoadProject, "LOAD");
                 spawn_editor_button(bar, 31, EditorAction::RecoverProject, "RECOVER");
                 spawn_editor_button(bar, 32, EditorAction::PublishProject, "PUBLISH");
+                spawn_editor_button(bar, 102, EditorAction::LevelNext, "NEXT LEVEL");
+                spawn_editor_button(bar, 103, EditorAction::LevelCycleTemplate, "LEVEL TEMPLATE");
+                spawn_editor_button(bar, 104, EditorAction::LevelNew, "NEW LEVEL");
+                spawn_editor_button(bar, 105, EditorAction::LevelSetStartup, "SET STARTUP");
                 spawn_editor_button(bar, 1, EditorAction::Undo, "UNDO");
                 spawn_editor_button(bar, 2, EditorAction::Redo, "REDO");
                 spawn_editor_button(bar, 3, EditorAction::FrameSelection, "FRAME  [F]");
@@ -6114,6 +6128,79 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 set_editor_status(world, "Selected object has no modifiable mesh");
             }
         }
+        EditorAction::LevelCycleTemplate => {
+            let mut armed = world.resource_mut::<EditorArmedLevelTemplate>();
+            armed.0 = (armed.0 + 1) % LevelTemplate::ALL.len();
+            let label = LevelTemplate::ALL[armed.0].label();
+            set_editor_status(world, format!("Armed level template: {label}"));
+        }
+        EditorAction::LevelNew => {
+            let template = LevelTemplate::ALL
+                [world.resource::<EditorArmedLevelTemplate>().0 % LevelTemplate::ALL.len()];
+            let scene = collect_working_scene(world);
+            let (level_id, objects) = {
+                let mut session = world.resource_mut::<EditorProjectSession>();
+                session.project.scene = scene;
+                let level_id = session.project.create_level(template);
+                (level_id, session.project.scene.objects.clone())
+            };
+            world.resource_mut::<EditorSelection>().clear();
+            respawn_scene_objects(world, &objects);
+            world.resource_mut::<EditorDocumentState>().dirty = true;
+            set_editor_status(
+                world,
+                format!("Created {} ({level_id}) — now active", template.label()),
+            );
+        }
+        EditorAction::LevelNext => {
+            let scene = collect_working_scene(world);
+            let switch = {
+                let mut session = world.resource_mut::<EditorProjectSession>();
+                session.project.scene = scene;
+                if session.project.levels.len() < 2 {
+                    None
+                } else {
+                    let current = session
+                        .project
+                        .levels
+                        .iter()
+                        .position(|level| level.level_id == session.project.active_level_id)
+                        .unwrap_or(0);
+                    let next = (current + 1) % session.project.levels.len();
+                    let next_id = session.project.levels[next].level_id.clone();
+                    match session.project.activate_level(&next_id) {
+                        Ok(()) => Some((
+                            session.project.levels[next].display_name.clone(),
+                            session.project.scene.objects.clone(),
+                        )),
+                        Err(_) => None,
+                    }
+                }
+            };
+            let Some((name, objects)) = switch else {
+                set_editor_status(world, "This project has only one level");
+                return;
+            };
+            world.resource_mut::<EditorSelection>().clear();
+            respawn_scene_objects(world, &objects);
+            world.resource_mut::<EditorDocumentState>().dirty = true;
+            set_editor_status(world, format!("Editing level: {name}"));
+        }
+        EditorAction::LevelSetStartup => {
+            let (active_id, name) = {
+                let mut session = world.resource_mut::<EditorProjectSession>();
+                let active_id = session.project.active_level_id.clone();
+                session.project.startup_level_id = active_id.clone();
+                let name = session
+                    .project
+                    .active_level()
+                    .map(|level| level.display_name.clone())
+                    .unwrap_or_else(|| active_id.clone());
+                (active_id, name)
+            };
+            world.resource_mut::<EditorDocumentState>().dirty = true;
+            set_editor_status(world, format!("Startup level set to {name} ({active_id})"));
+        }
         EditorAction::ModifierCycleParam => {
             let Some((entity, editor_id)) = selected_modifier_target(world) else {
                 return;
@@ -6543,7 +6630,45 @@ fn adapter_key(
 }
 
 #[allow(clippy::type_complexity)]
-fn save_editor_project(world: &mut World, publish: bool) {
+/// Despawn every editor primitive and rebuild the world from scene drafts
+/// (used by project load and by PM3 level switching).
+fn respawn_scene_objects(world: &mut World, objects: &[SceneObjectDraft]) {
+    let primitive_entities = world
+        .query_filtered::<Entity, With<EditorPrimitive>>()
+        .iter(world)
+        .collect::<Vec<_>>();
+    for entity in primitive_entities {
+        world.despawn(entity);
+    }
+    for object in objects {
+        let id = EditorEntityId(object.editor_id);
+        world.resource_mut::<EditorIdAllocator>().reserve(id);
+        let entity = spawn_editor_primitive_record(
+            world,
+            id,
+            object.primitive.into(),
+            object.name.clone(),
+            object.transform.into(),
+        );
+        if !object.modifiers.is_empty() {
+            world
+                .entity_mut(entity)
+                .insert(EditorModifierStack(object.modifiers.clone()));
+            remesh_modified_object(world, entity);
+        }
+        if let Some(material_id) = &object.material_id {
+            if !apply_catalog_material(world, entity, material_id) {
+                world
+                    .entity_mut(entity)
+                    .insert(EditorMaterialBinding(material_id.clone()));
+            }
+        }
+    }
+}
+
+/// Collect the live editor world into a scene draft (used by save and by PM3
+/// level switching).
+fn collect_working_scene(world: &mut World) -> EditorSceneDraft {
     let mut objects = world
         .query::<(
             &EditorEntityId,
@@ -6591,10 +6716,14 @@ fn save_editor_project(world: &mut World, publish: bool) {
         .collect::<Vec<_>>();
     adapter_overrides.sort_by(|left, right| left.adapter_key.cmp(&right.adapter_key));
 
-    let scene = EditorSceneDraft {
+    EditorSceneDraft {
         objects,
         adapter_overrides,
-    };
+    }
+}
+
+fn save_editor_project(world: &mut World, publish: bool) {
+    let scene = collect_working_scene(world);
     let store = world.resource::<EditorProjectSession>().store.clone();
     let path = store.path().display().to_string();
     let result = {
@@ -6643,41 +6772,10 @@ fn load_editor_project(world: &mut World, recovery_only: bool) {
         }
     };
 
-    let primitive_entities = world
-        .query_filtered::<Entity, With<EditorPrimitive>>()
-        .iter(world)
-        .collect::<Vec<_>>();
-    for entity in primitive_entities {
-        world.despawn(entity);
-    }
     world.resource_mut::<EditorSelection>().clear();
     world.resource_mut::<EditorUndoStack>().clear();
     rebuild_published_content_catalogs(world, &project);
-
-    for object in &project.scene.objects {
-        let id = EditorEntityId(object.editor_id);
-        world.resource_mut::<EditorIdAllocator>().reserve(id);
-        let entity = spawn_editor_primitive_record(
-            world,
-            id,
-            object.primitive.into(),
-            object.name.clone(),
-            object.transform.into(),
-        );
-        if !object.modifiers.is_empty() {
-            world
-                .entity_mut(entity)
-                .insert(EditorModifierStack(object.modifiers.clone()));
-            remesh_modified_object(world, entity);
-        }
-        if let Some(material_id) = &object.material_id {
-            if !apply_catalog_material(world, entity, material_id) {
-                world
-                    .entity_mut(entity)
-                    .insert(EditorMaterialBinding(material_id.clone()));
-            }
-        }
-    }
+    respawn_scene_objects(world, &project.scene.objects);
 
     let mut applied_adapters = 0_usize;
     let mut adapter_query = world.query::<(

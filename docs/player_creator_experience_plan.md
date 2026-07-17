@@ -178,6 +178,22 @@ Initial templates: Empty Test Arena, Open-World Chapter, Dungeon, Airship, Boss
 Arena, Racing Course, and Settlement Hub. The complete workflow is New Level →
 Compose → Validate → Save → Playtest → Publish → Set Startup/Campaign Level.
 
+**First slice delivered (July 16, 2026):** `ForgeProject` now carries
+`levels: Vec<LevelDocument>` (id, display name, template, scene document)
+plus `active_level_id` and `startup_level_id`, with `serde(default)` and
+migration so legacy single-scene projects normalize into a "Main World" level
+on load. The working `scene` mirrors the active level: load mirrors
+level → workspace, save stashes workspace → level (the workspace is the
+source of truth on save). All seven templates seed recognizable primitive
+arrangements with project-wide collision-free editor ids. The editor toolbar
+gains NEXT LEVEL / LEVEL TEMPLATE / NEW LEVEL / SET STARTUP — switching
+stashes live edits, respawns the new level's objects (materials and modifier
+stacks included), and marks the document dirty; validation rejects empty or
+duplicate level ids. Remaining PM3 work: per-level terrain/spawn/encounter/
+lighting metadata, playtest-into-level boot flow honoring
+`startup_level_id`, per-level validation budgets, and level
+rename/delete/reorder.
+
 ## Immediate scope
 
 PX1 and the PM1 launcher shell are delivered. The first PX3 ownership foundation
