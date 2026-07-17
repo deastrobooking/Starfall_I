@@ -1966,7 +1966,7 @@ fn hydrate_record_sources(
     Ok(())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProjectIoError> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProjectIoError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }

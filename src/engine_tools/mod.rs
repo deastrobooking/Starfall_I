@@ -7,6 +7,7 @@
 
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 mod persistence;
+pub mod project_registry;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -636,6 +637,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<WorldKitTopologyDragState>()
             .init_resource::<EditorPendingTransactions>()
             .init_resource::<EditorProjectSession>()
+            .init_resource::<project_registry::ForgeProjectRegistry>()
             .init_resource::<PublishedMaterialCatalog>()
             .init_resource::<PublishedProceduralRecipeCatalog>()
             .init_resource::<PublishedContentCatalogEpoch>()
@@ -652,7 +654,12 @@ impl Plugin for EngineToolsPlugin {
             )
             .add_systems(
                 OnEnter(EngineToolMode::Editing),
-                (enter_editor_workspace, adapt_world_authorables).chain(),
+                (
+                    sync_active_project_session,
+                    enter_editor_workspace,
+                    adapt_world_authorables,
+                )
+                    .chain(),
             )
             .add_systems(OnExit(EngineToolMode::Editing), exit_editor_workspace)
             .add_systems(Update, resolve_procedural_material_bindings)
@@ -1762,6 +1769,38 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
         .entries = recipes;
     let mut epoch = world.resource_mut::<PublishedContentCatalogEpoch>();
     epoch.0 = epoch.0.wrapping_add(1).max(1);
+}
+
+/// PM1: point the editor session at the registry's active project before the
+/// workspace opens. A missing project file starts as an empty `ForgeProject`
+/// (freshly created projects have a valid store on disk already); switching
+/// projects also rebuilds the published-content catalogs from the new file.
+fn sync_active_project_session(world: &mut World) {
+    let active = world
+        .resource::<project_registry::ForgeProjectRegistry>()
+        .active
+        .clone();
+    let Some(active) = active else {
+        return;
+    };
+    if world.resource::<EditorProjectSession>().store.path() == active.as_path() {
+        return;
+    }
+    let store = ProjectStore::new(&active, 3);
+    let project = match store.load_with_recovery() {
+        Ok((project, _)) => project,
+        Err(error) => {
+            warn!(
+                "Active project {} could not be loaded ({error:?}); starting empty.",
+                active.display()
+            );
+            ForgeProject::default()
+        }
+    };
+    rebuild_published_content_catalogs(world, &project);
+    let mut session = world.resource_mut::<EditorProjectSession>();
+    session.project = project;
+    session.store = store;
 }
 
 fn bootstrap_published_content_catalogs(world: &mut World) {

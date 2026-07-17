@@ -84,8 +84,21 @@ The hub owns the active project path. Do not hard-code all users to
 **Shell delivered:** the title page now exposes `START GAME` and `START EDITOR`.
 `START EDITOR` opens `AppState::ProjectHub`; its Open Current Project action
 loads the existing versioned Starfall workspace through the protected
-`EngineToolMode::Editing` boundary. New/Open/Template/Import project selection
-and a user-owned active project path remain PM1 work.
+`EngineToolMode::Editing` boundary.
+
+**Browser/path model delivered (July 16, 2026):** a persistent
+`ForgeProjectRegistry` (platform data dir, `forge_projects.json`, atomic
+writes) owns the project list and the active project path — no user is
+hard-coded to `starfall_forge/project.json`; that legacy workspace is only
+seeded as the first entry when it already exists. The hub lists every
+registered project with CONTINUE (active), OPEN (switch), and NEW PROJECT
+(creates `projects/starfall-project-N/project.json` through `ProjectStore`, so
+new projects carry the versioned format with recovery snapshots, then enters
+the editor). Entering `EngineToolMode::Editing` syncs the editor session store
+to the active path and rebuilds published-content catalogs when the project
+changed. Remaining PM1 work: Create From Template, Import Package, Recover,
+Project Settings, and user-typed project names/paths (needs the editor text
+input capture wired into the hub).
 
 ### PM2 — Project packages and reproducible presets
 

@@ -29,6 +29,7 @@ use crate::components::world::{
 };
 use crate::damage::Health;
 use crate::discussion::DiscussionState;
+use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::EngineToolMode;
 use crate::events::*;
 use crate::perks::{all_perks, PerkTree};
@@ -354,7 +355,12 @@ struct EditorStartButton;
 struct ProjectHubButton(ProjectHubAction);
 #[derive(Clone, Copy)]
 enum ProjectHubAction {
+    /// Continue the registry's active project.
     OpenCurrent,
+    /// Open the registry project at this index and make it active.
+    OpenProject(usize),
+    /// Create a fresh empty project, activate it, and enter the editor.
+    NewProject,
     Back,
 }
 
@@ -1146,7 +1152,7 @@ fn menu_start_button(
     }
 }
 
-fn setup_project_hub(mut commands: Commands) {
+fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>) {
     commands
         .spawn((
             Node {
@@ -1172,15 +1178,23 @@ fn setup_project_hub(mut commands: Commands) {
                 TextColor(Color::srgb(0.78, 0.58, 1.0)),
             ));
             root.spawn((
-                Text::new("Open the current versioned project in the protected editor workspace."),
+                Text::new("Continue your active project, open another, or start a new one."),
                 TextFont {
                     font_size: FontSize::Px(17.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.72, 0.82, 1.0)),
             ));
+            let status = match registry.active_entry() {
+                Some(entry) => format!(
+                    "Active: {}\n{}\nAtomic save • recovery snapshots • draft/published validation",
+                    entry.name,
+                    entry.path.display()
+                ),
+                None => "No projects yet — NEW PROJECT creates your first one.".to_string(),
+            };
             root.spawn((
-                Text::new("Starfall Main World\nstarfall_forge/project.json\nAtomic save • recovery snapshots • draft/published validation"),
+                Text::new(status),
                 TextFont {
                     font_size: FontSize::Px(16.0),
                     ..default()
@@ -1188,15 +1202,34 @@ fn setup_project_hub(mut commands: Commands) {
                 TextLayout::justify(Justify::Center),
                 TextColor(Color::srgb(0.88, 0.90, 1.0)),
             ));
+            if let Some(entry) = registry.active_entry() {
+                spawn_project_hub_button(
+                    root,
+                    format!("CONTINUE {}", entry.name.to_uppercase()),
+                    ProjectHubAction::OpenCurrent,
+                    Color::srgb(0.28, 0.16, 0.54),
+                );
+            }
+            for (index, entry) in registry.projects.iter().enumerate() {
+                if registry.active.as_deref() == Some(entry.path.as_path()) {
+                    continue;
+                }
+                spawn_project_hub_button(
+                    root,
+                    format!("OPEN {}", entry.name.to_uppercase()),
+                    ProjectHubAction::OpenProject(index),
+                    Color::srgb(0.20, 0.20, 0.46),
+                );
+            }
             spawn_project_hub_button(
                 root,
-                "OPEN CURRENT PROJECT",
-                ProjectHubAction::OpenCurrent,
-                Color::srgb(0.28, 0.16, 0.54),
+                "NEW PROJECT".to_string(),
+                ProjectHubAction::NewProject,
+                Color::srgb(0.14, 0.36, 0.30),
             );
             spawn_project_hub_button(
                 root,
-                "BACK",
+                "BACK".to_string(),
                 ProjectHubAction::Back,
                 Color::srgb(0.22, 0.26, 0.38),
             );
@@ -1205,7 +1238,7 @@ fn setup_project_hub(mut commands: Commands) {
 
 fn spawn_project_hub_button(
     parent: &mut ChildSpawnerCommands,
-    label: &'static str,
+    label: String,
     action: ProjectHubAction,
     color: Color,
 ) {
@@ -1238,6 +1271,7 @@ fn spawn_project_hub_button(
 
 fn project_hub_action_system(
     interactions: Query<(&Interaction, &ProjectHubButton), (Changed<Interaction>, With<Button>)>,
+    mut registry: ResMut<ForgeProjectRegistry>,
     mut next_state: ResMut<NextState<AppState>>,
     mut next_tool_mode: ResMut<NextState<EngineToolMode>>,
 ) {
@@ -1245,11 +1279,38 @@ fn project_hub_action_system(
         if *interaction != Interaction::Pressed {
             continue;
         }
+        let enter_editor = |next_state: &mut NextState<AppState>,
+                                next_tool_mode: &mut NextState<EngineToolMode>| {
+            next_state.set(AppState::Playing);
+            next_tool_mode.set(EngineToolMode::Editing);
+        };
         match button.0 {
             ProjectHubAction::OpenCurrent => {
-                next_state.set(AppState::Playing);
-                next_tool_mode.set(EngineToolMode::Editing);
+                if registry.active.is_some() {
+                    enter_editor(&mut next_state, &mut next_tool_mode);
+                }
             }
+            ProjectHubAction::OpenProject(index) => {
+                let Some(path) = registry.projects.get(index).map(|entry| entry.path.clone())
+                else {
+                    continue;
+                };
+                registry.set_active(&path);
+                if let Err(error) = registry.save() {
+                    warn!("Could not persist project registry: {error}");
+                }
+                enter_editor(&mut next_state, &mut next_tool_mode);
+            }
+            ProjectHubAction::NewProject => match registry.create_new_project() {
+                Ok(entry) => {
+                    if let Err(error) = registry.save() {
+                        warn!("Could not persist project registry: {error}");
+                    }
+                    info!("Created project {} at {}", entry.name, entry.path.display());
+                    enter_editor(&mut next_state, &mut next_tool_mode);
+                }
+                Err(error) => warn!("Could not create a new project: {error}"),
+            },
             ProjectHubAction::Back => next_state.set(AppState::MainMenu),
         }
     }
