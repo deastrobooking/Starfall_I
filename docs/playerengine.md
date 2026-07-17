@@ -1,7 +1,8 @@
 # Starfall I Player Mechanics, Skeleton, Animation, And Customization Plan
 
-Implementation status and the current Sonic/Mario-inspired feel priorities are
-summarized in `docs/game_review_2026-07.md`; this remains the detailed MM# roadmap.
+Current cross-roadmap order is summarized in `docs/current_state.md`; this
+remains the detailed MM# roadmap, while `docs/game_review_2026-07.md` is dated
+implementation evidence.
 
 > **Naming convention:** Motion mechanics milestones use the `MM#` prefix to
 > distinguish them from engine/campaign milestones (`M#` in

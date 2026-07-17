@@ -1,6 +1,7 @@
 # Starfall I — Architecture Overview
 
-Current UI/road/movement/weapon audit: `docs/game_review_2026-07.md`.
+Current verified baseline and production order: `docs/current_state.md`.
+Historical UI/road/movement/weapon evidence: `docs/game_review_2026-07.md`.
 
 Bevy 0.19 + Avian 3D, with a local physics compatibility shim in
 `src/physics.rs`. Feature plugins coordinate gameplay while reusable engine,
@@ -15,7 +16,7 @@ src/
   input_buffer.rs           Per-player render-to-fixed command buffering
   spatial_lod.rs            Shared distance/visibility LOD profiles and helpers
   platform_paths.rs         Platform data root plus sanitized, bounded crash reports
-  state.rs                  AppState enum (MainMenu → ChapterSelect → Playing → GameOver)
+  state.rs                  AppState enum for game, creator, pause, game-over, and victory flows
   events.rs                 All game events + EventsPlugin
   damage.rs                 Health, Damageable, DamageInfo, apply_damage(), area_damage_falloff()
   resources.rs              Shared resources (WaveInfo, GameSettings, CurrentChapter, WorldSiteRegistry, WorldSite, WorldSiteId, WorldSiteKind, WorldSiteState, WorldSiteOwner, WorldSiteSaveRecord, initial_world_sites())
@@ -72,23 +73,14 @@ src/
 ## State Flow
 
 ```
-MainMenu ──► PlayerSelect ◄─────────────────────────────────────────┐
-   │
-   └──────► ProjectHub ──► Playing + EngineToolMode::Editing
-                  │                                                  │
-                  ▼                                                  │
-            CharacterDesign ────────────────────────────────────────┘
-                  │
-                  ▼
-            ChapterSelect ──[E]──► CharacterDesign ──► ChapterSelect
-                  │
-                  ├──[G]──► RobotGarage ──► ChapterSelect
-                  │
-                  ▼
-             Playing ◄──── resume ──── Paused
-                │
-                ▼
-             GameOver ──► MainMenu
+MainMenu ──► PlayerSelect ──► ChapterSelect ──► Playing ⇄ Paused
+   │              │                 │              │
+   │              └─► CharacterDesign             ├─► GameOver
+   │                       └─► CharacterStudio      └─► Victory
+   │                                │
+   └─► ProjectHub ──► Forge Editing ──► startup-level Playtest
+
+ChapterSelect ──► CharacterDesign / RobotGarage ──► ChapterSelect
 ```
 
 `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect` and return to it on Esc/confirm. Neither transitions to `Playing` directly.
@@ -120,14 +112,17 @@ runtime state. Query order is not an ownership signal.
 
 Campaign-shared resources:
 
-- `ChapterProgress`, chapter objectives, kill gates, boss phases, unlock
-  progression, `PerkTree`, the robot pet collection, and tech upgrades.
+- `ChapterProgress`, chapter objectives, kill gates, boss phases, world
+  sites/routes, settlements, raids, robot pets, command assets, hacking, and
+  final-war state.
 
 Per-player state:
 
-- Player inventory/rewards, HUD, camera feedback, damage feedback, companions,
+- `PlayerProgression` (perks, tech upgrades, weapon ranks, and shop ownership),
+  inventory/rewards, HUD, camera feedback, damage feedback, companions,
   crafting ownership, runtime stats, character blueprints, and save `players[]`
-  records.
+  records. Legacy top-level perk/upgrade/rank resources are compatibility
+  mirrors, not the authority for new runtime work.
 
 `players[]` now persists runtime stats plus inventory stacks, primary/special
 selection, armor infusion, quick-item selection, and traversal ride. Legacy
@@ -203,7 +198,11 @@ Party-shared exceptions:
   resolves custom-first/fallback-arcade, so a user manifest cannot erase the
   baseline game feedback. Both buses multiply by `master_volume`.
 - **PlayerIndex ownership**: Per-player save records, HUD panels, crafting ownership, companion ownership, rewards, and feedback use `PlayerIndex` as the shared key. Shared campaign systems intentionally live in resources like `ChapterProgress` and `PerkTree`.
-- **Global perk tree**: `PerkTree` is a shared campaign resource. Level-ups award points, chapter select spends them, combat/movement systems read the resulting multipliers, and save/load persists the ranks.
+- **Per-player progression**: `PlayerProgression` owns perks, tech upgrades,
+  weapon ranks, and shop state for each `PlayerIndex`. Chapter Select selects an
+  explicit player before spending, runtime systems read the owning component,
+  and schema-v4 `players[]` persists it. Legacy top-level resources seed old
+  saves only.
 - **Robot pets as the vehicle spine**: `RobotPetCollection` is a shared campaign resource that stores rescued/store-built pets, enemy salvage parts, and the active combined form. The Robot Garage (`AppState::RobotGarage`) lets players assemble forms from collected pets. Assembled forms drive `GroundMode`/`AirMode` in the vehicle plugin at runtime. 3-D mech/ship controller runtimes are still future work.
 - **Tech upgrades as the production upgrade spine**: `UpgradeLedger` is a shared campaign resource for beam, missile, turret, health, rejuvenation, and mech-link ranks. Chapter select spends robot salvage on ranks; weapon, armor, and player regen systems consume those ranks. `MechCommandLink` rank gates GiantMech, SpaceShip, and MegaShip forms in the Robot Garage. Rejuvenation healing spends a saved reserve so it is a paid survival system instead of free passive regen.
 - **Assembly-driven vehicle modes**: `VehicleState` uses `GroundMode` (None/Motorcycle/Tank/GiantMech) and `AirMode` (None/Jet/Ship) enums. `vehicle_input()` checks `RobotPetCollection.active_assembly` first, falling back to `PlayerLoadout` blueprints. Each mode applies its own speed/jetpack/armor buffs via `apply_vehicle_buffs()`. M toggles ground mode, J toggles air/boat mode.

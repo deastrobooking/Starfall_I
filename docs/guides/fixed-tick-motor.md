@@ -52,6 +52,6 @@ Key invariants:
 
 ## Testing
 
-`cargo test --bin starfall-i input_buffer` covers latch/consume/overlay.
+`cargo test input_buffer` covers latch/consume/overlay.
 Feel-test with F10 A/B at your display's refresh rate; watch `sim: N ticks
 @64Hz` on the F11 overlay.

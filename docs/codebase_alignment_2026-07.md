@@ -1,5 +1,8 @@
 # Codebase Alignment Review — July 17, 2026
 
+> Dated review snapshot. Its accepted changes are reflected in the living
+> `current_state.md`, architecture, systems reference, and roadmaps.
+
 This snapshot reconciles the broad code-review suggestions gathered from
 smaller agents with the repository as it exists now. It is evidence for the
 living roadmaps, not a second backlog.

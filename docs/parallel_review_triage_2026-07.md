@@ -1,5 +1,8 @@
 # Parallel Review Triage — July 2026
 
+> Historical evidence and disposition record. It is not the current backlog;
+> use `current_state.md` and `agent_next_steps.md` before scheduling work.
+
 This document is the durable repository memory for the 156-item external review
 received after ET2c. The source list is useful as an idea inventory, but it was
 generated from a mixture of current code, older documentation, and inference.

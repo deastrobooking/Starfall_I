@@ -1,7 +1,8 @@
 # Starfall I Agent Guide
 
 This file is the concise handoff for future Codex/agent work on Starfall I.
-For the production next-steps guide, use `docs/agent_next_steps.md`. For the
+Read `docs/current_state.md` first for the reconciled baseline and production
+order. For detailed next steps, use `docs/agent_next_steps.md`. For the
 detailed engine upgrade and milestone process, use
 `docs/engine_upgrade_milestones.md`.
 
@@ -67,16 +68,13 @@ together.
   scrolls the active control into view.
   ET5b adds bounded typed generator parameters, seed/reset/validation controls,
   parameter-driven four-object previews, and road/building/cave budget gates.
-  Do not replace shipped world roots until ET5d adds explicit published-layer
-  scope and promotion controls.
   ET5c implements that boundary inside a protected editor sandbox: stable road
   spline points, typed room/zone nodes and portal edges, collision/navigation
   preflight, cached part assets, and atomic owned-root replacement. Shipped world
-  promotion remains ET5d and must require explicit published-layer scope. The
-  first ET5d slice selects and snap-moves individual spline points/topology nodes
-  through recipe transactions and renders a gold sandbox locator. The next
-  controller slice adds typed endpoint edge connect/remove with a cyan live
-  guide. Direct topology dragging may mutate the draft for live preview only;
+  promotion still requires explicit published-layer scope. ET5d selection,
+  snapped topology edits, typed endpoint edge connect/remove, and direct
+  viewport handles are delivered. Direct topology dragging may mutate the draft
+  for live preview only;
   restore the before snapshot and commit one command on release. Never convert
   derived sandbox parts into independently authored state.
   F11 reports camera/projectile/VFX/material counts. World Kit regeneration UI,
@@ -187,19 +185,20 @@ together.
   `GamepadAssignments` is the controller ownership authority: Start in Player
   Select claims the next available `PlayerIndex`, disconnect releases only the
   device binding, and runtime input/F8 diagnostics must not return to query-order
-  mapping. Save schema v3 stores per-player `PlayerProgression` alongside the
-  already-individual stats, inventory, loadout, and traversal selection; see
-  `docs/controller_player_ownership.md` for the remaining consumer migration.
+  mapping. Save schema v4 stores per-player `PlayerProgression` alongside the
+  already-individual stats, inventory, shop ownership, loadout, and traversal
+  selection. Legacy top-level progression fields remain compatibility mirrors;
+  do not restore them as the runtime ownership authority.
 - Roadmap labels are intentionally namespaced: Engine M# refers to
   `docs/engine_upgrade_milestones.md`; Motion MM# refers to
   `docs/playerengine.md`; future enemy behavior planning should use Enemy AI
   AI# labels.
 - Humanoid traversal planning lives in `docs/playerengine.md`.
-  Current first hook slice: `GrappleHookState` is the single star-tech
-  grappling hook source of truth, `PlayerInput` maps `G` / Select+RB, and
-  `CartoonPose::Grapple` gives the wind-up a visible body silhouette. Hook
-  raycasts, mountain pull, swing physics, attack pull, better flight, and IK
-  are future milestones. Keep future parkour/flight/combat traversal work
+  `GrappleHookState` is the single star-tech grappling source of truth;
+  targeting, route/mountain zip, swing cable motion, enemy/boss pull behavior,
+  procedural cable visuals, and pose/IK integration are present. Bespoke
+  utility profiles, authored effects, and broad course tuning remain. Keep
+  future parkour/flight/combat traversal work
   routed through `PlayerMovement`, `EdgeGrabState`, `GrappleHookState`, and
   `PlayerStateMachine` before adding new standalone movement state.
 - Star Sabre combo work lives in `src/plugins/weapon_plugin.rs` and
@@ -209,19 +208,21 @@ together.
 - Runtime player guidance uses the `PlayerGuidance` resource and HUD panel in
   `src/plugins/ui_plugin.rs`. Feed new interactables into that panel when they
   need immediate player-facing prompts.
-- Core app states are `MainMenu`, `PlayerSelect`, `CharacterDesign`,
-  `ChapterSelect`, `RobotGarage`, `Playing`, `Paused`, and `GameOver`.
+- Core app states are `MainMenu`, `ProjectHub`, `PlayerSelect`,
+  `CharacterDesign`, `CharacterStudio`, `ChapterSelect`, `RobotGarage`,
+  `Playing`, `Paused`, `GameOver`, and `Victory`.
   `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect`
   via [E] and [G] and return to `ChapterSelect`.
-- Active docs are `README.md`, `docs/architecture.md`, `docs/systems.md`,
-  `docs/improvements.md`, `docs/naming.md`, and
-  `docs/agent_next_steps.md`, plus `docs/engine_upgrade_milestones.md` and
-  `docs/playerengine.md`. The current PX#/PM# player experience and repeatable
+- The documentation authority map is `docs/README.md`; the canonical current
+  handoff is `docs/current_state.md`. `docs/improvements.md` and dated reviews
+  are historical snapshots, not active backlogs. The current PX#/PM# player
+  experience and repeatable
   creator-workflow plan is `docs/player_creator_experience_plan.md`; PX1
   authoritative per-player aiming and the PM1 Start Editor / Project Hub shell
-  are delivered. Manual four-pad aiming/editor-launch acceptance remains; the
-  next bounded choice is the PM1 multi-project path/browser or PX3 shop
-  transactions.
+  plus the PM1 multi-project registry, PX3 shop transaction flow, PM2 lock and
+  preset records, and PM3 multi-level/playtest slices are delivered. Manual
+  four-pad acceptance and the remaining creator gaps are recorded in
+  `docs/current_state.md`.
   The evidence-based memory for the external 156-item
   review is `docs/parallel_review_triage_2026-07.md`; do not treat its raw idea
   inventory as verified defects or implicit product commitments. Its July 15
@@ -260,12 +261,12 @@ together.
    keep legacy readers until a deliberate save migration is designed.
 4. Treat `PlayerIndex` as the ownership key for local multiplayer. Do not guess
    ownership from query order when an event/component/resource can carry it.
-5. Keep campaign-shared systems explicit. `ChapterProgress`, chapter
-   objectives, kill gates, boss phases, unlocks, `PerkTree`,
-   `RobotPetCollection`, and `UpgradeLedger` are shared by default;
-   inventories, rewards, HUD, feedback, companions, crafting, runtime stats,
-   character blueprints, and save `players[]` records are per-player by
-   default.
+5. Keep ownership explicit. Chapters, objectives, world state, settlements,
+   raids, robot pets, commands, hacking, and final-war state are shared.
+   `PlayerProgression` owns perks, upgrades, weapon ranks, and shop state per
+   player; inventories, rewards, HUD, feedback, companions, crafting, runtime
+   stats, character blueprints, and save `players[]` records are also
+   per-player.
 6. Keep the current vehicle policy unless explicitly changed: one party-shared
    active vehicle/driver mode with passengers keyed by `PlayerIndex`.
 7. Keep `CharacterBlueprint` as editable recipe data. Do not collapse it into
@@ -310,17 +311,15 @@ together.
 
 ## Milestone Priority
 
-1. Stabilize the 200-mile Everest Range: marker readability, route signs,
-   settlements, grounded anchors, and far-zone smoke tests.
-2. Deepen dragon lairs and Great Scientist temples with keys, locks, room
-   objectives, miniboss staging, mechanics trials, and unique hazards.
-3. Add shared menu focus/navigation and finish multiplayer ownership UI/save reliability.
-4. Tune Sonic/Mario-inspired movement, prove loop traversal/recovery, and add
-   tracking-missile plus beam/Star Sabre presentation upgrades.
-5. Add app/plugin smoke tests, debug overlays, profiling notes, and repeatable
-   manual macOS validation.
-6. Then proceed through Chapter 1 vertical slice polish, full production
-   systems, presentation, accessibility, and ship readiness.
+1. Add the reusable app-construction seam and startup/plugin smoke tests.
+2. Continue small, behavior-preserving world/UI/Forge hotspot extractions.
+3. Complete recorded four-controller hardware acceptance for ownership,
+   controller-only menus, aiming, shops, editor launch, and save/reload.
+4. Measure large-world simulation and one-to-four-camera costs before expanding
+   density or streaming.
+5. Tune the playable MVP: camera/animation feel, road traversal, weapons, shop,
+   loot attraction, and mountain collision.
+6. Finish the remaining PM1–PM3 project/preset/level workflow gaps.
 
 ## Definition Of Done
 

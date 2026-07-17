@@ -9,8 +9,10 @@ disposition of the external 156-item idea inventory is
 raw suggestion list into milestones.
 
 The current player-facing and creator-workflow priority is
-`docs/player_creator_experience_plan.md`. Its PX1 authoritative aiming slice is
-the next implementation task; it temporarily precedes further EC2 expansion.
+`docs/player_creator_experience_plan.md`. PX1 aiming, PX3 shop transactions,
+the PM1 project registry, PM2 lock/presets, and PM3 multi-level playtest slices
+are delivered. The immediate engineering boundary is the reusable app factory
+and startup/plugin smoke tests described in N7/N8 and `docs/current_state.md`.
 
 ## Current Software Review
 
@@ -27,9 +29,10 @@ The project is in a strong prototype-to-production transition state:
   `EVEREST_RANGE_MILES`, `EVEREST_RANGE_WORLD_SIZE`, `chapter_map_locations()`,
   `map_settlements()`, terrain sampling, fast-travel UI projection, and world
   anchors aligned.
-- Multiplayer ownership is partly production-shaped: most player runtime,
-  HUD, save records, companions, crafting, chests, enemy loot, damage feedback,
-  and vehicle buffs are keyed by `PlayerIndex`.
+- Multiplayer ownership is production-shaped at the data boundary: per-player
+  progression, shop state, runtime stats, inventory, HUD, companions, crafting,
+  chests, loot, damage feedback, and vehicle ownership resolve by `PlayerIndex`.
+  Four-controller hardware acceptance remains open.
 - The largest code hot spots are `src/plugins/world_plugin.rs`,
   `src/plugins/ui_plugin.rs`, and `src/plugins/player_plugin.rs`. Add focused
   helpers or data tables when touching these files; avoid broad rewrites unless

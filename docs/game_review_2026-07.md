@@ -1,8 +1,11 @@
 # Starfall I — Local Co-op Gameplay Review (2026-07)
 
-This review records the code baseline for the current production push: button-first
-menus, high-speed racing roads, platformer movement, and star-tech weapons. It is
-the decision record for the next work in `docs/agent_next_steps.md`.
+> Historical July review snapshot. Use `current_state.md` and
+> `agent_next_steps.md` for current status and execution order.
+
+This review recorded the code baseline for its production push: button-first
+menus, high-speed racing roads, platformer movement, and star-tech weapons. Its
+findings are historical input to the living plans.
 
 ## Executive Summary
 

@@ -15,10 +15,14 @@ transition hooks, ensuring no stray node hierarchies survive state changes.
 | `AppState::MainMenu` | `setup_main_menu` | `despawn_menu` (on enter PlayerSelect) |
 | `AppState::ProjectHub` | `setup_project_hub` | `despawn_project_hub` |
 | `AppState::PlayerSelect` | `setup_player_select` | `despawn_player_select` |
+| `AppState::CharacterDesign` | character-design plugin setup | character-design plugin teardown |
+| `AppState::CharacterStudio` | Character Studio setup | Character Studio teardown |
 | `AppState::ChapterSelect` | `setup_chapter_select` | `despawn_chapter_select` |
+| `AppState::RobotGarage` | robot-garage plugin setup | robot-garage plugin teardown |
 | `AppState::Playing` | `setup_hud`, `setup_controller_diag`, `setup_command_overlay` | `cleanup_play_ui_for_menu` (on enter MainMenu) |
 | `AppState::Paused` | `setup_pause_menu` | `despawn_pause_menu` |
 | `AppState::GameOver` | `setup_game_over` | — |
+| `AppState::Victory` | `setup_victory_screen` | state-aware menu cleanup |
 
 A persistent `MenuCamera` (order −100) is spawned once on `Startup` and
 never despawned, providing a fallback render surface for menu states.
@@ -101,9 +105,9 @@ resource has not changed:
 | Weapon ranks | `chapter_select_weapon_rank_panel_update` | `weapon_ranks.is_changed() \|\| robot_pets.is_changed()` |
 | Economy | `chapter_select_economy_panel_update` | `economy.is_changed() \|\| world_site_registry.is_changed()` |
 
-The current chapter screen is mouse-button driven. Controller focus navigation
-is the next UI milestone; dense single-key purchase shortcuts are not the target
-production interaction model.
+The chapter screen participates in shared `MenuFocus` controller navigation and
+uses explicit owner selection for per-player progression spending. Dense legacy
+single-key shortcuts are compatibility paths, not the target interaction model.
 
 ### Colorblind-friendly shape layer (recommended next step)
 

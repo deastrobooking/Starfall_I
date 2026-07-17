@@ -8,6 +8,7 @@ each document is FOR and whether it's **living** (kept current, edit it) or a **
 
 | Doc | Status | What it is |
 |---|---|---|
+| [current_state.md](current_state.md) | living | **Canonical current handoff**: verified baseline, delivered foundations, next production order, authority map |
 | [guides/](guides/README.md) | living | **Process how-tos**: verification gates, fixed-tick motor, combat feel, character-studio pipeline |
 | [architecture.md](architecture.md) | living | Module map, state flow, ownership policy, key design choices |
 | [systems.md](systems.md) | living | Gameplay systems reference (movement, combat, world, saves…) — the encyclopedia |
@@ -28,11 +29,17 @@ each document is FOR and whether it's **living** (kept current, edit it) or a **
 | Doc | Covers |
 |---|---|
 | [character_studio.md](character_studio.md) | Character Studio feature reference (pipeline how-to: [guides/character-studio-pipeline.md](guides/character-studio-pipeline.md)) |
+| [audio_modding.md](audio_modding.md) | Player music and modular action-SFX workflow |
 | [engine_tools_multistage_pass.md](engine_tools_multistage_pass.md) | Starfall Forge in-game editor architecture (ET# passes) |
 | [EDITOR_DESIGNER.MD](EDITOR_DESIGNER.MD) / [game_maker_toolchain.md](game_maker_toolchain.md) | Forge/editor design vision + toolchain plan |
 | [rendering_shader_pass.md](rendering_shader_pass.md) | Rendering R# shader-material suite (toon/grass/water/energy/shield/ice/lava) |
 | [ui_architecture.md](ui_architecture.md) | UI lifecycle per AppState, HUD, overlays |
 | [naming.md](naming.md) | Canonical names: cast, factions, chapters, enums |
+
+Repository-level `README.md` is the player/developer overview. `agent.md` is
+the compact operating contract and must point here rather than maintain a
+competing priority list. Asset-folder READMEs under `assets/` are user-facing
+drop-in instructions.
 
 ## Snapshots (historical — do not update)
 

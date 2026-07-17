@@ -49,7 +49,7 @@ Implemented:
 In progress:
 
 - Local multiplayer is playable at the input/camera/player level, and save snapshots, HUD panels, companions, crafting, chests, hidden rewards, enemy loot pickups, camera shake, damage flash, and vehicle buffs are now keyed per player. Chapter scripting uses the party center for encounter placement, while some campaign systems remain intentionally shared.
-- Perks are functional and saved, with lightweight clickable chapter-select rows; controller focus navigation is still pending.
+- Per-player perks are functional and saved, with clickable chapter-select rows and shared controller focus navigation; four-pad hardware/TV acceptance remains.
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
 - Character design is the single playable-character editor, with GLB-inspired base models, modular silhouette presets, armor layers, and saved per-slot loadouts.
 - Menu actions are rendered as clearly named Bevy buttons across the main flow; action-critical controls avoid icon-only font glyphs. The shared focus layer supplies deterministic initial focus, spatial arrows/WASD/D-pad/left-stick navigation with held repeat, mouse-hover synchronization, focused/pressed/disabled styling, Enter/Space/controller-South activation, and Escape/controller-East Back routing. Character Studio retains its specialized field navigator.
@@ -252,12 +252,13 @@ faster forward boost. Fuel uses the existing per-player jet gauge.
 
 ## Documentation
 
+- **[Current State](docs/current_state.md)** — canonical verified baseline and next production order for agents
 - **[Documentation Map](docs/README.md)** — what every doc is for, living vs. snapshot
 - **[Developer Guides](docs/guides/README.md)** — process how-tos: [verification gates](docs/guides/verification.md), [fixed-tick motor](docs/guides/fixed-tick-motor.md), [combat feel](docs/guides/combat-feel.md), [character-studio pipeline](docs/guides/character-studio-pipeline.md)
 - [Engine Core Roadmap](docs/engine_roadmap.md) — `EC#` fixed-tick/combat/profiling substrate track
 - [Architecture Overview](docs/architecture.md)
 - [Gameplay Systems Reference](docs/systems.md)
-- [Improvement Notes](docs/improvements.md)
+- [Improvement Notes](docs/improvements.md) — historical May snapshot, not the active backlog
 - [July 2026 Gameplay Review](docs/game_review_2026-07.md)
 - [Motion Mechanics Roadmap](docs/playerengine.md)
 - [Naming Guide](docs/naming.md)
@@ -272,6 +273,10 @@ faster forward boost. Fuel uses the existing per-player jet gauge.
 ```text
 src/
   main.rs                         App bootstrap and plugin registration
+  platform_paths.rs               Platform data root and bounded sanitized crash reports
+  game_loop.rs                    Fixed-tick scheduling and performance diagnostics
+  input_buffer.rs                 Per-player render-to-fixed input buffering
+  spatial_lod.rs                  Shared camera-aware LOD profiles
   state.rs                        AppState flow
   events.rs                       Event definitions and EventsPlugin
   damage.rs                       Health, resistances, and shared damage helpers

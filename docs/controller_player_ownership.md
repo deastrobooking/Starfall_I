@@ -35,7 +35,8 @@ Each `PlayerSaveData`, keyed by `player_index`, owns:
 - character blueprint, Studio recipe, and modular part loadout through the
   corresponding player-select slot.
 
-Save schema version 3 adds optional per-player progression fields. Old saves
+Save schema version 4 retains the optional per-player progression fields added
+in v3 and adds atomic rotating generations. Old saves
 continue to load by seeding `PlayerProgression` from the legacy campaign-wide
 perk, upgrade, and weapon-rank records. New saves write independent progression
 for every active `PlayerIndex`.
@@ -56,9 +57,10 @@ reapplies stale disk progression after Chapter Select, so a purchase made just
 before launch survives into the session and the next save.
 
 The legacy top-level perk, upgrade, and weapon-rank resources remain serialized
-for backward compatibility and for systems not yet audited. PX3 should apply the
-same explicit owner selector to the transactional item shop before those fields
-are retired.
+for backward compatibility. The PX3 shop now uses the same explicit owner
+selector and persists per-player ownership/equipment in `players[]`; vehicles
+remain party-shared showcase entries. New runtime consumers must use
+`PlayerProgression`, not the compatibility resources.
 
 Manual acceptance still required: four physical controllers joining in arbitrary
 order, disconnect/reconnect in every slot, save with distinct inventories and

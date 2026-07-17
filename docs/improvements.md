@@ -1,5 +1,9 @@
 # Starfall I — Improvement Notes
 
+> Historical snapshot from May 2026. Do not execute unchecked items directly;
+> use `docs/current_state.md` and `docs/agent_next_steps.md`. Claims below may
+> intentionally describe superseded code.
+
 Current priority note: use `docs/game_review_2026-07.md` for the audited status
 and delivery order of button-first menus, racing roads, platformer movement,
 tracking missiles, beam graphics, and the Star Sabre. Older keyboard-shortcut UI

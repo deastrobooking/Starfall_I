@@ -120,4 +120,6 @@ The Level Designer implements spatial projection alignment:
 To implement these features cleanly, follow this structural order:
 1. Update **`CharacterIkPose`** to apply local roll adjustments ($\theta_{\text{roll}}$) on the pelvis joint during board flight.
 2. Register **`CustomGizmoSocket`** across the custom character part spawning loops in character_parts.rs.
-3. Bind the Level Editor’s block placements directly to Bevy’s **`PbrBundle`** mesh instancing, ensuring that level data saves cleanly into campaign JSON files without bloating runtime memory.
+3. Compile Level Editor blocks into Bevy 0.19 `Mesh3d` / `MeshMaterial3d`
+   render entities while saving stable recipe/content IDs in Forge project
+   documents. Never serialize generated ECS entities into campaign saves.

@@ -1,13 +1,15 @@
 # Verification — the gates every change passes
 
-## The four gates (run all, in order)
+## Automated gates and boot smoke (run all, in order)
 
 ```sh
-cargo check                    # compiles
-cargo clippy --bin starfall-i  # zero warnings is the baseline
-cargo test --bin starfall-i    # full suite (bin crate — there is no lib target)
-cargo build && STARFALL_AUTOSTART=1 ./target/debug/starfall-i
-                               # boot smoke: ~15s in Playing, then quit; zero panics
+cargo fmt --all -- --check
+cargo check
+cargo clippy --all-targets -- -D warnings
+cargo test                     # full suite (bin crate — there is no lib target)
+cargo build
+STARFALL_AUTOSTART=1 ./target/debug/starfall-i
+                               # observe ~15s in Playing, then quit; zero panics
 ```
 
 Boot-smoke both motor paths when you touched movement/input/physics:
@@ -17,7 +19,8 @@ STARFALL_AUTOSTART=1 ./target/debug/starfall-i                          # fixed-
 STARFALL_AUTOSTART=1 STARFALL_LEGACY_MOTOR=1 ./target/debug/starfall-i  # legacy per-frame motor
 ```
 
-Crashes write `starfall_crash.log` at the repo root (panic hook in `main.rs`).
+Crashes write timestamped `starfall_crash_*.log` reports in the platform data
+root. Reports sanitize local home/install paths and retain the newest five.
 
 ## Env flags
 

@@ -1,7 +1,8 @@
 # Starfall I — Gameplay Systems Reference
 
-For the current implementation audit and next production slices covering menus,
-speed roads, movement, and weapons, see `docs/game_review_2026-07.md`.
+For the current verified baseline and production order, see
+`docs/current_state.md`. The dated menu/road/movement/weapon review remains in
+`docs/game_review_2026-07.md` as historical evidence.
 
 July runtime additions: `MenuFocus` supplies shared controller menu navigation;
 `PlatformerMoveState` owns roll/stomp tuning; `SpeedLoopTraversalState` and
@@ -21,9 +22,10 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 | 3 | Top-left, top-right, bottom full |
 | 4 | Four equal quadrants |
 
-**Input assignment:**
-- P1 (`PlayerIndex(0)`) — keyboard + mouse + gamepad 0
-- P2–P4 (`PlayerIndex(1-3)`) — gamepad 1–3
+**Input assignment:** keyboard/mouse remains available to P1. An unassigned
+controller pressing Start in Player Select claims the next available stable
+`PlayerIndex`; disconnect releases the device binding and reconnect can reclaim
+the joined slot. Gamepad enumeration order is never player identity.
 
 **Character assignment:** each joined slot can cycle through Vincenzo, Antonio,
 Angelo, Joseph, Gabriella, Nova, Aurora, and Fortuna. The default join order
@@ -40,7 +42,13 @@ eight siblings.
 
 **Shared boss camera:** when 2-4 players are active, `PlayerPlugin` switches from split-screen to one full-screen party camera during boss-tier enemies or nearby flying-drone wings. P1's camera becomes the shared view, the other cameras are temporarily disabled, and viewports are restored when the threat clears. Distant players are softly pulled toward the encounter anchor, with a hard catch-up if they are far outside the battle space.
 
-**Ownership policy:** `PlayerIndex` is the stable owner key. Campaign progress, chapter objectives, kill gates, boss phases, unlocks, and `PerkTree` are shared. Inventories, rewards, HUD panels, camera/damage feedback, companions, crafting ownership, runtime stats, character blueprints, and save `players[]` records are per-player. Vehicles remain party-shared for now: one driver/vehicle mode, with passengers keyed by `PlayerIndex`.
+**Ownership policy:** `PlayerIndex` is the stable owner key. Chapters, world
+state, settlements, raids, robot pets, commands, hacking, and final-war state
+are shared. `PlayerProgression` (perks, upgrades, weapon ranks, shop),
+inventories, rewards, HUD panels, camera/damage feedback, companions, crafting,
+runtime stats, character blueprints, and save `players[]` records are
+per-player. Vehicles remain party-shared: one driver/vehicle mode, with
+passengers keyed by `PlayerIndex`.
 
 **Known limitations:**
 - Chapter director spawns use the party center as the encounter anchor; bespoke chapter beats are still campaign-shared.
@@ -354,7 +362,11 @@ The current runtime consumes the first practical slice of that model:
 | Feet / mass | Dodge tuning, stamina, armor, health, knockback metadata |
 | Head | Cartoon head and hair scale |
 
-Confirmed blueprints are kept on each player-select slot, saved into `starfall_i_save.json`, and restored on load. When a player has not authored a custom body yet, the runtime now creates an upgraded default hero blueprint so movement stats, collider proportions, visible body shape, and animation stride all use the same data path.
+Confirmed blueprints are kept on each player-select slot, saved in the rotating
+schema-v4 campaign slots, and restored on load. When a player has not authored a
+custom body yet, the runtime creates an upgraded default hero blueprint so
+movement stats, collider proportions, visible body shape, and animation stride
+all use the same data path.
 
 The Hero Atelier editor shows the active GLB-inspired base model, marks when that model has custom edits, and exposes prefab export/import buttons for `assets/Characters/design_prefabs/*.json`. Base model selection remains visible while the player tweaks proportions or swaps individual body, arm, leg, shoulder, and helmet presets.
 
@@ -1121,10 +1133,17 @@ Future work should split the compact chapter-select panel into a full garage/upg
 
 **File:** `src/plugins/save_plugin.rs`
 
-Save file: `starfall_i_save.json` (written next to the binary).
+Save files: three rotating campaign slots in
+`dirs::data_dir()/starfall_i` (or the documented working-directory fallback),
+plus atomic settings. Legacy working-directory saves migrate non-destructively.
 
 - **Autosave**: every 30 seconds while `Playing`.
 - **Manual save**: F5 key.
+- **Schema**: v4 with a monotonic generation; loading selects the valid slot
+  with the highest generation, skips corrupt slots, migrates older schemas, and
+  rejects unsupported future versions.
+- **Crash reports**: timestamped, path-sanitized logs share the platform data
+  root and retain the newest five files.
 - **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
 
 Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, robot pets, tech upgrade ranks, rejuvenation reserve, player-slot character blueprints, and chassis part loadout (`part_loadout_body/arms/legs/shoulders` as `CharacterPartStyle`).
