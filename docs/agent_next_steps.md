@@ -316,7 +316,9 @@ real Bevy gamepad rumble requests. Remaining production work:
   speed-road subsystem (56 items) lives in `src/plugins/world_plugin/roads.rs`;
   gameplay road-vehicle systems remain in `world_plugin.rs`.
 - Add world-obstacle casts to the existing swept target collision so fast
-  tracking missiles cannot pass through thin city or dungeon walls.
+  projectiles cannot pass through thin city or dungeon walls. Resolve the
+  nearest world impact versus target intersection and place explosions at that
+  impact before expanding to full EC2 hurtbox collision layers.
 - Move the existing beam, lock-ring, trail, Star Sabre blade, and impact visuals
   into explicit profiles with measured four-view effect budgets.
 
@@ -395,6 +397,12 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
   base-stat contract and pure derived-cap function before changing writers.
   `PlayerStats.armor` is armor durability, while `ArmorSet` is equipment
   mitigation. See `docs/software_audit_triage_2026-07-17.md`.
+- Terra gameplay audit triaged (July 17, 2026): projectile world obstruction,
+  incremental fixed-combat scheduling, player-event ownership, armor API
+  naming, and measured budgets are confirmed. Economy and vehicle findings are
+  product-policy gaps with existing partial consequences/roles; Character
+  Studio already feeds playable blueprints. See
+  `docs/terra_gameplay_audit_triage_2026-07-17.md`.
 - Before further hotspot extraction, create a reusable app-construction seam
   and startup/plugin smoke tests. Then split world terrain/settlement/dungeon,
   UI screen/HUD, and Forge panel boundaries in small ordering-preserving slices.

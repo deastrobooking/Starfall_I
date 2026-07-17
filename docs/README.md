@@ -50,4 +50,5 @@ drop-in instructions.
 | [parallel_review_triage_2026-07.md](parallel_review_triage_2026-07.md) | Jul 2026 | Parallel review triage |
 | [codebase_alignment_2026-07.md](codebase_alignment_2026-07.md) | Jul 2026 | Code-review reconciliation: accepted fixes, stale findings, and staged follow-up |
 | [software_audit_triage_2026-07-17.md](software_audit_triage_2026-07-17.md) | Jul 2026 | Follow-up architecture audit disposition: retained winners and rejected stale sequencing |
+| [terra_gameplay_audit_triage_2026-07-17.md](terra_gameplay_audit_triage_2026-07-17.md) | Jul 2026 | Terra gameplay audit disposition: collision, timing, ownership, economy, vehicles, and performance |
 | [improvements.md](improvements.md) | May 2026 | Early backlog (superseded by roadmaps) |
