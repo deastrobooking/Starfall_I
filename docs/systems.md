@@ -732,6 +732,16 @@ as an exponentially-decaying shove (~0.25 s). Wired: projectiles (2.2),
 explosions (falloff-scaled 1.0–5.5), melee combos (authored table values),
 sabre slashes (3.0). Player-receiving knockback is not yet drained (EC2).
 
+**Melee collision roles (2026-07):** canonical PlayerHitbox, EnemyHitbox,
+Pushbox, and GrappleSensor layers now complement body/hurtbox and projectile
+roles. Player combo and Star Sabre strikes query the Avian broad phase with the
+PlayerHitbox profile, then apply the existing authored reach/arc rules and a
+World-cover check. This removes the every-enemy candidate scan. Player combo
+hitboxes remain live throughout the authored active window, follow the current
+attack origin, and retain a per-move target set so each hurtbox resolves once.
+Star Sabre active-window persistence and enemy attack-volume producers remain
+EC2 work.
+
 **Hit reactions (2026-07, EC2 first slice):** landed hits now produce bounded
 **hitstop** (`src/hitstop.rs`: 28–90 ms scaled by damage, max-not-sum, drains
 on real time; simulation chains skip via `run_if(hitstop_inactive)` while

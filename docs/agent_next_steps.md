@@ -318,9 +318,12 @@ real Bevy gamepad rumble requests. Remaining production work:
 - Validate the newly landed canonical collision profiles and nearest-first
   player/enemy projectile sweeps on thin city walls, dungeon doors, terrain,
   piercing lines, explosions, and NPC road traffic. Explosion cover now has a
-  live Avian wall/open-path/target-exclusion fixture. Then extend EC2 with
-  move-scoped melee hitbox/pushbox/grapple/interaction profiles and decide
-  blast cover behavior per weapon profile.
+  live Avian wall/open-path/target-exclusion fixture. Player melee and Star
+  Sabre candidate selection now uses the PlayerHitbox→EnemyHurtbox layer path
+  with World cover. Player combo hitboxes remain live for their authored active
+  windows with per-move target deduplication. Next, extend that lifecycle to
+  Star Sabre and add enemy-hitbox, pushbox, grapple-sensor, and interaction
+  collider producers.
 - Move the existing beam, lock-ring, trail, Star Sabre blade, and impact visuals
   into explicit profiles with measured four-view effect budgets.
 

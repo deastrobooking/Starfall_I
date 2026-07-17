@@ -86,8 +86,12 @@ pub enum GameCollisionLayer {
     World,
     Player,
     Enemy,
+    PlayerHitbox,
+    EnemyHitbox,
     PlayerProjectile,
     EnemyProjectile,
+    Pushbox,
+    GrappleSensor,
     #[allow(dead_code)] // Reserved for editor/gameplay trigger colliders landing next.
     Interaction,
 }
@@ -101,8 +105,15 @@ pub enum CollisionProfile {
     Player,
     EnemyHurtbox,
     VehicleHurtbox,
+    PlayerHitbox,
+    #[allow(dead_code)] // Reserved for enemy move-scoped attack volumes.
+    EnemyHitbox,
     PlayerProjectile,
     EnemyProjectile,
+    #[allow(dead_code)] // Separate non-damaging character separation volume.
+    Pushbox,
+    #[allow(dead_code)] // Assigned as grapple sockets gain authored colliders.
+    GrappleSensor,
     #[allow(dead_code)] // Reserved for editor/gameplay trigger colliders landing next.
     Interaction,
 }
@@ -117,6 +128,8 @@ impl CollisionProfile {
                 [
                     Layer::Player,
                     Layer::Enemy,
+                    Layer::PlayerHitbox,
+                    Layer::EnemyHitbox,
                     Layer::PlayerProjectile,
                     Layer::EnemyProjectile,
                 ],
@@ -126,23 +139,42 @@ impl CollisionProfile {
                 [
                     Layer::World,
                     Layer::Enemy,
+                    Layer::EnemyHitbox,
                     Layer::EnemyProjectile,
                     Layer::Interaction,
                 ],
             ),
             Self::EnemyHurtbox => CollisionLayers::new(
                 Layer::Enemy,
-                [Layer::World, Layer::Player, Layer::PlayerProjectile],
+                [
+                    Layer::World,
+                    Layer::Player,
+                    Layer::PlayerHitbox,
+                    Layer::PlayerProjectile,
+                    Layer::GrappleSensor,
+                ],
             ),
             Self::VehicleHurtbox => CollisionLayers::new(
                 [Layer::World, Layer::Enemy],
-                [Layer::World, Layer::Player, Layer::PlayerProjectile],
+                [
+                    Layer::World,
+                    Layer::Player,
+                    Layer::PlayerHitbox,
+                    Layer::PlayerProjectile,
+                    Layer::GrappleSensor,
+                ],
             ),
+            Self::PlayerHitbox => CollisionLayers::new(Layer::PlayerHitbox, Layer::Enemy),
+            Self::EnemyHitbox => CollisionLayers::new(Layer::EnemyHitbox, Layer::Player),
             Self::PlayerProjectile => {
                 CollisionLayers::new(Layer::PlayerProjectile, [Layer::World, Layer::Enemy])
             }
             Self::EnemyProjectile => {
                 CollisionLayers::new(Layer::EnemyProjectile, [Layer::World, Layer::Player])
+            }
+            Self::Pushbox => CollisionLayers::new(Layer::Pushbox, Layer::Pushbox),
+            Self::GrappleSensor => {
+                CollisionLayers::new(Layer::GrappleSensor, [Layer::Player, Layer::Enemy])
             }
             Self::Interaction => CollisionLayers::new(Layer::Interaction, Layer::Player),
         }
@@ -511,6 +543,8 @@ mod collision_layer_tests {
         clear_above_wall: bool,
         target: Option<Entity>,
         target_does_not_block_itself: bool,
+        enemy: Option<Entity>,
+        player_hitbox_finds_enemy_only: bool,
     }
 
     fn sample_line_of_sight_fixture(
@@ -532,6 +566,16 @@ mod collision_layer_tests {
                 Vec3::new(10.0, 0.0, 0.0),
                 Some(target),
             )
+        });
+        result.player_hitbox_finds_enemy_only = result.enemy.is_some_and(|enemy| {
+            let hitbox_layers = CollisionProfile::PlayerHitbox.layers();
+            let candidates = spatial_query.shape_intersections(
+                &AvianCollider::sphere(3.0),
+                Vec3::ZERO,
+                Quat::IDENTITY,
+                &SpatialQueryFilter::from_mask(hitbox_layers.filters),
+            );
+            candidates == [enemy]
         });
     }
 
@@ -568,6 +612,18 @@ mod collision_layer_tests {
         assert!(enemy_shot.interacts_with(world));
         assert!(enemy_shot.interacts_with(player));
         assert!(!enemy_shot.interacts_with(enemy));
+
+        let player_hitbox = CollisionProfile::PlayerHitbox.layers();
+        let enemy_hitbox = CollisionProfile::EnemyHitbox.layers();
+        assert!(player_hitbox.interacts_with(enemy));
+        assert!(!player_hitbox.interacts_with(player));
+        assert!(enemy_hitbox.interacts_with(player));
+        assert!(!enemy_hitbox.interacts_with(enemy));
+
+        let pushbox = CollisionProfile::Pushbox.layers();
+        assert!(pushbox.interacts_with(pushbox));
+        let grapple = CollisionProfile::GrappleSensor.layers();
+        assert!(grapple.interacts_with(enemy));
     }
 
     #[test]
@@ -578,11 +634,11 @@ mod collision_layer_tests {
             AssetPlugin::default(),
             PhysicsPlugins::default(),
         ))
-            .init_asset::<Mesh>()
-            .add_message::<CollisionStart>()
-            .add_message::<CollisionEnd>()
-            .init_resource::<LineOfSightFixture>()
-            .add_systems(Update, sample_line_of_sight_fixture);
+        .init_asset::<Mesh>()
+        .add_message::<CollisionStart>()
+        .add_message::<CollisionEnd>()
+        .init_resource::<LineOfSightFixture>()
+        .add_systems(Update, sample_line_of_sight_fixture);
 
         app.world_mut().spawn((
             AvianCollider::cuboid(1.0, 4.0, 4.0),
@@ -599,7 +655,18 @@ mod collision_layer_tests {
                 Transform::from_xyz(10.0, 0.0, 0.0),
             ))
             .id();
-        app.world_mut().resource_mut::<LineOfSightFixture>().target = Some(target);
+        let enemy = app
+            .world_mut()
+            .spawn((
+                AvianCollider::sphere(0.8),
+                CollisionProfile::EnemyHurtbox.layers(),
+                AvianRigidBody::Kinematic,
+                Transform::from_xyz(2.0, 0.0, 0.0),
+            ))
+            .id();
+        let mut fixture = app.world_mut().resource_mut::<LineOfSightFixture>();
+        fixture.target = Some(target);
+        fixture.enemy = Some(enemy);
 
         // The first update registers colliders in the spatial-query pipeline;
         // the second samples the populated broad phase.
@@ -610,5 +677,6 @@ mod collision_layer_tests {
         assert!(result.blocked);
         assert!(result.clear_above_wall);
         assert!(result.target_does_not_block_itself);
+        assert!(result.player_hitbox_finds_enemy_only);
     }
 }

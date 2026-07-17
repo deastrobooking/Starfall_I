@@ -1,4 +1,5 @@
-use avian3d::prelude::{RayHitData, SpatialQuery, SpatialQueryFilter};
+use avian3d::prelude::{Collider as AvianCollider, RayHitData, SpatialQuery, SpatialQueryFilter};
+use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
 use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary};
@@ -1945,6 +1946,7 @@ fn damage_road_vehicles_in_radius(
 // ── Melee Combo ───────────────────────────────────────────────────────────────
 fn melee_combo_system(
     time: Res<Time>,
+    spatial_query: SpatialQuery,
     library: Res<MoveLibrary>,
     mut hitstop: ResMut<HitstopState>,
     mut commands: Commands,
@@ -2043,6 +2045,7 @@ fn melee_combo_system(
                             * blade_damage_mult;
                         let (radius, offset, arc_cos) = reach(active.chain);
                         execute_melee_hit(
+                            &spatial_query,
                             cam_pos,
                             cam_fwd,
                             radius,
@@ -2051,6 +2054,7 @@ fn melee_combo_system(
                             damage,
                             melee_damage_type,
                             def.knockback,
+                            Some(&mut combo.hit_entities),
                             &mut enemy_q,
                             &mut damaged_ev,
                             &mut killed_ev,
@@ -2096,6 +2100,29 @@ fn melee_combo_system(
                     combo.active = Some(active);
                 }
                 MeleePhase::Active => {
+                    let damage = def.damage
+                        * combo.damage_multiplier
+                        * armor_damage_mult
+                        * blade_damage_mult;
+                    let (radius, offset, arc_cos) = reach(active.chain);
+                    let new_hits = execute_melee_hit(
+                        &spatial_query,
+                        cam_pos,
+                        cam_fwd,
+                        radius,
+                        offset,
+                        arc_cos,
+                        damage,
+                        melee_damage_type,
+                        def.knockback,
+                        Some(&mut combo.hit_entities),
+                        &mut enemy_q,
+                        &mut damaged_ev,
+                        &mut killed_ev,
+                    );
+                    if new_hits > 0 {
+                        hitstop.remaining = hitstop.remaining.max(def.hitstop);
+                    }
                     if active.timer <= 0.0 {
                         active.phase = MeleePhase::Recovery;
                         active.timer = def.recovery;
@@ -2153,6 +2180,7 @@ fn start_melee_move(
     }
     .min(library.chain_len(chain).saturating_sub(1));
     let def = library.get(chain, index)?;
+    combo.hit_entities.clear();
     sm.force(PlayerState::Attacking);
     Some(ActiveMelee {
         chain,
@@ -2180,6 +2208,7 @@ fn spawn_melee_flash(commands: &mut Commands, assets: &ProjectileAssets, positio
 
 #[allow(clippy::too_many_arguments)]
 fn execute_melee_hit(
+    spatial_query: &SpatialQuery,
     origin: Vec3,
     forward: Vec3,
     radius: f32,
@@ -2188,23 +2217,54 @@ fn execute_melee_hit(
     damage: f32,
     damage_type: DamageType,
     knockback: f32,
+    mut already_hit: Option<&mut EntityHashSet>,
     enemy_q: &mut Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
         Without<HackedUnit>,
     >,
     damaged_ev: &mut MessageWriter<EnemyDamagedEvent>,
     killed_ev: &mut MessageWriter<EnemyKilledEvent>,
-) {
+) -> usize {
     let forward = forward.with_y(0.0).normalize_or_zero();
     let hit_center = origin + forward * offset;
-    for (e_entity, e_transform, mut health, mut damageable, enemy) in enemy_q.iter_mut() {
+    let hitbox = AvianCollider::sphere((radius + offset.abs()).max(0.1));
+    let hitbox_layers = CollisionProfile::PlayerHitbox.layers();
+    let filter = SpatialQueryFilter::from_mask(hitbox_layers.filters);
+    let mut candidates =
+        spatial_query.shape_intersections(&hitbox, origin, Quat::IDENTITY, &filter);
+    candidates.sort_by_key(|entity| entity.to_bits());
+    candidates.dedup();
+
+    let mut hit_count = 0;
+    for e_entity in candidates {
+        if already_hit
+            .as_ref()
+            .is_some_and(|entities| entities.contains(&e_entity))
+        {
+            continue;
+        }
+        let Ok((_, e_transform, mut health, mut damageable, enemy)) = enemy_q.get_mut(e_entity)
+        else {
+            continue;
+        };
         if !health.is_alive() {
             continue;
         }
         let to_enemy = (e_transform.translation - origin).with_y(0.0);
         let in_arc = to_enemy.length() <= radius + offset
             && to_enemy.normalize_or_zero().dot(forward) >= arc_cos;
-        if in_arc || hit_center.distance(e_transform.translation) <= radius {
+        let within_hitbox = in_arc || hit_center.distance(e_transform.translation) <= radius;
+        let unobstructed = world_line_of_sight(
+            spatial_query,
+            origin,
+            e_transform.translation + Vec3::Y * 0.9,
+            Some(e_entity),
+        );
+        if within_hitbox && unobstructed {
+            if let Some(entities) = already_hit.as_deref_mut() {
+                entities.insert(e_entity);
+            }
+            hit_count += 1;
             let push = to_enemy.normalize_or_zero() + Vec3::Y * 0.25;
             let info = DamageInfo::new(damage, damage_type)
                 .with_knockback(knockback)
@@ -2225,6 +2285,7 @@ fn execute_melee_hit(
             }
         }
     }
+    hit_count
 }
 
 // ── Star Sabre ────────────────────────────────────────────────────────────────
@@ -2242,6 +2303,7 @@ fn sabre_level_scale(sabre: &BeamSabre) -> (f32, f32) {
 
 fn beam_sabre_update_system(
     time: Res<Time>,
+    spatial_query: SpatialQuery,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     library: Res<MoveLibrary>,
@@ -2351,6 +2413,7 @@ fn beam_sabre_update_system(
                     let offset = if dungeon.active { 2.0 } else { 2.5 };
                     let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
                     execute_melee_hit(
+                        &spatial_query,
                         origin,
                         fwd,
                         radius,
@@ -2359,6 +2422,7 @@ fn beam_sabre_update_system(
                         def.damage * slash_scale * armor_damage_mult,
                         blade_damage_type,
                         def.knockback,
+                        None,
                         &mut enemy_q,
                         &mut damaged_ev,
                         &mut killed_ev,
@@ -2389,6 +2453,7 @@ fn beam_sabre_update_system(
             let offset = if dungeon.active { 2.0 } else { 2.5 };
             let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
             execute_melee_hit(
+                &spatial_query,
                 origin,
                 fwd,
                 radius,
@@ -2397,6 +2462,7 @@ fn beam_sabre_update_system(
                 def.damage * slash_scale * armor_damage_mult,
                 blade_damage_type,
                 def.knockback,
+                None,
                 &mut enemy_q,
                 &mut damaged_ev,
                 &mut killed_ev,
@@ -2738,6 +2804,21 @@ mod tracking_missile_tests {
 #[cfg(test)]
 mod move_def_wiring_tests {
     use super::*;
+
+    #[test]
+    fn starting_a_melee_move_clears_the_previous_active_window_hits() {
+        let library = MoveLibrary::defaults();
+        let mut combo = MeleeCombo::new();
+        let stale_target = Entity::from_bits(42);
+        combo.hit_entities.insert(stale_target);
+        let mut state = PlayerStateMachine::default();
+
+        let active = start_melee_move(&library, &mut combo, MeleeChain::Light, &mut state);
+
+        assert!(active.is_some());
+        assert!(combo.hit_entities.is_empty());
+        assert_eq!(state.current, PlayerState::Attacking);
+    }
 
     #[test]
     fn ranged_defaults_mirror_legacy_weapon_new_tuning() {

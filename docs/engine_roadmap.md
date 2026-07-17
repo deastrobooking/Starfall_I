@@ -200,13 +200,19 @@ gameplay logic; hits produce hitstop + knockback + shake.
 (flinch with `Without<Flinch>` AI/attack filters, hit-flash orbs, death
 dissolve, split-screen damage numbers, proximity outgoing shake, rumble hook).
 2 hitstop unit tests; suite 244. **Collision foundation landed 2026-07-17:**
-typed Avian World/Player/Enemy/PlayerProjectile/EnemyProjectile/Interaction
-layers, sensor hurtboxes, vehicle profiles, and nearest-first world-authoritative
+typed Avian World/Player/Enemy, player/enemy hitbox, player/enemy projectile,
+pushbox, grapple-sensor, and Interaction layers; sensor hurtboxes, vehicle
+profiles, and nearest-first world-authoritative
 projectile sweeps are live. Radial player/enemy/boss damage now respects
 World-layer cover, backed by a live Avian wall/target-exclusion fixture.
-Remaining EC2: move-scoped melee hitbox/pushbox/
-grapple/interaction profiles, `MoveDef` expansion, per-move cancel windows and
-i-frames, and player-received knockback.
+Player melee and Star Sabre strikes now obtain candidates from an Enemy-layer
+Avian shape intersection, preserve authored reach/arc checks, and reject targets
+behind World cover. Player combo hitboxes remain live through the full authored
+active window and keep a per-move target registry, so moving into a strike can
+connect without dealing damage every frame. Remaining EC2: the same persistent
+lifecycle for Star Sabre slashes, enemy hitbox producers, separate
+pushbox/grapple/interaction colliders,
+`MoveDef` expansion, per-move i-frames, and player-received knockback.
 **Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
 synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no

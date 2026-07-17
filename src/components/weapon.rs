@@ -1,4 +1,5 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
+use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
 use crate::combat_data::ActiveMelee;
@@ -590,6 +591,10 @@ pub struct MeleeCombo {
     pub buffered_light: bool,
     pub buffered_heavy: bool,
     pub damage_multiplier: f32,
+    /// Targets already resolved during the current authored active window.
+    /// This lets the hitbox follow the player for the whole window without
+    /// damaging the same hurtbox once per render frame.
+    pub hit_entities: EntityHashSet,
 }
 
 impl MeleeCombo {

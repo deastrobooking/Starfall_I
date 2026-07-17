@@ -44,8 +44,9 @@ Remaining follow-up:
 
 1. Add representative terrain, dungeon-door, piercing-chain, and four-player
    projectile load fixtures beyond the landed wall/cover fixture.
-2. Expand EC2 beyond projectile/body roles into move-scoped melee hitbox,
-   pushbox, grapple-sensor, and interaction profiles.
+2. Extend the landed persistent player-combo hitbox lifecycle to Star Sabre,
+   then add enemy hitbox producers and separate pushbox, grapple-sensor, and
+   interaction colliders.
 
 ### Combat timing remains frame-scheduled
 

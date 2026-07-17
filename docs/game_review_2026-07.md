@@ -89,6 +89,11 @@ blade, muzzle, and impact choices into data-driven profiles sized against measur
 split-screen budgets. Projectile collision now needs representative thin-wall,
 terrain, piercing, and four-player load validation; explosive cover has a live
 Avian wall/open-path/target-exclusion regression fixture.
+Player combo and Star Sabre candidate selection also uses the typed
+PlayerHitbox→EnemyHurtbox Avian path and rejects targets through World cover;
+player combos remain query-active for their full authored window with per-move
+target deduplication. Star Sabre active-window lifetime and enemy hitboxes remain
+next.
 
 ## Recommended Delivery Order
 
