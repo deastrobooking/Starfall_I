@@ -85,6 +85,15 @@ struct DebugColliderBox {
 #[derive(Component)]
 struct BuildingLodClustered;
 
+#[derive(Component)]
+pub(crate) struct BuildingClusterLodProxy;
+
+#[derive(Component)]
+pub(crate) struct TerrainHighLodPatch;
+
+#[derive(Component)]
+pub(crate) struct TerrainProxyLodPatch;
+
 /// Physics backends normally multiply collider shapes by `GlobalTransform` scale.
 /// Scaled unit-cube roads/bridges below already specify collider half-extents
 /// in world units, so this prevents invisible oversized blockers.
@@ -3382,9 +3391,21 @@ fn spawn_lighting(
 /// N11b: merge nearby minimal building shells that share a material into a
 /// single far-distance draw-call proxy. Original entities and colliders stay
 /// intact and render only in the near tier.
+fn building_cluster_cell(position: Vec3, cluster_size: f32) -> (i32, i32) {
+    (
+        (position.x / cluster_size).floor() as i32,
+        (position.z / cluster_size).floor() as i32,
+    )
+}
+
+fn building_material_is_clusterable(material: Option<&StandardMaterial>) -> bool {
+    material.is_some_and(|material| matches!(material.alpha_mode, AlphaMode::Opaque))
+}
+
 fn build_building_cluster_lods(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    materials: Res<Assets<StandardMaterial>>,
     buildings: Query<
         (
             Entity,
@@ -3418,8 +3439,17 @@ fn build_building_cluster_lods(
     let mut clusters: HashMap<(i32, i32, WorldZone, AssetId<StandardMaterial>), Cluster> =
         HashMap::new();
     for (entity, mesh, material, transform, building) in &buildings {
-        let cell_x = (transform.translation.x / CLUSTER_SIZE).floor() as i32;
-        let cell_z = (transform.translation.z / CLUSTER_SIZE).floor() as i32;
+        if !building_material_is_clusterable(materials.get(&material.0)) {
+            continue;
+        }
+        if meshes
+            .get(&mesh.0)
+            .and_then(|mesh| mesh.attribute(Mesh::ATTRIBUTE_POSITION))
+            .is_none()
+        {
+            continue;
+        }
+        let (cell_x, cell_z) = building_cluster_cell(transform.translation, CLUSTER_SIZE);
         clusters
             .entry((cell_x, cell_z, building.zone, material.id()))
             .or_insert_with(|| Cluster {
@@ -3461,6 +3491,9 @@ fn build_building_cluster_lods(
             })
             .collect::<Vec<_>>();
         let proxy_mesh = bake_character_mesh(&meshes, &models);
+        if proxy_mesh.count_vertices() == 0 {
+            continue;
+        }
         let proxy_handle = meshes.add(proxy_mesh);
 
         for part in &cluster.parts {
@@ -3479,6 +3512,7 @@ fn build_building_cluster_lods(
             WorldGeometry,
             crate::spatial_lod::SpatialLod::building_proxy(max_height),
             crate::spatial_lod::SpatialLodProxy,
+            BuildingClusterLodProxy,
         ));
     }
 }
@@ -6661,60 +6695,79 @@ fn terrain_vertex_color(x: f32, z: f32, y: f32, normal: Vec3, seed: u64) -> [f32
     scale_rgba(color, 0.90 + detail * 0.18)
 }
 
-fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
-    const RES: usize = TERRAIN_MESH_RESOLUTION;
-    const WORLD: f32 = TERRAIN_WORLD_SIZE;
-    const CELL: f32 = WORLD / RES as f32;
+const TERRAIN_PATCH_CELLS: usize = 40;
+const TERRAIN_PROXY_SAMPLE_STEP: usize = 4;
 
-    // ── Height grid ─────────────────────────────────────────────────────────
-    let vcount = (RES + 1) * (RES + 1);
-    let h = terrain_mesh_height_grid(seed);
+fn terrain_grid_normal(heights: &[f32], xi: usize, zi: usize) -> Vec3 {
+    let res = TERRAIN_MESH_RESOLUTION;
+    let stride = res + 1;
+    let hx0 = heights[zi * stride + xi.saturating_sub(1)];
+    let hx1 = heights[zi * stride + (xi + 1).min(res)];
+    let hz0 = heights[zi.saturating_sub(1) * stride + xi];
+    let hz1 = heights[(zi + 1).min(res) * stride + xi];
+    let dx = Vec3::new(2.0 * TERRAIN_MESH_CELL_SIZE, hx1 - hx0, 0.0);
+    let dz = Vec3::new(0.0, hz1 - hz0, 2.0 * TERRAIN_MESH_CELL_SIZE);
+    dz.cross(dx).normalize()
+}
 
-    // ── Mesh buffers ────────────────────────────────────────────────────────
-    let mut positions = Vec::with_capacity(vcount);
-    let mut normals = Vec::with_capacity(vcount);
-    let mut uvs = Vec::with_capacity(vcount);
-    let mut colors = Vec::with_capacity(vcount);
+fn terrain_patch_mesh(
+    heights: &[f32],
+    seed: u64,
+    start_x: usize,
+    start_z: usize,
+    cells: usize,
+    sample_step: usize,
+) -> (Mesh, Vec3) {
+    debug_assert!(sample_step > 0 && cells.is_multiple_of(sample_step));
+    let res = TERRAIN_MESH_RESOLUTION;
+    let stride = res + 1;
+    let samples = cells / sample_step;
+    let center_x = start_x + cells / 2;
+    let center_z = start_z + cells / 2;
+    let origin = Vec3::new(
+        center_x as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5,
+        heights[center_z * stride + center_x],
+        center_z as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5,
+    );
+    let vertex_count = (samples + 1) * (samples + 1);
+    let mut positions = Vec::with_capacity(vertex_count);
+    let mut normals = Vec::with_capacity(vertex_count);
+    let mut uvs = Vec::with_capacity(vertex_count);
+    let mut colors = Vec::with_capacity(vertex_count);
 
-    for zi in 0..=RES {
-        for xi in 0..=RES {
-            let wx = (xi as f32 / RES as f32 - 0.5) * WORLD;
-            let wz = (zi as f32 / RES as f32 - 0.5) * WORLD;
-            let wy = h[zi * (RES + 1) + xi];
-            positions.push([wx, wy, wz]);
-            uvs.push([xi as f32 / RES as f32, zi as f32 / RES as f32]);
-
-            // Finite-difference normal (upward).
-            let hx0 = h[zi * (RES + 1) + xi.saturating_sub(1)];
-            let hx1 = h[zi * (RES + 1) + (xi + 1).min(RES)];
-            let hz0 = h[zi.saturating_sub(1) * (RES + 1) + xi];
-            let hz1 = h[(zi + 1).min(RES) * (RES + 1) + xi];
-            let dx = Vec3::new(2.0 * CELL, hx1 - hx0, 0.0);
-            let dz = Vec3::new(0.0, hz1 - hz0, 2.0 * CELL);
-            let n = dz.cross(dx).normalize();
-            normals.push([n.x, n.y, n.z]);
-            colors.push(terrain_vertex_color(wx, wz, wy, n, seed));
+    for local_z in 0..=samples {
+        let zi = start_z + local_z * sample_step;
+        for local_x in 0..=samples {
+            let xi = start_x + local_x * sample_step;
+            let wx = xi as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+            let wz = zi as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+            let wy = heights[zi * stride + xi];
+            let normal = terrain_grid_normal(heights, xi, zi);
+            positions.push([wx - origin.x, wy - origin.y, wz - origin.z]);
+            normals.push(normal.to_array());
+            uvs.push([xi as f32 / res as f32, zi as f32 / res as f32]);
+            colors.push(terrain_vertex_color(wx, wz, wy, normal, seed));
         }
     }
 
-    // Two triangles per quad, CCW winding, normals pointing up.
-    let mut tri_idx = Vec::with_capacity(RES * RES * 6);
-    for zi in 0..RES {
-        for xi in 0..RES {
-            let tl = (zi * (RES + 1) + xi) as u32;
-            let tr = tl + 1;
-            let bl = tl + (RES + 1) as u32;
-            let br = bl + 1;
-            tri_idx.extend_from_slice(&[tl, bl, tr, tr, bl, br]);
+    let mut indices = Vec::with_capacity(samples * samples * 6);
+    let local_stride = samples + 1;
+    for zi in 0..samples {
+        for xi in 0..samples {
+            let top_left = (zi * local_stride + xi) as u32;
+            let top_right = top_left + 1;
+            let bottom_left = top_left + local_stride as u32;
+            let bottom_right = bottom_left + 1;
+            indices.extend_from_slice(&[
+                top_left,
+                bottom_left,
+                top_right,
+                top_right,
+                bottom_left,
+                bottom_right,
+            ]);
         }
     }
-
-    // Build collider data before the Vecs are consumed by the mesh.
-    let col_verts: Vec<Vec3> = positions.iter().map(|p| Vec3::from(*p)).collect();
-    let col_tris: Vec<[u32; 3]> = tri_idx
-        .chunks_exact(3)
-        .map(|c| [c[0], c[1], c[2]])
-        .collect();
 
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
@@ -6724,26 +6777,56 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-    mesh.insert_indices(Indices::U32(tri_idx));
+    mesh.insert_indices(Indices::U32(indices));
+    (mesh, origin)
+}
 
-    let vert_count = col_verts.len();
-    let tri_count = col_tris.len();
-    let terrain_collider = crate::physics::prelude::Collider::trimesh(col_verts, col_tris);
+fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
+    const RES: usize = TERRAIN_MESH_RESOLUTION;
+    let h = terrain_mesh_height_grid(seed);
 
-    let mut terrain = commands.spawn((
-        PbrBundle {
-            mesh: Mesh3d(meshes.add(mesh)),
-            material: MeshMaterial3d(pal.terrain_surface.clone()),
-            transform: Transform::IDENTITY,
-            ..default()
-        },
-        WorldGeometry,
-        WalkableSurface,
-        ProceduralMaterialBinding::new("biome.main_world", "terrain"),
-    ));
+    // Preserve the exact full-resolution physics surface. Rendering is split
+    // into spatial patches below, but traversal/collision semantics do not
+    // change with camera distance.
+    let mut collider_vertices = Vec::with_capacity((RES + 1) * (RES + 1));
+    for zi in 0..=RES {
+        for xi in 0..=RES {
+            let wx = xi as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+            let wz = zi as f32 * TERRAIN_MESH_CELL_SIZE - TERRAIN_WORLD_SIZE * 0.5;
+            let wy = h[zi * (RES + 1) + xi];
+            collider_vertices.push(Vec3::new(wx, wy, wz));
+        }
+    }
+
+    let mut collider_triangles = Vec::with_capacity(RES * RES * 2);
+    for zi in 0..RES {
+        for xi in 0..RES {
+            let tl = (zi * (RES + 1) + xi) as u32;
+            let tr = tl + 1;
+            let bl = tl + (RES + 1) as u32;
+            let br = bl + 1;
+            collider_triangles.push([tl, bl, tr]);
+            collider_triangles.push([tr, bl, br]);
+        }
+    }
+
+    let vert_count = collider_vertices.len();
+    let tri_count = collider_triangles.len();
+    let terrain_collider =
+        crate::physics::prelude::Collider::trimesh(collider_vertices, collider_triangles);
+    let terrain_root = commands
+        .spawn((
+            Transform::IDENTITY,
+            GlobalTransform::IDENTITY,
+            WorldGeometry,
+            WalkableSurface,
+        ))
+        .id();
     match terrain_collider {
         Ok(collider) => {
-            terrain.insert((crate::physics::prelude::RigidBody::Fixed, collider));
+            commands
+                .entity(terrain_root)
+                .insert((crate::physics::prelude::RigidBody::Fixed, collider));
         }
         Err(err) => {
             warn!(
@@ -6752,6 +6835,48 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
             );
         }
     }
+
+    debug_assert!(RES.is_multiple_of(TERRAIN_PATCH_CELLS));
+    commands.entity(terrain_root).with_children(|parent| {
+        for start_z in (0..RES).step_by(TERRAIN_PATCH_CELLS) {
+            for start_x in (0..RES).step_by(TERRAIN_PATCH_CELLS) {
+                let (high_mesh, origin) =
+                    terrain_patch_mesh(&h, seed, start_x, start_z, TERRAIN_PATCH_CELLS, 1);
+                let (proxy_mesh, proxy_origin) = terrain_patch_mesh(
+                    &h,
+                    seed,
+                    start_x,
+                    start_z,
+                    TERRAIN_PATCH_CELLS,
+                    TERRAIN_PROXY_SAMPLE_STEP,
+                );
+                debug_assert_eq!(origin, proxy_origin);
+                parent.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(high_mesh)),
+                        material: MeshMaterial3d(pal.terrain_surface.clone()),
+                        transform: Transform::from_translation(origin),
+                        ..default()
+                    },
+                    ProceduralMaterialBinding::new("biome.main_world", "terrain"),
+                    crate::spatial_lod::SpatialLod::terrain_high(),
+                    TerrainHighLodPatch,
+                ));
+                parent.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(meshes.add(proxy_mesh)),
+                        material: MeshMaterial3d(pal.terrain_surface.clone()),
+                        transform: Transform::from_translation(origin),
+                        ..default()
+                    },
+                    ProceduralMaterialBinding::new("biome.main_world", "terrain"),
+                    crate::spatial_lod::SpatialLod::terrain_proxy(),
+                    crate::spatial_lod::SpatialLodProxy,
+                    TerrainProxyLodPatch,
+                ));
+            }
+        }
+    });
 }
 
 fn spawn_everest_range_biomes(
@@ -17354,5 +17479,55 @@ mod tests {
         assert!((4.5..=6.8).contains(&small_story));
         assert_eq!(tower_floors, 12);
         assert!((4.5..=6.8).contains(&tower_story));
+    }
+
+    #[test]
+    fn building_cluster_cells_handle_negative_world_coordinates() {
+        assert_eq!(building_cluster_cell(Vec3::ZERO, 800.0), (0, 0));
+        assert_eq!(
+            building_cluster_cell(Vec3::new(799.9, 0.0, -0.1), 800.0),
+            (0, -1)
+        );
+        assert_eq!(
+            building_cluster_cell(Vec3::new(-800.0, 0.0, 1_600.0), 800.0),
+            (-1, 2)
+        );
+    }
+
+    #[test]
+    fn building_clusters_reject_transparent_materials() {
+        let opaque = StandardMaterial::default();
+        let transparent = StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        };
+
+        assert!(building_material_is_clusterable(Some(&opaque)));
+        assert!(!building_material_is_clusterable(Some(&transparent)));
+        assert!(!building_material_is_clusterable(None));
+    }
+
+    #[test]
+    fn terrain_patch_tiers_share_origins_and_reduce_geometry() {
+        assert!(TERRAIN_MESH_RESOLUTION.is_multiple_of(TERRAIN_PATCH_CELLS));
+        assert!(TERRAIN_PATCH_CELLS.is_multiple_of(TERRAIN_PROXY_SAMPLE_STEP));
+        let stride = TERRAIN_MESH_RESOLUTION + 1;
+        let heights = vec![0.0; stride * stride];
+        let (high, high_origin) = terrain_patch_mesh(&heights, 42, 0, 0, TERRAIN_PATCH_CELLS, 1);
+        let (proxy, proxy_origin) = terrain_patch_mesh(
+            &heights,
+            42,
+            0,
+            0,
+            TERRAIN_PATCH_CELLS,
+            TERRAIN_PROXY_SAMPLE_STEP,
+        );
+
+        assert_eq!(high_origin, proxy_origin);
+        assert_eq!(high.count_vertices(), 41 * 41);
+        assert_eq!(proxy.count_vertices(), 11 * 11);
+        assert!(proxy.count_vertices() * 10 < high.count_vertices());
+        assert_eq!(high.indices().unwrap().len(), 40 * 40 * 6);
+        assert_eq!(proxy.indices().unwrap().len(), 10 * 10 * 6);
     }
 }

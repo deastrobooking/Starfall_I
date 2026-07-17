@@ -22,6 +22,9 @@ use bevy::prelude::*;
 
 use crate::components::weapon::Projectile;
 use crate::plugins::weapon_plugin::HitParticle;
+use crate::plugins::world_plugin::{
+    BuildingClusterLodProxy, TerrainHighLodPatch, TerrainProxyLodPatch,
+};
 use crate::rendering::{
     EnergyMaterial, IceMaterial, LavaMaterial, ShieldMaterial, ToonMaterial, WaterMaterial,
 };
@@ -168,6 +171,9 @@ struct RenderPerfCounts<'w, 's> {
     lod_profiles: Query<'w, 's, (), With<SpatialLod>>,
     lod_renderables: Query<'w, 's, (), With<ManagedSpatialLod>>,
     lod_proxies: Query<'w, 's, (), With<SpatialLodProxy>>,
+    terrain_high: Query<'w, 's, &'static ViewVisibility, With<TerrainHighLodPatch>>,
+    terrain_proxies: Query<'w, 's, &'static ViewVisibility, With<TerrainProxyLodPatch>>,
+    building_proxies: Query<'w, 's, &'static ViewVisibility, With<BuildingClusterLodProxy>>,
     standard: Res<'w, Assets<StandardMaterial>>,
     toon: Res<'w, Assets<ToonMaterial>>,
     water: Res<'w, Assets<WaterMaterial>>,
@@ -274,11 +280,29 @@ fn update_perf_overlay(
     let lod_profiles = render.lod_profiles.iter().count();
     let lod_renderables = render.lod_renderables.iter().count();
     let lod_proxies = render.lod_proxies.iter().count();
+    let terrain_high_total = render.terrain_high.iter().count();
+    let terrain_high_visible = render
+        .terrain_high
+        .iter()
+        .filter(|visibility| visibility.get())
+        .count();
+    let terrain_proxy_total = render.terrain_proxies.iter().count();
+    let terrain_proxy_visible = render
+        .terrain_proxies
+        .iter()
+        .filter(|visibility| visibility.get())
+        .count();
+    let building_proxy_total = render.building_proxies.iter().count();
+    let building_proxy_visible = render
+        .building_proxies
+        .iter()
+        .filter(|visibility| visibility.get())
+        .count();
 
     // Budgets (EC0): 60 FPS = 16.67 ms/frame; sim < 2–4 ms target (EC1 splits this out).
     for mut text in &mut text_q {
         *text = Text::new(format!(
-            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nmats:  {custom_materials} custom / {standard_materials} standard\nlod:   {lod_profiles} profiles / {lod_renderables} meshes / {lod_proxies} proxies\nsim:   {} ticks @{:.0}Hz",
+            "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nmats:  {custom_materials} custom / {standard_materials} standard\nlod:   {lod_profiles} profiles / {lod_renderables} meshes / {lod_proxies} proxies\nterrain visible: {terrain_high_visible}/{terrain_high_total} high  {terrain_proxy_visible}/{terrain_proxy_total} proxy\nbuilding proxy:  {building_proxy_visible}/{building_proxy_total} visible\nsim:   {} ticks @{:.0}Hz",
             ticks.0, FIXED_HZ,
         ));
     }

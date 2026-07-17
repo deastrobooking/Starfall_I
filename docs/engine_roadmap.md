@@ -65,9 +65,12 @@ promise first:
   controller/play smoke is still required before merging the engine branch.
 - The first `N11` large-world upgrades are active: Starfall-owned hierarchical
   spatial LOD profiles use Bevy's multi-camera visibility ranges for trees and
-  building shells, detailed foliage crossfades into shared proxy geometry, and
-  F11 reports tier coverage. Building/terrain tiers and simulation/chunk
-  streaming remain follow-up work.
+  building shells, detailed foliage crossfades into shared proxy geometry,
+  buildings merge into skyline clusters, terrain renders through 64 high/low
+  patches over an unchanged full-resolution collider, and F11 reports tier
+  coverage including visible/total terrain and building proxy counts.
+  Transparent materials stay out of skyline merges. Measured simulation/chunk
+  streaming remains follow-up work.
 - Bevy 0.19 is available: the official news post announced it on June 19, 2026,
   and GitHub's `v0.19.0` release tag is marked latest. Its relevant wins matter
   now, not only later:
