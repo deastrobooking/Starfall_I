@@ -3242,33 +3242,21 @@ fn spawn_editor_panel(
     title: &str,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
-    parent
-        .spawn((
-            Node {
-                width: Val::Px(286.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(5.0),
-                padding: UiRect::all(Val::Px(14.0)),
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },
-            kind,
-            ScrollPosition::default(),
-            BackgroundColor(Color::srgba(0.035, 0.05, 0.085, 0.94)),
-            BorderColor::all(Color::srgb(0.14, 0.42, 0.62)),
-        ))
-        .with_children(|panel| {
-            panel.spawn((
-                Text::new(title),
-                TextFont {
-                    font_size: FontSize::Px(18.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.78, 0.25)),
-            ));
-            content(panel);
-        });
+    // Initial docking spots at the default 1280x720 window; every panel is a
+    // movable, minimizable tool window from there on.
+    let position = match kind {
+        EditorPanelKind::Outliner => Vec2::new(12.0, 96.0),
+        EditorPanelKind::Inspector => Vec2::new(497.0, 96.0),
+        EditorPanelKind::Registry => Vec2::new(982.0, 96.0),
+    };
+    crate::tool_windows::spawn_tool_window(
+        parent,
+        title,
+        position,
+        crate::tool_windows::ToolWindowStyle::default(),
+        (kind, ScrollPosition::default()),
+        content,
+    );
 }
 
 fn spawn_editor_button(

@@ -809,11 +809,14 @@ fn dungeon_room_progress_system(
     }
     let distance_to_party =
         |room: &DungeonRoomZone| (room.focus - party_focus).with_y(0.0).length_squared();
-    let nearest = rooms
+    let Some(nearest) = rooms
         .iter()
         .copied()
         .min_by(|a, b| distance_to_party(a).total_cmp(&distance_to_party(b)))
-        .expect("non-empty dungeon room list");
+    else {
+        room_state.clear_active();
+        return;
+    };
 
     let target = if room_state.active_gate_id == Some(gate_id) {
         room_state

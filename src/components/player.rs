@@ -17,8 +17,13 @@ pub struct PlayerCamera;
 // ── Stats ─────────────────────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct PlayerStats {
+    /// Effective health cap. Multiple legacy systems still write this value;
+    /// the derived-stat migration must introduce an explicit saved base first.
     pub max_health: f32,
+    /// Rechargeable armor durability remaining after equipment mitigation.
+    /// This is a consumable buffer, not `ArmorSet::total_defense()`.
     pub armor: f32,
+    /// Capacity of the rechargeable armor-durability buffer.
     pub max_armor: f32,
     pub stamina: f32,
     pub max_stamina: f32,

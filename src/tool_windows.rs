@@ -298,28 +298,29 @@ mod tests {
     fn minimize_button_collapses_content_and_restores_it() {
         let mut app = App::new();
         app.add_plugins(ToolWindowsPlugin);
-        let root = app
-            .world_mut()
-            .spawn(Node {
-                width: Val::Percent(100.0),
-                ..default()
-            })
-            .id();
         let mut window_entity = Entity::PLACEHOLDER;
-        app.world_mut()
-            .entity_mut(root)
-            .with_children(|parent| {
-                window_entity = spawn_tool_window(
-                    parent,
-                    "TEST WINDOW",
-                    Vec2::new(20.0, 30.0),
-                    ToolWindowStyle::default(),
-                    (),
-                    |content| {
-                        content.spawn(Text::new("body"));
-                    },
-                );
-            });
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            commands
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    ..default()
+                })
+                .with_children(|parent| {
+                    window_entity = spawn_tool_window(
+                        parent,
+                        "TEST WINDOW",
+                        Vec2::new(20.0, 30.0),
+                        ToolWindowStyle::default(),
+                        (),
+                        |content| {
+                            content.spawn(Text::new("body"));
+                        },
+                    );
+                });
+        }
+        app.world_mut().flush();
         app.update();
 
         let minimize_button = app

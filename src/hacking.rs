@@ -6,6 +6,9 @@ use crate::commands::{CommandAssetId, CommandAssetKind, CommandRegistry};
 use crate::components::faction::Faction;
 use crate::components::player::PlayerIndex;
 
+/// Stable persisted content ID awarded by the first Scallarian drone hack.
+pub const SCALLARIAN_DRONE_CORE_BLUEPRINT_ID: &str = "blueprint_scallarian_drone_core";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HackTargetClass {
     SmallDrone,
@@ -122,7 +125,7 @@ impl Hackable {
             target_class: HackTargetClass::SmallDrone,
             required_range: 14.0,
             line_of_sight_required: false,
-            blueprint_reward: "blueprint_scallarian_drone_core",
+            blueprint_reward: SCALLARIAN_DRONE_CORE_BLUEPRINT_ID,
             takeover_profile: TakeoverProfile::RemoteDrone,
             takeover_seconds: 18.0,
             command_asset_reward: Some(CommandAssetKind::ScoutDrone),
@@ -192,12 +195,12 @@ mod tests {
         let mut registry = HackingRegistry::default();
 
         assert!(registry.learn_blueprint(
-            "blueprint_scallarian_drone_core",
+            SCALLARIAN_DRONE_CORE_BLUEPRINT_ID,
             HackTargetClass::SmallDrone,
             PlayerIndex(0),
         ));
         assert!(!registry.learn_blueprint(
-            "blueprint_scallarian_drone_core",
+            SCALLARIAN_DRONE_CORE_BLUEPRINT_ID,
             HackTargetClass::SmallDrone,
             PlayerIndex(1),
         ));

@@ -7,7 +7,7 @@
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 369 tests, `cargo build`, `cargo fmt --check`, and
+- Automated baseline: 371 tests, `cargo build`, `cargo fmt --check`, and
   `cargo clippy --all-targets -- -D warnings` pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
   split-screen performance acceptance is still required. Automated success is
@@ -49,18 +49,20 @@
 
 1. Add a reusable app-construction seam and startup/plugin smoke tests. This is
    the safety boundary for further refactoring.
-2. Continue mechanical hotspot extraction: world terrain, settlements, and
+2. Design the schema-compatible base-stat/derived-cap contract so authored,
+   leveled, equipped, and loaded maximum health cannot overwrite each other.
+3. Continue mechanical hotspot extraction: world terrain, settlements, and
    dungeons; UI screens and HUD; then isolated Forge panels. Preserve schedule
    ordering and behavior in each slice.
-3. Complete manual one-to-four-controller acceptance for joining, aiming,
+4. Complete manual one-to-four-controller acceptance for joining, aiming,
    shops, editor launch, save/reload identity, disconnect/reconnect, and
    controller-only menu flows.
-4. Profile N11 large-world entity, simulation, terrain, and one-to-four-camera
+5. Profile N11 large-world entity, simulation, terrain, and one-to-four-camera
    render costs before adding streaming complexity or denser content.
-5. Tune the playable MVP: camera/animation feel, road and ramp traversal,
+6. Tune the playable MVP: camera/animation feel, road and ramp traversal,
    weapon presentation, shop usability, loot collection, and mountain collision
    using repeatable test routes.
-6. Continue PM1–PM3 creator gaps: templates/import/recovery/settings, preset
+7. Continue PM1–PM3 creator gaps: templates/import/recovery/settings, preset
    thumbnails and validation capture, and per-level metadata/budgets plus
    rename/delete/reorder.
 

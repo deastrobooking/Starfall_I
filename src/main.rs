@@ -64,9 +64,9 @@ use modular_character::ModularCharacterPlugin;
 use perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
-    CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, HackingPlugin, InputPlugin,
-    PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin,
-    WeaponPlugin, WorldPlugin,
+    CompanionPlugin, CraftingPlugin, CreatureForgePlugin, DiscoverablePlugin, EnemyPlugin,
+    HackingPlugin, InputPlugin, PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin,
+    VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
 use raids::RaidRegistry;
 use resources::{
@@ -196,6 +196,7 @@ fn main() {
             RobotGaragePlugin,
             ModularCharacterPlugin,
             character_studio::CharacterStudioPlugin,
+            CreatureForgePlugin,
         ));
 
     if std::env::var_os("STARFALL_AUTOSTART").is_some() {

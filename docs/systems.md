@@ -713,6 +713,12 @@ Incoming DamageInfo
 
 `area_damage_falloff(base, distance, radius)` returns `base * (1 - distance/radius)` for explosive splash.
 
+**Armor terminology:** `ArmorSet` is equipped protection and computes the
+defense reduction applied to an incoming hit. `PlayerStats.armor` is the
+separate rechargeable armor-durability meter shown in the HUD; it absorbs 70%
+of the already-mitigated hit while health receives 30%. Do not use the
+durability meter as equipment defense or apply either layer twice.
+
 **Resistances & defense (2026-06):** enemies spawn with faction-flavoured
 resistances and their `EnemyConfig.defense` via
 `enemy_plugin::enemy_damageable()` — DragonRoyalty resists Fire 0.6/Melee 0.15,

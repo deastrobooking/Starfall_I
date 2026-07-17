@@ -388,6 +388,13 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
   sky-road seed caches are bounded to four entries and recover poisoned locks;
   malformed empty L-system rule symbols are ignored safely. See
   `docs/codebase_alignment_2026-07.md` for accepted and stale findings.
+- Follow-up architecture audit triaged (July 17, 2026): terrain patches and
+  bounded caches were stale findings; hotspot extraction and measured profiling
+  remain valid. A genuine derived-stat gap remains: authored/spawned/loaded max
+  health competes with armor sync's hard-coded base. Design an explicit saved
+  base-stat contract and pure derived-cap function before changing writers.
+  `PlayerStats.armor` is armor durability, while `ArmorSet` is equipment
+  mitigation. See `docs/software_audit_triage_2026-07-17.md`.
 - Before further hotspot extraction, create a reusable app-construction seam
   and startup/plugin smoke tests. Then split world terrain/settlement/dungeon,
   UI screen/HUD, and Forge panel boundaries in small ordering-preserving slices.

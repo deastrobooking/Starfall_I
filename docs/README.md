@@ -49,4 +49,5 @@ drop-in instructions.
 | [game_review_2026-07.md](game_review_2026-07.md) | Jul 2026 | Follow-up review |
 | [parallel_review_triage_2026-07.md](parallel_review_triage_2026-07.md) | Jul 2026 | Parallel review triage |
 | [codebase_alignment_2026-07.md](codebase_alignment_2026-07.md) | Jul 2026 | Code-review reconciliation: accepted fixes, stale findings, and staged follow-up |
+| [software_audit_triage_2026-07-17.md](software_audit_triage_2026-07-17.md) | Jul 2026 | Follow-up architecture audit disposition: retained winners and rejected stale sequencing |
 | [improvements.md](improvements.md) | May 2026 | Early backlog (superseded by roadmaps) |

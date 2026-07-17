@@ -361,6 +361,8 @@ enum ProjectHubAction {
     OpenProject(usize),
     /// Create a fresh empty project, activate it, and enter the editor.
     NewProject,
+    /// Open the Creature Forge authoring screen.
+    CreatureForge,
     Back,
 }
 
@@ -855,6 +857,7 @@ fn menu_back_navigation(
     match state.get() {
         AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
         AppState::ProjectHub => next_state.set(AppState::MainMenu),
+        AppState::CreatureForge => next_state.set(AppState::ProjectHub),
         AppState::PlayerSelect => next_state.set(AppState::MainMenu),
         AppState::CharacterDesign => next_state.set(match design_data.return_target {
             CharacterDesignReturnTarget::PlayerSelect => AppState::PlayerSelect,
@@ -1229,6 +1232,12 @@ fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>
             );
             spawn_project_hub_button(
                 root,
+                "CREATURE FORGE".to_string(),
+                ProjectHubAction::CreatureForge,
+                Color::srgb(0.12, 0.42, 0.28),
+            );
+            spawn_project_hub_button(
+                root,
                 "BACK".to_string(),
                 ProjectHubAction::Back,
                 Color::srgb(0.22, 0.26, 0.38),
@@ -1312,6 +1321,7 @@ fn project_hub_action_system(
                 }
                 Err(error) => warn!("Could not create a new project: {error}"),
             },
+            ProjectHubAction::CreatureForge => next_state.set(AppState::CreatureForge),
             ProjectHubAction::Back => next_state.set(AppState::MainMenu),
         }
     }

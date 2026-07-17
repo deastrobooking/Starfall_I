@@ -7,6 +7,9 @@ pub enum AppState {
     MainMenu,
     /// Creator-facing launcher for opening a validated Forge workspace.
     ProjectHub,
+    /// Creature recipe authoring screen (versioned `CreatureSpec` editing
+    /// against a live robot-factory preview).
+    CreatureForge,
     PlayerSelect,
     CharacterDesign,
     /// Human character generator studio — in-game mesh generation from preset

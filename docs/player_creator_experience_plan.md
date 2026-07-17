@@ -100,6 +100,24 @@ changed. Remaining PM1 work: Create From Template, Import Package, Recover,
 Project Settings, and user-typed project names/paths (needs the editor text
 input capture wired into the hub).
 
+**Creature Forge + tool windows delivered (July 17, 2026):** the hub's
+CREATURE FORGE button opens `AppState::CreatureForge` — a full authoring
+screen for versioned `CreatureSpec` recipes with a live, auto-rotating 3D
+preview built by the proven robot factory (invalid drafts still preview while
+validation issues show in the status line). Panels cover identity cycling
+(kind/topology/role/faction/surface + archetype presets), eleven clamped
+morphology fields, feature toggles (wings/cannons/backpack), the shared
+modifier stack (armed-template add/remove, same contract as World Kit and
+Character Studio), seed variation, VALIDATE, UNDO/RESET, and a versioned
+library (`creature_forge/creature_vNNN.json` under the platform data root)
+with one-press LOAD per saved version. All creator panels — Creature Forge's
+four and the level workspace's Outliner/Inspector/Registry — are now movable,
+minimizable tool windows (`src/tool_windows.rs`: drag by title bar with
+screen-bounds clamping, minimize/restore collapsing to the title bar),
+making the Forge a proper multi-window tool. Remaining: window layouts are
+not yet persisted per user, and Forge specs do not yet publish into the
+active project's Creature content records.
+
 ### PM2 — Project packages and reproducible presets
 
 Each project is a directory containing a manifest, content source folders,
