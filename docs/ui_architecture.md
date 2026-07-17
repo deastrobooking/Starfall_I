@@ -35,9 +35,10 @@ never despawned, providing a fallback render surface for menu states.
 slot per active player. Bars are marked with `PlayerHudBar { player_index, kind }`
 and text nodes with `PlayerHudText { player_index, kind }`.
 
-**Bar kinds**: `Health`, `Armor`, `Stamina`, `Jetpack`
+**Bar kinds**: `Health`, `Armor`, `Stamina`, `Jetpack`, `Climb`
 
-**Text kinds**: `Header`, `Credits`, `Level`, `Element`, `WeaponName`, `Ammo`, `SpecialAmmo`
+**Text kinds**: `Header`, `Credits`, `Level`, `Element`, `WeaponName`, `Ammo`,
+`SpecialAmmo`, `TraversalStatus`, `SabreStatus`
 
 `hud_update_system` runs every frame in `Playing | GameOver`. It queries
 `Health`, `PlayerStats`, `JetpackState`, `WeaponInventory`, `SpecialWeaponInventory`,
@@ -134,11 +135,13 @@ halting physics advancement. `resume_physics_after_pause` unpauses it on exit.
 `pause_menu_action_system` handles button clicks and keyboard/controller input,
 calling `save_current_session` inline when the Save action fires.
 
-### Layout cleanup (recommended next step)
+### Shared semantic theme
 
-Panel colors, font sizes, and padding are currently hardcoded inline. Extracting
-them to a `UiTheme` resource (or a module-level constant block) would make
-visual updates a single-file change instead of a grep across setup functions.
+`UiTheme` now owns the first production semantic slice: canvas/panel colors,
+text hierarchy, PLAY/CREATE signals, resource bars, and four-player accents.
+Main Menu, Player Select accents, the per-player HUD, and the Star Loadout shell
+consume it. Pause, Project Hub, Chapter Select, Shop, and Garage migrate incrementally when
+their layouts are next touched; avoid a single high-risk rewrite.
 
 ---
 
@@ -181,9 +184,8 @@ These are tracked as implementation targets, not architectural debt:
    outlines (circle for chapters, triangle for temples, diamond for sites)
    alongside the existing colored icons.
 
-4. **UiTheme constant block** — extract panel background colors, border colors,
-   and font sizes from inline spawn code to a shared `const` or `Resource` so
-   visual theme changes are a single edit.
+4. **UiTheme expansion** — extend the shipped resource into remaining screens,
+   button states, spacing, icon sizing, and font roles.
 
 ---
 

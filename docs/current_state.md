@@ -53,6 +53,12 @@
   validation/publishing, immutable presets and lock documents, deterministic
   modifier stacks, typed World Kit recipes, multi-level projects, and startup
   level playtest.
+- The accepted product/art direction and performance gates are recorded in
+  `docs/product_art_direction_triage_2026-07-17.md`. A shared semantic
+  `UiTheme` now drives the Main Menu, Player Select accents, and per-player HUD;
+  the Star Loadout shell now follows it and includes a controller-owned,
+  shape-coded relic catalog with save-backed discovery, effects, inputs, and
+  source hints. Remaining screens migrate incrementally.
 
 ## Current production order
 

@@ -62,8 +62,11 @@ passengers keyed by `PlayerIndex`.
   Left/Right; P1 can use Shift + `[` / `]`. Plain brackets remain primary weapon
   cycling.
 - The in-game Star Loadout is a per-player modal button GUI opened with `I` or
-  LB+Select. Weapons, Armor, Items, Specials, and Rides use owner-scoped D-pad/
-  stick focus and A/Confirm; only the owner's gameplay input is captured.
+  LB+Select. Weapons, Armor, Items, Specials, Rides, and Relics use owner-scoped
+  D-pad/stick focus; only the owner's gameplay input is captured. Relics is a
+  read-only catalog: ASCII shapes distinguish core, technique, elemental, and
+  legendary objects without relying on color, while FOUND/LOCKED rows and the
+  detail line show effect, input, and world-source hint.
 - Rocket Hoverboard is the production Hoverboard traversal profile. Every
   assigned player can enable it directly with LB + D-pad Up or through
   Loadout → Rides; LB + D-pad Left/Down/Right selects Grapple, Hover Jet, or

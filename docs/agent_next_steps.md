@@ -181,7 +181,8 @@ Goal: remove remaining P1-only assumptions from player-facing play.
 
 **2026-07 ownership slice complete:** armor infusion now routes through
 per-player input, crafting has per-owner controller cursors plus modal gameplay
-capture, the button-based Star Loadout owns Weapons/Armor/Items/Specials/Rides,
+capture, the button-based Star Loadout owns Weapons/Armor/Items/Specials/Rides/
+Relics,
 inventory and active selections round-trip per player, active party vehicles
 reject silent ownership takeover, and boat seats/driver replacement are
 deterministic. Remaining work is deliberate pause/drop-in authority and
@@ -580,8 +581,8 @@ Code-side presentation delivered with this slice:
 - Hoverboard/Saber actions emit safe modular audio ids and use procedural
   fallbacks until authored MP3 assignments exist.
 
-After controller acceptance, the next bounded implementation slice is an
-upgrade-catalog panel in Star Loadout: show each world relic's discovered/locked
-state, effect, input, and source hint. Follow it with distinct budgeted VFX for
-Cyclone, Comet Dash, Meteor Pound, each element, and Starheart; keep the current
+The Star Loadout relic catalog is delivered with discovered/locked shape cues,
+effect, input, source hint, per-player ownership, and save-ID coverage tests.
+The next bounded implementation slice is distinct budgeted VFX for Cyclone,
+Comet Dash, Meteor Pound, each element, and Starheart; keep the current
 procedural effects as the low-effect fallback for four-player split screen.

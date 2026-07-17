@@ -49,7 +49,9 @@ use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
 use crate::shop_transactions;
 use crate::state::AppState;
-use crate::upgrades::{all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger};
+use crate::upgrades::{
+    all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger, SABRE_RELIC_CATALOG,
+};
 
 pub struct UiPlugin;
 
@@ -59,16 +61,11 @@ pub struct UiPlugin;
 pub struct UiTheme {
     pub canvas: Color,
     pub panel: Color,
-    pub panel_strong: Color,
-    pub border: Color,
     pub text_primary: Color,
     pub text_muted: Color,
     pub play: Color,
     pub create: Color,
     pub objective: Color,
-    pub success: Color,
-    pub danger: Color,
-    pub locked: Color,
     pub health: Color,
     pub armor: Color,
     pub stamina: Color,
@@ -88,16 +85,11 @@ impl Default for UiTheme {
         Self {
             canvas: Color::srgba(0.008, 0.012, 0.030, 1.0),
             panel: Color::srgba(0.035, 0.050, 0.105, 0.82),
-            panel_strong: Color::srgba(0.045, 0.065, 0.140, 0.96),
-            border: Color::srgb(0.20, 0.55, 0.82),
             text_primary: Color::srgb(0.90, 0.95, 1.0),
             text_muted: Color::srgb(0.58, 0.70, 0.84),
             play: Color::srgb(0.00, 0.42, 0.78),
             create: Color::srgb(0.46, 0.20, 0.68),
             objective: Color::srgb(1.00, 0.82, 0.22),
-            success: Color::srgb(0.24, 0.92, 0.52),
-            danger: Color::srgb(1.00, 0.28, 0.22),
-            locked: Color::srgb(0.31, 0.35, 0.43),
             health: Color::srgb(0.22, 0.86, 0.42),
             armor: Color::srgb(0.20, 0.55, 1.00),
             stamina: Color::srgb(0.98, 0.72, 0.10),
@@ -606,15 +598,17 @@ enum LoadoutTab {
     Items,
     Specials,
     Rides,
+    Relics,
 }
 
 impl LoadoutTab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Weapons,
         Self::Armor,
         Self::Items,
         Self::Specials,
         Self::Rides,
+        Self::Relics,
     ];
 
     const fn index(self) -> usize {
@@ -624,6 +618,7 @@ impl LoadoutTab {
             Self::Items => 2,
             Self::Specials => 3,
             Self::Rides => 4,
+            Self::Relics => 5,
         }
     }
 
@@ -634,6 +629,7 @@ impl LoadoutTab {
             Self::Items => "ITEMS",
             Self::Specials => "SPECIALS",
             Self::Rides => "RIDES",
+            Self::Relics => "RELICS",
         }
     }
 
@@ -653,7 +649,7 @@ struct LoadoutPanelState {
     visible: bool,
     owner: Option<u8>,
     tab: LoadoutTab,
-    selection: [[usize; 5]; 4],
+    selection: [[usize; 6]; 4],
     repeat_direction: i8,
     repeat_timer: f32,
 }
@@ -4658,8 +4654,8 @@ fn setup_hud(
                     border_radius: BorderRadius::all(Val::Px(12.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.018, 0.028, 0.065, 0.97)),
-                BorderColor::all(Color::srgb(0.20, 0.78, 1.0)),
+                BackgroundColor(theme.canvas),
+                BorderColor::all(theme.energy),
                 LoadoutPanelRoot,
             ))
             .with_children(|panel| {
@@ -4669,7 +4665,7 @@ fn setup_hud(
                         font_size: FontSize::Px(25.0),
                         ..default()
                     },
-                    TextColor(Color::srgb(0.96, 0.86, 0.30)),
+                    TextColor(theme.objective),
                     LoadoutTitleText,
                 ));
                 panel.spawn((
@@ -4678,7 +4674,7 @@ fn setup_hud(
                         font_size: FontSize::Px(13.0),
                         ..default()
                     },
-                    TextColor(Color::srgb(0.62, 0.82, 1.0)),
+                    TextColor(theme.text_muted),
                 ));
                 panel
                     .spawn(Node {
@@ -4708,7 +4704,7 @@ fn setup_hud(
                                     font_size: FontSize::Px(13.0),
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                    TextColor(theme.text_primary),
                             ));
                         }
                     });
@@ -4720,7 +4716,7 @@ fn setup_hud(
                         ..default()
                     })
                     .with_children(|entries| {
-                        for index in 0..8 {
+                        for index in 0..SABRE_RELIC_CATALOG.len() {
                             entries
                                 .spawn((
                                     Button,
@@ -4744,7 +4740,7 @@ fn setup_hud(
                                         font_size: FontSize::Px(15.0),
                                         ..default()
                                     },
-                                    TextColor(Color::srgb(0.88, 0.93, 1.0)),
+                                    TextColor(theme.text_primary),
                                     LoadoutEntryLabel(index),
                                 ));
                         }
@@ -4877,11 +4873,7 @@ fn damage_vignette_node(player_index: u8, active: u8) -> Node {
     node
 }
 
-fn spawn_player_hud_panel(
-    parent: &mut ChildSpawnerCommands,
-    player_index: u8,
-    theme: &UiTheme,
-) {
+fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8, theme: &UiTheme) {
     parent
         .spawn((
             Node {
@@ -5214,12 +5206,8 @@ fn hud_update_system(
                 }
                 PlayerHudTextKind::Ammo => "∞ AMMO".to_string(),
                 PlayerHudTextKind::SpecialAmmo => format!("SPECIALS ∞{}", lock_label),
-                PlayerHudTextKind::TraversalStatus => {
-                    traversal_status_text(traversal, board_boost)
-                }
-                PlayerHudTextKind::SabreStatus => {
-                    sabre_status_text(sabre, &progression.upgrades)
-                }
+                PlayerHudTextKind::TraversalStatus => traversal_status_text(traversal, board_boost),
+                PlayerHudTextKind::SabreStatus => sabre_status_text(sabre, &progression.upgrades),
             });
         }
     }
@@ -5931,6 +5919,7 @@ fn loadout_panel_system(
             &Inventory,
             &mut QuickItemSlot,
             &mut TraversalModeState,
+            &PlayerProgression,
         ),
         With<Player>,
     >,
@@ -6029,8 +6018,16 @@ fn loadout_panel_system(
         }
     }
 
-    let Some((_, mut weapons, mut specials, mut armor, inventory, mut quick, mut traversal)) =
-        player_q.iter_mut().find(|(index, ..)| index.0 == owner)
+    let Some((
+        _,
+        mut weapons,
+        mut specials,
+        mut armor,
+        inventory,
+        mut quick,
+        mut traversal,
+        progression,
+    )) = player_q.iter_mut().find(|(index, ..)| index.0 == owner)
     else {
         state.visible = false;
         state.owner = None;
@@ -6039,7 +6036,14 @@ fn loadout_panel_system(
     };
 
     let mut entries = loadout_entry_labels(
-        state.tab, &weapons, &specials, &armor, inventory, &quick, &traversal,
+        state.tab,
+        &weapons,
+        &specials,
+        &armor,
+        inventory,
+        &quick,
+        &traversal,
+        &progression.upgrades,
     );
     let tab_slot = state.tab.index();
     state.selection[owner_slot][tab_slot] =
@@ -6065,7 +6069,7 @@ fn loadout_panel_system(
     let confirm = !opened_this_frame
         && (clicked_entry.is_some() || owner_input.is_some_and(|input| input.ui_confirm));
     if confirm && !entries.is_empty() {
-        let equipped = activate_loadout_entry(
+        let selected_name = activate_loadout_entry(
             state.tab,
             selected,
             &mut weapons,
@@ -6076,11 +6080,22 @@ fn loadout_panel_system(
             &mut traversal,
         );
         msg_ev.write(UiMessageEvent {
-            text: format!("P{} equipped {}", owner + 1, equipped),
+            text: if state.tab == LoadoutTab::Relics {
+                format!("P{} inspected {}", owner + 1, selected_name)
+            } else {
+                format!("P{} equipped {}", owner + 1, selected_name)
+            },
             duration: 1.5,
         });
         entries = loadout_entry_labels(
-            state.tab, &weapons, &specials, &armor, inventory, &quick, &traversal,
+            state.tab,
+            &weapons,
+            &specials,
+            &armor,
+            inventory,
+            &quick,
+            &traversal,
+            &progression.upgrades,
         );
     }
 
@@ -6110,6 +6125,7 @@ fn loadout_panel_system(
             LoadoutTab::Rides => {
                 "Rocket Hoverboard: jump to launch, hold jump for lift, LB to boost.".to_string()
             }
+            LoadoutTab::Relics => relic_detail_text(&progression.upgrades, selected),
         });
     }
     for (label, mut text) in texts.p2().iter_mut() {
@@ -6164,6 +6180,7 @@ fn loadout_entry_labels(
     inventory: &Inventory,
     quick: &QuickItemSlot,
     traversal: &TraversalModeState,
+    upgrades: &UpgradeLedger,
 ) -> Vec<String> {
     match tab {
         LoadoutTab::Weapons => weapons
@@ -6257,6 +6274,21 @@ fn loadout_entry_labels(
                 )
             })
             .collect(),
+        LoadoutTab::Relics => SABRE_RELIC_CATALOG
+            .iter()
+            .map(|relic| {
+                format!(
+                    "{} [{}] {}",
+                    relic.kind.shape(),
+                    if upgrades.has_relic(relic.id) {
+                        "FOUND"
+                    } else {
+                        "LOCKED"
+                    },
+                    relic.name
+                )
+            })
+            .collect(),
     }
 }
 
@@ -6302,7 +6334,26 @@ fn activate_loadout_entry(
             traversal.active = ride_modes()[index.min(ride_modes().len() - 1)];
             traversal.active.label().to_string()
         }
+        LoadoutTab::Relics => SABRE_RELIC_CATALOG[index.min(SABRE_RELIC_CATALOG.len() - 1)]
+            .name
+            .to_string(),
     }
+}
+
+fn relic_detail_text(upgrades: &UpgradeLedger, index: usize) -> String {
+    let relic = SABRE_RELIC_CATALOG[index.min(SABRE_RELIC_CATALOG.len() - 1)];
+    format!(
+        "{} {} — {}  •  INPUT: {}  •  SOURCE: {}",
+        if upgrades.has_relic(relic.id) {
+            "DISCOVERED"
+        } else {
+            "LOCKED"
+        },
+        relic.kind.shape(),
+        relic.effect,
+        relic.input,
+        relic.source_hint
+    )
 }
 
 fn consumable_inventory_entries(inventory: &Inventory) -> Vec<(String, String, u32)> {
@@ -7198,13 +7249,36 @@ mod menu_navigation_tests {
 
     #[test]
     fn loadout_tabs_wrap_and_keep_per_player_selection() {
-        assert_eq!(LoadoutTab::Weapons.offset(-1), LoadoutTab::Rides);
-        assert_eq!(LoadoutTab::Rides.offset(1), LoadoutTab::Weapons);
+        assert_eq!(LoadoutTab::Weapons.offset(-1), LoadoutTab::Relics);
+        assert_eq!(LoadoutTab::Relics.offset(1), LoadoutTab::Weapons);
         let mut state = LoadoutPanelState::default();
         state.selection[0][LoadoutTab::Weapons.index()] = 4;
         state.selection[1][LoadoutTab::Weapons.index()] = 1;
         assert_eq!(state.selection[0][LoadoutTab::Weapons.index()], 4);
         assert_eq!(state.selection[1][LoadoutTab::Weapons.index()], 1);
+    }
+
+    #[test]
+    fn relic_catalog_uses_shape_and_ownership_without_color_dependency() {
+        let mut upgrades = UpgradeLedger::default();
+        upgrades.unlock_relic("solar_sabre_glyph");
+        let labels = loadout_entry_labels(
+            LoadoutTab::Relics,
+            &WeaponInventory::default(),
+            &SpecialWeaponInventory::default(),
+            &ArmorSet::default(),
+            &Inventory::default(),
+            &QuickItemSlot::default(),
+            &TraversalModeState::default(),
+            &upgrades,
+        );
+        assert_eq!(labels.len(), SABRE_RELIC_CATALOG.len());
+        assert!(labels[0].contains("(O) [FOUND]"));
+        assert!(labels[1].contains(">> [LOCKED]"));
+        let detail = relic_detail_text(&upgrades, 0);
+        assert!(detail.contains("DISCOVERED"));
+        assert!(detail.contains("INPUT:"));
+        assert!(detail.contains("SOURCE:"));
     }
 
     #[test]
@@ -7288,7 +7362,10 @@ mod menu_navigation_tests {
 
         boost.timer = 0.4;
         boost.manual_cooldown = 0.8;
-        assert_eq!(traversal_status_text(&traversal, &boost), "BOARD: OVERDRIVE");
+        assert_eq!(
+            traversal_status_text(&traversal, &boost),
+            "BOARD: OVERDRIVE"
+        );
     }
 
     #[test]
@@ -7313,8 +7390,7 @@ mod menu_navigation_tests {
     fn ui_theme_keeps_semantic_signals_and_player_accents_distinct() {
         let theme = UiTheme::default();
         assert_ne!(theme.play, theme.create);
-        assert_ne!(theme.objective, theme.danger);
-        assert_ne!(theme.success, theme.locked);
+        assert_ne!(theme.objective, theme.play);
         for left in 0..theme.players.len() {
             for right in left + 1..theme.players.len() {
                 assert_ne!(theme.players[left], theme.players[right]);

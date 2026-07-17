@@ -21,6 +21,112 @@ pub fn is_sabre_relic(id: &str) -> bool {
     SABRE_RELIC_IDS.contains(&id)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SabreRelicKind {
+    Core,
+    Technique,
+    ElementalGem,
+    LegendaryGem,
+}
+
+impl SabreRelicKind {
+    /// ASCII shape layer remains readable with Bevy's fallback font and does
+    /// not rely on color: circle=core, chevron=technique, diamond=gem, star=legendary.
+    pub const fn shape(self) -> &'static str {
+        match self {
+            Self::Core => "(O)",
+            Self::Technique => ">>",
+            Self::ElementalGem => "<>",
+            Self::LegendaryGem => "**",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SabreRelicDef {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub kind: SabreRelicKind,
+    pub effect: &'static str,
+    pub input: &'static str,
+    pub source_hint: &'static str,
+}
+
+pub const SABRE_RELIC_CATALOG: [SabreRelicDef; 9] = [
+    SabreRelicDef {
+        id: "solar_sabre_glyph",
+        name: "Solar Sabre Glyph",
+        kind: SabreRelicKind::Core,
+        effect: "Launches a Star Wave after each standard Saber slash.",
+        input: "RT / LMB while Saber is active",
+        source_hint: "Solar Sabre Observatory",
+    },
+    SabreRelicDef {
+        id: "cyclone_slash_blueprint",
+        name: "Cyclone Slash Blueprint",
+        kind: SabreRelicKind::Technique,
+        effect: "Unlocks a wide 360-degree Saber strike.",
+        input: "L3 / Heavy",
+        source_hint: "Outer Solar Observatory",
+    },
+    SabreRelicDef {
+        id: "comet_dash_blueprint",
+        name: "Comet Dash Blueprint",
+        kind: SabreRelicKind::Technique,
+        effect: "Unlocks two advancing dash cuts.",
+        input: "B / East / Q while grounded",
+        source_hint: "Solar Observatory approach",
+    },
+    SabreRelicDef {
+        id: "meteor_pound_blueprint",
+        name: "Meteor Pound Blueprint",
+        kind: SabreRelicKind::Technique,
+        effect: "Converts the dash input into an airborne radial pound.",
+        input: "B / East / Q while airborne",
+        source_hint: "Solar Observatory ridge",
+    },
+    SabreRelicDef {
+        id: "solar_fire_gem",
+        name: "Solar Fire Gem",
+        kind: SabreRelicKind::ElementalGem,
+        effect: "Adds Fire damage and +12% Saber damage.",
+        input: "Passive",
+        source_hint: "Temple of the Sky Equation",
+    },
+    SabreRelicDef {
+        id: "storm_gem",
+        name: "Storm Gem",
+        kind: SabreRelicKind::ElementalGem,
+        effect: "Adds Electric damage and +12% Saber damage.",
+        input: "Passive",
+        source_hint: "Nova Missile Foundry",
+    },
+    SabreRelicDef {
+        id: "frost_gem",
+        name: "Frost Gem",
+        kind: SabreRelicKind::ElementalGem,
+        effect: "Adds +12% Saber damage; Frost status is a later upgrade.",
+        input: "Passive",
+        source_hint: "Sky Equation snowfield",
+    },
+    SabreRelicDef {
+        id: "void_gem",
+        name: "Void Gem",
+        kind: SabreRelicKind::ElementalGem,
+        effect: "Adds Rift damage and +12% Saber damage.",
+        input: "Passive",
+        source_hint: "Nova Foundry rift shelf",
+    },
+    SabreRelicDef {
+        id: "legendary_starheart_gem",
+        name: "Legendary Starheart Gem",
+        kind: SabreRelicKind::LegendaryGem,
+        effect: "Adds +35% Saber damage beyond elemental gem bonuses.",
+        input: "Passive",
+        source_hint: "Remote Everest landmark",
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TechUpgradeId {
     BeamCapacitors,
@@ -709,5 +815,19 @@ mod tests {
         assert!(upgrades.sabre_dash_unlocked());
         assert!(upgrades.sabre_pound_unlocked());
         assert!(upgrades.sabre_elemental_damage_mult() > 1.45);
+    }
+
+    #[test]
+    fn sabre_relic_catalog_covers_every_save_id_once() {
+        let mut catalog_ids: Vec<&str> = SABRE_RELIC_CATALOG.iter().map(|def| def.id).collect();
+        catalog_ids.sort_unstable();
+        catalog_ids.dedup();
+
+        let mut save_ids = SABRE_RELIC_IDS.to_vec();
+        save_ids.sort_unstable();
+        assert_eq!(catalog_ids, save_ids);
+        assert!(SABRE_RELIC_CATALOG.iter().all(|def| !def.effect.is_empty()
+            && !def.input.is_empty()
+            && !def.source_hint.is_empty()));
     }
 }
