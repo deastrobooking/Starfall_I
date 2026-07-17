@@ -649,6 +649,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorTextInputCapture>()
             .init_resource::<EditorPresetLibrary>()
             .init_resource::<EditorArmedModifier>()
+            .init_resource::<EditorModifierParamCursor>()
             .register_type::<EditorEntityId>()
             .add_systems(Startup, bootstrap_published_content_catalogs)
             .add_systems(
@@ -1127,6 +1128,9 @@ enum EditorAction {
     ModifierCycleKind,
     ModifierAdd,
     ModifierRemoveLast,
+    ModifierCycleParam,
+    ModifierValueDown,
+    ModifierValueUp,
     SearchRegistry,
     MaterialCycleFamily,
     MaterialCyclePreset,
@@ -1383,32 +1387,14 @@ struct EditorModifierStack(Vec<crate::mesh_modifiers::MeshModifier>);
 #[derive(Resource, Default)]
 struct EditorArmedModifier(usize);
 
+/// Parameter cursor for MOD PARAM / MOD VALUE −/+ editing of the last
+/// modifier on the selected object.
+#[derive(Resource, Default)]
+struct EditorModifierParamCursor(usize);
+
 /// Default instances for each armable modifier kind, in cycle order.
 fn armed_modifier_template(index: usize) -> crate::mesh_modifiers::MeshModifier {
-    use crate::mesh_modifiers::{MeshModifier, ModifierAxis};
-    match index % 6 {
-        0 => MeshModifier::Mirror {
-            axis: ModifierAxis::X,
-        },
-        1 => MeshModifier::Array {
-            count: 3,
-            offset: [3.0, 0.0, 0.0],
-        },
-        2 => MeshModifier::Twist {
-            axis: ModifierAxis::Y,
-            degrees: 45.0,
-        },
-        3 => MeshModifier::Subdivide { levels: 1 },
-        4 => MeshModifier::Smooth {
-            iterations: 2,
-            factor: 0.5,
-        },
-        _ => MeshModifier::NoiseDisplace {
-            seed: 7,
-            amplitude: 0.25,
-            frequency: 1.6,
-        },
-    }
+    crate::mesh_modifiers::MeshModifier::template(index)
 }
 
 impl Default for EditorProjectSession {
@@ -2737,7 +2723,12 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     ));
                     spawn_editor_button(panel, 12, EditorAction::Duplicate, "DUPLICATE");
                     spawn_editor_button(panel, 13, EditorAction::Delete, "DELETE");
-                    spawn_editor_button(panel, 96, EditorAction::ModifierCycleKind, "MODIFIER KIND");
+                    spawn_editor_button(
+                        panel,
+                        96,
+                        EditorAction::ModifierCycleKind,
+                        "MODIFIER KIND",
+                    );
                     spawn_editor_button(panel, 97, EditorAction::ModifierAdd, "ADD MODIFIER");
                     spawn_editor_button(
                         panel,
@@ -2745,6 +2736,9 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                         EditorAction::ModifierRemoveLast,
                         "REMOVE MODIFIER",
                     );
+                    spawn_editor_button(panel, 99, EditorAction::ModifierCycleParam, "MOD PARAM");
+                    spawn_editor_button(panel, 100, EditorAction::ModifierValueDown, "MOD VALUE −");
+                    spawn_editor_button(panel, 101, EditorAction::ModifierValueUp, "MOD VALUE +");
                     spawn_editor_button(panel, 14, EditorAction::MoveXNegative, "X  −SNAP");
                     spawn_editor_button(panel, 15, EditorAction::MoveXPositive, "X  +SNAP");
                     spawn_editor_button(panel, 16, EditorAction::MoveYNegative, "Y  −SNAP");
@@ -6108,7 +6102,10 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     .unwrap_or(0);
                 set_editor_status(
                     world,
-                    format!("Added {label} to object #{} (stack depth {depth})", editor_id.0),
+                    format!(
+                        "Added {label} to object #{} (stack depth {depth})",
+                        editor_id.0
+                    ),
                 );
             } else {
                 if let Some(mut stack) = world.get_mut::<EditorModifierStack>(entity) {
@@ -6116,6 +6113,57 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 }
                 set_editor_status(world, "Selected object has no modifiable mesh");
             }
+        }
+        EditorAction::ModifierCycleParam => {
+            let Some((entity, editor_id)) = selected_modifier_target(world) else {
+                return;
+            };
+            let Some(stack) = world.get::<EditorModifierStack>(entity) else {
+                set_editor_status(world, "Selected object has no modifiers");
+                return;
+            };
+            let Some(last) = stack.0.last().cloned() else {
+                set_editor_status(world, "Selected object has no modifiers");
+                return;
+            };
+            let mut cursor = world.resource_mut::<EditorModifierParamCursor>();
+            cursor.0 = (cursor.0 + 1) % last.param_count();
+            let index = cursor.0;
+            set_editor_status(
+                world,
+                format!(
+                    "{} on #{}: {}",
+                    last.label(),
+                    editor_id.0,
+                    last.param_label(index)
+                ),
+            );
+        }
+        EditorAction::ModifierValueDown | EditorAction::ModifierValueUp => {
+            let direction = if matches!(action, EditorAction::ModifierValueUp) {
+                1
+            } else {
+                -1
+            };
+            let Some((entity, editor_id)) = selected_modifier_target(world) else {
+                return;
+            };
+            let index = world.resource::<EditorModifierParamCursor>().0;
+            let adjusted = world
+                .get_mut::<EditorModifierStack>(entity)
+                .and_then(|mut stack| {
+                    stack.0.last_mut().map(|last| {
+                        last.adjust_param(index, direction);
+                        (last.label(), last.param_label(index))
+                    })
+                });
+            let Some((label, value)) = adjusted else {
+                set_editor_status(world, "Selected object has no modifiers");
+                return;
+            };
+            remesh_modified_object(world, entity);
+            world.resource_mut::<EditorDocumentState>().dirty = true;
+            set_editor_status(world, format!("{} on #{}: {}", label, editor_id.0, value));
         }
         EditorAction::ModifierRemoveLast => {
             let Some(editor_id) = world.resource::<EditorSelection>().active() else {
@@ -6763,6 +6811,20 @@ fn remesh_modified_object(world: &mut World, entity: Entity) -> bool {
     };
     world.entity_mut(render_entity).insert(Mesh3d(handle));
     true
+}
+
+/// Resolve the active selection for modifier actions, reporting the standard
+/// status messages when nothing usable is selected.
+fn selected_modifier_target(world: &mut World) -> Option<(Entity, EditorEntityId)> {
+    let Some(editor_id) = world.resource::<EditorSelection>().active() else {
+        set_editor_status(world, "Select a scene object first");
+        return None;
+    };
+    let Some(entity) = resolve_editor_entity(world, editor_id) else {
+        set_editor_status(world, "Selected scene object is missing");
+        return None;
+    };
+    Some((entity, editor_id))
 }
 
 /// The entity carrying the object's `Mesh3d` — the object itself or its

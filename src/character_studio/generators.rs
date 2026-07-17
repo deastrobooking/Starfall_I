@@ -37,6 +37,8 @@ pub struct CharacterPatch {
     pub sex: Sex,
     pub wardrobe: WardrobeSpec,
     pub hair: HairStyle,
+    /// Non-destructive modifier stack applied to every generated part mesh.
+    pub modifiers: Vec<crate::mesh_modifiers::MeshModifier>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -79,6 +81,7 @@ pub fn build_character_patch(spec: &CharacterSpec) -> CharacterPatch {
         sex: spec.sex,
         wardrobe: spec.style.wardrobe,
         hair: spec.style.hair,
+        modifiers: spec.modifiers.iter().flatten().copied().collect(),
         ..default()
     };
     for generator in generators {

@@ -449,7 +449,16 @@ Primary files:
 
 Goal: Ensure the 200-mile Everest range runs flawlessly at true 60fps, even in 4-player split-screen with dense combat encounters.
 
-- Establish level-of-detail (LOD) generation and distance culling for cities, rendering, and terrain meshes.
+Status: `N11a` render-only distance culling is implemented. The reusable
+`SpatialLod` service propagates camera-aware visibility ranges through mesh
+hierarchies, currently covers trees and non-enterable building shells, and
+reports live coverage in the F11 overlay. See
+[`guides/spatial-lod.md`](guides/spatial-lod.md). Physics and gameplay remain
+loaded; real mesh tiers and chunk streaming are the next slices.
+
+- Extend `N11a` into generated lower-detail mesh tiers or impostors for cities,
+  foliage, and terrain; distance culling is now established for the first two
+  high-volume asset classes.
 - Stream biomes and distant geometry asynchronously so the 200-mile world does not indefinitely bog down the physics solver.
 - Refactor heavy queries and giant systems (e.g. `world_plugin.rs`) hitting `clippy::too_many_arguments` to use focused Bevy `SystemParam` structs.
 - Implement object pooling for projectiles, enemies, and common SFX.

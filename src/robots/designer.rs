@@ -129,6 +129,10 @@ pub struct RobotStyle {
     pub secondary: Color,
     #[serde(with = "color_serde")]
     pub emissive: Color,
+
+    /// Blender-style non-destructive modifier stack applied to every generated
+    /// robot part mesh at spawn time.
+    pub modifiers: Vec<crate::mesh_modifiers::MeshModifier>,
 }
 
 mod color_serde {
@@ -193,6 +197,7 @@ impl Default for RobotStyle {
             primary: Color::srgb(0.3, 0.5, 0.8),
             secondary: Color::srgb(0.15, 0.25, 0.4),
             emissive: Color::srgb(0.0, 0.8, 1.0),
+            modifiers: Vec::new(),
         }
     }
 }

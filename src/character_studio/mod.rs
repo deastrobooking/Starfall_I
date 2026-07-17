@@ -90,6 +90,9 @@ enum StudioAction {
     Random,
     Undo,
     ResetAll,
+    ModifierKind,
+    ModifierAdd,
+    ModifierRemove,
     ViewFront,
     ViewProfile,
     ViewBack,
@@ -121,7 +124,7 @@ enum StudioNavDirection {
 
 /// Focusable rows. Action groups hold several buttons, while morph/style rows
 /// expose their own decrement/increment buttons.
-const ACTION_GROUPS: [&[StudioAction]; 9] = [
+const ACTION_GROUPS: [&[StudioAction]; 10] = [
     &[StudioAction::Male, StudioAction::Female],
     &[
         StudioAction::StarHero,
@@ -140,6 +143,11 @@ const ACTION_GROUPS: [&[StudioAction]; 9] = [
         StudioAction::Random,
         StudioAction::Undo,
         StudioAction::ResetAll,
+    ],
+    &[
+        StudioAction::ModifierKind,
+        StudioAction::ModifierAdd,
+        StudioAction::ModifierRemove,
     ],
     &[
         StudioAction::ViewFront,
@@ -177,6 +185,9 @@ fn action_label(action: StudioAction) -> &'static str {
         StudioAction::Random => "RANDOM",
         StudioAction::Undo => "UNDO",
         StudioAction::ResetAll => "RESET ALL",
+        StudioAction::ModifierKind => "MOD KIND",
+        StudioAction::ModifierAdd => "ADD MOD",
+        StudioAction::ModifierRemove => "REMOVE MOD",
         StudioAction::ViewFront => "FRONT",
         StudioAction::ViewProfile => "PROFILE",
         StudioAction::ViewBack => "BACK VIEW",
@@ -208,6 +219,8 @@ pub struct StudioState {
     status: String,
     apply_requested: bool,
     export_requested: bool,
+    /// Which modifier template the ADD MOD button is armed with.
+    armed_modifier: usize,
 }
 
 impl Default for StudioState {
@@ -226,6 +239,7 @@ impl Default for StudioState {
             status: "Welcome to the Character Studio".to_string(),
             apply_requested: false,
             export_requested: false,
+            armed_modifier: 0,
         }
     }
 }
@@ -994,6 +1008,38 @@ fn apply_action(
             state.push_undo();
             state.spec = CharacterSpec::default();
             mark(state, "Reset to neutral model".into());
+        }
+        StudioAction::ModifierKind => {
+            state.armed_modifier =
+                (state.armed_modifier + 1) % crate::mesh_modifiers::MeshModifier::TEMPLATE_COUNT;
+            let label = crate::mesh_modifiers::MeshModifier::template(state.armed_modifier).label();
+            state.status = format!("Armed modifier: {label}");
+            state.labels_dirty = true;
+        }
+        StudioAction::ModifierAdd => {
+            let armed = crate::mesh_modifiers::MeshModifier::template(state.armed_modifier);
+            let Some(slot) = state.spec.modifiers.iter().position(|slot| slot.is_none()) else {
+                state.status = "All 4 modifier slots are full".into();
+                state.labels_dirty = true;
+                return;
+            };
+            state.push_undo();
+            let label = armed.label();
+            state.spec.modifiers[slot] = Some(armed);
+            mark(state, format!("Added {label} (slot {})", slot + 1));
+        }
+        StudioAction::ModifierRemove => {
+            let Some(slot) = state.spec.modifiers.iter().rposition(|slot| slot.is_some()) else {
+                state.status = "No modifiers to remove".into();
+                state.labels_dirty = true;
+                return;
+            };
+            state.push_undo();
+            let label = state.spec.modifiers[slot]
+                .map(|modifier| modifier.label())
+                .unwrap_or_default();
+            state.spec.modifiers[slot] = None;
+            mark(state, format!("Removed {label}"));
         }
         StudioAction::ViewFront => {
             state.yaw = std::f32::consts::PI;

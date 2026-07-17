@@ -520,6 +520,11 @@ pub struct CharacterSpec {
     pub body: BodySpec,
     pub face: FaceSpec,
     pub style: StyleSpec,
+    /// Blender-style non-destructive modifier slots applied to every generated
+    /// body-part mesh (fixed size keeps the spec `Copy`; `None` slots are
+    /// skipped).
+    #[serde(default)]
+    pub modifiers: [Option<crate::mesh_modifiers::MeshModifier>; 4],
 }
 
 /// Every editable scalar morph, in UI order. The editor cursor walks this

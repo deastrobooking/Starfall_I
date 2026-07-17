@@ -40,8 +40,9 @@ impl ModifierAxis {
     }
 }
 
-/// One non-destructive operation in a modifier stack.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// One non-destructive operation in a modifier stack. All variants are plain
+/// data, so the whole enum stays `Copy` and can live inside `Copy` specs.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum MeshModifier {
     /// Append a copy of the geometry mirrored across the axis plane through
     /// the local origin (winding flipped so faces stay outward).
@@ -74,6 +75,124 @@ impl MeshModifier {
             Self::Subdivide { levels } => format!("Subdivide x{levels}"),
             Self::Smooth { iterations, .. } => format!("Smooth x{iterations}"),
             Self::NoiseDisplace { seed, .. } => format!("Noise (seed {seed})"),
+        }
+    }
+
+    /// How many armable template kinds [`MeshModifier::template`] cycles
+    /// through.
+    pub const TEMPLATE_COUNT: usize = 6;
+
+    /// Default instance for each armable modifier kind, in cycle order.
+    /// Shared by every design feature's "add modifier" UI.
+    pub fn template(index: usize) -> Self {
+        match index % Self::TEMPLATE_COUNT {
+            0 => Self::Mirror {
+                axis: ModifierAxis::X,
+            },
+            1 => Self::Array {
+                count: 3,
+                offset: [3.0, 0.0, 0.0],
+            },
+            2 => Self::Twist {
+                axis: ModifierAxis::Y,
+                degrees: 45.0,
+            },
+            3 => Self::Subdivide { levels: 1 },
+            4 => Self::Smooth {
+                iterations: 2,
+                factor: 0.5,
+            },
+            _ => Self::NoiseDisplace {
+                seed: 7,
+                amplitude: 0.25,
+                frequency: 1.6,
+            },
+        }
+    }
+
+    /// Number of editable parameters for cursor-based editing UIs.
+    pub fn param_count(&self) -> usize {
+        match self {
+            Self::Mirror { .. } | Self::Subdivide { .. } => 1,
+            Self::Twist { .. } | Self::Smooth { .. } => 2,
+            Self::NoiseDisplace { .. } => 3,
+            Self::Array { .. } => 4,
+        }
+    }
+
+    /// `name = value` display for one parameter slot.
+    pub fn param_label(&self, index: usize) -> String {
+        match self {
+            Self::Mirror { axis } => format!("axis = {}", axis.label()),
+            Self::Array { count, offset } => match index % 4 {
+                0 => format!("count = {count}"),
+                1 => format!("offset.x = {:.2}", offset[0]),
+                2 => format!("offset.y = {:.2}", offset[1]),
+                _ => format!("offset.z = {:.2}", offset[2]),
+            },
+            Self::Twist { axis, degrees } => match index % 2 {
+                0 => format!("axis = {}", axis.label()),
+                _ => format!("degrees = {degrees:.1}"),
+            },
+            Self::Subdivide { levels } => format!("levels = {levels}"),
+            Self::Smooth { iterations, factor } => match index % 2 {
+                0 => format!("iterations = {iterations}"),
+                _ => format!("factor = {factor:.2}"),
+            },
+            Self::NoiseDisplace {
+                seed,
+                amplitude,
+                frequency,
+            } => match index % 3 {
+                0 => format!("seed = {seed}"),
+                1 => format!("amplitude = {amplitude:.2}"),
+                _ => format!("frequency = {frequency:.2}"),
+            },
+        }
+    }
+
+    /// Step one parameter up (`direction > 0`) or down. Values stay inside the
+    /// same clamped ranges [`apply_stack`] enforces, so edits are always valid.
+    pub fn adjust_param(&mut self, index: usize, direction: i32) {
+        let up = direction > 0;
+        let cycle_axis = |axis: &mut ModifierAxis| {
+            *axis = match (*axis, up) {
+                (ModifierAxis::X, true) | (ModifierAxis::Z, false) => ModifierAxis::Y,
+                (ModifierAxis::Y, true) | (ModifierAxis::X, false) => ModifierAxis::Z,
+                (ModifierAxis::Z, true) | (ModifierAxis::Y, false) => ModifierAxis::X,
+            };
+        };
+        let step_f32 = |value: &mut f32, step: f32, min: f32, max: f32| {
+            *value = (*value + if up { step } else { -step }).clamp(min, max);
+        };
+        match self {
+            Self::Mirror { axis } => cycle_axis(axis),
+            Self::Array { count, offset } => match index % 4 {
+                0 => *count = (count.saturating_add_signed(direction)).clamp(1, 16),
+                1 => step_f32(&mut offset[0], 0.5, -64.0, 64.0),
+                2 => step_f32(&mut offset[1], 0.5, -64.0, 64.0),
+                _ => step_f32(&mut offset[2], 0.5, -64.0, 64.0),
+            },
+            Self::Twist { axis, degrees } => match index % 2 {
+                0 => cycle_axis(axis),
+                _ => step_f32(degrees, 15.0, -720.0, 720.0),
+            },
+            Self::Subdivide { levels } => {
+                *levels = (levels.saturating_add_signed(direction)).clamp(1, 4)
+            }
+            Self::Smooth { iterations, factor } => match index % 2 {
+                0 => *iterations = (iterations.saturating_add_signed(direction)).clamp(1, 10),
+                _ => step_f32(factor, 0.05, 0.0, 1.0),
+            },
+            Self::NoiseDisplace {
+                seed,
+                amplitude,
+                frequency,
+            } => match index % 3 {
+                0 => *seed = seed.wrapping_add_signed(direction as i64),
+                1 => step_f32(amplitude, 0.05, 0.0, 8.0),
+                _ => step_f32(frequency, 0.2, 0.05, 32.0),
+            },
         }
     }
 }
@@ -507,6 +626,39 @@ mod tests {
         let buffer = MeshBuffer::from_mesh(&derived).expect("derived converts back");
         // 2 tris → mirror ×2 → subdivide ×4.
         assert_eq!(buffer.triangle_count(), 16);
+    }
+
+    #[test]
+    fn param_editing_steps_cycle_and_clamp() {
+        let mut array = MeshModifier::Array {
+            count: 16,
+            offset: [0.0, 0.0, 0.0],
+        };
+        array.adjust_param(0, 1);
+        assert_eq!(array.param_label(0), "count = 16");
+        array.adjust_param(1, 1);
+        assert_eq!(array.param_label(1), "offset.x = 0.50");
+
+        let mut twist = MeshModifier::Twist {
+            axis: ModifierAxis::Z,
+            degrees: 45.0,
+        };
+        twist.adjust_param(0, 1);
+        assert_eq!(twist.param_label(0), "axis = X");
+        twist.adjust_param(0, -1);
+        assert_eq!(twist.param_label(0), "axis = Z");
+        twist.adjust_param(1, -1);
+        assert_eq!(twist.param_label(1), "degrees = 30.0");
+
+        let mut smooth = MeshModifier::Smooth {
+            iterations: 1,
+            factor: 0.0,
+        };
+        smooth.adjust_param(0, -1);
+        assert_eq!(smooth.param_label(0), "iterations = 1");
+        smooth.adjust_param(1, 1);
+        assert_eq!(smooth.param_label(1), "factor = 0.05");
+        assert_eq!(smooth.param_count(), 2);
     }
 
     #[test]

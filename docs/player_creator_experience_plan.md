@@ -146,9 +146,25 @@ buffers with Bevy mesh interop, capped at 262k triangles. World Kit consumes
 it first: scene objects carry a `modifiers` list in the project schema
 (`serde(default)`, saved/loaded/locked with the project), and the object panel
 gains MODIFIER KIND / ADD MODIFIER / REMOVE MODIFIER buttons that re-derive
-the render mesh from the pristine base primitive on every stack edit. Next
-slices: parameter editing for armed modifiers, Character Studio part meshes,
-and Creature Forge robot geometry through the same stack.
+the render mesh from the pristine base primitive on every stack edit.
+
+All three design features now consume the stack (July 16, 2026):
+
+- **World Kit** additionally has parameter editing — MOD PARAM cycles the
+  editable parameter of the selected object's last modifier and MOD VALUE −/+
+  steps it (axis cycling, clamped numeric steps), remeshing live.
+- **Character Studio** specs carry four `Copy`-friendly modifier slots applied
+  to every generated body-part mesh; the studio gains a MOD KIND / ADD MOD /
+  REMOVE MOD action row with undo support, and the same spec drives the
+  playable in-game character mesh, so the equipped look matches the preview.
+- **Creature Forge** robot styles carry a modifier stack applied to all 29
+  generated robot part meshes (pets, creatures, and `CreatureSpec` recipes
+  included); legacy style JSON loads with an empty stack. Interactive Forge
+  authoring UI arrives with the Forge screen itself.
+
+Remaining modifier work: studio/forge parameter editing UIs (World Kit has it
+first), proportional terrain editing, and constraint/driver concepts for the
+animation MVP.
 
 ### PM3 — Multi-level project support
 

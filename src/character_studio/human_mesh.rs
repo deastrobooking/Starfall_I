@@ -411,6 +411,11 @@ pub fn spawn_human(
 
     let pending_face_feature = Cell::new(None);
     let mut part = |mesh: Mesh, mat: &Handle<StandardMaterial>, transform: Transform| {
+        let mesh = if patch.modifiers.is_empty() {
+            mesh
+        } else {
+            crate::mesh_modifiers::apply_stack_to_mesh(&mesh, &patch.modifiers).unwrap_or(mesh)
+        };
         let (region, pivot) = classify_studio_part(&p, transform.translation);
         let e = commands
             .spawn((

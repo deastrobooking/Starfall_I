@@ -45,6 +45,7 @@ mod robots;
 mod settlement_economy;
 mod sfx;
 mod shop_transactions;
+mod spatial_lod;
 mod state;
 mod upgrades;
 
@@ -144,6 +145,8 @@ fn main() {
         // Shared recipe-editor services: tool mode, stable IDs, selection,
         // and transactional undo/redo. Player-facing workspace UI lands ET2.
         .add_plugins(EngineToolsPlugin)
+        // N11a: camera-aware hierarchical distance culling for world assets.
+        .add_plugins(spatial_lod::SpatialLodPlugin)
         // EC0: engine-core loop scaffolding (GameSet ordering + profiling overlay).
         .add_plugins(game_loop::GameLoopPlugin)
         // EC2: bounded hitstop + hit-reaction feedback (flinch, flashes,

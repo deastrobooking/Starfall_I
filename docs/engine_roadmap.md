@@ -63,6 +63,10 @@ promise first:
 - Current local engine branch baseline is Bevy `0.19.0` + Avian `0.7`. Local
   compile, strict clippy, and automated test gates pass; manual macOS
   controller/play smoke is still required before merging the engine branch.
+- The first `N11` large-world upgrade is active: Starfall-owned hierarchical
+  spatial LOD profiles use Bevy's multi-camera visibility ranges for trees and
+  building shells, with F11 coverage diagnostics. Mesh simplification and
+  simulation/chunk streaming remain follow-up work.
 - Bevy 0.19 is available: the official news post announced it on June 19, 2026,
   and GitHub's `v0.19.0` release tag is marked latest. Its relevant wins matter
   now, not only later:

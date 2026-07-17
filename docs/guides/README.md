@@ -11,6 +11,7 @@ for the map.
 | [fixed-tick-motor.md](fixed-tick-motor.md) | touch player movement, input, or add a simulation system |
 | [combat-feel.md](combat-feel.md) | add/tune hit feedback (hitstop, knockback, flinch, numbers, shake) or hook a new gameplay event |
 | [character-studio-pipeline.md](character-studio-pipeline.md) | extend the character generator (morphs, wardrobe, presets, saves) |
+| [spatial-lod.md](spatial-lod.md) | tune large-world render distance, add LOD coverage, or verify split-screen culling |
 
 House rules that apply to every guide:
 - **Milestone prefixes:** `M#` campaign · `MM#` motion · `AI#` enemy AI ·

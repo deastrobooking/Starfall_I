@@ -14630,6 +14630,7 @@ fn spawn_building(
                 WorldGeometry,
                 WalkableSurface,
                 Building { zone, height },
+                crate::spatial_lod::SpatialLod::landmark(height),
                 ProceduralMaterialBinding::new("building.world", "exterior"),
                 crate::physics::prelude::RigidBody::Fixed,
                 crate::physics::prelude::Collider::cuboid(flank_w * 0.5, height * 0.5, along * 0.5),
@@ -14656,6 +14657,7 @@ fn spawn_building(
                     zone,
                     height: header_h,
                 },
+                crate::spatial_lod::SpatialLod::landmark(height),
                 ProceduralMaterialBinding::new("building.world", "exterior"),
                 crate::physics::prelude::RigidBody::Fixed,
                 crate::physics::prelude::Collider::cuboid(
@@ -14678,6 +14680,7 @@ fn spawn_building(
         WorldGeometry,
         WalkableSurface,
         Building { zone, height },
+        crate::spatial_lod::SpatialLod::landmark(height),
         ProceduralMaterialBinding::new("building.world", "exterior"),
         crate::physics::prelude::RigidBody::Fixed,
         crate::physics::prelude::Collider::cuboid(width * 0.5, height * 0.5, depth * 0.5),
