@@ -113,6 +113,15 @@ parameters, seed, dependencies, thumbnail, tags, and generator fingerprint.
 Users may Apply, Compare, Fork, Reset, Regenerate With Same Seed, or Generate a
 New-Seed Variant.
 
+**Lock document delivered (July 16, 2026):** every successful `ProjectStore`
+save now also writes `project.lock.json` atomically beside the project file:
+lock schema, engine/build version, project id + schema, every record's source
+path, draft/published hashes, and dependency ids (sorted by content id), and
+every generator payload's fingerprint (category, schema, seed, revision).
+Identical project state produces an identical lock document. Remaining PM2
+work: the immutable preset record system with Apply/Compare/Fork/Regenerate
+actions, thumbnails, and validation-configuration capture.
+
 ### PM3 — Multi-level project support
 
 Replace the current single-scene workspace restriction with separate level

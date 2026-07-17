@@ -1639,6 +1639,97 @@ pub enum ProjectLoadSource {
     Recovery(usize),
 }
 
+/// PM2 lock document: a reproducibility snapshot written next to the project
+/// file on every successful save. It captures the engine/build identity,
+/// project schema, every record's source hashes and dependency ids, and every
+/// generator payload's fingerprint (category, schema, seed, revision) so a
+/// project state can be compared, diffed, and regenerated deterministically.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProjectLockDocument {
+    pub lock_schema: u32,
+    pub engine_version: String,
+    pub project_id: String,
+    pub project_schema: u32,
+    pub records: Vec<LockRecord>,
+    pub generators: Vec<LockGenerator>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LockRecord {
+    pub content_id: String,
+    pub schema_version: u32,
+    pub source_path: String,
+    pub draft_hash: String,
+    pub published_hash: Option<String>,
+    pub dependencies: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LockGenerator {
+    pub content_id: String,
+    pub generator: String,
+    pub schema_version: u32,
+    pub seed: u64,
+    pub revision: u64,
+}
+
+pub const CURRENT_LOCK_SCHEMA: u32 = 1;
+
+impl ProjectLockDocument {
+    pub fn from_project(project: &ForgeProject) -> Self {
+        let mut records: Vec<LockRecord> = project
+            .records
+            .iter()
+            .map(|record| LockRecord {
+                content_id: record.content_id.clone(),
+                schema_version: record.schema_version,
+                source_path: record.source_path.clone(),
+                draft_hash: record.draft_hash.clone(),
+                published_hash: record.published_hash.clone(),
+                dependencies: record.dependencies.clone(),
+            })
+            .collect();
+        records.sort_by(|a, b| a.content_id.cmp(&b.content_id));
+
+        // `payloads` is a BTreeMap, so generator order is already
+        // deterministic by content id.
+        let generators = project
+            .payloads
+            .iter()
+            .filter_map(|(content_id, payload)| {
+                let generator = format!("{:?}", payload.category()).to_lowercase();
+                let (schema_version, seed, revision) = match payload.procedural_recipe() {
+                    Some(recipe) => (recipe.schema_version, recipe.seed, recipe.revision),
+                    None => match payload {
+                        ContentPayload::Scene(_) => (CURRENT_PROJECT_SCHEMA, 0, 0),
+                        ContentPayload::Character(recipe)
+                        | ContentPayload::Creature(recipe)
+                        | ContentPayload::Material(recipe)
+                        | ContentPayload::Ui(recipe) => (recipe.schema_version, 0, 0),
+                        _ => return None,
+                    },
+                };
+                Some(LockGenerator {
+                    content_id: content_id.clone(),
+                    generator,
+                    schema_version,
+                    seed,
+                    revision,
+                })
+            })
+            .collect();
+
+        Self {
+            lock_schema: CURRENT_LOCK_SCHEMA,
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            project_id: project.project_id.clone(),
+            project_schema: project.schema_version,
+            records,
+            generators,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProjectStore {
     path: PathBuf,
@@ -1814,7 +1905,22 @@ impl ProjectStore {
         self.write_record_sources(project)?;
         let bytes = serde_json::to_vec_pretty(project)
             .map_err(|error| ProjectIoError::Serialization(error.to_string()))?;
-        atomic_write(&self.path, &bytes)
+        atomic_write(&self.path, &bytes)?;
+        let lock = ProjectLockDocument::from_project(project);
+        let lock_bytes = serde_json::to_vec_pretty(&lock)
+            .map_err(|error| ProjectIoError::Serialization(error.to_string()))?;
+        atomic_write(&self.lock_path(), &lock_bytes)
+    }
+
+    /// The PM2 lock document path: `project.lock.json` beside `project.json`.
+    pub fn lock_path(&self) -> PathBuf {
+        self.path.with_extension("lock.json")
+    }
+
+    pub fn load_lock(&self) -> Result<ProjectLockDocument, ProjectIoError> {
+        let bytes = fs::read(self.lock_path()).map_err(io_error)?;
+        serde_json::from_slice(&bytes)
+            .map_err(|error| ProjectIoError::Serialization(error.to_string()))
     }
 
     pub fn load(&self) -> Result<ForgeProject, ProjectIoError> {
@@ -2032,6 +2138,73 @@ mod tests {
         ));
         let store = ProjectStore::new(root.join("project.json"), 3);
         (root, store)
+    }
+
+    #[test]
+    fn save_writes_lock_document_with_hashes_and_generator_fingerprints() {
+        let (root, store) = test_store("lock_doc");
+        let mut project = ForgeProject::default();
+        let recipe = ProceduralRecipeDraft {
+            seed: 42_195,
+            revision: 7,
+            ..Default::default()
+        };
+        project.records.push(ContentRecord {
+            content_id: "biome.test_ridge".into(),
+            schema_version: CURRENT_PROJECT_SCHEMA,
+            category: ContentCategory::Biome,
+            source_path: "biomes/test_ridge.json".into(),
+            dependencies: vec!["scene.main_world".into()],
+            display_name: "Test Ridge".into(),
+            tags: Vec::new(),
+            thumbnail: None,
+            draft_hash: String::new(),
+            published_hash: None,
+        });
+        project
+            .payloads
+            .insert("biome.test_ridge".into(), ContentPayload::Biome(recipe));
+
+        store.save(&mut project).unwrap();
+        assert!(store.lock_path().is_file());
+
+        let lock = store.load_lock().unwrap();
+        assert_eq!(lock.lock_schema, CURRENT_LOCK_SCHEMA);
+        assert_eq!(lock.engine_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(lock.project_id, project.project_id);
+        assert_eq!(lock.records.len(), project.records.len());
+
+        // Records are sorted by content id and carry the refreshed hashes.
+        assert!(lock
+            .records
+            .windows(2)
+            .all(|pair| pair[0].content_id <= pair[1].content_id));
+        let biome_record = lock
+            .records
+            .iter()
+            .find(|record| record.content_id == "biome.test_ridge")
+            .expect("lock should include the biome record");
+        assert_eq!(biome_record.dependencies, vec!["scene.main_world"]);
+        let scene_record = lock
+            .records
+            .iter()
+            .find(|record| record.content_id == "scene.main_world")
+            .expect("lock should include the scene record");
+        assert!(!scene_record.draft_hash.is_empty());
+
+        let generator = lock
+            .generators
+            .iter()
+            .find(|generator| generator.content_id == "biome.test_ridge")
+            .expect("lock should fingerprint the biome generator");
+        assert_eq!(generator.generator, "biome");
+        assert_eq!(generator.seed, 42_195);
+        assert_eq!(generator.revision, 7);
+
+        // Same project state saves to an identical lock document.
+        store.save(&mut project).unwrap();
+        assert_eq!(store.load_lock().unwrap(), lock);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
