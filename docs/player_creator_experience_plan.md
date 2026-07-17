@@ -189,10 +189,16 @@ arrangements with project-wide collision-free editor ids. The editor toolbar
 gains NEXT LEVEL / LEVEL TEMPLATE / NEW LEVEL / SET STARTUP — switching
 stashes live edits, respawns the new level's objects (materials and modifier
 stacks included), and marks the document dirty; validation rejects empty or
-duplicate level ids. Remaining PM3 work: per-level terrain/spawn/encounter/
-lighting metadata, playtest-into-level boot flow honoring
-`startup_level_id`, per-level validation budgets, and level
-rename/delete/reorder.
+duplicate level ids.
+
+**Playtest flow delivered (July 17, 2026):** the editor toolbar's PLAYTEST
+button completes the New Level → Compose → Save → Playtest loop — it syncs
+the working scene, switches to the `startup_level_id` level (respawning its
+objects), saves atomically, and only then leaves the protected
+`EngineToolMode::Editing` boundary into play; a failed save keeps you in the
+editor with the error on the status line. Remaining PM3 work: per-level
+terrain/spawn/encounter/lighting metadata, per-level validation budgets, and
+level rename/delete/reorder.
 
 ## Immediate scope
 

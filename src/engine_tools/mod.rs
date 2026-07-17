@@ -1137,6 +1137,7 @@ enum EditorAction {
     LevelNew,
     LevelNext,
     LevelSetStartup,
+    PlaytestStartup,
     SearchRegistry,
     MaterialCycleFamily,
     MaterialCyclePreset,
@@ -2677,6 +2678,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                 spawn_editor_button(bar, 103, EditorAction::LevelCycleTemplate, "LEVEL TEMPLATE");
                 spawn_editor_button(bar, 104, EditorAction::LevelNew, "NEW LEVEL");
                 spawn_editor_button(bar, 105, EditorAction::LevelSetStartup, "SET STARTUP");
+                spawn_editor_button(bar, 106, EditorAction::PlaytestStartup, "PLAYTEST");
                 spawn_editor_button(bar, 1, EditorAction::Undo, "UNDO");
                 spawn_editor_button(bar, 2, EditorAction::Redo, "REDO");
                 spawn_editor_button(bar, 3, EditorAction::FrameSelection, "FRAME  [F]");
@@ -5738,8 +5740,12 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             };
             set_editor_status(world, format!("Translation snap: {snap:.2} m"));
         }
-        EditorAction::SaveProject => save_editor_project(world, false),
-        EditorAction::PublishProject => save_editor_project(world, true),
+        EditorAction::SaveProject => {
+            save_editor_project(world, false);
+        }
+        EditorAction::PublishProject => {
+            save_editor_project(world, true);
+        }
         EditorAction::LoadProject => load_editor_project(world, false),
         EditorAction::RecoverProject => load_editor_project(world, true),
         EditorAction::RegistryPrevious | EditorAction::RegistryNext => {
@@ -6200,6 +6206,53 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             };
             world.resource_mut::<EditorDocumentState>().dirty = true;
             set_editor_status(world, format!("Startup level set to {name} ({active_id})"));
+        }
+        EditorAction::PlaytestStartup => {
+            // PM3 workflow: Save → boot the startup level → leave the
+            // protected editing boundary and play it.
+            let scene = collect_working_scene(world);
+            let switch: Result<Option<Vec<SceneObjectDraft>>, String> = {
+                let mut session = world.resource_mut::<EditorProjectSession>();
+                session.project.scene = scene;
+                session.project.sync_active_level();
+                let startup_id = session.project.startup_level_id.clone();
+                if session.project.active_level_id == startup_id {
+                    Ok(None)
+                } else {
+                    session
+                        .project
+                        .activate_level(&startup_id)
+                        .map(|()| Some(session.project.scene.objects.clone()))
+                }
+            };
+            let switch = match switch {
+                Ok(switch) => switch,
+                Err(error) => {
+                    set_editor_status(world, format!("Playtest failed: {error}"));
+                    return;
+                }
+            };
+            let name = {
+                let session = world.resource::<EditorProjectSession>();
+                session
+                    .project
+                    .active_level()
+                    .map(|level| level.display_name.clone())
+                    .unwrap_or_else(|| session.project.startup_level_id.clone())
+            };
+            if let Some(objects) = switch {
+                world.resource_mut::<EditorSelection>().clear();
+                respawn_scene_objects(world, &objects);
+            }
+            if !save_editor_project(world, false) {
+                // Stay in the editor; the save error is already on the
+                // status line.
+                return;
+            }
+            world
+                .resource_mut::<NextState<EngineToolMode>>()
+                .set(EngineToolMode::Playing);
+            set_editor_status(world, format!("Playtesting startup level: {name}"));
         }
         EditorAction::ModifierCycleParam => {
             let Some((entity, editor_id)) = selected_modifier_target(world) else {
@@ -6722,7 +6775,7 @@ fn collect_working_scene(world: &mut World) -> EditorSceneDraft {
     }
 }
 
-fn save_editor_project(world: &mut World, publish: bool) {
+fn save_editor_project(world: &mut World, publish: bool) -> bool {
     let scene = collect_working_scene(world);
     let store = world.resource::<EditorProjectSession>().store.clone();
     let path = store.path().display().to_string();
@@ -6750,8 +6803,12 @@ fn save_editor_project(world: &mut World, publish: bool) {
                 rebuild_published_content_catalogs(world, &project);
             }
             set_editor_status(world, format!("Project {verb} atomically to {path}"));
+            true
         }
-        Err(error) => set_editor_status(world, format!("Save failed: {error}")),
+        Err(error) => {
+            set_editor_status(world, format!("Save failed: {error}"));
+            false
+        }
     }
 }
 
