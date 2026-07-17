@@ -20,9 +20,21 @@ preview entity / PlayableStudioHuman (in-game player integration)
 ```
 
 Never mutate entities from UI code; never serialize meshes — always the spec.
-The named-morph layer is the forward-compat contract: if a rigged, shape-keyed
-`.glb` base ever lands, the same names bind to Bevy `MorphWeights` and the
-editor/presets don't change.
+The named-morph layer is the forward-compat contract: a rigged, shape-keyed
+`.glb` base uses the same names for Bevy `MorphWeights`, so editor and preset
+data remain independent from the visual backend.
+
+## Shared rig and animation path
+
+Procedural skeletons and imported skinned GLBs both resolve to the canonical
+17-joint `SkeletonRig`. Imported scenes are mapped after `WorldInstanceReady`;
+binding is atomic and preserves each bone's authored local rest transform. The
+MVP graph is rebuilt against imported rest rotations, while gameplay continues
+to select the same `CartoonPose` states and apply the same hand and IK layers.
+
+The imported adapter recognizes Starfall, AMP, Mixamo, Blender Rigify, and
+Unreal-style naming. Character Studio exposes pending/ready/invalid diagnostics
+for missing joints, duplicate targets, and broken hierarchy paths.
 
 ## Common tasks
 
@@ -60,5 +72,9 @@ layout, JSON round-trip, empty-input). Files open in Quick Look/Blender/Bevy.
 
 ## Gaps to know about
 
-- Rigid parts only — skinning/skeletal animation is an EC4 decision.
-- Import-side modding (loading player-edited GLBs back) comes after export.
+- Generated GLB export is still rigid preview geometry; it does not yet emit
+  skin weights, the canonical skeleton, morph targets, sockets, or clips.
+- Imported rig mapping is automatic in the MVP. Persistent manual overrides,
+  T/A-pose calibration, axis/unit correction, and an import wizard are next.
+- AMP validates and animates through the shared runtime but has no morph targets
+  or embedded authored animation library.

@@ -1877,6 +1877,8 @@ fn spawn_joint(
                 kind,
                 local_translation,
                 rest_translation,
+                rest_rotation: Quat::IDENTITY,
+                rest_scale: Vec3::ONE,
             },
             Name::new(format!("Joint::{kind:?}")),
         ))

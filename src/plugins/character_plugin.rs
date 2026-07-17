@@ -1030,8 +1030,8 @@ fn apply_joint_pose(
     joint_rests: &HashMap<(Entity, JointKind), Vec3>,
 ) {
     transform.translation = marker.local_translation;
-    transform.rotation = Quat::IDENTITY;
-    transform.scale = Vec3::ONE;
+    transform.rotation = marker.rest_rotation;
+    transform.scale = marker.rest_scale;
 
     let wave = sample.phase.sin();
     let step = (sample.phase * 1.1).sin();
@@ -2810,6 +2810,47 @@ mod tests {
         assert_eq!(hands.right.grip, HandGrip::Balance);
         assert!(hands.left.spread > 0.6);
         assert!(hands.right.spread > 0.6);
+    }
+
+    #[test]
+    fn imported_joint_rest_rotation_and_scale_survive_pose_reset() {
+        let mut world = World::new();
+        let root = world.spawn_empty().id();
+        let rest_rotation = Quat::from_euler(EulerRot::XYZ, 0.18, -0.27, 0.09);
+        let rest_scale = Vec3::new(1.0, 0.96, 1.04);
+        let marker = JointMarker {
+            root,
+            kind: JointKind::Head,
+            local_translation: Vec3::new(0.0, 0.24, 0.0),
+            rest_translation: Vec3::new(0.0, 1.72, 0.0),
+            rest_rotation,
+            rest_scale,
+        };
+        let sample = PoseSample {
+            pose: CartoonPose::Idle,
+            phase: 0.0,
+            speed: 0.0,
+            scale: 1.0,
+            stride: 1.0,
+            agility: 1.0,
+            vertical_velocity: 0.0,
+            local_velocity: Vec3::ZERO,
+            grounded: true,
+            wall_normal_local: Vec3::ZERO,
+            hanging: false,
+            dodge_direction_local: Vec3::ZERO,
+            grapple_attach_local: None,
+            ik: CharacterIkPose::default(),
+            hands: HandEngine::default(),
+            wall_clasp_time: 0.0,
+        };
+        let mut transform = Transform::default();
+
+        apply_joint_pose(&marker, &mut transform, sample, &HashMap::new());
+
+        assert!(transform.rotation.angle_between(rest_rotation) < 0.001);
+        assert!(transform.scale.distance(rest_scale) < 0.001);
+        assert!(transform.translation.distance(marker.local_translation) < 0.001);
     }
 
     #[test]

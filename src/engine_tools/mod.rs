@@ -648,6 +648,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<WorldKitSandboxAssets>()
             .init_resource::<EditorTextInputCapture>()
             .init_resource::<EditorPresetLibrary>()
+            .init_resource::<EditorArmedModifier>()
             .register_type::<EditorEntityId>()
             .add_systems(Startup, bootstrap_published_content_catalogs)
             .add_systems(
@@ -1123,6 +1124,9 @@ enum EditorAction {
     PresetCompare,
     PresetFork,
     PresetNewSeedVariant,
+    ModifierCycleKind,
+    ModifierAdd,
+    ModifierRemoveLast,
     SearchRegistry,
     MaterialCycleFamily,
     MaterialCyclePreset,
@@ -1366,6 +1370,45 @@ struct EditorTextInputCapture(bool);
 struct EditorPresetLibrary {
     presets: Vec<presets::PresetRecord>,
     selected: usize,
+}
+
+/// Blender-style non-destructive modifier stack on one editor scene object.
+/// The base primitive mesh is regenerated and the stack re-applied whenever
+/// the stack changes, so the source data stays destructive-edit free.
+#[derive(Component, Debug, Clone, Default)]
+struct EditorModifierStack(Vec<crate::mesh_modifiers::MeshModifier>);
+
+/// Which modifier kind the ADD MODIFIER button is armed with (cycled by
+/// MODIFIER KIND).
+#[derive(Resource, Default)]
+struct EditorArmedModifier(usize);
+
+/// Default instances for each armable modifier kind, in cycle order.
+fn armed_modifier_template(index: usize) -> crate::mesh_modifiers::MeshModifier {
+    use crate::mesh_modifiers::{MeshModifier, ModifierAxis};
+    match index % 6 {
+        0 => MeshModifier::Mirror {
+            axis: ModifierAxis::X,
+        },
+        1 => MeshModifier::Array {
+            count: 3,
+            offset: [3.0, 0.0, 0.0],
+        },
+        2 => MeshModifier::Twist {
+            axis: ModifierAxis::Y,
+            degrees: 45.0,
+        },
+        3 => MeshModifier::Subdivide { levels: 1 },
+        4 => MeshModifier::Smooth {
+            iterations: 2,
+            factor: 0.5,
+        },
+        _ => MeshModifier::NoiseDisplace {
+            seed: 7,
+            amplitude: 0.25,
+            frequency: 1.6,
+        },
+    }
 }
 
 impl Default for EditorProjectSession {
@@ -2694,6 +2737,14 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     ));
                     spawn_editor_button(panel, 12, EditorAction::Duplicate, "DUPLICATE");
                     spawn_editor_button(panel, 13, EditorAction::Delete, "DELETE");
+                    spawn_editor_button(panel, 96, EditorAction::ModifierCycleKind, "MODIFIER KIND");
+                    spawn_editor_button(panel, 97, EditorAction::ModifierAdd, "ADD MODIFIER");
+                    spawn_editor_button(
+                        panel,
+                        98,
+                        EditorAction::ModifierRemoveLast,
+                        "REMOVE MODIFIER",
+                    );
                     spawn_editor_button(panel, 14, EditorAction::MoveXNegative, "X  −SNAP");
                     spawn_editor_button(panel, 15, EditorAction::MoveXPositive, "X  +SNAP");
                     spawn_editor_button(panel, 16, EditorAction::MoveYNegative, "Y  −SNAP");
@@ -2764,10 +2815,20 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                             EditorAction::SearchRegistry,
                             "SEARCH RECORDS",
                         );
-                        spawn_editor_button(panel, 90, EditorAction::PresetCapture, "CAPTURE PRESET");
+                        spawn_editor_button(
+                            panel,
+                            90,
+                            EditorAction::PresetCapture,
+                            "CAPTURE PRESET",
+                        );
                         spawn_editor_button(panel, 91, EditorAction::PresetNext, "NEXT PRESET");
                         spawn_editor_button(panel, 92, EditorAction::PresetApply, "APPLY PRESET");
-                        spawn_editor_button(panel, 93, EditorAction::PresetCompare, "COMPARE PRESET");
+                        spawn_editor_button(
+                            panel,
+                            93,
+                            EditorAction::PresetCompare,
+                            "COMPARE PRESET",
+                        );
                         spawn_editor_button(panel, 94, EditorAction::PresetFork, "FORK PRESET");
                         spawn_editor_button(
                             panel,
@@ -5876,7 +5937,10 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 return;
             };
             let Some(payload) = session.project.payloads.get(&record.content_id).cloned() else {
-                set_editor_status(world, format!("{} has no payload to capture", record.content_id));
+                set_editor_status(
+                    world,
+                    format!("{} has no payload to capture", record.content_id),
+                );
                 return;
             };
             let store = presets::PresetStore::for_project(session.store.path());
@@ -5913,11 +5977,13 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 return;
             };
             let mut session = world.resource_mut::<EditorProjectSession>();
-            let Some(payload) = session.project.payloads.get_mut(&preset.source_content_id)
-            else {
+            let Some(payload) = session.project.payloads.get_mut(&preset.source_content_id) else {
                 set_editor_status(
                     world,
-                    format!("{} no longer exists in this project", preset.source_content_id),
+                    format!(
+                        "{} no longer exists in this project",
+                        preset.source_content_id
+                    ),
                 );
                 return;
             };
@@ -5926,7 +5992,11 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     world.resource_mut::<EditorDocumentState>().dirty = true;
                     set_editor_status(
                         world,
-                        format!("Applied {} to {}", preset.summary(), preset.source_content_id),
+                        format!(
+                            "Applied {} to {}",
+                            preset.summary(),
+                            preset.source_content_id
+                        ),
                     );
                 }
                 Err(error) => set_editor_status(world, format!("Apply rejected: {error}")),
@@ -5942,7 +6012,10 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             let Some(payload) = session.project.payloads.get(&preset.source_content_id) else {
                 set_editor_status(
                     world,
-                    format!("{} no longer exists in this project", preset.source_content_id),
+                    format!(
+                        "{} no longer exists in this project",
+                        preset.source_content_id
+                    ),
                 );
                 return;
             };
@@ -5961,8 +6034,9 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 return;
             };
             let forked = presets::fork(preset, &library.presets);
-            let store =
-                presets::PresetStore::for_project(world.resource::<EditorProjectSession>().store.path());
+            let store = presets::PresetStore::for_project(
+                world.resource::<EditorProjectSession>().store.path(),
+            );
             match store.save(&forked) {
                 Ok(()) => {
                     let message = format!("Forked into {}", forked.summary());
@@ -5987,8 +6061,9 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     return;
                 }
             };
-            let store =
-                presets::PresetStore::for_project(world.resource::<EditorProjectSession>().store.path());
+            let store = presets::PresetStore::for_project(
+                world.resource::<EditorProjectSession>().store.path(),
+            );
             match store.save(&variant) {
                 Ok(()) => {
                     let message = format!("New-seed variant {}", variant.summary());
@@ -5999,6 +6074,71 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 }
                 Err(error) => set_editor_status(world, format!("Variant save failed: {error}")),
             }
+        }
+        EditorAction::ModifierCycleKind => {
+            let mut armed = world.resource_mut::<EditorArmedModifier>();
+            armed.0 = (armed.0 + 1) % 6;
+            let label = armed_modifier_template(armed.0).label();
+            set_editor_status(world, format!("Armed modifier: {label}"));
+        }
+        EditorAction::ModifierAdd => {
+            let Some(editor_id) = world.resource::<EditorSelection>().active() else {
+                set_editor_status(world, "Select a scene object before adding a modifier");
+                return;
+            };
+            let Some(entity) = resolve_editor_entity(world, editor_id) else {
+                set_editor_status(world, "Selected scene object is missing");
+                return;
+            };
+            let modifier = armed_modifier_template(world.resource::<EditorArmedModifier>().0);
+            let label = modifier.label();
+            match world.get_mut::<EditorModifierStack>(entity) {
+                Some(mut stack) => stack.0.push(modifier),
+                None => {
+                    world
+                        .entity_mut(entity)
+                        .insert(EditorModifierStack(vec![modifier]));
+                }
+            }
+            if remesh_modified_object(world, entity) {
+                world.resource_mut::<EditorDocumentState>().dirty = true;
+                let depth = world
+                    .get::<EditorModifierStack>(entity)
+                    .map(|stack| stack.0.len())
+                    .unwrap_or(0);
+                set_editor_status(
+                    world,
+                    format!("Added {label} to object #{} (stack depth {depth})", editor_id.0),
+                );
+            } else {
+                if let Some(mut stack) = world.get_mut::<EditorModifierStack>(entity) {
+                    stack.0.pop();
+                }
+                set_editor_status(world, "Selected object has no modifiable mesh");
+            }
+        }
+        EditorAction::ModifierRemoveLast => {
+            let Some(editor_id) = world.resource::<EditorSelection>().active() else {
+                set_editor_status(world, "Select a scene object before removing a modifier");
+                return;
+            };
+            let Some(entity) = resolve_editor_entity(world, editor_id) else {
+                set_editor_status(world, "Selected scene object is missing");
+                return;
+            };
+            let removed = world
+                .get_mut::<EditorModifierStack>(entity)
+                .and_then(|mut stack| stack.0.pop());
+            let Some(removed) = removed else {
+                set_editor_status(world, "Selected object has no modifiers");
+                return;
+            };
+            remesh_modified_object(world, entity);
+            world.resource_mut::<EditorDocumentState>().dirty = true;
+            set_editor_status(
+                world,
+                format!("Removed {} from object #{}", removed.label(), editor_id.0),
+            );
         }
         EditorAction::SearchRegistry => {
             world.resource_mut::<EditorOutlinerFilter>().active = false;
@@ -6363,10 +6503,11 @@ fn save_editor_project(world: &mut World, publish: bool) {
             &Transform,
             Option<&Name>,
             Option<&EditorMaterialBinding>,
+            Option<&EditorModifierStack>,
         )>()
         .iter(world)
         .map(
-            |(id, primitive, transform, name, material)| SceneObjectDraft {
+            |(id, primitive, transform, name, material, modifiers)| SceneObjectDraft {
                 editor_id: id.0,
                 name: name
                     .map(|name| name.as_str().to_owned())
@@ -6374,6 +6515,7 @@ fn save_editor_project(world: &mut World, publish: bool) {
                 primitive: (*primitive).into(),
                 transform: transform.into(),
                 material_id: material.map(|binding| binding.0.clone()),
+                modifiers: modifiers.map(|stack| stack.0.clone()).unwrap_or_default(),
             },
         )
         .collect::<Vec<_>>();
@@ -6474,6 +6616,12 @@ fn load_editor_project(world: &mut World, recovery_only: bool) {
             object.name.clone(),
             object.transform.into(),
         );
+        if !object.modifiers.is_empty() {
+            world
+                .entity_mut(entity)
+                .insert(EditorModifierStack(object.modifiers.clone()));
+            remesh_modified_object(world, entity);
+        }
         if let Some(material_id) = &object.material_id {
             if !apply_catalog_material(world, entity, material_id) {
                 world
@@ -6575,6 +6723,61 @@ fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
     world.resource_mut::<EditorSelection>().replace(id);
     world.resource_mut::<EditorDocumentState>().dirty = true;
     set_editor_status(world, format!("Created {kind} {}", id.0));
+}
+
+/// Base mesh for a primitive, matching the sizes used at spawn time.
+fn editor_primitive_base_mesh(primitive: EditorPrimitive) -> Option<Mesh> {
+    match primitive {
+        EditorPrimitive::Empty => None,
+        EditorPrimitive::Cube => Some(Cuboid::new(2.5, 2.5, 2.5).into()),
+        EditorPrimitive::Pillar => Some(Cylinder::new(1.15, 5.0).into()),
+        EditorPrimitive::Beacon => Some(Sphere::new(1.0).into()),
+    }
+}
+
+/// Re-derive an object's render mesh from its base primitive plus its
+/// modifier stack. The base is regenerated every time, so the stack stays
+/// non-destructive.
+fn remesh_modified_object(world: &mut World, entity: Entity) -> bool {
+    let Some(primitive) = world.get::<EditorPrimitive>(entity).copied() else {
+        return false;
+    };
+    let Some(base) = editor_primitive_base_mesh(primitive) else {
+        return false;
+    };
+    let stack = world
+        .get::<EditorModifierStack>(entity)
+        .map(|stack| stack.0.clone())
+        .unwrap_or_default();
+    let derived = if stack.is_empty() {
+        base
+    } else {
+        match crate::mesh_modifiers::apply_stack_to_mesh(&base, &stack) {
+            Some(mesh) => mesh,
+            None => return false,
+        }
+    };
+    let handle = world.resource_mut::<Assets<Mesh>>().add(derived);
+    let Some(render_entity) = find_render_mesh_entity(world, entity) else {
+        return false;
+    };
+    world.entity_mut(render_entity).insert(Mesh3d(handle));
+    true
+}
+
+/// The entity carrying the object's `Mesh3d` — the object itself or its
+/// render child.
+fn find_render_mesh_entity(world: &mut World, entity: Entity) -> Option<Entity> {
+    if world.get::<Mesh3d>(entity).is_some() {
+        return Some(entity);
+    }
+    let children = world
+        .get::<Children>(entity)?
+        .iter()
+        .collect::<Vec<Entity>>();
+    children
+        .into_iter()
+        .find(|child| world.get::<Mesh3d>(*child).is_some())
 }
 
 fn primitive_label(primitive: EditorPrimitive) -> &'static str {

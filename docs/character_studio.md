@@ -80,13 +80,20 @@ and upper thighs before outer clothing is generated. This is an invariant of
 the mesh builder, not a UI convention, so randomization and old presets cannot
 create an accidentally uncovered model.
 
-## External rig bridge
+## Unified procedural/imported rig MVP
 
-The studio now has two preview backends. **GENERATED** is the production-safe,
-fully editable procedural character. **RIG TEST** loads `Characters/AMP.glb`
-through Bevy's world-asset scene path and applies coarse height/width/depth
-scaling from the current body specification. If that scene fails to load, the
-studio automatically restores the generated preview.
+The studio has two visual backends feeding one animation contract. **GENERATED**
+builds the editable procedural character. **RIG TEST** loads
+`Characters/AMP.glb`, discovers its bone hierarchy after scene instantiation,
+and maps it atomically into the same 17-joint `SkeletonRig` used by procedural
+characters. Imported joints preserve authored translation, rotation, and scale;
+the runtime builds rest-pose-adjusted MVP clips for that rig and enables the
+same `CartoonAnimator`, gameplay pose selection, hand state, IK, and sockets.
+
+Character Studio reports `Pending`, `Ready`, or `Invalid` import status. A rig
+is rejected rather than partially animated when required joints are missing,
+multiple bones map to one canonical joint, or the hierarchy cannot be resolved.
+If the scene asset itself fails to load, the generated preview is restored.
 
 The repository asset audit found that AMP has one 40-bone skin and covers all
 17 Starfall gameplay joints, but contains no animations and no morph targets.
@@ -104,9 +111,9 @@ SF_HIP_L  SF_KNEE_L  SF_ANKLE_L
 SF_HIP_R  SF_KNEE_R  SF_ANKLE_R
 ```
 
-`rig_bridge.rs` also accepts AMP's existing Pelvis/Spine01/Spine02,
-L_Upperarm/L_Forearm/L_Hand, R equivalents, thigh/calf/foot, and neck/head
-names. Missing or duplicate canonical targets invalidate a rig.
+`rig_bridge.rs` accepts AMP's existing names plus common Mixamo, Blender
+Rigify, and Unreal-style upper-arm/forearm/hand/thigh/calf/foot aliases. Saved
+gameplay data references canonical joints only, never vendor bone names.
 
 Production shape keys must use the existing patch names:
 
@@ -128,9 +135,10 @@ more visual authoring power:
 
 1. Add collapsible Body, Face, Hair, Wardrobe, and Materials tabs with preset
    presets and thumbnail grids. This is the largest remaining RPG-maker UX gap.
-2. Author a rigged humanoid base using the documented 17-bone and 15-shape-key
-   contract. The loader/validator and fallback path are complete; the current
-   AMP diagnostic asset has a valid skin but no shape keys or animation clips.
+2. Author a production humanoid base using the documented 17-bone and
+   shape-key contract. Runtime rig discovery, validation, rest-pose retargeting,
+   shared animation, and fallback are complete; AMP still lacks editable shape
+   keys and authored animation clips.
 3. Add region selection in the viewport: selecting the head, torso, arm, or leg
    should open the matching parameter group and outline that region.
 4. Add paired/asymmetric controls for ear shape, hand/foot scale, arm/leg length
@@ -140,8 +148,14 @@ more visual authoring power:
    and equipment-clearance checks before acceptance.
 6. Add named character projects, duplicate/rename, thumbnail capture, and an
    explicit APPLY TO PLAYER SLOT action. Keep version history for recovery.
-7. Export generated characters through a tested glTF/GLB path only after rig,
-   materials, skin weights, and animation compatibility are stable.
+7. Upgrade generated GLB export from rigid preview geometry to a skinned
+   canonical skeleton with weights, sockets, morphs, and optional animations.
+
+The next rig-tooling phase is an import wizard that persists one reusable rig
+profile per asset: detected convention, manual mapping overrides, axis/unit
+normalization, T/A-pose calibration, root-motion policy, socket offsets, and
+validation results. After that come animation layers/masks, blend trees,
+timeline events, IK gizmos, retarget comparison, and equipment-clearance tests.
 
 Free vertex sculpting is deliberately not the immediate target. Unrestricted
 topology edits would make animation, collision, clothing, and multiplayer asset

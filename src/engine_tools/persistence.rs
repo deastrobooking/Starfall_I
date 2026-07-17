@@ -911,6 +911,9 @@ pub struct SceneObjectDraft {
     pub transform: TransformDraft,
     #[serde(default)]
     pub material_id: Option<String>,
+    /// Non-destructive modifier stack applied to the primitive's base mesh.
+    #[serde(default)]
+    pub modifiers: Vec<crate::mesh_modifiers::MeshModifier>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -2217,6 +2220,7 @@ mod tests {
             primitive: DraftPrimitive::Cube,
             transform: TransformDraft::default(),
             material_id: None,
+            modifiers: Vec::new(),
         });
         store.save(&mut project).unwrap();
         let loaded = store.load().unwrap();
@@ -2237,6 +2241,7 @@ mod tests {
             primitive: DraftPrimitive::Beacon,
             transform: TransformDraft::default(),
             material_id: None,
+            modifiers: Vec::new(),
         });
         store.save(&mut project).unwrap();
 
@@ -2260,6 +2265,7 @@ mod tests {
             primitive: DraftPrimitive::Cube,
             transform: TransformDraft::default(),
             material_id: None,
+            modifiers: Vec::new(),
         });
         store.save(&mut first).unwrap();
         let mut second = first.clone();
@@ -2316,6 +2322,7 @@ mod tests {
                 primitive: DraftPrimitive::Empty,
                 transform: TransformDraft::default(),
                 material_id: None,
+                modifiers: Vec::new(),
             },
             SceneObjectDraft {
                 editor_id: 4,
@@ -2323,6 +2330,7 @@ mod tests {
                 primitive: DraftPrimitive::Empty,
                 transform: TransformDraft::default(),
                 material_id: None,
+                modifiers: Vec::new(),
             },
         ]);
         let errors = validate_project(&project);
@@ -2386,6 +2394,7 @@ mod tests {
             primitive: DraftPrimitive::Beacon,
             transform: TransformDraft::default(),
             material_id: None,
+            modifiers: Vec::new(),
         });
         let changed = serde_json::to_vec(&scene).unwrap();
         assert_ne!(fnv1a_hash(&empty), fnv1a_hash(&changed));
@@ -2426,6 +2435,7 @@ mod tests {
                 ..TransformDraft::default()
             },
             material_id: None,
+            modifiers: Vec::new(),
         });
         project.scene.adapter_overrides.push(AdapterOverrideDraft {
             adapter_key: " ".into(),
@@ -2596,6 +2606,7 @@ mod tests {
             primitive: DraftPrimitive::Cube,
             transform: TransformDraft::default(),
             material_id: Some(material_id.clone()),
+            modifiers: Vec::new(),
         });
         assert!(validate_project(&project).is_empty());
 

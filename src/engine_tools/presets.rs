@@ -103,10 +103,16 @@ pub fn compare(preset: &PresetRecord, payload: &ContentPayload) -> Vec<String> {
         ));
         return differences;
     }
-    match (preset.payload.procedural_recipe(), payload.procedural_recipe()) {
+    match (
+        preset.payload.procedural_recipe(),
+        payload.procedural_recipe(),
+    ) {
         (Some(stored), Some(live)) => {
             if stored.seed != live.seed {
-                differences.push(format!("seed: preset {} vs live {}", stored.seed, live.seed));
+                differences.push(format!(
+                    "seed: preset {} vs live {}",
+                    stored.seed, live.seed
+                ));
             }
             if stored.revision != live.revision {
                 differences.push(format!(
@@ -241,8 +247,9 @@ impl PresetStore {
             }
             match std::fs::read_to_string(&path)
                 .map_err(|e| e.to_string())
-                .and_then(|json| serde_json::from_str::<PresetRecord>(&json).map_err(|e| e.to_string()))
-            {
+                .and_then(|json| {
+                    serde_json::from_str::<PresetRecord>(&json).map_err(|e| e.to_string())
+                }) {
                 Ok(preset) => presets.push(preset),
                 Err(error) => warn!("Skipping unreadable preset {}: {error}", path.display()),
             }
@@ -354,7 +361,10 @@ mod tests {
         let preset = capture(&record, &biome_payload(42), &[]);
 
         store.save(&preset).expect("first save succeeds");
-        assert!(store.save(&preset).is_err(), "same revision must not overwrite");
+        assert!(
+            store.save(&preset).is_err(),
+            "same revision must not overwrite"
+        );
 
         let variant =
             new_seed_variant(&preset, std::slice::from_ref(&preset)).expect("variant succeeds");

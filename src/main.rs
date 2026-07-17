@@ -30,6 +30,7 @@ mod hero_roster;
 mod hitstop;
 mod input_buffer;
 mod lsystem;
+mod mesh_modifiers;
 mod modular_character;
 mod perks;
 mod physics;

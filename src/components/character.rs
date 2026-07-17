@@ -154,6 +154,12 @@ pub struct JointMarker {
     pub kind: JointKind,
     pub local_translation: Vec3,
     pub rest_translation: Vec3,
+    /// Authored local-space rest orientation. Procedural joints use identity;
+    /// imported skeletons retain the orientation supplied by their DCC tool.
+    pub rest_rotation: Quat,
+    /// Authored local-space rest scale. This prevents imported bone chains
+    /// from being normalized destructively when procedural pose layers run.
+    pub rest_scale: Vec3,
 }
 
 #[derive(Component, Debug, Clone, Default)]

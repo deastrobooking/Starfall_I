@@ -35,6 +35,7 @@ use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{CharacterDesignData, CharacterDesignReturnTarget, PlayerSelectState};
 use crate::state::AppState;
 use generators::build_character_patch;
+use rig_bridge::{ImportedHumanoidRig, ImportedRigStatus};
 use spec::{CharacterSpec, MorphField, StyleField};
 
 pub struct CharacterStudioPlugin;
@@ -59,6 +60,7 @@ impl Plugin for CharacterStudioPlugin {
                     rebuild_library_rows,
                     rebuild_preview,
                     fallback_failed_rig_preview,
+                    refresh_imported_rig_status,
                     orbit_camera,
                     refresh_labels,
                     refresh_focus_highlight,
@@ -1689,6 +1691,8 @@ fn rebuild_preview(
             commands.spawn((
                 StudioPreview,
                 RiggedPreviewAsset(scene.clone()),
+                ImportedHumanoidRig::new("Characters/AMP.glb"),
+                ImportedRigStatus::Pending,
                 WorldAssetRoot(scene),
                 Transform::from_scale(Vec3::new(width, height, depth)),
             ));
@@ -1715,6 +1719,32 @@ fn fallback_failed_rig_preview(
         state.dirty = true;
         state.labels_dirty = true;
         state.status = "Rig asset failed to load; generated fallback restored".into();
+    }
+}
+
+fn refresh_imported_rig_status(
+    statuses: Query<(&ImportedHumanoidRig, &ImportedRigStatus), Changed<ImportedRigStatus>>,
+    mut state: ResMut<StudioState>,
+) {
+    for (imported, status) in &statuses {
+        state.status = match status {
+            ImportedRigStatus::Pending => format!("Loading and validating {}…", imported.source),
+            ImportedRigStatus::Ready { mapped_joint_count } => format!(
+                "RIG READY • {mapped_joint_count}/{} canonical joints • shared animation enabled",
+                crate::components::character::JointKind::HUMANOID.len()
+            ),
+            ImportedRigStatus::Invalid {
+                missing,
+                duplicate_targets,
+                unresolved_hierarchy,
+            } => format!(
+                "RIG INVALID • missing {} • duplicates {} • hierarchy errors {}",
+                missing.len(),
+                duplicate_targets.len(),
+                unresolved_hierarchy.len()
+            ),
+        };
+        state.labels_dirty = true;
     }
 }
 

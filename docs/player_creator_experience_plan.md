@@ -135,6 +135,21 @@ preset thumbnails, validation-configuration capture in the lock document, and
 Regenerate-With-Same-Seed as an explicit one-press action (today it is
 APPLY, which restores the stored seed and parameters).
 
+### Native modifier stack (Blender-inspired, clean-room)
+
+Decision (July 16, 2026): Blender itself is GPL and will not be ported;
+instead the three design features gain clean-room, Blender-inspired tools one
+bounded slice at a time. First slice delivered: `src/mesh_modifiers.rs` — a
+pure, deterministic, non-destructive modifier stack (Mirror, Array, Twist,
+Subdivide, Smooth, seed-deterministic Noise Displace) over plain triangle
+buffers with Bevy mesh interop, capped at 262k triangles. World Kit consumes
+it first: scene objects carry a `modifiers` list in the project schema
+(`serde(default)`, saved/loaded/locked with the project), and the object panel
+gains MODIFIER KIND / ADD MODIFIER / REMOVE MODIFIER buttons that re-derive
+the render mesh from the pristine base primitive on every stack edit. Next
+slices: parameter editing for armed modifiers, Character Studio part meshes,
+and Creature Forge robot geometry through the same stack.
+
 ### PM3 — Multi-level project support
 
 Replace the current single-scene workspace restriction with separate level

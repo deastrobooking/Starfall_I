@@ -10,9 +10,18 @@ use std::{collections::HashMap, f32::consts::PI, time::Duration};
 use bevy::{
     animation::{animated_field, AnimatedBy, AnimationTargetId},
     prelude::*,
+    world_serialization::WorldInstanceReady,
 };
 
-use crate::components::character::{CartoonAnimator, CartoonPose, JointKind, SkeletonRig};
+use crate::{
+    character_studio::rig_bridge::{
+        canonical_joint_for_bone, ImportedHumanoidRig, ImportedRigStatus,
+    },
+    components::character::{
+        CartoonAnimator, CartoonPose, CharacterIkPose, HandEngine, JointKind, JointMarker,
+        SkeletonRig,
+    },
+};
 
 const GRAPH_POSES: [CartoonPose; 8] = [
     CartoonPose::Idle,
@@ -57,7 +66,8 @@ pub struct CharacterAnimationMvpPlugin;
 impl Plugin for CharacterAnimationMvpPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, build_animation_library)
-            .add_systems(Update, attach_animation_graph_to_new_rigs);
+            .add_systems(Update, attach_animation_graph_to_new_rigs)
+            .add_observer(bind_imported_humanoid_rig);
     }
 }
 
@@ -79,21 +89,25 @@ fn build_animation_library(
 fn attach_animation_graph_to_new_rigs(
     mut commands: Commands,
     library: Res<CharacterAnimationLibrary>,
-    rigs: Query<(Entity, &SkeletonRig), Added<SkeletonRig>>,
+    mut clips: ResMut<Assets<AnimationClip>>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
+    rigs: Query<(Entity, &SkeletonRig, Option<&ImportedHumanoidRig>), Added<SkeletonRig>>,
+    joints: Query<&JointMarker>,
 ) {
-    for (root, rig) in &rigs {
+    for (root, rig, imported) in &rigs {
+        let (graph, nodes) = if imported.is_some() {
+            build_retargeted_library(rig, &joints, &mut clips, &mut graphs)
+        } else {
+            (library.graph.clone(), library.nodes.clone())
+        };
         let mut player = AnimationPlayer::default();
         let mut transitions = AnimationTransitions::new();
         transitions
-            .play(
-                &mut player,
-                library.nodes[&CartoonPose::Idle],
-                Duration::ZERO,
-            )
+            .play(&mut player, nodes[&CartoonPose::Idle], Duration::ZERO)
             .repeat();
 
         commands.entity(root).insert((
-            AnimationGraphHandle(library.graph.clone()),
+            AnimationGraphHandle(graph),
             player,
             transitions,
             GraphPlaybackState {
@@ -110,6 +124,171 @@ fn attach_animation_graph_to_new_rigs(
             }
         }
     }
+}
+
+fn build_retargeted_library(
+    rig: &SkeletonRig,
+    joints: &Query<&JointMarker>,
+    clips: &mut Assets<AnimationClip>,
+    graphs: &mut Assets<AnimationGraph>,
+) -> (
+    Handle<AnimationGraph>,
+    HashMap<CartoonPose, AnimationNodeIndex>,
+) {
+    let rest_rotations = GRAPH_JOINTS
+        .into_iter()
+        .filter_map(|joint| {
+            let entity = *rig.joints.get(&joint)?;
+            Some((joint, joints.get(entity).ok()?.rest_rotation))
+        })
+        .collect::<HashMap<_, _>>();
+    let handles = GRAPH_POSES.map(|pose| clips.add(build_clip_with_rest(pose, &rest_rotations)));
+    let (graph, node_indices) = AnimationGraph::from_clips(handles);
+    let nodes = GRAPH_POSES.into_iter().zip(node_indices).collect();
+    (graphs.add(graph), nodes)
+}
+
+/// Convert a loaded skinned hierarchy into the same canonical rig used by
+/// procedural characters. Binding is atomic: incomplete or ambiguous rigs
+/// retain a diagnostic status and receive no partial animation components.
+fn bind_imported_humanoid_rig(
+    ready: On<WorldInstanceReady>,
+    mut commands: Commands,
+    children: Query<&Children>,
+    names: Query<&Name>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
+    imported_roots: Query<(
+        &ImportedHumanoidRig,
+        &Transform,
+        Option<&CartoonAnimator>,
+        Option<&HandEngine>,
+        Option<&CharacterIkPose>,
+    )>,
+) {
+    let root = ready.entity;
+    let Ok((imported, root_transform, animator, hands, ik)) = imported_roots.get(root) else {
+        return;
+    };
+
+    let mut joints = HashMap::new();
+    let mut duplicate_targets = Vec::new();
+    for entity in children.iter_descendants(root) {
+        let Ok(name) = names.get(entity) else {
+            continue;
+        };
+        let Some(kind) = canonical_joint_for_bone(name.as_str()) else {
+            continue;
+        };
+        if joints.insert(kind, entity).is_some() && !duplicate_targets.contains(&kind) {
+            duplicate_targets.push(kind);
+        }
+    }
+    duplicate_targets.sort_by_key(|joint| *joint as u8);
+    let missing = JointKind::HUMANOID
+        .into_iter()
+        .filter(|kind| !joints.contains_key(kind))
+        .collect::<Vec<_>>();
+
+    if !missing.is_empty() || !duplicate_targets.is_empty() {
+        warn!(
+            "Imported humanoid '{}' rejected: missing={missing:?}, duplicates={duplicate_targets:?}",
+            imported.source
+        );
+        commands.entity(root).insert(ImportedRigStatus::Invalid {
+            missing,
+            duplicate_targets,
+            unresolved_hierarchy: Vec::new(),
+        });
+        return;
+    }
+
+    let mut bindings = Vec::with_capacity(joints.len());
+    let mut unresolved_hierarchy = Vec::new();
+    for (&kind, &entity) in &joints {
+        let (Ok(local), Some(rest_translation)) = (
+            transforms.get(entity),
+            root_relative_translation(root, entity, &transforms, &parents),
+        ) else {
+            unresolved_hierarchy.push(kind);
+            continue;
+        };
+        bindings.push((
+            entity,
+            JointMarker {
+                root,
+                kind,
+                local_translation: local.translation,
+                rest_translation,
+                rest_rotation: local.rotation,
+                rest_scale: local.scale,
+            },
+        ));
+    }
+    unresolved_hierarchy.sort_by_key(|joint| *joint as u8);
+    if !unresolved_hierarchy.is_empty() {
+        warn!(
+            "Imported humanoid '{}' rejected: unresolved hierarchy={unresolved_hierarchy:?}",
+            imported.source
+        );
+        commands.entity(root).insert(ImportedRigStatus::Invalid {
+            missing: Vec::new(),
+            duplicate_targets: Vec::new(),
+            unresolved_hierarchy,
+        });
+        return;
+    }
+    for (entity, marker) in bindings {
+        commands.entity(entity).insert(marker);
+    }
+
+    let mut root_commands = commands.entity(root);
+    root_commands.insert((
+        SkeletonRig {
+            joints: joints.clone(),
+        },
+        ImportedRigStatus::Ready {
+            mapped_joint_count: joints.len(),
+        },
+    ));
+    if animator.is_none() {
+        root_commands.insert(CartoonAnimator::new(root_transform.translation));
+    }
+    if hands.is_none() {
+        root_commands.insert(HandEngine::default());
+    }
+    if ik.is_none() {
+        root_commands.insert(CharacterIkPose::default());
+    }
+    info!(
+        "Imported humanoid '{}' bound to {} canonical joints",
+        imported.source,
+        joints.len()
+    );
+}
+
+fn root_relative_translation(
+    root: Entity,
+    entity: Entity,
+    transforms: &Query<&Transform>,
+    parents: &Query<&ChildOf>,
+) -> Option<Vec3> {
+    let mut current = entity;
+    let mut chain = Vec::new();
+    for _ in 0..128 {
+        if current == root {
+            let relative = chain
+                .into_iter()
+                .rev()
+                .fold(GlobalTransform::IDENTITY, |parent, local| {
+                    parent.mul_transform(local)
+                });
+            return Some(relative.translation());
+        }
+        chain.push(*transforms.get(current).ok()?);
+        current = parents.get(current).ok()?.parent();
+    }
+    None
 }
 
 /// Synchronizes gameplay pose selection with the graph. Unsupported action
@@ -176,11 +355,22 @@ fn target_id(joint: JointKind) -> AnimationTargetId {
 }
 
 fn build_clip(pose: CartoonPose) -> AnimationClip {
+    build_clip_with_rest(pose, &HashMap::new())
+}
+
+fn build_clip_with_rest(
+    pose: CartoonPose,
+    rest_rotations: &HashMap<JointKind, Quat>,
+) -> AnimationClip {
     let duration = clip_duration(pose);
     let mut clip = AnimationClip::default();
 
     for joint in GRAPH_JOINTS {
-        let [start, middle, end] = joint_rotations(pose, joint);
+        let rest = rest_rotations
+            .get(&joint)
+            .copied()
+            .unwrap_or(Quat::IDENTITY);
+        let [start, middle, end] = joint_rotations(pose, joint).map(|rotation| rest * rotation);
         clip.add_curve_to_target(
             target_id(joint),
             AnimatableCurve::new(
