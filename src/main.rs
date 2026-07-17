@@ -82,31 +82,47 @@ use upgrades::UpgradeLedger;
 fn main() {
     install_crash_logger();
 
+    let mut app = build_app();
+    apply_boot_overrides(&mut app);
+    app.run();
+}
+
+/// Constructs the complete production app without starting its runner.
+///
+/// Keeping construction separate from `main` gives smoke tests and future
+/// platform launchers one authoritative plugin/resource registration boundary.
+pub fn build_app() -> App {
     let mut app = App::new();
 
-    app
-        // Default plugins with window setup
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Starfall I".to_string(),
-                        resolution: WindowResolution::new(1280, 720),
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(ImagePlugin::default_nearest())
-                .set(AssetPlugin {
-                    file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Starfall I".to_string(),
+                    resolution: WindowResolution::new(1280, 720),
                     ..default()
                 }),
-        )
-        // Physics
-        .add_plugins(PhysicsPlugins::default())
-        .add_plugins(PhysicsCompatPlugin)
-        // State
-        .init_state::<AppState>()
+                ..default()
+            })
+            .set(ImagePlugin::default_nearest())
+            .set(AssetPlugin {
+                file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+                ..default()
+            }),
+    )
+    // Physics
+    .add_plugins(PhysicsPlugins::default())
+    .add_plugins(PhysicsCompatPlugin);
+
+    configure_starfall_app(&mut app, true);
+    app
+}
+
+/// Registers Starfall's state, resources, and game plugins independently from
+/// the platform/window plugin group. Tests use the same registration boundary
+/// without constructing macOS' process-global event loop.
+fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
+    app.init_state::<AppState>()
         // Global resources
         .init_resource::<WaveInfo>()
         .init_resource::<GameSettings>()
@@ -164,41 +180,46 @@ fn main() {
         // active through SfxPlugin and can be overridden action by action.
         .add_plugins(audio_player::MusicPlayerPlugin)
         // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
-        .add_plugins(input_buffer::InputBufferPlugin)
-        .add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
-        .add_plugins(MaterialPlugin::<rendering::WaterMaterial>::default())
-        .add_plugins(MaterialPlugin::<rendering::EnergyMaterial>::default())
-        .add_plugins(MaterialPlugin::<rendering::ShieldMaterial>::default())
-        .add_plugins(MaterialPlugin::<rendering::IceMaterial>::default())
-        .add_plugins(MaterialPlugin::<rendering::LavaMaterial>::default())
-        // Game plugins
-        .add_plugins((
-            InputPlugin,
-            UiPlugin,
-            WorldPlugin,
-            PlayerPlugin,
-            CharacterPlugin,
-            CharacterDesignPlugin,
-            WeaponPlugin,
-            EnemyPlugin,
-            HackingPlugin,
-            ChestPlugin,
-            CompanionPlugin,
-            ArmorPlugin,
-            CraftingPlugin,
-            SavePlugin,
-        ))
-        .add_plugins((
-            ChapterPlugin,
-            DiscoverablePlugin,
-            RadioPlugin,
-            VehiclePlugin,
-            RobotGaragePlugin,
-            ModularCharacterPlugin,
-            character_studio::CharacterStudioPlugin,
-            CreatureForgePlugin,
-        ));
+        .add_plugins(input_buffer::InputBufferPlugin);
 
+    if add_render_materials {
+        app.add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
+            .add_plugins(MaterialPlugin::<rendering::WaterMaterial>::default())
+            .add_plugins(MaterialPlugin::<rendering::EnergyMaterial>::default())
+            .add_plugins(MaterialPlugin::<rendering::ShieldMaterial>::default())
+            .add_plugins(MaterialPlugin::<rendering::IceMaterial>::default())
+            .add_plugins(MaterialPlugin::<rendering::LavaMaterial>::default());
+    }
+
+    app.add_plugins((
+        InputPlugin,
+        UiPlugin,
+        WorldPlugin,
+        PlayerPlugin,
+        CharacterPlugin,
+        CharacterDesignPlugin,
+        WeaponPlugin,
+        EnemyPlugin,
+        HackingPlugin,
+        ChestPlugin,
+        CompanionPlugin,
+        ArmorPlugin,
+        CraftingPlugin,
+        SavePlugin,
+    ))
+    .add_plugins((
+        ChapterPlugin,
+        DiscoverablePlugin,
+        RadioPlugin,
+        VehiclePlugin,
+        RobotGaragePlugin,
+        ModularCharacterPlugin,
+        character_studio::CharacterStudioPlugin,
+        CreatureForgePlugin,
+    ));
+}
+
+fn apply_boot_overrides(app: &mut App) {
     if std::env::var_os("STARFALL_AUTOSTART").is_some() {
         app.insert_state(AppState::Playing);
     }
@@ -212,8 +233,6 @@ fn main() {
         app.insert_state(AppState::Playing);
         app.insert_state(EngineToolMode::Editing);
     }
-
-    app.run();
 }
 
 fn install_crash_logger() {
@@ -224,4 +243,43 @@ fn install_crash_logger() {
         let _ = platform_paths::write_crash_report(&log);
         default_hook(panic_info);
     }));
+}
+
+#[cfg(test)]
+mod app_smoke_tests {
+    use super::*;
+    use bevy::ecs::message::Messages;
+
+    fn build_headless_app() -> App {
+        use bevy::state::app::StatesPlugin;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin, AssetPlugin::default()));
+        configure_starfall_app(&mut app, false);
+        app
+    }
+
+    #[test]
+    fn app_constructs_with_core_state_resources_messages_and_plugins() {
+        let app = build_headless_app();
+        let world = app.world();
+
+        assert_eq!(
+            world.resource::<State<AppState>>().get(),
+            &AppState::MainMenu
+        );
+        assert!(world.contains_resource::<LocalPlayerConfig>());
+        assert!(world.contains_resource::<PlayerSelectState>());
+        assert!(world.contains_resource::<GameSettings>());
+        assert!(world.contains_resource::<Messages<events::UiMessageEvent>>());
+        assert!(world.contains_resource::<Messages<events::PlayerDamagedEvent>>());
+
+        assert!(app.is_plugin_added::<game_loop::GameLoopPlugin>());
+        assert!(app.is_plugin_added::<EventsPlugin>());
+        assert!(app.is_plugin_added::<InputPlugin>());
+        assert!(app.is_plugin_added::<PlayerPlugin>());
+        assert!(app.is_plugin_added::<WeaponPlugin>());
+        assert!(app.is_plugin_added::<WorldPlugin>());
+        assert!(app.is_plugin_added::<SavePlugin>());
+    }
 }

@@ -1,4 +1,4 @@
-use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
+use avian3d::prelude::{RayHitData, SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
 
 use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary};
@@ -14,6 +14,10 @@ use crate::events::*;
 use crate::game_rng::GameRng;
 use crate::hacking::HackedUnit;
 use crate::hitstop::HitstopState;
+use crate::physics::{
+    prelude::{CollisionProfile, GameCollisionLayer},
+    world_line_of_sight,
+};
 use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::resources::DungeonCrawlState;
 use crate::state::AppState;
@@ -116,6 +120,7 @@ impl Plugin for WeaponPlugin {
                     special_weapon_system,
                     tracking_missile_system.before(projectile_update_system),
                     sync_target_lock_visual.after(tracking_missile_system),
+                    assign_projectile_collision_profiles.before(projectile_update_system),
                     projectile_update_system,
                     melee_combo_system,
                     beam_sabre_update_system,
@@ -126,6 +131,17 @@ impl Plugin for WeaponPlugin {
                 )
                     .run_if(in_state(AppState::Playing)),
             );
+    }
+}
+
+fn assign_projectile_collision_profiles(
+    mut commands: Commands,
+    projectile_q: Query<Entity, Added<Projectile>>,
+) {
+    for entity in projectile_q.iter() {
+        commands
+            .entity(entity)
+            .insert(CollisionProfile::PlayerProjectile);
     }
 }
 
@@ -1561,20 +1577,15 @@ fn steer_toward_direction(current: Vec3, desired: Vec3, max_radians: f32) -> Vec
     }
 }
 
-fn segment_point_distance_squared(start: Vec3, end: Vec3, point: Vec3) -> f32 {
-    let segment = end - start;
-    let length_squared = segment.length_squared();
-    if length_squared <= f32::EPSILON {
-        return start.distance_squared(point);
-    }
-    let t = ((point - start).dot(segment) / length_squared).clamp(0.0, 1.0);
-    (start + segment * t).distance_squared(point)
+fn sort_projectile_collisions(collisions: &mut [RayHitData]) {
+    collisions.sort_by(|a, b| a.distance.total_cmp(&b.distance));
 }
 
 // ── Projectile Update ─────────────────────────────────────────────────────────
 fn projectile_update_system(
     mut commands: Commands,
     time: Res<Time>,
+    spatial_query: SpatialQuery,
     mut proj_q: Query<(
         Entity,
         &mut Transform,
@@ -1605,6 +1616,7 @@ fn projectile_update_system(
             Without<HackedUnit>,
         ),
     >,
+    ignored_target_q: Query<(), Or<(With<DeadEnemy>, With<HackedUnit>)>>,
     mut enemy_damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut enemy_killed_ev: MessageWriter<EnemyKilledEvent>,
     mut impact_ev: MessageWriter<CombatImpactEvent>,
@@ -1625,6 +1637,7 @@ fn projectile_update_system(
         if proj.lifetime <= 0.0 {
             if proj.is_explosive {
                 explode(
+                    &spatial_query,
                     &proj_transform.translation,
                     proj.explosion_radius,
                     proj.damage,
@@ -1636,6 +1649,7 @@ fn projectile_update_system(
                     &mut impact_ev,
                 );
                 damage_road_vehicles_in_radius(
+                    &spatial_query,
                     &proj_transform.translation,
                     proj.explosion_radius,
                     proj.damage,
@@ -1650,6 +1664,7 @@ fn projectile_update_system(
         if proj_transform.translation.y < 0.0 {
             if proj.is_explosive {
                 explode(
+                    &spatial_query,
                     &proj_transform.translation,
                     proj.explosion_radius,
                     proj.damage,
@@ -1661,6 +1676,7 @@ fn projectile_update_system(
                     &mut impact_ev,
                 );
                 damage_road_vehicles_in_radius(
+                    &spatial_query,
                     &proj_transform.translation,
                     proj.explosion_radius,
                     proj.damage,
@@ -1672,102 +1688,126 @@ fn projectile_update_system(
             continue;
         }
 
+        let displacement = proj_transform.translation - previous_position;
+        let query_filter =
+            SpatialQueryFilter::from_mask([GameCollisionLayer::World, GameCollisionLayer::Enemy])
+                .with_excluded_entities(proj.owner);
+        let mut collisions = Dir3::new(displacement)
+            .ok()
+            .map(|direction| {
+                spatial_query.ray_hits(
+                    previous_position,
+                    direction,
+                    displacement.length(),
+                    64,
+                    true,
+                    &query_filter,
+                )
+            })
+            .unwrap_or_default();
+        collisions.retain(|collision| !ignored_target_q.contains(collision.entity));
+        sort_projectile_collisions(&mut collisions);
+
         let mut hit = false;
         let mut explosion: Option<(Vec3, f32, f32, DamageType)> = None;
 
-        for (e_entity, e_transform, mut e_health, mut e_damageable, enemy) in enemy_q.iter_mut() {
-            if !e_health.is_alive() {
-                continue;
-            }
-            let target_center = e_transform.translation + Vec3::Y * 0.9;
-            if segment_point_distance_squared(
-                previous_position,
-                proj_transform.translation,
-                target_center,
-            ) < 1.75_f32.powi(2)
-            {
-                if proj.is_explosive {
-                    explosion = Some((
-                        proj_transform.translation,
-                        proj.explosion_radius,
-                        proj.damage,
-                        proj.damage_type,
-                    ));
-                    hit = true;
-                    break;
-                } else {
-                    let push = (e_transform.translation - proj_transform.translation)
-                        .with_y(0.0)
-                        .normalize_or_zero()
-                        + Vec3::Y * 0.2;
-                    let mut info = DamageInfo::new(proj.damage, proj.damage_type)
-                        .with_knockback(2.2)
-                        .with_hit_direction(push);
-                    if is_critical {
-                        info = info.critical();
-                    }
-                    let result = apply_damage(&mut e_health, &mut e_damageable, &info);
-                    enemy_damaged_ev.write(EnemyDamagedEvent {
-                        entity: e_entity,
-                        damage: result.damage_amount,
-                        position: e_transform.translation,
-                    });
-                    impact_ev.write(CombatImpactEvent {
-                        position: e_transform.translation,
-                        damage: result.damage_amount,
-                        damage_type: proj.damage_type,
-                        is_critical: result.was_critical,
-                    });
-                    if result.was_killed {
-                        enemy_killed_ev.write(EnemyKilledEvent {
-                            enemy_type: enemy.enemy_type.as_str().to_string(),
-                            credits: enemy.config.credits,
-                            experience: enemy.config.experience_value,
-                            position: e_transform.translation,
-                        });
-                    }
-                }
-                if !proj.piercing {
-                    hit = true;
-                    break;
-                }
-            }
-        }
+        for collision in collisions {
+            let impact_position =
+                previous_position + displacement.normalize_or_zero() * collision.distance;
 
-        if !hit {
-            for (_, v_transform, mut v_health, mut v_damageable, vehicle) in
-                road_vehicle_q.iter_mut()
+            if let Ok((e_entity, e_transform, mut e_health, mut e_damageable, enemy)) =
+                enemy_q.get_mut(collision.entity)
             {
-                if !v_health.is_alive() {
-                    continue;
-                }
-                if segment_point_distance_squared(
-                    previous_position,
-                    proj_transform.translation,
-                    v_transform.translation,
-                ) < vehicle.hit_radius.powi(2)
-                {
+                if e_health.is_alive() {
                     if proj.is_explosive {
                         explosion = Some((
-                            proj_transform.translation,
+                            impact_position,
                             proj.explosion_radius,
                             proj.damage,
                             proj.damage_type,
                         ));
                     } else {
-                        let info = DamageInfo::new(proj.damage, proj.damage_type);
-                        apply_damage(&mut v_health, &mut v_damageable, &info);
+                        let push = (e_transform.translation - impact_position)
+                            .with_y(0.0)
+                            .normalize_or_zero()
+                            + Vec3::Y * 0.2;
+                        let mut info = DamageInfo::new(proj.damage, proj.damage_type)
+                            .with_knockback(2.2)
+                            .with_hit_direction(push);
+                        if is_critical {
+                            info = info.critical();
+                        }
+                        let result = apply_damage(&mut e_health, &mut e_damageable, &info);
+                        enemy_damaged_ev.write(EnemyDamagedEvent {
+                            entity: e_entity,
+                            damage: result.damage_amount,
+                            position: e_transform.translation,
+                        });
+                        impact_ev.write(CombatImpactEvent {
+                            position: impact_position,
+                            damage: result.damage_amount,
+                            damage_type: proj.damage_type,
+                            is_critical: result.was_critical,
+                        });
+                        if result.was_killed {
+                            enemy_killed_ev.write(EnemyKilledEvent {
+                                enemy_type: enemy.enemy_type.as_str().to_string(),
+                                credits: enemy.config.credits,
+                                experience: enemy.config.experience_value,
+                                position: e_transform.translation,
+                            });
+                        }
                     }
-                    if !proj.piercing {
-                        hit = true;
+                    hit = proj.is_explosive || !proj.piercing;
+                    if hit {
+                        proj_transform.translation = impact_position;
                         break;
                     }
                 }
+            } else if let Ok((_, _, mut health, mut damageable, _)) =
+                road_vehicle_q.get_mut(collision.entity)
+            {
+                if health.is_alive() {
+                    if proj.is_explosive {
+                        explosion = Some((
+                            impact_position,
+                            proj.explosion_radius,
+                            proj.damage,
+                            proj.damage_type,
+                        ));
+                    } else {
+                        apply_damage(
+                            &mut health,
+                            &mut damageable,
+                            &DamageInfo::new(proj.damage, proj.damage_type),
+                        );
+                    }
+                    hit = proj.is_explosive || !proj.piercing;
+                    if hit {
+                        proj_transform.translation = impact_position;
+                        break;
+                    }
+                }
+            } else {
+                // The nearest collider is world geometry. Projectiles never
+                // pass through it, including charged/piercing shots.
+                if proj.is_explosive {
+                    explosion = Some((
+                        impact_position,
+                        proj.explosion_radius,
+                        proj.damage,
+                        proj.damage_type,
+                    ));
+                }
+                hit = true;
+                proj_transform.translation = impact_position;
+                break;
             }
         }
 
         if let Some((pos, radius, dmg, damage_type)) = explosion {
             explode(
+                &spatial_query,
                 &pos,
                 radius,
                 dmg,
@@ -1778,7 +1818,14 @@ fn projectile_update_system(
                 &mut enemy_killed_ev,
                 &mut impact_ev,
             );
-            damage_road_vehicles_in_radius(&pos, radius, dmg, damage_type, &mut road_vehicle_q);
+            damage_road_vehicles_in_radius(
+                &spatial_query,
+                &pos,
+                radius,
+                dmg,
+                damage_type,
+                &mut road_vehicle_q,
+            );
         }
         if hit {
             commands.entity(proj_entity).despawn();
@@ -1787,6 +1834,7 @@ fn projectile_update_system(
 }
 
 fn explode(
+    spatial_query: &SpatialQuery,
     center: &Vec3,
     radius: f32,
     base_damage: f32,
@@ -1810,7 +1858,10 @@ fn explode(
             continue;
         }
         let dist = center.distance(e_transform.translation);
-        if dist <= radius {
+        let target_point = e_transform.translation + Vec3::Y * 0.9;
+        if dist <= radius
+            && world_line_of_sight(spatial_query, *center, target_point, Some(e_entity))
+        {
             let damage = area_damage_falloff(base_damage, dist, radius).max(1.0);
             let blast = (e_transform.translation - *center)
                 .with_y(0.0)
@@ -1849,6 +1900,7 @@ fn explode(
 }
 
 fn damage_road_vehicles_in_radius(
+    spatial_query: &SpatialQuery,
     center: &Vec3,
     radius: f32,
     base_damage: f32,
@@ -1869,12 +1921,19 @@ fn damage_road_vehicles_in_radius(
         ),
     >,
 ) {
-    for (_, transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
+    for (entity, transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
         if !health.is_alive() {
             continue;
         }
         let dist = center.distance(transform.translation);
-        if dist <= radius + vehicle.hit_radius {
+        if dist <= radius + vehicle.hit_radius
+            && world_line_of_sight(
+                spatial_query,
+                *center,
+                transform.translation + Vec3::Y * 0.5,
+                Some(entity),
+            )
+        {
             let damage =
                 area_damage_falloff(base_damage, dist, radius + vehicle.hit_radius).max(1.0);
             let info = DamageInfo::new(damage, damage_type);
@@ -2590,13 +2649,27 @@ mod tracking_missile_tests {
     }
 
     #[test]
-    fn swept_collision_catches_fast_projectile_between_frames() {
-        let distance = segment_point_distance_squared(
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec3::new(0.0, 1.0, 18.0),
-            Vec3::new(0.4, 1.0, 9.0),
-        );
-        assert!(distance < 1.75_f32.powi(2));
+    fn swept_collisions_are_resolved_nearest_first() {
+        let mut world = World::new();
+        let near = world.spawn_empty().id();
+        let far = world.spawn_empty().id();
+        let mut collisions = vec![
+            RayHitData {
+                entity: far,
+                distance: 14.0,
+                normal: Vec3::NEG_Z,
+            },
+            RayHitData {
+                entity: near,
+                distance: 3.0,
+                normal: Vec3::NEG_Z,
+            },
+        ];
+
+        sort_projectile_collisions(&mut collisions);
+
+        assert_eq!(collisions[0].entity, near);
+        assert_eq!(collisions[1].entity, far);
     }
 
     #[test]

@@ -19,33 +19,33 @@
 
 ## Confirmed findings
 
-### Projectile collision is not world-authoritative
+### Projectile collision world authority — addressed July 17, 2026
 
-`projectile_update_system` moves each projectile in `Update`, then performs a
-manual swept segment-to-point test over every living enemy and, if no enemy was
-hit, every road vehicle. It does not query terrain, walls, rails, props, or
-dungeon collision and does not compare the nearest target hit with the nearest
-world obstruction. Explosions also use distance-only target scans without
-world occlusion.
+Player and enemy projectiles now sweep their full per-frame travel through
+Avian `SpatialQuery` using canonical collision-layer masks. Player shots sort
+all candidate hits by distance: piercing shots can continue through hostile
+hurtboxes, while every shot stops at the first world obstruction. Explosions
+are relocated to the resolved impact point. Enemy shots use the same nearest
+world/player rule instead of endpoint-only distance checks.
 
-The current cost is proportional to projectiles multiplied by candidate
-targets, and an enemy can be damaged through blocking geometry. Aim obstruction
-already uses Avian `SpatialQuery`, but projectile travel does not.
+`src/physics.rs` now owns the stable World, Player, Enemy, PlayerProjectile,
+EnemyProjectile, and Interaction layer meanings. Player bodies, enemy sensor
+hurtboxes, and damageable road vehicles have explicit profiles; legacy world
+colliders receive World automatically through the compatibility sync.
 
-First safe slice:
+Explosion cover follow-up landed in the same collision pass: radial damage from
+player explosives, enemy fireballs, and boss shockwaves now requires a clear
+World-layer path to each target. The query biases away from the blast origin,
+excludes the target's own collider, and retains distance falloff after cover is
+accepted. A live Avian fixture verifies wall blocking, an open path above the
+wall, and target-collider exclusion.
 
-1. Cast the swept projectile segment against world geometry and retain the
-   nearest obstruction distance/position.
-2. Compare candidate target intersection distance with that obstruction so the
-   closest valid impact wins.
-3. Explode at the resolved impact position and define whether blast occlusion
-   is required by weapon profile.
-4. Add wall-before-enemy, high-speed, terrain, explosive-position, and piercing
-   regression tests.
+Remaining follow-up:
 
-Full hurtbox collision layers and physics broad-phase targeting belong to EC2;
-they should not be smuggled into the first obstruction fix without a layer and
-ownership design.
+1. Add representative terrain, dungeon-door, piercing-chain, and four-player
+   projectile load fixtures beyond the landed wall/cover fixture.
+2. Expand EC2 beyond projectile/body roles into move-scoped melee hitbox,
+   pushbox, grapple-sensor, and interaction profiles.
 
 ### Combat timing remains frame-scheduled
 

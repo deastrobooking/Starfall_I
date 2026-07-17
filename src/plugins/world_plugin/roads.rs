@@ -1298,6 +1298,7 @@ pub(super) fn spawn_settlement_speed_ring(
             Damageable::default(),
             crate::physics::prelude::RigidBody::KinematicPositionBased,
             crate::physics::prelude::Collider::cuboid(3.2, 0.85, 5.1),
+            crate::physics::prelude::CollisionProfile::VehicleHurtbox,
         ));
     }
 
@@ -1979,6 +1980,7 @@ pub(super) fn spawn_npc_road_vehicles(
                 Damageable::default(),
                 crate::physics::prelude::RigidBody::KinematicPositionBased,
                 crate::physics::prelude::Collider::cuboid(4.1, 1.25, 6.6),
+                crate::physics::prelude::CollisionProfile::VehicleHurtbox,
             ));
             spawned += 1;
         }

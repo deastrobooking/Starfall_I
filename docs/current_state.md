@@ -47,8 +47,8 @@
 
 ## Current production order
 
-1. Add a reusable app-construction seam and startup/plugin smoke tests. This is
-   the safety boundary for further refactoring.
+1. Maintain the reusable app-construction seam and headless startup/plugin
+   smoke test now covering the authoritative registration boundary.
 2. Design the schema-compatible base-stat/derived-cap contract so authored,
    leveled, equipped, and loaded maximum health cannot overwrite each other.
 3. Continue mechanical hotspot extraction: world terrain, settlements, and

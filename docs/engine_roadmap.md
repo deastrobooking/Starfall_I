@@ -199,9 +199,14 @@ gameplay logic; hits produce hitstop + knockback + shake.
 `run_if(hitstop_inactive)`) + the `src/combat_feedback.rs` reaction layer
 (flinch with `Without<Flinch>` AI/attack filters, hit-flash orbs, death
 dissolve, split-screen damage numbers, proximity outgoing shake, rumble hook).
-2 hitstop unit tests; suite 244. Remaining EC2: collision layers, `MoveDef`
-frame-data assets, per-move cancel windows/i-frames, player-received
-knockback.
+2 hitstop unit tests; suite 244. **Collision foundation landed 2026-07-17:**
+typed Avian World/Player/Enemy/PlayerProjectile/EnemyProjectile/Interaction
+layers, sensor hurtboxes, vehicle profiles, and nearest-first world-authoritative
+projectile sweeps are live. Radial player/enemy/boss damage now respects
+World-layer cover, backed by a live Avian wall/target-exclusion fixture.
+Remaining EC2: move-scoped melee hitbox/pushbox/
+grapple/interaction profiles, `MoveDef` expansion, per-move cancel windows and
+i-frames, and player-received knockback.
 **Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
 synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no
@@ -219,8 +224,8 @@ every gameplay `thread_rng()`; sole exemption: camera-shake offset
 fallback); `melee_combo_system` rebuilt as a Startup→Active→Recovery phase
 machine with cancel-window chaining and per-move hitstop. Loot drops tiered by
 enemy type (champion = guaranteed core + extra rolls). Remaining EC2:
-collision layers, per-move i-frames, player-received knockback, MoveDefs for
-sabre/ranged.
+the remaining move-scoped collision roles, per-move i-frames, player-received
+knockback, and MoveDefs for sabre/ranged.
 **Boss variety (2026-07-15):** RiftBoss + MechBoss controllers
 (`enemy_plugin.rs`, components in `enemy.rs` with shared `boss_phase()`)
 close gameplay-review item #3 — all boss factions mechanically distinct.

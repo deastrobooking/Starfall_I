@@ -1,3 +1,6 @@
+use avian3d::prelude::{
+    Collider as AvianCollider, Sensor, ShapeCastConfig, SpatialQuery, SpatialQueryFilter,
+};
 use bevy::prelude::*;
 use rand::Rng;
 
@@ -19,6 +22,10 @@ use crate::events::*;
 use crate::game_rng::GameRng;
 use crate::hacking::{Hackable, HackedUnit};
 use crate::hitstop::hitstop_inactive;
+use crate::physics::{
+    prelude::{Collider, CollisionProfile, GameCollisionLayer, RigidBody},
+    world_line_of_sight,
+};
 use crate::rendering::PbrBundle;
 use crate::resources::{PlaySessionTransition, WaveInfo};
 use crate::robot_pets::{salvage_for_enemy, RobotPetCollection};
@@ -56,6 +63,8 @@ impl Plugin for EnemyPlugin {
                     dragon_boss_system.run_if(hitstop_inactive),
                     rift_boss_system.run_if(hitstop_inactive),
                     mech_boss_system.run_if(hitstop_inactive),
+                    assign_enemy_projectile_collision_profiles
+                        .before(enemy_projectile_update_system),
                     enemy_projectile_update_system.run_if(hitstop_inactive),
                     enemy_attack_vfx_cleanup,
                     enemy_attack_system.run_if(hitstop_inactive),
@@ -68,6 +77,17 @@ impl Plugin for EnemyPlugin {
                 )
                     .run_if(in_state(AppState::Playing)),
             );
+    }
+}
+
+fn assign_enemy_projectile_collision_profiles(
+    mut commands: Commands,
+    projectile_q: Query<Entity, Added<EnemyProjectile>>,
+) {
+    for entity in projectile_q.iter() {
+        commands
+            .entity(entity)
+            .insert(CollisionProfile::EnemyProjectile);
     }
 }
 
@@ -284,6 +304,13 @@ pub fn spawn_enemy_entity(
         Health::new(max_hp),
         damageable,
         faction.unwrap_or_default(),
+        RigidBody::KinematicPositionBased,
+        Collider::capsule_y(
+            0.9 * difficulty_scale.clamp(0.85, 1.8),
+            difficulty_scale.clamp(0.85, 1.8),
+        ),
+        CollisionProfile::EnemyHurtbox,
+        Sensor,
     ));
     if enemy_type == EnemyType::Drone {
         commands
@@ -351,6 +378,10 @@ pub fn spawn_named_enemy(
             display_name: name,
             faction,
         },
+        RigidBody::KinematicPositionBased,
+        Collider::capsule_y(0.9 * visual_scale, visual_scale),
+        CollisionProfile::EnemyHurtbox,
+        Sensor,
     ));
     if is_boss {
         e.insert(BossEnemy);
@@ -640,6 +671,7 @@ fn dragon_boss_system(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<EnemyAttackAssets>,
+    spatial_query: SpatialQuery,
     player_pos_q: Query<(Entity, &Transform, &PlayerIndex), (With<Player>, Without<BossEnemy>)>,
     mut player_damage_q: Query<
         (
@@ -750,6 +782,7 @@ fn dragon_boss_system(
             let radius = 8.0 + phase * 2.2;
             spawn_shockwave_vfx(&mut commands, &assets, center, radius, 0.45);
             damage_players_in_radius(
+                &spatial_query,
                 center,
                 radius,
                 enemy.scaled_damage() * (0.20 + phase * 0.06),
@@ -918,6 +951,7 @@ fn mech_boss_system(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<EnemyAttackAssets>,
+    spatial_query: SpatialQuery,
     player_pos_q: Query<(Entity, &Transform, &PlayerIndex), (With<Player>, Without<BossEnemy>)>,
     mut player_damage_q: Query<
         (
@@ -983,6 +1017,7 @@ fn mech_boss_system(
                 let radius = 7.0 + phase * 1.6;
                 spawn_shockwave_vfx(&mut commands, &assets, center, radius, 0.45);
                 damage_players_in_radius(
+                    &spatial_query,
                     center,
                     radius,
                     enemy.scaled_damage() * (0.24 + phase * 0.07),
@@ -1057,6 +1092,7 @@ fn enemy_projectile_update_system(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<EnemyAttackAssets>,
+    spatial_query: SpatialQuery,
     mut projectile_q: Query<(Entity, &mut Transform, &mut EnemyProjectile)>,
     player_pos_q: Query<
         (Entity, &Transform, &PlayerIndex),
@@ -1073,7 +1109,13 @@ fn enemy_projectile_update_system(
         With<Player>,
     >,
     mut road_vehicle_q: Query<
-        (&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle),
+        (
+            Entity,
+            &Transform,
+            &mut Health,
+            &mut Damageable,
+            &NpcRoadVehicle,
+        ),
         (
             With<NpcRoadVehicle>,
             Without<Player>,
@@ -1085,40 +1127,44 @@ fn enemy_projectile_update_system(
 ) {
     let dt = time.delta_secs();
     for (entity, mut transform, mut projectile) in projectile_q.iter_mut() {
+        let previous_position = transform.translation;
         transform.translation += projectile.direction * projectile.speed * dt;
         projectile.lifetime -= dt;
 
         let mut impact = projectile.lifetime <= 0.0 || transform.translation.y <= 0.2;
         let mut hit_player = None;
-        for (player_entity, player_transform, player_index) in player_pos_q.iter() {
-            if transform
-                .translation
-                .distance(player_transform.translation + Vec3::Y * 0.7)
-                <= projectile.hit_radius
-            {
-                hit_player = Some((player_entity, player_index.0));
-                impact = true;
-                break;
-            }
-        }
-
         let mut hit_vehicle = false;
-        for (vehicle_transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
-            if !health.is_alive() {
-                continue;
-            }
-            if transform
-                .translation
-                .distance(vehicle_transform.translation)
-                <= projectile.hit_radius + vehicle.hit_radius
-            {
-                hit_vehicle = true;
+        if !impact {
+            let displacement = transform.translation - previous_position;
+            let filter = SpatialQueryFilter::from_mask([
+                GameCollisionLayer::World,
+                GameCollisionLayer::Player,
+            ]);
+            let collision = Dir3::new(displacement).ok().and_then(|direction| {
+                spatial_query.cast_shape(
+                    &AvianCollider::sphere(projectile.hit_radius.max(0.05)),
+                    previous_position,
+                    Quat::IDENTITY,
+                    direction,
+                    &ShapeCastConfig::from_max_distance(displacement.length()),
+                    &filter,
+                )
+            });
+            if let Some(collision) = collision {
+                transform.translation =
+                    previous_position + displacement.normalize_or_zero() * collision.distance;
                 impact = true;
-                if matches!(projectile.kind, EnemyProjectileKind::Laser) {
-                    let info = DamageInfo::new(projectile.damage, DamageType::Laser);
-                    apply_damage(&mut health, &mut damageable, &info);
+                if let Ok((player_entity, _, player_index)) = player_pos_q.get(collision.entity) {
+                    hit_player = Some((player_entity, player_index.0));
+                } else if let Ok((_, _, mut health, mut damageable, _)) =
+                    road_vehicle_q.get_mut(collision.entity)
+                {
+                    hit_vehicle = true;
+                    if health.is_alive() && matches!(projectile.kind, EnemyProjectileKind::Laser) {
+                        let info = DamageInfo::new(projectile.damage, DamageType::Laser);
+                        apply_damage(&mut health, &mut damageable, &info);
+                    }
                 }
-                break;
             }
         }
 
@@ -1154,6 +1200,7 @@ fn enemy_projectile_update_system(
                         0.35,
                     );
                     damage_players_in_radius(
+                        &spatial_query,
                         transform.translation,
                         radius,
                         projectile.damage,
@@ -1164,6 +1211,7 @@ fn enemy_projectile_update_system(
                         &mut parry_ev,
                     );
                     damage_road_vehicles_in_radius(
+                        &spatial_query,
                         transform.translation,
                         radius,
                         projectile.damage,
@@ -1178,12 +1226,19 @@ fn enemy_projectile_update_system(
 }
 
 fn damage_road_vehicles_in_radius(
+    spatial_query: &SpatialQuery,
     center: Vec3,
     radius: f32,
     base_damage: f32,
     damage_type: DamageType,
     road_vehicle_q: &mut Query<
-        (&Transform, &mut Health, &mut Damageable, &NpcRoadVehicle),
+        (
+            Entity,
+            &Transform,
+            &mut Health,
+            &mut Damageable,
+            &NpcRoadVehicle,
+        ),
         (
             With<NpcRoadVehicle>,
             Without<Player>,
@@ -1191,12 +1246,19 @@ fn damage_road_vehicles_in_radius(
         ),
     >,
 ) {
-    for (transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
+    for (entity, transform, mut health, mut damageable, vehicle) in road_vehicle_q.iter_mut() {
         if !health.is_alive() {
             continue;
         }
         let dist = center.distance(transform.translation);
-        if dist <= radius + vehicle.hit_radius {
+        if dist <= radius + vehicle.hit_radius
+            && world_line_of_sight(
+                spatial_query,
+                center,
+                transform.translation + Vec3::Y * 0.5,
+                Some(entity),
+            )
+        {
             let falloff_radius = (radius + vehicle.hit_radius).max(0.01);
             let damage = area_damage_falloff(base_damage, dist, falloff_radius).max(1.0);
             let info = DamageInfo::new(damage, damage_type);
@@ -1251,6 +1313,7 @@ fn damage_players_in_radius<
     DamageFilter: bevy::ecs::query::QueryFilter,
     PositionFilter: bevy::ecs::query::QueryFilter,
 >(
+    spatial_query: &SpatialQuery,
     center: Vec3,
     radius: f32,
     damage: f32,
@@ -1272,6 +1335,14 @@ fn damage_players_in_radius<
     for (player_entity, player_transform, player_index) in player_pos_q.iter() {
         let dist = center.distance(player_transform.translation);
         if dist > radius {
+            continue;
+        }
+        if !world_line_of_sight(
+            spatial_query,
+            center,
+            player_transform.translation + Vec3::Y * 0.7,
+            Some(player_entity),
+        ) {
             continue;
         }
         let falloff = 1.0 - (dist / radius).clamp(0.0, 0.8);

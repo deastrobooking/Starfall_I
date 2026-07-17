@@ -80,17 +80,23 @@ move-specific frame data/cancel rules, and split-screen effect budgets.
 configurable cone/range, store player ownership and target entity, steer with a
 capped turn rate, survive target loss, and use readable trails. Primary aiming
 locks toward living enemy torsos and projectile collision sweeps between frames.
+Typed World/Player/Enemy/projectile layers now make those sweeps
+world-authoritative: nearest impacts win, piercing stops at blocking geometry,
+and enemy fire obeys the same obstruction rule. Radial player/enemy/boss
+damage also checks World-layer cover before applying distance falloff.
 The next presentation pass should consolidate existing beam, trail, lock-ring,
 blade, muzzle, and impact choices into data-driven profiles sized against measured
-split-screen budgets. Fast projectiles also need world-obstacle casts: the current
-sweep protects target hits, not thin-wall collision.
+split-screen budgets. Projectile collision now needs representative thin-wall,
+terrain, piercing, and four-player load validation; explosive cover has a live
+Avian wall/open-path/target-exclusion regression fixture.
 
 ## Recommended Delivery Order
 
 1. Record controller-only main-flow and four-player ownership acceptance.
 2. Validate EC1 fixed movement at 30/60/120/144 Hz and tune ground/air/route feel.
-3. Build EC2 `MoveDef`, hit/hurt layers, cancel windows, and per-move reactions.
-4. Add road/ramp/landing/barrier validators and missile world-obstacle casts.
+3. Extend EC2's landed body/projectile layer foundation with move-scoped melee
+   hitbox/pushbox/grapple/interaction roles, cancel windows, and reactions.
+4. Add road/ramp/landing/barrier validators and projectile collision fixtures.
 5. Profile data-driven beam/Sabre/lock/impact effects across four viewports.
 6. Expand roads and combat content through the validated Forge/tool boundaries.
 

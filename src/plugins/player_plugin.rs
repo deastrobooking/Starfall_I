@@ -738,6 +738,7 @@ fn spawn_players(
                 player_stats.clone(),
                 player_movement,
             ))
+            .insert(CollisionProfile::Player)
             .insert(player_progression)
             .insert((
                 hero_profile,

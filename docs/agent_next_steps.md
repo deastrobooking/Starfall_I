@@ -315,10 +315,12 @@ real Bevy gamepad rumble requests. Remaining production work:
   and underside-artifact checks. Road generation extraction is delivered: the
   speed-road subsystem (56 items) lives in `src/plugins/world_plugin/roads.rs`;
   gameplay road-vehicle systems remain in `world_plugin.rs`.
-- Add world-obstacle casts to the existing swept target collision so fast
-  projectiles cannot pass through thin city or dungeon walls. Resolve the
-  nearest world impact versus target intersection and place explosions at that
-  impact before expanding to full EC2 hurtbox collision layers.
+- Validate the newly landed canonical collision profiles and nearest-first
+  player/enemy projectile sweeps on thin city walls, dungeon doors, terrain,
+  piercing lines, explosions, and NPC road traffic. Explosion cover now has a
+  live Avian wall/open-path/target-exclusion fixture. Then extend EC2 with
+  move-scoped melee hitbox/pushbox/grapple/interaction profiles and decide
+  blast cover behavior per weapon profile.
 - Move the existing beam, lock-ring, trail, Star Sabre blade, and impact visuals
   into explicit profiles with measured four-view effect budgets.
 

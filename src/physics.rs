@@ -1,8 +1,9 @@
 use avian3d::{
     math::AdjustPrecision,
     prelude::{
-        Collider as AvianCollider, MoveAndSlide, MoveAndSlideConfig, MoveAndSlideHitResponse,
-        RigidBody as AvianRigidBody, ShapeCastConfig, SpatialQueryFilter,
+        Collider as AvianCollider, CollisionLayers, MoveAndSlide, MoveAndSlideConfig,
+        MoveAndSlideHitResponse, PhysicsLayer, RigidBody as AvianRigidBody, ShapeCastConfig,
+        SpatialQuery, SpatialQueryFilter,
     },
 };
 use bevy::prelude::*;
@@ -12,9 +13,41 @@ pub mod prelude {
     pub use avian3d::prelude::{Physics, PhysicsPlugins, PhysicsTime};
 
     pub use crate::physics::{
-        CharacterAutostep, CharacterLength, Collider, ColliderScale, KinematicCharacterController,
-        KinematicCharacterControllerOutput, PhysicsCompatPlugin, PhysicsCompatSet, RigidBody,
+        CharacterAutostep, CharacterLength, Collider, ColliderScale, CollisionProfile,
+        GameCollisionLayer, KinematicCharacterController, KinematicCharacterControllerOutput,
+        PhysicsCompatPlugin, PhysicsCompatSet, RigidBody,
     };
+}
+
+/// Returns whether a target point is reachable from an effect origin without
+/// crossing a World-layer collider. A small target-facing bias makes an
+/// explosion on a wall damage actors on the impact side while keeping actors
+/// behind the wall protected.
+pub fn world_line_of_sight(
+    spatial_query: &SpatialQuery,
+    origin: Vec3,
+    target: Vec3,
+    excluded_target: Option<Entity>,
+) -> bool {
+    const ORIGIN_BIAS: f32 = 0.05;
+    const TARGET_SKIN: f32 = 0.08;
+
+    let offset = target - origin;
+    let distance = offset.length();
+    if distance <= ORIGIN_BIAS + TARGET_SKIN {
+        return true;
+    }
+    let Ok(direction) = Dir3::new(offset) else {
+        return true;
+    };
+    let biased_origin = origin + direction.as_vec3() * ORIGIN_BIAS;
+    let max_distance = distance - ORIGIN_BIAS;
+    let filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World)
+        .with_excluded_entities(excluded_target);
+
+    spatial_query
+        .cast_ray(biased_origin, direction, max_distance, true, &filter)
+        .is_none_or(|hit| hit.distance + TARGET_SKIN >= max_distance)
 }
 
 pub struct PhysicsCompatPlugin;
@@ -42,6 +75,78 @@ impl Plugin for PhysicsCompatPlugin {
 pub enum PhysicsCompatSet {
     SyncComponents,
     CharacterController,
+}
+
+/// Canonical collision memberships shared by physics movement and gameplay
+/// spatial queries. Keeping these meanings centralized prevents each weapon or
+/// interaction system from inventing an incompatible bit mask.
+#[derive(PhysicsLayer, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameCollisionLayer {
+    #[default]
+    World,
+    Player,
+    Enemy,
+    PlayerProjectile,
+    EnemyProjectile,
+    #[allow(dead_code)] // Reserved for editor/gameplay trigger colliders landing next.
+    Interaction,
+}
+
+/// Semantic collision role for compatibility colliders. The compatibility
+/// sync converts this into Avian's immutable `CollisionLayers` component.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollisionProfile {
+    #[default]
+    World,
+    Player,
+    EnemyHurtbox,
+    VehicleHurtbox,
+    PlayerProjectile,
+    EnemyProjectile,
+    #[allow(dead_code)] // Reserved for editor/gameplay trigger colliders landing next.
+    Interaction,
+}
+
+impl CollisionProfile {
+    pub fn layers(self) -> CollisionLayers {
+        use GameCollisionLayer as Layer;
+
+        match self {
+            Self::World => CollisionLayers::new(
+                Layer::World,
+                [
+                    Layer::Player,
+                    Layer::Enemy,
+                    Layer::PlayerProjectile,
+                    Layer::EnemyProjectile,
+                ],
+            ),
+            Self::Player => CollisionLayers::new(
+                Layer::Player,
+                [
+                    Layer::World,
+                    Layer::Enemy,
+                    Layer::EnemyProjectile,
+                    Layer::Interaction,
+                ],
+            ),
+            Self::EnemyHurtbox => CollisionLayers::new(
+                Layer::Enemy,
+                [Layer::World, Layer::Player, Layer::PlayerProjectile],
+            ),
+            Self::VehicleHurtbox => CollisionLayers::new(
+                [Layer::World, Layer::Enemy],
+                [Layer::World, Layer::Player, Layer::PlayerProjectile],
+            ),
+            Self::PlayerProjectile => {
+                CollisionLayers::new(Layer::PlayerProjectile, [Layer::World, Layer::Enemy])
+            }
+            Self::EnemyProjectile => {
+                CollisionLayers::new(Layer::EnemyProjectile, [Layer::World, Layer::Player])
+            }
+            Self::Interaction => CollisionLayers::new(Layer::Interaction, Layer::Player),
+        }
+    }
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,22 +373,26 @@ fn sync_compat_colliders(
             &Collider,
             Option<&ColliderScale>,
             Option<&Transform>,
+            Option<&CollisionProfile>,
         ),
         Or<(
             Added<Collider>,
             Changed<Collider>,
             Added<ColliderScale>,
             Changed<ColliderScale>,
+            Added<CollisionProfile>,
+            Changed<CollisionProfile>,
         )>,
     >,
 ) {
-    for (entity, collider, scale_mode, transform) in collider_q.iter() {
+    for (entity, collider, scale_mode, transform, profile) in collider_q.iter() {
         let transform_scale = transform
             .map(|transform| transform.scale)
             .unwrap_or(Vec3::ONE);
-        commands
-            .entity(entity)
-            .insert(collider.to_avian(scale_mode, transform_scale));
+        commands.entity(entity).insert((
+            collider.to_avian(scale_mode, transform_scale),
+            profile.copied().unwrap_or_default().layers(),
+        ));
     }
 }
 
@@ -312,7 +421,8 @@ fn apply_kinematic_character_controllers(
         output.collisions.clear();
 
         if desired_translation.length_squared() > 0.0 {
-            let filter = SpatialQueryFilter::from_excluded_entities([entity]);
+            let filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World)
+                .with_excluded_entities([entity]);
             let velocity = desired_translation / delta_secs;
             let config = MoveAndSlideConfig::default();
             let out = move_and_slide.move_and_slide(
@@ -375,7 +485,8 @@ fn character_grounded(
             .max(0.05)
     };
     let down = Dir3::new(-controller.up).unwrap_or(Dir3::NEG_Y);
-    let filter = SpatialQueryFilter::from_excluded_entities([entity]);
+    let filter =
+        SpatialQueryFilter::from_mask(GameCollisionLayer::World).with_excluded_entities([entity]);
     move_and_slide
         .spatial_query
         .cast_shape(
@@ -387,4 +498,117 @@ fn character_grounded(
             &filter,
         )
         .is_some_and(|hit| hit.normal1.dot(controller.up) > 0.45)
+}
+
+#[cfg(test)]
+mod collision_layer_tests {
+    use super::*;
+    use avian3d::prelude::{CollisionEnd, CollisionStart, PhysicsPlugins};
+
+    #[derive(Resource, Default)]
+    struct LineOfSightFixture {
+        blocked: bool,
+        clear_above_wall: bool,
+        target: Option<Entity>,
+        target_does_not_block_itself: bool,
+    }
+
+    fn sample_line_of_sight_fixture(
+        spatial_query: SpatialQuery,
+        mut result: ResMut<LineOfSightFixture>,
+    ) {
+        result.blocked =
+            !world_line_of_sight(&spatial_query, Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), None);
+        result.clear_above_wall = world_line_of_sight(
+            &spatial_query,
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(10.0, 4.0, 0.0),
+            None,
+        );
+        result.target_does_not_block_itself = result.target.is_some_and(|target| {
+            world_line_of_sight(
+                &spatial_query,
+                Vec3::new(6.5, 0.0, 0.0),
+                Vec3::new(10.0, 0.0, 0.0),
+                Some(target),
+            )
+        });
+    }
+
+    #[test]
+    fn collision_profiles_have_stable_memberships() {
+        assert!(CollisionProfile::World
+            .layers()
+            .memberships
+            .has_all(GameCollisionLayer::World));
+        assert!(CollisionProfile::Player
+            .layers()
+            .memberships
+            .has_all(GameCollisionLayer::Player));
+        assert!(CollisionProfile::EnemyHurtbox
+            .layers()
+            .memberships
+            .has_all(GameCollisionLayer::Enemy));
+        let vehicle = CollisionProfile::VehicleHurtbox.layers();
+        assert!(vehicle.memberships.has_all(GameCollisionLayer::World));
+        assert!(vehicle.memberships.has_all(GameCollisionLayer::Enemy));
+    }
+
+    #[test]
+    fn projectile_profiles_interact_only_with_intended_sides() {
+        let world = CollisionProfile::World.layers();
+        let player = CollisionProfile::Player.layers();
+        let enemy = CollisionProfile::EnemyHurtbox.layers();
+        let player_shot = CollisionProfile::PlayerProjectile.layers();
+        let enemy_shot = CollisionProfile::EnemyProjectile.layers();
+
+        assert!(player_shot.interacts_with(world));
+        assert!(player_shot.interacts_with(enemy));
+        assert!(!player_shot.interacts_with(player));
+        assert!(enemy_shot.interacts_with(world));
+        assert!(enemy_shot.interacts_with(player));
+        assert!(!enemy_shot.interacts_with(enemy));
+    }
+
+    #[test]
+    fn world_line_of_sight_blocks_cover_but_excludes_the_target_collider() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            PhysicsPlugins::default(),
+        ))
+            .init_asset::<Mesh>()
+            .add_message::<CollisionStart>()
+            .add_message::<CollisionEnd>()
+            .init_resource::<LineOfSightFixture>()
+            .add_systems(Update, sample_line_of_sight_fixture);
+
+        app.world_mut().spawn((
+            AvianCollider::cuboid(1.0, 4.0, 4.0),
+            CollisionProfile::World.layers(),
+            AvianRigidBody::Static,
+            Transform::from_xyz(5.0, 0.0, 0.0),
+        ));
+        let target = app
+            .world_mut()
+            .spawn((
+                AvianCollider::cuboid(1.0, 2.0, 2.0),
+                CollisionProfile::VehicleHurtbox.layers(),
+                AvianRigidBody::Static,
+                Transform::from_xyz(10.0, 0.0, 0.0),
+            ))
+            .id();
+        app.world_mut().resource_mut::<LineOfSightFixture>().target = Some(target);
+
+        // The first update registers colliders in the spatial-query pipeline;
+        // the second samples the populated broad phase.
+        app.update();
+        app.update();
+
+        let result = app.world().resource::<LineOfSightFixture>();
+        assert!(result.blocked);
+        assert!(result.clear_above_wall);
+        assert!(result.target_does_not_block_itself);
+    }
 }
