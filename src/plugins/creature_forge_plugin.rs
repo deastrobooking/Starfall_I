@@ -8,6 +8,7 @@
 
 use bevy::prelude::*;
 
+use super::ui_plugin::MenuScrollPanel;
 use crate::engine_tools::creature_records;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::mesh_modifiers::MeshModifier;
@@ -438,7 +439,7 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 "CREATURE",
                 Vec2::new(12.0, 84.0),
                 style(240.0),
-                (),
+                (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     panel.spawn((
                         Text::new(""),
@@ -478,7 +479,7 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 "MORPHOLOGY",
                 Vec2::new(12.0, 380.0),
                 style(300.0),
-                (),
+                (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     for (index, field) in ForgeField::ALL.iter().enumerate() {
                         forge_row(panel, |row| {
@@ -511,7 +512,7 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 "FEATURES & MODIFIERS",
                 Vec2::new(966.0, 84.0),
                 style(240.0),
-                (),
+                (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     forge_row(panel, |row| {
                         forge_button(row, "WINGS".into(), ForgeAction::ToggleWings);
@@ -545,7 +546,7 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 "LIBRARY",
                 Vec2::new(966.0, 380.0),
                 style(300.0),
-                (ForgeLibraryList,),
+                (ForgeLibraryList, MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     forge_row(panel, |row| {
                         forge_button(row, "VALIDATE".into(), ForgeAction::Validate);

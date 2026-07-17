@@ -133,6 +133,19 @@ Forge work: controller-first navigation of every Forge control, window
 layout persistence per user/workspace, thumbnails, and the publish/runtime
 bridge that lets spawners consume published creature records by content id.
 
+**Controller-first Forge navigation (July 17, 2026):** the shared menu focus
+layer already dispatches in `AppState::CreatureForge` (its gate excludes only
+Playing and CharacterStudio), so every Forge button — including tool-window
+title bars and minimize buttons — has D-pad/stick spatial navigation, repeat,
+Confirm activation, focus styling, and Back → Project Hub. This slice closed
+the remaining gap: all four Forge windows are `MenuScrollPanel` surfaces, and
+`keep_menu_focus_in_view` now scrolls only the panel that actually contains
+the focused button (an ancestry check — previously every scrollable panel
+chased the focus, which was wrong the moment two scrollable windows were on
+screen). Remaining: window drag has no controller binding (windows stay
+reachable via focus regardless), and a recorded controller-only Forge
+acceptance pass.
+
 ### PM2 — Project packages and reproducible presets
 
 Each project is a directory containing a manifest, content source folders,

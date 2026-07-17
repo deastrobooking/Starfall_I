@@ -1011,8 +1011,9 @@ fn menu_focus_style(
 fn keep_menu_focus_in_view(
     focus: Res<MenuFocus>,
     focused_q: Query<(&GlobalTransform, &ComputedNode), With<MenuFocusable>>,
+    parents: Query<&ChildOf>,
     mut panel_q: Query<
-        (&GlobalTransform, &ComputedNode, &mut ScrollPosition),
+        (Entity, &GlobalTransform, &ComputedNode, &mut ScrollPosition),
         With<MenuScrollPanel>,
     >,
 ) {
@@ -1023,7 +1024,18 @@ fn keep_menu_focus_in_view(
         return;
     };
 
-    for (panel_transform, panel_node, mut scroll) in panel_q.iter_mut() {
+    for (panel_entity, panel_transform, panel_node, mut scroll) in panel_q.iter_mut() {
+        // Only the panel that actually contains the focused button may
+        // scroll; with several scrollable tool windows on screen the others
+        // must hold still.
+        let contains_focus = std::iter::successors(Some(entity), |current| {
+            parents.get(*current).ok().map(|child_of| child_of.parent())
+        })
+        .take(64)
+        .any(|ancestor| ancestor == panel_entity);
+        if !contains_focus {
+            continue;
+        }
         let max_y = menu_scroll_max(panel_node);
         if max_y <= 0.0 {
             continue;
@@ -4979,7 +4991,7 @@ fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8, t
                 panel,
                 player_index,
                 PlayerHudTextKind::SabreStatus,
-                "SABER: BASE",
+                "SABER: WAVE 1",
                 10.0,
             );
         });
@@ -5239,21 +5251,16 @@ fn sabre_status_text(sabre: &BeamSabre, upgrades: &UpgradeLedger) -> String {
     if sabre.technique_timer > 0.0 {
         return format!("SABER: {}", sabre.technique.label());
     }
-    let mut techniques = Vec::new();
-    if upgrades.sabre_wave_unlocked() {
-        techniques.push("WAVE");
-    }
+    let wave_tier = (upgrades.sabre_wave_upgrade_tier() + sabre.level.saturating_sub(1)).min(6) + 1;
+    let mut techniques = vec![format!("WAVE {wave_tier}")];
     if upgrades.sabre_spin_unlocked() {
-        techniques.push("SPIN");
+        techniques.push("SPIN".into());
     }
     if upgrades.sabre_dash_unlocked() {
-        techniques.push("DASH");
+        techniques.push("DASH".into());
     }
     if upgrades.sabre_pound_unlocked() {
-        techniques.push("POUND");
-    }
-    if techniques.is_empty() {
-        techniques.push("BASE");
+        techniques.push("POUND".into());
     }
     let gem_count = ["solar_fire_gem", "storm_gem", "frost_gem", "void_gem"]
         .into_iter()
@@ -7378,7 +7385,7 @@ mod menu_navigation_tests {
         let mut sabre = BeamSabre::default();
 
         let status = sabre_status_text(&sabre, &upgrades);
-        assert!(status.contains("WAVE/SPIN"));
+        assert!(status.contains("WAVE 2/SPIN"));
         assert!(status.contains("GEMS 1/4 + STARHEART"));
 
         sabre.technique = crate::components::weapon::SabreTechnique::CycloneSlash;
