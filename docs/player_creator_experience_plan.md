@@ -118,9 +118,22 @@ save now also writes `project.lock.json` atomically beside the project file:
 lock schema, engine/build version, project id + schema, every record's source
 path, draft/published hashes, and dependency ids (sorted by content id), and
 every generator payload's fingerprint (category, schema, seed, revision).
-Identical project state produces an identical lock document. Remaining PM2
-work: the immutable preset record system with Apply/Compare/Fork/Regenerate
-actions, thumbnails, and validation-configuration capture.
+Identical project state produces an identical lock document.
+
+**Preset records delivered (July 16, 2026):** presets are immutable versioned
+records in the project's `presets/` folder (`<preset_id>.r<revision>.json`,
+atomic writes, overwriting an existing revision is refused). Each record
+carries the stable id, revision, name, category, generator fingerprint, source
+content id, tags, dependencies, thumbnail slot, and the complete payload
+parameters including the seed. Editor registry buttons cover CAPTURE / NEXT /
+APPLY / COMPARE / FORK / NEW-SEED VARIANT; apply targets the preset's source
+content and marks the document dirty, compare reports seed/field/geometry
+differences, forks start a new lineage at revision 1, and new-seed variants
+append the next revision with a deterministic LCG successor seed. The library
+reloads whenever the active project loads or switches. Remaining PM2 work:
+preset thumbnails, validation-configuration capture in the lock document, and
+Regenerate-With-Same-Seed as an explicit one-press action (today it is
+APPLY, which restores the stored seed and parameters).
 
 ### PM3 — Multi-level project support
 

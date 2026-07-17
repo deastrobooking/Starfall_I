@@ -37,7 +37,6 @@ use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::plugins::input_plugin::{GamepadAssignments, NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
-use crate::shop_transactions;
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
@@ -47,6 +46,7 @@ use crate::resources::{
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
+use crate::shop_transactions;
 use crate::state::AppState;
 use crate::upgrades::{all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger};
 
@@ -1279,11 +1279,12 @@ fn project_hub_action_system(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        let enter_editor = |next_state: &mut NextState<AppState>,
-                                next_tool_mode: &mut NextState<EngineToolMode>| {
-            next_state.set(AppState::Playing);
-            next_tool_mode.set(EngineToolMode::Editing);
-        };
+        let enter_editor =
+            |next_state: &mut NextState<AppState>,
+             next_tool_mode: &mut NextState<EngineToolMode>| {
+                next_state.set(AppState::Playing);
+                next_tool_mode.set(EngineToolMode::Editing);
+            };
         match button.0 {
             ProjectHubAction::OpenCurrent => {
                 if registry.active.is_some() {
@@ -1777,9 +1778,8 @@ fn shop_action_system(
             else {
                 return;
             };
-            let Some((_, mut stats, mut progression)) = player_q
-                .iter_mut()
-                .find(|(idx, _, _)| idx.0 == ui.owner)
+            let Some((_, mut stats, mut progression)) =
+                player_q.iter_mut().find(|(idx, _, _)| idx.0 == ui.owner)
             else {
                 toast("That player is not in the game right now.".to_string());
                 return;
@@ -1905,7 +1905,12 @@ fn shop_panel_refresh_system(
             return;
         };
         let state = shop_transactions::card_state(&ownership, item, credits);
-        text(panel, item.name.to_string(), 20.0, Color::srgb(0.9, 0.95, 1.0));
+        text(
+            panel,
+            item.name.to_string(),
+            20.0,
+            Color::srgb(0.9, 0.95, 1.0),
+        );
         text(
             panel,
             item.summary.to_string(),
@@ -1957,8 +1962,7 @@ fn shop_panel_refresh_system(
             ),
             CardState::Locked => text(
                 panel,
-                "Vehicle frames are party-shared and get built in the Robot Garage."
-                    .to_string(),
+                "Vehicle frames are party-shared and get built in the Robot Garage.".to_string(),
                 13.0,
                 Color::srgb(0.94, 0.72, 0.52),
             ),

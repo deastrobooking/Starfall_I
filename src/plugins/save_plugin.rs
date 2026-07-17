@@ -11,7 +11,6 @@ use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, Shoul
 use crate::character_studio::spec::CharacterSpec;
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::armor::{ArmorSet, ElementType};
-use crate::shop_transactions::ShopOwnership;
 use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::{
     Player, PlayerIndex, PlayerProgression, PlayerStats, TraversalMode, TraversalModeState,
@@ -30,6 +29,7 @@ use crate::resources::{
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::SettlementEconomy;
+use crate::shop_transactions::ShopOwnership;
 use crate::state::AppState;
 use crate::upgrades::UpgradeLedger;
 

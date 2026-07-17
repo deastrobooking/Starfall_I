@@ -161,7 +161,8 @@ pub struct CraftingQueue {
 #[derive(Debug)]
 pub struct ActiveCraft {
     pub owner: u8,
-    #[allow(dead_code)] // Kept for crafting UI progress display (recipe name + fraction) planned in the garage/store pass.
+    #[allow(dead_code)]
+    // Kept for crafting UI progress display (recipe name + fraction) planned in the garage/store pass.
     pub recipe_id: String,
     pub timer: f32,
     #[allow(dead_code)]

@@ -12121,6 +12121,7 @@ fn spawn_boost_road_span(
     let flat_rot = Quat::from_rotation_y(yaw);
     let rot = flat_rot * Quat::from_rotation_x(-pitch);
     let forward = flat_rot * Vec3::Z;
+    let road_forward = rot * Vec3::Z;
     let right = flat_rot * Vec3::X;
     let lane_width = (width * 0.40).max(3.2);
     let side_offset = width * 0.24;
@@ -12211,15 +12212,26 @@ fn spawn_boost_road_span(
 
         if include_ramps {
             for end in [-1.0_f32, 1.0] {
-                let ramp_dir = if end > 0.0 { lane_dir } else { -lane_dir };
-                let ramp_center =
-                    lane_center + forward * end * length * 0.43 + Vec3::Y * (1.0 + end.abs());
+                let lane_road_direction = if side > 0.0 {
+                    road_forward
+                } else {
+                    -road_forward
+                };
+                let ramp_road_direction = if end > 0.0 {
+                    lane_road_direction
+                } else {
+                    -lane_road_direction
+                };
+                // Anchor the entrance in the sloped road's local frame. The
+                // former flat-forward + fixed-Y offset detached ramps from
+                // steep chunks at either end of a span.
+                let ramp_base = lane_center + rot * Vec3::new(0.0, 0.18, end * length * 0.43);
                 spawn_board_boost_ramp(
                     commands,
                     meshes,
                     pal,
-                    ramp_center,
-                    ramp_dir,
+                    ramp_base,
+                    ramp_road_direction,
                     lane_width * 0.92,
                     22.0,
                     4.2,
@@ -12304,20 +12316,14 @@ fn spawn_board_boost_ramp(
     impulse: f32,
     lift: f32,
 ) {
-    let direction = direction.with_y(0.0).normalize_or_zero();
-    if direction.length_squared() <= f32::EPSILON {
+    let Some((center, rot, surface_length, boost_direction)) =
+        board_boost_ramp_pose(base_center, direction, length, rise)
+    else {
         return;
-    }
-    let yaw = direction.x.atan2(direction.z);
-    let pitch = (rise / length.max(0.1)).atan();
-    let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
-    // Callers provide the low road-surface entrance, not the mesh center.
-    // Moving half a run forward and half a rise upward keeps the complete ramp
-    // above the deck and guarantees that its uphill face matches `direction`.
-    let center = base_center + direction * (length * 0.5) + Vec3::Y * (rise * 0.5);
+    };
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.72, length))),
+            mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.72, surface_length))),
             material: MeshMaterial3d(pal.boost_ramp.clone()),
             transform: Transform::from_translation(center).with_rotation(rot),
             ..default()
@@ -12325,9 +12331,9 @@ fn spawn_board_boost_ramp(
         WorldGeometry,
         WalkableSurface,
         BoardBoostPad {
-            direction,
+            direction: boost_direction,
             half_width: width * 0.5,
-            half_length: length * 0.5,
+            half_length: surface_length * 0.5,
             speed_mult: 3.15,
             impulse: impulse.max(3.9),
             lift,
@@ -12337,8 +12343,39 @@ fn spawn_board_boost_ramp(
             force_hoverboard: true,
         },
         crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(width * 0.5, 0.36, length * 0.5),
+        crate::physics::prelude::Collider::cuboid(width * 0.5, 0.36, surface_length * 0.5),
     ));
+}
+
+/// Build a ramp from its low entrance and the grade of its supporting road.
+/// `rise` is additional lift above that grade, not an absolute world pitch.
+fn board_boost_ramp_pose(
+    base_center: Vec3,
+    road_direction: Vec3,
+    horizontal_length: f32,
+    rise: f32,
+) -> Option<(Vec3, Quat, f32, Vec3)> {
+    let horizontal = road_direction.with_y(0.0);
+    let horizontal_magnitude = horizontal.length();
+    if horizontal_magnitude <= f32::EPSILON || horizontal_length <= f32::EPSILON {
+        return None;
+    }
+
+    let forward = horizontal / horizontal_magnitude;
+    let road_grade = road_direction.y / horizontal_magnitude;
+    let total_rise = road_grade * horizontal_length + rise;
+    let longitudinal = forward * horizontal_length + Vec3::Y * total_rise;
+    let surface_length = longitudinal.length();
+    let yaw = forward.x.atan2(forward.z);
+    let pitch = (total_rise / horizontal_length).atan();
+    let rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
+
+    Some((
+        base_center + longitudinal * 0.5,
+        rotation,
+        surface_length,
+        forward,
+    ))
 }
 
 fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette) {
@@ -16106,6 +16143,38 @@ fn spawn_magic_crystals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boost_ramp_pose_inherits_road_grade_and_entrance_height() {
+        let base = Vec3::new(10.0, 40.0, -6.0);
+        let road_direction = Vec3::new(0.0, 0.25, 1.0).normalize();
+        let horizontal_length = 20.0;
+        let added_rise = 4.0;
+        let (center, rotation, surface_length, boost_direction) =
+            board_boost_ramp_pose(base, road_direction, horizontal_length, added_rise).unwrap();
+
+        let expected_total_rise = 0.25 * horizontal_length + added_rise;
+        let expected_exit = base + Vec3::new(0.0, expected_total_rise, horizontal_length);
+        let actual_entrance = center - rotation * Vec3::Z * (surface_length * 0.5);
+        let actual_exit = center + rotation * Vec3::Z * (surface_length * 0.5);
+
+        assert!(actual_entrance.distance(base) < 0.001);
+        assert!(actual_exit.distance(expected_exit) < 0.001);
+        assert!(boost_direction.distance(Vec3::Z) < 0.001);
+    }
+
+    #[test]
+    fn road_profile_tangent_preserves_local_slope() {
+        let profile = [
+            Vec3::new(0.0, 10.0, 0.0),
+            Vec3::new(0.0, 15.0, 20.0),
+            Vec3::new(20.0, 15.0, 20.0),
+        ];
+
+        let tangent = road_profile_tangent_at(&profile, 0.5, 8.0).unwrap();
+        let expected = Vec3::new(0.0, 5.0, 20.0).normalize();
+        assert!(tangent.distance(expected) < 0.001);
+    }
 
     #[test]
     fn dungeon_return_slots_are_distinct_and_centered() {

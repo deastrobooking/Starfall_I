@@ -160,10 +160,7 @@ pub fn equip(ownership: &mut ShopOwnership, item: &ShopItem) -> Result<(), ShopT
 }
 
 /// Clear the equipped slot for the item's category.
-pub fn unequip(
-    ownership: &mut ShopOwnership,
-    item: &ShopItem,
-) -> Result<(), ShopTransactionError> {
+pub fn unequip(ownership: &mut ShopOwnership, item: &ShopItem) -> Result<(), ShopTransactionError> {
     let Some(slot) = ownership.equipped_slot_mut(item.category) else {
         return Err(ShopTransactionError::Locked);
     };
@@ -180,7 +177,14 @@ mod tests {
     use crate::resources::ShopCatalog;
 
     fn item(category: ShopCategory, price: u32) -> ShopItem {
-        ShopItem::new("test_item", "Test Item", category, "A test item.", price, None)
+        ShopItem::new(
+            "test_item",
+            "Test Item",
+            category,
+            "A test item.",
+            price,
+            None,
+        )
     }
 
     #[test]
@@ -242,13 +246,19 @@ mod tests {
         let mut credits = 100;
         let armor = item(ShopCategory::Armor, 80);
 
-        assert_eq!(card_state(&ownership, &armor, credits), CardState::Affordable);
+        assert_eq!(
+            card_state(&ownership, &armor, credits),
+            CardState::Affordable
+        );
         assert_eq!(buy(&mut ownership, &mut credits, &armor), Ok(()));
         assert_eq!(credits, 20);
         assert_eq!(card_state(&ownership, &armor, credits), CardState::Owned);
 
         assert_eq!(equip(&mut ownership, &armor), Ok(()));
-        assert_eq!(ownership.equipped_for(ShopCategory::Armor), Some("test_item"));
+        assert_eq!(
+            ownership.equipped_for(ShopCategory::Armor),
+            Some("test_item")
+        );
         assert_eq!(card_state(&ownership, &armor, credits), CardState::Equipped);
 
         assert_eq!(unequip(&mut ownership, &armor), Ok(()));

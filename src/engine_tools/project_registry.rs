@@ -61,7 +61,10 @@ impl ForgeProjectRegistry {
                 }
             },
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                warn!("Failed to read project registry {}: {error}", path.display());
+                warn!(
+                    "Failed to read project registry {}: {error}",
+                    path.display()
+                );
             }
             Err(_) => {}
         }
@@ -83,8 +86,7 @@ impl ForgeProjectRegistry {
     /// Persist the registry atomically under `root`.
     pub fn save_to(&self, root: &Path) -> Result<(), String> {
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        atomic_write(&root.join(REGISTRY_FILE), json.as_bytes())
-            .map_err(|e| format!("{e:?}"))
+        atomic_write(&root.join(REGISTRY_FILE), json.as_bytes()).map_err(|e| format!("{e:?}"))
     }
 
     /// Persist to the platform data directory.
@@ -185,7 +187,10 @@ mod tests {
 
         let loaded = ForgeProjectRegistry::load_or_seed(&root);
         assert_eq!(loaded, registry);
-        assert_eq!(loaded.active_entry().map(|e| e.name.as_str()), Some("Test World"));
+        assert_eq!(
+            loaded.active_entry().map(|e| e.name.as_str()),
+            Some("Test World")
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

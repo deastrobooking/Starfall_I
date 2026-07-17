@@ -7,6 +7,7 @@
 
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 mod persistence;
+mod presets;
 pub mod project_registry;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -646,6 +647,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<WorldKitSandboxState>()
             .init_resource::<WorldKitSandboxAssets>()
             .init_resource::<EditorTextInputCapture>()
+            .init_resource::<EditorPresetLibrary>()
             .register_type::<EditorEntityId>()
             .add_systems(Startup, bootstrap_published_content_catalogs)
             .add_systems(
@@ -1115,6 +1117,12 @@ enum EditorAction {
     DuplicateRecord,
     DeleteRecord,
     NormalizeSourcePath,
+    PresetCapture,
+    PresetNext,
+    PresetApply,
+    PresetCompare,
+    PresetFork,
+    PresetNewSeedVariant,
     SearchRegistry,
     MaterialCycleFamily,
     MaterialCyclePreset,
@@ -1351,6 +1359,14 @@ struct EditorRegistryState {
 
 #[derive(Resource, Default)]
 struct EditorTextInputCapture(bool);
+
+/// PM2: the loaded preset library for the active project plus the cursor used
+/// by the preset action buttons.
+#[derive(Resource, Default)]
+struct EditorPresetLibrary {
+    presets: Vec<presets::PresetRecord>,
+    selected: usize,
+}
 
 impl Default for EditorProjectSession {
     fn default() -> Self {
@@ -1798,9 +1814,19 @@ fn sync_active_project_session(world: &mut World) {
         }
     };
     rebuild_published_content_catalogs(world, &project);
+    reload_preset_library(world, &active);
     let mut session = world.resource_mut::<EditorProjectSession>();
     session.project = project;
     session.store = store;
+}
+
+/// PM2: refresh the in-editor preset library from the project's `presets/`
+/// folder.
+fn reload_preset_library(world: &mut World, project_path: &std::path::Path) {
+    let presets = presets::PresetStore::for_project(project_path).load_all();
+    let mut library = world.resource_mut::<EditorPresetLibrary>();
+    library.presets = presets;
+    library.selected = 0;
 }
 
 fn bootstrap_published_content_catalogs(world: &mut World) {
@@ -1812,6 +1838,7 @@ fn bootstrap_published_content_catalogs(world: &mut World) {
         return;
     };
     rebuild_published_content_catalogs(world, &project);
+    reload_preset_library(world, store.path());
     world.resource_mut::<EditorProjectSession>().project = project;
 }
 
@@ -2736,6 +2763,17 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                             41,
                             EditorAction::SearchRegistry,
                             "SEARCH RECORDS",
+                        );
+                        spawn_editor_button(panel, 90, EditorAction::PresetCapture, "CAPTURE PRESET");
+                        spawn_editor_button(panel, 91, EditorAction::PresetNext, "NEXT PRESET");
+                        spawn_editor_button(panel, 92, EditorAction::PresetApply, "APPLY PRESET");
+                        spawn_editor_button(panel, 93, EditorAction::PresetCompare, "COMPARE PRESET");
+                        spawn_editor_button(panel, 94, EditorAction::PresetFork, "FORK PRESET");
+                        spawn_editor_button(
+                            panel,
+                            95,
+                            EditorAction::PresetNewSeedVariant,
+                            "NEW-SEED VARIANT",
                         );
                         spawn_editor_button(
                             panel,
@@ -5828,6 +5866,138 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     set_editor_status(world, format!("Source path synchronized to {path}"));
                 }
                 Err(error) => set_editor_status(world, format!("Source move rejected: {error}")),
+            }
+        }
+        EditorAction::PresetCapture => {
+            let selected = world.resource::<EditorRegistryState>().selected;
+            let session = world.resource::<EditorProjectSession>();
+            let Some(record) = session.project.records.get(selected).cloned() else {
+                set_editor_status(world, "No registry record selected");
+                return;
+            };
+            let Some(payload) = session.project.payloads.get(&record.content_id).cloned() else {
+                set_editor_status(world, format!("{} has no payload to capture", record.content_id));
+                return;
+            };
+            let store = presets::PresetStore::for_project(session.store.path());
+            let preset = presets::capture(
+                &record,
+                &payload,
+                &world.resource::<EditorPresetLibrary>().presets,
+            );
+            match store.save(&preset) {
+                Ok(()) => {
+                    let message = format!("Captured preset {}", preset.summary());
+                    let mut library = world.resource_mut::<EditorPresetLibrary>();
+                    library.presets.push(preset);
+                    library.selected = library.presets.len() - 1;
+                    set_editor_status(world, message);
+                }
+                Err(error) => set_editor_status(world, format!("Preset capture failed: {error}")),
+            }
+        }
+        EditorAction::PresetNext => {
+            let mut library = world.resource_mut::<EditorPresetLibrary>();
+            if library.presets.is_empty() {
+                set_editor_status(world, "No presets captured yet");
+                return;
+            }
+            library.selected = (library.selected + 1) % library.presets.len();
+            let summary = library.presets[library.selected].summary();
+            set_editor_status(world, format!("Selected preset {summary}"));
+        }
+        EditorAction::PresetApply => {
+            let library = world.resource::<EditorPresetLibrary>();
+            let Some(preset) = library.presets.get(library.selected).cloned() else {
+                set_editor_status(world, "No presets captured yet");
+                return;
+            };
+            let mut session = world.resource_mut::<EditorProjectSession>();
+            let Some(payload) = session.project.payloads.get_mut(&preset.source_content_id)
+            else {
+                set_editor_status(
+                    world,
+                    format!("{} no longer exists in this project", preset.source_content_id),
+                );
+                return;
+            };
+            match presets::apply(&preset, payload) {
+                Ok(_) => {
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(
+                        world,
+                        format!("Applied {} to {}", preset.summary(), preset.source_content_id),
+                    );
+                }
+                Err(error) => set_editor_status(world, format!("Apply rejected: {error}")),
+            }
+        }
+        EditorAction::PresetCompare => {
+            let library = world.resource::<EditorPresetLibrary>();
+            let Some(preset) = library.presets.get(library.selected).cloned() else {
+                set_editor_status(world, "No presets captured yet");
+                return;
+            };
+            let session = world.resource::<EditorProjectSession>();
+            let Some(payload) = session.project.payloads.get(&preset.source_content_id) else {
+                set_editor_status(
+                    world,
+                    format!("{} no longer exists in this project", preset.source_content_id),
+                );
+                return;
+            };
+            let differences = presets::compare(&preset, payload);
+            let message = if differences.is_empty() {
+                format!("{} matches the live content", preset.summary())
+            } else {
+                format!("{} differs: {}", preset.summary(), differences.join("; "))
+            };
+            set_editor_status(world, message);
+        }
+        EditorAction::PresetFork => {
+            let library = world.resource::<EditorPresetLibrary>();
+            let Some(preset) = library.presets.get(library.selected) else {
+                set_editor_status(world, "No presets captured yet");
+                return;
+            };
+            let forked = presets::fork(preset, &library.presets);
+            let store =
+                presets::PresetStore::for_project(world.resource::<EditorProjectSession>().store.path());
+            match store.save(&forked) {
+                Ok(()) => {
+                    let message = format!("Forked into {}", forked.summary());
+                    let mut library = world.resource_mut::<EditorPresetLibrary>();
+                    library.presets.push(forked);
+                    library.selected = library.presets.len() - 1;
+                    set_editor_status(world, message);
+                }
+                Err(error) => set_editor_status(world, format!("Fork failed: {error}")),
+            }
+        }
+        EditorAction::PresetNewSeedVariant => {
+            let library = world.resource::<EditorPresetLibrary>();
+            let Some(preset) = library.presets.get(library.selected) else {
+                set_editor_status(world, "No presets captured yet");
+                return;
+            };
+            let variant = match presets::new_seed_variant(preset, &library.presets) {
+                Ok(variant) => variant,
+                Err(error) => {
+                    set_editor_status(world, format!("Variant rejected: {error}"));
+                    return;
+                }
+            };
+            let store =
+                presets::PresetStore::for_project(world.resource::<EditorProjectSession>().store.path());
+            match store.save(&variant) {
+                Ok(()) => {
+                    let message = format!("New-seed variant {}", variant.summary());
+                    let mut library = world.resource_mut::<EditorPresetLibrary>();
+                    library.presets.push(variant);
+                    library.selected = library.presets.len() - 1;
+                    set_editor_status(world, message);
+                }
+                Err(error) => set_editor_status(world, format!("Variant save failed: {error}")),
             }
         }
         EditorAction::SearchRegistry => {

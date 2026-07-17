@@ -509,6 +509,32 @@ pub(super) fn road_profile_height_at(profile: &[Vec3], x: f32, z: f32) -> Option
         .map(|(_, height)| height)
 }
 
+/// Return the 3D tangent of the road segment nearest an X/Z position. Unlike
+/// the authored route direction, this includes the solved road grade.
+pub(super) fn road_profile_tangent_at(profile: &[Vec3], x: f32, z: f32) -> Option<Vec3> {
+    let target = Vec2::new(x, z);
+    profile
+        .windows(2)
+        .filter_map(|points| {
+            let a = Vec2::new(points[0].x, points[0].z);
+            let b = Vec2::new(points[1].x, points[1].z);
+            let delta_xz = b - a;
+            let length_squared = delta_xz.length_squared();
+            if length_squared <= f32::EPSILON {
+                return None;
+            }
+            let t = ((target - a).dot(delta_xz) / length_squared).clamp(0.0, 1.0);
+            let distance_squared = target.distance_squared(a + delta_xz * t);
+            Some((
+                distance_squared,
+                (points[1] - points[0]).normalize_or_zero(),
+            ))
+        })
+        .filter(|(_, tangent)| tangent.length_squared() > f32::EPSILON)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, tangent)| tangent)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_speed_road_deck_between(
     commands: &mut Commands,
@@ -1469,7 +1495,7 @@ pub(super) fn spawn_hoverboard_trick_ramps(
                 let lane = if slot == 0 { -1.0 } else { 1.0 };
                 let ramp_x = x + right.x * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET;
                 let ramp_z = z + right.z * lane * SPEED_ROAD_TRAFFIC_LANE_OFFSET;
-                let center = Vec3::new(
+                let base_center = Vec3::new(
                     ramp_x,
                     road_profile_height_at(&road_profiles[ri], ramp_x, ramp_z).unwrap_or_else(
                         || {
@@ -1480,14 +1506,26 @@ pub(super) fn spawn_hoverboard_trick_ramps(
                     ) + 0.55,
                     ramp_z,
                 );
+                let road_direction = road_profile_tangent_at(&road_profiles[ri], ramp_x, ramp_z)
+                    .filter(|tangent| tangent.dot(dir) >= 0.0)
+                    .unwrap_or(dir);
                 spawn_board_boost_ramp(
-                    commands, meshes, pal, center, dir, 18.0, 54.0, 18.0, 7.2, 2.35,
+                    commands,
+                    meshes,
+                    pal,
+                    base_center,
+                    road_direction,
+                    18.0,
+                    54.0,
+                    18.0,
+                    7.2,
+                    2.35,
                 );
                 spawn_speed_loop_gate(
                     commands,
                     meshes,
                     pal,
-                    center + dir * 42.0 + Vec3::Y * 2.4,
+                    base_center + dir * 42.0 + Vec3::Y * 2.4,
                     yaw,
                     18.0 + seeded(seed, spawned as u64 * 17) * 7.0,
                     24.0,

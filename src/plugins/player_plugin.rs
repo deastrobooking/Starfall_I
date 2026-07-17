@@ -33,6 +33,7 @@ use crate::hitstop::hitstop_inactive;
 use crate::input_buffer::PlayerInputBuffers;
 use crate::physics::prelude::*;
 use crate::player_mesh::attach_modular_player_mesh;
+use crate::plugins::world_plugin::terrain_surface_y;
 use crate::rendering::{
     Camera3dBundle, PbrBundle, ShieldMaterial, ShieldMaterialUniform, ShieldPbrBundle,
     SpatialBundle,
@@ -45,7 +46,6 @@ use crate::resources::{
 };
 use crate::robot_pets::RobotPetCollection;
 use crate::state::AppState;
-use crate::plugins::world_plugin::terrain_surface_y;
 
 /// Route the player's visual through the new native modular humanoid
 /// ([`crate::player_mesh`]) instead of the legacy `character_parts` meshes.
@@ -2603,8 +2603,8 @@ fn terrain_fall_recovery_system(
         }
 
         let safe = recovery.last_safe_position;
-        let safe_inside = safe.x.abs() <= EVEREST_RANGE_HALF_EXTENT
-            && safe.z.abs() <= EVEREST_RANGE_HALF_EXTENT;
+        let safe_inside =
+            safe.x.abs() <= EVEREST_RANGE_HALF_EXTENT && safe.z.abs() <= EVEREST_RANGE_HALF_EXTENT;
         let safe_surface_y = terrain_surface_y(safe.x, safe.z, settings.world_seed);
         let safe_is_valid = safe_inside && safe.y >= safe_surface_y - 1.0;
         let recovered_position = if safe_is_valid {
