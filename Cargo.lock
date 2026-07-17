@@ -5478,6 +5478,7 @@ dependencies = [
  "noise",
  "objc2 0.6.4",
  "rand 0.8.6",
+ "rodio",
  "serde",
  "serde_json",
 ]

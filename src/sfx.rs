@@ -17,7 +17,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::audio_player::{looks_like_mp3, AudioLibraryReloadEvent};
+use crate::audio_player::AudioLibraryReloadEvent;
 use crate::audio_synth::{self, render_wav};
 use crate::events::{
     ChestOpenedEvent, ComboHitEvent, EnemyDamagedEvent, EnemyKilledEvent, LootCollectedEvent,
@@ -185,7 +185,11 @@ fn load_action_sfx_registry(sources: &mut Assets<AudioSource>) -> ActionSfxRegis
         let Ok(bytes) = std::fs::read(&source_path) else {
             continue;
         };
-        if !looks_like_mp3(&bytes) {
+        if !crate::audio_player::valid_music_bytes(&bytes) {
+            warn!(
+                "Skipping action SFX {} for '{action_id}' — not a playable MP3",
+                source_path.display()
+            );
             continue;
         }
         registry.handles.insert(

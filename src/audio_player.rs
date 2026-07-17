@@ -34,6 +34,9 @@ pub struct MusicDeck {
     pub shuffle: bool,
     pub overlay_visible: bool,
     pub generation: u32,
+    /// Files found in the music folder but refused at import because the
+    /// playback decoder cannot handle them (shown in the deck overlay).
+    pub rejected: Vec<String>,
 }
 
 impl MusicDeck {
@@ -95,7 +98,24 @@ pub(crate) fn looks_like_mp3(bytes: &[u8]) -> bool {
             .any(|frame| frame[0] == 0xFF && frame[1] & 0xE0 == 0xE0 && frame[1] & 0x06 != 0)
 }
 
-fn scan_music_tracks(directory: &Path, sources: &mut Assets<AudioSource>) -> Vec<MusicTrack> {
+/// True when rodio — the exact decoder Bevy uses at playback time — accepts
+/// these bytes. `bevy_audio` unwraps its decoder when a sink starts, so any
+/// file admitted into `Assets<AudioSource>` without passing this check can
+/// crash the app mid-session (`UnrecognizedFormat`). Import is the only safe
+/// place to reject.
+pub(crate) fn decodes_as_playable(bytes: &[u8]) -> bool {
+    rodio::Decoder::new(std::io::Cursor::new(bytes.to_vec())).is_ok()
+}
+
+/// Full import gate: cheap header sniff first, then a real decode attempt.
+pub(crate) fn valid_music_bytes(bytes: &[u8]) -> bool {
+    looks_like_mp3(bytes) && decodes_as_playable(bytes)
+}
+
+fn scan_music_tracks(
+    directory: &Path,
+    sources: &mut Assets<AudioSource>,
+) -> (Vec<MusicTrack>, Vec<String>) {
     let mut paths = std::fs::read_dir(directory)
         .ok()
         .into_iter()
@@ -109,26 +129,39 @@ fn scan_music_tracks(directory: &Path, sources: &mut Assets<AudioSource>) -> Vec
             .map(|name| name.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default()
     });
-    paths
-        .into_iter()
-        .filter_map(|source_path| {
-            let bytes = std::fs::read(&source_path).ok()?;
-            if !looks_like_mp3(&bytes) {
-                return None;
-            }
-            let name = source_path
-                .file_stem()
-                .map(|name| name.to_string_lossy().replace(['_', '-'], " "))
-                .unwrap_or_else(|| "Unknown Track".to_string());
-            Some(MusicTrack {
-                name,
-                source_path,
-                handle: sources.add(AudioSource {
-                    bytes: bytes.into(),
-                }),
-            })
-        })
-        .collect()
+    let mut tracks = Vec::new();
+    let mut rejected = Vec::new();
+    for source_path in paths {
+        let file_name = source_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| source_path.display().to_string());
+        let Ok(bytes) = std::fs::read(&source_path) else {
+            warn!("Skipping unreadable music file {}", source_path.display());
+            rejected.push(file_name);
+            continue;
+        };
+        if !valid_music_bytes(&bytes) {
+            warn!(
+                "Skipping {} — not a playable MP3 (would crash the audio decoder)",
+                source_path.display()
+            );
+            rejected.push(file_name);
+            continue;
+        }
+        let name = source_path
+            .file_stem()
+            .map(|name| name.to_string_lossy().replace(['_', '-'], " "))
+            .unwrap_or_else(|| "Unknown Track".to_string());
+        tracks.push(MusicTrack {
+            name,
+            source_path,
+            handle: sources.add(AudioSource {
+                bytes: bytes.into(),
+            }),
+        });
+    }
+    (tracks, rejected)
 }
 
 fn setup_music_player(
@@ -138,7 +171,9 @@ fn setup_music_player(
 ) {
     let directory = configured_music_dir();
     let _ = std::fs::create_dir_all(&directory);
-    deck.tracks = scan_music_tracks(&directory, &mut sources);
+    let (tracks, rejected) = scan_music_tracks(&directory, &mut sources);
+    deck.tracks = tracks;
+    deck.rejected = rejected;
     deck.current_index = deck.current_index.min(deck.tracks.len().saturating_sub(1));
 
     commands
@@ -247,7 +282,9 @@ fn reload_music_library_system(
         return;
     }
     stop_music_entity(&mut commands, &mut deck);
-    deck.tracks = scan_music_tracks(&configured_music_dir(), &mut sources);
+    let (tracks, rejected) = scan_music_tracks(&configured_music_dir(), &mut sources);
+    deck.tracks = tracks;
+    deck.rejected = rejected;
     deck.current_index = 0;
     deck.paused = false;
     deck.generation = deck.generation.wrapping_add(1);
@@ -322,8 +359,17 @@ fn update_music_overlay_system(
             .map(|track| track.name.as_str())
             .unwrap_or("No MP3 tracks found");
         let status = if deck.paused { "PAUSED" } else { "PLAYING" };
+        let skipped = if deck.rejected.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\nSkipped {} unplayable file(s): {}",
+                deck.rejected.len(),
+                deck.rejected.join(", ")
+            )
+        };
         *text = Text::new(format!(
-            "STARFALL MUSIC DECK  [{status}]\nTrack {}/{}: {}\nShuffle: {}\nCustom action SFX: {} assigned\n\n←/→ or D-pad: Previous/Next    Space/A: Pause\nS: Shuffle    R: Rescan music + action SFX    Esc/F6: Close\nMusic: {}\nAction SFX: {}",
+            "STARFALL MUSIC DECK  [{status}]\nTrack {}/{}: {}\nShuffle: {}\nCustom action SFX: {} assigned{skipped}\n\n←/→ or D-pad: Previous/Next    Space/A: Pause\nS: Shuffle    R: Rescan music + action SFX    Esc/F6: Close\nMusic: {}\nAction SFX: {}",
             if deck.tracks.is_empty() { 0 } else { deck.current_index + 1 },
             deck.tracks.len(),
             track,
@@ -382,6 +428,19 @@ mod tests {
         assert_eq!(deck.current_index, 2);
         deck.advance(1);
         assert_eq!(deck.current_index, 0);
+    }
+
+    #[test]
+    fn header_sniff_alone_is_not_enough_the_decoder_has_final_say() {
+        // These bytes pass the cheap header sniff (ID3 tag prefix) but carry
+        // no decodable audio frames — exactly the shape that used to reach
+        // Assets<AudioSource> and panic bevy_audio's decoder at playback
+        // (UnrecognizedFormat, see the retained crash log).
+        let mut disguised = b"ID3\x04\x00\x00".to_vec();
+        disguised.extend(std::iter::repeat_n(0u8, 256));
+        assert!(looks_like_mp3(&disguised));
+        assert!(!decodes_as_playable(&disguised));
+        assert!(!valid_music_bytes(&disguised));
     }
 
     #[test]
