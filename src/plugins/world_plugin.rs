@@ -960,8 +960,13 @@ fn dungeon_key_gate_system(
 
 fn dungeon_enemy_spawner_system(
     dungeon: Res<DungeonCrawlState>,
-    mut spawner_q: Query<(&Transform, &mut DungeonEnemySpawner)>,
+    mut spawner_q: Query<(
+        &Transform,
+        &mut DungeonEnemySpawner,
+        Option<&CreatureSpawnOverride>,
+    )>,
     player_q: Query<&Transform, With<Player>>,
+    creature_catalog: Res<crate::engine_tools::PublishedCreatureCatalog>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -970,7 +975,7 @@ fn dungeon_enemy_spawner_system(
     if !dungeon.active {
         return;
     }
-    for (spawner_xf, mut spawner) in spawner_q.iter_mut() {
+    for (spawner_xf, mut spawner, creature_override) in spawner_q.iter_mut() {
         if spawner.spawned {
             continue;
         }
@@ -988,15 +993,30 @@ fn dungeon_enemy_spawner_system(
                 0.0,
                 0.0,
             );
-            let enemy = spawn_enemy_entity(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                spawner.enemy_type,
-                spawner_xf.translation + offset,
-                spawner.difficulty,
-                None,
-            );
+            // A published Forge creature overrides the built-in enemy type;
+            // unpublished ids fall back so encounters never spawn empty.
+            let published_creature = creature_override
+                .and_then(|over| creature_catalog.get(&over.0));
+            let enemy = match published_creature {
+                Some(spec) => crate::plugins::enemy_plugin::spawn_published_creature_enemy(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    spec,
+                    spawner_xf.translation + offset,
+                    spawner.difficulty,
+                    None,
+                ),
+                None => spawn_enemy_entity(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    spawner.enemy_type,
+                    spawner_xf.translation + offset,
+                    spawner.difficulty,
+                    None,
+                ),
+            };
             if let Some((gate_id, room_index)) = spawner.encounter {
                 commands.entity(enemy).insert(DungeonEncounterEnemy {
                     gate_id,

@@ -320,6 +320,64 @@ pub fn spawn_enemy_entity(
     root
 }
 
+/// Base gameplay statline for a Forge creature, chosen by its authored role.
+pub fn creature_enemy_base_type(role: crate::robots::creature::CreatureRole) -> EnemyType {
+    use crate::robots::creature::CreatureRole;
+    match role {
+        CreatureRole::Civilian | CreatureRole::Ally | CreatureRole::Pet | CreatureRole::Scout => {
+            EnemyType::Soldier
+        }
+        CreatureRole::Bruiser => EnemyType::Heavy,
+        CreatureRole::Artillery => EnemyType::SpikeAlien,
+        CreatureRole::Boss => EnemyType::Hybrid,
+    }
+}
+
+/// Spawn a published Creature Forge recipe as a combat-ready enemy: the
+/// forge-built robot hierarchy carries the standard enemy gameplay component
+/// set, with the statline derived from the creature's authored role.
+pub fn spawn_published_creature_enemy(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    spec: &crate::robots::creature::CreatureSpec,
+    position: Vec3,
+    difficulty_scale: f32,
+    faction: Option<Faction>,
+) -> Entity {
+    let enemy_type = creature_enemy_base_type(spec.role);
+    let enemy_data = Enemy::new(enemy_type, position, difficulty_scale);
+    let max_hp = enemy_data.scaled_health();
+    let root = match crate::robots::factory::spawn_creature(
+        commands, meshes, materials, spec, position,
+    ) {
+        Ok(root) => root,
+        // Published records passed validation at save time; if a stale one
+        // fails now, still field a fighter from its raw style.
+        Err(_) => crate::robots::factory::spawn_robot(
+            commands,
+            meshes,
+            materials,
+            &spec.compiled_style(),
+            position,
+        ),
+    };
+    let damageable = enemy_damageable(&enemy_data, faction);
+    let body_scale = difficulty_scale.clamp(0.85, 1.8);
+    commands.entity(root).insert((
+        enemy_data,
+        EnemyStateMachine::default(),
+        Health::new(max_hp),
+        damageable,
+        faction.unwrap_or_default(),
+        RigidBody::KinematicPositionBased,
+        Collider::capsule_y(0.9 * body_scale, body_scale),
+        CollisionProfile::EnemyHurtbox,
+        Sensor,
+    ));
+    root
+}
+
 /// Spawn a story-named enemy (mid-boss or boss).
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_named_enemy(
@@ -1782,6 +1840,36 @@ fn loot_pickup_system(
                 // for this player after inventory space becomes available.
                 loot.quantity = leftover;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::robots::creature::CreatureRole;
+
+    #[test]
+    fn creature_roles_map_to_escalating_enemy_statlines() {
+        assert_eq!(
+            creature_enemy_base_type(CreatureRole::Scout),
+            EnemyType::Soldier
+        );
+        assert_eq!(
+            creature_enemy_base_type(CreatureRole::Bruiser),
+            EnemyType::Heavy
+        );
+        assert_eq!(
+            creature_enemy_base_type(CreatureRole::Artillery),
+            EnemyType::SpikeAlien
+        );
+        assert_eq!(
+            creature_enemy_base_type(CreatureRole::Boss),
+            EnemyType::Hybrid
+        );
+        // Non-combat roles still field a baseline fighter rather than panic.
+        for role in [CreatureRole::Civilian, CreatureRole::Ally, CreatureRole::Pet] {
+            assert_eq!(creature_enemy_base_type(role), EnemyType::Soldier);
         }
     }
 }

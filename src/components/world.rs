@@ -288,6 +288,13 @@ pub struct DungeonKeyGate {
     pub open: Vec3,
 }
 
+/// Optional companion to an enemy spawner: spawn a published Creature Forge
+/// recipe (resolved by stable content id through `PublishedCreatureCatalog`)
+/// instead of the spawner's built-in enemy type. Falls back to the built-in
+/// type when the id is not published in the active project.
+#[derive(Component, Debug, Clone)]
+pub struct CreatureSpawnOverride(pub String);
+
 /// A spawn point inside a dungeon that fires an enemy wave when players enter range.
 #[derive(Component, Debug, Clone)]
 pub struct DungeonEnemySpawner {

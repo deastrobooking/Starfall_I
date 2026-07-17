@@ -146,6 +146,20 @@ screen). Remaining: window drag has no controller binding (windows stay
 reachable via focus regardless), and a recorded controller-only Forge
 acceptance pass.
 
+**Publish/runtime bridge (July 17, 2026):** published creature records now
+reach gameplay. `PublishedCreatureCatalog` joins the published-content
+catalogs — rebuilt on project load/publish, it holds only Creature records
+whose published hash matches their draft hash, so drafts never leak into
+play. `spawn_published_creature_enemy` fields a Forge creature as a
+combat-ready enemy: the robot-factory hierarchy (modifier stacks included)
+carries the standard enemy component set with the statline derived from the
+authored role (Scout/Civilian/Ally/Pet → Soldier, Bruiser → Heavy,
+Artillery → SpikeAlien, Boss → Hybrid). Any `DungeonEnemySpawner` can carry
+a `CreatureSpawnOverride(content_id)` component to spawn a published
+creature instead of its built-in type, falling back safely when the id is
+not published. Remaining: authoring spawner overrides from the Level
+Composer (PM3 metadata), thumbnails, and window layout persistence.
+
 ### PM2 — Project packages and reproducible presets
 
 Each project is a directory containing a manifest, content source folders,

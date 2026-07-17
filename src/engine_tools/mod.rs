@@ -205,6 +205,36 @@ struct PublishedProceduralRecipeEntry {
     material_slots: BTreeMap<String, String>,
 }
 
+/// Published Creature Forge recipes, keyed by stable content id. Enemy
+/// spawners and encounter content resolve creatures through this catalog so
+/// gameplay only ever consumes published (hashed, validated) records.
+#[derive(Resource, Default)]
+pub struct PublishedCreatureCatalog {
+    entries: BTreeMap<String, crate::robots::creature::CreatureSpec>,
+}
+
+impl PublishedCreatureCatalog {
+    pub fn contains(&self, content_id: &str) -> bool {
+        self.entries.contains_key(content_id)
+    }
+
+    pub fn get(&self, content_id: &str) -> Option<&crate::robots::creature::CreatureSpec> {
+        self.entries.get(content_id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn content_ids(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
+    }
+}
+
 /// Published deterministic generator inputs keyed by stable Forge content ID.
 /// The catalog contains source data only; generated ECS entities remain
 /// disposable and can be rebuilt without changing authored identity.
@@ -642,6 +672,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<project_registry::ForgeProjectRegistry>()
             .init_resource::<PublishedMaterialCatalog>()
             .init_resource::<PublishedProceduralRecipeCatalog>()
+            .init_resource::<PublishedCreatureCatalog>()
             .init_resource::<PublishedContentCatalogEpoch>()
             .init_resource::<EditorRegistryState>()
             .init_resource::<WorldKitPreviewState>()
@@ -1823,6 +1854,22 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
     world
         .resource_mut::<PublishedProceduralRecipeCatalog>()
         .entries = recipes;
+
+    let creatures = project
+        .records
+        .iter()
+        .filter(|record| {
+            record.category == persistence::ContentCategory::Creature
+                && record.published_hash.as_ref() == Some(&record.draft_hash)
+                && record.published_hash.is_some()
+        })
+        .filter_map(|record| {
+            let spec = creature_records::load_creature(project, &record.content_id).ok()?;
+            Some((record.content_id.clone(), spec))
+        })
+        .collect();
+    world.resource_mut::<PublishedCreatureCatalog>().entries = creatures;
+
     let mut epoch = world.resource_mut::<PublishedContentCatalogEpoch>();
     epoch.0 = epoch.0.wrapping_add(1).max(1);
 }
@@ -7968,6 +8015,7 @@ mod tests {
         world.init_resource::<Assets<LavaMaterial>>();
         world.init_resource::<PublishedMaterialCatalog>();
         world.init_resource::<PublishedProceduralRecipeCatalog>();
+        world.init_resource::<PublishedCreatureCatalog>();
         world.init_resource::<PublishedContentCatalogEpoch>();
         world.init_resource::<WorldKitPreviewState>();
         world.init_resource::<WorldKitSandboxState>();
@@ -8383,6 +8431,45 @@ mod tests {
             Some(&EditorMaterialBinding(material_id))
         );
         assert!(world.get::<MeshMaterial3d<ToonMaterial>>(entity).is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn published_creature_records_reach_the_runtime_catalog() {
+        let (mut world, root) = persistence_test_world("creature_catalog");
+        let content_id = {
+            let mut session = world.resource_mut::<EditorProjectSession>();
+            let spec = crate::robots::creature::CreatureSpec {
+                content_id: "starfall.creature-test".into(),
+                display_name: "Catalog Stalker".into(),
+                seed: 99,
+                ..Default::default()
+            };
+            creature_records::upsert_creature(&mut session.project, &spec).unwrap();
+            session.project.refresh_hashes().unwrap();
+            spec.content_id
+        };
+
+        // Draft-only records must not reach the runtime catalog.
+        let project = world.resource::<EditorProjectSession>().project.clone();
+        rebuild_published_content_catalogs(&mut world, &project);
+        assert!(!world
+            .resource::<PublishedCreatureCatalog>()
+            .contains(&content_id));
+
+        world
+            .resource_mut::<EditorProjectSession>()
+            .project
+            .publish_drafts()
+            .unwrap();
+        let project = world.resource::<EditorProjectSession>().project.clone();
+        rebuild_published_content_catalogs(&mut world, &project);
+        let catalog = world.resource::<PublishedCreatureCatalog>();
+        let published = catalog
+            .get(&content_id)
+            .expect("published creature is cataloged");
+        assert_eq!(published.seed, 99);
+        assert_eq!(catalog.len(), 1);
         let _ = std::fs::remove_dir_all(root);
     }
 
