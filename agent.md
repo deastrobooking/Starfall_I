@@ -208,7 +208,7 @@ together.
 - Runtime player guidance uses the `PlayerGuidance` resource and HUD panel in
   `src/plugins/ui_plugin.rs`. Feed new interactables into that panel when they
   need immediate player-facing prompts.
-- Core app states are `MainMenu`, `ProjectHub`, `PlayerSelect`,
+- Core app states are `MainMenu`, `ProjectHub`, `CreatureForge`, `PlayerSelect`,
   `CharacterDesign`, `CharacterStudio`, `ChapterSelect`, `RobotGarage`,
   `Playing`, `Paused`, `GameOver`, and `Victory`.
   `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect`

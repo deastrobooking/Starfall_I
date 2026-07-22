@@ -43,7 +43,7 @@ and explicit schema versioning. Art direction combines compact fantasy
 readability, colorful action robots, and original 1970s space-opera shapes
 without copying protected characters or assets.
 
-### GM2 — Robot and Monster Forge (foundation active)
+### GM2 — Robot and Monster Forge (playable vertical slice active)
 
 Unify the existing `src/robots` archetypes and drone factory behind a serializable
 `CreatureSpec`. Use composable morphology modules rather than separate hardcoded
@@ -60,14 +60,22 @@ Acceptance: create, save, reload, animate, validate, and spawn at least three
 distinct robots and three monsters from recipes; generated enemies must work
 with targeting, damage, navigation, and campaign saves.
 
-Foundation status: `src/robots/creature.rs` now provides schema-versioned JSON
-recipes, deterministic seeded generation, robot/monster kinds, six topologies,
-seven gameplay roles, six factions, five material responses, publish validation,
-and six curated seeds. `CreatureSpec::from_legacy` wraps any existing preset
-without losing its `RobotStyle`, while `spawn_creature` compiles topology into
-the existing procedural factory and adds stable runtime metadata. Remaining GM2
-work is the player-facing Forge workspace, topology-specific animation rigs,
-enemy-system binding, thumbnail publishing, and campaign asset registration.
+Current status: `src/robots/creature.rs` provides schema-versioned JSON recipes,
+deterministic seeded generation, robot/monster kinds, six topologies, seven
+gameplay roles, six factions, five material responses, publish validation, and
+six curated seeds. `CreatureSpec::from_legacy` wraps an existing preset without
+losing its `RobotStyle`, while `spawn_creature` compiles topology into the
+procedural factory and adds stable runtime metadata.
+
+The Project Hub now opens a player-facing `AppState::CreatureForge` workspace
+with live preview, controller focus, bounded morphology/features/modifier
+editing, undo/reset, project-backed validation/save, and versioned preset
+export/load. Published creature payloads enter `PublishedCreatureCatalog` only
+when published and draft hashes match. Dungeon spawners can resolve a
+`CreatureSpawnOverride` by stable content ID, derive combat stats from the
+authored role, and fall back to their built-in enemy safely. Remaining GM2 work
+is topology-specific animation rigs, thumbnail publishing, window-layout
+persistence, and Level Composer authoring for creature spawn overrides.
 
 ### GM3 — World Kit Forge
 

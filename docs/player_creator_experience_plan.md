@@ -259,7 +259,18 @@ objects), saves atomically, and only then leaves the protected
 `EngineToolMode::Editing` boundary into play; a failed save keeps you in the
 editor with the error on the status line. Remaining PM3 work: per-level
 terrain/spawn/encounter/lighting metadata, per-level validation budgets, and
-level rename/delete/reorder.
+level rename.
+
+**Level lifecycle delivered (July 22, 2026):** the workspace now displays the
+active level's project position and STARTUP marker. Controller-focusable
+LEVEL ◀ / LEVEL ▶ actions reorder the active level without changing stable
+active/startup IDs and stash its live scene before moving it. DELETE LEVEL uses
+a same-level two-press confirmation, refuses to remove the project's final
+level, repairs active/startup references when necessary, clears stale object
+selection, and respawns the replacement level. Pure persistence tests cover
+unsaved-scene preservation, boundary rejection, startup repair, and the
+non-empty-project invariant. Free-form level rename remains with the shared
+text-entry workflow.
 
 ## Immediate scope
 

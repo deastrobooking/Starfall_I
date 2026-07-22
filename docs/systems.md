@@ -113,7 +113,7 @@ The panel hides while a discussion is active so the dialogue UI can own the bott
 | WallSliding | Pushing into wall while falling | One-hand wall clasp; drains light stamina and caps fall speed at `wall_slide_speed = 0.28` |
 | Hanging | Interact while falling into a wall | Max hang time 2.5s; drains stamina 12/sec |
 | Climbing | Push firmly forward into a vertical surface | Free-climb mountains/buildings on its own HUD energy bar (`CL`, 420 units, drains 26/sec, regens 55/sec grounded). Stick climbs/descends/shimmies; buffered jump mid-climb performs a full wall jump (charges preserved); topping out vaults up-and-over; camera auto-pulls back + widens FOV while climbing |
-| Grappling | `G` / Select+RB | First MVP slice: hook wind-up pose and cooldown only; targeting and pull physics come next |
+| Grappling | `G` / Select+RB | Scores forward route sockets, enemies, drones, bosses, and Grapple-mode surface targets; then zips, swings, or pulls with jump/dodge release |
 
 Jumping uses a short input buffer, coyote timer, early-release jump cut, and a short apex float so near-edge jumps, taps, and high-arc jumps feel more responsive. Falling uses a stronger gravity multiplier and a capped terminal velocity. The local `KinematicCharacterController` compatibility component feeds Avian move-and-slide and uses explicit movement-profile fields for offset, step height/width, and snap-to-ground distance so small lips and authored traversal props are easier to tune consistently.
 
@@ -148,26 +148,37 @@ compression. The facial layer provides deterministic blinking, combat brows,
 attack mouth opening, and exertion movement. Named good-guy, bad-guy, fantasy,
 street-clothes, and Mecha Robot presets remain editable `CharacterSpec` seeds.
 
-Robot and monster generation now has a compatible versioned recipe layer in
+Robot and monster generation has a compatible versioned recipe layer in
 `robots/creature.rs`. `CreatureSpec` preserves the complete legacy `RobotStyle`
 while adding deterministic seed, kind, topology, role, faction, surface, stable
-content ID, schema version, and validation report. Six curated forge seeds cover
-allied, hostile, retro-mecha, crystal, flying, and cave-creature silhouettes.
-`spawn_creature()` validates and compiles recipes through the existing robot
-factory, varies PBR response by surface, and attaches `GeneratedCreature`
-metadata to the root. Existing `spawn_robot()` callers and named drone/boss
-presets remain unchanged.
+content ID, schema version, modifiers, and validation. Six curated Forge seeds
+cover allied, hostile, retro-mecha, crystal, flying, and cave-creature
+silhouettes. `AppState::CreatureForge`, reached from Project Hub, edits those
+recipes against a live procedural preview and supports controller focus,
+undo/reset, project-backed validation/save, and versioned preset export/load.
+`spawn_creature()` compiles recipes through the existing robot factory, varies
+PBR response by surface, and attaches `GeneratedCreature` metadata to the root.
+Published project records whose draft and published hashes match populate
+`PublishedCreatureCatalog`; a dungeon `CreatureSpawnOverride(content_id)` can
+spawn one as a combat enemy with role-derived stats and falls back to its
+built-in enemy when the ID is unavailable. Existing `spawn_robot()` callers and
+named drone/boss presets remain unchanged.
 
 Locomotion animation thresholds use the same units as `PlayerMovement`: walk
 begins above `0.06`, run above `0.48`, and the explicit `Sprinting` state selects
 the faster sprint cycle. The former run threshold of `28.0` was unreachable for
 normal movement speeds (`walk ~= 0.38`, `sprint ~= 0.70`).
 
-Grapple hook foundation: `GrappleHookState` is a single-hook state component
-with Ready/Windup/Searching/Swinging/Zipping/Recovering/Cooldown modes, cable
-tuning, zip/mountain/attack pull tuning, and attach-point fields for future
-raycast work. The current milestone only plays the wind-up/cooldown animation
-path; M2 adds target raycasts and M3-M4 add zip/swing physics.
+Grapple hook: `GrappleHookState` is the single-hook state component with
+Ready/Windup/Searching/Swinging/Zipping/Recovering/Cooldown modes and bounded
+cable, zip, mountain, attack-pull, spring, and damping tuning. Search scores
+forward `GrappleSocket`s, open/contested route markers, drones, ordinary
+enemies, and boss/heavy weak points within cable range. Grapple traversal mode
+also supplies a forward surface latch when no authored target wins. Target kind
+selects swing or zip behavior; movement pumps a swing, while jump or dodge
+releases either mode. Reaching an enemy applies kinetic impact damage and pulls
+non-heavy enemies toward the player; boss/heavy targets take the hit without
+being displaced.
 
 Climb-up: `E` / D-pad Down while hanging. Boosts player upward `climb_boost * dt * 60`.
 
@@ -182,10 +193,10 @@ empty bar → release. Grapple swing/zip suppresses climb starts.
 Speed roads (2026-07): fourteen mountain trunks and cross-links form multiple
 closed racing circuits instead of isolated spokes. Decks use a continuous
 full-route profile (`speed_road_route_profile`) with stations no farther than
-48 units apart. `terrain_surface_y` reproduces the exact two-triangle planes
+32 units apart. `terrain_surface_y` reproduces the exact two-triangle planes
 used by the 62.5-unit terrain collider grid instead of querying a mismatched
 continuous height function. Each station pair samples thirteen lanes across
-the entire 52+ unit road footprint every 2 longitudinal units. The nominal
+the entire 64+ unit road footprint every 1.5 longitudinal units. The nominal
 0.75-unit center clearance and 0.65-unit interpolation envelope keep ordinary
 roads close to grade. The terrain mesh carves a 96-unit full-width shelf that
 blends back into the mountain by 190 units and smooths summit noise along the

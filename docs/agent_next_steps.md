@@ -487,7 +487,8 @@ stack beside Forge.
 - Add preset thumbnails, lock validation-configuration capture, and an explicit
   regenerate-with-same-seed action.
 - Add per-level terrain/spawn/encounter/lighting metadata and budgets plus level
-  rename/delete/reorder.
+  rename. Level reorder and guarded delete are delivered; preserve their stable
+  active/startup-ID and non-empty-project invariants.
 - Build Character/Creature production panels on the shared recipe, transaction,
   validation, and modifier services rather than serializing ECS state.
 

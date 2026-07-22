@@ -683,6 +683,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorArmedModifier>()
             .init_resource::<EditorModifierParamCursor>()
             .init_resource::<EditorArmedLevelTemplate>()
+            .init_resource::<EditorLevelDeleteArm>()
             .register_type::<EditorEntityId>()
             .add_systems(Startup, bootstrap_published_content_catalogs)
             .add_systems(
@@ -1167,6 +1168,9 @@ enum EditorAction {
     LevelCycleTemplate,
     LevelNew,
     LevelNext,
+    LevelMoveEarlier,
+    LevelMoveLater,
+    LevelDelete,
     LevelSetStartup,
     PlaytestStartup,
     SearchRegistry,
@@ -1434,6 +1438,11 @@ struct EditorModifierParamCursor(usize);
 /// PM3: which level template the NEW LEVEL button is armed with.
 #[derive(Resource, Default)]
 struct EditorArmedLevelTemplate(usize);
+
+/// Destructive level removal requires the same active level to be requested
+/// twice. Any other editor action clears the arm.
+#[derive(Resource, Default)]
+struct EditorLevelDeleteArm(Option<String>);
 
 /// Default instances for each armable modifier kind, in cycle order.
 fn armed_modifier_template(index: usize) -> crate::mesh_modifiers::MeshModifier {
@@ -2725,6 +2734,9 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                 spawn_editor_button(bar, 102, EditorAction::LevelNext, "NEXT LEVEL");
                 spawn_editor_button(bar, 103, EditorAction::LevelCycleTemplate, "LEVEL TEMPLATE");
                 spawn_editor_button(bar, 104, EditorAction::LevelNew, "NEW LEVEL");
+                spawn_editor_button(bar, 107, EditorAction::LevelMoveEarlier, "LEVEL ◀");
+                spawn_editor_button(bar, 108, EditorAction::LevelMoveLater, "LEVEL ▶");
+                spawn_editor_button(bar, 109, EditorAction::LevelDelete, "DELETE LEVEL");
                 spawn_editor_button(bar, 105, EditorAction::LevelSetStartup, "SET STARTUP");
                 spawn_editor_button(bar, 106, EditorAction::PlaytestStartup, "PLAYTEST");
                 spawn_editor_button(bar, 1, EditorAction::Undo, "UNDO");
@@ -5711,6 +5723,11 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
     if action != EditorAction::Exit {
         world.resource_mut::<EditorDocumentState>().exit_armed = false;
     }
+    if action != EditorAction::LevelDelete {
+        if let Some(mut arm) = world.get_resource_mut::<EditorLevelDeleteArm>() {
+            arm.0 = None;
+        }
+    }
     match action {
         EditorAction::Exit => {
             let document = world.resource::<EditorDocumentState>();
@@ -6322,6 +6339,97 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             respawn_scene_objects(world, &objects);
             world.resource_mut::<EditorDocumentState>().dirty = true;
             set_editor_status(world, format!("Editing level: {name}"));
+        }
+        EditorAction::LevelMoveEarlier | EditorAction::LevelMoveLater => {
+            let offset = if action == EditorAction::LevelMoveEarlier {
+                -1
+            } else {
+                1
+            };
+            let scene = collect_working_scene(world);
+            let result = {
+                let mut session = world.resource_mut::<EditorProjectSession>();
+                session.project.scene = scene;
+                let active_id = session.project.active_level_id.clone();
+                let name = session
+                    .project
+                    .active_level()
+                    .map(|level| level.display_name.clone())
+                    .unwrap_or_else(|| active_id.clone());
+                let count = session.project.levels.len();
+                session
+                    .project
+                    .move_level(&active_id, offset)
+                    .map(|index| (name, index, count))
+            };
+            match result {
+                Ok((name, index, count)) => {
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(
+                        world,
+                        format!("Moved {name} to level position {}/{}", index + 1, count),
+                    );
+                }
+                Err(error) => set_editor_status(world, format!("Level move rejected: {error}")),
+            }
+        }
+        EditorAction::LevelDelete => {
+            let (active_id, name, count) = {
+                let session = world.resource::<EditorProjectSession>();
+                let active_id = session.project.active_level_id.clone();
+                let name = session
+                    .project
+                    .active_level()
+                    .map(|level| level.display_name.clone())
+                    .unwrap_or_else(|| active_id.clone());
+                (active_id, name, session.project.levels.len())
+            };
+            if count <= 1 {
+                world.resource_mut::<EditorLevelDeleteArm>().0 = None;
+                set_editor_status(world, "Delete rejected: a project must keep one level");
+                return;
+            }
+            let confirmed =
+                world.resource::<EditorLevelDeleteArm>().0.as_deref() == Some(active_id.as_str());
+            if !confirmed {
+                world.resource_mut::<EditorLevelDeleteArm>().0 = Some(active_id);
+                set_editor_status(
+                    world,
+                    format!("Press DELETE LEVEL again to remove {name} from this project"),
+                );
+                return;
+            }
+
+            let scene = collect_working_scene(world);
+            let result = {
+                let mut session = world.resource_mut::<EditorProjectSession>();
+                session.project.scene = scene;
+                session.project.delete_level(&active_id).map(|deleted| {
+                    let next_name = session
+                        .project
+                        .active_level()
+                        .map(|level| level.display_name.clone())
+                        .unwrap_or_else(|| session.project.active_level_id.clone());
+                    (
+                        deleted.display_name,
+                        next_name,
+                        session.project.scene.objects.clone(),
+                    )
+                })
+            };
+            world.resource_mut::<EditorLevelDeleteArm>().0 = None;
+            match result {
+                Ok((deleted_name, next_name, objects)) => {
+                    world.resource_mut::<EditorSelection>().clear();
+                    respawn_scene_objects(world, &objects);
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(
+                        world,
+                        format!("Deleted {deleted_name}; now editing {next_name}"),
+                    );
+                }
+                Err(error) => set_editor_status(world, format!("Delete rejected: {error}")),
+            }
         }
         EditorAction::LevelSetStartup => {
             let (active_id, name) = {
@@ -7490,9 +7598,28 @@ fn update_editor_workspace_text(
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let (level_name, level_position, level_count, startup) = session
+        .project
+        .active_level()
+        .map(|level| {
+            let position = session
+                .project
+                .levels
+                .iter()
+                .position(|candidate| candidate.level_id == level.level_id)
+                .unwrap_or(0);
+            (
+                level.display_name.as_str(),
+                position + 1,
+                session.project.levels.len(),
+                level.level_id == session.project.startup_level_id,
+            )
+        })
+        .unwrap_or(("—", 0, session.project.levels.len(), false));
+    let startup_marker = if startup { " • STARTUP" } else { "" };
     for mut text in &mut text_queries.p0() {
         *text = Text::new(format!(
-            "Authorable objects: {count}\nSelected: {}\nActive: {active}\n\n{listing}",
+            "Level {level_position}/{level_count}: {level_name}{startup_marker}\nAuthorable objects: {count}\nSelected: {}\nActive: {active}\n\n{listing}",
             selection.iter().count(),
         ));
     }

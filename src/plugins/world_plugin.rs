@@ -6722,7 +6722,7 @@ fn terrain_mesh_height_grid(seed: u64) -> Arc<Vec<f32>> {
 }
 
 /// Cut a broad, blended shelf into the mountain mesh beneath authored roads.
-/// Without this cross-slope terrace, a 52-unit-wide unbanked deck must float
+/// Without this cross-slope terrace, a 64-unit-wide unbanked deck must float
 /// above whichever edge of a steep mountain is highest. The shelf lets the
 /// road genuinely follow and climb the mountain while leaving cliffs intact
 /// outside the travel corridor.

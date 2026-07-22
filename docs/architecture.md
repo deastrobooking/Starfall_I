@@ -64,10 +64,11 @@ src/
     radio_plugin.rs         RadioChatter queue drain → UiMessage
     vehicle_plugin.rs       Vehicle enter/exit; GroundMode (Motorcycle/Tank/GiantMech) and AirMode (Jet/Ship) driven by assembly or blueprint
     robot_garage_plugin.rs  Assembly form browser; auto-selects eligible pets; MechCommandLink gating
+    creature_forge_plugin.rs Project-backed CreatureSpec authoring, live preview, validation, and preset library
   lsystem/                  L-system string rewriting + 3-D turtle for procedural trees
   engine_tools/             Forge project/level persistence, validation, editor runtime and panels
   mesh_modifiers/           Reusable procedural mesh modifier pipeline
-  robots/                   Robot style presets (designer.rs, factory.rs presets.rs)
+  robots/                   Creature recipes, procedural robot factory, designer, and presets
 ```
 
 ## State Flow
@@ -75,15 +76,20 @@ src/
 ```
 MainMenu ──► PlayerSelect ──► ChapterSelect ──► Playing ⇄ Paused
    │              │                 │              │
-   │              └─► CharacterDesign             ├─► GameOver
-   │                       └─► CharacterStudio      └─► Victory
-   │                                │
-   └─► ProjectHub ──► Forge Editing ──► startup-level Playtest
+   │              ├─► CharacterDesign             ├─► GameOver
+   │              └─► CharacterStudio              └─► Victory
+   │
+   └─► ProjectHub ──┬─► CreatureForge
+                    └─► Forge Editing in Playing ──► startup-level Playtest
 
 ChapterSelect ──► CharacterDesign / RobotGarage ──► ChapterSelect
 ```
 
 `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect` and return to it on Esc/confirm. Neither transitions to `Playing` directly.
+`CharacterDesign` and `CharacterStudio` are also available per joined slot from
+`PlayerSelect`. `CreatureForge` returns to `ProjectHub`; opening or creating a
+project enters `Playing` with `EngineToolMode::Editing` rather than creating a
+second editor-only gameplay state.
 
 ## Core Data Flow
 
@@ -159,6 +165,11 @@ Party-shared exceptions:
   payload contract maps to configurable three-band toon and rim-light settings;
   Forge renders a live shader preview before those records are promoted into
   the broader runtime material catalog.
+- **Published creature drafts do not leak into play**: Creature Forge writes
+  validated `ContentPayload::Creature` records through the active project store.
+  Only records whose published hash matches their draft hash enter
+  `PublishedCreatureCatalog`; `CreatureSpawnOverride` resolves those stable IDs
+  for dungeon enemies and retains the built-in spawn as its fallback.
 - **Kinematic controller physics**: Player movement is computed manually each
   frame through the local `KinematicCharacterController` compatibility component,
   then applied with Avian move-and-slide. This gives full control over wall

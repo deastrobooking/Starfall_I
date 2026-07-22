@@ -169,6 +169,59 @@ impl ForgeProject {
         self.normalize_levels();
         level_id
     }
+
+    /// Move a level in project order without changing active/startup identity.
+    /// The active workspace is stashed first so reordering cannot discard live
+    /// editor changes.
+    pub fn move_level(&mut self, level_id: &str, offset: isize) -> Result<usize, String> {
+        self.ensure_level_invariants();
+        let current = self
+            .levels
+            .iter()
+            .position(|level| level.level_id == level_id)
+            .ok_or_else(|| format!("Unknown level {level_id}"))?;
+        let target = current as isize + offset;
+        if target < 0 || target >= self.levels.len() as isize {
+            return Err(format!(
+                "Level {level_id} is already at the project boundary"
+            ));
+        }
+        self.stash_active_level();
+        self.levels.swap(current, target as usize);
+        self.normalize_levels();
+        Ok(target as usize)
+    }
+
+    /// Delete a level while preserving the invariant that every project has at
+    /// least one. Removing the active level selects the next entry (or the
+    /// preceding final entry); removing the startup level promotes the active
+    /// level to startup.
+    pub fn delete_level(&mut self, level_id: &str) -> Result<LevelDocument, String> {
+        self.ensure_level_invariants();
+        if self.levels.len() <= 1 {
+            return Err("A project must keep at least one level".into());
+        }
+        let index = self
+            .levels
+            .iter()
+            .position(|level| level.level_id == level_id)
+            .ok_or_else(|| format!("Unknown level {level_id}"))?;
+        let deleting_active = self.active_level_id == level_id;
+        if !deleting_active {
+            self.stash_active_level();
+        }
+        let deleted = self.levels.remove(index);
+        if deleting_active {
+            let replacement = index.min(self.levels.len() - 1);
+            self.active_level_id = self.levels[replacement].level_id.clone();
+        }
+        if self.startup_level_id == level_id {
+            self.startup_level_id = self.active_level_id.clone();
+        }
+        self.normalize_levels();
+        Ok(deleted)
+    }
+
     pub fn refresh_hashes(&mut self) -> Result<(), ProjectIoError> {
         for record in &self.records {
             if record.category == ContentCategory::Scene {
@@ -2489,6 +2542,67 @@ mod tests {
             .iter()
             .any(|error| matches!(error, ProjectValidationError::DuplicateLevelId(_))));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn level_reorder_preserves_active_startup_and_live_scene() {
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        let startup_id = project.startup_level_id.clone();
+        project.create_level(LevelTemplate::Dungeon);
+        let boss_id = project.create_level(LevelTemplate::BossArena);
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 999,
+            name: "Unsaved Boss Edit".into(),
+            primitive: DraftPrimitive::Beacon,
+            transform: TransformDraft::default(),
+            material_id: None,
+            modifiers: Vec::new(),
+        });
+
+        assert_eq!(project.move_level(&boss_id, -1), Ok(1));
+        assert_eq!(project.active_level_id, boss_id);
+        assert_eq!(project.startup_level_id, startup_id);
+        assert_eq!(project.levels[1].level_id, boss_id);
+        assert!(project
+            .scene
+            .objects
+            .iter()
+            .any(|object| object.name == "Unsaved Boss Edit"));
+        let order = project
+            .levels
+            .iter()
+            .map(|level| level.level_id.clone())
+            .collect::<Vec<_>>();
+        assert!(project.move_level(&startup_id, -1).is_err());
+        assert_eq!(
+            project
+                .levels
+                .iter()
+                .map(|level| level.level_id.clone())
+                .collect::<Vec<_>>(),
+            order
+        );
+    }
+
+    #[test]
+    fn level_delete_repairs_active_and_startup_without_allowing_empty_projects() {
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        let main_id = project.active_level_id.clone();
+        let dungeon_id = project.create_level(LevelTemplate::Dungeon);
+        project.startup_level_id = dungeon_id.clone();
+
+        let deleted = project
+            .delete_level(&dungeon_id)
+            .expect("delete active level");
+        assert_eq!(deleted.level_id, dungeon_id);
+        assert_eq!(project.levels.len(), 1);
+        assert_eq!(project.active_level_id, main_id);
+        assert_eq!(project.startup_level_id, main_id);
+        assert_eq!(project.scene, project.levels[0].scene);
+        assert!(project.delete_level(&main_id).is_err());
+        assert_eq!(project.levels.len(), 1);
     }
 
     #[test]

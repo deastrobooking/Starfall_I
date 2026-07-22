@@ -7,15 +7,15 @@
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 409 tests across the main crate and example targets,
+- Automated baseline: 411 tests across the main crate and example targets,
   `cargo build`, `cargo fmt --check`, and
   `cargo clippy --all-targets -- -D warnings` pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
   split-screen performance acceptance is still required. Automated success is
   not evidence that those hardware gates passed.
-- Core states are `MainMenu`, `ProjectHub`, `PlayerSelect`, `CharacterDesign`,
-  `CharacterStudio`, `ChapterSelect`, `RobotGarage`, `Playing`, `Paused`,
-  `GameOver`, and `Victory`.
+- Core states are `MainMenu`, `ProjectHub`, `CreatureForge`, `PlayerSelect`,
+  `CharacterDesign`, `CharacterStudio`, `ChapterSelect`, `RobotGarage`,
+  `Playing`, `Paused`, `GameOver`, and `Victory`.
 
 ## Delivered foundations
 
@@ -76,6 +76,15 @@
   validation/publishing, immutable presets and lock documents, deterministic
   modifier stacks, typed World Kit recipes, multi-level projects, and startup
   level playtest.
+- Multi-level projects expose the active level's order/startup state and support
+  controller-driven reordering plus guarded deletion. Deletion requires a
+  same-level second confirmation, cannot remove the final level, and repairs
+  active/startup identity before the replacement scene is respawned.
+- Creature Forge is a Project Hub branch with live procedural preview,
+  controller menu focus, bounded morphology and modifier editing, undo/reset,
+  project-backed validation/save, and versioned preset export/load. Published
+  creature records populate `PublishedCreatureCatalog`; dungeon spawners can
+  opt into them by stable content ID and safely fall back when unavailable.
 - The accepted product/art direction and performance gates are recorded in
   `docs/product_art_direction_triage_2026-07-17.md`. A shared semantic
   `UiTheme` now drives the Main Menu, Player Select accents, and per-player HUD;
@@ -105,7 +114,7 @@
    four-player effect-budget behavior, and per-player save/reload ownership.
 7. Continue PM1–PM3 creator gaps: templates/import/recovery/settings, preset
    thumbnails and validation capture, and per-level metadata/budgets plus
-   rename/delete/reorder.
+   rename.
 
 ## Authority map
 

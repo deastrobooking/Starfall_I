@@ -26,7 +26,8 @@ numbers.
 ## Core Concept
 
 Starfall uses one star-tech grappling hook per player, not a two-web system.
-The hook should eventually support four verbs:
+The hook currently supports swing, zip, and attack-pull behavior and is designed
+to grow into four verbs:
 
 - Swing: attach to cliffs, bridges, ships, towers, boss armor, and authored hook
   sockets, then preserve momentum through a readable arc.
@@ -114,9 +115,12 @@ Non-goals for MM7-MM11:
 - Chassis/body-part swaps already point toward modular customization, but the
   full main-menu clothing/armor/prefab creator should be planned as a separate
   `CC#` roadmap once the skeleton and attachment contracts are stable.
-- `GrappleHookState` is the first MVP hook foundation: it stores the single-hook
-  mode, target classification, cable tuning, wind-up/search/recovery/cooldown
-  timers, heat, zip/mountain/attack pull tuning, and attach-point data.
+- `GrappleHookState` is the authoritative single-hook runtime: it stores mode,
+  target classification, cable tuning, wind-up/search/recovery/cooldown timers,
+  heat, zip/mountain/attack-pull tuning, and attach-point data. Authored route
+  sockets, enemies, drones, bosses, and Grapple-mode surface fallbacks feed the
+  search; the movement motor consumes its zip and swing velocity, and enemy
+  arrival resolves impact damage plus light-target pull.
 - D-pad quick modes select traversal intent: Grapple, Hover Jet, Flight, and
   Hoverboard. Select+D-pad keeps legacy utility shortcuts such as interact,
   vehicle, previous weapon, and map.

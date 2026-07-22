@@ -98,13 +98,11 @@ cargo run --features dynamic
 
 ## Game Flow
 
-1. Main Menu
-2. Player Select
-3. Character Design
-4. Chapter Select
-5. Playing
-6. Paused
-7. Game Over
+The top-level flow includes the player-facing `MainMenu`, `PlayerSelect`,
+`CharacterDesign`, `CharacterStudio`, `ChapterSelect`, `RobotGarage`, `Playing`,
+`Paused`, `GameOver`, and `Victory` states. The creator path branches from the
+title into `ProjectHub`, which opens `CreatureForge` or the Forge level
+workspace running inside `Playing` with protected editor mode enabled.
 
 Chapter select is now the 200 x 200 mile Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the character editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
 
@@ -112,7 +110,16 @@ Character design supports GLB-inspired base model buttons, visible prefab export
 
 The studio also includes a guarded external-rig diagnostic backend. It maps the skinned AMP GLB onto Starfall's canonical 17-joint humanoid contract and automatically falls back to the generated model if loading fails. Production Blender assets must add the documented 19 named shape keys before external rigs become the editable default; see `docs/character_studio.md`.
 
-The Game Maker toolchain now includes the GM2 robot/monster recipe foundation. Serializable `CreatureSpec` assets wrap all existing robot geometry while adding deterministic seeds, robot/monster type, topology, role, faction, material response, stable IDs, validation, and curated Star Guardian, Raider Gunner, Retro Mecha, Crystal Golem, Sky Manta, and Cave Crawler presets. Valid recipes spawn through the existing procedural robot factory, so the current drone and boss library remains compatible.
+The Game Maker toolchain includes a playable GM2 Creature Forge reached from
+Project Hub. Serializable `CreatureSpec` assets wrap the existing robot geometry
+while adding deterministic seeds, robot/monster type, topology, role, faction,
+material response, stable IDs, validation, modifiers, and curated Star Guardian,
+Raider Gunner, Retro Mecha, Crystal Golem, Sky Manta, and Cave Crawler presets.
+The Forge provides a live preview, undo/reset, project-backed saves, versioned
+preset export/load, and controller menu focus. Published creature records enter
+the runtime catalog by content ID and can override dungeon enemy spawners; role
+metadata supplies the combat statline, with safe fallback when a record is not
+published.
 
 Perk training is also in chapter select. Leveling up grants one perk point; spend points with:
 
@@ -148,7 +155,7 @@ Keyboard and mouse:
 | Hold toward wall while falling | Wall slide |
 | `E` near wall while falling/hanging | Hang or climb up |
 | `E` | Interact; trigger nearby slingshots |
-| `G` | Grapple hook wind-up foundation |
+| `G` | Fire the grapple hook; zip, swing, or pull the selected target |
 | `Q` | Dodge/drop; Rocket Hoverboard overdrive; Saber Comet Dash/Meteor Pound after blueprint |
 | `LMB` | Fire active star beam / Star Sabre slash |
 | `RMB` | Aim |
@@ -201,7 +208,7 @@ Controller:
 | LB + Select | Open/close the owning player's Star Loadout |
 | LB + West | Use equipped quick item |
 | RB | Next beam |
-| Select + RB | Grapple hook wind-up foundation |
+| Select + RB | Fire the grapple hook; zip, swing, or pull the selected target |
 | D-Pad Left | Previous beam |
 | D-Pad Down | Interact / hang / climb / trigger slingshots |
 | D-Pad Up | Enter vehicle |
