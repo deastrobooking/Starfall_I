@@ -348,20 +348,19 @@ pub fn spawn_published_creature_enemy(
     let enemy_type = creature_enemy_base_type(spec.role);
     let enemy_data = Enemy::new(enemy_type, position, difficulty_scale);
     let max_hp = enemy_data.scaled_health();
-    let root = match crate::robots::factory::spawn_creature(
-        commands, meshes, materials, spec, position,
-    ) {
-        Ok(root) => root,
-        // Published records passed validation at save time; if a stale one
-        // fails now, still field a fighter from its raw style.
-        Err(_) => crate::robots::factory::spawn_robot(
-            commands,
-            meshes,
-            materials,
-            &spec.compiled_style(),
-            position,
-        ),
-    };
+    let root =
+        match crate::robots::factory::spawn_creature(commands, meshes, materials, spec, position) {
+            Ok(root) => root,
+            // Published records passed validation at save time; if a stale one
+            // fails now, still field a fighter from its raw style.
+            Err(_) => crate::robots::factory::spawn_robot(
+                commands,
+                meshes,
+                materials,
+                &spec.compiled_style(),
+                position,
+            ),
+        };
     let damageable = enemy_damageable(&enemy_data, faction);
     let body_scale = difficulty_scale.clamp(0.85, 1.8);
     commands.entity(root).insert((
@@ -1868,7 +1867,11 @@ mod tests {
             EnemyType::Hybrid
         );
         // Non-combat roles still field a baseline fighter rather than panic.
-        for role in [CreatureRole::Civilian, CreatureRole::Ally, CreatureRole::Pet] {
+        for role in [
+            CreatureRole::Civilian,
+            CreatureRole::Ally,
+            CreatureRole::Pet,
+        ] {
             assert_eq!(creature_enemy_base_type(role), EnemyType::Soldier);
         }
     }

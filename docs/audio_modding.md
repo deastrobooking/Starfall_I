@@ -41,6 +41,7 @@ and `reward.chest`. Modular systems may emit additional IDs through
 `hoverboard.trick_land`.
 
 The hoverboard/Saber progression pass also emits `hoverboard.overdrive`,
+`hoverboard.land`,
 `sabre.cyclone`, `sabre.comet_dash`, `sabre.meteor_pound`, and `sabre.wave`.
 If an id is absent from `actions.json`, the game uses the appropriate synthesized
 arcade fallback so the action remains audible during prototyping.

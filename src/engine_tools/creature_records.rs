@@ -110,7 +110,9 @@ pub fn next_free_content_id(project: &ForgeProject) -> String {
         .expect("unbounded numbering always finds a free creature id")
 }
 
-fn open_active_store(registry: &ForgeProjectRegistry) -> Result<(ProjectStore, ForgeProject), String> {
+fn open_active_store(
+    registry: &ForgeProjectRegistry,
+) -> Result<(ProjectStore, ForgeProject), String> {
     let Some(active) = registry.active.as_deref() else {
         return Err("No active project — open one in the Project Hub first".to_string());
     };
@@ -206,8 +208,7 @@ mod tests {
         };
         spec.style.has_wings = true;
 
-        let content_id =
-            save_to_active_project(&registry, &mut spec).expect("first save succeeds");
+        let content_id = save_to_active_project(&registry, &mut spec).expect("first save succeeds");
         assert_eq!(content_id, "starfall.creature-1");
         assert_eq!(spec.content_id, content_id);
 
@@ -216,8 +217,7 @@ mod tests {
             .iter()
             .any(|(id, name)| id == &content_id && name == "Ridge Stalker"));
 
-        let loaded =
-            load_from_active_project(&registry, &content_id).expect("load succeeds");
+        let loaded = load_from_active_project(&registry, &content_id).expect("load succeeds");
         assert_eq!(loaded.seed, 77);
         assert!(loaded.style.has_wings);
 

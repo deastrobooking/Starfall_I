@@ -57,7 +57,7 @@ pub const SABRE_RELIC_CATALOG: [SabreRelicDef; 9] = [
         id: "solar_sabre_glyph",
         name: "Solar Sabre Glyph",
         kind: SabreRelicKind::Core,
-        effect: "Launches a Star Wave after each standard Saber slash.",
+        effect: "Upgrades the second-slash Star Wave into a wider, stronger multi-wave.",
         input: "RT / LMB while Saber is active",
         source_hint: "Solar Sabre Observatory",
     },
@@ -356,6 +356,12 @@ impl UpgradeLedger {
 
     pub fn sabre_wave_unlocked(&self) -> bool {
         self.has_relic("solar_sabre_glyph")
+    }
+
+    /// Tier zero is the starter second-slash wave. The Solar Glyph contributes
+    /// the first upgrade and Beam Capacitors provide the remaining five tiers.
+    pub fn sabre_wave_upgrade_tier(&self) -> u32 {
+        u32::from(self.sabre_wave_unlocked()) + self.rank(TechUpgradeId::BeamCapacitors)
     }
 
     pub fn sabre_spin_unlocked(&self) -> bool {

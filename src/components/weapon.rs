@@ -457,8 +457,8 @@ impl SabreTechnique {
 #[derive(Component, Debug, Clone)]
 pub struct BeamSabre {
     pub active: bool,
-    /// The base Star Sabre is part of the starter kit. World relics unlock its
-    /// waves and advanced techniques instead of withholding the core weapon.
+    /// The base Star Sabre is part of the starter kit and earns a small wave on
+    /// its second slash. World relics strengthen waves and unlock techniques.
     pub unlocked: bool,
     pub level: u32,
     pub slash_damage: f32,

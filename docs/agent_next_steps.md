@@ -307,6 +307,15 @@ four-gate three-lap races with two NPC rivals each; per-player rail/air/spin
 combos bank on landing and drive board rotation, stunt FOV, score messages, and
 real Bevy gamepad rumble requests. Remaining production work:
 
+The freeway/landing reliability slice is also delivered: mountain trunks are
+64 units wide with 32-unit slices, automatic Hermite rounding, and 4.6-unit
+barriers while settlement paths keep their smaller widths. Forge roads now
+compile finer curves, rounded 12-slice junctions and barriers, with a one-action
+automatic rounding reset. Hoverboards retain forward coast, ease descent near
+terrain, land with a short board pose, and render 10% larger. City spy drones
+now expose enemy hurtboxes, and armor durability recharges after a three-second
+damage delay.
+
 - Tune the existing loop adhesion, entry/exit handoff, camera, recovery, and
   checkpoint behavior plus rail/spring camera handoff on representative ground,
   mountain, and aerial routes.
@@ -567,9 +576,17 @@ Run the focused hoverboard/Saber acceptance pass before more feature work:
   soles across procedural/imported character scales.
 - Compare cruise, sprint/rocket, jump, and B/East overdrive; tune only the
   `TraversalModeState` constants after controller hardware feedback.
-- Verify a new player starts with the Saber, gains waves from Solar Sabre Glyph,
-  and gains Cyclone, Comet Dash, Meteor Pound, elemental gems, and Starheart
-  independently as their world objects are collected.
+- Coast without stick input, redirect while airborne, and land from low and
+  high jumps; verify momentum remains readable and the near-ground assist never
+  causes hovering. Drive the main freeway edges and several settlement paths,
+  then compile/edit a sharp Forge junction with automatic rounding.
+- Shoot both normal flying drones and peaceful-city spy drones; verify health,
+  damage numbers, hit flash, death rewards, and armor recharge delay/refill.
+- Verify a new player starts with the larger core/aura Saber and launches one
+  small wave after slash two. Confirm Solar Sabre Glyph and Beam Capacitors add
+  waves, size, speed, damage, piercing/fourth-slash/splash progression, while
+  Cyclone, Comet Dash, Meteor Pound, elemental gems, and Starheart remain
+  independently collectible.
 - Save/reload two players and confirm the party relic grant is present in both
   owned ledgers, then join a later player and confirm discovered relics seed
   correctly.

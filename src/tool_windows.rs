@@ -55,8 +55,10 @@ pub struct ToolWindowsPlugin;
 
 impl Plugin for ToolWindowsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ToolWindowRaiseOrder>()
-            .add_systems(Update, (tool_window_drag_system, tool_window_minimize_system));
+        app.init_resource::<ToolWindowRaiseOrder>().add_systems(
+            Update,
+            (tool_window_drag_system, tool_window_minimize_system),
+        );
     }
 }
 
@@ -126,10 +128,7 @@ fn tool_window_drag_system(
 }
 
 fn tool_window_minimize_system(
-    buttons: Query<
-        (&Interaction, &ToolWindowMinimizeButton),
-        (Changed<Interaction>, With<Button>),
-    >,
+    buttons: Query<(&Interaction, &ToolWindowMinimizeButton), (Changed<Interaction>, With<Button>)>,
     mut windows: Query<&mut ToolWindow>,
     mut contents: Query<(&mut Node, &ToolWindowContent)>,
     mut glyphs: Query<(&mut Text, &ToolWindowMinimizeGlyph)>,
@@ -360,14 +359,24 @@ mod tests {
         };
 
         press(&mut app);
-        assert!(app.world().get::<ToolWindow>(window_entity).unwrap().minimized);
+        assert!(
+            app.world()
+                .get::<ToolWindow>(window_entity)
+                .unwrap()
+                .minimized
+        );
         assert_eq!(
             app.world().get::<Node>(content_entity).unwrap().display,
             Display::None
         );
 
         press(&mut app);
-        assert!(!app.world().get::<ToolWindow>(window_entity).unwrap().minimized);
+        assert!(
+            !app.world()
+                .get::<ToolWindow>(window_entity)
+                .unwrap()
+                .minimized
+        );
         assert_eq!(
             app.world().get::<Node>(content_entity).unwrap().display,
             Display::Flex

@@ -1,3 +1,4 @@
+use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::camera::Hdr;
 use bevy::camera::{PerspectiveProjection, Projection, Viewport};
 use bevy::prelude::*;
@@ -16,7 +17,7 @@ use crate::characters::{
     despawn_cartoon_character_parts, eye_preset, hair_preset, hero_config,
     hero_config_with_overrides, outfit_preset, skin_preset,
 };
-use crate::components::armor::ArmorSet;
+use crate::components::armor::{ArmorRechargeState, ArmorSet};
 use crate::components::character::{CartoonPart, JointMarker};
 use crate::components::enemy::{BossEnemy, DeadEnemy, Enemy, EnemyType, FlyingDrone};
 use crate::components::inventory::{Inventory, QuickItemSlot};
@@ -44,8 +45,8 @@ use crate::resources::{
     PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
     WorldRouteRegistry, WorldRouteState,
 };
-use crate::sfx::ModularActionSfxEvent;
 use crate::robot_pets::RobotPetCollection;
+use crate::sfx::ModularActionSfxEvent;
 use crate::state::AppState;
 
 /// Route the player's visual through the new native modular humanoid
@@ -778,6 +779,7 @@ fn spawn_players(
                 StuntRunState::default(),
                 StuntRaceProgress::default(),
                 ArmorSet::default(),
+                ArmorRechargeState::default(),
                 starter_inventory,
                 QuickItemSlot::default(),
                 weapon_inventory,
@@ -995,10 +997,7 @@ fn update_rocket_hoverboard_visuals(
         ),
         With<Player>,
     >,
-    mut boards: Query<
-        (&RocketHoverboardVisual, &mut Visibility, &mut Transform),
-        Without<Player>,
-    >,
+    mut boards: Query<(&RocketHoverboardVisual, &mut Visibility, &mut Transform), Without<Player>>,
 ) {
     for (board, mut visibility, mut transform) in boards.iter_mut() {
         let Some((_, traversal, movement, jetpack, boost, input, stunt, output, player_transform)) =
@@ -1019,7 +1018,14 @@ fn update_rocket_hoverboard_visuals(
         let speed = movement.ground_velocity.length();
         let rocket = jetpack.is_active || !movement.is_grounded;
         let pulse = (time.elapsed_secs() * if rocket { 18.0 } else { 8.0 }).sin();
-        transform.translation.y = -1.24 + pulse * if rocket { 0.045 } else { 0.016 };
+        let landing_phase = (1.0 - boost.landing_timer / 0.34).clamp(0.0, 1.0);
+        let landing_compression = if boost.landing_timer > 0.0 {
+            (landing_phase * std::f32::consts::PI).sin()
+        } else {
+            0.0
+        };
+        transform.translation.y =
+            -1.24 + pulse * if rocket { 0.045 } else { 0.016 } - landing_compression * 0.12;
         let aerial_spin = if !movement.is_grounded {
             stunt.spin_degrees.to_radians()
         } else {
@@ -1040,11 +1046,18 @@ fn update_rocket_hoverboard_visuals(
         transform.rotation = surface_tilt
             * Quat::from_rotation_y(aerial_spin)
             * Quat::from_rotation_x(
-                (-movement.velocity.y * 0.12 - speed * 0.018).clamp(-0.30, 0.24),
+                (-movement.velocity.y * 0.12 - speed * 0.018 + boost.landing_approach * 0.14
+                    - landing_compression * 0.10)
+                    .clamp(-0.30, 0.30),
             )
             * Quat::from_rotation_z(aerial_roll);
         let boost_scale = if boost.timer > 0.0 { 1.08 } else { 1.0 };
-        transform.scale = Vec3::new(boost_scale, 1.0, 1.0);
+        let board_scale = 1.10;
+        transform.scale = Vec3::new(
+            board_scale * boost_scale,
+            board_scale * (1.0 - landing_compression * 0.08),
+            board_scale * (1.0 + landing_compression * 0.04),
+        );
     }
 }
 
@@ -1774,8 +1787,17 @@ fn flush_motor_translation(
     }
 }
 
+fn hoverboard_landing_approach(ground_distance: f32) -> f32 {
+    (1.0 - ground_distance.max(0.0) / 4.8).clamp(0.0, 1.0)
+}
+
+fn hoverboard_landing_descent_cap(approach: f32) -> f32 {
+    -(0.58 - approach.clamp(0.0, 1.0) * 0.46)
+}
+
 fn player_movement(
     time: Res<Time>,
+    spatial_query: SpatialQuery,
     dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
     player_config: Res<LocalPlayerConfig>,
@@ -1870,12 +1892,29 @@ fn player_movement(
         jetpack.air_dash_cooldown_timer = (jetpack.air_dash_cooldown_timer - dt).max(0.0);
         board_boost.timer = (board_boost.timer - dt).max(0.0);
         board_boost.manual_cooldown = (board_boost.manual_cooldown - dt).max(0.0);
+        board_boost.landing_timer = (board_boost.landing_timer - dt).max(0.0);
         if board_boost.timer <= 0.0 {
             board_boost.speed_mult = 1.0;
             board_boost.direction = Vec3::ZERO;
         }
 
         movement.is_grounded = output.grounded;
+        let just_landed = movement.is_grounded && !platformer.was_grounded;
+        if traversal.active == TraversalMode::Hoverboard {
+            if movement.is_grounded {
+                if just_landed && board_boost.airborne_time >= 0.12 {
+                    board_boost.landing_timer = 0.34;
+                    action_sfx.write(ModularActionSfxEvent::new("hoverboard.land"));
+                }
+                board_boost.airborne_time = 0.0;
+                board_boost.landing_approach = 0.0;
+            } else {
+                board_boost.airborne_time += dt;
+            }
+        } else {
+            board_boost.airborne_time = 0.0;
+            board_boost.landing_approach = 0.0;
+        }
         let landed_stomp =
             movement.is_grounded && !platformer.was_grounded && platformer.stomp_active;
         platformer.roll_timer = (platformer.roll_timer - dt).max(0.0);
@@ -1978,12 +2017,11 @@ fn player_movement(
 
         let sprinting =
             pi.sprint && stats.stamina > 0.0 && input_strength >= movement.analog_sprint_threshold;
-        let mode_speed_mult =
-            if traversal.active == TraversalMode::Hoverboard && movement.is_grounded {
-                traversal.hoverboard_speed_mult
-            } else {
-                1.0
-            } * board_boost.speed_mult.max(1.0);
+        let mode_speed_mult = if traversal.active == TraversalMode::Hoverboard {
+            traversal.hoverboard_speed_mult
+        } else {
+            1.0
+        } * board_boost.speed_mult.max(1.0);
         let speed = if sprinting {
             movement.sprint_speed
         } else {
@@ -2380,8 +2418,34 @@ fn player_movement(
             }
             if traversal.active == TraversalMode::Hoverboard {
                 gravity *= traversal.hoverboard_gravity_mult;
+                if movement.velocity.y < 0.0 {
+                    let filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World);
+                    let ground_distance = spatial_query
+                        .cast_ray(
+                            transform.translation + Vec3::Y * 0.15,
+                            Dir3::NEG_Y,
+                            4.8,
+                            true,
+                            &filter,
+                        )
+                        .map(|hit| hit.distance);
+                    board_boost.landing_approach = ground_distance
+                        .map(hoverboard_landing_approach)
+                        .unwrap_or(0.0);
+                } else {
+                    board_boost.landing_approach = 0.0;
+                }
             }
             movement.velocity.y -= gravity;
+            if traversal.active == TraversalMode::Hoverboard
+                && board_boost.landing_approach > 0.0
+                && movement.velocity.y < 0.0
+            {
+                movement.velocity.y = movement
+                    .velocity
+                    .y
+                    .max(hoverboard_landing_descent_cap(board_boost.landing_approach));
+            }
             movement.velocity.y = movement.velocity.y.max(-movement.max_fall_speed);
             let wall_slide_speed = if stats.stamina > 0.0 {
                 movement.wall_slide_speed
@@ -2417,6 +2481,16 @@ fn player_movement(
                 target_h_vel += input * 0.16;
             }
         }
+        if traversal.active == TraversalMode::Hoverboard && !movement.is_grounded {
+            let current_speed = movement.ground_velocity.length();
+            if input_strength <= 0.05 {
+                target_h_vel = movement.ground_velocity * 0.998;
+            } else if current_speed > 0.05 {
+                let current_direction = movement.ground_velocity.normalize_or_zero();
+                let surf_direction = (current_direction * 0.74 + input * 0.26).normalize_or_zero();
+                target_h_vel = surf_direction * current_speed.max(target_h_vel.length());
+            }
+        }
         let mut h_vel = if movement.is_grounded {
             let accel = if input.length_squared() > 0.01 {
                 if traversal.active == TraversalMode::Hoverboard {
@@ -2427,6 +2501,8 @@ fn player_movement(
             } else {
                 if platformer.rolling {
                     platformer.roll_decel
+                } else if traversal.active == TraversalMode::Hoverboard {
+                    movement.ground_decel * 0.16
                 } else {
                     movement.ground_decel
                 }
@@ -2437,7 +2513,11 @@ fn player_movement(
         } else {
             let has_air_input = input_strength > 0.05;
             let air_accel = if !has_air_input {
-                movement.air_decel
+                if traversal.active == TraversalMode::Hoverboard {
+                    movement.air_decel * 0.08
+                } else {
+                    movement.air_decel
+                }
             } else if edge_grab.cooldown_timer > 0.0 {
                 movement.air_accel * 0.35
             } else if movement.wall_jump_lock_timer > 0.0 {
@@ -3462,6 +3542,17 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hoverboard_landing_assist_eases_descent_near_the_surface() {
+        let far = hoverboard_landing_approach(4.8);
+        let near = hoverboard_landing_approach(0.25);
+
+        assert_eq!(far, 0.0);
+        assert!(near > 0.9);
+        assert!(hoverboard_landing_descent_cap(near) > -0.2);
+        assert!(hoverboard_landing_descent_cap(far) < -0.5);
+    }
 
     #[test]
     fn late_joining_player_inherits_only_discovered_sabre_relics() {

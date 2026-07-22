@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::components::armor::*;
 use crate::components::player::{Player, PlayerInput, PlayerProgression, PlayerStats};
+use crate::events::PlayerDamagedEvent;
 use crate::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -14,11 +15,52 @@ impl Plugin for ArmorPlugin {
             (
                 sync_armor_upgrade_state,
                 apply_armor_health_bonus,
+                armor_recharge_system,
                 element_switch_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Playing)),
         );
+    }
+}
+
+fn armor_recharge_amount(current: f32, maximum: f32, rate: f32, dt: f32) -> f32 {
+    (current + rate.max(0.0) * dt.max(0.0)).min(maximum.max(0.0))
+}
+
+fn armor_recharge_system(
+    time: Res<Time>,
+    mut damaged_events: MessageReader<PlayerDamagedEvent>,
+    mut player_q: Query<
+        (
+            &crate::components::player::PlayerIndex,
+            &mut PlayerStats,
+            &mut ArmorRechargeState,
+        ),
+        With<Player>,
+    >,
+) {
+    let mut damaged = [false; 4];
+    for event in damaged_events.read() {
+        if let Some(index) = event.player_index.filter(|index| *index < 4) {
+            damaged[index as usize] = true;
+        }
+    }
+    let dt = time.delta_secs();
+    for (index, mut stats, mut recharge) in player_q.iter_mut() {
+        if damaged.get(index.0 as usize).copied().unwrap_or(false) {
+            recharge.delay_remaining = recharge.delay_after_hit;
+            continue;
+        }
+        recharge.delay_remaining = (recharge.delay_remaining - dt).max(0.0);
+        if recharge.delay_remaining <= 0.0 && stats.armor < stats.max_armor {
+            stats.armor = armor_recharge_amount(
+                stats.armor,
+                stats.max_armor,
+                recharge.recharge_per_second,
+                dt,
+            );
+        }
     }
 }
 
@@ -146,5 +188,12 @@ mod tests {
     fn element_cycle_wraps_in_both_directions() {
         assert_eq!(cycle_element(ElementType::None, -1), ElementType::Rift);
         assert_eq!(cycle_element(ElementType::Rift, 1), ElementType::None);
+    }
+
+    #[test]
+    fn armor_recharge_is_bounded_and_frame_rate_independent() {
+        assert!((armor_recharge_amount(20.0, 100.0, 18.0, 0.5) - 29.0).abs() < 1e-6);
+        assert_eq!(armor_recharge_amount(98.0, 100.0, 18.0, 1.0), 100.0);
+        assert_eq!(armor_recharge_amount(20.0, 100.0, 18.0, -1.0), 20.0);
     }
 }

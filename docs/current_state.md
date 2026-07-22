@@ -1,13 +1,14 @@
 # Starfall I — Current State
 
-> Living agent handoff. Last reconciled July 17, 2026. Update this file when a
+> Living agent handoff. Last reconciled July 22, 2026. Update this file when a
 > change alters architecture, ownership, persistence, controls, verification,
 > or the next production slice.
 
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 371 tests, `cargo build`, `cargo fmt --check`, and
+- Automated baseline: 409 tests across the main crate and example targets,
+  `cargo build`, `cargo fmt --check`, and
   `cargo clippy --all-targets -- -D warnings` pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
   split-screen performance acceptance is still required. Automated success is
@@ -41,9 +42,12 @@
   alignment tests, and the MVP animation/rig bridge are present.
 - The Rocket Hoverboard now has reduced airborne gravity, a stronger board
   jump/rocket profile, B/East overdrive, uphill wave assistance, contact-normal
-  banking, and a larger sole-height visual. The Star Saber is starter equipment;
-  the Solar Glyph unlocks waves and save-backed world blueprints/gems unlock
-  cyclone, double-dash/pound, elemental, and legendary upgrades per player.
+  banking, forward-momentum retention in the air and during coast, a short
+  ground-approach descent assist, a compressed landing pose, and a 10% larger
+  sole-height visual. The Star Saber is starter equipment
+  with a small second-slash wave; the Solar Glyph and Beam Capacitors add wider,
+  larger, stronger waves while save-backed world blueprints/gems unlock cyclone,
+  double-dash/pound, elemental, and legendary upgrades per player.
 - Each player HUD now reports hoverboard boost readiness/recharge, the live
   Saber technique, owned wave/technique unlocks, elemental gem count, and
   Starheart ownership. Hoverboard overdrive and Saber actions emit modular SFX
@@ -55,6 +59,18 @@
   split-screen case without allocating per-use materials. F11 includes these
   entities in total combat VFX and reports a dedicated `saber: current/24`
   reading for the acceptance pass.
+- The persistent Saber blade now uses a larger two-layer additive HDR core/aura,
+  extends roughly twice the previous rendered length, and has a correspondingly
+  wider normal-slash reach. Starter waves launch only after slash two; progression
+  scales them from one small projectile to four larger, faster, stronger waves.
+- Main mountain freeway trunks are 64 units wide, sampled into 32-unit deck
+  slices, smoothed through bounded Hermite centerlines, and protected by taller
+  4.6-unit edge barriers. Settlement rings remain narrower road/path variants.
+  Forge road recipes compile finer Hermite curves, curved 12-slice junctions,
+  deck barriers, and expose an `AUTO ROUND ALL SPLINE POINTS` controller action.
+- City spy drones now carry canonical enemy hurtboxes, restoring projectile
+  damage, hit flash, and damage-number feedback. Per-player armor durability
+  begins recharging at 18 points/second after three seconds without a hit.
 - Starfall Forge has a title launcher and project hub, persistent project
   registry, stable recipe/content IDs, atomic project/source saves and recovery,
   validation/publishing, immutable presets and lock documents, deterministic
@@ -81,8 +97,10 @@
    controller-only menu flows.
 5. Profile N11 large-world entity, simulation, terrain, and one-to-four-camera
    render costs before adding streaming complexity or denser content.
-6. Hardware-test and tune the new hoverboard/Saber pass: steep ascents, crests,
-   banked curves, B overdrive, board-to-feet alignment, Saber wave discovery,
+6. Hardware-test and tune the new hoverboard/Saber/road pass: steep ascents, crests,
+   banked curves, B overdrive, board-to-feet alignment, second-slash starter
+   waves and upgraded multi-wave growth, softened landings, forward coasting,
+   freeway barrier containment, rounded connectors,
    technique inputs/VFX readability, elemental and Starheart differentiation,
    four-player effect-budget behavior, and per-player save/reload ownership.
 7. Continue PM1–PM3 creator gaps: templates/import/recovery/settings, preset

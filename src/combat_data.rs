@@ -106,9 +106,9 @@ pub struct MoveLibrary {
     /// slash count; `total_duration()` is the cadence between slashes.
     #[serde(default = "default_sabre_chain")]
     pub sabre: Vec<MoveDef>,
-    /// The energy wave the Star Sabre launches (level 4+ dual wave, and
-    /// every slash inside dungeons). `fire_rate` mirrors the level-1 sabre
-    /// cooldown for reference; the live cooldown scales with sabre level.
+    /// Base tuning for the energy wave launched after the second Saber slash.
+    /// Runtime progression scales count, size, damage, speed, and properties.
+    /// `fire_rate` mirrors the level-1 cooldown for authoring reference.
     #[serde(default = "default_sabre_wave")]
     pub sabre_wave: RangedMoveDef,
     /// Primary ranged weapons, indexed by inventory slot (see [`RANGED_SLOTS`]).
@@ -258,9 +258,8 @@ fn default_sabre_chain() -> Vec<MoveDef> {
     }]
 }
 
-/// Star Sabre energy wave — legacy hardcoded projectile (speed 20, 1.5 s
-/// lifetime, level-1 wave damage 40, splash 4.0 once the level-5 AoE
-/// unlocks). `fire_rate` mirrors the level-1 sabre cooldown.
+/// Star Sabre energy-wave authoring base: runtime combo progression applies a
+/// starter damage fraction and upgrades toward the full value, count, and AoE.
 fn default_sabre_wave() -> RangedMoveDef {
     RangedMoveDef {
         name: "Star Wave".to_string(),

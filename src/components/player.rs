@@ -503,6 +503,11 @@ pub struct BoardBoostState {
     pub speed_mult: f32,
     pub direction: Vec3,
     pub manual_cooldown: f32,
+    /// Short suspension squash/rebound after an airborne board landing.
+    pub landing_timer: f32,
+    pub airborne_time: f32,
+    /// 0–1 proximity used by the board pose while descent assist is active.
+    pub landing_approach: f32,
 }
 
 impl Default for BoardBoostState {
@@ -512,6 +517,9 @@ impl Default for BoardBoostState {
             speed_mult: 1.0,
             direction: Vec3::ZERO,
             manual_cooldown: 0.0,
+            landing_timer: 0.0,
+            airborne_time: 0.0,
+            landing_approach: 0.0,
         }
     }
 }

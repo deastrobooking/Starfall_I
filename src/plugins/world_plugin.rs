@@ -995,8 +995,8 @@ fn dungeon_enemy_spawner_system(
             );
             // A published Forge creature overrides the built-in enemy type;
             // unpublished ids fall back so encounters never spawn empty.
-            let published_creature = creature_override
-                .and_then(|over| creature_catalog.get(&over.0));
+            let published_creature =
+                creature_override.and_then(|over| creature_catalog.get(&over.0));
             let enemy = match published_creature {
                 Some(spec) => crate::plugins::enemy_plugin::spawn_published_creature_enemy(
                     &mut commands,
@@ -10870,6 +10870,10 @@ fn spawn_city_spy_drones(
                 Health::new(max_hp),
                 Damageable::default(),
                 Faction::DimensionalAlien,
+                crate::physics::prelude::RigidBody::KinematicPositionBased,
+                crate::physics::prelude::Collider::cuboid(1.9, 0.78, 1.2),
+                crate::physics::prelude::CollisionProfile::EnemyHurtbox,
+                avian3d::prelude::Sensor,
                 CitySpyDrone {
                     id: spec.id,
                     label: spec.label,
@@ -17035,9 +17039,24 @@ mod tests {
 
     #[test]
     fn speed_roads_are_wide_enough_for_patrol_traffic() {
-        const { assert!(SPEED_ROAD_WIDTH >= 36.0) };
+        const { assert!(SPEED_ROAD_WIDTH >= 60.0) };
+        const { assert!(SPEED_ROAD_CHUNK_LEN <= 32.0) };
         const { assert!(SPEED_ROAD_TRAFFIC_LANE_OFFSET * 2.0 < SPEED_ROAD_WIDTH) };
         assert_eq!(SPEED_ROAD_PATROL_VEHICLE_COUNT, 18);
+    }
+
+    #[test]
+    fn mountain_speed_road_centerlines_round_authored_corners() {
+        let route = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)];
+        let rounded = rounded_speed_road_route(&route);
+
+        assert!(rounded.len() > route.len());
+        assert_eq!(rounded.first().copied(), route.first().copied());
+        assert_eq!(rounded.last().copied(), route.last().copied());
+        assert!(rounded.iter().any(|&(x, z)| {
+            (x > 1.0 && x < 99.0 && z.abs() > 0.1)
+                || (z > 1.0 && z < 99.0 && (x - 100.0).abs() > 0.1)
+        }));
     }
 
     #[test]
@@ -17141,9 +17160,12 @@ mod tests {
             aerial_support_stations >= 40,
             "the elevated network should produce frequent structural pylons"
         );
+        // A 64-unit freeway footprint must clear ridges that the old narrow
+        // deck could follow directly. Keep nearly half the network grounded
+        // while permitting the wider trunk to become a supported viaduct.
         assert!(
-            total_stations - aerial_support_stations >= total_stations / 2,
-            "roads should remain terrain-following: {aerial_support_stations}/{total_stations} stations are aerial"
+            total_stations - aerial_support_stations >= total_stations * 45 / 100,
+            "roads should remain substantially terrain-following: {aerial_support_stations}/{total_stations} stations are aerial"
         );
     }
 
@@ -17446,9 +17468,11 @@ mod tests {
                 let ground = terrain_surface_y(sample.x, sample.y, terrain_seed);
                 assert!(
                     road_y >= ground + min_clearance,
-                    "speed road sample sank below terrain clearance at ({:.1}, {:.1})",
+                    "speed road sample sank below terrain clearance at ({:.1}, {:.1}): road {:.3}, required {:.3}",
                     sample.x,
-                    sample.y
+                    sample.y,
+                    road_y,
+                    ground + min_clearance,
                 );
             }
         }

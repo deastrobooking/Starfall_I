@@ -2,7 +2,7 @@ use avian3d::prelude::{Collider as AvianCollider, RayHitData, SpatialQuery, Spat
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
-use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary};
+use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary, RangedMoveDef};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{DeadEnemy, Enemy};
 use crate::components::player::*;
@@ -62,9 +62,16 @@ impl Default for SabreVfxBudget {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SabreBladeLayer {
+    Aura,
+    Core,
+}
+
 #[derive(Component)]
 struct SabreBladeVisual {
     owner: Entity,
+    layer: SabreBladeLayer,
 }
 
 /// World-space confirmation that a homing projectile has acquired a target.
@@ -120,6 +127,7 @@ pub struct ProjectileAssets {
     pub energy_explosive: Handle<EnergyMaterial>,
     pub energy_magic: Handle<EnergyMaterial>,
     pub energy_sabre: Handle<EnergyMaterial>,
+    pub energy_sabre_core: Handle<EnergyMaterial>,
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -372,9 +380,15 @@ fn setup_weapon_assets(
         ),
         energy_sabre: mk_energy_mat(
             &mut energy_materials,
-            Vec4::new(1.0, 1.0, 0.88, 1.0),
-            Vec4::new(0.18, 0.78, 1.0, 1.0),
-            Vec4::new(5.2, 8.0, 7.0, 0.94),
+            Vec4::new(1.8, 2.2, 2.8, 1.0),
+            Vec4::new(0.12, 1.15, 3.8, 1.0),
+            Vec4::new(6.4, 7.0, 8.5, 0.78),
+        ),
+        energy_sabre_core: mk_energy_mat(
+            &mut energy_materials,
+            Vec4::new(4.8, 4.8, 4.2, 1.0),
+            Vec4::new(0.55, 2.8, 5.2, 1.0),
+            Vec4::new(8.0, 10.0, 10.5, 1.0),
         ),
     });
 }
@@ -2330,6 +2344,40 @@ fn sabre_level_scale(sabre: &BeamSabre) -> (f32, f32) {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SabreWaveProfile {
+    projectile_count: usize,
+    width: f32,
+    length: f32,
+    damage_mult: f32,
+    speed_mult: f32,
+    piercing: bool,
+    explosive: bool,
+}
+
+fn sabre_wave_profile(
+    sabre: &BeamSabre,
+    upgrades: &UpgradeLedger,
+    completed_slashes: u32,
+) -> Option<SabreWaveProfile> {
+    let tier = (upgrades.sabre_wave_upgrade_tier() + sabre.level.saturating_sub(1)).min(6);
+    let is_second_slash = completed_slashes == 2;
+    let is_upgraded_fourth_slash = completed_slashes == 4 && tier >= 3;
+    if !is_second_slash && !is_upgraded_fourth_slash {
+        return None;
+    }
+
+    Some(SabreWaveProfile {
+        projectile_count: (1 + tier.div_ceil(2)) as usize,
+        width: 0.60 + tier as f32 * 0.11,
+        length: 1.80 + tier as f32 * 0.28,
+        damage_mult: 0.30 + tier as f32 * 0.10,
+        speed_mult: 0.90 + tier as f32 * 0.04,
+        piercing: sabre.is_piercing() || tier >= 3,
+        explosive: sabre.has_aoe_splash() || tier >= 5,
+    })
+}
+
 fn sabre_vfx_material(
     upgrades: &UpgradeLedger,
     assets: &ProjectileAssets,
@@ -2552,6 +2600,81 @@ fn spawn_sabre_wave_vfx(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn spawn_sabre_wave_attack(
+    commands: &mut Commands,
+    assets: &ProjectileAssets,
+    upgrades: &UpgradeLedger,
+    wave: &RangedMoveDef,
+    profile: SabreWaveProfile,
+    origin: Vec3,
+    forward: Vec3,
+    right: Vec3,
+    owner: Entity,
+    damage_scale: f32,
+    damage_type: DamageType,
+    dungeon_active: bool,
+    active_vfx: &mut usize,
+    vfx_budget: usize,
+) {
+    let material = sabre_wave_material(upgrades, assets);
+    let spread = 0.16 + profile.width * 0.08;
+    let offsets: &[f32] = match profile.projectile_count {
+        1 => &[0.0],
+        2 => &[-spread, spread],
+        3 => &[-spread, 0.0, spread],
+        _ => &[-spread * 1.5, -spread * 0.5, spread * 0.5, spread * 1.5],
+    };
+    let launch_origin = origin + forward * 2.2;
+    for offset in offsets {
+        let direction = (forward + right * *offset).with_y(0.0).normalize_or_zero();
+        commands.spawn((
+            EnergyPbrBundle {
+                mesh: Mesh3d(assets.sphere_md.clone()),
+                material: MeshMaterial3d(material.clone()),
+                transform: Transform::from_translation(launch_origin)
+                    .looking_to(direction, Vec3::Y)
+                    .with_scale(Vec3::new(
+                        profile.width,
+                        profile.width * 1.15,
+                        profile.length,
+                    )),
+                ..default()
+            },
+            Projectile {
+                damage: wave.damage
+                    * damage_scale
+                    * profile.damage_mult
+                    * if dungeon_active { 0.72 } else { 1.0 },
+                damage_type,
+                speed: wave.projectile_speed * profile.speed_mult,
+                direction,
+                lifetime: wave.projectile_lifetime,
+                is_explosive: profile.explosive,
+                explosion_radius: if profile.explosive {
+                    wave.explosion_radius * (0.65 + profile.width * 0.35)
+                } else {
+                    0.0
+                },
+                weapon_type: ProjectileOwner::Player,
+                owner: Some(owner),
+                piercing: profile.piercing,
+                gravity_affected: false,
+                vertical_velocity: 0.0,
+            },
+        ));
+    }
+    spawn_sabre_wave_vfx(
+        commands,
+        assets,
+        upgrades,
+        launch_origin,
+        forward,
+        active_vfx,
+        vfx_budget,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
 fn beam_sabre_update_system(
     time: Res<Time>,
     spatial_query: SpatialQuery,
@@ -2679,8 +2802,8 @@ fn beam_sabre_update_system(
                         sm.transition(PlayerState::Idle);
                         continue;
                     };
-                    let radius = if dungeon.active { 5.2 } else { 3.5 };
-                    let offset = if dungeon.active { 2.0 } else { 2.5 };
+                    let radius = if dungeon.active { 6.4 } else { 4.6 };
+                    let offset = if dungeon.active { 2.5 } else { 3.1 };
                     let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
                     execute_melee_hit(
                         &spatial_query,
@@ -2697,7 +2820,27 @@ fn beam_sabre_update_system(
                         &mut damaged_ev,
                         &mut killed_ev,
                     );
-                    spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
+                    let completed_slashes = sabre.slash_index + 1;
+                    if let Some(profile) = sabre_wave_profile(&sabre, upgrades, completed_slashes) {
+                        action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
+                        spawn_sabre_wave_attack(
+                            &mut commands,
+                            &proj_assets,
+                            upgrades,
+                            &library.sabre_wave,
+                            profile,
+                            origin,
+                            fwd,
+                            cam.right().as_vec3().with_y(0.0).normalize_or_zero(),
+                            entity,
+                            wave_scale * armor_damage_mult,
+                            wave_damage_type,
+                            dungeon.active,
+                            &mut active_vfx,
+                            vfx_budget.max_entities,
+                        );
+                    }
+                    spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.1);
                     hitstop.remaining = hitstop.remaining.max(def.hitstop);
                     sabre.slash_timer = def.total_duration();
                 } else {
@@ -2838,8 +2981,8 @@ fn beam_sabre_update_system(
             sabre.slash_timer = def.total_duration();
             sm.force(PlayerState::Attacking);
 
-            let radius = if dungeon.active { 5.2 } else { 3.5 };
-            let offset = if dungeon.active { 2.0 } else { 2.5 };
+            let radius = if dungeon.active { 6.4 } else { 4.6 };
+            let offset = if dungeon.active { 2.5 } else { 3.1 };
             let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
             execute_melee_hit(
                 &spatial_query,
@@ -2856,65 +2999,8 @@ fn beam_sabre_update_system(
                 &mut damaged_ev,
                 &mut killed_ev,
             );
-            spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 2.5);
+            spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.1);
             hitstop.remaining = hitstop.remaining.max(def.hitstop);
-
-            if upgrades.sabre_wave_unlocked() {
-                action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
-                spawn_sabre_wave_vfx(
-                    &mut commands,
-                    &proj_assets,
-                    upgrades,
-                    origin,
-                    fwd,
-                    &mut active_vfx,
-                    vfx_budget.max_entities,
-                );
-                let wave = &library.sabre_wave;
-                let wave_material = sabre_wave_material(upgrades, &proj_assets);
-                let right = cam.right().as_vec3();
-                let wave_offsets: &[f32] = if sabre.fires_dual_wave() {
-                    &[-0.4, 0.4]
-                } else {
-                    &[0.0]
-                };
-                for wave_offset in wave_offsets {
-                    let dir = (fwd + right.with_y(0.0).normalize_or_zero() * *wave_offset)
-                        .with_y(0.0)
-                        .normalize_or_zero();
-                    commands.spawn((
-                        EnergyPbrBundle {
-                            mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                            material: MeshMaterial3d(wave_material.clone()),
-                            transform: Transform::from_translation(origin)
-                                .looking_to(dir, Vec3::Y)
-                                .with_scale(Vec3::new(0.8, 0.8, 2.5)),
-                            ..default()
-                        },
-                        Projectile {
-                            damage: wave.damage
-                                * wave_scale
-                                * armor_damage_mult
-                                * if dungeon.active { 0.72 } else { 1.0 },
-                            damage_type: wave_damage_type,
-                            speed: wave.projectile_speed,
-                            direction: dir,
-                            lifetime: wave.projectile_lifetime,
-                            is_explosive: sabre.has_aoe_splash(),
-                            explosion_radius: if sabre.has_aoe_splash() {
-                                wave.explosion_radius
-                            } else {
-                                0.0
-                            },
-                            weapon_type: ProjectileOwner::Player,
-                            owner: Some(entity),
-                            piercing: sabre.is_piercing(),
-                            gravity_affected: false,
-                            vertical_velocity: 0.0,
-                        },
-                    ));
-                }
-            }
         }
     }
 }
@@ -2935,29 +3021,43 @@ fn sync_sabre_blade_visual(
             commands.entity(visual_entity).despawn();
             continue;
         }
-        represented.push(visual.owner);
-        *transform = sabre_blade_transform(player_transform, sabre);
+        represented.push((visual.owner, visual.layer));
+        *transform = sabre_blade_transform(player_transform, sabre, visual.layer);
     }
 
     for (player_entity, player_transform, sabre) in player_q.iter() {
-        if !sabre.active || !sabre.unlocked || represented.contains(&player_entity) {
+        if !sabre.active || !sabre.unlocked {
             continue;
         }
-        commands.spawn((
-            EnergyPbrBundle {
-                mesh: Mesh3d(assets.sphere_sm.clone()),
-                material: MeshMaterial3d(assets.energy_sabre.clone()),
-                transform: sabre_blade_transform(player_transform, sabre),
-                ..default()
-            },
-            SabreBladeVisual {
-                owner: player_entity,
-            },
-        ));
+        for layer in [SabreBladeLayer::Aura, SabreBladeLayer::Core] {
+            if represented.contains(&(player_entity, layer)) {
+                continue;
+            }
+            let material = match layer {
+                SabreBladeLayer::Aura => assets.energy_sabre.clone(),
+                SabreBladeLayer::Core => assets.energy_sabre_core.clone(),
+            };
+            commands.spawn((
+                EnergyPbrBundle {
+                    mesh: Mesh3d(assets.sphere_sm.clone()),
+                    material: MeshMaterial3d(material),
+                    transform: sabre_blade_transform(player_transform, sabre, layer),
+                    ..default()
+                },
+                SabreBladeVisual {
+                    owner: player_entity,
+                    layer,
+                },
+            ));
+        }
     }
 }
 
-fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transform {
+fn sabre_blade_transform(
+    player: &GlobalTransform,
+    sabre: &BeamSabre,
+    layer: SabreBladeLayer,
+) -> Transform {
     let forward = player.forward().as_vec3().with_y(0.0).normalize_or_zero();
     let right = player.right().as_vec3().with_y(0.0).normalize_or_zero();
     let technique_spin = if sabre.technique_timer > 0.0
@@ -2980,9 +3080,14 @@ fn sabre_blade_transform(player: &GlobalTransform, sabre: &BeamSabre) -> Transfo
     };
     let spin_direction = Quat::from_rotation_y(technique_spin) * forward;
     let blade_direction = (spin_direction + right * swing + Vec3::Y * 0.12).normalize_or_zero();
-    Transform::from_translation(player.translation() + Vec3::Y * 1.15 + forward * 0.9 + right * 0.5)
+    let hand = player.translation() + Vec3::Y * 1.15 + forward * 0.55 + right * 0.48;
+    let scale = match layer {
+        SabreBladeLayer::Aura => Vec3::new(4.6, 4.6, 40.0),
+        SabreBladeLayer::Core => Vec3::new(2.5, 2.5, 38.0),
+    };
+    Transform::from_translation(hand + blade_direction * 3.0)
         .looking_to(blade_direction, Vec3::Y)
-        .with_scale(Vec3::new(1.8, 1.8, 18.0))
+        .with_scale(scale)
 }
 
 fn sabre_technique_vfx_system(
@@ -3379,6 +3484,32 @@ mod move_def_wiring_tests {
         // Legacy inter-slash cadence was a hardcoded 0.25 s.
         assert!((slash.total_duration() - 0.25).abs() < 1e-4);
         assert!((slash.knockback - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn starter_and_upgraded_sabre_waves_follow_combo_progression() {
+        let sabre = BeamSabre::default();
+        let base_upgrades = UpgradeLedger::default();
+        assert!(sabre_wave_profile(&sabre, &base_upgrades, 1).is_none());
+        let base = sabre_wave_profile(&sabre, &base_upgrades, 2)
+            .expect("starter Saber earns a wave on its second slash");
+        assert_eq!(base.projectile_count, 1);
+        assert!((base.damage_mult - 0.30).abs() < 1e-6);
+        assert!(!base.explosive);
+
+        let upgraded = UpgradeLedger {
+            ranks: vec![(crate::upgrades::TechUpgradeId::BeamCapacitors, 5)],
+            relics: vec!["solar_sabre_glyph".into()],
+            ..default()
+        };
+        let strong = sabre_wave_profile(&sabre, &upgraded, 2).unwrap();
+        assert_eq!(strong.projectile_count, 4);
+        assert!(strong.width > base.width);
+        assert!(strong.length > base.length);
+        assert!(strong.damage_mult > base.damage_mult);
+        assert!(strong.explosive);
+        assert!(sabre_wave_profile(&sabre, &upgraded, 3).is_none());
+        assert!(sabre_wave_profile(&sabre, &upgraded, 4).is_some());
     }
 
     #[test]

@@ -189,6 +189,26 @@ pub struct ArmorSet {
     pub upgrade_state: ArmorUpgradeState,
 }
 
+/// Recharge controller for the separate `PlayerStats::armor` durability bar.
+/// Equipment defense remains owned by `ArmorSet`; this component only governs
+/// the post-hit delay and refill rate of the absorbable HUD resource.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ArmorRechargeState {
+    pub delay_remaining: f32,
+    pub delay_after_hit: f32,
+    pub recharge_per_second: f32,
+}
+
+impl Default for ArmorRechargeState {
+    fn default() -> Self {
+        Self {
+            delay_remaining: 0.0,
+            delay_after_hit: 3.0,
+            recharge_per_second: 18.0,
+        }
+    }
+}
+
 impl ArmorSet {
     pub fn total_defense(&self) -> f32 {
         let base = [&self.helmet, &self.chest, &self.legs, &self.boots]

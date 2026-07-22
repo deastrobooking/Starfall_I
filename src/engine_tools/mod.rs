@@ -1209,6 +1209,7 @@ enum EditorAction {
     RoadTangentDecrease,
     RoadTangentIncrease,
     RoadTangentReset,
+    RoadTangentAutoRoundAll,
     RoadMarkJunctionStart,
     RoadCycleJunctionKind,
     RoadConnectJunction,
@@ -3109,6 +3110,12 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                         );
                         spawn_editor_button(
                             panel,
+                            120,
+                            EditorAction::RoadTangentAutoRoundAll,
+                            "AUTO ROUND ALL SPLINE POINTS",
+                        );
+                        spawn_editor_button(
+                            panel,
                             83,
                             EditorAction::RoadMarkJunctionStart,
                             "MARK ROAD JUNCTION START",
@@ -4830,6 +4837,25 @@ fn reset_selected_road_tangent(world: &mut World) {
     );
 }
 
+fn auto_round_all_road_tangents(world: &mut World) {
+    let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
+        set_editor_status(world, "Select a Road recipe before auto-rounding");
+        return;
+    };
+    if category != persistence::ContentCategory::Road || recipe.spline_points.len() < 2 {
+        set_editor_status(
+            world,
+            "Seed at least two Road spline points before auto-rounding",
+        );
+        return;
+    }
+    execute_recipe_edit(world, "Auto-round all Road spline tangents", |recipe| {
+        for point in &mut recipe.spline_points {
+            point.tangent = [0.0; 3];
+        }
+    });
+}
+
 fn mark_road_junction_start(world: &mut World) {
     let Some((_, category, recipe)) = selected_procedural_recipe(world) else {
         set_editor_status(world, "Select a Road recipe before authoring a junction");
@@ -5298,6 +5324,58 @@ fn segment_part(
     })
 }
 
+fn road_segment_parts(
+    name: &str,
+    start: Vec3,
+    end: Vec3,
+    width: f32,
+) -> Option<Vec<CompiledWorldKitPart>> {
+    let deck = segment_part(name.to_string(), start, end, width, 0.8, "deck")?;
+    let direction = (end - start).with_y(0.0).normalize_or_zero();
+    let right = Vec3::new(direction.z, 0.0, -direction.x);
+    let barrier_height = if width >= 30.0 { 4.6 } else { 3.2 };
+    let barrier_lift = Vec3::Y * (barrier_height * 0.5 + 0.4);
+    let mut parts = vec![deck];
+    for (side, label) in [(-1.0_f32, "left"), (1.0, "right")] {
+        let offset = right * side * width * 0.505 + barrier_lift;
+        parts.push(segment_part(
+            format!("{name} {label} barrier"),
+            start + offset,
+            end + offset,
+            if width >= 30.0 { 1.05 } else { 0.82 },
+            barrier_height,
+            "barrier",
+        )?);
+    }
+    Some(parts)
+}
+
+fn hermite_road_connector(
+    start: Vec3,
+    end: Vec3,
+    mut start_tangent: Vec3,
+    mut end_tangent: Vec3,
+    t: f32,
+) -> Vec3 {
+    let chord = end - start;
+    let tangent_limit = chord.length() * 0.58;
+    start_tangent = start_tangent.clamp_length_max(tangent_limit);
+    end_tangent = end_tangent.clamp_length_max(tangent_limit);
+    if start_tangent.dot(chord) < 0.0 {
+        start_tangent = -start_tangent;
+    }
+    if end_tangent.dot(chord) < 0.0 {
+        end_tangent = -end_tangent;
+    }
+    let t = t.clamp(0.0, 1.0);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    start * (2.0 * t3 - 3.0 * t2 + 1.0)
+        + start_tangent * (t3 - 2.0 * t2 + t)
+        + end * (-2.0 * t3 + 3.0 * t2)
+        + end_tangent * (t3 - t2)
+}
+
 fn compile_world_kit(
     category: persistence::ContentCategory,
     recipe: &ProceduralRecipeDraft,
@@ -5315,8 +5393,9 @@ fn compile_world_kit(
             return Err("seed or author at least two spline points".into());
         }
         let spans = recipe.spline_points.len() - 1;
-        let sample_budget = 192usize.saturating_sub(recipe.road_junctions.len());
-        let samples_per_span = (sample_budget / spans).clamp(1, 8);
+        let junction_part_count = recipe.road_junctions.len() * 12 * 3;
+        let curve_part_budget = 192usize.saturating_sub(junction_part_count);
+        let samples_per_span = (curve_part_budget / 3 / spans).clamp(1, 16);
         for span in 0..spans {
             let mut start = Vec3::from_array(recipe.spline_points[span].position);
             for sample in 1..=samples_per_span {
@@ -5329,47 +5408,64 @@ fn compile_world_kit(
                     + (recipe.spline_points[span + 1].width_scale
                         - recipe.spline_points[span].width_scale)
                         * t;
-                let part = segment_part(
-                    format!("Road curve {span}.{sample}"),
-                    start,
-                    end,
-                    parameter("width") * width_scale,
-                    0.8,
-                    "deck",
-                )
-                .ok_or_else(|| format!("road curve {span}.{sample} is degenerate"))?;
-                parts.push(part);
+                let segment_name = format!("Road curve {span}.{sample}");
+                let segment_parts =
+                    road_segment_parts(&segment_name, start, end, parameter("width") * width_scale)
+                        .ok_or_else(|| format!("road curve {span}.{sample} is degenerate"))?;
+                parts.extend(segment_parts);
                 start = end;
             }
         }
         let points = recipe
             .spline_points
             .iter()
-            .map(|point| (point.point_id.as_str(), Vec3::from_array(point.position)))
+            .enumerate()
+            .map(|(index, point)| (point.point_id.as_str(), index))
             .collect::<BTreeMap<_, _>>();
         for junction in &recipe.road_junctions {
-            let Some(start) = points.get(junction.from_point.as_str()).copied() else {
+            let Some(start_index) = points.get(junction.from_point.as_str()).copied() else {
                 return Err(format!(
                     "junction {} is missing its start point",
                     junction.junction_id
                 ));
             };
-            let Some(end) = points.get(junction.to_point.as_str()).copied() else {
+            let Some(end_index) = points.get(junction.to_point.as_str()).copied() else {
                 return Err(format!(
                     "junction {} is missing its destination point",
                     junction.junction_id
                 ));
             };
-            let part = segment_part(
-                format!("{:?} junction {}", junction.kind, junction.junction_id),
-                start,
-                end,
-                parameter("width") * 0.65,
-                0.7,
-                "deck",
-            )
-            .ok_or_else(|| format!("junction {} is degenerate", junction.junction_id))?;
-            parts.push(part);
+            let start = Vec3::from_array(recipe.spline_points[start_index].position);
+            let end = Vec3::from_array(recipe.spline_points[end_index].position);
+            let start_tangent = Vec3::from_array(persistence::resolved_road_tangent(
+                &recipe.spline_points,
+                start_index,
+            ));
+            let end_tangent = Vec3::from_array(persistence::resolved_road_tangent(
+                &recipe.spline_points,
+                end_index,
+            ));
+            let start_width = recipe.spline_points[start_index].width_scale;
+            let end_width = recipe.spline_points[end_index].width_scale;
+            let mut previous = start;
+            for sample in 1..=12 {
+                let t = sample as f32 / 12.0;
+                let current = hermite_road_connector(start, end, start_tangent, end_tangent, t);
+                let width_scale = start_width + (end_width - start_width) * t;
+                let segment_name = format!(
+                    "{:?} junction {} curve {sample}",
+                    junction.kind, junction.junction_id
+                );
+                let segment_parts = road_segment_parts(
+                    &segment_name,
+                    previous,
+                    current,
+                    parameter("width") * width_scale * 0.72,
+                )
+                .ok_or_else(|| format!("junction {} is degenerate", junction.junction_id))?;
+                parts.extend(segment_parts);
+                previous = current;
+            }
         }
     } else {
         if recipe.topology_nodes.is_empty() {
@@ -6596,6 +6692,7 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
         EditorAction::RoadTangentDecrease => adjust_selected_road_tangent(world, -1.0),
         EditorAction::RoadTangentIncrease => adjust_selected_road_tangent(world, 1.0),
         EditorAction::RoadTangentReset => reset_selected_road_tangent(world),
+        EditorAction::RoadTangentAutoRoundAll => auto_round_all_road_tangents(world),
         EditorAction::RoadMarkJunctionStart => mark_road_junction_start(world),
         EditorAction::RoadCycleJunctionKind => cycle_road_junction_kind(world),
         EditorAction::RoadConnectJunction => edit_road_junction(world, true),
@@ -9064,8 +9161,14 @@ mod tests {
         assert_eq!(recipe.road_junctions[0].kind, RoadJunctionKind::Merge);
         assert!(validate_project(&world.resource::<EditorProjectSession>().project).is_empty());
         let compiled = compile_world_kit(persistence::ContentCategory::Road, &recipe).unwrap();
-        assert_eq!(compiled.len(), 25);
-        assert!(compiled.iter().any(|part| part.name.contains("junction")));
+        let junction_parts = compiled
+            .iter()
+            .filter(|part| part.name.contains("junction"))
+            .count();
+        assert!(junction_parts >= 36);
+        assert!(compiled
+            .iter()
+            .any(|part| part.name.contains("junction") && part.name.contains("barrier")));
         assert!(compiled.iter().any(|part| part.name.contains("Road curve")));
 
         apply_editor_action(&mut world, EditorAction::RoadRemoveJunction);
@@ -9084,6 +9187,19 @@ mod tests {
                 .road_junctions
                 .len(),
             1
+        );
+
+        apply_editor_action(&mut world, EditorAction::RoadTangentIncrease);
+        apply_editor_action(&mut world, EditorAction::TopologyNext);
+        apply_editor_action(&mut world, EditorAction::RoadTangentIncrease);
+        apply_editor_action(&mut world, EditorAction::RoadTangentAutoRoundAll);
+        assert!(
+            world.resource::<EditorProjectSession>().project.payloads[&road_id]
+                .procedural_recipe()
+                .unwrap()
+                .spline_points
+                .iter()
+                .all(|point| point.tangent == [0.0; 3])
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -9211,13 +9327,11 @@ mod tests {
             .iter(&world)
             .next()
             .unwrap();
-        assert_eq!(
-            world
-                .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
-                .iter(&world)
-                .count(),
-            24
-        );
+        let first_part_count = world
+            .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
+            .iter(&world)
+            .count();
+        assert!((25..=192).contains(&first_part_count));
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
         assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);
 
@@ -9235,7 +9349,7 @@ mod tests {
                 .query_filtered::<Entity, With<WorldKitGeneratedPart>>()
                 .iter(&world)
                 .count(),
-            24
+            first_part_count
         );
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 1);
         assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 1);

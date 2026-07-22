@@ -13,7 +13,9 @@ use crate::engine_tools::creature_records;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::mesh_modifiers::MeshModifier;
 use crate::platform_paths;
-use crate::robots::creature::{CreatureFaction, CreatureKind, CreatureRole, CreatureSpec, CreatureTopology, CreatureSurface};
+use crate::robots::creature::{
+    CreatureFaction, CreatureKind, CreatureRole, CreatureSpec, CreatureSurface, CreatureTopology,
+};
 use crate::robots::factory::spawn_creature;
 use crate::state::AppState;
 use crate::tool_windows::{spawn_tool_window, ToolWindowStyle};
@@ -501,7 +503,11 @@ fn spawn_forge_ui(commands: &mut Commands) {
                                 "−".into(),
                                 ForgeAction::Adjust(*field, -field.step()),
                             );
-                            forge_button(row, "+".into(), ForgeAction::Adjust(*field, field.step()));
+                            forge_button(
+                                row,
+                                "+".into(),
+                                ForgeAction::Adjust(*field, field.step()),
+                            );
                         });
                     }
                 },
@@ -772,7 +778,11 @@ fn forge_action_system(
             state.labels_dirty = true;
         }
         ForgeAction::ModValueDown | ForgeAction::ModValueUp => {
-            let direction = if action == ForgeAction::ModValueUp { 1 } else { -1 };
+            let direction = if action == ForgeAction::ModValueUp {
+                1
+            } else {
+                -1
+            };
             if state.spec.style.modifiers.is_empty() {
                 state.status = "Add a modifier first".into();
                 state.labels_dirty = true;

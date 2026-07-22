@@ -220,9 +220,11 @@ collidable stone pylons with a metal crossbeam. Pylon feet independently sample
 the terrain collider beneath each side of the road, supporting rising mountain
 approaches and long aerial viaducts instead of leaving them visibly floating.
 
-Road system v3 (vehicle-grade): decks widened for traffic
-(`SPEED_ROAD_WIDTH = 52`; rings City 46 / Harbor 42 / Village 38 / Outpost 36).
-**Collidable guardrails** on both edges of every deck (3.4 tall and 0.9 thick,
+Road system v4 (freeway-grade): main mountain trunks are widened for high-speed
+traffic (`SPEED_ROAD_WIDTH = 64`) and resampled into 32-unit deck slices after a
+bounded automatic Hermite-rounding pass. Settlement rings deliberately remain
+the smaller road/path family (City 46 / Harbor 42 / Village 38 / Outpost 36).
+**Collidable guardrails** on both edges of every trunk deck (4.6 tall and 1.05 thick,
 `spawn_deck_guardrails`) — players and vehicles can no longer slide off the
 network. Each two-way boost overlay also has a 1.75-unit collidable center
 divider, preventing momentum from carrying a player onto the arrows facing the
@@ -256,6 +258,13 @@ eight-times-bounded multiplier. A line banks only after a clean landing; board
 visuals display the accumulated yaw/roll, the individual camera pulls back and
 widens FOV with stunt intensity, and landing sends both owner-labelled score
 feedback and a short owner-mapped `GamepadRumbleRequest` when rumble is enabled.
+Normal airborne hoverboard travel retains its horizontal vector instead of
+converging immediately on the low air target. No-input coasting has reduced
+drag, and steering blends into existing momentum so mountain traversal reads as
+surfing a large wave. A downward World-layer probe begins easing descending
+velocity inside 4.8 units of terrain; contact then plays a short squash/pitch
+landing pose. The rendered board is uniformly 10% larger before boost and
+landing deformation.
 **Clear corridor**: tree scatter skips anything within road half-width + 10 of
 the network — the props vehicles used to crash into. Buildings are reactive to
 the network: if the road centerline crosses a footprint, `spawn_building` emits
@@ -720,7 +729,10 @@ Incoming DamageInfo
 defense reduction applied to an incoming hit. `PlayerStats.armor` is the
 separate rechargeable armor-durability meter shown in the HUD; it absorbs 70%
 of the already-mitigated hit while health receives 30%. Do not use the
-durability meter as equipment defense or apply either layer twice.
+durability meter as equipment defense or apply either layer twice. Every player
+owns `ArmorRechargeState`: an incoming `PlayerDamagedEvent` resets a three-second
+delay, after which durability refills at 18 points per second up to
+`PlayerStats.max_armor`.
 
 **Resistances & defense (2026-06):** enemies spawn with faction-flavoured
 resistances and their `EnemyConfig.defense` via
@@ -783,16 +795,15 @@ Primary and special ammo counters are retained for save compatibility but no lon
 **Star Sabre / Beam Sabre** (`BeamSabre`): controller ownership follows the
 assigned `PlayerIndex`. The base Saber is starter equipment; toggle `T` or
 controller LB+North/Y, with LT+North/Y, Guide, and L3+R3 as fallbacks. RT/LMB
-performs the animated slash while active. Normal beam weapons use that same
-player's LT aim and RT fire inputs. Levels 1–5
-increase slash damage, wave damage, slash count, and at level 3+ gains piercing;
-level 4+ fires dual wave; level 5 adds AoE splash. Beam Capacitors now also raise
-the Star Sabre's effective wave tier for combo behavior: finishers gain single
-waves first, mid-chain slashes gain waves next, dual waves arrive at high tier,
-and level-5/tier-5 finishers throw a triple spread.
+performs the animated slash while active. Its second combo slash launches one
+small starter wave. Normal beam weapons use that same player's LT aim and RT
+fire inputs. Saber level, Solar Sabre Glyph, and Beam Capacitors combine into a
+bounded wave tier: upgrades grow the projectile mesh, damage, and speed; add up
+to four spread waves; add piercing at tier 3; add another emission on slash four
+when the combo is long enough; and add splash at tier 5.
 
-The Solar Sabre Glyph is now the energy-wave upgrade rather than the base weapon
-unlock. Save-backed `UpgradeLedger.relics` holds extensible gem/blueprint ids per
+The Solar Sabre Glyph upgrades the starter wave rather than unlocking the base
+weapon or withholding its first projectile. Save-backed `UpgradeLedger.relics` holds extensible gem/blueprint ids per
 player. Cyclone Slash (heavy/L3) performs a full radial cut; Comet Dash (B/East,
 or Q on keyboard) performs two advancing cuts; Meteor Pound turns that input
 into an airborne radial slam. Solar Fire, Storm, Frost, and Void gems stack
@@ -819,6 +830,10 @@ F11 counts these entities in total combat VFX and displays the dedicated Saber
 count against its cap. Player spawning seeds campaign-discovered Saber relics
 into the joining player's save-backed ledger; automated coverage verifies that
 existing ownership remains idempotent and unrelated discoveries are excluded.
+The persistent blade uses two shared additive energy materials: a broad blue
+aura around a narrower near-white HDR core. Its longer visual is centered from
+the hand along the animated blade direction, and standard slash radius/offset
+were increased with it so the rendered weapon and gameplay reach agree better.
 
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 
@@ -994,7 +1009,7 @@ Chapter select renders those locations as the Everest Range fast-travel map. Key
 
 Each settlement also has one `DiscussionNpc` near its plaza. Press `E` / D-pad Down near that NPC to open the discussion panel. Dialogue scripts live in `src/discussion.rs`; each line may reference an MP3 under `assets/voice/...`, and the HUD spawns that clip once when the line appears. Missing voice files are acceptable during prototyping, but final recorded lines should keep the documented paths or update the script.
 
-City settlements are peaceful mega-city hubs protected by orbiting `FreePeopleGuardianShip` patrols from the Free Peoples of Earth. They also hide a small counter-spy activity: Cloudrail City and Switchwork Borough each spawn two non-combat `CitySpyDrone`s. Shoot them down with normal player weapons, then collect the spawned `SpyData` beacon to earn save-backed credits, XP, and armor rewards.
+City settlements are peaceful mega-city hubs protected by orbiting `FreePeopleGuardianShip` patrols from the Free Peoples of Earth. They also hide a small counter-spy activity: Cloudrail City and Switchwork Borough each spawn two non-combat `CitySpyDrone`s. Spy drones carry an EnemyHurtbox sensor despite using kinematic patrol motion, so ordinary projectiles drive the shared enemy-damage, hit-flash, and floating-number path. Shoot them down, then collect the spawned `SpyData` beacon to earn save-backed credits, XP, and armor rewards.
 
 Current settlements:
 
@@ -1022,7 +1037,7 @@ Current temple rewards:
 | Temple | Reward | Runtime effect |
 |---|---|---|
 | Temple of the Sky Equation | Ancient Flight Core | Improves air control and jetpack/flight fuel, force, regen, and vertical velocity |
-| Solar Sabre Observatory | Solar Sabre Glyph | Unlocks Star Saber energy waves and also boosts hand/sabre-style pressure, Rainbow Ray, and Tri-Star Burst |
+| Solar Sabre Observatory | Solar Sabre Glyph | Upgrades the starter second-slash wave into a wider multi-wave and also boosts hand/sabre-style pressure, Rainbow Ray, and Tri-Star Burst |
 | Nova Missile Foundry | Nova Missile Matrix | Boosts Nova Orb missile damage, explosion radius, ammo, and Homing Star capacity |
 | Aegis Frame Archive | Aegis Armor Frame | Grants armor rewards and improves traversal reliability through stronger snap/step and extra wall-jump charge |
 
@@ -1243,6 +1258,7 @@ relative to the configured SFX directory, IDs are bounded to safe ASCII tokens,
 and custom one-shots play at original pitch on the SFX/master volume bus.
 Unassigned modular actions now select a synthesized fallback instead of going
 silent. The current traversal/Saber ids are `hoverboard.overdrive`,
+`hoverboard.land`,
 `sabre.cyclone`, `sabre.comet_dash`, `sabre.meteor_pound`, and `sabre.wave`.
 
 See `docs/audio_modding.md` for the player workflow and manifest schema.

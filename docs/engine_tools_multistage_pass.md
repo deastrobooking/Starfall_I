@@ -396,10 +396,13 @@ destructively regenerated from a preview-only recipe.
   automatic cubic curves within the 192-part sandbox budget, and validates
   sampled grade instead of trusting only straight control-point chords.
 - Controller controls select tangent X/Y/Z, adjust from the resolved automatic
-  value, or reset to automatic. A magenta viewport arrow shows the resolved
+  value, reset one point to automatic, or use `AUTO ROUND ALL SPLINE POINTS` to
+  return the whole spline to automatic rounding. A magenta viewport arrow shows the resolved
   derivative. Typed Merge/Split/Cross/Loop-Link records mark two stable road
   point IDs, validate unique bounded links, draw a cyan pending guide, compile
-  connector decks, and participate in recipe undo/redo.
+  12-slice Hermite connector decks with width-aware barriers, and participate
+  in recipe undo/redo. Ordinary spline slices compile matching edge barriers;
+  freeway-width recipes receive the taller barrier profile.
 - Building/cave/city/biome nodes now own version-compatible typed sockets:
   Doorway, Stair Landing, Encounter, Item, and Portal. Each stable socket ID
   stores its owning node ID, bounded local position, facing, and size. Optional

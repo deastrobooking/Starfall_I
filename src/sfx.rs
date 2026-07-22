@@ -522,7 +522,10 @@ mod tests {
     #[test]
     fn modular_actions_select_readable_procedural_fallbacks() {
         assert_eq!(modular_fallback_kind("sabre.cyclone"), SfxKind::Slash);
-        assert_eq!(modular_fallback_kind("hoverboard.overdrive"), SfxKind::Shoot);
+        assert_eq!(
+            modular_fallback_kind("hoverboard.overdrive"),
+            SfxKind::Shoot
+        );
         assert_eq!(modular_fallback_kind("world.reward"), SfxKind::Loot);
     }
 }

@@ -8,21 +8,73 @@ use super::*;
 
 // Shorter stations let the elevation solver see narrow ridges before a deck
 // reaches them.  This is also the maximum collider/deck seam spacing.
-pub(super) const SPEED_ROAD_CHUNK_LEN: f32 = 48.0;
+pub(super) const SPEED_ROAD_CHUNK_LEN: f32 = 32.0;
 // The deck normally rides close to terrain. The profile solver raises it only
 // where mountain clearance or the grade limit requires a viaduct.
 pub(super) const SPEED_ROAD_CLEARANCE: f32 = 0.75;
 pub(super) const SPEED_ROAD_TERRAIN_ENVELOPE: f32 = 0.65;
+const SPEED_ROAD_PROFILE_SAFETY_MARGIN: f32 = 0.18;
 // Sized for vehicles: two NPC cars + a player vehicle pass comfortably.
-pub(super) const SPEED_ROAD_WIDTH: f32 = 52.0;
+pub(super) const SPEED_ROAD_WIDTH: f32 = 64.0;
 // Less than half a terrain cell, so every triangle crossed by a road receives
 // at least two longitudinal checks.
-pub(super) const SPEED_ROAD_TERRAIN_SAMPLE_SPACING: f32 = 2.0;
-pub(super) const SPEED_ROAD_TRAFFIC_LANE_OFFSET: f32 = 9.5;
+pub(super) const SPEED_ROAD_TERRAIN_SAMPLE_SPACING: f32 = 1.5;
+pub(super) const SPEED_ROAD_TRAFFIC_LANE_OFFSET: f32 = 12.0;
 pub(super) const SPEED_ROAD_PATROL_VEHICLE_COUNT: usize = 18;
 
 pub(super) fn speed_road_segment_subdivision_count(length: f32) -> usize {
     (length / SPEED_ROAD_CHUNK_LEN).ceil().max(1.0) as usize
+}
+
+/// Convert authored route corners into a clamped cubic-Hermite centerline.
+/// Tangents are limited by each span chord and lateral deviation stays inside
+/// the existing route-clearance corridor, so smoothing cannot create loops or
+/// send a deck into prop-filled terrain. The terrain/deck pass subsequently
+/// resamples this centerline at the finer freeway chunk length.
+pub(super) fn rounded_speed_road_route(route: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    if route.len() < 3 {
+        return route.to_vec();
+    }
+    let points = route
+        .iter()
+        .map(|&(x, z)| Vec2::new(x, z))
+        .collect::<Vec<_>>();
+    let mut rounded = Vec::new();
+    for span in 0..points.len() - 1 {
+        let start = points[span];
+        let end = points[span + 1];
+        let chord = end - start;
+        let chord_len = chord.length();
+        if chord_len <= 0.01 {
+            continue;
+        }
+        let previous = points[span.saturating_sub(1)];
+        let next = points[(span + 2).min(points.len() - 1)];
+        let tangent_limit = chord_len * 0.72;
+        let start_tangent = ((end - previous) * 0.5).clamp_length_max(tangent_limit);
+        let end_tangent = ((next - start) * 0.5).clamp_length_max(tangent_limit);
+        let slices = (chord_len / 96.0).ceil().clamp(4.0, 24.0) as usize;
+        for slice in 0..slices {
+            let t = slice as f32 / slices as f32;
+            let t2 = t * t;
+            let t3 = t2 * t;
+            let curved_sample = start * (2.0 * t3 - 3.0 * t2 + 1.0)
+                + start_tangent * (t3 - 2.0 * t2 + t)
+                + end * (-2.0 * t3 + 3.0 * t2)
+                + end_tangent * (t3 - t2);
+            let chord_sample = start.lerp(end, t);
+            let sample = chord_sample + (curved_sample - chord_sample).clamp_length_max(18.0);
+            if rounded.last().is_none_or(|last: &(f32, f32)| {
+                Vec2::new(last.0, last.1).distance_squared(sample) > 0.01
+            }) {
+                rounded.push((sample.x, sample.y));
+            }
+        }
+    }
+    if let Some(last) = points.last() {
+        rounded.push((last.x, last.y));
+    }
+    rounded
 }
 
 pub(super) fn speed_road_required_terrain_lift(
@@ -430,11 +482,12 @@ pub(super) fn speed_road_network_profiles(terrain_seed: u64) -> Vec<Vec<Vec3>> {
         .iter()
         .enumerate()
         .map(|(route_index, route)| {
+            let rounded = rounded_speed_road_route(route);
             speed_road_route_profile(
-                route,
+                &rounded,
                 SPEED_ROAD_WIDTH + (route_index % 3) as f32 * 2.4,
                 terrain_seed,
-                SPEED_ROAD_CLEARANCE,
+                SPEED_ROAD_CLEARANCE + SPEED_ROAD_PROFILE_SAFETY_MARGIN,
             )
         })
         .collect();
@@ -626,8 +679,8 @@ pub(super) fn spawn_deck_guardrails(
     width: f32,
     length: f32,
 ) {
-    let rail_h = 3.4;
-    let rail_w = 0.90;
+    let rail_h = 4.6;
+    let rail_w = 1.05;
     for side in [-1.0_f32, 1.0] {
         commands.spawn((
             PbrBundle {
