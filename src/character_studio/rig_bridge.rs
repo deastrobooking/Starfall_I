@@ -13,7 +13,7 @@ use crate::components::character::JointKind;
 /// should export shape keys with these exact names. Aliases belong in the asset
 /// conversion pipeline, not in player save data.
 #[allow(dead_code)] // Public DCC/export contract; consumed by validation tests until morph import lands.
-pub const CANONICAL_MORPHS: [&str; 15] = [
+pub const CANONICAL_MORPHS: [&str; 23] = [
     "body_height",
     "body_muscle",
     "body_weight",
@@ -21,14 +21,22 @@ pub const CANONICAL_MORPHS: [&str; 15] = [
     "waist_width",
     "hips_wide",
     "limb_length",
+    "body_chest_shape",
     "face_jaw_wide",
     "face_chin_long",
+    "face_chin_wide",
     "face_nose_long",
     "face_nose_wide",
+    "face_nose_bridge",
     "face_brow_heavy",
     "face_cheek_full",
     "face_eye_large",
+    "face_eye_spacing",
+    "face_eye_tilt",
+    "face_eye_depth",
+    "face_brow_angle",
     "face_mouth_wide",
+    "face_lip_full",
 ];
 
 #[allow(dead_code)] // Offline/profile validation API; runtime binding reports the component status below.

@@ -57,23 +57,33 @@ implementation is upgraded.
 The generated base deliberately targets a broad 1980s cel-anime language:
 larger cranium, tapered lower face, wide eyes with upper lashes and catchlights,
 small readable nose, warm cheek marks, and graphic hair silhouettes. Eye
-spacing, eye tilt, brow angle, and lip fullness now join the original face
-controls. The mouth has separate cavity and upper/lower-lip geometry. Generated
+spacing, tilt, and depth; brow angle; nose bridge; chin width; and lip fullness
+join the original face controls. The mouth has separate cavity and
+upper/lower-lip geometry. Generated
 eyes, brows, and mouth carry semantic feature tags so runtime animation can
 blink, emote, breathe, and open the mouth during attacks independently of the
 head. These are original procedural forms and are not tied to one show or
 artist.
 
 The MECHA ROBOT preset preserves the generator's successful armored silhouette
-as a first-class character seed. STAR HERO and SHADOW RAIDER provide readable
-good-guy/bad-guy contrast; MANA ADVENTURER targets compact shared-camera fantasy
-play; STREET RUNNER demonstrates the city clothing stack.
+as a first-class character seed and now combines Crystal Mecha armor with mecha
+wings. STAR HERO and SHADOW RAIDER provide readable good-guy/bad-guy contrast;
+MANA ADVENTURER uses an arcane coat and moon gem for compact shared-camera
+fantasy play; STREET RUNNER demonstrates the city clothing stack.
 
-Wardrobe options currently include ten top silhouettes, eight bottoms, nine
-footwear silhouettes, nine hairstyles, gloves/gauntlets, and two full armor
-overrides. Bomber, moto, denim, blazer, cargo, flare, pleat, sneaker, high-top,
-combat-boot, and heeled-boot details are generated as geometry. Clothing uses
-separate cloth, denim, leather, sole, metal, and emissive material responses.
+Wardrobe options currently include twelve top silhouettes, eight bottoms, nine
+footwear silhouettes, nine hairstyles, gloves/gauntlets, and four full armor
+overrides. The Arcane Coat and Star Knight Tunic add fantasy layering to the
+existing modern wardrobe. Mecha Armor, Crystal Mecha, and Dragon Mecha provide
+distinct armor suites. An independent fantasy-flair field offers None, Star
+Gem, Moon Gem, Royal Mantle, Arcane Halo, and Mecha Wings without consuming a
+wardrobe slot. Clothing uses separate cloth, denim, leather, sole, metal, and
+emissive material responses.
+
+Chest Shape is an explicit neutral morph shared by both bases. It drives fitted
+clothing depth and sex-aware procedural chest definition: broader pectoral
+planes on the male base and softer paired forms on the female base. The control
+remains editable on either body and does not change gameplay collision.
 
 Every non-armor character receives a fitted coverage garment around the pelvis
 and upper thighs before outer clothing is generated. This is an invariant of
@@ -119,9 +129,10 @@ Production shape keys must use the existing patch names:
 
 ```text
 body_height body_muscle body_weight shoulders_wide waist_width hips_wide limb_length
-face_jaw_wide face_chin_long face_nose_long face_nose_wide face_brow_heavy
-face_cheek_full face_eye_large face_eye_spacing face_eye_tilt face_brow_angle
-face_mouth_wide face_lip_full
+body_chest_shape face_jaw_wide face_chin_long face_chin_wide face_nose_long
+face_nose_wide face_nose_bridge face_brow_heavy face_cheek_full face_eye_large
+face_eye_spacing face_eye_tilt face_eye_depth face_brow_angle face_mouth_wide
+face_lip_full
 ```
 
 This contract means a future Blender model can replace the preview renderer

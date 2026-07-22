@@ -844,7 +844,10 @@ pub fn studio_spec_to_blueprint(name: &str, spec: CharacterSpec) -> CharacterBlu
     let body = BodyRecipe {
         height: 0.82 + spec.body.height * 0.42,
         shoulder_width: 0.76 + spec.body.shoulder_width * 0.54,
-        chest_size: 0.78 + (spec.body.muscle * 0.32 + spec.body.weight * 0.16),
+        chest_size: 0.74
+            + spec.body.muscle * 0.26
+            + spec.body.weight * 0.12
+            + spec.body.chest_shape * 0.18,
         arm_length: 0.78 + spec.body.limb_length * 0.48,
         leg_length: 0.82 + spec.body.limb_length * 0.55,
         hand_size: 0.88 + spec.body.muscle * 0.22,
@@ -873,11 +876,20 @@ pub fn studio_spec_to_blueprint(name: &str, spec: CharacterSpec) -> CharacterBlu
         },
         CartoonAppearanceRecipe {
             has_hood: false,
-            has_cape: matches!(wardrobe.top, spec::TopStyle::Robe),
+            has_cape: matches!(
+                wardrobe.top,
+                spec::TopStyle::Robe | spec::TopStyle::ArcaneCoat
+            ) || matches!(spec.style.flair, spec::FlairStyle::RoyalMantle),
             has_gloves: !matches!(wardrobe.hands, spec::HandStyle::Bare),
             has_boots: !matches!(wardrobe.feet, spec::FootStyle::Barefoot),
-            has_shoulder_pads: !matches!(wardrobe.armor, spec::ArmorStyle::None),
-            has_visor: matches!(wardrobe.armor, spec::ArmorStyle::MechaArmor),
+            has_shoulder_pads: !matches!(wardrobe.armor, spec::ArmorStyle::None)
+                || matches!(wardrobe.top, spec::TopStyle::StarKnightTunic),
+            has_visor: matches!(
+                wardrobe.armor,
+                spec::ArmorStyle::MechaArmor
+                    | spec::ArmorStyle::CrystalMecha
+                    | spec::ArmorStyle::DragonMecha
+            ),
         },
     )
 }

@@ -305,8 +305,8 @@ Pipeline (single source of truth, per the design doc):
 keys/presets/randomize → CharacterSpec → PresetGenerators → CharacterPatch → generated meshes
 ```
 
-- `spec.rs` — `CharacterSpec { sex, body, face, style }`; 15 normalized morph
-  fields (height/muscle/weight/shoulders/waist/hips/limbs + 8 face params),
+- `spec.rs` — `CharacterSpec { sex, body, face, style }`; 23 normalized morph
+  fields (eight body controls, including chest shape, plus 15 face controls),
   serialized as JSON (F5 save / F8 load → `assets/presets/humans/`).
 - `generators.rs` — `PresetGenerator` trait; Body/Face/Skin/Hair/Outfit
   generators emit **named morphs** ("body_muscle", "face_jaw_wide", …), named
@@ -315,7 +315,7 @@ keys/presets/randomize → CharacterSpec → PresetGenerators → CharacterPatch
   exists, the same names bind to Bevy `MorphWeights` with no editor changes.
 - `human_mesh.rs` — anthropometric mesh generator (lofted superellipse columns
   + ovoids; hip 0.52 H, shoulder 0.815 H, head 0.928 H): male/female bases,
-  jaw/chin/nose/brow/cheek/eye/mouth face features, 5 hair styles, and three
+  jaw/chin/nose/brow/cheek/eye/mouth face features, 9 hair styles, and three
   outfit layer systems — **Clothes** (shirt/sleeves/pants/shoes overlays),
   **Super Suit** (skin-tight recolor + emissive emblem/belt/trim), **Mecha
   Armor** (Megaman-style helmet + crest, chest core, shoulder spheres, right
@@ -334,11 +334,14 @@ opens on the actual front. Controller West resets the focused field and
 LB/RB jumps among preset, body, face, wardrobe, and saved-library sections.
 
 **Wardrobe (2026-07):** independent slots, mix-and-match — Top (None/T-Shirt/
-Long Shirt/Tunic/Jacket/Robe/Tank Top/Bomber/Moto/Blazer), Bottom
+Long Shirt/Tunic/Jacket/Robe/Tank Top/Bomber/Moto/Blazer/Arcane Coat/Star
+Knight Tunic), Bottom
 (Underwear/Shorts/Pants/Skirt/Jeans/Cargo/Flared/Pleated Skirt), Footwear
 (Barefoot/Shoes/Boots/Tall Boots/Sneakers/High-Tops/Loafers/Combat/Heeled
 Boots), Hands (Bare/Gloves/Gauntlets), Armor
-(None/Super Suit/Mecha Armor — armor overrides wardrobe visuals). Primary/
+(None/Super Suit/Mecha Armor/Crystal Mecha/Dragon Mecha — armor overrides
+wardrobe visuals), and independent Fantasy Flair (None/Star Gem/Moon Gem/Royal
+Mantle/Arcane Halo/Mecha Wings). Primary/
 secondary colours tint the whole outfit. A fitted base garment always encloses
 the pelvis and upper thighs, so Underwear is a real visible option and outer
 garments cannot expose skin through the glute/leg seams.
@@ -346,7 +349,9 @@ garments cannot expose skin through the glute/leg seams.
 **Anime MVP appearance (2026-07):** the procedural head uses a larger cranium,
 tapered jaw/chin, smaller nose, wide layered eyes, upper lash lines, iris
 catchlights, cheek color, and a dedicated lip material for a broad 1980s cel
-anime look. Feathered, spiky, bob, and side-ponytail hair join the original
+anime look. Eye depth, nose bridge, chin width, and sex-aware chest definition
+increase silhouette control without changing the gameplay collider. Feathered,
+spiky, bob, and side-ponytail hair join the original
 styles. Clavicles, elbows, knees, calves, and grounded shoe soles improve the
 full-body silhouette. Skin, eye, hair, cloth, denim, leather, sole, metal, and
 emissive accents use distinct roughness/reflectance treatment, and palette
@@ -356,8 +361,9 @@ entries now have readable names across expanded anime and 80s color ranges.
 the next `human_vNNN.json` to `assets/presets/humans/`; the SAVED VERSIONS
 panel lists every version with LOAD/DEL buttons (mouse or gamepad).
 
-Because every vertex is generated in-engine, direct `.glb` export of authored
-characters is a planned follow-up (mesh data → glTF JSON + BIN writer).
+Because every vertex is generated in-engine, direct rigid `.glb` export of the
+authored preview is available. Skinned export with weights, the canonical
+skeleton, morph targets, sockets, and animation clips remains a follow-up.
 
 The current editor is intentionally a constrained parametric modeler, not a
 free vertex editor: this keeps characters compatible with gameplay collision,

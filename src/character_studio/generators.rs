@@ -10,8 +10,8 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use super::spec::{
-    ArmorStyle, BottomStyle, CharacterSpec, FootStyle, HairStyle, HandStyle, Sex, TopStyle,
-    WardrobeSpec,
+    ArmorStyle, BottomStyle, CharacterSpec, FlairStyle, FootStyle, HairStyle, HandStyle, Sex,
+    TopStyle, WardrobeSpec,
 };
 
 // ── Patch ─────────────────────────────────────────────────────────────────────
@@ -37,6 +37,7 @@ pub struct CharacterPatch {
     pub sex: Sex,
     pub wardrobe: WardrobeSpec,
     pub hair: HairStyle,
+    pub flair: FlairStyle,
     /// Non-destructive modifier stack applied to every generated part mesh.
     pub modifiers: Vec<crate::mesh_modifiers::MeshModifier>,
 }
@@ -81,6 +82,7 @@ pub fn build_character_patch(spec: &CharacterSpec) -> CharacterPatch {
         sex: spec.sex,
         wardrobe: spec.style.wardrobe,
         hair: spec.style.hair,
+        flair: spec.style.flair,
         modifiers: spec.modifiers.iter().flatten().copied().collect(),
         ..default()
     };
@@ -172,6 +174,7 @@ impl PresetGenerator for BodyGenerator {
         patch.morphs.insert("waist_width", b.waist_width);
         patch.morphs.insert("hips_wide", b.hip_width);
         patch.morphs.insert("limb_length", b.limb_length);
+        patch.morphs.insert("body_chest_shape", b.chest_shape);
     }
 }
 
@@ -183,13 +186,16 @@ impl PresetGenerator for FaceGenerator {
         let f = &spec.face;
         patch.morphs.insert("face_jaw_wide", f.jaw_width);
         patch.morphs.insert("face_chin_long", f.chin_length);
+        patch.morphs.insert("face_chin_wide", f.chin_width);
         patch.morphs.insert("face_nose_long", f.nose_length);
         patch.morphs.insert("face_nose_wide", f.nose_width);
+        patch.morphs.insert("face_nose_bridge", f.nose_bridge);
         patch.morphs.insert("face_brow_heavy", f.brow_depth);
         patch.morphs.insert("face_cheek_full", f.cheek_fullness);
         patch.morphs.insert("face_eye_large", f.eye_size);
         patch.morphs.insert("face_eye_spacing", f.eye_spacing);
         patch.morphs.insert("face_eye_tilt", f.eye_tilt);
+        patch.morphs.insert("face_eye_depth", f.eye_depth);
         patch.morphs.insert("face_brow_angle", f.brow_angle);
         patch.morphs.insert("face_mouth_wide", f.mouth_width);
         patch.morphs.insert("face_lip_full", f.lip_fullness);
@@ -251,7 +257,7 @@ impl PresetGenerator for OutfitGenerator {
                 (S::Hands, C::Suit),
                 (S::Helmet, C::None),
             ],
-            ArmorStyle::MechaArmor => [
+            ArmorStyle::MechaArmor | ArmorStyle::CrystalMecha | ArmorStyle::DragonMecha => [
                 (S::Torso, C::Mecha),
                 (S::Legs, C::Mecha),
                 (S::Feet, C::Mecha),
@@ -310,6 +316,7 @@ pub fn preset_male() -> CharacterSpec {
     };
     spec.body.shoulder_width = 0.62;
     spec.body.muscle = 0.55;
+    spec.body.chest_shape = 0.58;
     spec.face.jaw_width = 0.58;
     spec.face.brow_depth = 0.60;
     spec.style.hair = HairStyle::Short;
@@ -335,6 +342,7 @@ pub fn preset_female() -> CharacterSpec {
     spec.body.hip_width = 0.62;
     spec.body.waist_width = 0.38;
     spec.body.muscle = 0.42;
+    spec.body.chest_shape = 0.58;
     spec.face.jaw_width = 0.38;
     spec.face.chin_length = 0.42;
     spec.face.brow_depth = 0.36;
@@ -365,11 +373,14 @@ pub fn preset_star_hero() -> CharacterSpec {
     spec.face.eye_tilt = 0.58;
     spec.face.brow_angle = 0.56;
     spec.face.jaw_width = 0.48;
+    spec.face.chin_width = 0.48;
+    spec.face.nose_bridge = 0.54;
     spec.face.lip_fullness = 0.42;
     spec.style.hair = HairStyle::Feathered;
     spec.style.hair_color = 3;
     spec.style.primary_color = 0;
     spec.style.secondary_color = 3;
+    spec.style.flair = FlairStyle::StarGem;
     spec.style.wardrobe = WardrobeSpec {
         top: TopStyle::Tunic,
         bottom: BottomStyle::Pants,
@@ -388,6 +399,9 @@ pub fn preset_shadow_raider() -> CharacterSpec {
     spec.body.muscle = 0.70;
     spec.face.jaw_width = 0.66;
     spec.face.chin_length = 0.64;
+    spec.face.chin_width = 0.62;
+    spec.face.nose_bridge = 0.68;
+    spec.face.eye_depth = 0.64;
     spec.face.cheek_fullness = 0.28;
     spec.face.eye_size = 0.43;
     spec.face.eye_spacing = 0.47;
@@ -420,17 +434,21 @@ pub fn preset_mana_adventurer() -> CharacterSpec {
     spec.face.eye_tilt = 0.54;
     spec.face.cheek_fullness = 0.64;
     spec.face.lip_fullness = 0.48;
+    spec.face.chin_width = 0.40;
+    spec.face.nose_bridge = 0.42;
+    spec.face.eye_depth = 0.42;
     spec.style.hair = HairStyle::SidePonytail;
     spec.style.hair_color = 4;
     spec.style.primary_color = 2;
     spec.style.secondary_color = 11;
     spec.style.wardrobe = WardrobeSpec {
-        top: TopStyle::Tunic,
+        top: TopStyle::ArcaneCoat,
         bottom: BottomStyle::Shorts,
         feet: FootStyle::Boots,
         hands: HandStyle::Bare,
         armor: ArmorStyle::None,
     };
+    spec.style.flair = FlairStyle::MoonGem;
     spec
 }
 
@@ -464,18 +482,20 @@ pub fn preset_mecha_robot() -> CharacterSpec {
     spec.body.muscle = 0.82;
     spec.body.shoulder_width = 0.76;
     spec.body.waist_width = 0.38;
+    spec.body.chest_shape = 0.72;
     spec.face.eye_size = 0.60;
     spec.face.eye_tilt = 0.66;
     spec.style.hair = HairStyle::Bald;
     spec.style.eye_color = 6;
     spec.style.primary_color = 0;
     spec.style.secondary_color = 7;
+    spec.style.flair = FlairStyle::MechaWings;
     spec.style.wardrobe = WardrobeSpec {
         top: TopStyle::None,
         bottom: BottomStyle::Pants,
         feet: FootStyle::Boots,
         hands: HandStyle::Gauntlets,
-        armor: ArmorStyle::MechaArmor,
+        armor: ArmorStyle::CrystalMecha,
     };
     spec
 }
@@ -538,15 +558,19 @@ pub fn randomize(spec: &mut CharacterSpec, rng: &mut impl rand::Rng) {
     jitter(&mut spec.body.waist_width, 0.22);
     jitter(&mut spec.body.hip_width, 0.20);
     jitter(&mut spec.body.limb_length, 0.20);
+    jitter(&mut spec.body.chest_shape, 0.25);
     jitter(&mut spec.face.jaw_width, 0.30);
     jitter(&mut spec.face.chin_length, 0.30);
+    jitter(&mut spec.face.chin_width, 0.30);
     jitter(&mut spec.face.nose_length, 0.35);
     jitter(&mut spec.face.nose_width, 0.35);
+    jitter(&mut spec.face.nose_bridge, 0.30);
     jitter(&mut spec.face.brow_depth, 0.30);
     jitter(&mut spec.face.cheek_fullness, 0.30);
     jitter(&mut spec.face.eye_size, 0.25);
     jitter(&mut spec.face.eye_spacing, 0.20);
     jitter(&mut spec.face.eye_tilt, 0.25);
+    jitter(&mut spec.face.eye_depth, 0.22);
     jitter(&mut spec.face.brow_angle, 0.28);
     jitter(&mut spec.face.mouth_width, 0.25);
     jitter(&mut spec.face.lip_fullness, 0.25);
@@ -556,6 +580,7 @@ pub fn randomize(spec: &mut CharacterSpec, rng: &mut impl rand::Rng) {
     spec.style.hair_color = rng.gen_range(0..8);
     spec.style.primary_color = rng.gen_range(0..8);
     spec.style.secondary_color = rng.gen_range(0..8);
+    spec.style.flair = FlairStyle::ALL[rng.gen_range(0..FlairStyle::ALL.len())];
     spec.style.wardrobe = WardrobeSpec {
         top: TopStyle::ALL[rng.gen_range(1..TopStyle::ALL.len())],
         bottom: BottomStyle::ALL[rng.gen_range(1..BottomStyle::ALL.len())],
@@ -591,7 +616,8 @@ mod tests {
     fn mecha_robot_is_a_named_full_armor_preset() {
         let spec = preset_mecha_robot();
         let patch = build_character_patch(&spec);
-        assert_eq!(spec.style.wardrobe.armor, ArmorStyle::MechaArmor);
+        assert_eq!(spec.style.wardrobe.armor, ArmorStyle::CrystalMecha);
+        assert_eq!(spec.style.flair, FlairStyle::MechaWings);
         assert_eq!(
             patch.slots.get(&CharacterSlot::Torso),
             Some(&SlotContent::Mecha)
@@ -607,12 +633,34 @@ mod tests {
         let mut spec = CharacterSpec::default();
         spec.face.eye_spacing = 0.77;
         spec.face.eye_tilt = 0.68;
+        spec.face.eye_depth = 0.57;
+        spec.face.chin_width = 0.46;
+        spec.face.nose_bridge = 0.72;
         spec.face.brow_angle = 0.81;
         spec.face.lip_fullness = 0.63;
+        spec.body.chest_shape = 0.69;
         let patch = build_character_patch(&spec);
         assert_eq!(patch.morph("face_eye_spacing"), 0.77);
         assert_eq!(patch.morph("face_eye_tilt"), 0.68);
+        assert_eq!(patch.morph("face_eye_depth"), 0.57);
+        assert_eq!(patch.morph("face_chin_wide"), 0.46);
+        assert_eq!(patch.morph("face_nose_bridge"), 0.72);
         assert_eq!(patch.morph("face_brow_angle"), 0.81);
         assert_eq!(patch.morph("face_lip_full"), 0.63);
+        assert_eq!(patch.morph("body_chest_shape"), 0.69);
+    }
+
+    #[test]
+    fn fantasy_styles_reach_the_patch_without_overriding_wardrobe_layers() {
+        let mut spec = preset_mana_adventurer();
+        spec.style.wardrobe.top = TopStyle::StarKnightTunic;
+        spec.style.flair = FlairStyle::ArcaneHalo;
+        let patch = build_character_patch(&spec);
+        assert_eq!(patch.wardrobe.top, TopStyle::StarKnightTunic);
+        assert_eq!(patch.flair, FlairStyle::ArcaneHalo);
+        assert_eq!(
+            patch.slots.get(&CharacterSlot::Torso),
+            Some(&SlotContent::Cloth)
+        );
     }
 }

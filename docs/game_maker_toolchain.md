@@ -37,11 +37,13 @@ ET1–ET11 delivery gates are specified in `docs/engine_tools_multistage_pass.md
 ### GM1 — Humanoid Character Studio (active)
 
 The current `CharacterSpec -> CharacterPatch -> procedural mesh` path is the
-reference implementation. Immediate completion gates are expression channels,
-animation preview, thumbnail presets, attachment clearance, seeded randomize,
-and explicit schema versioning. Art direction combines compact fantasy
-readability, colorful action robots, and original 1970s space-opera shapes
-without copying protected characters or assets.
+reference implementation. Its 23-morph contract includes eye depth, nose
+bridge, chin width, and chest shape; fantasy gems/mantles/halos/wings layer
+independently over twelve tops and three mecha suites. Immediate completion
+gates are expression channels, animation preview, thumbnail presets, attachment
+clearance, seeded randomize, and explicit schema versioning. Art direction
+combines compact fantasy readability, colorful action robots, and original
+1970s space-opera shapes without copying protected characters or assets.
 
 ### GM2 — Robot and Monster Forge (playable vertical slice active)
 

@@ -15,7 +15,7 @@ use std::cell::Cell;
 use std::f32::consts::TAU;
 
 use super::generators::{CharacterPatch, CharacterSlot, SlotContent};
-use super::spec::{ArmorStyle, BottomStyle, FootStyle, HairStyle, Sex, TopStyle};
+use super::spec::{ArmorStyle, BottomStyle, FlairStyle, FootStyle, HairStyle, Sex, TopStyle};
 use crate::procedural_meshes::superellipsoid_mesh;
 
 // ── Lofted column primitive ───────────────────────────────────────────────────
@@ -126,6 +126,7 @@ struct Proportions {
     limb: f32,
     muscle: f32,
     weight: f32,
+    chest_shape: f32,
     head_r: f32,
     female: bool,
 }
@@ -146,6 +147,7 @@ impl Proportions {
             1.75 * spread(m(patch, "body_height"), 1.0, 0.09) * if female { 0.945 } else { 1.0 };
         let muscle = m(patch, "body_muscle");
         let weight = m(patch, "body_weight");
+        let chest_shape = m(patch, "body_chest_shape");
         let limb = spread(m(patch, "limb_length"), 1.0, 0.07);
 
         let shoulder_base = if female { 0.108 } else { 0.125 };
@@ -170,10 +172,15 @@ impl Proportions {
             hip_hw: spread(m(patch, "hips_wide"), hip_base, 0.018)
                 * h
                 * (1.0 + (weight - 0.5) * 0.30),
-            chest_depth: 0.062 * h * bulk * if female { 0.94 } else { 1.0 },
+            chest_depth: 0.062
+                * h
+                * bulk
+                * spread(chest_shape, 1.0, 0.20)
+                * if female { 0.96 } else { 1.0 },
             limb,
             muscle,
             weight,
+            chest_shape,
             // Slightly larger head and shorter facial mass create the readable
             // heroic proportions common to hand-drawn 1980s anime casts.
             head_r: 0.0735 * h * if female { 0.98 } else { 1.0 },
@@ -507,6 +514,38 @@ pub fn spawn_human(
         body_mat,
         Transform::from_xyz(0.0, (p.waist_y + p.shoulder_y) * 0.5, 0.0),
     );
+    // Sex-aware chest definition remains driven by an explicit neutral slider:
+    // softer paired forms for the female base and broader pectoral planes for
+    // the male base. Clothing uses the same chest depth, so outer layers keep
+    // coverage as the shape changes.
+    let chest_definition = spread(p.chest_shape, 1.0, 0.34);
+    for side in [-1.0f32, 1.0] {
+        let (width, height, depth, x, y) = if p.female {
+            (
+                p.shoulder_hw * 0.34,
+                0.055 * p.h * chest_definition,
+                p.chest_depth * 0.58 * chest_definition,
+                p.shoulder_hw * 0.29,
+                p.chest_y - 0.012 * p.h,
+            )
+        } else {
+            (
+                p.shoulder_hw * 0.40,
+                0.045 * p.h * chest_definition,
+                p.chest_depth * 0.34 * chest_definition,
+                p.shoulder_hw * 0.31,
+                p.chest_y + 0.006 * p.h,
+            )
+        };
+        part(
+            ovoid(
+                Vec3::new(width, height, depth),
+                if p.female { 1.15 } else { 1.45 },
+            ),
+            body_mat,
+            Transform::from_xyz(side * x, y, -p.chest_depth * 0.72),
+        );
+    }
     // Trapezius wedge: fills the neck→shoulder gap so the silhouette flows.
     part(
         ovoid(
@@ -775,7 +814,9 @@ pub fn spawn_human(
         let armor = patch.wardrobe.armor;
         let feet_style = patch.wardrobe.feet;
         let (foot_mat, foot_scale) = match (armor, feet_style) {
-            (ArmorStyle::MechaArmor, _) => (&mats.metal, 1.9),
+            (ArmorStyle::MechaArmor | ArmorStyle::CrystalMecha | ArmorStyle::DragonMecha, _) => {
+                (&mats.metal, 1.9)
+            }
             (ArmorStyle::SuperSuit, _) => (&mats.secondary, 1.08),
             (_, FootStyle::Barefoot) => (&mats.skin, 1.0),
             (_, FootStyle::Shoes | FootStyle::Loafers) => (&mats.leather, 1.10),
@@ -907,8 +948,9 @@ pub fn spawn_human(
         spawn_super_suit(&mut part, &p, &mats);
     }
     if mecha {
-        spawn_mecha_armor(&mut part, &p, &mats, upper_r);
+        spawn_mecha_armor(&mut part, &p, &mats, upper_r, patch.wardrobe.armor);
     }
+    spawn_fantasy_flair(&mut part, &p, &mats, patch.flair);
 
     root
 }
@@ -1008,6 +1050,7 @@ fn spawn_head(
     // (retro-RPG: soft rounded face, no bolted-on lower box).
     let jaw_w = spread(m(patch, "face_jaw_wide"), 0.61, 0.13);
     let chin = spread(m(patch, "face_chin_long"), 1.0, 0.30);
+    let chin_w = spread(m(patch, "face_chin_wide"), 1.0, 0.42);
     part(
         ovoid(
             Vec3::new(hr * jaw_w * cheek, hr * 0.46 * chin, hr * 0.68),
@@ -1019,7 +1062,11 @@ fn spawn_head(
     // Chin cap.
     part(
         ovoid(
-            Vec3::new(hr * 0.18 * jaw_w.max(0.4), hr * 0.13 * chin, hr * 0.14),
+            Vec3::new(
+                hr * 0.18 * jaw_w.max(0.4) * chin_w,
+                hr * 0.13 * chin,
+                hr * 0.14,
+            ),
             1.0,
         ),
         &mats.skin,
@@ -1031,6 +1078,21 @@ fn spawn_head(
     // front view.
     let nose_len = spread(m(patch, "face_nose_long"), 1.0, 0.4);
     let nose_w = spread(m(patch, "face_nose_wide"), 1.0, 0.4);
+    let nose_bridge = spread(m(patch, "face_nose_bridge"), 1.0, 0.5);
+    part(
+        ovoid(
+            Vec3::new(
+                hr * 0.045 * nose_w,
+                hr * 0.18 * nose_bridge,
+                hr * 0.045 * nose_bridge,
+            ),
+            1.25,
+        ),
+        &mats.skin,
+        Transform::from_translation(
+            head_c + Vec3::new(0.0, hr * 0.01, face_z - hr * 0.005 * nose_bridge),
+        ),
+    );
     part(
         ovoid(
             Vec3::new(hr * 0.055 * nose_w, hr * 0.11 * nose_len, hr * 0.075),
@@ -1063,6 +1125,7 @@ fn spawn_head(
     let eye = spread(m(patch, "face_eye_large"), 1.18, 0.30);
     let eye_spacing = spread(m(patch, "face_eye_spacing"), 1.0, 0.22);
     let eye_tilt = (m(patch, "face_eye_tilt") - 0.5) * 0.30;
+    let eye_depth = spread(m(patch, "face_eye_depth"), 1.0, 0.30);
     for side in [-1.0f32, 1.0] {
         let feature = if side < 0.0 {
             StudioFaceFeature::LeftEye
@@ -1073,7 +1136,7 @@ fn spawn_head(
             + Vec3::new(
                 side * hr * 0.29 * eye_spacing,
                 hr * 0.05,
-                face_z + hr * 0.05,
+                face_z + hr * (0.05 + (eye_depth - 1.0) * 0.12),
             );
         pending_face_feature.set(Some(feature));
         part(
@@ -1088,7 +1151,11 @@ fn spawn_head(
         pending_face_feature.set(Some(feature));
         part(
             ovoid(
-                Vec3::new(hr * 0.087 * eye, hr * 0.098 * eye, hr * 0.028),
+                Vec3::new(
+                    hr * 0.087 * eye * eye_depth,
+                    hr * 0.098 * eye * eye_depth,
+                    hr * 0.028,
+                ),
                 1.0,
             ),
             &mats.iris,
@@ -1586,6 +1653,78 @@ fn spawn_wardrobe(
                 );
             }
         }
+        TopStyle::ArcaneCoat => {
+            let hem = p.hip_y - 0.10 * p.h;
+            part(
+                torso_overlay(hem, 1.12),
+                &mats.primary,
+                Transform::from_xyz(0.0, (hem + p.shoulder_y) * 0.5, 0.0),
+            );
+            long_sleeves(part, &mats.primary);
+            // High collar, luminous clasp, and split spell-coat tails.
+            part(
+                lofted_column(
+                    Vec2::new(p.head_r * 0.84, p.head_r * 0.78),
+                    Vec2::new(p.head_r * 0.96, p.head_r * 0.88),
+                    0.045 * p.h,
+                    0.0,
+                    1.5,
+                    3,
+                    16,
+                ),
+                &mats.secondary,
+                Transform::from_xyz(0.0, p.shoulder_y + 0.015 * p.h, 0.0),
+            );
+            for side in [-1.0f32, 1.0] {
+                part(
+                    ovoid(Vec3::new(0.075 * p.h, 0.19 * p.h, 0.018 * p.h), 1.25),
+                    &mats.primary,
+                    Transform::from_xyz(
+                        side * 0.055 * p.h,
+                        p.hip_y - 0.08 * p.h,
+                        p.chest_depth * 1.12,
+                    )
+                    .with_rotation(Quat::from_rotation_z(-side * 0.12)),
+                );
+            }
+            part(
+                ovoid(Vec3::new(0.026 * p.h, 0.032 * p.h, 0.014 * p.h), 0.65),
+                &mats.core,
+                Transform::from_xyz(0.0, p.chest_y + 0.025 * p.h, -p.chest_depth * 1.22),
+            );
+        }
+        TopStyle::StarKnightTunic => {
+            let hem = p.hip_y - 0.03 * p.h;
+            part(
+                torso_overlay(hem, 1.06),
+                &mats.primary,
+                Transform::from_xyz(0.0, (hem + p.shoulder_y) * 0.5, 0.0),
+            );
+            short_sleeves(part, &mats.primary);
+            // Layered shoulder guards and a diagonal heraldic sash.
+            for side in [-1.0f32, 1.0] {
+                part(
+                    ovoid(Vec3::new(0.050 * p.h, 0.026 * p.h, 0.050 * p.h), 0.8),
+                    &mats.metal,
+                    Transform::from_xyz(
+                        side * (p.shoulder_hw + 0.010 * p.h),
+                        p.shoulder_y + 0.010 * p.h,
+                        0.0,
+                    ),
+                );
+            }
+            part(
+                ovoid(Vec3::new(0.018 * p.h, 0.15 * p.h, 0.010 * p.h), 1.15),
+                &mats.secondary,
+                Transform::from_xyz(0.0, p.chest_y - 0.025 * p.h, -p.chest_depth * 1.20)
+                    .with_rotation(Quat::from_rotation_z(-0.48)),
+            );
+            part(
+                ovoid(Vec3::new(0.030 * p.h, 0.034 * p.h, 0.014 * p.h), 0.62),
+                &mats.core,
+                Transform::from_xyz(0.0, p.chest_y + 0.018 * p.h, -p.chest_depth * 1.24),
+            );
+        }
     }
 
     // ── Bottoms ──────────────────────────────────────────────────────────────
@@ -1849,6 +1988,7 @@ fn spawn_mecha_armor(
     p: &Proportions,
     mats: &StudioMats,
     upper_r: f32,
+    armor: ArmorStyle,
 ) {
     let hr = p.head_r;
     let head_c = Vec3::new(0.0, p.head_c_y, 0.0);
@@ -1915,6 +2055,174 @@ fn spawn_mecha_armor(
         &mats.metal,
         Transform::from_xyz(0.0, (p.hip_y + p.waist_y) * 0.5 - 0.01 * p.h, 0.0),
     );
+
+    match armor {
+        ArmorStyle::CrystalMecha => {
+            // Faceted constellation crystals reinforce the crest, shoulders,
+            // gauntlet line, and chest core without replacing the base suit.
+            for side in [-1.0f32, 1.0] {
+                part(
+                    ovoid(Vec3::new(0.020 * p.h, 0.065 * p.h, 0.020 * p.h), 0.58),
+                    &mats.core,
+                    Transform::from_xyz(
+                        side * (p.shoulder_hw + upper_r * 0.70),
+                        p.shoulder_y + 0.055 * p.h,
+                        -0.015 * p.h,
+                    )
+                    .with_rotation(Quat::from_rotation_z(-side * 0.30)),
+                );
+                part(
+                    ovoid(Vec3::new(0.015 * p.h, 0.040 * p.h, 0.014 * p.h), 0.60),
+                    &mats.core,
+                    Transform::from_xyz(
+                        side * p.hip_hw * 0.82,
+                        p.hip_y + 0.035 * p.h,
+                        -p.chest_depth * 1.16,
+                    ),
+                );
+            }
+            for point in 0..5 {
+                let angle = point as f32 * TAU / 5.0;
+                part(
+                    ovoid(Vec3::new(0.010 * p.h, 0.022 * p.h, 0.010 * p.h), 0.55),
+                    &mats.core,
+                    Transform::from_xyz(
+                        angle.cos() * 0.047 * p.h,
+                        p.chest_y + angle.sin() * 0.045 * p.h,
+                        -p.chest_depth * 1.25,
+                    )
+                    .with_rotation(Quat::from_rotation_z(-angle)),
+                );
+            }
+        }
+        ArmorStyle::DragonMecha => {
+            // Swept horns and layered blade pauldrons give this suite a
+            // distinct dragon-knight silhouette.
+            for side in [-1.0f32, 1.0] {
+                part(
+                    ovoid(Vec3::new(0.018 * p.h, 0.085 * p.h, 0.022 * p.h), 0.62),
+                    &mats.metal,
+                    Transform::from_translation(
+                        head_c + Vec3::new(side * hr * 0.58, hr * 0.88, hr * 0.08),
+                    )
+                    .with_rotation(Quat::from_rotation_z(-side * 0.52)),
+                );
+                part(
+                    ovoid(Vec3::new(0.095 * p.h, 0.020 * p.h, 0.045 * p.h), 0.62),
+                    &mats.secondary,
+                    Transform::from_xyz(
+                        side * (p.shoulder_hw + 0.030 * p.h),
+                        p.shoulder_y + 0.025 * p.h,
+                        0.015 * p.h,
+                    )
+                    .with_rotation(Quat::from_rotation_z(side * 0.18)),
+                );
+            }
+            part(
+                ovoid(Vec3::new(0.028 * p.h, 0.046 * p.h, 0.016 * p.h), 0.56),
+                &mats.core,
+                Transform::from_xyz(0.0, p.chest_y + 0.018 * p.h, -p.chest_depth * 1.27),
+            );
+        }
+        ArmorStyle::None | ArmorStyle::SuperSuit | ArmorStyle::MechaArmor => {}
+    }
+}
+
+fn spawn_fantasy_flair(
+    part: &mut impl FnMut(Mesh, &Handle<StandardMaterial>, Transform),
+    p: &Proportions,
+    mats: &StudioMats,
+    flair: FlairStyle,
+) {
+    match flair {
+        FlairStyle::None => {}
+        FlairStyle::StarGem => {
+            part(
+                ovoid(Vec3::new(0.032 * p.h, 0.040 * p.h, 0.015 * p.h), 0.56),
+                &mats.core,
+                Transform::from_xyz(0.0, p.chest_y + 0.020 * p.h, -p.chest_depth * 1.34),
+            );
+            for ray in 0..5 {
+                let angle = ray as f32 * TAU / 5.0;
+                part(
+                    ovoid(Vec3::new(0.006 * p.h, 0.024 * p.h, 0.006 * p.h), 0.65),
+                    &mats.highlight,
+                    Transform::from_xyz(
+                        angle.cos() * 0.042 * p.h,
+                        p.chest_y + 0.020 * p.h + angle.sin() * 0.042 * p.h,
+                        -p.chest_depth * 1.35,
+                    )
+                    .with_rotation(Quat::from_rotation_z(-angle)),
+                );
+            }
+        }
+        FlairStyle::MoonGem => {
+            for side in [-1.0f32, 1.0] {
+                part(
+                    ovoid(Vec3::new(0.013 * p.h, 0.038 * p.h, 0.010 * p.h), 0.58),
+                    &mats.core,
+                    Transform::from_xyz(
+                        side * 0.020 * p.h,
+                        p.chest_y + side * 0.012 * p.h,
+                        -p.chest_depth * 1.34,
+                    )
+                    .with_rotation(Quat::from_rotation_z(side * 0.45)),
+                );
+            }
+        }
+        FlairStyle::RoyalMantle => {
+            for side in [-1.0f32, 1.0] {
+                part(
+                    ovoid(Vec3::new(0.035 * p.h, 0.026 * p.h, 0.030 * p.h), 0.72),
+                    &mats.core,
+                    Transform::from_xyz(
+                        side * p.shoulder_hw * 0.72,
+                        p.shoulder_y + 0.012 * p.h,
+                        -0.010 * p.h,
+                    ),
+                );
+            }
+            part(
+                ovoid(Vec3::new(0.16 * p.h, 0.24 * p.h, 0.018 * p.h), 1.35),
+                &mats.secondary,
+                Transform::from_xyz(0.0, p.chest_y - 0.08 * p.h, p.chest_depth * 1.36),
+            );
+        }
+        FlairStyle::ArcaneHalo => {
+            for gem in 0..8 {
+                let angle = gem as f32 * TAU / 8.0;
+                part(
+                    ovoid(Vec3::splat(0.012 * p.h), 0.55),
+                    if gem % 2 == 0 {
+                        &mats.core
+                    } else {
+                        &mats.highlight
+                    },
+                    Transform::from_xyz(
+                        angle.cos() * p.head_r * 1.22,
+                        p.head_c_y + angle.sin() * p.head_r * 1.22,
+                        p.head_r * 0.72,
+                    ),
+                );
+            }
+        }
+        FlairStyle::MechaWings => {
+            for side in [-1.0f32, 1.0] {
+                for blade in 0..2 {
+                    part(
+                        ovoid(Vec3::new(0.030 * p.h, 0.14 * p.h, 0.018 * p.h), 0.60),
+                        if blade == 0 { &mats.metal } else { &mats.core },
+                        Transform::from_xyz(
+                            side * (0.11 + blade as f32 * 0.045) * p.h,
+                            p.chest_y + (0.02 - blade as f32 * 0.055) * p.h,
+                            p.chest_depth * 1.30,
+                        )
+                        .with_rotation(Quat::from_rotation_z(side * (0.42 + blade as f32 * 0.18))),
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1947,5 +2255,21 @@ mod tests {
             classify_studio_part(&proportions, Vec3::Y * proportions.head_c_y).0,
             StudioBodyRegion::Head
         );
+    }
+
+    #[test]
+    fn chest_shape_and_sex_baselines_produce_distinct_bounded_depths() {
+        let mut masculine = CharacterSpec::default();
+        masculine.body.chest_shape = 0.0;
+        let shallow = Proportions::from_patch(&build_character_patch(&masculine));
+        masculine.body.chest_shape = 1.0;
+        let deep = Proportions::from_patch(&build_character_patch(&masculine));
+        assert!(deep.chest_depth > shallow.chest_depth);
+
+        let mut feminine = masculine;
+        feminine.sex = Sex::Female;
+        let female = Proportions::from_patch(&build_character_patch(&feminine));
+        assert!(female.female);
+        assert!(female.chest_depth.is_finite() && female.chest_depth > 0.0);
     }
 }

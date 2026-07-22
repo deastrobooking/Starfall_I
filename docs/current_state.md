@@ -7,7 +7,7 @@
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 411 tests across the main crate and example targets,
+- Automated baseline: 413 tests across the main crate and example targets,
   `cargo build`, `cargo fmt --check`, and
   `cargo clippy --all-targets -- -D warnings` pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
@@ -40,6 +40,10 @@
 - Authoritative per-player aiming, viewport reticles, Homing Star tracking,
   Star Sabre controls, procedural weapon poses, loot attraction, road ramp
   alignment tests, and the MVP animation/rig bridge are present.
+- Character Studio exposes 23 body/face morphs, including eye depth, nose
+  bridge, chin width, and sex-aware chest shape. Twelve top styles, independent
+  fantasy gems/mantles/halos/wings, and Mecha/Crystal/Dragon armor suites all
+  persist through the same playable `CharacterSpec` recipe.
 - The Rocket Hoverboard now has reduced airborne gravity, a stronger board
   jump/rocket profile, B/East overdrive, uphill wave assistance, contact-normal
   banking, forward-momentum retention in the air and during coast, a short

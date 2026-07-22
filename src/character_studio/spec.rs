@@ -83,10 +83,12 @@ pub enum TopStyle {
     BomberJacket,
     MotoJacket,
     Blazer,
+    ArcaneCoat,
+    StarKnightTunic,
 }
 
 impl TopStyle {
-    pub const ALL: [TopStyle; 10] = [
+    pub const ALL: [TopStyle; 12] = [
         TopStyle::None,
         TopStyle::TShirt,
         TopStyle::LongShirt,
@@ -97,6 +99,8 @@ impl TopStyle {
         TopStyle::BomberJacket,
         TopStyle::MotoJacket,
         TopStyle::Blazer,
+        TopStyle::ArcaneCoat,
+        TopStyle::StarKnightTunic,
     ];
 
     pub fn label(self) -> &'static str {
@@ -111,6 +115,8 @@ impl TopStyle {
             TopStyle::BomberJacket => "Bomber Jacket",
             TopStyle::MotoJacket => "Moto Jacket",
             TopStyle::Blazer => "School Blazer",
+            TopStyle::ArcaneCoat => "Arcane Coat",
+            TopStyle::StarKnightTunic => "Star-Knight Tunic",
         }
     }
 }
@@ -222,13 +228,17 @@ pub enum ArmorStyle {
     None,
     SuperSuit,
     MechaArmor,
+    CrystalMecha,
+    DragonMecha,
 }
 
 impl ArmorStyle {
-    pub const ALL: [ArmorStyle; 3] = [
+    pub const ALL: [ArmorStyle; 5] = [
         ArmorStyle::None,
         ArmorStyle::SuperSuit,
         ArmorStyle::MechaArmor,
+        ArmorStyle::CrystalMecha,
+        ArmorStyle::DragonMecha,
     ];
 
     pub fn label(self) -> &'static str {
@@ -236,6 +246,41 @@ impl ArmorStyle {
             ArmorStyle::None => "None",
             ArmorStyle::SuperSuit => "Super Suit",
             ArmorStyle::MechaArmor => "Mecha Armor",
+            ArmorStyle::CrystalMecha => "Crystal Mecha",
+            ArmorStyle::DragonMecha => "Dragon Mecha",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum FlairStyle {
+    #[default]
+    None,
+    StarGem,
+    MoonGem,
+    RoyalMantle,
+    ArcaneHalo,
+    MechaWings,
+}
+
+impl FlairStyle {
+    pub const ALL: [Self; 6] = [
+        Self::None,
+        Self::StarGem,
+        Self::MoonGem,
+        Self::RoyalMantle,
+        Self::ArcaneHalo,
+        Self::MechaWings,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::StarGem => "Star Gem",
+            Self::MoonGem => "Moon Gem",
+            Self::RoyalMantle => "Royal Mantle",
+            Self::ArcaneHalo => "Arcane Halo",
+            Self::MechaWings => "Mecha Wings",
         }
     }
 }
@@ -250,6 +295,7 @@ pub struct WardrobeSpec {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BodySpec {
     pub height: f32,
     pub muscle: f32,
@@ -258,6 +304,7 @@ pub struct BodySpec {
     pub waist_width: f32,
     pub hip_width: f32,
     pub limb_length: f32,
+    pub chest_shape: f32,
 }
 
 impl Default for BodySpec {
@@ -270,6 +317,7 @@ impl Default for BodySpec {
             waist_width: 0.5,
             hip_width: 0.5,
             limb_length: 0.5,
+            chest_shape: 0.5,
         }
     }
 }
@@ -279,13 +327,16 @@ impl Default for BodySpec {
 pub struct FaceSpec {
     pub jaw_width: f32,
     pub chin_length: f32,
+    pub chin_width: f32,
     pub nose_length: f32,
     pub nose_width: f32,
+    pub nose_bridge: f32,
     pub brow_depth: f32,
     pub cheek_fullness: f32,
     pub eye_size: f32,
     pub eye_spacing: f32,
     pub eye_tilt: f32,
+    pub eye_depth: f32,
     pub brow_angle: f32,
     pub mouth_width: f32,
     pub lip_fullness: f32,
@@ -296,13 +347,16 @@ impl Default for FaceSpec {
         Self {
             jaw_width: 0.5,
             chin_length: 0.5,
+            chin_width: 0.5,
             nose_length: 0.5,
             nose_width: 0.5,
+            nose_bridge: 0.5,
             brow_depth: 0.5,
             cheek_fullness: 0.5,
             eye_size: 0.5,
             eye_spacing: 0.5,
             eye_tilt: 0.5,
+            eye_depth: 0.5,
             brow_angle: 0.5,
             mouth_width: 0.5,
             lip_fullness: 0.5,
@@ -311,6 +365,7 @@ impl Default for FaceSpec {
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct StyleSpec {
     /// Index into the studio skin-tone palette.
     pub skin_tone: usize,
@@ -318,6 +373,7 @@ pub struct StyleSpec {
     pub hair: HairStyle,
     pub hair_color: usize,
     pub wardrobe: WardrobeSpec,
+    pub flair: FlairStyle,
     /// Primary outfit/suit/armor colour index.
     pub primary_color: usize,
     /// Secondary/trim colour index.
@@ -338,12 +394,13 @@ pub enum StyleField {
     Feet,
     Hands,
     Armor,
+    Flair,
     PrimaryColor,
     SecondaryColor,
 }
 
 impl StyleField {
-    pub const ALL: [StyleField; 12] = [
+    pub const ALL: [StyleField; 13] = [
         StyleField::Sex,
         StyleField::SkinTone,
         StyleField::EyeColor,
@@ -354,6 +411,7 @@ impl StyleField {
         StyleField::Feet,
         StyleField::Hands,
         StyleField::Armor,
+        StyleField::Flair,
         StyleField::PrimaryColor,
         StyleField::SecondaryColor,
     ];
@@ -370,6 +428,7 @@ impl StyleField {
             StyleField::Feet => "Footwear",
             StyleField::Hands => "Hands",
             StyleField::Armor => "Armor",
+            StyleField::Flair => "Fantasy Flair",
             StyleField::PrimaryColor => "Primary",
             StyleField::SecondaryColor => "Secondary",
         }
@@ -430,6 +489,7 @@ impl StyleField {
             StyleField::Feet => spec.style.wardrobe.feet.label().to_string(),
             StyleField::Hands => spec.style.wardrobe.hands.label().to_string(),
             StyleField::Armor => spec.style.wardrobe.armor.label().to_string(),
+            StyleField::Flair => spec.style.flair.label().to_string(),
             StyleField::PrimaryColor => {
                 OUTFIT_NAMES[spec.style.primary_color % OUTFIT_NAMES.len()].to_string()
             }
@@ -480,6 +540,7 @@ impl StyleField {
             StyleField::Armor => {
                 spec.style.wardrobe.armor = step(&ArmorStyle::ALL, spec.style.wardrobe.armor, dir)
             }
+            StyleField::Flair => spec.style.flair = step(&FlairStyle::ALL, spec.style.flair, dir),
             StyleField::PrimaryColor => {
                 spec.style.primary_color = step_idx(spec.style.primary_color, 12, dir)
             }
@@ -505,6 +566,7 @@ impl StyleField {
             StyleField::Feet => spec.style.wardrobe.feet = defaults.style.wardrobe.feet,
             StyleField::Hands => spec.style.wardrobe.hands = defaults.style.wardrobe.hands,
             StyleField::Armor => spec.style.wardrobe.armor = defaults.style.wardrobe.armor,
+            StyleField::Flair => spec.style.flair = defaults.style.flair,
             StyleField::PrimaryColor => spec.style.primary_color = defaults.style.primary_color,
             StyleField::SecondaryColor => {
                 spec.style.secondary_color = defaults.style.secondary_color
@@ -538,22 +600,26 @@ pub enum MorphField {
     WaistWidth,
     HipWidth,
     LimbLength,
+    ChestShape,
     JawWidth,
     ChinLength,
+    ChinWidth,
     NoseLength,
     NoseWidth,
+    NoseBridge,
     BrowDepth,
     CheekFullness,
     EyeSize,
     EyeSpacing,
     EyeTilt,
+    EyeDepth,
     BrowAngle,
     MouthWidth,
     LipFullness,
 }
 
 impl MorphField {
-    pub const ALL: [MorphField; 19] = [
+    pub const ALL: [MorphField; 23] = [
         MorphField::Height,
         MorphField::Muscle,
         MorphField::Weight,
@@ -561,15 +627,19 @@ impl MorphField {
         MorphField::WaistWidth,
         MorphField::HipWidth,
         MorphField::LimbLength,
+        MorphField::ChestShape,
         MorphField::JawWidth,
         MorphField::ChinLength,
+        MorphField::ChinWidth,
         MorphField::NoseLength,
         MorphField::NoseWidth,
+        MorphField::NoseBridge,
         MorphField::BrowDepth,
         MorphField::CheekFullness,
         MorphField::EyeSize,
         MorphField::EyeSpacing,
         MorphField::EyeTilt,
+        MorphField::EyeDepth,
         MorphField::BrowAngle,
         MorphField::MouthWidth,
         MorphField::LipFullness,
@@ -584,15 +654,19 @@ impl MorphField {
             MorphField::WaistWidth => "Waist",
             MorphField::HipWidth => "Hips",
             MorphField::LimbLength => "Limb Length",
+            MorphField::ChestShape => "Chest Shape",
             MorphField::JawWidth => "Jaw Width",
             MorphField::ChinLength => "Chin",
+            MorphField::ChinWidth => "Chin Width",
             MorphField::NoseLength => "Nose Length",
             MorphField::NoseWidth => "Nose Width",
+            MorphField::NoseBridge => "Nose Bridge",
             MorphField::BrowDepth => "Brow",
             MorphField::CheekFullness => "Cheeks",
             MorphField::EyeSize => "Eyes",
             MorphField::EyeSpacing => "Eye Spacing",
             MorphField::EyeTilt => "Eye Tilt",
+            MorphField::EyeDepth => "Eye Depth",
             MorphField::BrowAngle => "Brow Angle",
             MorphField::MouthWidth => "Mouth",
             MorphField::LipFullness => "Lip Fullness",
@@ -608,15 +682,19 @@ impl MorphField {
             MorphField::WaistWidth => spec.body.waist_width,
             MorphField::HipWidth => spec.body.hip_width,
             MorphField::LimbLength => spec.body.limb_length,
+            MorphField::ChestShape => spec.body.chest_shape,
             MorphField::JawWidth => spec.face.jaw_width,
             MorphField::ChinLength => spec.face.chin_length,
+            MorphField::ChinWidth => spec.face.chin_width,
             MorphField::NoseLength => spec.face.nose_length,
             MorphField::NoseWidth => spec.face.nose_width,
+            MorphField::NoseBridge => spec.face.nose_bridge,
             MorphField::BrowDepth => spec.face.brow_depth,
             MorphField::CheekFullness => spec.face.cheek_fullness,
             MorphField::EyeSize => spec.face.eye_size,
             MorphField::EyeSpacing => spec.face.eye_spacing,
             MorphField::EyeTilt => spec.face.eye_tilt,
+            MorphField::EyeDepth => spec.face.eye_depth,
             MorphField::BrowAngle => spec.face.brow_angle,
             MorphField::MouthWidth => spec.face.mouth_width,
             MorphField::LipFullness => spec.face.lip_fullness,
@@ -633,15 +711,19 @@ impl MorphField {
             MorphField::WaistWidth => spec.body.waist_width = v,
             MorphField::HipWidth => spec.body.hip_width = v,
             MorphField::LimbLength => spec.body.limb_length = v,
+            MorphField::ChestShape => spec.body.chest_shape = v,
             MorphField::JawWidth => spec.face.jaw_width = v,
             MorphField::ChinLength => spec.face.chin_length = v,
+            MorphField::ChinWidth => spec.face.chin_width = v,
             MorphField::NoseLength => spec.face.nose_length = v,
             MorphField::NoseWidth => spec.face.nose_width = v,
+            MorphField::NoseBridge => spec.face.nose_bridge = v,
             MorphField::BrowDepth => spec.face.brow_depth = v,
             MorphField::CheekFullness => spec.face.cheek_fullness = v,
             MorphField::EyeSize => spec.face.eye_size = v,
             MorphField::EyeSpacing => spec.face.eye_spacing = v,
             MorphField::EyeTilt => spec.face.eye_tilt = v,
+            MorphField::EyeDepth => spec.face.eye_depth = v,
             MorphField::BrowAngle => spec.face.brow_angle = v,
             MorphField::MouthWidth => spec.face.mouth_width = v,
             MorphField::LipFullness => spec.face.lip_fullness = v,
@@ -685,13 +767,19 @@ mod tests {
         let old: CharacterSpec = serde_json::from_str(legacy).expect("legacy preset should load");
         assert_eq!(old.style.wardrobe.top, TopStyle::Jacket);
         assert_eq!(old.face.eye_spacing, 0.5);
+        assert_eq!(old.face.eye_depth, 0.5);
+        assert_eq!(old.face.nose_bridge, 0.5);
+        assert_eq!(old.face.chin_width, 0.5);
         assert_eq!(old.face.lip_fullness, 0.5);
+        assert_eq!(old.body.chest_shape, 0.5);
+        assert_eq!(old.style.flair, FlairStyle::None);
 
         let mut modern = old;
         modern.style.hair = HairStyle::Feathered;
         modern.style.wardrobe.top = TopStyle::BomberJacket;
         modern.style.wardrobe.bottom = BottomStyle::CargoPants;
         modern.style.wardrobe.feet = FootStyle::HighTops;
+        modern.style.flair = FlairStyle::StarGem;
         let json = serde_json::to_string(&modern).expect("modern preset should serialize");
         let loaded: CharacterSpec =
             serde_json::from_str(&json).expect("modern preset should deserialize");
@@ -699,6 +787,7 @@ mod tests {
         assert_eq!(loaded.style.wardrobe.top, TopStyle::BomberJacket);
         assert_eq!(loaded.style.wardrobe.bottom, BottomStyle::CargoPants);
         assert_eq!(loaded.style.wardrobe.feet, FootStyle::HighTops);
+        assert_eq!(loaded.style.flair, FlairStyle::StarGem);
     }
 
     #[test]

@@ -60,6 +60,12 @@ rows live. Ship-ready presets are committed alongside (v003/v004).
 (shoulders/hips/waist/jaw/chest), *on top of* which all morphs apply — keep it
 that way so every slider works for both bodies.
 
+**Fantasy flair and mecha variants** — `StyleSpec::flair` is independent from
+wardrobe slots, so gems, mantles, halos, and wings can layer over clothing or
+armor. Mecha Armor, Crystal Mecha, and Dragon Mecha share the `Mecha` slot
+contract and add variant geometry in `spawn_mecha_armor()`. New serialized body
+or style fields must retain `serde(default)` compatibility for old presets.
+
 ## GLB export
 
 The **EXPORT GLB** button (beside SAVE VERSION) walks the live preview
