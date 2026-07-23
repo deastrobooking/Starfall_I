@@ -534,19 +534,62 @@ pub fn apply_slim(spec: &mut CharacterSpec) {
 }
 
 pub fn apply_soft_face(spec: &mut CharacterSpec) {
+    spec.face.face_length = 0.43;
     spec.face.jaw_width = 0.38;
     spec.face.chin_length = 0.40;
+    spec.face.chin_width = 0.42;
     spec.face.cheek_fullness = 0.68;
     spec.face.brow_depth = 0.38;
+    spec.face.eye_size = 0.68;
+    spec.face.eye_shape = 0.40;
     spec.face.nose_width = 0.45;
+    spec.face.nose_tip = 0.42;
+}
+
+pub fn apply_heroic_face(spec: &mut CharacterSpec) {
+    spec.face.face_length = 0.52;
+    spec.face.jaw_width = 0.52;
+    spec.face.chin_length = 0.50;
+    spec.face.chin_width = 0.50;
+    spec.face.cheek_fullness = 0.48;
+    spec.face.brow_depth = 0.55;
+    spec.face.brow_angle = 0.58;
+    spec.face.eye_size = 0.60;
+    spec.face.eye_shape = 0.62;
+    spec.face.nose_bridge = 0.54;
+    spec.face.nose_tip = 0.50;
+}
+
+pub fn apply_chibi_face(spec: &mut CharacterSpec) {
+    spec.face.face_length = 0.28;
+    spec.face.jaw_width = 0.34;
+    spec.face.chin_length = 0.30;
+    spec.face.chin_width = 0.38;
+    spec.face.cheek_fullness = 0.78;
+    spec.face.brow_depth = 0.30;
+    spec.face.eye_size = 0.88;
+    spec.face.eye_shape = 0.32;
+    spec.face.eye_spacing = 0.56;
+    spec.face.nose_length = 0.28;
+    spec.face.nose_width = 0.38;
+    spec.face.nose_bridge = 0.30;
+    spec.face.nose_tip = 0.32;
+    spec.face.mouth_width = 0.42;
 }
 
 pub fn apply_sharp_face(spec: &mut CharacterSpec) {
+    spec.face.face_length = 0.62;
     spec.face.jaw_width = 0.62;
     spec.face.chin_length = 0.62;
+    spec.face.chin_width = 0.58;
     spec.face.cheek_fullness = 0.30;
     spec.face.brow_depth = 0.66;
+    spec.face.brow_angle = 0.76;
+    spec.face.eye_size = 0.46;
+    spec.face.eye_shape = 0.78;
     spec.face.nose_length = 0.60;
+    spec.face.nose_bridge = 0.64;
+    spec.face.nose_tip = 0.58;
 }
 
 /// Full random character (body + face + style), sex included.
@@ -681,5 +724,24 @@ mod tests {
             patch.slots.get(&CharacterSlot::Torso),
             Some(&SlotContent::Cloth)
         );
+    }
+
+    #[test]
+    fn face_seeds_are_distinct_and_leave_body_and_style_untouched() {
+        let original = preset_star_hero();
+        let mut soft = original;
+        let mut heroic = original;
+        let mut chibi = original;
+        let mut rival = original;
+        apply_soft_face(&mut soft);
+        apply_heroic_face(&mut heroic);
+        apply_chibi_face(&mut chibi);
+        apply_sharp_face(&mut rival);
+
+        assert!(chibi.face.eye_size > heroic.face.eye_size);
+        assert!(soft.face.cheek_fullness > rival.face.cheek_fullness);
+        assert!(rival.face.eye_shape > chibi.face.eye_shape);
+        assert_eq!(chibi.body.height, original.body.height);
+        assert_eq!(chibi.style.wardrobe, original.style.wardrobe);
     }
 }

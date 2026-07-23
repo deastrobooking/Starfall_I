@@ -40,8 +40,10 @@ The current `CharacterSpec -> CharacterPatch -> procedural mesh` path is the
 reference implementation. Its 26-morph contract includes face length, eye
 shape/depth, nose bridge/tip, chin width, and chest shape; fantasy
 gems/mantles/halos/wings layer
-independently over twelve tops and three mecha suites. Immediate completion
-gates are expression channels, animation preview, thumbnail presets, attachment
+independently over twelve tops and three mecha suites. Four face seeds and four
+non-destructive expression previews provide a preset-first refinement loop.
+Immediate completion gates are authorable expression channels, animation
+preview poses, thumbnail presets, attachment
 clearance, seeded randomize, and explicit schema versioning. Art direction
 combines compact fantasy readability, colorful action robots, and original
 1970s space-opera shapes without copying protected characters or assets.

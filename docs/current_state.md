@@ -7,7 +7,7 @@
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 415 tests across the main crate and example targets,
+- Automated baseline: 418 tests across the main crate and example targets,
   `cargo build`, `cargo fmt --check`, and
   `cargo clippy --all-targets -- -D warnings` pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
@@ -43,7 +43,9 @@
 - Character Studio exposes 26 body/face morphs, including face length, eye
   shape/depth, nose bridge/tip, chin width, and sex-aware chest shape. Its
   original parametric almond eyes, fitted lids, cheek planes, and restrained
-  mouth improve the cartoon-anime read. Twelve top styles, independent
+  mouth improve the cartoon-anime read. Soft/Heroic/Chibi/Rival face seeds and
+  non-destructive Neutral/Joy/Determined/Surprised previews accelerate
+  iteration without mutating the saved neutral recipe. Twelve top styles, independent
   fantasy gems/mantles/halos/wings, and Mecha/Crystal/Dragon armor suites all
   persist through the same playable `CharacterSpec` recipe.
 - The Rocket Hoverboard now has reduced airborne gravity, a stronger board

@@ -332,6 +332,11 @@ height/model information, and explicit FRONT/PROFILE/BACK plus FULL BODY/FACE
 CLOSE-UP camera tools. Generated humans face -Z, so the default camera now
 opens on the actual front. Controller West resets the focused field and
 LB/RB jumps among preset, body, face, wardrobe, and saved-library sections.
+The action panel uses explicit Body Presets, Face Presets, Edit History, Mesh
+Modifiers, View Angle, Framing, Expression Preview, Preview Backend, and
+Project headings. Soft/Heroic/Chibi/Rival seeds modify only facial parameters;
+Neutral/Joy/Determined/Surprised preview semantic facial parts without changing
+the serialized neutral recipe.
 
 **Wardrobe (2026-07):** independent slots, mix-and-match — Top (None/T-Shirt/
 Long Shirt/Tunic/Jacket/Robe/Tank Top/Bomber/Moto/Blazer/Arcane Coat/Star

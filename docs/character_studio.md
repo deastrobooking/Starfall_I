@@ -12,10 +12,14 @@ runtime mesh entities directly.
    SHADOW RAIDER, MANA ADVENTURER, STREET RUNNER, or MECHA ROBOT. Presets are
    editable seeds, never locked character classes.
 2. Sculpt body and face proportions with sliders or precise `-` / `+` steps.
+   Soft, Heroic, Chibi, and Rival face seeds update only facial parameters and
+   leave the current body, wardrobe, colors, and flair intact.
 3. Use `R` on a row to restore only that field, or RESET ALL to return to a
    neutral model. Both are protected by the 64-step undo history.
 4. Inspect the design with FRONT, PROFILE, BACK VIEW, FULL BODY, and FACE
-   CLOSE-UP. Right-drag/right-stick provides free orbit; wheel/triggers zoom.
+   CLOSE-UP. Preview Neutral, Joy, Determined, and Surprised expressions
+   non-destructively; expression choice is not written into the character
+   recipe. Right-drag/right-stick provides free orbit; wheel/triggers zoom.
 5. Mix wardrobe slots and colors. Palette fields show their actual color next
    to the value instead of only a numeric index.
 6. SAVE VERSION writes a new JSON preset. Existing versions remain available
@@ -75,6 +79,14 @@ This follows the same compact-parametric principle as Alan Barr's
 and the low-control-cage/smooth-limit-surface rationale documented by
 [OpenSubdiv](https://graphics.pixar.com/opensubdiv/overview.html), while all
 forms and code remain original to Starfall.
+
+The workflow follows the preset-first/fine-adjustment pattern used by
+[MetaHuman Creator](https://dev.epicgames.com/documentation/metahuman/metahuman-creator-in-unreal-engine)
+and [VRoid Studio](https://vroid.com/en/news/1FI7DuaA77iAntDfxBFTRT).
+Expression preview is deliberately separate from the neutral saved design,
+matching the authoring distinction described by VRoid's
+[Expression Editor](https://vroid.pixiv.help/hc/en-us/articles/4408150140825-How-to-use-the-Expression-Editor).
+Starfall keeps its own original anime geometry, parameters, and runtime.
 
 The MECHA ROBOT preset preserves the generator's successful armored silhouette
 as a first-class character seed and now combines Crystal Mecha armor with mecha
@@ -165,9 +177,9 @@ more visual authoring power:
    should open the matching parameter group and outline that region.
 4. Add paired/asymmetric controls for ear shape, hand/foot scale, arm/leg length
    separately, and optional left/right details.
-5. Expand semantic facial animation from procedural blink/shout to expression
-   channels (joy, fear, anger, pain, phonemes), then add animation preview poses
-   and equipment-clearance checks before acceptance.
+5. Promote the delivered neutral/joy/determined/surprised Studio previews into
+   authorable expression channels (fear, anger, pain, phonemes), then add
+   locomotion/combat preview poses and equipment-clearance checks.
 6. Add named character projects, duplicate/rename, thumbnail capture, and an
    explicit APPLY TO PLAYER SLOT action. Keep version history for recovery.
 7. Upgrade generated GLB export from rigid preview geometry to a skinned

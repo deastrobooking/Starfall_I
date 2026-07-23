@@ -285,7 +285,7 @@ impl FlairStyle {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WardrobeSpec {
     pub top: TopStyle,
     pub bottom: BottomStyle,

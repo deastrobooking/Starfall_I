@@ -59,6 +59,7 @@ impl Plugin for CharacterStudioPlugin {
                     export_glb_system,
                     rebuild_library_rows,
                     rebuild_preview,
+                    preview_expression,
                     fallback_failed_rig_preview,
                     refresh_imported_rig_status,
                     orbit_camera,
@@ -86,6 +87,8 @@ enum StudioAction {
     Heavy,
     Slim,
     SoftFace,
+    HeroicFace,
+    ChibiFace,
     SharpFace,
     Random,
     Undo,
@@ -98,6 +101,10 @@ enum StudioAction {
     ViewBack,
     ViewFull,
     ViewFace,
+    ExpressionNeutral,
+    ExpressionJoy,
+    ExpressionDetermined,
+    ExpressionSurprised,
     PreviewProcedural,
     PreviewRigged,
     SaveVersion,
@@ -124,7 +131,7 @@ enum StudioNavDirection {
 
 /// Focusable rows. Action groups hold several buttons, while morph/style rows
 /// expose their own decrement/increment buttons.
-const ACTION_GROUPS: [&[StudioAction]; 10] = [
+const ACTION_GROUPS: [&[StudioAction]; 11] = [
     &[StudioAction::Male, StudioAction::Female],
     &[
         StudioAction::StarHero,
@@ -138,7 +145,12 @@ const ACTION_GROUPS: [&[StudioAction]; 10] = [
         StudioAction::Heavy,
         StudioAction::Slim,
     ],
-    &[StudioAction::SoftFace, StudioAction::SharpFace],
+    &[
+        StudioAction::SoftFace,
+        StudioAction::HeroicFace,
+        StudioAction::ChibiFace,
+        StudioAction::SharpFace,
+    ],
     &[
         StudioAction::Random,
         StudioAction::Undo,
@@ -155,6 +167,12 @@ const ACTION_GROUPS: [&[StudioAction]; 10] = [
         StudioAction::ViewBack,
     ],
     &[StudioAction::ViewFull, StudioAction::ViewFace],
+    &[
+        StudioAction::ExpressionNeutral,
+        StudioAction::ExpressionJoy,
+        StudioAction::ExpressionDetermined,
+        StudioAction::ExpressionSurprised,
+    ],
     &[StudioAction::PreviewProcedural, StudioAction::PreviewRigged],
     &[
         StudioAction::SaveVersion,
@@ -162,6 +180,19 @@ const ACTION_GROUPS: [&[StudioAction]; 10] = [
         StudioAction::UseInGame,
         StudioAction::Back,
     ],
+];
+const ACTION_SECTION_LABELS: [Option<&str>; ACTION_GROUPS.len()] = [
+    None,
+    None,
+    Some("BODY PRESETS"),
+    Some("FACE PRESETS"),
+    Some("EDIT HISTORY"),
+    Some("MESH MODIFIERS"),
+    Some("VIEW ANGLE"),
+    Some("FRAMING"),
+    Some("EXPRESSION PREVIEW"),
+    Some("PREVIEW BACKEND"),
+    Some("PROJECT"),
 ];
 const ACTION_ROW_COUNT: usize = ACTION_GROUPS.len();
 const MORPH_ROW_0: usize = ACTION_ROW_COUNT;
@@ -180,8 +211,10 @@ fn action_label(action: StudioAction) -> &'static str {
         StudioAction::Athletic => "ATHLETIC",
         StudioAction::Heavy => "HEAVY",
         StudioAction::Slim => "SLIM",
-        StudioAction::SoftFace => "SOFT FACE",
-        StudioAction::SharpFace => "SHARP FACE",
+        StudioAction::SoftFace => "SOFT",
+        StudioAction::HeroicFace => "HEROIC",
+        StudioAction::ChibiFace => "CHIBI",
+        StudioAction::SharpFace => "RIVAL",
         StudioAction::Random => "RANDOM",
         StudioAction::Undo => "UNDO",
         StudioAction::ResetAll => "RESET ALL",
@@ -193,6 +226,10 @@ fn action_label(action: StudioAction) -> &'static str {
         StudioAction::ViewBack => "BACK VIEW",
         StudioAction::ViewFull => "FULL BODY",
         StudioAction::ViewFace => "FACE CLOSE-UP",
+        StudioAction::ExpressionNeutral => "NEUTRAL",
+        StudioAction::ExpressionJoy => "JOY",
+        StudioAction::ExpressionDetermined => "DETERMINED",
+        StudioAction::ExpressionSurprised => "SURPRISED",
         StudioAction::PreviewProcedural => "GENERATED",
         StudioAction::PreviewRigged => "RIG TEST",
         StudioAction::SaveVersion => "SAVE VERSION",
@@ -221,6 +258,7 @@ pub struct StudioState {
     export_requested: bool,
     /// Which modifier template the ADD MOD button is armed with.
     armed_modifier: usize,
+    preview_expression: StudioExpression,
 }
 
 impl Default for StudioState {
@@ -240,6 +278,7 @@ impl Default for StudioState {
             apply_requested: false,
             export_requested: false,
             armed_modifier: 0,
+            preview_expression: StudioExpression::Neutral,
         }
     }
 }
@@ -248,6 +287,15 @@ impl Default for StudioState {
 enum StudioPreviewBackend {
     Procedural,
     RiggedAmp,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum StudioExpression {
+    #[default]
+    Neutral,
+    Joy,
+    Determined,
+    Surprised,
 }
 
 impl StudioState {
@@ -366,6 +414,7 @@ fn setup_studio(
         .and_then(|slot| slot.studio_spec)
         .unwrap_or_else(generators::preset_male);
     state.undo.clear();
+    state.preview_expression = StudioExpression::Neutral;
     state.apply_requested = false;
     state.dirty = true;
     state.labels_dirty = true;
@@ -583,14 +632,8 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
 
             section_label(panel, "BASE PRESETS");
             for (g, actions) in ACTION_GROUPS[..ACTION_ROW_COUNT].iter().enumerate() {
-                if g == 3 {
-                    section_label(panel, "EDIT");
-                } else if g == 4 {
-                    section_label(panel, "VIEWPORT");
-                } else if g == 6 {
-                    section_label(panel, "PREVIEW BACKEND");
-                } else if g == 7 {
-                    section_label(panel, "PROJECT");
+                if let Some(label) = ACTION_SECTION_LABELS[g] {
+                    section_label(panel, label);
                 }
                 panel
                     .spawn((
@@ -993,12 +1036,22 @@ fn apply_action(
         StudioAction::SoftFace => {
             state.push_undo();
             generators::apply_soft_face(&mut state.spec);
-            mark(state, "Preset: Soft Face".into());
+            mark(state, "Face seed: Soft Anime".into());
+        }
+        StudioAction::HeroicFace => {
+            state.push_undo();
+            generators::apply_heroic_face(&mut state.spec);
+            mark(state, "Face seed: Heroic Anime".into());
+        }
+        StudioAction::ChibiFace => {
+            state.push_undo();
+            generators::apply_chibi_face(&mut state.spec);
+            mark(state, "Face seed: Chibi Anime".into());
         }
         StudioAction::SharpFace => {
             state.push_undo();
             generators::apply_sharp_face(&mut state.spec);
-            mark(state, "Preset: Sharp Face".into());
+            mark(state, "Face seed: Sharp Rival".into());
         }
         StudioAction::Random => {
             state.push_undo();
@@ -1083,6 +1136,30 @@ fn apply_action(
             state.focus_height = estimated_height(&state.spec) * 0.928;
             state.distance = 1.25;
             state.status = "Face sculpt close-up".into();
+            state.labels_dirty = true;
+        }
+        StudioAction::ExpressionNeutral
+        | StudioAction::ExpressionJoy
+        | StudioAction::ExpressionDetermined
+        | StudioAction::ExpressionSurprised => {
+            state.preview_expression = match action {
+                StudioAction::ExpressionNeutral => StudioExpression::Neutral,
+                StudioAction::ExpressionJoy => StudioExpression::Joy,
+                StudioAction::ExpressionDetermined => StudioExpression::Determined,
+                StudioAction::ExpressionSurprised => StudioExpression::Surprised,
+                _ => unreachable!(),
+            };
+            if state.preview_backend != StudioPreviewBackend::Procedural {
+                state.preview_backend = StudioPreviewBackend::Procedural;
+                state.dirty = true;
+            }
+            let label = match state.preview_expression {
+                StudioExpression::Neutral => "Neutral",
+                StudioExpression::Joy => "Joy",
+                StudioExpression::Determined => "Determined",
+                StudioExpression::Surprised => "Surprised",
+            };
+            state.status = format!("Expression preview: {label} (not saved)");
             state.labels_dirty = true;
         }
         StudioAction::PreviewProcedural => {
@@ -1758,6 +1835,75 @@ fn rebuild_preview(
     }
 }
 
+fn preview_expression(
+    state: Res<StudioState>,
+    preview_roots: Query<(), With<StudioPreview>>,
+    mut parts: Query<(&human_mesh::StudioHumanPart, &mut Transform)>,
+) {
+    for (part, mut transform) in &mut parts {
+        let Some(feature) = part.face_feature else {
+            continue;
+        };
+        if preview_roots.get(part.root).is_err() {
+            continue;
+        }
+        *transform = expression_transform(state.preview_expression, feature, part.rest);
+    }
+}
+
+fn expression_transform(
+    expression: StudioExpression,
+    feature: human_mesh::StudioFaceFeature,
+    rest: Transform,
+) -> Transform {
+    use human_mesh::StudioFaceFeature;
+
+    let mut transform = rest;
+    match (expression, feature) {
+        (StudioExpression::Neutral, _) => {}
+        (StudioExpression::Joy, StudioFaceFeature::LeftEye | StudioFaceFeature::RightEye) => {
+            transform.scale.y *= 0.52;
+            transform.translation.y += 0.006;
+        }
+        (StudioExpression::Joy, StudioFaceFeature::LeftBrow | StudioFaceFeature::RightBrow) => {
+            transform.translation.y += 0.014
+        }
+        (StudioExpression::Joy, StudioFaceFeature::Mouth) => {
+            transform.scale.x *= 1.10;
+            transform.scale.y *= 1.22;
+        }
+        (
+            StudioExpression::Determined,
+            StudioFaceFeature::LeftEye | StudioFaceFeature::RightEye,
+        ) => transform.scale.y *= 0.78,
+        (StudioExpression::Determined, StudioFaceFeature::LeftBrow) => {
+            transform.rotation *= Quat::from_rotation_z(-0.18);
+            transform.translation.y -= 0.005;
+        }
+        (StudioExpression::Determined, StudioFaceFeature::RightBrow) => {
+            transform.rotation *= Quat::from_rotation_z(0.18);
+            transform.translation.y -= 0.005;
+        }
+        (StudioExpression::Determined, StudioFaceFeature::Mouth) => {
+            transform.scale.x *= 1.04;
+            transform.scale.y *= 0.72;
+        }
+        (StudioExpression::Surprised, StudioFaceFeature::LeftEye | StudioFaceFeature::RightEye) => {
+            transform.scale.x *= 1.06;
+            transform.scale.y *= 1.18;
+        }
+        (
+            StudioExpression::Surprised,
+            StudioFaceFeature::LeftBrow | StudioFaceFeature::RightBrow,
+        ) => transform.translation.y += 0.025,
+        (StudioExpression::Surprised, StudioFaceFeature::Mouth) => {
+            transform.scale.x *= 0.72;
+            transform.scale.y *= 2.15;
+        }
+    }
+    transform
+}
+
 fn fallback_failed_rig_preview(
     asset_server: Res<AssetServer>,
     rigged_preview: Query<&RiggedPreviewAsset>,
@@ -2180,5 +2326,35 @@ mod playable_tests {
         assert!(blueprint.body.height > 1.0);
         assert!(blueprint.body.leg_length > 1.0);
         assert_eq!(blueprint.animation_profile.states.len(), 9);
+    }
+
+    #[test]
+    fn expression_preview_is_non_destructive_and_visibly_distinct() {
+        let rest = Transform::from_xyz(0.1, 0.2, 0.3);
+        let neutral = expression_transform(
+            StudioExpression::Neutral,
+            human_mesh::StudioFaceFeature::Mouth,
+            rest,
+        );
+        let surprised = expression_transform(
+            StudioExpression::Surprised,
+            human_mesh::StudioFaceFeature::Mouth,
+            rest,
+        );
+        assert_eq!(neutral, rest);
+        assert_eq!(surprised.translation, rest.translation);
+        assert!(surprised.scale.y > rest.scale.y * 2.0);
+        assert!(surprised.scale.x < rest.scale.x);
+    }
+
+    #[test]
+    fn action_rows_expose_clear_creator_sections() {
+        assert_eq!(ACTION_SECTION_LABELS.len(), ACTION_GROUPS.len());
+        assert_eq!(ACTION_SECTION_LABELS[3], Some("FACE PRESETS"));
+        assert_eq!(ACTION_SECTION_LABELS[8], Some("EXPRESSION PREVIEW"));
+        assert_eq!(
+            ACTION_SECTION_LABELS[ACTION_SECTION_LABELS.len() - 1],
+            Some("PROJECT")
+        );
     }
 }
