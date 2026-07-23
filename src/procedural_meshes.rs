@@ -73,6 +73,92 @@ pub fn superellipsoid_mesh(
     mesh
 }
 
+/// Builds a shallow, forward-facing anime eye lens.
+///
+/// `pointiness` controls the signed-sine exponent of the upper/lower outline:
+/// values near zero stay round while values near one pull the corners into the
+/// graphic almond silhouette used by cel-styled characters. `corner_lift`
+/// raises the outer corner without rotating the iris or catchlights with it.
+pub fn anime_eye_mesh(
+    half_size: Vec2,
+    depth: f32,
+    pointiness: f32,
+    corner_lift: f32,
+    side: f32,
+) -> Mesh {
+    const RINGS: usize = 4;
+    const SECTORS: usize = 32;
+
+    let half_size = half_size.max(Vec2::splat(0.001));
+    let depth = depth.max(0.001);
+    let outline_exponent = 0.82 + pointiness.clamp(0.0, 1.0) * 0.90;
+    let corner_lift = corner_lift.clamp(-0.35, 0.35);
+    let side = side.signum();
+
+    let vertex_count = 1 + RINGS * (SECTORS + 1);
+    let mut positions = Vec::with_capacity(vertex_count);
+    let mut normals = Vec::with_capacity(vertex_count);
+    let mut uvs = Vec::with_capacity(vertex_count);
+    positions.push([0.0, 0.0, -depth]);
+    normals.push([0.0, 0.0, -1.0]);
+    uvs.push([0.5, 0.5]);
+
+    for ring in 1..=RINGS {
+        let radius = ring as f32 / RINGS as f32;
+        for sector in 0..=SECTORS {
+            let theta = TAU * sector as f32 / SECTORS as f32;
+            let unit_x = theta.cos();
+            let outline_y = signed_pow(theta.sin(), outline_exponent);
+            let x = half_size.x * radius * unit_x;
+            let lift = half_size.y * corner_lift * side * unit_x * radius;
+            let y = half_size.y * radius * outline_y + lift;
+            let z = -depth * (1.0 - radius * radius);
+            let normal = Vec3::new(
+                x / half_size.x.powi(2),
+                (y - lift) / half_size.y.powi(2),
+                -1.0 / depth,
+            )
+            .normalize_or_zero();
+
+            positions.push([x, y, z]);
+            normals.push([normal.x, normal.y, normal.z]);
+            uvs.push([0.5 + x / (half_size.x * 2.0), 0.5 + y / (half_size.y * 2.0)]);
+        }
+    }
+
+    let mut indices = Vec::with_capacity(SECTORS * 6 * RINGS);
+    let first_ring = 1usize;
+    for sector in 0..SECTORS {
+        indices.extend_from_slice(&[
+            0,
+            (first_ring + sector + 1) as u32,
+            (first_ring + sector) as u32,
+        ]);
+    }
+    for ring in 1..RINGS {
+        let inner = 1 + (ring - 1) * (SECTORS + 1);
+        let outer = inner + SECTORS + 1;
+        for sector in 0..SECTORS {
+            let a = inner + sector;
+            let b = inner + sector + 1;
+            let c = outer + sector;
+            let d = outer + sector + 1;
+            indices
+                .extend_from_slice(&[a as u32, d as u32, c as u32, a as u32, b as u32, d as u32]);
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +174,24 @@ mod tests {
             mesh.indices().expect("indices should be present").len(),
             360
         );
+    }
+
+    #[test]
+    fn anime_eye_mesh_is_bounded_pointed_and_faces_forward() {
+        let mesh = anime_eye_mesh(Vec2::new(2.0, 1.0), 0.2, 1.0, 0.2, 1.0);
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|attribute| attribute.as_float3())
+            .expect("anime eye positions should be float3");
+        assert_eq!(positions.len(), 133);
+        assert!(positions
+            .iter()
+            .all(|position| position[0].abs() <= 2.001 && position[2] <= 0.001));
+        let normals = mesh
+            .attribute(Mesh::ATTRIBUTE_NORMAL)
+            .and_then(|attribute| attribute.as_float3())
+            .expect("anime eye normals should be float3");
+        assert!(normals[0][2] < -0.99);
+        assert_eq!(mesh.indices().expect("eye indices").len(), 672);
     }
 }

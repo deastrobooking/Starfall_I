@@ -16,7 +16,7 @@ use std::f32::consts::TAU;
 
 use super::generators::{CharacterPatch, CharacterSlot, SlotContent};
 use super::spec::{ArmorStyle, BottomStyle, FlairStyle, FootStyle, HairStyle, Sex, TopStyle};
-use crate::procedural_meshes::superellipsoid_mesh;
+use crate::procedural_meshes::{anime_eye_mesh, superellipsoid_mesh};
 
 // ── Lofted column primitive ───────────────────────────────────────────────────
 
@@ -1036,6 +1036,7 @@ fn spawn_head(
 ) {
     let hr = p.head_r;
     let cheek = spread(m(patch, "face_cheek_full"), 1.0, 0.14);
+    let face_length = spread(m(patch, "face_length"), 1.0, 0.16);
     let face_z = -hr * 0.86; // faces -Z
     let head_c = Vec3::new(0.0, p.head_c_y, 0.0);
 
@@ -1057,8 +1058,26 @@ fn spawn_head(
             1.0,
         ),
         &mats.skin,
-        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.50, -hr * 0.06)),
+        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.50 * face_length, -hr * 0.06)),
     );
+    // Broad cheek planes bridge the cranium into the lower face. Their shallow
+    // superellipse profile keeps a readable cel highlight from front and
+    // three-quarter views without forming separate spherical "cheek balls".
+    for side in [-1.0f32, 1.0] {
+        part(
+            ovoid(Vec3::new(hr * 0.29 * cheek, hr * 0.30, hr * 0.11), 1.45),
+            &mats.skin,
+            Transform::from_translation(
+                head_c
+                    + Vec3::new(
+                        side * hr * 0.39,
+                        -hr * 0.20 * face_length,
+                        face_z + hr * 0.13,
+                    ),
+            )
+            .with_rotation(Quat::from_rotation_z(-side * 0.18)),
+        );
+    }
     // Chin cap.
     part(
         ovoid(
@@ -1071,7 +1090,7 @@ fn spawn_head(
         ),
         &mats.skin,
         Transform::from_translation(
-            head_c + Vec3::new(0.0, -hr * (0.78 + 0.10 * chin), -hr * 0.42),
+            head_c + Vec3::new(0.0, -hr * (0.78 + 0.10 * chin) * face_length, -hr * 0.42),
         ),
     );
     // Minimal cel-animation nose: readable in profile without dominating the
@@ -1079,14 +1098,15 @@ fn spawn_head(
     let nose_len = spread(m(patch, "face_nose_long"), 1.0, 0.4);
     let nose_w = spread(m(patch, "face_nose_wide"), 1.0, 0.4);
     let nose_bridge = spread(m(patch, "face_nose_bridge"), 1.0, 0.5);
+    let nose_tip = spread(m(patch, "face_nose_tip"), 1.0, 0.45);
     part(
         ovoid(
             Vec3::new(
-                hr * 0.045 * nose_w,
+                hr * 0.038 * nose_w,
                 hr * 0.18 * nose_bridge,
-                hr * 0.045 * nose_bridge,
+                hr * 0.032 * nose_bridge,
             ),
-            1.25,
+            1.45,
         ),
         &mats.skin,
         Transform::from_translation(
@@ -1095,11 +1115,22 @@ fn spawn_head(
     );
     part(
         ovoid(
-            Vec3::new(hr * 0.055 * nose_w, hr * 0.11 * nose_len, hr * 0.075),
-            1.1,
+            Vec3::new(
+                hr * 0.060 * nose_w * nose_tip,
+                hr * 0.085 * nose_len,
+                hr * 0.070 * nose_tip,
+            ),
+            1.25,
         ),
         &mats.skin,
-        Transform::from_translation(head_c + Vec3::new(0.0, -hr * 0.18, face_z - hr * 0.045)),
+        Transform::from_translation(
+            head_c
+                + Vec3::new(
+                    0.0,
+                    -hr * 0.18 * face_length,
+                    face_z - hr * 0.040 * nose_tip,
+                ),
+        ),
     );
     // Twin eyebrows (angled) — the old single bar read as a visor.
     let brow = spread(m(patch, "face_brow_heavy"), 1.0, 0.5);
@@ -1123,6 +1154,7 @@ fn spawn_head(
     // pupil, and twin catchlights. The layered depth remains legible under the
     // studio's moving light instead of depending on a painted texture.
     let eye = spread(m(patch, "face_eye_large"), 1.18, 0.30);
+    let eye_shape = m(patch, "face_eye_shape");
     let eye_spacing = spread(m(patch, "face_eye_spacing"), 1.0, 0.22);
     let eye_tilt = (m(patch, "face_eye_tilt") - 0.5) * 0.30;
     let eye_depth = spread(m(patch, "face_eye_depth"), 1.0, 0.30);
@@ -1140,13 +1172,15 @@ fn spawn_head(
             );
         pending_face_feature.set(Some(feature));
         part(
-            ovoid(
-                Vec3::new(hr * 0.185 * eye, hr * 0.125 * eye, hr * 0.052),
-                1.0,
+            anime_eye_mesh(
+                Vec2::new(hr * 0.190 * eye, hr * 0.124 * eye),
+                hr * 0.050,
+                eye_shape,
+                eye_tilt,
+                side,
             ),
             &mats.eye_white,
-            Transform::from_translation(eye_pos)
-                .with_rotation(Quat::from_rotation_z(-side * eye_tilt)),
+            Transform::from_translation(eye_pos),
         );
         pending_face_feature.set(Some(feature));
         part(
@@ -1174,6 +1208,27 @@ fn spawn_head(
             &mats.brow,
             Transform::from_translation(eye_pos + Vec3::new(0.0, hr * 0.115 * eye, -hr * 0.060))
                 .with_rotation(Quat::from_rotation_z(-side * (0.07 + eye_tilt))),
+        );
+        // Skin-toned lower lid and a short outer lash visually seat the eye in
+        // the face instead of leaving a decal-like white oval.
+        part(
+            ovoid(Vec3::new(hr * 0.155 * eye, hr * 0.014, hr * 0.020), 1.3),
+            &mats.skin,
+            Transform::from_translation(eye_pos + Vec3::new(0.0, -hr * 0.112 * eye, -hr * 0.054))
+                .with_rotation(Quat::from_rotation_z(-side * eye_tilt)),
+        );
+        part(
+            ovoid(Vec3::new(hr * 0.060 * eye, hr * 0.015, hr * 0.018), 1.2),
+            &mats.brow,
+            Transform::from_translation(
+                eye_pos
+                    + Vec3::new(
+                        side * hr * 0.175 * eye,
+                        hr * (0.095 + eye_tilt * 0.2) * eye,
+                        -hr * 0.061,
+                    ),
+            )
+            .with_rotation(Quat::from_rotation_z(-side * (0.26 + eye_tilt))),
         );
         pending_face_feature.set(Some(feature));
         part(
@@ -1204,18 +1259,18 @@ fn spawn_head(
     // for readable smiles, speech, and combat shouts.
     let mouth = spread(m(patch, "face_mouth_wide"), 1.0, 0.4);
     let lip = spread(m(patch, "face_lip_full"), 1.0, 0.65);
-    let mouth_pos = head_c + Vec3::new(0.0, -hr * 0.52, face_z - hr * 0.02);
+    let mouth_pos = head_c + Vec3::new(0.0, -hr * 0.52 * face_length, face_z - hr * 0.02);
     pending_face_feature.set(Some(StudioFaceFeature::Mouth));
     part(
-        ovoid(Vec3::new(hr * 0.235 * mouth, hr * 0.040, hr * 0.038), 1.0),
+        ovoid(Vec3::new(hr * 0.220 * mouth, hr * 0.025, hr * 0.028), 1.25),
         &mats.dark,
         Transform::from_translation(mouth_pos + Vec3::new(0.0, 0.0, hr * 0.012)),
     );
     pending_face_feature.set(Some(StudioFaceFeature::Mouth));
     part(
         ovoid(
-            Vec3::new(hr * 0.25 * mouth, hr * 0.030 * lip, hr * 0.045),
-            1.0,
+            Vec3::new(hr * 0.21 * mouth, hr * 0.018 * lip, hr * 0.028),
+            1.25,
         ),
         &mats.lip,
         Transform::from_translation(mouth_pos + Vec3::new(0.0, hr * 0.027 * lip, -hr * 0.01)),
@@ -1223,8 +1278,8 @@ fn spawn_head(
     pending_face_feature.set(Some(StudioFaceFeature::Mouth));
     part(
         ovoid(
-            Vec3::new(hr * 0.23 * mouth, hr * 0.038 * lip, hr * 0.048),
-            1.0,
+            Vec3::new(hr * 0.19 * mouth, hr * 0.026 * lip, hr * 0.030),
+            1.25,
         ),
         &mats.lip,
         Transform::from_translation(mouth_pos + Vec3::new(0.0, -hr * 0.030 * lip, -hr * 0.012)),
@@ -1384,6 +1439,56 @@ fn spawn_head(
                     .with_rotation(Quat::from_rotation_z(-0.22)),
             );
         }
+    }
+    spawn_anime_bangs(part, patch.hair, head_c, hr, face_z, cheek, mats);
+}
+
+fn spawn_anime_bangs(
+    part: &mut impl FnMut(Mesh, &Handle<StandardMaterial>, Transform),
+    style: HairStyle,
+    head_c: Vec3,
+    hr: f32,
+    face_z: f32,
+    cheek: f32,
+    mats: &StudioMats,
+) {
+    if matches!(style, HairStyle::Bald | HairStyle::Buzz) {
+        return;
+    }
+
+    let (count, length, sweep) = match style {
+        HairStyle::Short => (4, 0.42, 0.08),
+        HairStyle::Long | HairStyle::Bob => (5, 0.58, -0.04),
+        HairStyle::Ponytail => (4, 0.50, 0.06),
+        HairStyle::Feathered => (5, 0.46, 0.22),
+        HairStyle::Spiky => (4, 0.38, -0.12),
+        HairStyle::SidePonytail => (5, 0.52, 0.16),
+        HairStyle::Bald | HairStyle::Buzz => unreachable!(),
+    };
+    for strand in 0..count {
+        let t = if count == 1 {
+            0.0
+        } else {
+            strand as f32 / (count - 1) as f32 * 2.0 - 1.0
+        };
+        let strand_len = hr * length * (1.0 - t.abs() * 0.18);
+        let x = hr * t * 0.50 * cheek;
+        part(
+            lofted_column(
+                Vec2::new(hr * 0.055, hr * 0.035),
+                Vec2::new(hr * 0.13, hr * 0.055),
+                strand_len,
+                0.0,
+                1.45,
+                3,
+                10,
+            ),
+            &mats.hair,
+            Transform::from_translation(
+                head_c + Vec3::new(x, hr * 0.57 - strand_len * 0.5, face_z + hr * 0.08),
+            )
+            .with_rotation(Quat::from_rotation_z(-t * 0.18 - sweep)),
+        );
     }
 }
 

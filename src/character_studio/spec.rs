@@ -325,15 +325,18 @@ impl Default for BodySpec {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FaceSpec {
+    pub face_length: f32,
     pub jaw_width: f32,
     pub chin_length: f32,
     pub chin_width: f32,
     pub nose_length: f32,
     pub nose_width: f32,
     pub nose_bridge: f32,
+    pub nose_tip: f32,
     pub brow_depth: f32,
     pub cheek_fullness: f32,
     pub eye_size: f32,
+    pub eye_shape: f32,
     pub eye_spacing: f32,
     pub eye_tilt: f32,
     pub eye_depth: f32,
@@ -345,15 +348,18 @@ pub struct FaceSpec {
 impl Default for FaceSpec {
     fn default() -> Self {
         Self {
+            face_length: 0.5,
             jaw_width: 0.5,
             chin_length: 0.5,
             chin_width: 0.5,
             nose_length: 0.5,
             nose_width: 0.5,
             nose_bridge: 0.5,
+            nose_tip: 0.5,
             brow_depth: 0.5,
             cheek_fullness: 0.5,
             eye_size: 0.5,
+            eye_shape: 0.5,
             eye_spacing: 0.5,
             eye_tilt: 0.5,
             eye_depth: 0.5,
@@ -601,15 +607,18 @@ pub enum MorphField {
     HipWidth,
     LimbLength,
     ChestShape,
+    FaceLength,
     JawWidth,
     ChinLength,
     ChinWidth,
     NoseLength,
     NoseWidth,
     NoseBridge,
+    NoseTip,
     BrowDepth,
     CheekFullness,
     EyeSize,
+    EyeShape,
     EyeSpacing,
     EyeTilt,
     EyeDepth,
@@ -619,7 +628,7 @@ pub enum MorphField {
 }
 
 impl MorphField {
-    pub const ALL: [MorphField; 23] = [
+    pub const ALL: [MorphField; 26] = [
         MorphField::Height,
         MorphField::Muscle,
         MorphField::Weight,
@@ -628,15 +637,18 @@ impl MorphField {
         MorphField::HipWidth,
         MorphField::LimbLength,
         MorphField::ChestShape,
+        MorphField::FaceLength,
         MorphField::JawWidth,
         MorphField::ChinLength,
         MorphField::ChinWidth,
         MorphField::NoseLength,
         MorphField::NoseWidth,
         MorphField::NoseBridge,
+        MorphField::NoseTip,
         MorphField::BrowDepth,
         MorphField::CheekFullness,
         MorphField::EyeSize,
+        MorphField::EyeShape,
         MorphField::EyeSpacing,
         MorphField::EyeTilt,
         MorphField::EyeDepth,
@@ -655,15 +667,18 @@ impl MorphField {
             MorphField::HipWidth => "Hips",
             MorphField::LimbLength => "Limb Length",
             MorphField::ChestShape => "Chest Shape",
+            MorphField::FaceLength => "Face Length",
             MorphField::JawWidth => "Jaw Width",
             MorphField::ChinLength => "Chin",
             MorphField::ChinWidth => "Chin Width",
             MorphField::NoseLength => "Nose Length",
             MorphField::NoseWidth => "Nose Width",
             MorphField::NoseBridge => "Nose Bridge",
+            MorphField::NoseTip => "Nose Tip",
             MorphField::BrowDepth => "Brow",
             MorphField::CheekFullness => "Cheeks",
             MorphField::EyeSize => "Eyes",
+            MorphField::EyeShape => "Eye Shape",
             MorphField::EyeSpacing => "Eye Spacing",
             MorphField::EyeTilt => "Eye Tilt",
             MorphField::EyeDepth => "Eye Depth",
@@ -683,15 +698,18 @@ impl MorphField {
             MorphField::HipWidth => spec.body.hip_width,
             MorphField::LimbLength => spec.body.limb_length,
             MorphField::ChestShape => spec.body.chest_shape,
+            MorphField::FaceLength => spec.face.face_length,
             MorphField::JawWidth => spec.face.jaw_width,
             MorphField::ChinLength => spec.face.chin_length,
             MorphField::ChinWidth => spec.face.chin_width,
             MorphField::NoseLength => spec.face.nose_length,
             MorphField::NoseWidth => spec.face.nose_width,
             MorphField::NoseBridge => spec.face.nose_bridge,
+            MorphField::NoseTip => spec.face.nose_tip,
             MorphField::BrowDepth => spec.face.brow_depth,
             MorphField::CheekFullness => spec.face.cheek_fullness,
             MorphField::EyeSize => spec.face.eye_size,
+            MorphField::EyeShape => spec.face.eye_shape,
             MorphField::EyeSpacing => spec.face.eye_spacing,
             MorphField::EyeTilt => spec.face.eye_tilt,
             MorphField::EyeDepth => spec.face.eye_depth,
@@ -712,15 +730,18 @@ impl MorphField {
             MorphField::HipWidth => spec.body.hip_width = v,
             MorphField::LimbLength => spec.body.limb_length = v,
             MorphField::ChestShape => spec.body.chest_shape = v,
+            MorphField::FaceLength => spec.face.face_length = v,
             MorphField::JawWidth => spec.face.jaw_width = v,
             MorphField::ChinLength => spec.face.chin_length = v,
             MorphField::ChinWidth => spec.face.chin_width = v,
             MorphField::NoseLength => spec.face.nose_length = v,
             MorphField::NoseWidth => spec.face.nose_width = v,
             MorphField::NoseBridge => spec.face.nose_bridge = v,
+            MorphField::NoseTip => spec.face.nose_tip = v,
             MorphField::BrowDepth => spec.face.brow_depth = v,
             MorphField::CheekFullness => spec.face.cheek_fullness = v,
             MorphField::EyeSize => spec.face.eye_size = v,
+            MorphField::EyeShape => spec.face.eye_shape = v,
             MorphField::EyeSpacing => spec.face.eye_spacing = v,
             MorphField::EyeTilt => spec.face.eye_tilt = v,
             MorphField::EyeDepth => spec.face.eye_depth = v,
@@ -766,9 +787,12 @@ mod tests {
         }"#;
         let old: CharacterSpec = serde_json::from_str(legacy).expect("legacy preset should load");
         assert_eq!(old.style.wardrobe.top, TopStyle::Jacket);
+        assert_eq!(old.face.face_length, 0.5);
         assert_eq!(old.face.eye_spacing, 0.5);
+        assert_eq!(old.face.eye_shape, 0.5);
         assert_eq!(old.face.eye_depth, 0.5);
         assert_eq!(old.face.nose_bridge, 0.5);
+        assert_eq!(old.face.nose_tip, 0.5);
         assert_eq!(old.face.chin_width, 0.5);
         assert_eq!(old.face.lip_fullness, 0.5);
         assert_eq!(old.body.chest_shape, 0.5);

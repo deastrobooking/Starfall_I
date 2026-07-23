@@ -65,6 +65,17 @@ blink, emote, breathe, and open the mouth during attacks independently of the
 head. These are original procedural forms and are not tied to one show or
 artist.
 
+The current face pass adds Face Length, Eye Shape, and Nose Tip controls. Eye
+whites now use an original shallow parametric lens whose signed-power outline
+interpolates from rounded to pointed almond shapes. Skin-toned lower lids,
+short outer lashes, broad shallow cheek planes, a narrower bridge/tip nose, and
+restrained lip volumes keep the face cohesive in front and three-quarter view.
+This follows the same compact-parametric principle as Alan Barr's
+[superquadric formulation](https://authors.library.caltech.edu/records/rtr62-f2882/latest)
+and the low-control-cage/smooth-limit-surface rationale documented by
+[OpenSubdiv](https://graphics.pixar.com/opensubdiv/overview.html), while all
+forms and code remain original to Starfall.
+
 The MECHA ROBOT preset preserves the generator's successful armored silhouette
 as a first-class character seed and now combines Crystal Mecha armor with mecha
 wings. STAR HERO and SHADOW RAIDER provide readable good-guy/bad-guy contrast;
@@ -129,10 +140,10 @@ Production shape keys must use the existing patch names:
 
 ```text
 body_height body_muscle body_weight shoulders_wide waist_width hips_wide limb_length
-body_chest_shape face_jaw_wide face_chin_long face_chin_wide face_nose_long
-face_nose_wide face_nose_bridge face_brow_heavy face_cheek_full face_eye_large
-face_eye_spacing face_eye_tilt face_eye_depth face_brow_angle face_mouth_wide
-face_lip_full
+body_chest_shape face_length face_jaw_wide face_chin_long face_chin_wide
+face_nose_long face_nose_wide face_nose_bridge face_nose_tip face_brow_heavy
+face_cheek_full face_eye_large face_eye_shape face_eye_spacing face_eye_tilt
+face_eye_depth face_brow_angle face_mouth_wide face_lip_full
 ```
 
 This contract means a future Blender model can replace the preview renderer

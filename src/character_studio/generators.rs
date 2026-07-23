@@ -184,15 +184,18 @@ pub struct FaceGenerator;
 impl PresetGenerator for FaceGenerator {
     fn generate(&self, spec: &CharacterSpec, patch: &mut CharacterPatch) {
         let f = &spec.face;
+        patch.morphs.insert("face_length", f.face_length);
         patch.morphs.insert("face_jaw_wide", f.jaw_width);
         patch.morphs.insert("face_chin_long", f.chin_length);
         patch.morphs.insert("face_chin_wide", f.chin_width);
         patch.morphs.insert("face_nose_long", f.nose_length);
         patch.morphs.insert("face_nose_wide", f.nose_width);
         patch.morphs.insert("face_nose_bridge", f.nose_bridge);
+        patch.morphs.insert("face_nose_tip", f.nose_tip);
         patch.morphs.insert("face_brow_heavy", f.brow_depth);
         patch.morphs.insert("face_cheek_full", f.cheek_fullness);
         patch.morphs.insert("face_eye_large", f.eye_size);
+        patch.morphs.insert("face_eye_shape", f.eye_shape);
         patch.morphs.insert("face_eye_spacing", f.eye_spacing);
         patch.morphs.insert("face_eye_tilt", f.eye_tilt);
         patch.morphs.insert("face_eye_depth", f.eye_depth);
@@ -371,6 +374,7 @@ pub fn preset_star_hero() -> CharacterSpec {
     spec.face.eye_size = 0.68;
     spec.face.eye_spacing = 0.54;
     spec.face.eye_tilt = 0.58;
+    spec.face.eye_shape = 0.63;
     spec.face.brow_angle = 0.56;
     spec.face.jaw_width = 0.48;
     spec.face.chin_width = 0.48;
@@ -398,10 +402,13 @@ pub fn preset_shadow_raider() -> CharacterSpec {
     spec.body.height = 0.62;
     spec.body.muscle = 0.70;
     spec.face.jaw_width = 0.66;
+    spec.face.face_length = 0.58;
     spec.face.chin_length = 0.64;
     spec.face.chin_width = 0.62;
     spec.face.nose_bridge = 0.68;
+    spec.face.nose_tip = 0.58;
     spec.face.eye_depth = 0.64;
+    spec.face.eye_shape = 0.72;
     spec.face.cheek_fullness = 0.28;
     spec.face.eye_size = 0.43;
     spec.face.eye_spacing = 0.47;
@@ -432,10 +439,12 @@ pub fn preset_mana_adventurer() -> CharacterSpec {
     spec.face.eye_size = 0.76;
     spec.face.eye_spacing = 0.57;
     spec.face.eye_tilt = 0.54;
+    spec.face.eye_shape = 0.42;
     spec.face.cheek_fullness = 0.64;
     spec.face.lip_fullness = 0.48;
     spec.face.chin_width = 0.40;
     spec.face.nose_bridge = 0.42;
+    spec.face.nose_tip = 0.40;
     spec.face.eye_depth = 0.42;
     spec.style.hair = HairStyle::SidePonytail;
     spec.style.hair_color = 4;
@@ -559,15 +568,18 @@ pub fn randomize(spec: &mut CharacterSpec, rng: &mut impl rand::Rng) {
     jitter(&mut spec.body.hip_width, 0.20);
     jitter(&mut spec.body.limb_length, 0.20);
     jitter(&mut spec.body.chest_shape, 0.25);
+    jitter(&mut spec.face.face_length, 0.24);
     jitter(&mut spec.face.jaw_width, 0.30);
     jitter(&mut spec.face.chin_length, 0.30);
     jitter(&mut spec.face.chin_width, 0.30);
     jitter(&mut spec.face.nose_length, 0.35);
     jitter(&mut spec.face.nose_width, 0.35);
     jitter(&mut spec.face.nose_bridge, 0.30);
+    jitter(&mut spec.face.nose_tip, 0.28);
     jitter(&mut spec.face.brow_depth, 0.30);
     jitter(&mut spec.face.cheek_fullness, 0.30);
     jitter(&mut spec.face.eye_size, 0.25);
+    jitter(&mut spec.face.eye_shape, 0.30);
     jitter(&mut spec.face.eye_spacing, 0.20);
     jitter(&mut spec.face.eye_tilt, 0.25);
     jitter(&mut spec.face.eye_depth, 0.22);
@@ -575,11 +587,12 @@ pub fn randomize(spec: &mut CharacterSpec, rng: &mut impl rand::Rng) {
     jitter(&mut spec.face.mouth_width, 0.25);
     jitter(&mut spec.face.lip_fullness, 0.25);
     spec.style.skin_tone = rng.gen_range(0..8);
-    spec.style.eye_color = rng.gen_range(0..6);
-    spec.style.hair = super::spec::HairStyle::ALL[rng.gen_range(0..5)];
-    spec.style.hair_color = rng.gen_range(0..8);
-    spec.style.primary_color = rng.gen_range(0..8);
-    spec.style.secondary_color = rng.gen_range(0..8);
+    spec.style.eye_color = rng.gen_range(0..8);
+    spec.style.hair =
+        super::spec::HairStyle::ALL[rng.gen_range(0..super::spec::HairStyle::ALL.len())];
+    spec.style.hair_color = rng.gen_range(0..12);
+    spec.style.primary_color = rng.gen_range(0..12);
+    spec.style.secondary_color = rng.gen_range(0..12);
     spec.style.flair = FlairStyle::ALL[rng.gen_range(0..FlairStyle::ALL.len())];
     spec.style.wardrobe = WardrobeSpec {
         top: TopStyle::ALL[rng.gen_range(1..TopStyle::ALL.len())],
@@ -634,8 +647,11 @@ mod tests {
         spec.face.eye_spacing = 0.77;
         spec.face.eye_tilt = 0.68;
         spec.face.eye_depth = 0.57;
+        spec.face.eye_shape = 0.84;
+        spec.face.face_length = 0.61;
         spec.face.chin_width = 0.46;
         spec.face.nose_bridge = 0.72;
+        spec.face.nose_tip = 0.66;
         spec.face.brow_angle = 0.81;
         spec.face.lip_fullness = 0.63;
         spec.body.chest_shape = 0.69;
@@ -643,8 +659,11 @@ mod tests {
         assert_eq!(patch.morph("face_eye_spacing"), 0.77);
         assert_eq!(patch.morph("face_eye_tilt"), 0.68);
         assert_eq!(patch.morph("face_eye_depth"), 0.57);
+        assert_eq!(patch.morph("face_eye_shape"), 0.84);
+        assert_eq!(patch.morph("face_length"), 0.61);
         assert_eq!(patch.morph("face_chin_wide"), 0.46);
         assert_eq!(patch.morph("face_nose_bridge"), 0.72);
+        assert_eq!(patch.morph("face_nose_tip"), 0.66);
         assert_eq!(patch.morph("face_brow_angle"), 0.81);
         assert_eq!(patch.morph("face_lip_full"), 0.63);
         assert_eq!(patch.morph("body_chest_shape"), 0.69);

@@ -305,8 +305,8 @@ Pipeline (single source of truth, per the design doc):
 keys/presets/randomize → CharacterSpec → PresetGenerators → CharacterPatch → generated meshes
 ```
 
-- `spec.rs` — `CharacterSpec { sex, body, face, style }`; 23 normalized morph
-  fields (eight body controls, including chest shape, plus 15 face controls),
+- `spec.rs` — `CharacterSpec { sex, body, face, style }`; 26 normalized morph
+  fields (eight body controls, including chest shape, plus 18 face controls),
   serialized as JSON (F5 save / F8 load → `assets/presets/humans/`).
 - `generators.rs` — `PresetGenerator` trait; Body/Face/Skin/Hair/Outfit
   generators emit **named morphs** ("body_muscle", "face_jaw_wide", …), named
@@ -347,9 +347,11 @@ the pelvis and upper thighs, so Underwear is a real visible option and outer
 garments cannot expose skin through the glute/leg seams.
 
 **Anime MVP appearance (2026-07):** the procedural head uses a larger cranium,
-tapered jaw/chin, smaller nose, wide layered eyes, upper lash lines, iris
+tapered jaw/chin, smaller nose, signed-power parametric almond eyes, fitted
+lower lids, upper lash lines, iris
 catchlights, cheek color, and a dedicated lip material for a broad 1980s cel
-anime look. Eye depth, nose bridge, chin width, and sex-aware chest definition
+anime look. Face length, eye shape/depth, nose bridge/tip, chin width, and
+sex-aware chest definition
 increase silhouette control without changing the gameplay collider. Feathered,
 spiky, bob, and side-ponytail hair join the original
 styles. Clavicles, elbows, knees, calves, and grounded shoe soles improve the
