@@ -62,14 +62,14 @@ not enforced by the advertised contract. Migrate one state-changing combat
 chain at a time, keeping VFX/UI/interpolation in frame schedules, and compare
 outcomes across render-frame patterns for the same fixed-tick count.
 
-### App-level regression seam is missing
+### App-level regression seam is delivered
 
-`main()` still constructs the complete app directly. Unit coverage and CI are
-strong, but plugin registration, resource initialization, core transitions,
-and schedule contracts lack a reusable smoke boundary. Keep the current plan:
-extract an app factory first, add internal/headless app smoke tests, then use it
-as the guardrail for module extraction. Creating `/tests` first would not expose
-private binary modules by itself.
+As of July 23, 2026, `main()` delegates to
+`build_starfall_app(StarfallAppMode::Production)`, and the headless profile
+shares the complete Starfall registration graph without window/render
+backends. Internal smoke tests cover construction, message/plugin contracts,
+Startup, and a steady frame. Use that guardrail for module extraction. A future
+root `/tests` suite still requires a library boundary to expose binary modules.
 
 ### Several player-facing messages lack identity
 

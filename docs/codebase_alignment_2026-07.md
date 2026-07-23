@@ -42,9 +42,10 @@ well-defined boundaries; large file moves remain staged behind tests.
 
 ## Aligned next work
 
-1. Add an app-construction seam and startup/plugin smoke tests before broad
-   module moves. The project is currently a binary crate, so useful integration
-   tests require a deliberately reusable app factory or library boundary.
+1. The app-construction seam and headless construction/Startup/steady-frame
+   smoke tests are delivered. Use them before and during broad module moves.
+   The project remains a binary crate, so root integration tests still require
+   a deliberate library boundary.
 2. Continue mechanical hotspot extraction in reviewable slices: terrain,
    settlements, and dungeons from the world plugin; screens and HUD sections
    from UI; then isolated Forge editor panels. Each move must preserve system

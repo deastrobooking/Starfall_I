@@ -311,7 +311,8 @@ together.
 
 ## Milestone Priority
 
-1. Add the reusable app-construction seam and startup/plugin smoke tests.
+1. Maintain the delivered reusable app-construction seam and headless
+   construction/Startup/steady-frame plugin smoke tests.
 2. Continue small, behavior-preserving world/UI/Forge hotspot extractions.
 3. Complete recorded four-controller hardware acceptance for ownership,
    controller-only menus, aiming, shops, editor launch, and save/reload.

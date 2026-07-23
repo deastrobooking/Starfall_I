@@ -1,13 +1,13 @@
 # Starfall I — Current State
 
-> Living agent handoff. Last reconciled July 22, 2026. Update this file when a
+> Living agent handoff. Last reconciled July 23, 2026. Update this file when a
 > change alters architecture, ownership, persistence, controls, verification,
 > or the next production slice.
 
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 418 tests across the main crate and example targets,
+- Automated baseline: 423 tests across the main crate and example targets,
   `cargo build`, `cargo fmt --check`, and
   `cargo clippy --all-targets -- -D warnings` pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
@@ -93,6 +93,12 @@
   project-backed validation/save, and versioned preset export/load. Published
   creature records populate `PublishedCreatureCatalog`; dungeon spawners can
   opt into them by stable content ID and safely fall back when unavailable.
+- App construction now has one authoritative
+  `build_starfall_app(StarfallAppMode)` boundary. Production keeps the full
+  window/render/audio stack; the headless profile keeps state, assets, physics,
+  gizmos, and every Starfall game plugin without creating process-global
+  presentation backends. Smoke tests verify registration and execute Startup
+  plus a steady frame, including generated assets and menu UI/camera creation.
 - The accepted product/art direction and performance gates are recorded in
   `docs/product_art_direction_triage_2026-07-17.md`. A shared semantic
   `UiTheme` now drives the Main Menu, Player Select accents, and per-player HUD;
@@ -103,7 +109,8 @@
 ## Current production order
 
 1. Maintain the reusable app-construction seam and headless startup/plugin
-   smoke test now covering the authoritative registration boundary.
+   smoke tests covering construction, presentation-backend exclusion, Startup,
+   and a steady frame.
 2. Design the schema-compatible base-stat/derived-cap contract so authored,
    leveled, equipped, and loaded maximum health cannot overwrite each other.
 3. Continue mechanical hotspot extraction: world terrain, settlements, and

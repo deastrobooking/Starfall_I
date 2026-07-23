@@ -12,8 +12,9 @@ raw suggestion list into milestones.
 The current player-facing and creator-workflow priority is
 `docs/player_creator_experience_plan.md`. PX1 aiming, PX3 shop transactions,
 the PM1 project registry, PM2 lock/presets, and PM3 multi-level playtest slices
-are delivered. The immediate engineering boundary is the reusable app factory
-and startup/plugin smoke tests described in N7/N8 and `docs/current_state.md`.
+are delivered. The reusable app factory and headless construction/Startup/
+steady-frame smoke tests described in N7/N8 are now delivered; use them as the
+guardrail for the extraction sequence in `docs/current_state.md`.
 
 ## Current Software Review
 
@@ -356,7 +357,8 @@ Primary files:
 
 Goal: make the growing open world safe to expand.
 
-- Add app/plugin startup smoke tests for message registration and core states.
+- Maintain app/plugin smoke tests for message registration, core state, Startup,
+  and a steady frame as plugin boundaries move.
 - Add debug overlays for anchors, terrain height, collider blockers, controller
   assignment, dungeon mode, and boss camera mode.
 - Start profiling terrain/entity counts and split-screen render cost.
@@ -418,9 +420,10 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
   product-policy gaps with existing partial consequences/roles; Character
   Studio already feeds playable blueprints. See
   `docs/terra_gameplay_audit_triage_2026-07-17.md`.
-- Before further hotspot extraction, create a reusable app-construction seam
-  and startup/plugin smoke tests. Then split world terrain/settlement/dungeon,
-  UI screen/HUD, and Forge panel boundaries in small ordering-preserving slices.
+- Reusable app construction and headless construction/Startup/steady-frame
+  smoke tests are delivered (July 23, 2026). Use them while splitting world
+  terrain/settlement/dungeon, UI screen/HUD, player, and Forge panel boundaries
+  in small ordering-preserving slices.
 - Unclutter `src/main.rs` by migrating plugin-specific `init_resource` calls and localized configurations into their respective plugin `build()` configurations.
 - Platform-agnostic save paths delivered with the save-hardening slice above;
   legacy working-directory files are migrated once, never overwritten.

@@ -12,6 +12,19 @@ STARFALL_AUTOSTART=1 ./target/debug/starfall-i
                                # observe ~15s in Playing, then quit; zero panics
 ```
 
+For app/plugin registration changes, the fast headless guard is:
+
+```sh
+cargo test app_smoke_tests
+```
+
+`build_starfall_app(StarfallAppMode::Headless)` uses the production state,
+resource, physics, and game-plugin graph while omitting the process-global
+window and renderer. The smoke tests finalize that graph, execute Startup and
+one steady frame, and verify core assets, menu UI/camera creation, messages,
+plugins, and state. Keep this green before extracting systems from
+`world_plugin`, `ui_plugin`, or `player_plugin`.
+
 Boot-smoke both motor paths when you touched movement/input/physics:
 
 ```sh

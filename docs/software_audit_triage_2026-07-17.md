@@ -66,6 +66,7 @@ choices must follow measurements from representative anchors and encounters.
 - Do not move the monoliths wholesale or invent parallel `/src/world` and
   `/src/ui` architectures in one change. Continue from existing plugin module
   boundaries.
-- Do not add root integration tests before the binary crate exposes a reusable
-  app factory. A `/tests` file cannot exercise private plugin construction by
-  itself.
+- The prerequisite is now delivered: the binary exposes a reusable app factory
+  internally, with headless construction/Startup/steady-frame smoke coverage.
+  Keep root integration tests deferred until there is a real library boundary;
+  a `/tests` file still cannot exercise private binary modules by itself.

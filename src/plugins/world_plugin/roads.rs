@@ -78,8 +78,8 @@ fn corner_cut_guides(points: &[Vec2]) -> Vec<Vec2> {
             guides.push(apex);
             continue;
         }
-        let setback = (before.distance(apex).min(apex.distance(after)) * 0.35)
-            .min(MAX_FILLET_SETBACK);
+        let setback =
+            (before.distance(apex).min(apex.distance(after)) * 0.35).min(MAX_FILLET_SETBACK);
         guides.push(apex - d1 * setback);
         guides.push(apex + d2 * setback);
     }

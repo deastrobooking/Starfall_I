@@ -154,8 +154,12 @@ Party-shared exceptions:
   while physics keeps the full-resolution collider.
 - **Mechanical hotspot extraction**: large feature plugins are split only at
   stable subsystem boundaries with ordering preserved and tests passing. Roads
-  are the first world extraction; terrain, settlements, and dungeons follow
-  after an app smoke-test seam exists.
+  are the first world extraction. The shared
+  `build_starfall_app(StarfallAppMode)` boundary now constructs production and
+  headless profiles from the same Starfall registration graph; headless smoke
+  coverage executes Startup and a steady frame without a window or renderer.
+  Terrain, settlements, dungeons, UI screens/HUD, and player subsystems can now
+  move behind that guardrail in small behavior-preserving slices.
 
 - **Editable character recipes, not baked meshes**: `CharacterBlueprint` stores body sliders, procedural part recipes, materials, sockets, rig metadata, animation profiles, movement profiles, and gameplay stats. The current cartoon renderer consumes the body/material portions, while the data model leaves room for fuller mesh, rig, and editor tooling.
 - **Forge content is payload-driven, not ECS-serialized**: stable `ContentRecord`

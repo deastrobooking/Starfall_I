@@ -3,8 +3,12 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 use crate::physics::prelude::*;
+use bevy::asset::AssetApp;
+use bevy::audio::AudioSource;
 use bevy::prelude::*;
+use bevy::state::app::StatesPlugin;
 use bevy::window::WindowResolution;
+use bevy::world_serialization::WorldSerializationPlugin;
 
 mod animation_mvp;
 mod audio_player;
@@ -92,30 +96,89 @@ fn main() {
 /// Keeping construction separate from `main` gives smoke tests and future
 /// platform launchers one authoritative plugin/resource registration boundary.
 pub fn build_app() -> App {
+    build_starfall_app(StarfallAppMode::Production)
+}
+
+/// Constructs the complete game without presentation backends.
+///
+/// The returned app uses the same state/resource/plugin registration as
+/// production and can execute Startup plus ordinary schedule frames in tests,
+/// CI, extraction harnesses, and future server-side tooling.
+pub fn build_headless_app() -> App {
+    build_starfall_app(StarfallAppMode::Headless)
+}
+
+/// Platform profile for the authoritative Starfall app factory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StarfallAppMode {
+    Production,
+    Headless,
+}
+
+/// Single construction boundary shared by the executable and headless tests.
+pub fn build_starfall_app(mode: StarfallAppMode) -> App {
     let mut app = App::new();
 
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Starfall I".to_string(),
-                    resolution: WindowResolution::new(1280, 720),
-                    ..default()
-                }),
-                ..default()
-            })
-            .set(ImagePlugin::default_nearest())
-            .set(AssetPlugin {
-                file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
-                ..default()
-            }),
-    )
-    // Physics
-    .add_plugins(PhysicsPlugins::default())
-    .add_plugins(PhysicsCompatPlugin);
+    match mode {
+        StarfallAppMode::Production => {
+            app.add_plugins(
+                DefaultPlugins
+                    .set(WindowPlugin {
+                        primary_window: Some(Window {
+                            title: "Starfall I".to_string(),
+                            resolution: WindowResolution::new(1280, 720),
+                            ..default()
+                        }),
+                        ..default()
+                    })
+                    .set(ImagePlugin::default_nearest())
+                    .set(production_asset_plugin()),
+            );
+        }
+        StarfallAppMode::Headless => {
+            app.add_plugins((
+                MinimalPlugins,
+                bevy::diagnostic::DiagnosticsPlugin,
+                bevy::transform::TransformPlugin,
+                bevy::input::InputPlugin,
+                StatesPlugin,
+                production_asset_plugin(),
+                bevy::mesh::MeshPlugin,
+                WorldSerializationPlugin,
+                bevy::scene::ScenePlugin,
+                bevy::gizmos::GizmoPlugin,
+            ));
+            register_headless_asset_stores(&mut app);
+        }
+    }
 
-    configure_starfall_app(&mut app, true);
+    app.add_plugins(PhysicsPlugins::default())
+        .add_plugins(PhysicsCompatPlugin);
+    configure_starfall_app(&mut app, mode == StarfallAppMode::Production);
     app
+}
+
+fn production_asset_plugin() -> AssetPlugin {
+    AssetPlugin {
+        file_path: format!("{}/assets", env!("CARGO_MANIFEST_DIR")),
+        ..default()
+    }
+}
+
+/// Startup systems allocate gameplay assets even when no renderer or audio
+/// device exists. Register only their CPU-side stores so the exact production
+/// plugins can execute headlessly without a window, GPU, or sound backend.
+fn register_headless_asset_stores(app: &mut App) {
+    app.init_asset::<StandardMaterial>()
+        .init_asset::<AudioSource>()
+        .init_asset::<AnimationClip>()
+        .init_asset::<AnimationGraph>()
+        .init_asset::<rendering::ToonMaterial>()
+        .init_asset::<rendering::WaterMaterial>()
+        .init_asset::<rendering::EnergyMaterial>()
+        .init_asset::<rendering::ShieldMaterial>()
+        .init_asset::<rendering::IceMaterial>()
+        .init_asset::<rendering::LavaMaterial>();
 }
 
 /// Registers Starfall's state, resources, and game plugins independently from
@@ -250,15 +313,6 @@ mod app_smoke_tests {
     use super::*;
     use bevy::ecs::message::Messages;
 
-    fn build_headless_app() -> App {
-        use bevy::state::app::StatesPlugin;
-
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, StatesPlugin, AssetPlugin::default()));
-        configure_starfall_app(&mut app, false);
-        app
-    }
-
     #[test]
     fn app_constructs_with_core_state_resources_messages_and_plugins() {
         let app = build_headless_app();
@@ -277,9 +331,64 @@ mod app_smoke_tests {
         assert!(app.is_plugin_added::<game_loop::GameLoopPlugin>());
         assert!(app.is_plugin_added::<EventsPlugin>());
         assert!(app.is_plugin_added::<InputPlugin>());
+        assert!(app.is_plugin_added::<UiPlugin>());
         assert!(app.is_plugin_added::<PlayerPlugin>());
         assert!(app.is_plugin_added::<WeaponPlugin>());
         assert!(app.is_plugin_added::<WorldPlugin>());
         assert!(app.is_plugin_added::<SavePlugin>());
+    }
+
+    #[test]
+    fn headless_factory_omits_process_global_presentation_backends() {
+        let app = build_headless_app();
+
+        assert!(app.is_plugin_added::<bevy::input::InputPlugin>());
+        assert!(app.is_plugin_added::<AssetPlugin>());
+        assert!(app.is_plugin_added::<WorldSerializationPlugin>());
+        assert!(app.is_plugin_added::<PhysicsCompatPlugin>());
+        assert!(!app.is_plugin_added::<WindowPlugin>());
+        assert!(!app.is_plugin_added::<bevy::render::RenderPlugin>());
+    }
+
+    #[test]
+    fn headless_app_executes_startup_and_a_steady_frame() {
+        let mut app = build_headless_app();
+
+        // `App::run` finalizes plugins automatically; direct-update harnesses
+        // must do the same before executing schedules.
+        assert!(app.world().contains_resource::<AssetServer>());
+        app.finish();
+        assert!(app.world().contains_resource::<AssetServer>());
+        app.cleanup();
+        assert!(app.world().contains_resource::<AssetServer>());
+        app.update();
+
+        let world = app.world_mut();
+        assert_eq!(
+            world.resource::<State<AppState>>().get(),
+            &AppState::MainMenu
+        );
+        assert!(!world.resource::<Assets<Mesh>>().is_empty());
+        assert!(!world.resource::<Assets<StandardMaterial>>().is_empty());
+        assert!(world.resource::<Assets<AudioSource>>().len() >= 10);
+        assert!(world.resource::<Assets<AnimationClip>>().len() >= 8);
+        assert!(world.resource::<Assets<rendering::ShieldMaterial>>().len() >= 4);
+
+        let camera_count = world.query::<&Camera>().iter(world).count();
+        let ui_node_count = world.query::<&Node>().iter(world).count();
+        assert!(
+            camera_count >= 1,
+            "UI startup should create its menu camera"
+        );
+        assert!(
+            ui_node_count >= 1,
+            "startup should create headless UI roots"
+        );
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<State<AppState>>().get(),
+            &AppState::MainMenu
+        );
     }
 }

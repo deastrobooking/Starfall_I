@@ -290,7 +290,7 @@ nothing-owned); Vehicles remain party-shared showcase entries built in the Robot
 Garage. Tech upgrades, perk training, and the Robot Garage should adopt the same
 transaction contract in a later slice. The PM1 project registry/path model, PM2
 lock/preset records, and PM3 multi-level/playtest slices are now delivered as
-described above. Next, add the app/startup smoke-test seam, then finish the
-remaining PM1–PM3 gaps without breaking those persisted contracts. Manual
+described above. The app/startup smoke-test seam is now delivered; use it while
+finishing the remaining PM1–PM3 gaps without breaking those persisted contracts. Manual
 one-to-four-player aim, ownership, shop purchase/equip, and editor-launch smoke
 acceptance remains required.

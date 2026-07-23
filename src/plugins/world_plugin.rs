@@ -6494,7 +6494,9 @@ fn nearest_mountain_route_point(x: f32, z: f32) -> Option<RouteProjection> {
         // Reject whole routes whose bounding box cannot beat the best hit —
         // rounding multiplies segment counts, so this prefilter keeps the
         // terrain-sampling hot path close to its previous cost.
-        let current = best.map(|projection| projection.distance).unwrap_or(f32::MAX);
+        let current = best
+            .map(|projection| projection.distance)
+            .unwrap_or(f32::MAX);
         let dx = (aabb[0] - x).max(x - aabb[2]).max(0.0);
         let dz = (aabb[1] - z).max(z - aabb[3]).max(0.0);
         if dx * dx + dz * dz > current * current {
