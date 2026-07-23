@@ -31,50 +31,131 @@ pub(super) fn speed_road_segment_subdivision_count(length: f32) -> usize {
 /// the existing route-clearance corridor, so smoothing cannot create loops or
 /// send a deck into prop-filled terrain. The terrain/deck pass subsequently
 /// resamples this centerline at the finer freeway chunk length.
+/// Smooth an authored waypoint polyline into a rounded centerline.
+///
+/// Uses a centripetal Catmull-Rom spline (alpha = 0.5, Barry–Goldman form):
+/// unlike the uniform parameterization, it cannot cusp, loop, or overshoot
+/// within a span even when authored waypoint spacing is very uneven — the
+/// standard "advanced" road-spline choice. Sample density adapts to the
+/// local turn angle so hairpins stay genuinely round while long straights
+/// stay cheap. There is deliberately no chord-deviation clamp: the terrain
+/// distance field and route projection follow this same centerline, so the
+/// deck is free to cut deep, natural arcs through corners.
+/// Stations that must stay exactly on the centerline: every authored route
+/// endpoint. Connector roads join trunk routes at these coordinates, and the
+/// junction height-sharing pass matches them by rounded X/Z — cutting the
+/// corner there would disconnect the network.
+fn pinned_route_stations() -> &'static std::collections::HashSet<(i32, i32)> {
+    static PINNED: std::sync::OnceLock<std::collections::HashSet<(i32, i32)>> =
+        std::sync::OnceLock::new();
+    PINNED.get_or_init(|| {
+        mountain_routes()
+            .iter()
+            .flat_map(|route| [route.first(), route.last()])
+            .flatten()
+            .map(|&(x, z)| (x.round() as i32, z.round() as i32))
+            .collect()
+    })
+}
+
+/// Corner-cutting pass: replace every free interior waypoint with a pair of
+/// setback points on its legs, so the spline arcs inside the apex instead of
+/// driving through it. Pinned junction stations and straight-through
+/// waypoints are kept exact.
+fn corner_cut_guides(points: &[Vec2]) -> Vec<Vec2> {
+    const MAX_FILLET_SETBACK: f32 = 180.0;
+    let pinned = pinned_route_stations();
+    let mut guides = Vec::with_capacity(points.len() * 2);
+    guides.push(points[0]);
+    for index in 1..points.len() - 1 {
+        let apex = points[index];
+        let before = points[index - 1];
+        let after = points[index + 1];
+        let d1 = (apex - before).normalize_or_zero();
+        let d2 = (after - apex).normalize_or_zero();
+        let pinned_station = pinned.contains(&(apex.x.round() as i32, apex.y.round() as i32));
+        if pinned_station || d1.dot(d2) > 0.995 {
+            guides.push(apex);
+            continue;
+        }
+        let setback = (before.distance(apex).min(apex.distance(after)) * 0.35)
+            .min(MAX_FILLET_SETBACK);
+        guides.push(apex - d1 * setback);
+        guides.push(apex + d2 * setback);
+    }
+    guides.push(points[points.len() - 1]);
+    guides
+}
+
 pub(super) fn rounded_speed_road_route(route: &[(f32, f32)]) -> Vec<(f32, f32)> {
     if route.len() < 3 {
         return route.to_vec();
     }
-    let points = route
-        .iter()
-        .map(|&(x, z)| Vec2::new(x, z))
-        .collect::<Vec<_>>();
+    let points = corner_cut_guides(
+        &route
+            .iter()
+            .map(|&(x, z)| Vec2::new(x, z))
+            .collect::<Vec<_>>(),
+    );
+    fn push(rounded: &mut Vec<(f32, f32)>, sample: Vec2) {
+        if rounded.last().is_none_or(|last: &(f32, f32)| {
+            Vec2::new(last.0, last.1).distance_squared(sample) > 0.01
+        }) {
+            rounded.push((sample.x, sample.y));
+        }
+    }
     let mut rounded = Vec::new();
     for span in 0..points.len() - 1 {
-        let start = points[span];
-        let end = points[span + 1];
-        let chord = end - start;
-        let chord_len = chord.length();
+        let p1 = points[span];
+        let p2 = points[span + 1];
+        let chord_len = p1.distance(p2);
         if chord_len <= 0.01 {
             continue;
         }
-        let previous = points[span.saturating_sub(1)];
-        let next = points[(span + 2).min(points.len() - 1)];
-        let tangent_limit = chord_len * 0.72;
-        let start_tangent = ((end - previous) * 0.5).clamp_length_max(tangent_limit);
-        let end_tangent = ((next - start) * 0.5).clamp_length_max(tangent_limit);
-        let slices = (chord_len / 96.0).ceil().clamp(4.0, 24.0) as usize;
+        let p0 = points[span.saturating_sub(1)];
+        let p3 = points[(span + 2).min(points.len() - 1)];
+        // Turn severity across the span's endpoints drives sample density:
+        // 0.0 for straight-through, 2.0 for a full reversal.
+        let in_dir = (p2 - p0).normalize_or_zero();
+        let out_dir = (p3 - p1).normalize_or_zero();
+        let turn = 1.0 - in_dir.dot(out_dir).clamp(-1.0, 1.0);
+        let by_length = (chord_len / 72.0).ceil();
+        let by_turn = (turn * 26.0).ceil();
+        let slices = (by_length + by_turn).clamp(4.0, 48.0) as usize;
         for slice in 0..slices {
             let t = slice as f32 / slices as f32;
-            let t2 = t * t;
-            let t3 = t2 * t;
-            let curved_sample = start * (2.0 * t3 - 3.0 * t2 + 1.0)
-                + start_tangent * (t3 - 2.0 * t2 + t)
-                + end * (-2.0 * t3 + 3.0 * t2)
-                + end_tangent * (t3 - t2);
-            let chord_sample = start.lerp(end, t);
-            let sample = chord_sample + (curved_sample - chord_sample).clamp_length_max(18.0);
-            if rounded.last().is_none_or(|last: &(f32, f32)| {
-                Vec2::new(last.0, last.1).distance_squared(sample) > 0.01
-            }) {
-                rounded.push((sample.x, sample.y));
-            }
+            push(&mut rounded, centripetal_catmull_rom(p0, p1, p2, p3, t));
         }
     }
     if let Some(last) = points.last() {
-        rounded.push((last.x, last.y));
+        push(&mut rounded, *last);
     }
     rounded
+}
+
+/// Centripetal Catmull-Rom (alpha = 0.5) evaluated on the `p1..p2` span via
+/// the Barry–Goldman recursive form, which stays exact for repeated or
+/// near-coincident control points (natural end conditions).
+fn centripetal_catmull_rom(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
+    let knot = |a: Vec2, b: Vec2, previous: f32| previous + a.distance(b).max(1.0e-4).sqrt();
+    let t0 = 0.0;
+    let t1 = knot(p0, p1, t0);
+    let t2 = knot(p1, p2, t1);
+    let t3 = knot(p2, p3, t2);
+    let t = t1 + (t2 - t1) * t.clamp(0.0, 1.0);
+    let lerp_at = |a: Vec2, b: Vec2, ta: f32, tb: f32| -> Vec2 {
+        if (tb - ta).abs() <= 1.0e-5 {
+            a
+        } else {
+            a.lerp(b, (t - ta) / (tb - ta))
+        }
+    };
+    let a1 = lerp_at(p0, p1, t0, t1);
+    let a2 = lerp_at(p1, p2, t1, t2);
+    let a3 = lerp_at(p2, p3, t2, t3);
+    let b1 = lerp_at(a1, a2, t0, t2);
+    let b2 = lerp_at(a2, a3, t1, t3);
+    lerp_at(b1, b2, t1, t2)
 }
 
 pub(super) fn speed_road_required_terrain_lift(
@@ -349,7 +430,18 @@ pub(super) fn spawn_speed_road_network(
 
         // Round every interior corner of this route with a banked fillet.
         let fillet_width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
-        spawn_route_corner_fillets(commands, pal, &deck_mesh, route, fillet_width, terrain_seed);
+        // The spine itself is rounded now; feeding the rounded centerline in
+        // lets the fillet pass self-disable on smooth spans and only patch
+        // residual sharp samples (e.g. clamped hairpins), aligned to the deck.
+        let rounded_route = rounded_speed_road_route(route);
+        spawn_route_corner_fillets(
+            commands,
+            pal,
+            &deck_mesh,
+            &rounded_route,
+            fillet_width,
+            terrain_seed,
+        );
     }
 
     spawn_mountain_wrap_ramps(

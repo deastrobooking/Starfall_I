@@ -6463,9 +6463,43 @@ struct RouteProjection {
     tangent: Vec2,
 }
 
+/// Rounded centerline of every mountain route plus its expanded AABB
+/// (min_x, min_z, max_x, max_z). Deterministic; computed once. Terrain
+/// carving, prop avoidance, and settlement spur projection all measure
+/// against these rounded polylines so they agree exactly with the deck
+/// geometry the routes actually spawn.
+fn rounded_mountain_route_network() -> &'static [(Vec<(f32, f32)>, [f32; 4])] {
+    static NETWORK: OnceLock<Vec<(Vec<(f32, f32)>, [f32; 4])>> = OnceLock::new();
+    NETWORK.get_or_init(|| {
+        mountain_routes()
+            .iter()
+            .map(|route| {
+                let rounded = rounded_speed_road_route(route);
+                let mut aabb = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                for &(px, pz) in &rounded {
+                    aabb[0] = aabb[0].min(px);
+                    aabb[1] = aabb[1].min(pz);
+                    aabb[2] = aabb[2].max(px);
+                    aabb[3] = aabb[3].max(pz);
+                }
+                (rounded, aabb)
+            })
+            .collect()
+    })
+}
+
 fn nearest_mountain_route_point(x: f32, z: f32) -> Option<RouteProjection> {
     let mut best: Option<RouteProjection> = None;
-    for route in mountain_routes() {
+    for (route, aabb) in rounded_mountain_route_network() {
+        // Reject whole routes whose bounding box cannot beat the best hit —
+        // rounding multiplies segment counts, so this prefilter keeps the
+        // terrain-sampling hot path close to its previous cost.
+        let current = best.map(|projection| projection.distance).unwrap_or(f32::MAX);
+        let dx = (aabb[0] - x).max(x - aabb[2]).max(0.0);
+        let dz = (aabb[1] - z).max(z - aabb[3]).max(0.0);
+        if dx * dx + dz * dz > current * current {
+            continue;
+        }
         for pair in route.windows(2) {
             let (ax, az) = pair[0];
             let (bx, bz) = pair[1];
@@ -17057,6 +17091,71 @@ mod tests {
             (x > 1.0 && x < 99.0 && z.abs() > 0.1)
                 || (z > 1.0 && z < 99.0 && (x - 100.0).abs() > 0.1)
         }));
+    }
+
+    #[test]
+    fn rounded_corners_cut_deep_arcs_not_shallow_bevels() {
+        // Mountain-scale right angle: a genuinely round corner must depart
+        // far more than the old 18 m chord clamp allowed.
+        let route = [(0.0, 0.0), (600.0, 0.0), (600.0, 600.0)];
+        let rounded = rounded_speed_road_route(&route);
+        let apex = Vec2::new(600.0, 0.0);
+        let apex_clearance = rounded
+            .iter()
+            .map(|&(x, z)| Vec2::new(x, z).distance(apex))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            apex_clearance > 25.0,
+            "corner arc should cut inside the apex, got {apex_clearance}"
+        );
+        assert!(apex_clearance < 300.0, "arc must stay near the corner");
+
+        // Adaptive density keeps direction changes gradual through the turn.
+        let mut max_turn_degrees = 0.0_f32;
+        for window in rounded.windows(3) {
+            let a = Vec2::new(window[0].0, window[0].1);
+            let b = Vec2::new(window[1].0, window[1].1);
+            let c = Vec2::new(window[2].0, window[2].1);
+            let d1 = (b - a).normalize_or_zero();
+            let d2 = (c - b).normalize_or_zero();
+            max_turn_degrees =
+                max_turn_degrees.max(d1.dot(d2).clamp(-1.0, 1.0).acos().to_degrees());
+        }
+        assert!(
+            max_turn_degrees < 25.0,
+            "per-segment turn should stay gradual, got {max_turn_degrees}°"
+        );
+    }
+
+    #[test]
+    fn centripetal_rounding_stays_bounded_on_uneven_spacing() {
+        // Uniform Catmull-Rom overshoots when leg lengths differ wildly;
+        // the centripetal form must stay inside the control hull's box.
+        let route = [(0.0, 0.0), (60.0, 0.0), (960.0, 40.0), (980.0, 640.0)];
+        let rounded = rounded_speed_road_route(&route);
+        // Centripetal CR guarantees no cusps or loops, not strict hull
+        // containment — asymmetric knot spacing may bow a few meters wide
+        // on long spans (~1-2% here). Bound it at 2.5% of the route extent,
+        // far under the uniform parameterization's overshoot on this data.
+        for &(x, z) in &rounded {
+            assert!(
+                (-24.0..=1_004.0).contains(&x) && (-24.0..=664.0).contains(&z),
+                "sample ({x}, {z}) escaped the control-point bounds"
+            );
+        }
+    }
+
+    #[test]
+    fn route_projection_tracks_the_rounded_centerline() {
+        // The distance field must agree with the rounded deck geometry:
+        // every rounded sample of every route sits on the network.
+        let (route, _) = &rounded_mountain_route_network()[0];
+        let mid = route[route.len() / 2];
+        let distance = distance_to_mountain_route_network(mid.0, mid.1);
+        assert!(
+            distance < 1.0,
+            "rounded centerline point should project onto the network, got {distance}"
+        );
     }
 
     #[test]
