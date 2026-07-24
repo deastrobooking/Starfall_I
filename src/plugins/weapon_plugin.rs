@@ -12,6 +12,7 @@ use crate::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
 };
 use crate::events::*;
+use crate::game_loop::GameSet;
 use crate::game_rng::GameRng;
 use crate::hacking::HackedUnit;
 use crate::hitstop::HitstopState;
@@ -143,6 +144,7 @@ impl Plugin for WeaponPlugin {
                 update_aim_solution_system
                     .before(weapon_fire_system)
                     .before(special_weapon_system)
+                    .in_set(GameSet::Combat)
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -167,6 +169,9 @@ impl Plugin for WeaponPlugin {
                     critical_impact_spawn_system.after(hit_particle_spawn_system),
                     particle_update_system,
                 )
+                    // EC0 canonical order: attacks resolve in Combat, after the
+                    // Motor-set player actions have consumed their inputs.
+                    .in_set(GameSet::Combat)
                     .run_if(in_state(AppState::Playing)),
             );
     }

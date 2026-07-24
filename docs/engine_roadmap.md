@@ -119,7 +119,11 @@ promise first:
 **Acceptance:** overlay shows live FPS/frame-time; `GameSet` ordering compiles and
 is configured; budgets documented (sim < 2–4 ms, motor < 0.5 ms, combat < 0.5 ms).
 **Status:** perf overlay + Tracy flag + `GameSet` scaffold landed via `GameLoopPlugin`
-(`src/game_loop.rs`). Per-system `.in_set()` assignment completes in EC1.
+(`src/game_loop.rs`). First `.in_set()` opt-ins landed 2026-07-24: the player
+action chain (dodge/parry/state/stamina) runs in `Motor` and the weapon systems
+(melee, sabre, ranged, projectiles) in `Combat`, so player actions consume their
+inputs deterministically before attacks resolve. Remaining per-system
+assignment completes in EC1.
 
 ### EC0.5 — Current Bevy tracking *(open-source freshness gate)*
 **Goal:** Move the project to the current stable Bevy line without breaking the

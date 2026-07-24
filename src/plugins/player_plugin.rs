@@ -28,7 +28,7 @@ use crate::components::world::{
 };
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
-use crate::game_loop::{fixed_motor_off, fixed_motor_on, PreviousTickPosition, SimConfig};
+use crate::game_loop::{fixed_motor_off, fixed_motor_on, GameSet, PreviousTickPosition, SimConfig};
 use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
 use crate::hitstop::hitstop_inactive;
 use crate::input_buffer::PlayerInputBuffers;
@@ -351,6 +351,11 @@ impl Plugin for PlayerPlugin {
                     hero_affinity_update_system,
                 )
                     .chain()
+                    // EC0 canonical order: player actions resolve in Motor,
+                    // before Combat — the dodge-roll suppression in
+                    // `player_dodge_update` and the sabre technique trigger
+                    // read shared state in a deterministic order.
+                    .in_set(GameSet::Motor)
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
