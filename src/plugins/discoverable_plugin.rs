@@ -3,13 +3,15 @@
 
 use bevy::prelude::*;
 
+use crate::components::armor::ArmorSet;
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
 use crate::components::mods::{ArmorMod, PlayerLoadout, WeaponMod};
 use crate::components::player::{
-    JetpackState, Player, PlayerIndex, PlayerMovement, PlayerProgression, PlayerStats,
+    JetpackState, Player, PlayerBaseStats, PlayerIndex, PlayerMovement, PlayerProgression,
+    PlayerStats,
 };
 use crate::components::weapon::{
     BeamSabre, BeamSabreLocked, MeleeCombo, SpecialWeaponInventory, WeaponInventory,
@@ -498,7 +500,10 @@ fn set_node_material(
 
 fn grant_reward_stats(
     stats: &mut PlayerStats,
+    base_stats: &mut PlayerBaseStats,
     health: &mut Health,
+    armor_set: &ArmorSet,
+    progression: &PlayerProgression,
     special_weapons: &mut SpecialWeaponInventory,
     credits: u32,
     experience: u32,
@@ -508,7 +513,14 @@ fn grant_reward_stats(
     stats.credits = stats.credits.saturating_add(credits);
     stats.experience = stats.experience.saturating_add(experience);
     if armor > 0 {
-        stats.max_armor += armor as f32 * 0.5;
+        base_stats.max_armor += armor as f32 * 0.5;
+        let caps = crate::plugins::armor_plugin::current_derived_caps(
+            *base_stats,
+            stats,
+            armor_set,
+            progression,
+        );
+        crate::plugins::armor_plugin::apply_derived_caps(stats, health, caps);
         stats.armor = (stats.armor + armor as f32).min(stats.max_armor);
         health.heal((armor as f32 * 0.25).max(2.0));
     }
@@ -608,6 +620,7 @@ fn discoverable_pickup_system(
     mut reward_player_q: Query<
         (
             &mut PlayerStats,
+            &mut PlayerBaseStats,
             &mut Health,
             &mut SpecialWeaponInventory,
             &mut PlayerMovement,
@@ -615,6 +628,7 @@ fn discoverable_pickup_system(
             &mut WeaponInventory,
             &mut MeleeCombo,
             &mut PlayerProgression,
+            &ArmorSet,
         ),
         With<Player>,
     >,
@@ -679,12 +693,22 @@ fn discoverable_pickup_system(
                 progress.recruit(name);
                 let (credits, experience, armor) = friend_rescue_reward(name);
                 if was_new {
-                    if let Ok((mut stats, mut health, mut special_weapons, ..)) =
-                        reward_player_q.get_mut(player_entity)
+                    if let Ok((
+                        mut stats,
+                        mut base_stats,
+                        mut health,
+                        mut special_weapons,
+                        ..,
+                        progression,
+                        armor_set,
+                    )) = reward_player_q.get_mut(player_entity)
                     {
                         grant_reward_stats(
                             &mut stats,
+                            &mut base_stats,
                             &mut health,
+                            armor_set,
+                            &progression,
                             &mut special_weapons,
                             credits,
                             experience,
@@ -873,18 +897,23 @@ fn discoverable_pickup_system(
                     }
                     if let Ok((
                         mut stats,
+                        mut base_stats,
                         mut health,
                         mut special_weapons,
                         mut movement,
                         mut jetpack,
                         mut weapons,
                         mut melee,
-                        _progression,
+                        progression,
+                        armor_set,
                     )) = reward_player_q.get_mut(player_entity)
                     {
                         special_label = grant_reward_stats(
                             &mut stats,
+                            &mut base_stats,
                             &mut health,
+                            armor_set,
+                            &progression,
                             &mut special_weapons,
                             *credits,
                             *experience,
@@ -906,7 +935,7 @@ fn discoverable_pickup_system(
                             // World relics are campaign discoveries. Mirror the
                             // unlock into every active player's owned ledger so
                             // local co-op never races for a one-use pickup.
-                            for (.., mut progression) in reward_player_q.iter_mut() {
+                            for (.., mut progression, _) in reward_player_q.iter_mut() {
                                 progression.upgrades.unlock_relic(ability_id);
                             }
                         }
@@ -955,12 +984,22 @@ fn discoverable_pickup_system(
                 let was_new = !progress.has_discoverable(data_id);
                 progress.unlock(data_id);
                 if was_new {
-                    if let Ok((mut stats, mut health, mut special_weapons, ..)) =
-                        reward_player_q.get_mut(player_entity)
+                    if let Ok((
+                        mut stats,
+                        mut base_stats,
+                        mut health,
+                        mut special_weapons,
+                        ..,
+                        progression,
+                        armor_set,
+                    )) = reward_player_q.get_mut(player_entity)
                     {
                         grant_reward_stats(
                             &mut stats,
+                            &mut base_stats,
                             &mut health,
+                            armor_set,
+                            &progression,
                             &mut special_weapons,
                             *credits,
                             *experience,

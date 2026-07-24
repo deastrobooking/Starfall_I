@@ -13,26 +13,24 @@ seam and startup/plugin smoke tests. Then extract one behavior-preserving module
 at a time while preserving schedule order. Roads are already the first world
 extraction in `src/plugins/world_plugin/roads.rs`.
 
-### Armor semantics and derived health ownership
+### Armor semantics and derived health ownership — delivered July 23, 2026
 
 `ArmorSet` equipment defense mitigates incoming damage first. The fields
 `PlayerStats.armor` and `max_armor` are a separate rechargeable durability
 buffer that absorbs 70 percent of the post-mitigation amount; health receives
 the remaining 30 percent. They are not duplicate defense calculations.
 
-The naming is unclear, and maximum-health ownership is genuinely split:
+`PlayerBaseStats` now owns the blueprint/hero level-one health and armor bases.
+Effective caps derive from those bases plus level, equipment, perks, and
+upgrades, with ordinary-frame reconciliation owned by `ArmorPlugin`. Level-up
+changes level instead of mutating the cached health cap, and permanent world
+armor rewards change the base.
 
-- character blueprints establish authored gameplay health;
-- player spawn adds perk and tech bonuses;
-- level-up mutates the effective cap;
-- save hydration restores the effective cap;
-- armor sync reconstructs the cap from a hard-coded base of 100 plus level,
-  equipment, perk, and tech bonuses.
-
-Do not patch this with another writer. Design a schema-compatible base-stat
-component/save field, a pure derived-cap function, and one sync system. Migrate
-legacy saves by deriving a safe base from their effective cap and known bonuses,
-then cover equip/unequip, perk reset, level-up, authored blueprint, and reload.
+`PlayerSaveData` adds optional base fields without rejecting schema-v4 records.
+Legacy saves infer each missing base from their effective cap and known
+modifiers; unknown historical bonuses remain absorbed in the inferred base.
+Tests cover authored blueprints, level/modifier math, equip/reset behavior,
+fill-ratio preservation, and legacy reload without double application.
 
 ### Stable persisted IDs
 

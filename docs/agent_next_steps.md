@@ -409,11 +409,12 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
   `docs/codebase_alignment_2026-07.md` for accepted and stale findings.
 - Follow-up architecture audit triaged (July 17, 2026): terrain patches and
   bounded caches were stale findings; hotspot extraction and measured profiling
-  remain valid. A genuine derived-stat gap remains: authored/spawned/loaded max
-  health competes with armor sync's hard-coded base. Design an explicit saved
-  base-stat contract and pure derived-cap function before changing writers.
-  `PlayerStats.armor` is armor durability, while `ArmorSet` is equipment
-  mitigation. See `docs/software_audit_triage_2026-07-17.md`.
+  remain valid. The derived-stat gap is delivered (July 23, 2026):
+  `PlayerBaseStats` persists blueprint/hero health and armor bases, one pure
+  contract derives effective caps, and legacy saves infer missing bases without
+  double-applying known bonuses. `PlayerStats.armor` remains durability, while
+  `ArmorSet` is equipment mitigation. See
+  `docs/software_audit_triage_2026-07-17.md`.
 - Terra gameplay audit triaged (July 17, 2026): projectile world obstruction,
   incremental fixed-combat scheduling, player-event ownership, armor API
   naming, and measured budgets are confirmed. Economy and vehicle findings are

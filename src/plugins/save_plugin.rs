@@ -13,7 +13,8 @@ use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandReg
 use crate::components::armor::{ArmorSet, ElementType};
 use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::{
-    Player, PlayerIndex, PlayerProgression, PlayerStats, TraversalMode, TraversalModeState,
+    Player, PlayerBaseStats, PlayerIndex, PlayerProgression, PlayerStats, TraversalMode,
+    TraversalModeState,
 };
 use crate::components::weapon::{SpecialWeaponInventory, WeaponInventory, WeaponRanks};
 use crate::damage::Health;
@@ -171,6 +172,7 @@ pub struct SaveParams<'w, 's> {
         (
             &'static PlayerIndex,
             &'static PlayerStats,
+            &'static PlayerBaseStats,
             &'static Health,
             &'static WeaponInventory,
             &'static SpecialWeaponInventory,
@@ -291,10 +293,16 @@ pub struct PlayerSaveData {
     pub credits: u32,
     pub health_current: f32,
     pub health_max: f32,
+    /// Stable authored level-one cap. Absent in schema-v4 legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_max_health: Option<f32>,
     pub stamina: f32,
     pub max_stamina: f32,
     pub armor: f32,
     pub max_armor: f32,
+    /// Stable authored level-one durability cap. Absent in legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_max_armor: Option<f32>,
     #[serde(default)]
     pub primary_weapon_slot: usize,
     #[serde(default)]
@@ -325,6 +333,7 @@ impl PlayerSaveData {
     fn from_runtime(
         player_index: u8,
         stats: &PlayerStats,
+        base_stats: &PlayerBaseStats,
         health: &Health,
         weapons: &WeaponInventory,
         specials: &SpecialWeaponInventory,
@@ -341,10 +350,12 @@ impl PlayerSaveData {
             credits: stats.credits,
             health_current: health.current,
             health_max: health.max,
+            base_max_health: Some(base_stats.max_health),
             stamina: stats.stamina,
             max_stamina: stats.max_stamina,
             armor: stats.armor,
             max_armor: stats.max_armor,
+            base_max_armor: Some(base_stats.max_armor),
             primary_weapon_slot: weapons.active_slot,
             special_weapon_slot: specials.active_slot,
             armor_element: armor.active_element,
@@ -366,10 +377,12 @@ impl PlayerSaveData {
             credits: data.credits,
             health_current: data.max_health,
             health_max: data.max_health,
+            base_max_health: None,
             stamina: data.max_stamina,
             max_stamina: data.max_stamina,
             armor: data.max_armor,
             max_armor: data.max_armor,
+            base_max_armor: None,
             primary_weapon_slot: 0,
             special_weapon_slot: None,
             armor_element: ElementType::None,
@@ -383,14 +396,39 @@ impl PlayerSaveData {
         }
     }
 
-    fn apply_to(&self, stats: &mut PlayerStats, health: &mut Health) {
+    fn apply_to(
+        &self,
+        base_stats: &mut PlayerBaseStats,
+        stats: &mut PlayerStats,
+        health: &mut Health,
+        armor: &ArmorSet,
+        progression: &PlayerProgression,
+    ) {
         stats.level = self.level.max(1);
         stats.experience = self.experience;
         stats.credits = self.credits;
-        stats.max_health = self.health_max.max(1.0);
+
+        let inferred = PlayerBaseStats::from_legacy_effective(
+            self.health_max,
+            self.max_armor,
+            stats.level,
+            armor.total_health_bonus(),
+            progression.perks.hp_bonus(),
+            progression.upgrades.armor_health_bonus(),
+            progression.upgrades.armor_shield_defense_bonus() * 0.8,
+        );
+        base_stats.max_health = self.base_max_health.unwrap_or(inferred.max_health).max(1.0);
+        base_stats.max_armor = self.base_max_armor.unwrap_or(inferred.max_armor).max(1.0);
+        let caps = crate::plugins::armor_plugin::current_derived_caps(
+            *base_stats,
+            stats,
+            armor,
+            progression,
+        );
+        stats.max_health = caps.max_health;
         stats.max_stamina = self.max_stamina.max(1.0);
         stats.stamina = self.stamina.clamp(0.0, stats.max_stamina);
-        stats.max_armor = self.max_armor.max(1.0);
+        stats.max_armor = caps.max_armor;
         stats.armor = self.armor.clamp(0.0, stats.max_armor);
         health.max = stats.max_health;
         health.current = self.health_current.clamp(0.0, health.max);
@@ -843,6 +881,7 @@ fn collect_player_saves(
         (
             &PlayerIndex,
             &PlayerStats,
+            &PlayerBaseStats,
             &Health,
             &WeaponInventory,
             &SpecialWeaponInventory,
@@ -861,6 +900,7 @@ fn collect_player_saves(
             |(
                 index,
                 stats,
+                base_stats,
                 health,
                 weapons,
                 specials,
@@ -873,6 +913,7 @@ fn collect_player_saves(
                 PlayerSaveData::from_runtime(
                     index.0,
                     stats,
+                    base_stats,
                     health,
                     weapons,
                     specials,
@@ -978,6 +1019,7 @@ fn load_save_on_enter(
         (
             &PlayerIndex,
             &mut PlayerStats,
+            &mut PlayerBaseStats,
             &mut Health,
             &mut WeaponInventory,
             &mut SpecialWeaponInventory,
@@ -985,6 +1027,7 @@ fn load_save_on_enter(
             &mut Inventory,
             &mut QuickItemSlot,
             &mut TraversalModeState,
+            &PlayerProgression,
         ),
         With<Player>,
     >,
@@ -1013,6 +1056,7 @@ fn load_save_on_enter(
         for (
             index,
             mut stats,
+            mut base_stats,
             mut health,
             mut weapons,
             mut specials,
@@ -1020,11 +1064,11 @@ fn load_save_on_enter(
             mut inventory,
             mut quick,
             mut traversal,
+            progression,
         ) in player_q.iter_mut()
         {
             active_players += 1;
             if let Some(saved) = player_save_for(&data, index.0) {
-                saved.apply_to(&mut stats, &mut health);
                 saved.apply_loadout(
                     &mut weapons,
                     &mut specials,
@@ -1032,6 +1076,13 @@ fn load_save_on_enter(
                     &mut inventory,
                     &mut quick,
                     &mut traversal,
+                );
+                saved.apply_to(
+                    &mut base_stats,
+                    &mut stats,
+                    &mut health,
+                    &armor,
+                    progression,
                 );
             }
         }
@@ -1162,10 +1213,12 @@ mod tests {
             credits,
             health_current,
             health_max,
+            base_max_health: Some(100.0),
             stamina: 40.0 + f32::from(player_index),
             max_stamina: 120.0 + f32::from(player_index),
             armor: 10.0 + f32::from(player_index),
             max_armor: 90.0 + f32::from(player_index),
+            base_max_armor: Some(90.0),
             primary_weapon_slot: 0,
             special_weapon_slot: None,
             armor_element: ElementType::None,
@@ -1526,10 +1579,12 @@ mod tests {
             credits: 25,
             health_current: 500.0,
             health_max: 125.0,
+            base_max_health: Some(125.0),
             stamina: 999.0,
             max_stamina: 80.0,
             armor: -10.0,
             max_armor: 60.0,
+            base_max_armor: Some(60.0),
             primary_weapon_slot: 999,
             special_weapon_slot: Some(9),
             armor_element: ElementType::Electric,
@@ -1545,15 +1600,25 @@ mod tests {
             weapon_ranks: None,
             shop: None,
         };
+        let mut base_stats = PlayerBaseStats::default();
         let mut stats = PlayerStats::default();
         let mut health = Health::new(100.0);
+        let armor = ArmorSet::default();
+        let progression = PlayerProgression::default();
 
-        saved.apply_to(&mut stats, &mut health);
+        saved.apply_to(
+            &mut base_stats,
+            &mut stats,
+            &mut health,
+            &armor,
+            &progression,
+        );
 
         assert_eq!(stats.level, 1);
         assert_eq!(stats.experience, 50);
         assert_eq!(stats.credits, 25);
         assert_eq!(stats.max_health, 125.0);
+        assert_eq!(base_stats.max_health, 125.0);
         assert_eq!(health.max, 125.0);
         assert_eq!(health.current, 125.0);
         assert_eq!(stats.max_stamina, 80.0);
@@ -1581,6 +1646,57 @@ mod tests {
         assert_eq!(inventory.count("health_pack"), 2);
         assert_eq!(quick.item_id.as_deref(), Some("health_pack"));
         assert_eq!(traversal.active, TraversalMode::Hoverboard);
+    }
+
+    #[test]
+    fn legacy_effective_caps_infer_bases_without_double_applying_known_bonuses() {
+        let mut saved = player_save(0, 4, 50, 25, 88.0, 177.0);
+        saved.base_max_health = None;
+        saved.base_max_armor = None;
+        saved.max_armor = 110.0;
+        saved.armor = 55.0;
+
+        let mut progression = PlayerProgression::default();
+        progression
+            .perks
+            .ranks
+            .push(("heart_vitality".to_string(), 1));
+        progression
+            .upgrades
+            .ranks
+            .push((TechUpgradeId::ArmorPlating, 1));
+        progression
+            .upgrades
+            .ranks
+            .push((TechUpgradeId::AegisArmorSuite, 1));
+
+        let armor = ArmorSet::default();
+        let mut base_stats = PlayerBaseStats::default();
+        let mut stats = PlayerStats::default();
+        let mut health = Health::new(100.0);
+        saved.apply_to(
+            &mut base_stats,
+            &mut stats,
+            &mut health,
+            &armor,
+            &progression,
+        );
+
+        assert_eq!(base_stats.max_health, 120.0);
+        assert_eq!(base_stats.max_armor, 90.0);
+        assert_eq!(stats.max_health, 177.0);
+        assert_eq!(stats.max_armor, 110.0);
+        assert_eq!(health.current, 88.0);
+        assert_eq!(stats.armor, 55.0);
+
+        let next_caps = crate::plugins::armor_plugin::current_derived_caps(
+            base_stats,
+            &stats,
+            &armor,
+            &progression,
+        );
+        assert_eq!(next_caps.max_health, stats.max_health);
+        assert_eq!(next_caps.max_armor, stats.max_armor);
     }
 
     #[test]

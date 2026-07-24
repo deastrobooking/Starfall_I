@@ -87,7 +87,10 @@ For the current agent-facing execution order, use `docs/agent_next_steps.md`.
 - Character Design (`AppState::CharacterDesign`) is now the single playable-character editor from player select and chapter select: live preview, GLB-inspired base models, silhouette sections, armor layers, color/accent controls, and Enter/Esc return to the screen that opened it.
 - Perk Tree UI and Tech Upgrade Shop UI added to chapter select in `ui_plugin.rs`: per-branch and per-track colored rank rows with filled/empty rank bars (`■□`), live update systems (`PerkRowText`, `UpgradeRowText`), A–H spend perk points, Z–N purchase tech upgrades.
 - Robot Garage screen (`AppState::RobotGarage`) built in `robot_garage_plugin.rs`: parts inventory and pet roster display, 9-form assembly browser (A/D navigate), auto-pet selection for Enter-to-assemble, MechCommandLink gating for advanced forms (GiantMech/SpaceShip/MegaShip), X to disassemble, [G] from chapter select.
-- HP bonus application fixed: `perks.hp_bonus()` + `upgrades.armor_health_bonus()` now added to `player_stats.max_health` at spawn in `player_plugin.rs`; previously these values were computed but never applied.
+- HP bonus application now flows through the derived-cap contract:
+  `perks.hp_bonus()` + `upgrades.armor_health_bonus()` are modifiers over the
+  save-backed `PlayerBaseStats.max_health`, not mutations accumulated into the
+  effective cache.
 - Chassis persistence: `CharacterPartStyle` derives Serialize/Deserialize; `SaveData` gains `part_loadout_body/arms/legs/shoulders` fields with `#[serde(default)]` for backward save compatibility; all save paths (`save_game`, `save_current_session`, `autosave_system`, `manual_save_system`, pause-menu save) carry `&PlayerPartLoadout`; hydrated from disk on load.
 - Assembly-driven vehicle modes: `VehicleState` rewritten to use `GroundMode` (None/Motorcycle/Tank/GiantMech) and `AirMode` (None/Jet/Ship) enums instead of boolean fields. `vehicle_input()` reads `RobotPetCollection.active_assembly` to determine available modes. `apply_vehicle_buffs()` applies correct speed/jetpack/armor stats per mode (Tank slow+armor, GiantMech very slow+40 armor bonus, Jet enhanced jetpack, Ship 1.5× jet).
 

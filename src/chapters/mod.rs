@@ -8,7 +8,6 @@
 //! platformer/RPG setup. Each chapter sets a biome, then seeds star tools,
 //! companion recruits, alien waves, dragon bosses, and mirror-human rivals.
 
-#![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use bevy::prelude::*;
 use std::sync::OnceLock;
 
@@ -52,154 +51,6 @@ pub struct ChapterMapLocation {
     pub x: f32,
     pub z: f32,
     pub facing_yaw: f32,
-}
-
-/// Authored mountain-cave destination shared by world generation, dungeon
-/// activation, and the fast-travel map.
-#[derive(Debug, Clone, Copy)]
-pub struct SecretCaveLocation {
-    pub chapter: ChapterId,
-    pub anchor_id: &'static str,
-    pub label: &'static str,
-    pub x: f32,
-    pub z: f32,
-    pub yaw: f32,
-    pub length: f32,
-}
-
-pub const SECRET_CAVE_LOCATIONS: [SecretCaveLocation; 14] = [
-    SecretCaveLocation {
-        chapter: ChapterId(1),
-        anchor_id: "secret_cave_ch01",
-        label: "Star Engine Grotto",
-        x: 42.0,
-        z: 54.0,
-        yaw: -0.55,
-        length: 38.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(2),
-        anchor_id: "secret_cave_ch02",
-        label: "Rift-Glass Underpass",
-        x: 2340.0,
-        z: 1780.0,
-        yaw: -1.10,
-        length: 42.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(3),
-        anchor_id: "secret_cave_ch03",
-        label: "Sister Starwell Cave",
-        x: -2380.0,
-        z: 2720.0,
-        yaw: 0.70,
-        length: 36.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(4),
-        anchor_id: "secret_cave_ch04",
-        label: "Brother Trial Burrow",
-        x: 3200.0,
-        z: -1800.0,
-        yaw: 0.25,
-        length: 40.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(5),
-        anchor_id: "secret_cave_ch05",
-        label: "Mirror Sludge Cavern",
-        x: -3320.0,
-        z: 790.0,
-        yaw: 1.20,
-        length: 40.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(6),
-        anchor_id: "secret_cave_ch06",
-        label: "Crownroot Ice Cave",
-        x: -8850.0,
-        z: -8200.0,
-        yaw: 0.78,
-        length: 46.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(7),
-        anchor_id: "secret_cave_ch07",
-        label: "Ember Breathing Hollow",
-        x: -7950.0,
-        z: 4200.0,
-        yaw: -0.40,
-        length: 44.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(8),
-        anchor_id: "secret_cave_ch08",
-        label: "Fangroot Scrap Tunnel",
-        x: -6000.0,
-        z: 8200.0,
-        yaw: -0.90,
-        length: 38.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(9),
-        anchor_id: "secret_cave_ch09",
-        label: "Pink Flame Root Cave",
-        x: 6300.0,
-        z: 260.0,
-        yaw: 1.00,
-        length: 36.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(10),
-        anchor_id: "secret_cave_ch10",
-        label: "Granite Echo Cave",
-        x: 8900.0,
-        z: 5200.0,
-        yaw: -1.35,
-        length: 46.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(11),
-        anchor_id: "secret_cave_ch11",
-        label: "Icebreaker Under-Cave",
-        x: 2820.0,
-        z: -8650.0,
-        yaw: 0.95,
-        length: 42.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(12),
-        anchor_id: "secret_cave_ch12",
-        label: "Mana Gear Grotto",
-        x: 5750.0,
-        z: -3450.0,
-        yaw: 0.35,
-        length: 38.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(13),
-        anchor_id: "secret_cave_ch13",
-        label: "Crown Gate Underpath",
-        x: -4700.0,
-        z: -6550.0,
-        yaw: -0.20,
-        length: 42.0,
-    },
-    SecretCaveLocation {
-        chapter: ChapterId(14),
-        anchor_id: "secret_cave_ch14",
-        label: "Starfall Core Hollow",
-        x: 650.0,
-        z: -8300.0,
-        yaw: 0.0,
-        length: 44.0,
-    },
-];
-
-pub fn secret_cave_location(chapter: ChapterId) -> Option<&'static SecretCaveLocation> {
-    SECRET_CAVE_LOCATIONS
-        .iter()
-        .find(|location| location.chapter == chapter)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1424,27 +1275,5 @@ mod tests {
 
         assert_eq!(anchors.len(), map_settlements().len());
         assert_eq!(rewards.len(), map_settlements().len());
-    }
-
-    #[test]
-    fn every_chapter_has_one_unique_mountain_cave_destination() {
-        let chapters: Vec<u8> = SECRET_CAVE_LOCATIONS
-            .iter()
-            .map(|cave| cave.chapter.0)
-            .collect();
-        assert_eq!(chapters, (1..=14).collect::<Vec<_>>());
-
-        let mut anchors: Vec<_> = SECRET_CAVE_LOCATIONS
-            .iter()
-            .map(|cave| cave.anchor_id)
-            .collect();
-        anchors.sort_unstable();
-        anchors.dedup();
-        assert_eq!(anchors.len(), SECRET_CAVE_LOCATIONS.len());
-        for cave in SECRET_CAVE_LOCATIONS {
-            assert!(cave.x.abs() <= EVEREST_RANGE_HALF_EXTENT);
-            assert!(cave.z.abs() <= EVEREST_RANGE_HALF_EXTENT);
-            assert!(cave.length >= 36.0);
-        }
     }
 }

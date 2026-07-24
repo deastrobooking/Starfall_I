@@ -17,8 +17,7 @@ pub struct PlayerCamera;
 // ── Stats ─────────────────────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct PlayerStats {
-    /// Effective health cap. Multiple legacy systems still write this value;
-    /// the derived-stat migration must introduce an explicit saved base first.
+    /// Cached effective health cap derived from [`PlayerBaseStats`].
     pub max_health: f32,
     /// Rechargeable armor durability remaining after equipment mitigation.
     /// This is a consumable buffer, not `ArmorSet::total_defense()`.
@@ -30,6 +29,80 @@ pub struct PlayerStats {
     pub credits: u32,
     pub experience: u32,
     pub level: u32,
+}
+
+/// Stable level-one caps authored by the character blueprint and hero profile.
+///
+/// These values are saved independently from the effective caps in
+/// [`PlayerStats`]. Level, equipment, perks, and upgrades are modifiers; they
+/// must never be folded back into these bases.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct PlayerBaseStats {
+    pub max_health: f32,
+    pub max_armor: f32,
+}
+
+impl Default for PlayerBaseStats {
+    fn default() -> Self {
+        Self {
+            max_health: 100.0,
+            max_armor: 100.0,
+        }
+    }
+}
+
+/// Effective caps produced from stable authored bases and current modifiers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DerivedPlayerCaps {
+    pub max_health: f32,
+    pub max_armor: f32,
+}
+
+impl PlayerBaseStats {
+    pub const HEALTH_PER_LEVEL: f32 = 10.0;
+
+    pub fn derived_caps(
+        self,
+        level: u32,
+        equipment_health_bonus: f32,
+        perk_health_bonus: f32,
+        upgrade_health_bonus: f32,
+        shield_capacity_bonus: f32,
+    ) -> DerivedPlayerCaps {
+        let level_health_bonus = level.saturating_sub(1) as f32 * Self::HEALTH_PER_LEVEL;
+        DerivedPlayerCaps {
+            max_health: (self.max_health.max(1.0)
+                + level_health_bonus
+                + equipment_health_bonus.max(0.0)
+                + perk_health_bonus.max(0.0)
+                + upgrade_health_bonus.max(0.0))
+            .max(1.0),
+            max_armor: (self.max_armor.max(1.0) + shield_capacity_bonus.max(0.0)).max(1.0),
+        }
+    }
+
+    /// Recover additive-schema bases from a legacy save that stored only
+    /// effective caps. Known modifiers are removed once; unknown historical
+    /// modifiers remain absorbed in the inferred base to avoid reducing a
+    /// player's saved cap.
+    pub fn from_legacy_effective(
+        effective_health: f32,
+        effective_armor: f32,
+        level: u32,
+        equipment_health_bonus: f32,
+        perk_health_bonus: f32,
+        upgrade_health_bonus: f32,
+        shield_capacity_bonus: f32,
+    ) -> Self {
+        let known_health_bonus = level.saturating_sub(1) as f32 * Self::HEALTH_PER_LEVEL
+            + equipment_health_bonus.max(0.0)
+            + perk_health_bonus.max(0.0)
+            + upgrade_health_bonus.max(0.0);
+        Self {
+            max_health: (effective_health.max(1.0) - known_health_bonus).max(1.0),
+            max_armor: (effective_armor.max(1.0) - shield_capacity_bonus.max(0.0)).max(1.0),
+        }
+    }
 }
 
 impl Default for PlayerStats {
@@ -63,6 +136,40 @@ pub struct PlayerProgression {
 impl PlayerStats {
     pub fn xp_for_next_level(&self) -> u32 {
         self.level * 100
+    }
+}
+
+#[cfg(test)]
+mod derived_cap_tests {
+    use super::*;
+
+    #[test]
+    fn authored_bases_and_modifiers_derive_without_compounding() {
+        let base = PlayerBaseStats {
+            max_health: 135.0,
+            max_armor: 80.0,
+        };
+
+        let caps = base.derived_caps(4, 12.0, 20.0, 15.0, 8.0);
+
+        assert_eq!(caps.max_health, 212.0);
+        assert_eq!(caps.max_armor, 88.0);
+        assert_eq!(base.max_health, 135.0);
+        assert_eq!(base.max_armor, 80.0);
+    }
+
+    #[test]
+    fn legacy_inference_round_trips_known_modifiers() {
+        let inferred =
+            PlayerBaseStats::from_legacy_effective(212.0, 88.0, 4, 12.0, 20.0, 15.0, 8.0);
+
+        assert_eq!(
+            inferred.derived_caps(4, 12.0, 20.0, 15.0, 8.0),
+            DerivedPlayerCaps {
+                max_health: 212.0,
+                max_armor: 88.0,
+            }
+        );
     }
 }
 

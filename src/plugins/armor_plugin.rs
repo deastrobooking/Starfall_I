@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 
 use crate::components::armor::*;
-use crate::components::player::{Player, PlayerInput, PlayerProgression, PlayerStats};
+use crate::components::player::{
+    DerivedPlayerCaps, Player, PlayerBaseStats, PlayerInput, PlayerProgression, PlayerStats,
+};
 use crate::events::PlayerDamagedEvent;
 use crate::state::AppState;
 
@@ -14,7 +16,7 @@ impl Plugin for ArmorPlugin {
             Update,
             (
                 sync_armor_upgrade_state,
-                apply_armor_health_bonus,
+                sync_derived_player_caps,
                 armor_recharge_system,
                 element_switch_system,
             )
@@ -84,11 +86,56 @@ fn sync_armor_upgrade_state(
     }
 }
 
-/// Keep player max health in sync with total armor health bonuses.
-fn apply_armor_health_bonus(
+pub(crate) fn current_derived_caps(
+    base: PlayerBaseStats,
+    stats: &PlayerStats,
+    armor: &ArmorSet,
+    progression: &PlayerProgression,
+) -> DerivedPlayerCaps {
+    base.derived_caps(
+        stats.level,
+        armor.total_health_bonus(),
+        progression.perks.hp_bonus(),
+        progression.upgrades.armor_health_bonus(),
+        progression.upgrades.armor_shield_defense_bonus() * 0.8,
+    )
+}
+
+/// Reconcile cached effective caps while preserving the fill ratio. This is the
+/// sole ordinary-frame writer for maximum health and armor durability.
+pub(crate) fn apply_derived_caps(
+    stats: &mut PlayerStats,
+    health: &mut crate::damage::Health,
+    caps: DerivedPlayerCaps,
+) {
+    if (stats.max_health - caps.max_health).abs() > 0.1 {
+        let ratio = if health.max > 0.0 {
+            health.current / health.max
+        } else {
+            1.0
+        };
+        stats.max_health = caps.max_health;
+        health.max = caps.max_health;
+        health.current = (caps.max_health * ratio).clamp(0.0, caps.max_health);
+    }
+
+    if (stats.max_armor - caps.max_armor).abs() > 0.1 {
+        let ratio = if stats.max_armor > 0.0 {
+            stats.armor / stats.max_armor
+        } else {
+            1.0
+        };
+        stats.max_armor = caps.max_armor;
+        stats.armor = (caps.max_armor * ratio).clamp(0.0, caps.max_armor);
+    }
+}
+
+/// Keep cached effective caps synchronized with stable authored bases.
+fn sync_derived_player_caps(
     mut player_q: Query<
         (
             &ArmorSet,
+            &PlayerBaseStats,
             &mut PlayerStats,
             &mut crate::damage::Health,
             &PlayerProgression,
@@ -96,21 +143,11 @@ fn apply_armor_health_bonus(
         With<Player>,
     >,
 ) {
-    for (armor, mut stats, mut health, progression) in player_q.iter_mut() {
-        let bonus = armor.total_health_bonus();
+    for (armor, base, mut stats, mut health, progression) in player_q.iter_mut() {
         let stamina_bonus = armor.total_stamina_bonus();
-        // Recalculate max health from stable sources so armor/perks cannot stack.
-        let new_max = 100.0
-            + (stats.level.saturating_sub(1) as f32 * 10.0)
-            + bonus
-            + progression.perks.hp_bonus()
-            + progression.upgrades.armor_health_bonus();
-        if (stats.max_health - new_max).abs() > 0.1 {
-            let ratio = health.current / health.max;
-            stats.max_health = new_max;
-            health.max = new_max;
-            health.current = new_max * ratio;
-        }
+        let caps = current_derived_caps(*base, &stats, armor, progression);
+        apply_derived_caps(&mut stats, &mut health, caps);
+
         let new_stamina_max = 100.0 + stamina_bonus;
         if (stats.max_stamina - new_stamina_max).abs() > 0.1 {
             let ratio = if stats.max_stamina > 0.0 {
@@ -120,17 +157,6 @@ fn apply_armor_health_bonus(
             };
             stats.max_stamina = new_stamina_max;
             stats.stamina = (new_stamina_max * ratio).min(new_stamina_max);
-        }
-
-        let new_armor_max = 100.0 + armor.upgrade_state.shield_defense_bonus * 0.8;
-        if (stats.max_armor - new_armor_max).abs() > 0.1 {
-            let ratio = if stats.max_armor > 0.0 {
-                stats.armor / stats.max_armor
-            } else {
-                1.0
-            };
-            stats.max_armor = new_armor_max;
-            stats.armor = (new_armor_max * ratio).min(new_armor_max);
         }
     }
 }
@@ -176,6 +202,8 @@ fn cycle_element_prev(e: ElementType) -> ElementType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::damage::Health;
+    use crate::upgrades::TechUpgradeId;
 
     #[test]
     fn element_cycle_honors_each_direction_and_idle_input() {
@@ -195,5 +223,62 @@ mod tests {
         assert!((armor_recharge_amount(20.0, 100.0, 18.0, 0.5) - 29.0).abs() < 1e-6);
         assert_eq!(armor_recharge_amount(98.0, 100.0, 18.0, 1.0), 100.0);
         assert_eq!(armor_recharge_amount(20.0, 100.0, 18.0, -1.0), 20.0);
+    }
+
+    #[test]
+    fn equipment_perks_and_upgrades_rederive_without_changing_authored_bases() {
+        let base = PlayerBaseStats {
+            max_health: 130.0,
+            max_armor: 82.0,
+        };
+        let mut stats = PlayerStats {
+            level: 3,
+            max_health: 130.0,
+            max_armor: 82.0,
+            armor: 41.0,
+            ..default()
+        };
+        let mut health = Health::new(130.0);
+        health.current = 65.0;
+        let mut armor = ArmorSet {
+            chest: Some(ArmorPiece::new(ArmorSlot::Chest, ArmorTier::Steel)),
+            ..default()
+        };
+        let mut progression = PlayerProgression::default();
+        progression
+            .perks
+            .ranks
+            .push(("heart_vitality".to_string(), 2));
+        progression
+            .upgrades
+            .ranks
+            .push((TechUpgradeId::ArmorPlating, 1));
+        progression
+            .upgrades
+            .ranks
+            .push((TechUpgradeId::AegisArmorSuite, 1));
+
+        let equipped_caps = current_derived_caps(base, &stats, &armor, &progression);
+        apply_derived_caps(&mut stats, &mut health, equipped_caps);
+
+        assert_eq!(base.max_health, 130.0);
+        assert_eq!(base.max_armor, 82.0);
+        assert_eq!(stats.max_health, equipped_caps.max_health);
+        assert_eq!(stats.max_armor, equipped_caps.max_armor);
+        assert!((health.current / health.max - 0.5).abs() < 1e-6);
+        assert!((stats.armor / stats.max_armor - 0.5).abs() < 1e-6);
+
+        armor.chest = None;
+        progression.perks.ranks.clear();
+        progression.upgrades.ranks.clear();
+        let reset_caps = current_derived_caps(base, &stats, &armor, &progression);
+        apply_derived_caps(&mut stats, &mut health, reset_caps);
+
+        assert_eq!(reset_caps.max_health, 150.0);
+        assert_eq!(reset_caps.max_armor, 82.0);
+        assert_eq!(stats.max_health, 150.0);
+        assert_eq!(stats.max_armor, 82.0);
+        assert!((health.current / health.max - 0.5).abs() < 1e-6);
+        assert!((stats.armor / stats.max_armor - 0.5).abs() < 1e-6);
     }
 }

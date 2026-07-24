@@ -506,8 +506,15 @@ fn player_viewport(index: u8, active: u8, win_w: u32, win_h: u32) -> Option<View
 fn authored_player_defaults(
     blueprint: Option<&CharacterBlueprint>,
     visual_scale: f32,
-) -> (PlayerStats, PlayerMovement, DodgeState, Collider) {
+) -> (
+    PlayerStats,
+    PlayerBaseStats,
+    PlayerMovement,
+    DodgeState,
+    Collider,
+) {
     let mut stats = PlayerStats::default();
+    let mut base_stats = PlayerBaseStats::default();
     let mut movement = PlayerMovement::default();
     let mut dodge = DodgeState::new();
     let mut half_height = 0.6;
@@ -526,11 +533,13 @@ fn authored_player_defaults(
         dodge.dodge_speed = movement_profile.dodge_speed;
         dodge.dodge_cost = movement_profile.dodge_cost;
 
-        stats.max_health = gameplay.max_health;
+        base_stats.max_health = gameplay.max_health;
+        stats.max_health = base_stats.max_health;
         stats.max_stamina = gameplay.max_stamina;
         stats.stamina = gameplay.max_stamina;
-        stats.max_armor = gameplay.max_armor;
-        stats.armor = gameplay.max_armor;
+        base_stats.max_armor = gameplay.max_armor;
+        stats.max_armor = base_stats.max_armor;
+        stats.armor = base_stats.max_armor;
 
         half_height = 0.6 * (body.height * 0.72 + body.leg_length * 0.28);
         radius =
@@ -545,6 +554,7 @@ fn authored_player_defaults(
 
     (
         stats,
+        base_stats,
         movement,
         dodge,
         Collider::capsule_y(
@@ -679,8 +689,13 @@ fn spawn_players(
         let hero_profile = hero_power_profile(character_name);
         let hero_powers = hero_profile.amplified_powers(&robot_pets);
         let character_visual_scale = hero_config(character_name).scale;
-        let (mut player_stats, mut player_movement, mut dodge_state, player_collider) =
-            authored_player_defaults(Some(&runtime_blueprint), character_visual_scale);
+        let (
+            mut player_stats,
+            mut player_base_stats,
+            mut player_movement,
+            mut dodge_state,
+            player_collider,
+        ) = authored_player_defaults(Some(&runtime_blueprint), character_visual_scale);
         let mut jetpack = JetpackState::default();
         let mut weapon_inventory = WeaponInventory::default();
         let mut special_inventory = SpecialWeaponInventory::default();
@@ -689,6 +704,7 @@ fn spawn_players(
             hero_profile,
             hero_powers,
             &mut player_stats,
+            &mut player_base_stats,
             &mut player_movement,
             &mut jetpack,
             &mut dodge_state,
@@ -708,13 +724,20 @@ fn spawn_players(
         starter_inventory.add_item("health_pack", 2, 10);
         starter_inventory.add_item("armor_shard", 2, 10);
 
-        // Apply perk and tech-upgrade HP bonuses to the authoritative max_health.
         let mut player_progression = slot.progression.clone();
         // Campaign discoveries are party-wide, while the resulting ownership
         // is copied into each player's save-backed progression component.
         seed_discovered_sabre_relics(&progress, &mut player_progression);
-        player_stats.max_health +=
-            player_progression.perks.hp_bonus() + player_progression.upgrades.armor_health_bonus();
+        let initial_caps = player_base_stats.derived_caps(
+            player_stats.level,
+            0.0,
+            player_progression.perks.hp_bonus(),
+            player_progression.upgrades.armor_health_bonus(),
+            0.0,
+        );
+        player_stats.max_health = initial_caps.max_health;
+        player_stats.max_armor = initial_caps.max_armor;
+        player_stats.armor = initial_caps.max_armor;
         for (weapon, rank) in weapon_inventory
             .slots
             .iter_mut()
@@ -755,6 +778,7 @@ fn spawn_players(
                 player_movement,
             ))
             .insert(CollisionProfile::Player)
+            .insert(player_base_stats)
             .insert(player_progression)
             .insert((
                 hero_profile,
@@ -3419,9 +3443,10 @@ fn player_level_up(
         if stats.experience >= xp_needed {
             stats.experience -= xp_needed;
             stats.level += 1;
-            stats.max_health += 10.0;
             stats.max_stamina += 5.0;
-            health.max = stats.max_health;
+            // The derived-cap sync observes the new level and expands the cap.
+            // Filling the old cap first preserves the existing full-heal
+            // behavior when that sync applies its fill ratio.
             health.current = health.max;
             stats.stamina = stats.max_stamina;
             progression.perks.award(1);
@@ -3569,6 +3594,73 @@ mod tests {
         assert!(player.upgrades.has_relic("cyclone_slash_blueprint"));
         assert!(!player.upgrades.has_relic("unrelated_world_secret"));
         assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 0);
+    }
+
+    #[test]
+    fn blueprint_caps_become_stable_authored_bases() {
+        let body = crate::character_blueprint::BodyRecipe::default();
+        let mut blueprint = CharacterBlueprint::hero(
+            "Cap Contract",
+            body,
+            crate::character_blueprint::CharacterPaletteRecipe {
+                skin: Color::WHITE,
+                outfit: Color::WHITE,
+                accent: Color::WHITE,
+                hair: Color::WHITE,
+                eye: Color::WHITE,
+            },
+            CartoonAppearanceRecipe::default(),
+        );
+        blueprint.gameplay_stats.max_health = 142.0;
+        blueprint.gameplay_stats.max_armor = 76.0;
+
+        let (stats, base, _, _, _) = authored_player_defaults(Some(&blueprint), 1.0);
+
+        assert_eq!(base.max_health, 142.0);
+        assert_eq!(base.max_armor, 76.0);
+        assert_eq!(stats.max_health, base.max_health);
+        assert_eq!(stats.max_armor, base.max_armor);
+    }
+
+    #[test]
+    fn level_up_changes_level_without_mutating_the_effective_health_cache() {
+        let mut app = App::new();
+        app.add_message::<PlayerLevelUpEvent>();
+        app.add_systems(Update, player_level_up);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerStats {
+                    max_health: 142.0,
+                    experience: 100,
+                    ..default()
+                },
+                Health {
+                    current: 50.0,
+                    max: 142.0,
+                },
+                PlayerProgression::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let stats = app.world().get::<PlayerStats>(entity).unwrap();
+        let health = app.world().get::<Health>(entity).unwrap();
+        assert_eq!(stats.level, 2);
+        assert_eq!(stats.max_health, 142.0);
+        assert_eq!(health.max, 142.0);
+        assert_eq!(health.current, 142.0);
+        assert_eq!(
+            PlayerBaseStats {
+                max_health: 142.0,
+                max_armor: 100.0,
+            }
+            .derived_caps(stats.level, 0.0, 0.0, 0.0, 0.0)
+            .max_health,
+            152.0
+        );
     }
 
     #[test]

@@ -178,6 +178,12 @@ Party-shared exceptions:
   frame through the local `KinematicCharacterController` compatibility component,
   then applied with Avian move-and-slide. This gives full control over wall
   jumps, edge grabs, and jetpack without fighting a dynamic solver.
+- **Base stats are authored; caps are derived**: `PlayerBaseStats` persists
+  blueprint/hero level-one health and armor capacity. `PlayerStats` caches the
+  effective caps derived from level, equipment, perks, and upgrades.
+  `ArmorPlugin` owns ordinary-frame reconciliation and preserves fill ratios;
+  save hydration uses the same pure derivation and infers missing bases from
+  legacy effective-cap records.
 - **State machines on components**: Both `PlayerStateMachine` and `EnemyStateMachine` use allow-list transition tables so illegal state jumps are caught at the call site. `force()` bypasses the table for death/reset paths.
 - **Chapter director replaces wave loop**: `CurrentChapter` + `ChapterPlugin` replaces the old `WaveInfo`-driven loop. `WaveInfo` is kept alive only for legacy loot and save compatibility.
 - **Cached chapter catalog**: `chapters/mod.rs` builds the 14 chapter definitions once through `OnceLock`; `get_chapter()` clones from that catalog instead of rebuilding scripts every frame.

@@ -131,10 +131,10 @@ Those representations have different responsibilities: editable visual source
 and gameplay/runtime projection. Preserve and version that conversion boundary;
 do not create a third character-authoring path.
 
-## Important correction to Terra's conclusion
+## Important correction to Terra's conclusion — resolved July 23, 2026
 
-Maximum-health recalculation is not fully centralized. The separate follow-up
-architecture audit confirmed that authored blueprint health, spawn bonuses,
-level-up, save hydration, and armor sync still write or reconstruct effective
-maximum health from different bases. The schema-compatible base-stat/derived-cap
-work in `current_state.md` remains valid and must not be closed by this review.
+The correction was valid when recorded. It is now resolved by
+`PlayerBaseStats`, additive optional save fields, a pure derived-cap contract,
+and one ordinary-frame reconciliation system. Blueprint/hero bases, level,
+equipment, perks, upgrades, permanent armor rewards, and legacy hydration no
+longer compete as effective-cap writers.

@@ -758,6 +758,31 @@ owns `ArmorRechargeState`: an incoming `PlayerDamagedEvent` resets a three-secon
 delay, after which durability refills at 18 points per second up to
 `PlayerStats.max_armor`.
 
+**Derived cap contract:** `PlayerBaseStats` owns the stable level-one
+`max_health` and `max_armor` authored by the character blueprint and adjusted
+by the intrinsic hero profile. `PlayerStats.max_health` and `max_armor` are
+effective caches, never progression inputs:
+
+```text
+health cap = base health
+           + 10 × (level - 1)
+           + equipped armor health
+           + perk health
+           + tech health
+
+armor cap  = base armor
+           + 0.8 × Aegis shield-defense bonus
+```
+
+`armor_plugin::sync_derived_player_caps` reconciles those caches and preserves
+current fill ratios when equipment, perks, or upgrades change. Level-up changes
+`level`, not the cached health cap. Permanent world armor rewards increase the
+saved base armor. `PlayerSaveData.base_max_health/base_max_armor` persist the
+bases as additive optional fields; older saves infer each base once by
+subtracting known modifiers from the saved effective cap. Unknown historical
+bonuses remain absorbed in the inferred base so migration never silently
+reduces a saved cap.
+
 **Resistances & defense (2026-06):** enemies spawn with faction-flavoured
 resistances and their `EnemyConfig.defense` via
 `enemy_plugin::enemy_damageable()` — DragonRoyalty resists Fire 0.6/Melee 0.15,

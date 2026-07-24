@@ -313,14 +313,16 @@ together.
 
 1. Maintain the delivered reusable app-construction seam and headless
    construction/Startup/steady-frame plugin smoke tests.
-2. Continue small, behavior-preserving world/UI/Forge hotspot extractions.
-3. Complete recorded four-controller hardware acceptance for ownership,
+2. Maintain the save-compatible `PlayerBaseStats`/derived-cap contract; new
+   permanent health or armor-cap rewards must update bases, not effective caches.
+3. Continue small, behavior-preserving world/UI/Forge hotspot extractions.
+4. Complete recorded four-controller hardware acceptance for ownership,
    controller-only menus, aiming, shops, editor launch, and save/reload.
-4. Measure large-world simulation and one-to-four-camera costs before expanding
+5. Measure large-world simulation and one-to-four-camera costs before expanding
    density or streaming.
-5. Tune the playable MVP: camera/animation feel, road traversal, weapons, shop,
+6. Tune the playable MVP: camera/animation feel, road traversal, weapons, shop,
    loot attraction, and mountain collision.
-6. Finish the remaining PM1–PM3 project/preset/level workflow gaps.
+7. Finish the remaining PM1–PM3 project/preset/level workflow gaps.
 
 ## Definition Of Done
 

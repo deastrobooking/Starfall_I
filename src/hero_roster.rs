@@ -184,6 +184,7 @@ pub fn apply_hero_runtime(
     profile: HeroPowerProfile,
     powers: HeroPowerSet,
     stats: &mut PlayerStats,
+    base_stats: &mut crate::components::player::PlayerBaseStats,
     movement: &mut PlayerMovement,
     jetpack: &mut JetpackState,
     dodge: &mut DodgeState,
@@ -198,11 +199,10 @@ pub fn apply_hero_runtime(
     dodge.dodge_speed *= powers.speed;
 
     let stamina_mult = ((powers.speed + powers.flight) * 0.5).clamp(0.85, 1.40);
-    stats.max_health *= powers.strength.clamp(0.90, 1.35);
+    base_stats.max_health *= powers.strength.clamp(0.90, 1.35);
     stats.max_stamina *= stamina_mult;
     stats.stamina = stats.max_stamina;
-    stats.max_armor *= (0.80 + powers.strength * 0.20).clamp(0.90, 1.25);
-    stats.armor = stats.max_armor;
+    base_stats.max_armor *= (0.80 + powers.strength * 0.20).clamp(0.90, 1.25);
 
     jetpack.max_fuel *= powers.flight;
     jetpack.fuel = jetpack.max_fuel;
