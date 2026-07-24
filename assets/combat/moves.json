@@ -8,7 +8,8 @@
       "active": 0.1,
       "recovery": 0.23,
       "cancel_after": 0.08,
-      "hitstop": 0.03
+      "hitstop": 0.03,
+      "iframes": 0.0
     },
     {
       "name": "Comet Cross",
@@ -18,7 +19,8 @@
       "active": 0.1,
       "recovery": 0.27,
       "cancel_after": 0.1,
-      "hitstop": 0.034
+      "hitstop": 0.034,
+      "iframes": 0.0
     },
     {
       "name": "Moon Uppercut",
@@ -28,7 +30,8 @@
       "active": 0.12,
       "recovery": 0.36,
       "cancel_after": 0.16,
-      "hitstop": 0.05
+      "hitstop": 0.05,
+      "iframes": 0.0
     }
   ],
   "heavy": [
@@ -40,7 +43,8 @@
       "active": 0.14,
       "recovery": 0.4,
       "cancel_after": 0.18,
-      "hitstop": 0.06
+      "hitstop": 0.06,
+      "iframes": 0.0
     },
     {
       "name": "Orbit Sweep",
@@ -50,7 +54,8 @@
       "active": 0.16,
       "recovery": 0.46,
       "cancel_after": 0.2,
-      "hitstop": 0.07
+      "hitstop": 0.07,
+      "iframes": 0.0
     }
   ],
   "sabre": [
@@ -62,7 +67,8 @@
       "active": 0.08,
       "recovery": 0.12,
       "cancel_after": 0.0,
-      "hitstop": 0.0
+      "hitstop": 0.0,
+      "iframes": 0.0
     }
   ],
   "sabre_wave": {
@@ -90,7 +96,8 @@
       "technique_time": 0.48,
       "hitstop": 0.055,
       "dash_speed": 0.0,
-      "plunge_speed": 0.0
+      "plunge_speed": 0.0,
+      "iframes": 0.0
     },
     "comet_dash": {
       "name": "Comet Dash",
@@ -107,7 +114,8 @@
       "technique_time": 0.42,
       "hitstop": 0.06,
       "dash_speed": 1.78,
-      "plunge_speed": 0.0
+      "plunge_speed": 0.0,
+      "iframes": 0.28
     },
     "meteor_pound": {
       "name": "Meteor Pound",
@@ -123,7 +131,8 @@
       "technique_time": 0.42,
       "hitstop": 0.06,
       "dash_speed": 0.0,
-      "plunge_speed": 1.85
+      "plunge_speed": 1.85,
+      "iframes": 0.0
     }
   },
   "ranged": [

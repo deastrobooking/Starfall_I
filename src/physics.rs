@@ -106,7 +106,7 @@ pub enum CollisionProfile {
     EnemyHurtbox,
     VehicleHurtbox,
     PlayerHitbox,
-    #[allow(dead_code)] // Reserved for enemy move-scoped attack volumes.
+    /// Enemy attack volumes (`execute_enemy_melee_hit` queries its filters).
     EnemyHitbox,
     PlayerProjectile,
     EnemyProjectile,

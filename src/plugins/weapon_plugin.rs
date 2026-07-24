@@ -2010,8 +2010,9 @@ fn melee_combo_system(
             &ArmorSet,
             &PlayerProgression,
             Option<&BeamSabre>,
+            &mut Damageable,
         ),
-        With<Player>,
+        (With<Player>, Without<Enemy>),
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
     mut enemy_q: Query<
@@ -2024,8 +2025,17 @@ fn melee_combo_system(
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_transform, mut combo, mut sm, pi, cam_ref, armor, progression, sabre) in
-        player_q.iter_mut()
+    for (
+        player_transform,
+        mut combo,
+        mut sm,
+        pi,
+        cam_ref,
+        armor,
+        progression,
+        sabre,
+        mut player_damageable,
+    ) in player_q.iter_mut()
     {
         let upgrades = &progression.upgrades;
         let Ok(cam) = cam_q.get(cam_ref.0) else {
@@ -2190,7 +2200,13 @@ fn melee_combo_system(
                         };
                         combo.buffered_light = false;
                         combo.buffered_heavy = false;
-                        combo.active = start_melee_move(&library, &mut combo, chain, &mut sm);
+                        combo.active = start_melee_move(
+                            &library,
+                            &mut combo,
+                            chain,
+                            &mut sm,
+                            &mut player_damageable,
+                        );
                     } else if active.timer <= 0.0 {
                         combo.active = None;
                         sm.transition(PlayerState::Idle);
@@ -2209,9 +2225,21 @@ fn melee_combo_system(
         combo.buffered_heavy = false;
 
         if do_light {
-            combo.active = start_melee_move(&library, &mut combo, MeleeChain::Light, &mut sm);
+            combo.active = start_melee_move(
+                &library,
+                &mut combo,
+                MeleeChain::Light,
+                &mut sm,
+                &mut player_damageable,
+            );
         } else if do_heavy {
-            combo.active = start_melee_move(&library, &mut combo, MeleeChain::Heavy, &mut sm);
+            combo.active = start_melee_move(
+                &library,
+                &mut combo,
+                MeleeChain::Heavy,
+                &mut sm,
+                &mut player_damageable,
+            );
         }
     }
 }
@@ -2224,12 +2252,22 @@ fn sabre_claims_heavy_input(sabre: Option<&BeamSabre>, upgrades: &UpgradeLedger)
     sabre.is_some_and(|s| s.active) && upgrades.sabre_spin_unlocked()
 }
 
+/// EC2 per-move i-frames: extend (never shorten) the shared invulnerability
+/// window owned by `player_invulnerability_update`.
+fn grant_iframes(damageable: &mut Damageable, iframes: f32) {
+    if iframes > 0.0 {
+        damageable.is_invulnerable = true;
+        damageable.invulnerability_timer = damageable.invulnerability_timer.max(iframes);
+    }
+}
+
 /// Begin a move's startup phase from the chain's current index.
 fn start_melee_move(
     library: &MoveLibrary,
     combo: &mut MeleeCombo,
     chain: MeleeChain,
     sm: &mut PlayerStateMachine,
+    damageable: &mut Damageable,
 ) -> Option<ActiveMelee> {
     let index = match chain {
         MeleeChain::Light => combo.light_index,
@@ -2239,6 +2277,7 @@ fn start_melee_move(
     let def = library.get(chain, index)?;
     combo.hit_entities.clear();
     sm.force(PlayerState::Attacking);
+    grant_iframes(damageable, def.iframes);
     Some(ActiveMelee {
         chain,
         index,
@@ -2712,8 +2751,9 @@ fn beam_sabre_update_system(
             &mut PlayerMovement,
             &TraversalModeState,
             Option<&BeamSabreLocked>,
+            &mut Damageable,
         ),
-        With<Player>,
+        (With<Player>, Without<Enemy>),
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
     mut enemy_q: Query<
@@ -2739,6 +2779,7 @@ fn beam_sabre_update_system(
         mut movement,
         traversal,
         locked_marker,
+        mut player_damageable,
     ) in player_q.iter_mut()
     {
         let upgrades = &progression.upgrades;
@@ -2904,6 +2945,7 @@ fn beam_sabre_update_system(
                                 sabre.slash_hits.clear();
                                 sabre.slash_phase = MeleePhase::Startup;
                                 sabre.slash_timer = next.startup;
+                                grant_iframes(&mut player_damageable, next.iframes);
                             }
                             None => {
                                 sabre.is_slashing = false;
@@ -2945,6 +2987,7 @@ fn beam_sabre_update_system(
             sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
             sabre.technique_timer = tech.technique_time;
             sabre.technique = SabreTechnique::CycloneSlash;
+            grant_iframes(&mut player_damageable, tech.iframes);
             sm.force(PlayerState::Attacking);
             spawn_sabre_technique_vfx(
                 &mut commands,
@@ -3023,6 +3066,7 @@ fn beam_sabre_update_system(
             action_sfx.write(ModularActionSfxEvent::new(sfx));
             sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
             sabre.technique_timer = tech.technique_time;
+            grant_iframes(&mut player_damageable, tech.iframes);
             sm.force(PlayerState::Attacking);
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.0);
             hitstop.remaining = hitstop.remaining.max(tech.hitstop);
@@ -3041,6 +3085,7 @@ fn beam_sabre_update_system(
             sabre.slash_timer = def.startup;
             sabre.slash_hits.clear();
             sabre.cooldown_timer = sabre.cooldown;
+            grant_iframes(&mut player_damageable, def.iframes);
             sm.force(PlayerState::Attacking);
         }
     }
@@ -3426,11 +3471,36 @@ mod move_def_wiring_tests {
         combo.hit_entities.insert(stale_target);
         let mut state = PlayerStateMachine::default();
 
-        let active = start_melee_move(&library, &mut combo, MeleeChain::Light, &mut state);
+        let mut damageable = Damageable::default();
+        let active = start_melee_move(
+            &library,
+            &mut combo,
+            MeleeChain::Light,
+            &mut state,
+            &mut damageable,
+        );
 
         assert!(active.is_some());
         assert!(combo.hit_entities.is_empty());
         assert_eq!(state.current, PlayerState::Attacking);
+        // Default moves author no i-frames; the shared window is untouched.
+        assert!(!damageable.is_invulnerable);
+    }
+
+    #[test]
+    fn move_iframes_extend_but_never_shorten_the_shared_window() {
+        let mut damageable = Damageable::default();
+        grant_iframes(&mut damageable, 0.0);
+        assert!(!damageable.is_invulnerable);
+
+        grant_iframes(&mut damageable, 0.28);
+        assert!(damageable.is_invulnerable);
+        assert!((damageable.invulnerability_timer - 0.28).abs() < 1e-6);
+
+        // A longer window already active (e.g. post-hit invulnerability) wins.
+        damageable.invulnerability_timer = 0.5;
+        grant_iframes(&mut damageable, 0.28);
+        assert!((damageable.invulnerability_timer - 0.5).abs() < 1e-6);
     }
 
     #[test]

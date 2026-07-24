@@ -1435,6 +1435,92 @@ fn damage_players_in_radius<
     }
 }
 
+/// EC2 enemy attack volume: resolve an enemy melee strike as a shape
+/// intersection on the Player layer (the reserved `EnemyHitbox` collision
+/// role) with an optional facing arc and a World-cover check — the same
+/// shape as the player's `execute_melee_hit`, pointed the other way. Every
+/// player inside the volume is struck (not just the closest). Returns the
+/// number of players hit.
+#[allow(clippy::too_many_arguments)]
+fn execute_enemy_melee_hit<
+    DamageFilter: bevy::ecs::query::QueryFilter,
+    PositionFilter: bevy::ecs::query::QueryFilter,
+>(
+    spatial_query: &SpatialQuery,
+    origin: Vec3,
+    forward: Vec3,
+    radius: f32,
+    arc_cos: f32,
+    damage: f32,
+    damage_type: DamageType,
+    knockback: f32,
+    player_damage_q: &mut Query<
+        (
+            &mut Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut ParryState,
+            &ArmorSet,
+        ),
+        DamageFilter,
+    >,
+    player_pos_q: &Query<(Entity, &Transform, &PlayerIndex), PositionFilter>,
+    damaged_ev: &mut MessageWriter<PlayerDamagedEvent>,
+    parry_ev: &mut MessageWriter<PlayerParryEvent>,
+) -> usize {
+    let hitbox = AvianCollider::sphere(radius.max(0.1));
+    let filter = SpatialQueryFilter::from_mask(CollisionProfile::EnemyHitbox.layers().filters);
+    let mut candidates =
+        spatial_query.shape_intersections(&hitbox, origin, Quat::IDENTITY, &filter);
+    candidates.sort_by_key(|entity| entity.to_bits());
+    candidates.dedup();
+
+    let forward = forward.with_y(0.0).normalize_or_zero();
+    let mut hit_count = 0;
+    for candidate in candidates {
+        let Ok((player_entity, player_transform, player_index)) = player_pos_q.get(candidate)
+        else {
+            continue;
+        };
+        let to_player = (player_transform.translation - origin).with_y(0.0);
+        let dist = to_player.length();
+        if arc_cos > -1.0
+            && dist > 0.01
+            && forward.length_squared() > 0.5
+            && (to_player / dist).dot(forward) < arc_cos
+        {
+            continue;
+        }
+        if !world_line_of_sight(
+            spatial_query,
+            origin + Vec3::Y * 0.7,
+            player_transform.translation + Vec3::Y * 0.7,
+            Some(player_entity),
+        ) {
+            continue;
+        }
+        if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
+            player_damage_q.get_mut(player_entity)
+        {
+            crate::plugins::player_plugin::damage_player(
+                Some(player_index.0),
+                &mut health,
+                &mut damageable,
+                &mut stats,
+                &mut parry,
+                armor,
+                &DamageInfo::new(damage, damage_type)
+                    .with_knockback(knockback)
+                    .with_hit_direction(to_player),
+                damaged_ev,
+                parry_ev,
+            );
+            hit_count += 1;
+        }
+    }
+    hit_count
+}
+
 fn damage_players_in_cone<
     DamageFilter: bevy::ecs::query::QueryFilter,
     PositionFilter: bevy::ecs::query::QueryFilter,
@@ -1542,6 +1628,7 @@ fn spawn_shockwave_vfx(
 
 // ── Attack System ─────────────────────────────────────────────────────────────
 fn enemy_attack_system(
+    spatial_query: SpatialQuery,
     player_q: Query<(Entity, &Transform, &PlayerIndex), With<Player>>,
     mut enemy_q: Query<
         (
@@ -1587,35 +1674,28 @@ fn enemy_attack_system(
             continue;
         }
 
-        let Some((player_entity, player_pos, player_index, _distance)) = closest_indexed_player(
+        // EC2 hitbox producer: the strike is a Player-layer volume around the
+        // enemy — every player inside is hit, and World cover blocks it
+        // (previously: an unconditional hit on the single closest player).
+        // knockback_force is authored on a legacy 100x scale (120-800);
+        // world knockback units run ~1-10 (player melee 3-10).
+        let hits = execute_enemy_melee_hit(
+            &spatial_query,
             e_transform.translation,
+            e_transform.forward().as_vec3(),
             enemy.config.attack_range,
+            -1.0,
+            enemy.scaled_damage(),
+            DamageType::Kinetic,
+            enemy.config.knockback_force / 100.0,
+            &mut player_damage_q,
             &player_q,
-        ) else {
-            continue;
-        };
-
-        if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
-            player_damage_q.get_mut(player_entity)
-        {
-            // knockback_force is authored on a legacy 100x scale (120-800);
-            // world knockback units run ~1-10 (player melee 3-10).
-            let shove = (player_pos - e_transform.translation).with_y(0.0);
-            crate::plugins::player_plugin::damage_player(
-                Some(player_index),
-                &mut health,
-                &mut damageable,
-                &mut stats,
-                &mut parry,
-                armor,
-                &DamageInfo::new(enemy.scaled_damage(), DamageType::Kinetic)
-                    .with_knockback(enemy.config.knockback_force / 100.0)
-                    .with_hit_direction(shove),
-                &mut damaged_ev,
-                &mut parry_ev,
-            );
+            &mut damaged_ev,
+            &mut parry_ev,
+        );
+        if hits > 0 {
+            enemy.attack_cooldown_timer = enemy.config.attack_cooldown;
         }
-        enemy.attack_cooldown_timer = enemy.config.attack_cooldown;
     }
 }
 

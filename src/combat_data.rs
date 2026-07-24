@@ -33,6 +33,11 @@ pub struct MoveDef {
     pub cancel_after: f32,
     /// Freeze-frame applied on hit (feeds `HitstopState`, still capped there).
     pub hitstop: f32,
+    /// EC2 per-move i-frames: seconds of invulnerability granted when the move
+    /// starts (0 = none). Routed through `Damageable.invulnerability_timer`,
+    /// so the shared invulnerability system clears it.
+    #[serde(default)]
+    pub iframes: f32,
 }
 
 impl MoveDef {
@@ -96,6 +101,11 @@ pub struct SabreTechniqueDef {
     pub dash_speed: f32,
     /// Downward plunge speed applied while airborne (Meteor Pound; 0 = none).
     pub plunge_speed: f32,
+    /// Seconds of invulnerability granted on activation (0 = none). Comet
+    /// Dash carries some because it claims the dodge input while the sabre
+    /// is drawn — the technique keeps a slice of the roll's defense.
+    #[serde(default)]
+    pub iframes: f32,
 }
 
 /// The three relic-unlocked sabre techniques.
@@ -215,6 +225,7 @@ impl MoveLibrary {
             recovery,
             cancel_after,
             hitstop,
+            iframes: 0.0,
         };
         Self {
             light: vec![
@@ -260,6 +271,9 @@ impl MoveLibrary {
             if def.damage <= 0.0 {
                 return Err(format!("'{}': damage must be > 0", def.name));
             }
+            if def.iframes < 0.0 {
+                return Err(format!("'{}': iframes must be >= 0", def.name));
+            }
         }
         for def in self.sabre_techniques.all() {
             if def.damage_mult <= 0.0 || def.radius <= 0.0 {
@@ -284,9 +298,10 @@ impl MoveLibrary {
                 || def.hitstop < 0.0
                 || def.dash_speed < 0.0
                 || def.plunge_speed < 0.0
+                || def.iframes < 0.0
             {
                 return Err(format!(
-                    "'{}': knockback_mult, hitstop, and speeds must be >= 0",
+                    "'{}': knockback_mult, hitstop, iframes, and speeds must be >= 0",
                     def.name
                 ));
             }
@@ -339,6 +354,7 @@ fn default_sabre_chain() -> Vec<MoveDef> {
         recovery: 0.12,
         cancel_after: 0.0,
         hitstop: 0.0,
+        iframes: 0.0,
     }]
 }
 
@@ -360,6 +376,7 @@ fn default_sabre_techniques() -> SabreTechniqueDefs {
             hitstop: 0.055,
             dash_speed: 0.0,
             plunge_speed: 0.0,
+            iframes: 0.0,
         },
         comet_dash: SabreTechniqueDef {
             name: "Comet Dash".to_string(),
@@ -374,6 +391,9 @@ fn default_sabre_techniques() -> SabreTechniqueDefs {
             hitstop: 0.06,
             dash_speed: 1.78,
             plunge_speed: 0.0,
+            // The dash claims the dodge input while the sabre is drawn, so it
+            // keeps a slice of the roll's defensive window (roll ≈ 0.35 s).
+            iframes: 0.28,
         },
         meteor_pound: SabreTechniqueDef {
             name: "Meteor Pound".to_string(),
@@ -388,6 +408,7 @@ fn default_sabre_techniques() -> SabreTechniqueDefs {
             hitstop: 0.06,
             dash_speed: 0.0,
             plunge_speed: 1.85,
+            iframes: 0.0,
         },
     }
 }

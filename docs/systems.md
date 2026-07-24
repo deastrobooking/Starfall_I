@@ -810,8 +810,13 @@ World-cover check. This removes the every-enemy candidate scan. Player combo
 hitboxes remain live throughout the authored active window, follow the current
 attack origin, and retain a per-move target set so each hurtbox resolves once.
 Star Sabre slashes run the same persistent lifecycle as of 2026-07-24
-(`BeamSabre.slash_phase`/`slash_hits`); enemy attack-volume producers remain
-EC2 work.
+(`BeamSabre.slash_phase`/`slash_hits`). Enemy melee is also volume-based now:
+`execute_enemy_melee_hit` intersects a Player-layer sphere (the `EnemyHitbox`
+collision role), supports a facing arc, respects World cover, and strikes
+every player inside — replacing the unconditional closest-player range check.
+Moves and sabre techniques may author `iframes` (seconds of invulnerability
+granted at move start through the shared invulnerability timer; Comet Dash
+ships 0.28 s because it claims the dodge input while the sabre is drawn).
 
 **Hit reactions (2026-07, EC2 first slice):** landed hits now produce bounded
 **hitstop** (`src/hitstop.rs`: 28–90 ms scaled by damage, max-not-sum, drains

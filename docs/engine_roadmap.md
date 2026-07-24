@@ -222,9 +222,14 @@ persistent hit window and per-slash target dedup (`BeamSabre.slash_phase` /
 now carries knockback (melee contact uses the `EnemyConfig.knockback_force`
 stat ÷100; projectiles/beams 2.2; blasts falloff-scaled), drained by
 `player_knockback_intake` into a decaying shove the motor integrates through
-the character controller. Remaining EC2: enemy hitbox producers, separate
-pushbox/grapple/interaction colliders,
-`MoveDef` expansion, and per-move i-frames.
+the character controller. **Per-move i-frames + enemy attack volumes
+(2026-07-24):** `MoveDef`/`SabreTechniqueDef` gained an authored `iframes`
+window (granted through the shared invulnerability timer; Comet Dash ships
+0.28 s since it claims the dodge input), and `enemy_attack_system` now
+resolves melee as a Player-layer shape intersection with World-cover check
+via `execute_enemy_melee_hit` (all players in the volume, not just the
+closest). Remaining EC2: separate pushbox/grapple/interaction colliders and
+`MoveDef` expansion.
 **Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
 synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no
@@ -243,8 +248,9 @@ fallback); `melee_combo_system` rebuilt as a Startup→Active→Recovery phase
 machine with cancel-window chaining and per-move hitstop. Loot drops tiered by
 enemy type (champion = guaranteed core + extra rolls). MoveDefs for
 sabre/ranged and the sabre technique defs have since landed in
-`src/combat_data.rs`; player-received knockback landed 2026-07-24. Remaining
-EC2: the remaining move-scoped collision roles and per-move i-frames.
+`src/combat_data.rs`; player-received knockback and per-move i-frames landed
+2026-07-24. Remaining EC2: the remaining move-scoped collision roles
+(pushbox/grapple/interaction split).
 **Boss variety (2026-07-15):** RiftBoss + MechBoss controllers
 (`enemy_plugin.rs`, components in `enemy.rs` with shared `boss_phase()`)
 close gameplay-review item #3 — all boss factions mechanically distinct.
