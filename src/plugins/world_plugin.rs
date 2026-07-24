@@ -2342,7 +2342,9 @@ fn laser_turret_system(
                     &mut stats,
                     &mut parry,
                     armor,
-                    &DamageInfo::new(turret.damage, DamageType::Laser),
+                    &DamageInfo::new(turret.damage, DamageType::Laser)
+                        .with_knockback(2.2)
+                        .with_hit_direction((aim - muzzle).normalize_or_zero()),
                     &mut damaged_ev,
                     &mut parry_ev,
                 );

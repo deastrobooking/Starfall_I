@@ -794,7 +794,13 @@ now matters per faction.
 `Damageable.pending_knockback`; `enemy_plugin::apply_enemy_knockback` drains it
 as an exponentially-decaying shove (~0.25 s). Wired: projectiles (2.2),
 explosions (falloff-scaled 1.0–5.5), melee combos (authored table values),
-sabre slashes (3.0). Player-receiving knockback is not yet drained (EC2).
+sabre slashes (3.0). Players receive knockback too (2026-07-24): enemy melee
+contact (the `EnemyConfig.knockback_force` stat, ÷100 to world scale), enemy
+lasers and turret beams (2.2 along the shot), fireball splash and boss
+shockwaves (falloff-scaled radial 3.5–5.5), and dragon breath (falloff-scaled
+4.0). `player_knockback_intake` drains `Damageable.pending_knockback` into a
+horizontal decaying shove that the motor integrates through the character
+controller, so knockback respects walls instead of teleporting the player.
 
 **Melee collision roles (2026-07):** canonical PlayerHitbox, EnemyHitbox,
 Pushbox, and GrappleSensor layers now complement body/hurtbox and projectile

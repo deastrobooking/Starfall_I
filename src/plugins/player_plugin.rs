@@ -339,6 +339,7 @@ impl Plugin for PlayerPlugin {
             .add_systems(
                 Update,
                 (
+                    player_knockback_intake,
                     player_dodge_update,
                     player_parry_update,
                     player_state_update,
@@ -2581,7 +2582,17 @@ fn player_movement(
             state.force(PlayerState::Grappling);
         }
 
-        let translation = (h_vel + Vec3::new(0.0, movement.velocity.y, 0.0)) * dt * 60.0;
+        let mut translation = (h_vel + Vec3::new(0.0, movement.velocity.y, 0.0)) * dt * 60.0;
+        if movement.knockback_velocity.length_squared() > 1e-4 {
+            // Received-knockback shove (world-units/sec): same decay tuning as
+            // the enemy drain, but integrated through the controller so the
+            // shove respects collisions instead of teleporting the transform.
+            translation += movement.knockback_velocity * dt;
+            movement.knockback_velocity *= (-dt * 9.0).exp();
+            if movement.knockback_velocity.length_squared() < 1e-4 {
+                movement.knockback_velocity = Vec3::ZERO;
+            }
+        }
         if sim.fixed_motor {
             movement.motor_accum += translation;
         } else {
@@ -3262,6 +3273,28 @@ fn grapple_hook_impact_system(
 }
 
 // ── Dodge Update ──────────────────────────────────────────────────────────────
+/// Impulse → shove conversion for player-received knockback. Matches the
+/// enemy drain's 2.4× impulse-to-velocity scale; flattened so gravity and the
+/// grounded logic keep owning vertical motion.
+fn received_knockback_shove(pending: Vec3) -> Vec3 {
+    (pending * 2.4).with_y(0.0)
+}
+
+/// EC2: drain `Damageable.pending_knockback` (accumulated by `apply_damage`
+/// on every damage path) into the motor's decaying shove. Runs in `Motor`
+/// before the state machine so a shoved player reacts the same frame.
+fn player_knockback_intake(
+    mut player_q: Query<(&mut Damageable, &mut PlayerMovement), With<Player>>,
+) {
+    for (mut damageable, mut movement) in player_q.iter_mut() {
+        if damageable.pending_knockback.length_squared() < 1e-6 {
+            continue;
+        }
+        movement.knockback_velocity += received_knockback_shove(damageable.pending_knockback);
+        damageable.pending_knockback = Vec3::ZERO;
+    }
+}
+
 fn player_dodge_update(
     time: Res<Time>,
     mut player_q: Query<
@@ -3587,6 +3620,20 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_knockback_shove_scales_and_stays_horizontal() {
+        // Matches the enemy drain's 2.4x impulse-to-velocity conversion.
+        let shove = received_knockback_shove(Vec3::new(3.0, 5.0, -4.0));
+        assert!((shove.x - 7.2).abs() < 1e-5);
+        assert!((shove.z + 9.6).abs() < 1e-5);
+        // Vertical impulse is dropped: gravity and grounded logic own Y.
+        assert_eq!(shove.y, 0.0);
+        // The decay in player_movement uses exp(-9 dt): after ~0.25 s the
+        // shove is down to ~10%, mirroring apply_enemy_knockback's feel.
+        let decayed = shove * (-0.25_f32 * 9.0).exp();
+        assert!(decayed.length() < shove.length() * 0.12);
+    }
 
     #[test]
     fn hoverboard_landing_assist_eases_descent_near_the_surface() {

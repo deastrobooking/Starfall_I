@@ -826,6 +826,7 @@ fn dragon_boss_system(
                 0.82,
                 enemy.scaled_damage() * (0.28 + phase * 0.08),
                 DamageType::Fire,
+                4.0,
                 &mut player_damage_q,
                 &player_pos_q,
                 &mut damaged_ev,
@@ -844,6 +845,7 @@ fn dragon_boss_system(
                 radius,
                 enemy.scaled_damage() * (0.20 + phase * 0.06),
                 DamageType::Collision,
+                5.5,
                 &mut player_damage_q,
                 &player_pos_q,
                 &mut damaged_ev,
@@ -1079,6 +1081,7 @@ fn mech_boss_system(
                     radius,
                     enemy.scaled_damage() * (0.24 + phase * 0.07),
                     DamageType::Collision,
+                    5.5,
                     &mut player_damage_q,
                     &player_pos_q,
                     &mut damaged_ev,
@@ -1233,6 +1236,8 @@ fn enemy_projectile_update_system(
                         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
                             player_damage_q.get_mut(player_entity)
                         {
+                            // Mirror the player projectile knockback (2.2),
+                            // shoving along the shot's travel direction.
                             crate::plugins::player_plugin::damage_player(
                                 Some(player_index),
                                 &mut health,
@@ -1240,7 +1245,9 @@ fn enemy_projectile_update_system(
                                 &mut stats,
                                 &mut parry,
                                 armor,
-                                &DamageInfo::new(projectile.damage, DamageType::Laser),
+                                &DamageInfo::new(projectile.damage, DamageType::Laser)
+                                    .with_knockback(2.2)
+                                    .with_hit_direction(projectile.direction),
                                 &mut damaged_ev,
                                 &mut parry_ev,
                             );
@@ -1262,6 +1269,7 @@ fn enemy_projectile_update_system(
                         radius,
                         projectile.damage,
                         DamageType::Fire,
+                        3.5,
                         &mut player_damage_q,
                         &player_pos_q,
                         &mut damaged_ev,
@@ -1375,6 +1383,7 @@ fn damage_players_in_radius<
     radius: f32,
     damage: f32,
     damage_type: DamageType,
+    knockback: f32,
     player_damage_q: &mut Query<
         (
             &mut Health,
@@ -1403,6 +1412,9 @@ fn damage_players_in_radius<
             continue;
         }
         let falloff = 1.0 - (dist / radius).clamp(0.0, 0.8);
+        // Blast shove pushes radially out from the center, falloff-scaled
+        // like the damage (mirrors player-dealt explosion knockback).
+        let shove = (player_transform.translation - center).with_y(0.0);
         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
             player_damage_q.get_mut(player_entity)
         {
@@ -1413,7 +1425,9 @@ fn damage_players_in_radius<
                 &mut stats,
                 &mut parry,
                 armor,
-                &DamageInfo::new(damage * falloff, damage_type),
+                &DamageInfo::new(damage * falloff, damage_type)
+                    .with_knockback(knockback * falloff)
+                    .with_hit_direction(shove),
                 damaged_ev,
                 parry_ev,
             );
@@ -1431,6 +1445,7 @@ fn damage_players_in_cone<
     min_dot: f32,
     damage: f32,
     damage_type: DamageType,
+    knockback: f32,
     player_damage_q: &mut Query<
         (
             &mut Health,
@@ -1459,6 +1474,8 @@ fn damage_players_in_cone<
             continue;
         }
         let falloff = 1.0 - (dist / range).clamp(0.0, 0.7);
+        // Beam/breath shove pushes away from the emitter, falloff-scaled.
+        let shove = (to_player / dist).with_y(0.0);
         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
             player_damage_q.get_mut(player_entity)
         {
@@ -1469,7 +1486,9 @@ fn damage_players_in_cone<
                 &mut stats,
                 &mut parry,
                 armor,
-                &DamageInfo::new(damage * falloff, damage_type),
+                &DamageInfo::new(damage * falloff, damage_type)
+                    .with_knockback(knockback * falloff)
+                    .with_hit_direction(shove),
                 damaged_ev,
                 parry_ev,
             );
@@ -1568,7 +1587,7 @@ fn enemy_attack_system(
             continue;
         }
 
-        let Some((player_entity, _player_pos, player_index, _distance)) = closest_indexed_player(
+        let Some((player_entity, player_pos, player_index, _distance)) = closest_indexed_player(
             e_transform.translation,
             enemy.config.attack_range,
             &player_q,
@@ -1579,6 +1598,9 @@ fn enemy_attack_system(
         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
             player_damage_q.get_mut(player_entity)
         {
+            // knockback_force is authored on a legacy 100x scale (120-800);
+            // world knockback units run ~1-10 (player melee 3-10).
+            let shove = (player_pos - e_transform.translation).with_y(0.0);
             crate::plugins::player_plugin::damage_player(
                 Some(player_index),
                 &mut health,
@@ -1586,7 +1608,9 @@ fn enemy_attack_system(
                 &mut stats,
                 &mut parry,
                 armor,
-                &DamageInfo::new(enemy.scaled_damage(), DamageType::Kinetic),
+                &DamageInfo::new(enemy.scaled_damage(), DamageType::Kinetic)
+                    .with_knockback(enemy.config.knockback_force / 100.0)
+                    .with_hit_direction(shove),
                 &mut damaged_ev,
                 &mut parry_ev,
             );

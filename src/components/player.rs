@@ -210,6 +210,12 @@ pub struct PlayerMovement {
     /// here and flushed to the physics controller once per frame (physics steps
     /// per-frame, so we must not overwrite/double-apply). Unused in `Update` mode.
     pub motor_accum: Vec3,
+    /// EC2 received knockback: shove in world-units/sec, filled from
+    /// `Damageable.pending_knockback` by `player_knockback_intake` and
+    /// integrated + exponentially decayed by the motor (mirrors the enemy
+    /// drain in `apply_enemy_knockback`, but resolves through the character
+    /// controller so walls still stop the player).
+    pub knockback_velocity: Vec3,
 }
 
 impl Default for PlayerMovement {
@@ -245,6 +251,7 @@ impl Default for PlayerMovement {
             is_grounded: true,
             ground_velocity: Vec3::ZERO,
             motor_accum: Vec3::ZERO,
+            knockback_velocity: Vec3::ZERO,
         }
     }
 }

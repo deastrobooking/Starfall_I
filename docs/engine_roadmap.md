@@ -218,9 +218,13 @@ Star Sabre slashes now run the same Startup→Active→Recovery machine with a
 persistent hit window and per-slash target dedup (`BeamSabre.slash_phase` /
 `slash_hits`), and the three relic techniques are authored as
 `SabreTechniqueDef` data in `moves.json` instead of hardcoded multipliers.
-Remaining EC2: enemy hitbox producers, separate
+**Player-received knockback (2026-07-24):** every enemy→player damage path
+now carries knockback (melee contact uses the `EnemyConfig.knockback_force`
+stat ÷100; projectiles/beams 2.2; blasts falloff-scaled), drained by
+`player_knockback_intake` into a decaying shove the motor integrates through
+the character controller. Remaining EC2: enemy hitbox producers, separate
 pushbox/grapple/interaction colliders,
-`MoveDef` expansion, per-move i-frames, and player-received knockback.
+`MoveDef` expansion, and per-move i-frames.
 **Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
 synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no
@@ -239,8 +243,8 @@ fallback); `melee_combo_system` rebuilt as a Startup→Active→Recovery phase
 machine with cancel-window chaining and per-move hitstop. Loot drops tiered by
 enemy type (champion = guaranteed core + extra rolls). MoveDefs for
 sabre/ranged and the sabre technique defs have since landed in
-`src/combat_data.rs`. Remaining EC2: the remaining move-scoped collision
-roles, per-move i-frames, and player-received knockback.
+`src/combat_data.rs`; player-received knockback landed 2026-07-24. Remaining
+EC2: the remaining move-scoped collision roles and per-move i-frames.
 **Boss variety (2026-07-15):** RiftBoss + MechBoss controllers
 (`enemy_plugin.rs`, components in `enemy.rs` with shared `boss_phase()`)
 close gameplay-review item #3 — all boss factions mechanically distinct.
