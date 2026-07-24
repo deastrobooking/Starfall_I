@@ -2004,6 +2004,7 @@ fn melee_combo_system(
             &PlayerCameraRef,
             &ArmorSet,
             &PlayerProgression,
+            Option<&BeamSabre>,
         ),
         With<Player>,
     >,
@@ -2018,7 +2019,7 @@ fn melee_combo_system(
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_transform, mut combo, mut sm, pi, cam_ref, armor, progression) in
+    for (player_transform, mut combo, mut sm, pi, cam_ref, armor, progression, sabre) in
         player_q.iter_mut()
     {
         let upgrades = &progression.upgrades;
@@ -2032,7 +2033,7 @@ fn melee_combo_system(
         if pi.melee_light {
             combo.buffered_light = true;
         }
-        if pi.melee_heavy {
+        if pi.melee_heavy && !sabre_claims_heavy_input(sabre, upgrades) {
             combo.buffered_heavy = true;
         }
 
@@ -2208,6 +2209,14 @@ fn melee_combo_system(
             combo.active = start_melee_move(&library, &mut combo, MeleeChain::Heavy, &mut sm);
         }
     }
+}
+
+/// While the Star Sabre is drawn and Cyclone Slash is owned, heavy input is
+/// the cyclone verb — the fist Heavy chain must not also consume the press.
+/// This is deliberately independent of the cyclone's cooldown so the outcome
+/// does not depend on system ordering between the melee and sabre systems.
+fn sabre_claims_heavy_input(sabre: Option<&BeamSabre>, upgrades: &UpgradeLedger) -> bool {
+    sabre.is_some_and(|s| s.active) && upgrades.sabre_spin_unlocked()
 }
 
 /// Begin a move's startup phase from the chain's current index.
@@ -2791,62 +2800,113 @@ fn beam_sabre_update_system(
             sabre.technique = SabreTechnique::Ready;
         }
 
+        // ── Slash lifecycle: the same Startup→Active→Recovery machine as the
+        // melee chains, with a persistent hit window and per-slash target
+        // dedup. The chain auto-advances through the level-scaled slash count.
         if sabre.is_slashing {
+            let Some(def) = library.sabre_slash(sabre.slash_index as usize) else {
+                sabre.is_slashing = false;
+                sabre.slash_index = 0;
+                sm.transition(PlayerState::Idle);
+                continue;
+            };
+            let radius = if dungeon.active { 6.4 } else { 4.6 };
+            let offset = if dungeon.active { 2.5 } else { 3.1 };
+            let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
+            let damage = def.damage * slash_scale * armor_damage_mult;
             sabre.slash_timer -= dt;
-            if sabre.slash_timer <= 0.0 {
-                sabre.slash_index += 1;
-                if sabre.slash_index < sabre.slash_count {
-                    let Some(def) = library.sabre_slash(sabre.slash_index as usize) else {
-                        sabre.is_slashing = false;
-                        sabre.slash_index = 0;
-                        sm.transition(PlayerState::Idle);
-                        continue;
-                    };
-                    let radius = if dungeon.active { 6.4 } else { 4.6 };
-                    let offset = if dungeon.active { 2.5 } else { 3.1 };
-                    let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
-                    execute_melee_hit(
+            match sabre.slash_phase {
+                MeleePhase::Startup => {
+                    if sabre.slash_timer <= 0.0 {
+                        // The strike lands at the start of the active window.
+                        execute_melee_hit(
+                            &spatial_query,
+                            origin,
+                            fwd,
+                            radius,
+                            offset,
+                            arc_cos,
+                            damage,
+                            blade_damage_type,
+                            def.knockback,
+                            Some(&mut sabre.slash_hits),
+                            &mut enemy_q,
+                            &mut damaged_ev,
+                            &mut killed_ev,
+                        );
+                        let completed_slashes = sabre.slash_index + 1;
+                        if let Some(profile) =
+                            sabre_wave_profile(&sabre, upgrades, completed_slashes)
+                        {
+                            action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
+                            spawn_sabre_wave_attack(
+                                &mut commands,
+                                &proj_assets,
+                                upgrades,
+                                &library.sabre_wave,
+                                profile,
+                                origin,
+                                fwd,
+                                cam.right().as_vec3().with_y(0.0).normalize_or_zero(),
+                                entity,
+                                wave_scale * armor_damage_mult,
+                                wave_damage_type,
+                                dungeon.active,
+                                &mut active_vfx,
+                                vfx_budget.max_entities,
+                            );
+                        }
+                        spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.1);
+                        hitstop.remaining = hitstop.remaining.max(def.hitstop);
+                        sabre.slash_phase = MeleePhase::Active;
+                        sabre.slash_timer = def.active;
+                    }
+                }
+                MeleePhase::Active => {
+                    // The window persists: enemies stepping into the arc are
+                    // struck, while `slash_hits` keeps one hit per target.
+                    let new_hits = execute_melee_hit(
                         &spatial_query,
                         origin,
                         fwd,
                         radius,
                         offset,
                         arc_cos,
-                        def.damage * slash_scale * armor_damage_mult,
+                        damage,
                         blade_damage_type,
                         def.knockback,
-                        None,
+                        Some(&mut sabre.slash_hits),
                         &mut enemy_q,
                         &mut damaged_ev,
                         &mut killed_ev,
                     );
-                    let completed_slashes = sabre.slash_index + 1;
-                    if let Some(profile) = sabre_wave_profile(&sabre, upgrades, completed_slashes) {
-                        action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
-                        spawn_sabre_wave_attack(
-                            &mut commands,
-                            &proj_assets,
-                            upgrades,
-                            &library.sabre_wave,
-                            profile,
-                            origin,
-                            fwd,
-                            cam.right().as_vec3().with_y(0.0).normalize_or_zero(),
-                            entity,
-                            wave_scale * armor_damage_mult,
-                            wave_damage_type,
-                            dungeon.active,
-                            &mut active_vfx,
-                            vfx_budget.max_entities,
-                        );
+                    if new_hits > 0 {
+                        hitstop.remaining = hitstop.remaining.max(def.hitstop);
                     }
-                    spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.1);
-                    hitstop.remaining = hitstop.remaining.max(def.hitstop);
-                    sabre.slash_timer = def.total_duration();
-                } else {
-                    sabre.is_slashing = false;
-                    sabre.slash_index = 0;
-                    sm.transition(PlayerState::Idle);
+                    if sabre.slash_timer <= 0.0 {
+                        sabre.slash_phase = MeleePhase::Recovery;
+                        sabre.slash_timer = def.recovery;
+                    }
+                }
+                MeleePhase::Recovery => {
+                    if sabre.slash_timer <= 0.0 {
+                        sabre.slash_index += 1;
+                        match library
+                            .sabre_slash(sabre.slash_index as usize)
+                            .filter(|_| sabre.slash_index < sabre.slash_count)
+                        {
+                            Some(next) => {
+                                sabre.slash_hits.clear();
+                                sabre.slash_phase = MeleePhase::Startup;
+                                sabre.slash_timer = next.startup;
+                            }
+                            None => {
+                                sabre.is_slashing = false;
+                                sabre.slash_index = 0;
+                                sm.transition(PlayerState::Idle);
+                            }
+                        }
+                    }
                 }
             }
             continue;
@@ -2859,23 +2919,26 @@ fn beam_sabre_update_system(
             let Some(def) = library.sabre_slash(0) else {
                 continue;
             };
-            execute_melee_hit(
-                &spatial_query,
-                origin,
-                fwd,
-                5.4,
-                0.0,
-                -1.0,
-                def.damage * slash_scale * armor_damage_mult * 1.45,
-                blade_damage_type,
-                def.knockback * 1.35,
-                None,
-                &mut enemy_q,
-                &mut damaged_ev,
-                &mut killed_ev,
-            );
-            sabre.cooldown_timer = sabre.cooldown * 1.15;
-            sabre.technique_timer = 0.48;
+            let tech = &library.sabre_techniques.cyclone_slash;
+            for strike in &tech.strikes {
+                execute_melee_hit(
+                    &spatial_query,
+                    origin + fwd * *strike,
+                    fwd,
+                    tech.radius,
+                    tech.hit_offset,
+                    tech.arc_cos,
+                    def.damage * slash_scale * armor_damage_mult * tech.damage_mult,
+                    blade_damage_type,
+                    def.knockback * tech.knockback_mult,
+                    None,
+                    &mut enemy_q,
+                    &mut damaged_ev,
+                    &mut killed_ev,
+                );
+            }
+            sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
+            sabre.technique_timer = tech.technique_time;
             sabre.technique = SabreTechnique::CycloneSlash;
             sm.force(PlayerState::Attacking);
             spawn_sabre_technique_vfx(
@@ -2889,7 +2952,7 @@ fn beam_sabre_update_system(
                 vfx_budget.max_entities,
             );
             spawn_melee_flash(&mut commands, &proj_assets, origin);
-            hitstop.remaining = hitstop.remaining.max(0.055);
+            hitstop.remaining = hitstop.remaining.max(tech.hitstop);
             action_sfx.write(ModularActionSfxEvent::new("sabre.cyclone"));
             continue;
         }
@@ -2897,77 +2960,67 @@ fn beam_sabre_update_system(
         if pi.dodge
             && traversal.active != TraversalMode::Hoverboard
             && sabre.cooldown_timer <= 0.0
-            && (upgrades.sabre_dash_unlocked() || upgrades.sabre_pound_unlocked())
+            && upgrades.sabre_dodge_technique_applicable(movement.is_grounded)
         {
             let Some(def) = library.sabre_slash(0) else {
                 continue;
             };
-            if !movement.is_grounded && upgrades.sabre_pound_unlocked() {
-                movement.velocity.y = -1.85;
+            // The gate above guarantees one of these applies: Meteor Pound
+            // while airborne with its blueprint, otherwise Comet Dash.
+            let (technique, tech, sfx) = if !movement.is_grounded && upgrades.sabre_pound_unlocked()
+            {
+                (
+                    SabreTechnique::MeteorPound,
+                    &library.sabre_techniques.meteor_pound,
+                    "sabre.meteor_pound",
+                )
+            } else {
+                (
+                    SabreTechnique::CometDash,
+                    &library.sabre_techniques.comet_dash,
+                    "sabre.comet_dash",
+                )
+            };
+            if tech.plunge_speed > 0.0 {
+                movement.velocity.y = -tech.plunge_speed;
+            }
+            if tech.dash_speed > 0.0 {
+                movement.ground_velocity = fwd * tech.dash_speed;
+            }
+            for strike in &tech.strikes {
                 execute_melee_hit(
                     &spatial_query,
-                    origin,
+                    origin + fwd * *strike,
                     fwd,
-                    5.0,
-                    0.0,
-                    -1.0,
-                    def.damage * slash_scale * armor_damage_mult * 1.75,
+                    tech.radius,
+                    tech.hit_offset,
+                    tech.arc_cos,
+                    def.damage * slash_scale * armor_damage_mult * tech.damage_mult,
                     blade_damage_type,
-                    def.knockback * 1.8,
+                    def.knockback * tech.knockback_mult,
                     None,
                     &mut enemy_q,
                     &mut damaged_ev,
                     &mut killed_ev,
                 );
-                sabre.technique = SabreTechnique::MeteorPound;
-                spawn_sabre_technique_vfx(
-                    &mut commands,
-                    &proj_assets,
-                    upgrades,
-                    SabreTechnique::MeteorPound,
-                    origin,
-                    fwd,
-                    &mut active_vfx,
-                    vfx_budget.max_entities,
-                );
-                action_sfx.write(ModularActionSfxEvent::new("sabre.meteor_pound"));
-            } else if upgrades.sabre_dash_unlocked() {
-                movement.ground_velocity = fwd * 1.78;
-                for dash_offset in [1.8, 4.8] {
-                    execute_melee_hit(
-                        &spatial_query,
-                        origin + fwd * dash_offset,
-                        fwd,
-                        3.6,
-                        0.8,
-                        -0.15,
-                        def.damage * slash_scale * armor_damage_mult * 0.92,
-                        blade_damage_type,
-                        def.knockback,
-                        None,
-                        &mut enemy_q,
-                        &mut damaged_ev,
-                        &mut killed_ev,
-                    );
-                }
-                sabre.technique = SabreTechnique::CometDash;
-                spawn_sabre_technique_vfx(
-                    &mut commands,
-                    &proj_assets,
-                    upgrades,
-                    SabreTechnique::CometDash,
-                    origin,
-                    fwd,
-                    &mut active_vfx,
-                    vfx_budget.max_entities,
-                );
-                action_sfx.write(ModularActionSfxEvent::new("sabre.comet_dash"));
             }
-            sabre.cooldown_timer = sabre.cooldown * 1.35;
-            sabre.technique_timer = 0.42;
+            sabre.technique = technique;
+            spawn_sabre_technique_vfx(
+                &mut commands,
+                &proj_assets,
+                upgrades,
+                technique,
+                origin,
+                fwd,
+                &mut active_vfx,
+                vfx_budget.max_entities,
+            );
+            action_sfx.write(ModularActionSfxEvent::new(sfx));
+            sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
+            sabre.technique_timer = tech.technique_time;
             sm.force(PlayerState::Attacking);
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.0);
-            hitstop.remaining = hitstop.remaining.max(0.06);
+            hitstop.remaining = hitstop.remaining.max(tech.hitstop);
             continue;
         }
 
@@ -2975,32 +3028,15 @@ fn beam_sabre_update_system(
             let Some(def) = library.sabre_slash(0) else {
                 continue;
             };
+            // Begin the first slash's startup; the strike itself lands when
+            // the lifecycle above reaches the active window.
             sabre.is_slashing = true;
             sabre.slash_index = 0;
+            sabre.slash_phase = MeleePhase::Startup;
+            sabre.slash_timer = def.startup;
+            sabre.slash_hits.clear();
             sabre.cooldown_timer = sabre.cooldown;
-            sabre.slash_timer = def.total_duration();
             sm.force(PlayerState::Attacking);
-
-            let radius = if dungeon.active { 6.4 } else { 4.6 };
-            let offset = if dungeon.active { 2.5 } else { 3.1 };
-            let arc_cos = if dungeon.active { -0.40 } else { 0.10 };
-            execute_melee_hit(
-                &spatial_query,
-                origin,
-                fwd,
-                radius,
-                offset,
-                arc_cos,
-                def.damage * slash_scale * armor_damage_mult,
-                blade_damage_type,
-                def.knockback,
-                None,
-                &mut enemy_q,
-                &mut damaged_ev,
-                &mut killed_ev,
-            );
-            spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.1);
-            hitstop.remaining = hitstop.remaining.max(def.hitstop);
         }
     }
 }
@@ -3008,6 +3044,7 @@ fn beam_sabre_update_system(
 fn sync_sabre_blade_visual(
     mut commands: Commands,
     assets: Res<ProjectileAssets>,
+    library: Res<MoveLibrary>,
     player_q: Query<(Entity, &GlobalTransform, &BeamSabre), With<Player>>,
     mut visual_q: Query<(Entity, &SabreBladeVisual, &mut Transform), Without<Player>>,
 ) {
@@ -3022,7 +3059,7 @@ fn sync_sabre_blade_visual(
             continue;
         }
         represented.push((visual.owner, visual.layer));
-        *transform = sabre_blade_transform(player_transform, sabre, visual.layer);
+        *transform = sabre_blade_transform(player_transform, sabre, &library, visual.layer);
     }
 
     for (player_entity, player_transform, sabre) in player_q.iter() {
@@ -3041,7 +3078,7 @@ fn sync_sabre_blade_visual(
                 EnergyPbrBundle {
                     mesh: Mesh3d(assets.sphere_sm.clone()),
                     material: MeshMaterial3d(material),
-                    transform: sabre_blade_transform(player_transform, sabre, layer),
+                    transform: sabre_blade_transform(player_transform, sabre, &library, layer),
                     ..default()
                 },
                 SabreBladeVisual {
@@ -3056,16 +3093,20 @@ fn sync_sabre_blade_visual(
 fn sabre_blade_transform(
     player: &GlobalTransform,
     sabre: &BeamSabre,
+    library: &MoveLibrary,
     layer: SabreBladeLayer,
 ) -> Transform {
     let forward = player.forward().as_vec3().with_y(0.0).normalize_or_zero();
     let right = player.right().as_vec3().with_y(0.0).normalize_or_zero();
-    let technique_spin = if sabre.technique_timer > 0.0
-        && matches!(
-            sabre.technique,
-            SabreTechnique::CycloneSlash | SabreTechnique::CometDash
-        ) {
-        (1.0 - sabre.technique_timer / 0.48).clamp(0.0, 1.0) * std::f32::consts::TAU
+    // Normalize the spin by the firing technique's authored duration so the
+    // blade completes exactly one revolution over the technique window.
+    let spin_time = match sabre.technique {
+        SabreTechnique::CycloneSlash => library.sabre_techniques.cyclone_slash.technique_time,
+        SabreTechnique::CometDash => library.sabre_techniques.comet_dash.technique_time,
+        _ => 0.0,
+    };
+    let technique_spin = if sabre.technique_timer > 0.0 && spin_time > 0.0 {
+        (1.0 - sabre.technique_timer / spin_time).clamp(0.0, 1.0) * std::f32::consts::TAU
     } else {
         0.0
     };
@@ -3345,6 +3386,32 @@ mod tracking_missile_tests {
 #[cfg(test)]
 mod move_def_wiring_tests {
     use super::*;
+
+    #[test]
+    fn drawn_sabre_with_cyclone_relic_claims_heavy_input() {
+        let mut upgrades = UpgradeLedger::default();
+        let mut sabre = BeamSabre {
+            active: true,
+            ..Default::default()
+        };
+
+        // Without the Cyclone Slash blueprint the fist chain keeps heavy.
+        assert!(!sabre_claims_heavy_input(Some(&sabre), &upgrades));
+
+        upgrades.unlock_relic("cyclone_slash_blueprint");
+        assert!(sabre_claims_heavy_input(Some(&sabre), &upgrades));
+
+        // Holstered (or absent) sabre never claims it, even with the relic.
+        sabre.active = false;
+        assert!(!sabre_claims_heavy_input(Some(&sabre), &upgrades));
+        assert!(!sabre_claims_heavy_input(None, &upgrades));
+
+        // Cooldown state must not affect the claim: the gate has to agree
+        // between systems regardless of which one ran first this frame.
+        sabre.active = true;
+        sabre.cooldown_timer = 10.0;
+        assert!(sabre_claims_heavy_input(Some(&sabre), &upgrades));
+    }
 
     #[test]
     fn starting_a_melee_move_clears_the_previous_active_window_hits() {

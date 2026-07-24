@@ -2,7 +2,7 @@
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
-use crate::combat_data::ActiveMelee;
+use crate::combat_data::{ActiveMelee, MeleePhase};
 use serde::{Deserialize, Serialize};
 
 // ── Weapon Type ───────────────────────────────────────────────────────────────
@@ -469,6 +469,12 @@ pub struct BeamSabre {
     pub slash_timer: f32,
     pub slash_index: u32,
     pub is_slashing: bool,
+    /// Startup/Active/Recovery progress of the current slash; `slash_timer`
+    /// counts down the current phase (EC2 lifecycle, same shape as `ActiveMelee`).
+    pub slash_phase: MeleePhase,
+    /// Enemies already struck by the current slash's active window, so a
+    /// multi-tick window never double-hits the same target.
+    pub slash_hits: EntityHashSet,
     pub technique_timer: f32,
     pub technique: SabreTechnique,
 }
@@ -501,6 +507,8 @@ impl Default for BeamSabre {
             slash_timer: 0.0,
             slash_index: 0,
             is_slashing: false,
+            slash_phase: MeleePhase::Startup,
+            slash_hits: EntityHashSet::default(),
             technique_timer: 0.0,
             technique: SabreTechnique::Ready,
         }

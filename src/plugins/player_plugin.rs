@@ -3268,13 +3268,14 @@ fn player_dodge_update(
             &mut PlayerStateMachine,
             &PlayerInput,
             &PlayerProgression,
+            Option<(&BeamSabre, &PlayerMovement, &TraversalModeState)>,
         ),
         With<Player>,
     >,
     mut dodge_ev: MessageWriter<PlayerDodgeEvent>,
 ) {
     let dt = time.delta_secs();
-    for (mut dodge, mut stats, mut damageable, transform, mut state, pi, progression) in
+    for (mut dodge, mut stats, mut damageable, transform, mut state, pi, progression, sabre_ctx) in
         player_q.iter_mut()
     {
         dodge.cooldown_timer = (dodge.cooldown_timer - dt).max(0.0);
@@ -3290,7 +3291,21 @@ fn player_dodge_update(
             }
         }
 
+        // While the Star Sabre is drawn and a dodge technique (Comet Dash /
+        // Meteor Pound) applies to the current stance, the dodge press belongs
+        // to `beam_sabre_update_system` — suppress the roll so one press never
+        // fires both. Deliberately independent of the technique cooldown so the
+        // outcome does not depend on cross-plugin system ordering.
+        let sabre_claims_dodge = sabre_ctx.is_some_and(|(sabre, movement, traversal)| {
+            sabre.active
+                && traversal.active != TraversalMode::Hoverboard
+                && progression
+                    .upgrades
+                    .sabre_dodge_technique_applicable(movement.is_grounded)
+        });
+
         if pi.dodge
+            && !sabre_claims_dodge
             && !dodge.is_dodging
             && dodge.cooldown_timer <= 0.0
             && stats.stamina >= dodge_cost

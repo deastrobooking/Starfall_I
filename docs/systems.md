@@ -803,7 +803,8 @@ PlayerHitbox profile, then apply the existing authored reach/arc rules and a
 World-cover check. This removes the every-enemy candidate scan. Player combo
 hitboxes remain live throughout the authored active window, follow the current
 attack origin, and retain a per-move target set so each hurtbox resolves once.
-Star Sabre active-window persistence and enemy attack-volume producers remain
+Star Sabre slashes run the same persistent lifecycle as of 2026-07-24
+(`BeamSabre.slash_phase`/`slash_hits`); enemy attack-volume producers remain
 EC2 work.
 
 **Hit reactions (2026-07, EC2 first slice):** landed hits now produce bounded
@@ -855,7 +856,13 @@ The Solar Sabre Glyph upgrades the starter wave rather than unlocking the base
 weapon or withholding its first projectile. Save-backed `UpgradeLedger.relics` holds extensible gem/blueprint ids per
 player. Cyclone Slash (heavy/L3) performs a full radial cut; Comet Dash (B/East,
 or Q on keyboard) performs two advancing cuts; Meteor Pound turns that input
-into an airborne radial slam. Solar Fire, Storm, Frost, and Void gems stack
+into an airborne radial slam. While the Saber is drawn, an input owned by an
+applicable technique is consumed exclusively: heavy never also buffers the fist
+Heavy chain, and dodge never also triggers the evasive roll (holster to roll).
+Technique tuning (multipliers, reach, cooldown, dash/plunge speeds) is authored
+as `sabre_techniques` in `assets/combat/moves.json` alongside the slash chain's
+frame data, which now runs the same persistent Startup→Active→Recovery hit
+window as hand melee. Solar Fire, Storm, Frost, and Void gems stack
 damage and select supported damage types, while the Legendary Starheart Gem
 adds a larger multiplier. Eight initial objects are distributed around the
 Great Scientist sites as ordinary `HiddenReward` pickups. Collection grants the

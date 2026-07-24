@@ -36,6 +36,9 @@ pub struct MoveDef {
 }
 
 impl MoveDef {
+    /// Full move length; the cadence between sabre slashes. Runtime systems
+    /// consume the phases individually — this stays as authoring/test API.
+    #[allow(dead_code)]
     pub fn total_duration(&self) -> f32 {
         self.startup + self.active + self.recovery
     }
@@ -61,6 +64,52 @@ pub struct RangedMoveDef {
     pub projectile_lifetime: f32,
     /// Splash radius on impact (0 = no splash).
     pub explosion_radius: f32,
+}
+
+/// One authored Star Sabre technique (a relic-unlocked verb). A technique
+/// multiplies the first sabre slash's damage/knockback instead of redefining
+/// them, so `BeamSabre` level scaling and slash-chain retuning propagate
+/// automatically.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SabreTechniqueDef {
+    pub name: String,
+    /// Damage multiplier over the first sabre slash's damage.
+    pub damage_mult: f32,
+    /// Knockback multiplier over the first sabre slash's knockback.
+    pub knockback_mult: f32,
+    /// Hit sphere radius.
+    pub radius: f32,
+    /// Forward shift applied inside each hit test.
+    pub hit_offset: f32,
+    /// Facing-cone cosine for the hit arc (-1 = full circle around the player).
+    pub arc_cos: f32,
+    /// Forward distance of each strike's center; one hit test per entry
+    /// (Comet Dash strikes twice along its dash line).
+    pub strikes: Vec<f32>,
+    /// Multiplier on `BeamSabre.cooldown` charged when the technique fires.
+    pub cooldown_mult: f32,
+    /// Seconds the technique state (blade spin, VFX, HUD flair) lingers.
+    pub technique_time: f32,
+    /// Freeze-frame applied on activation.
+    pub hitstop: f32,
+    /// Horizontal launch speed applied on activation (Comet Dash; 0 = none).
+    pub dash_speed: f32,
+    /// Downward plunge speed applied while airborne (Meteor Pound; 0 = none).
+    pub plunge_speed: f32,
+}
+
+/// The three relic-unlocked sabre techniques.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SabreTechniqueDefs {
+    pub cyclone_slash: SabreTechniqueDef,
+    pub comet_dash: SabreTechniqueDef,
+    pub meteor_pound: SabreTechniqueDef,
+}
+
+impl SabreTechniqueDefs {
+    pub fn all(&self) -> [&SabreTechniqueDef; 3] {
+        [&self.cyclone_slash, &self.comet_dash, &self.meteor_pound]
+    }
 }
 
 /// Number of primary weapon slots; `MoveLibrary::ranged` is indexed by
@@ -111,6 +160,10 @@ pub struct MoveLibrary {
     /// `fire_rate` mirrors the level-1 cooldown for authoring reference.
     #[serde(default = "default_sabre_wave")]
     pub sabre_wave: RangedMoveDef,
+    /// Relic-unlocked sabre techniques (Cyclone Slash, Comet Dash, Meteor
+    /// Pound), authored as multipliers over the first sabre slash.
+    #[serde(default = "default_sabre_techniques")]
+    pub sabre_techniques: SabreTechniqueDefs,
     /// Primary ranged weapons, indexed by inventory slot (see [`RANGED_SLOTS`]).
     #[serde(default = "default_ranged_slots")]
     pub ranged: Vec<RangedMoveDef>,
@@ -175,6 +228,7 @@ impl MoveLibrary {
             ],
             sabre: default_sabre_chain(),
             sabre_wave: default_sabre_wave(),
+            sabre_techniques: default_sabre_techniques(),
             ranged: default_ranged_slots(),
         }
     }
@@ -205,6 +259,36 @@ impl MoveLibrary {
             }
             if def.damage <= 0.0 {
                 return Err(format!("'{}': damage must be > 0", def.name));
+            }
+        }
+        for def in self.sabre_techniques.all() {
+            if def.damage_mult <= 0.0 || def.radius <= 0.0 {
+                return Err(format!(
+                    "'{}': damage_mult and radius must be > 0",
+                    def.name
+                ));
+            }
+            if def.strikes.is_empty() {
+                return Err(format!("'{}': needs at least one strike", def.name));
+            }
+            if def.cooldown_mult <= 0.0 || def.technique_time <= 0.0 {
+                return Err(format!(
+                    "'{}': cooldown_mult and technique_time must be > 0",
+                    def.name
+                ));
+            }
+            if !(-1.0..=1.0).contains(&def.arc_cos) {
+                return Err(format!("'{}': arc_cos must lie in -1..=1", def.name));
+            }
+            if def.knockback_mult < 0.0
+                || def.hitstop < 0.0
+                || def.dash_speed < 0.0
+                || def.plunge_speed < 0.0
+            {
+                return Err(format!(
+                    "'{}': knockback_mult, hitstop, and speeds must be >= 0",
+                    def.name
+                ));
             }
         }
         if self.ranged.len() != RANGED_SLOTS {
@@ -256,6 +340,56 @@ fn default_sabre_chain() -> Vec<MoveDef> {
         cancel_after: 0.0,
         hitstop: 0.0,
     }]
+}
+
+/// The shipping technique tuning — matches the numbers previously hardcoded
+/// in `beam_sabre_update_system` so retuning them is a data edit, not a
+/// recompile.
+fn default_sabre_techniques() -> SabreTechniqueDefs {
+    SabreTechniqueDefs {
+        cyclone_slash: SabreTechniqueDef {
+            name: "Cyclone Slash".to_string(),
+            damage_mult: 1.45,
+            knockback_mult: 1.35,
+            radius: 5.4,
+            hit_offset: 0.0,
+            arc_cos: -1.0,
+            strikes: vec![0.0],
+            cooldown_mult: 1.15,
+            technique_time: 0.48,
+            hitstop: 0.055,
+            dash_speed: 0.0,
+            plunge_speed: 0.0,
+        },
+        comet_dash: SabreTechniqueDef {
+            name: "Comet Dash".to_string(),
+            damage_mult: 0.92,
+            knockback_mult: 1.0,
+            radius: 3.6,
+            hit_offset: 0.8,
+            arc_cos: -0.15,
+            strikes: vec![1.8, 4.8],
+            cooldown_mult: 1.35,
+            technique_time: 0.42,
+            hitstop: 0.06,
+            dash_speed: 1.78,
+            plunge_speed: 0.0,
+        },
+        meteor_pound: SabreTechniqueDef {
+            name: "Meteor Pound".to_string(),
+            damage_mult: 1.75,
+            knockback_mult: 1.8,
+            radius: 5.0,
+            hit_offset: 0.0,
+            arc_cos: -1.0,
+            strikes: vec![0.0],
+            cooldown_mult: 1.35,
+            technique_time: 0.42,
+            hitstop: 0.06,
+            dash_speed: 0.0,
+            plunge_speed: 1.85,
+        },
+    }
 }
 
 /// Star Sabre energy-wave authoring base: runtime combo progression applies a
@@ -400,6 +534,67 @@ mod tests {
         assert!((wave.projectile_lifetime - 1.5).abs() < 1e-6);
         assert!((wave.damage - 40.0).abs() < 1e-6);
         assert!((wave.explosion_radius - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sabre_technique_defaults_match_legacy_hardcoded_values() {
+        let lib = MoveLibrary::defaults();
+        let t = &lib.sabre_techniques;
+        // Cyclone Slash: full-circle heavy spin.
+        assert!((t.cyclone_slash.damage_mult - 1.45).abs() < 1e-6);
+        assert!((t.cyclone_slash.knockback_mult - 1.35).abs() < 1e-6);
+        assert!((t.cyclone_slash.radius - 5.4).abs() < 1e-6);
+        assert!((t.cyclone_slash.arc_cos + 1.0).abs() < 1e-6, "full circle");
+        assert!((t.cyclone_slash.cooldown_mult - 1.15).abs() < 1e-6);
+        // Comet Dash: two strikes along the dash line plus a launch impulse.
+        assert_eq!(t.comet_dash.strikes.len(), 2);
+        assert!((t.comet_dash.strikes[1] - 4.8).abs() < 1e-6);
+        assert!((t.comet_dash.damage_mult - 0.92).abs() < 1e-6);
+        assert!(t.comet_dash.dash_speed > 0.0 && t.comet_dash.plunge_speed == 0.0);
+        // Meteor Pound: airborne plunge, biggest multipliers.
+        assert!((t.meteor_pound.damage_mult - 1.75).abs() < 1e-6);
+        assert!((t.meteor_pound.knockback_mult - 1.8).abs() < 1e-6);
+        assert!(t.meteor_pound.plunge_speed > 0.0 && t.meteor_pound.dash_speed == 0.0);
+    }
+
+    #[test]
+    fn validation_rejects_broken_sabre_techniques() {
+        let mut lib = MoveLibrary::defaults();
+        lib.sabre_techniques.cyclone_slash.damage_mult = 0.0;
+        assert!(lib.validate().is_err());
+
+        let mut lib = MoveLibrary::defaults();
+        lib.sabre_techniques.comet_dash.strikes.clear();
+        assert!(lib.validate().is_err());
+
+        let mut lib = MoveLibrary::defaults();
+        lib.sabre_techniques.meteor_pound.arc_cos = -2.0;
+        assert!(lib.validate().is_err());
+
+        let mut lib = MoveLibrary::defaults();
+        lib.sabre_techniques.cyclone_slash.technique_time = 0.0;
+        assert!(lib.validate().is_err());
+
+        let mut lib = MoveLibrary::defaults();
+        lib.sabre_techniques.comet_dash.dash_speed = -1.0;
+        assert!(lib.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_json_without_technique_section_still_loads() {
+        let lib = MoveLibrary::defaults();
+        let legacy = serde_json::json!({
+            "light": serde_json::to_value(&lib.light).unwrap(),
+            "heavy": serde_json::to_value(&lib.heavy).unwrap(),
+            "sabre": serde_json::to_value(&lib.sabre).unwrap(),
+            "sabre_wave": serde_json::to_value(&lib.sabre_wave).unwrap(),
+            "ranged": serde_json::to_value(&lib.ranged).unwrap(),
+        });
+        let back: MoveLibrary = serde_json::from_value(legacy).unwrap();
+        back.validate()
+            .expect("pre-technique file plus defaults must validate");
+        assert_eq!(back.sabre_techniques.cyclone_slash.name, "Cyclone Slash");
+        assert_eq!(back.sabre_techniques.comet_dash.strikes.len(), 2);
     }
 
     #[test]

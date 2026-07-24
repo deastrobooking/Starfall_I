@@ -209,8 +209,12 @@ Player melee and Star Sabre strikes now obtain candidates from an Enemy-layer
 Avian shape intersection, preserve authored reach/arc checks, and reject targets
 behind World cover. Player combo hitboxes remain live through the full authored
 active window and keep a per-move target registry, so moving into a strike can
-connect without dealing damage every frame. Remaining EC2: the same persistent
-lifecycle for Star Sabre slashes, enemy hitbox producers, separate
+connect without dealing damage every frame. **Sabre lifecycle (2026-07-24):**
+Star Sabre slashes now run the same Startup→Active→Recovery machine with a
+persistent hit window and per-slash target dedup (`BeamSabre.slash_phase` /
+`slash_hits`), and the three relic techniques are authored as
+`SabreTechniqueDef` data in `moves.json` instead of hardcoded multipliers.
+Remaining EC2: enemy hitbox producers, separate
 pushbox/grapple/interaction colliders,
 `MoveDef` expansion, per-move i-frames, and player-received knockback.
 **Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
@@ -229,9 +233,10 @@ every gameplay `thread_rng()`; sole exemption: camera-shake offset
 `assets/combat/moves.json` (defaults written on first run, validated with
 fallback); `melee_combo_system` rebuilt as a Startup→Active→Recovery phase
 machine with cancel-window chaining and per-move hitstop. Loot drops tiered by
-enemy type (champion = guaranteed core + extra rolls). Remaining EC2:
-the remaining move-scoped collision roles, per-move i-frames, player-received
-knockback, and MoveDefs for sabre/ranged.
+enemy type (champion = guaranteed core + extra rolls). MoveDefs for
+sabre/ranged and the sabre technique defs have since landed in
+`src/combat_data.rs`. Remaining EC2: the remaining move-scoped collision
+roles, per-move i-frames, and player-received knockback.
 **Boss variety (2026-07-15):** RiftBoss + MechBoss controllers
 (`enemy_plugin.rs`, components in `enemy.rs` with shared `boss_phase()`)
 close gameplay-review item #3 — all boss factions mechanically distinct.

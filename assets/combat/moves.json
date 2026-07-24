@@ -52,5 +52,140 @@
       "cancel_after": 0.2,
       "hitstop": 0.07
     }
+  ],
+  "sabre": [
+    {
+      "name": "Star Slash",
+      "damage": 25.0,
+      "knockback": 3.0,
+      "startup": 0.05,
+      "active": 0.08,
+      "recovery": 0.12,
+      "cancel_after": 0.0,
+      "hitstop": 0.0
+    }
+  ],
+  "sabre_wave": {
+    "name": "Star Wave",
+    "damage": 40.0,
+    "fire_rate": 0.8,
+    "projectile_speed": 20.0,
+    "spread": 0.0,
+    "pellets": 1,
+    "projectile_lifetime": 1.5,
+    "explosion_radius": 4.0
+  },
+  "sabre_techniques": {
+    "cyclone_slash": {
+      "name": "Cyclone Slash",
+      "damage_mult": 1.45,
+      "knockback_mult": 1.35,
+      "radius": 5.4,
+      "hit_offset": 0.0,
+      "arc_cos": -1.0,
+      "strikes": [
+        0.0
+      ],
+      "cooldown_mult": 1.15,
+      "technique_time": 0.48,
+      "hitstop": 0.055,
+      "dash_speed": 0.0,
+      "plunge_speed": 0.0
+    },
+    "comet_dash": {
+      "name": "Comet Dash",
+      "damage_mult": 0.92,
+      "knockback_mult": 1.0,
+      "radius": 3.6,
+      "hit_offset": 0.8,
+      "arc_cos": -0.15,
+      "strikes": [
+        1.8,
+        4.8
+      ],
+      "cooldown_mult": 1.35,
+      "technique_time": 0.42,
+      "hitstop": 0.06,
+      "dash_speed": 1.78,
+      "plunge_speed": 0.0
+    },
+    "meteor_pound": {
+      "name": "Meteor Pound",
+      "damage_mult": 1.75,
+      "knockback_mult": 1.8,
+      "radius": 5.0,
+      "hit_offset": 0.0,
+      "arc_cos": -1.0,
+      "strikes": [
+        0.0
+      ],
+      "cooldown_mult": 1.35,
+      "technique_time": 0.42,
+      "hitstop": 0.06,
+      "dash_speed": 0.0,
+      "plunge_speed": 1.85
+    }
+  },
+  "ranged": [
+    {
+      "name": "Starlight Popper",
+      "damage": 16.0,
+      "fire_rate": 0.26,
+      "projectile_speed": 68.0,
+      "spread": 0.02,
+      "pellets": 1,
+      "projectile_lifetime": 3.0,
+      "explosion_radius": 0.0
+    },
+    {
+      "name": "Comet Stream",
+      "damage": 18.0,
+      "fire_rate": 0.075,
+      "projectile_speed": 105.0,
+      "spread": 0.025,
+      "pellets": 1,
+      "projectile_lifetime": 3.0,
+      "explosion_radius": 0.0
+    },
+    {
+      "name": "Sparkle Fan",
+      "damage": 7.0,
+      "fire_rate": 0.7,
+      "projectile_speed": 80.0,
+      "spread": 0.18,
+      "pellets": 10,
+      "projectile_lifetime": 3.0,
+      "explosion_radius": 0.0
+    },
+    {
+      "name": "Nova Orb",
+      "damage": 90.0,
+      "fire_rate": 1.2,
+      "projectile_speed": 34.0,
+      "spread": 0.0,
+      "pellets": 1,
+      "projectile_lifetime": 3.0,
+      "explosion_radius": 6.5
+    },
+    {
+      "name": "Rainbow Ray",
+      "damage": 26.0,
+      "fire_rate": 0.045,
+      "projectile_speed": 320.0,
+      "spread": 0.0,
+      "pellets": 1,
+      "projectile_lifetime": 3.0,
+      "explosion_radius": 0.0
+    },
+    {
+      "name": "Star Bubble Bombs",
+      "damage": 75.0,
+      "fire_rate": 0.95,
+      "projectile_speed": 16.0,
+      "spread": 0.0,
+      "pellets": 1,
+      "projectile_lifetime": 3.0,
+      "explosion_radius": 8.5
+    }
   ]
 }

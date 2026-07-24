@@ -376,6 +376,16 @@ impl UpgradeLedger {
         self.has_relic("meteor_pound_blueprint")
     }
 
+    /// Whether a dodge press can resolve into a sabre technique right now:
+    /// Comet Dash fires from any stance once its blueprint is owned, while
+    /// Meteor Pound needs the player airborne. Both the technique trigger in
+    /// `beam_sabre_update_system` and the dodge-roll suppression in
+    /// `player_dodge_update` must share this predicate so a single press never
+    /// fires both a roll and a technique.
+    pub fn sabre_dodge_technique_applicable(&self, is_grounded: bool) -> bool {
+        self.sabre_dash_unlocked() || (!is_grounded && self.sabre_pound_unlocked())
+    }
+
     pub fn sabre_elemental_damage_mult(&self) -> f32 {
         let gems = ["solar_fire_gem", "storm_gem", "frost_gem", "void_gem"]
             .into_iter()
@@ -821,6 +831,24 @@ mod tests {
         assert!(upgrades.sabre_dash_unlocked());
         assert!(upgrades.sabre_pound_unlocked());
         assert!(upgrades.sabre_elemental_damage_mult() > 1.45);
+    }
+
+    #[test]
+    fn sabre_dodge_technique_applicability_tracks_stance_and_relics() {
+        let mut upgrades = UpgradeLedger::default();
+        // No blueprints: dodge stays a roll in every stance.
+        assert!(!upgrades.sabre_dodge_technique_applicable(true));
+        assert!(!upgrades.sabre_dodge_technique_applicable(false));
+
+        // Meteor Pound alone only claims the press while airborne.
+        upgrades.unlock_relic("meteor_pound_blueprint");
+        assert!(!upgrades.sabre_dodge_technique_applicable(true));
+        assert!(upgrades.sabre_dodge_technique_applicable(false));
+
+        // Comet Dash claims it from any stance.
+        upgrades.unlock_relic("comet_dash_blueprint");
+        assert!(upgrades.sabre_dodge_technique_applicable(true));
+        assert!(upgrades.sabre_dodge_technique_applicable(false));
     }
 
     #[test]
