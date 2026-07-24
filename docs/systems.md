@@ -817,6 +817,11 @@ every player inside — replacing the unconditional closest-player range check.
 Moves and sabre techniques may author `iframes` (seconds of invulnerability
 granted at move start through the shared invulnerability timer; Comet Dash
 ships 0.28 s because it claims the dodge input while the sabre is drawn).
+Enemy melee is telegraphed: committing to a swing spawns the shockwave ring
+over the strike zone for `EnemyConfig.attack_windup` seconds (scouts 0.22 s
+up to brutes 0.5 s) before the volume resolves, and a committed swing spends
+its cooldown even on a whiff — dodging the telegraph is the player's reward.
+Losing the target mid-windup aborts the swing with a short 0.4 s lockout.
 
 **Hit reactions (2026-07, EC2 first slice):** landed hits now produce bounded
 **hitstop** (`src/hitstop.rs`: 28–90 ms scaled by damage, max-not-sum, drains

@@ -33,6 +33,10 @@ pub struct EnemyConfig {
     pub defense: f32,
     pub movement_speed: f32,
     pub attack_cooldown: f32,
+    /// Telegraph windup: seconds between committing to a melee swing (ring
+    /// telegraph spawns) and the hit volume resolving. Dodgeable window —
+    /// heavier enemies wind up longer.
+    pub attack_windup: f32,
     pub knockback_force: f32,
     pub experience_value: u32,
     pub detection_range: f32,
@@ -52,6 +56,7 @@ impl EnemyConfig {
                 defense: 3.0,
                 movement_speed: 8.0,
                 attack_cooldown: 2.0,
+                attack_windup: 0.28,
                 knockback_force: 200.0,
                 experience_value: 15,
                 detection_range: 25.0,
@@ -67,6 +72,7 @@ impl EnemyConfig {
                 defense: 2.0,
                 movement_speed: 10.0,
                 attack_cooldown: 99.0,
+                attack_windup: 0.3,
                 knockback_force: 120.0,
                 experience_value: 35,
                 detection_range: 0.0,
@@ -82,6 +88,7 @@ impl EnemyConfig {
                 defense: 5.0,
                 movement_speed: 4.0,
                 attack_cooldown: 1.8,
+                attack_windup: 0.32,
                 knockback_force: 300.0,
                 experience_value: 25,
                 detection_range: 20.0,
@@ -97,6 +104,7 @@ impl EnemyConfig {
                 defense: 15.0,
                 movement_speed: 2.0,
                 attack_cooldown: 2.5,
+                attack_windup: 0.5,
                 knockback_force: 600.0,
                 experience_value: 50,
                 detection_range: 15.0,
@@ -112,6 +120,7 @@ impl EnemyConfig {
                 defense: 4.0,
                 movement_speed: 6.0,
                 attack_cooldown: 1.2,
+                attack_windup: 0.22,
                 knockback_force: 250.0,
                 experience_value: 20,
                 detection_range: 18.0,
@@ -127,6 +136,7 @@ impl EnemyConfig {
                 defense: 20.0,
                 movement_speed: 3.0,
                 attack_cooldown: 1.5,
+                attack_windup: 0.42,
                 knockback_force: 800.0,
                 experience_value: 200,
                 detection_range: 30.0,
@@ -195,6 +205,9 @@ pub struct Enemy {
     /// Origin spawn point
     pub spawn_origin: Vec3,
     pub attack_cooldown_timer: f32,
+    /// Remaining telegraph time of a committed melee swing; `None` when not
+    /// winding up. The hit volume resolves when it reaches zero.
+    pub attack_windup_timer: Option<f32>,
     pub velocity: Vec3,
     /// Scale multiplier from wave difficulty
     pub difficulty_scale: f32,
@@ -221,6 +234,7 @@ impl Enemy {
             patrol_target: position,
             spawn_origin: position,
             attack_cooldown_timer: 0.0,
+            attack_windup_timer: None,
             velocity: Vec3::ZERO,
             difficulty_scale,
             patrol_waypoints,
@@ -412,6 +426,29 @@ pub struct EnemyAttackVfx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_enemy_type_telegraphs_its_melee_swing() {
+        let types = [
+            EnemyType::Drone,
+            EnemyType::SpyDrone,
+            EnemyType::Soldier,
+            EnemyType::Heavy,
+            EnemyType::SpikeAlien,
+            EnemyType::Hybrid,
+        ];
+        for t in types {
+            let config = EnemyConfig::for_type(t);
+            assert!(
+                config.attack_windup > 0.0,
+                "{t:?} must have a dodgeable windup"
+            );
+        }
+        // Heavier hitters wind up longer than the fastest scout.
+        let spike = EnemyConfig::for_type(EnemyType::SpikeAlien).attack_windup;
+        assert!(EnemyConfig::for_type(EnemyType::Heavy).attack_windup > spike);
+        assert!(EnemyConfig::for_type(EnemyType::Hybrid).attack_windup > spike);
+    }
 
     #[test]
     fn boss_phase_thresholds() {

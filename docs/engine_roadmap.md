@@ -228,8 +228,10 @@ window (granted through the shared invulnerability timer; Comet Dash ships
 0.28 s since it claims the dodge input), and `enemy_attack_system` now
 resolves melee as a Player-layer shape intersection with World-cover check
 via `execute_enemy_melee_hit` (all players in the volume, not just the
-closest). Remaining EC2: separate pushbox/grapple/interaction colliders and
-`MoveDef` expansion.
+closest), telegraphed by an `EnemyConfig.attack_windup` ring (0.22-0.5 s by
+enemy weight) before the volume resolves — dodgeable, and a whiffed swing
+still spends its cooldown. Remaining EC2: separate
+pushbox/grapple/interaction colliders and `MoveDef` expansion.
 **Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
 synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no

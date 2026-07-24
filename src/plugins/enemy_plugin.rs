@@ -1628,6 +1628,9 @@ fn spawn_shockwave_vfx(
 
 // ── Attack System ─────────────────────────────────────────────────────────────
 fn enemy_attack_system(
+    time: Res<Time>,
+    mut commands: Commands,
+    assets: Res<EnemyAttackAssets>,
     spatial_query: SpatialQuery,
     player_q: Query<(Entity, &Transform, &PlayerIndex), With<Player>>,
     mut enemy_q: Query<
@@ -1658,6 +1661,7 @@ fn enemy_attack_system(
     mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
     mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
+    let dt = time.delta_secs();
     for (e_transform, mut enemy, sm, health, drone, (dragon_boss, rift_boss, mech_boss)) in
         enemy_q.iter_mut()
     {
@@ -1667,35 +1671,71 @@ fn enemy_attack_system(
         if drone.is_some() || dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some() {
             continue;
         }
+
+        // ── Committed swing: tick the telegraph, then resolve the volume ──
+        if let Some(timer) = enemy.attack_windup_timer {
+            if sm.current != EnemyAIState::Attack {
+                // Target lost mid-windup (fled, died): abort the swing, with a
+                // short cooldown so the telegraph can't be re-spammed.
+                enemy.attack_windup_timer = None;
+                enemy.attack_cooldown_timer = enemy.attack_cooldown_timer.max(0.4);
+                continue;
+            }
+            let timer = timer - dt;
+            if timer > 0.0 {
+                enemy.attack_windup_timer = Some(timer);
+                continue;
+            }
+            enemy.attack_windup_timer = None;
+            // EC2 hitbox producer: the strike is a Player-layer volume around
+            // the enemy — every player inside is hit, and World cover blocks
+            // it. Whiffing still spends the cooldown: a dodged telegraph is
+            // the player's reward.
+            // knockback_force is authored on a legacy 100x scale (120-800);
+            // world knockback units run ~1-10 (player melee 3-10).
+            execute_enemy_melee_hit(
+                &spatial_query,
+                e_transform.translation,
+                e_transform.forward().as_vec3(),
+                enemy.config.attack_range,
+                -1.0,
+                enemy.scaled_damage(),
+                DamageType::Kinetic,
+                enemy.config.knockback_force / 100.0,
+                &mut player_damage_q,
+                &player_q,
+                &mut damaged_ev,
+                &mut parry_ev,
+            );
+            enemy.attack_cooldown_timer = enemy.config.attack_cooldown;
+            continue;
+        }
+
         if sm.current != EnemyAIState::Attack {
             continue;
         }
         if enemy.attack_cooldown_timer > 0.0 {
             continue;
         }
-
-        // EC2 hitbox producer: the strike is a Player-layer volume around the
-        // enemy — every player inside is hit, and World cover blocks it
-        // (previously: an unconditional hit on the single closest player).
-        // knockback_force is authored on a legacy 100x scale (120-800);
-        // world knockback units run ~1-10 (player melee 3-10).
-        let hits = execute_enemy_melee_hit(
-            &spatial_query,
+        // Commit only when someone is actually in reach, then telegraph the
+        // strike zone for the windup duration before the volume resolves.
+        if closest_indexed_player(
             e_transform.translation,
-            e_transform.forward().as_vec3(),
             enemy.config.attack_range,
-            -1.0,
-            enemy.scaled_damage(),
-            DamageType::Kinetic,
-            enemy.config.knockback_force / 100.0,
-            &mut player_damage_q,
             &player_q,
-            &mut damaged_ev,
-            &mut parry_ev,
-        );
-        if hits > 0 {
-            enemy.attack_cooldown_timer = enemy.config.attack_cooldown;
+        )
+        .is_none()
+        {
+            continue;
         }
+        enemy.attack_windup_timer = Some(enemy.config.attack_windup);
+        spawn_shockwave_vfx(
+            &mut commands,
+            &assets,
+            e_transform.translation + Vec3::Y * 0.12,
+            enemy.config.attack_range,
+            enemy.config.attack_windup,
+        );
     }
 }
 
