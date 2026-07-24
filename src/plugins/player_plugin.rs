@@ -340,6 +340,7 @@ impl Plugin for PlayerPlugin {
                 Update,
                 (
                     player_knockback_intake,
+                    player_pushbox_separation,
                     player_dodge_update,
                     player_parry_update,
                     player_state_update,
@@ -3280,6 +3281,59 @@ fn received_knockback_shove(pending: Vec3) -> Vec3 {
     (pending * 2.4).with_y(0.0)
 }
 
+/// Horizontal distance under which two players start shoving apart — just
+/// over two shoulder radii of the player capsule (0.26–0.50).
+const PUSHBOX_SEPARATION_DISTANCE: f32 = 1.1;
+/// Full-overlap separation push in world-units/sec.
+const PUSHBOX_PUSH_SPEED: f32 = 4.5;
+/// Vertical gap beyond which players are on different levels (one jumping
+/// over the other) and should not shove each other.
+const PUSHBOX_HEIGHT_GAP: f32 = 2.2;
+
+/// The full-strength separation push for a pair of players at horizontal
+/// offset `delta` (a→b), or `None` when they are far enough apart.
+/// Perfectly stacked players break the tie along +X deterministically.
+fn pushbox_separation_push(delta: Vec3) -> Option<Vec3> {
+    if delta.y.abs() > PUSHBOX_HEIGHT_GAP {
+        return None;
+    }
+    let flat = delta.with_y(0.0);
+    let dist = flat.length();
+    if dist >= PUSHBOX_SEPARATION_DISTANCE {
+        return None;
+    }
+    let dir = if dist > 0.01 { flat / dist } else { Vec3::X };
+    let overlap = 1.0 - dist / PUSHBOX_SEPARATION_DISTANCE;
+    Some(dir * (overlap * PUSHBOX_PUSH_SPEED))
+}
+
+/// EC3 pushbox-lite: co-op players gently shoulder past each other instead of
+/// occupying the same spot. Distance-based (2–4 players, no extra colliders);
+/// the shove routes through `knockback_velocity`, so it resolves through the
+/// character controller and fades once they separate. The per-frame addition
+/// is scaled by the shove channel's own decay rate, making the steady-state
+/// push ≈ `PUSHBOX_PUSH_SPEED` regardless of frame rate.
+fn player_pushbox_separation(
+    time: Res<Time>,
+    mut player_q: Query<(&Transform, &mut PlayerMovement), With<Player>>,
+) {
+    // Matches the exp(-9t) knockback decay in player_movement.
+    const DECAY_RATE: f32 = 9.0;
+    let dt = time.delta_secs();
+    let mut pairs = player_q.iter_combinations_mut();
+    while let Some([(a_transform, mut a_movement), (b_transform, mut b_movement)]) =
+        pairs.fetch_next()
+    {
+        let Some(push) = pushbox_separation_push(b_transform.translation - a_transform.translation)
+        else {
+            continue;
+        };
+        let step = push * (DECAY_RATE * dt);
+        a_movement.knockback_velocity -= step;
+        b_movement.knockback_velocity += step;
+    }
+}
+
 /// EC2: drain `Damageable.pending_knockback` (accumulated by `apply_damage`
 /// on every damage path) into the motor's decaying shove. Runs in `Motor`
 /// before the state machine so a shoved player reacts the same frame.
@@ -3620,6 +3674,23 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pushbox_separation_pushes_apart_only_when_close_and_level() {
+        // Overlapping on the same level: push points from a toward b.
+        let push = pushbox_separation_push(Vec3::new(0.5, 0.0, 0.0)).unwrap();
+        assert!(push.x > 0.0);
+        assert_eq!(push.y, 0.0);
+        // Deeper overlap pushes harder.
+        let deeper = pushbox_separation_push(Vec3::new(0.2, 0.0, 0.0)).unwrap();
+        assert!(deeper.x > push.x);
+        // Perfectly stacked players break the tie deterministically (+X).
+        let stacked = pushbox_separation_push(Vec3::ZERO).unwrap();
+        assert!(stacked.x > 0.0);
+        // Far enough apart, or on different levels: no shove.
+        assert!(pushbox_separation_push(Vec3::new(1.2, 0.0, 0.0)).is_none());
+        assert!(pushbox_separation_push(Vec3::new(0.5, 3.0, 0.0)).is_none());
+    }
 
     #[test]
     fn received_knockback_shove_scales_and_stays_horizontal() {

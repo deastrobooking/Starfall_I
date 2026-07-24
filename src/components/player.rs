@@ -210,11 +210,11 @@ pub struct PlayerMovement {
     /// here and flushed to the physics controller once per frame (physics steps
     /// per-frame, so we must not overwrite/double-apply). Unused in `Update` mode.
     pub motor_accum: Vec3,
-    /// EC2 received knockback: shove in world-units/sec, filled from
-    /// `Damageable.pending_knockback` by `player_knockback_intake` and
-    /// integrated + exponentially decayed by the motor (mirrors the enemy
-    /// drain in `apply_enemy_knockback`, but resolves through the character
-    /// controller so walls still stop the player).
+    /// External shove channel in world-units/sec, integrated and
+    /// exponentially decayed by the motor through the character controller
+    /// (walls still stop the player). Fed by received knockback
+    /// (`player_knockback_intake`, mirroring the enemy drain) and by co-op
+    /// pushbox separation (`player_pushbox_separation`).
     pub knockback_velocity: Vec3,
 }
 

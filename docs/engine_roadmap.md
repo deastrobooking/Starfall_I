@@ -230,8 +230,12 @@ resolves melee as a Player-layer shape intersection with World-cover check
 via `execute_enemy_melee_hit` (all players in the volume, not just the
 closest), telegraphed by an `EnemyConfig.attack_windup` ring (0.22-0.5 s by
 enemy weight) before the volume resolves — dodgeable, and a whiffed swing
-still spends its cooldown. Remaining EC2: separate
-pushbox/grapple/interaction colliders and `MoveDef` expansion.
+still spends its cooldown. Player-player pushbox behavior landed 2026-07-24
+as distance-based soft separation through the external-shove channel
+(`player_pushbox_separation`) — co-op scale (2-4 players) needs no collider
+role yet. Remaining EC2: authored GrappleSensor/Interaction collider
+entities (and a collider-backed Pushbox if enemy-enemy separation is ever
+wanted), plus `MoveDef` expansion.
 **Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
 synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no

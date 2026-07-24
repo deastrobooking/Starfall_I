@@ -822,6 +822,11 @@ over the strike zone for `EnemyConfig.attack_windup` seconds (scouts 0.22 s
 up to brutes 0.5 s) before the volume resolves, and a committed swing spends
 its cooldown even on a whiff — dodging the telegraph is the player's reward.
 Losing the target mid-windup aborts the swing with a short 0.4 s lockout.
+Co-op players shoulder past each other (pushbox-lite): inside ~1.1 units on
+the same level, `player_pushbox_separation` feeds a gentle overlap-scaled
+shove (up to 4.5 u/s) into the shared external-shove channel, so separation
+resolves through the character controller and fades on its own; a vertical
+gap over 2.2 units (jumping over a teammate) disables it.
 
 **Hit reactions (2026-07, EC2 first slice):** landed hits now produce bounded
 **hitstop** (`src/hitstop.rs`: 28–90 ms scaled by damage, max-not-sum, drains
