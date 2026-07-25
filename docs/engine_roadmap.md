@@ -216,7 +216,9 @@ active window and keep a per-move target registry, so moving into a strike can
 connect without dealing damage every frame. **Sabre lifecycle (2026-07-24):**
 Star Sabre slashes now run the same Startup→Active→Recovery machine with a
 persistent hit window and per-slash target dedup (`BeamSabre.slash_phase` /
-`slash_hits`), and the three relic techniques are authored as
+`slash_hits`). Trigger presses buffer across startup/active and advance once
+the slash's authored `cancel_after` recovery window opens. The three relic
+techniques are authored as
 `SabreTechniqueDef` data in `moves.json` instead of hardcoded multipliers.
 **Player-received knockback (2026-07-24):** every enemy→player damage path
 now carries knockback (melee contact uses the `EnemyConfig.knockback_force`

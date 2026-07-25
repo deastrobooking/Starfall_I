@@ -475,6 +475,9 @@ pub struct BeamSabre {
     /// Enemies already struck by the current slash's active window, so a
     /// multi-tick window never double-hits the same target.
     pub slash_hits: EntityHashSet,
+    /// A trigger press received while a slash is already executing. Recovery
+    /// consumes it once the authored `cancel_after` window opens.
+    pub buffered_slash: bool,
     pub technique_timer: f32,
     pub technique: SabreTechnique,
 }
@@ -509,6 +512,7 @@ impl Default for BeamSabre {
             is_slashing: false,
             slash_phase: MeleePhase::Startup,
             slash_hits: EntityHashSet::default(),
+            buffered_slash: false,
             technique_timer: 0.0,
             technique: SabreTechnique::Ready,
         }

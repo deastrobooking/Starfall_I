@@ -810,7 +810,8 @@ World-cover check. This removes the every-enemy candidate scan. Player combo
 hitboxes remain live throughout the authored active window, follow the current
 attack origin, and retain a per-move target set so each hurtbox resolves once.
 Star Sabre slashes run the same persistent lifecycle as of 2026-07-24
-(`BeamSabre.slash_phase`/`slash_hits`). Enemy melee is also volume-based now:
+(`BeamSabre.slash_phase`/`slash_hits`), including buffered trigger presses that
+honor the authored recovery cancel window. Enemy melee is also volume-based now:
 `execute_enemy_melee_hit` intersects a Player-layer sphere (the `EnemyHitbox`
 collision role), supports a facing arc, respects World cover, and strikes
 every player inside — replacing the unconditional closest-player range check.
@@ -879,7 +880,8 @@ player. Cyclone Slash (heavy/L3) performs a full radial cut; Comet Dash (B/East,
 or Q on keyboard) performs two advancing cuts; Meteor Pound turns that input
 into an airborne radial slam. While the Saber is drawn, an input owned by an
 applicable technique is consumed exclusively: heavy never also buffers the fist
-Heavy chain, and dodge never also triggers the evasive roll (holster to roll).
+Heavy chain or airborne stomp, and dodge never also triggers the evasive roll,
+platformer roll, flight dash, or wall/climb bail (holster to use those verbs).
 Technique tuning (multipliers, reach, cooldown, dash/plunge speeds) is authored
 as `sabre_techniques` in `assets/combat/moves.json` alongside the slash chain's
 frame data, which now runs the same persistent Startup→Active→Recovery hit

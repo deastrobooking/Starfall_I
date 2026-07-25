@@ -1826,6 +1826,23 @@ fn hoverboard_landing_descent_cap(approach: f32) -> f32 {
     -(0.58 - approach.clamp(0.0, 1.0) * 0.46)
 }
 
+fn sabre_claims_movement_dodge(
+    sabre: &BeamSabre,
+    progression: &PlayerProgression,
+    traversal: TraversalMode,
+    is_grounded: bool,
+) -> bool {
+    sabre.active
+        && traversal != TraversalMode::Hoverboard
+        && progression
+            .upgrades
+            .sabre_dodge_technique_applicable(is_grounded)
+}
+
+fn sabre_claims_movement_heavy(sabre: &BeamSabre, progression: &PlayerProgression) -> bool {
+    sabre.active && progression.upgrades.sabre_spin_unlocked()
+}
+
 fn player_movement(
     time: Res<Time>,
     spatial_query: SpatialQuery,
@@ -1851,7 +1868,7 @@ fn player_movement(
             &Transform,
             &mut PlayerStateMachine,
             (&PlayerIndex, &PlayerInput),
-            Option<&BoatPassenger>,
+            (Option<&BoatPassenger>, &PlayerProgression, &BeamSabre),
         ),
         With<Player>,
     >,
@@ -1872,7 +1889,7 @@ fn player_movement(
         transform,
         mut state,
         (player_idx, pi),
-        boat_passenger,
+        (boat_passenger, progression, sabre),
     ) in player_q.iter_mut()
     {
         // EC1b: on the fixed tick, consume the latched command buffer so edge
@@ -1948,6 +1965,9 @@ fn player_movement(
         }
         let landed_stomp =
             movement.is_grounded && !platformer.was_grounded && platformer.stomp_active;
+        let sabre_claims_dodge =
+            sabre_claims_movement_dodge(sabre, progression, traversal.active, movement.is_grounded);
+        let sabre_claims_heavy = sabre_claims_movement_heavy(sabre, progression);
         platformer.roll_timer = (platformer.roll_timer - dt).max(0.0);
         edge_grab.cooldown_timer = (edge_grab.cooldown_timer - dt).max(0.0);
         edge_grab.wall_contact_timer = (edge_grab.wall_contact_timer - dt).max(0.0);
@@ -2066,6 +2086,7 @@ fn player_movement(
 
         if movement.is_grounded
             && pi.dodge
+            && !sabre_claims_dodge
             && traversal.active != TraversalMode::Hoverboard
             && movement.ground_velocity.length() >= platformer.roll_min_speed
         {
@@ -2079,7 +2100,11 @@ fn player_movement(
             platformer.rolling = false;
         }
 
-        if !movement.is_grounded && pi.melee_heavy && !platformer.stomp_active {
+        if !movement.is_grounded
+            && pi.melee_heavy
+            && !sabre_claims_heavy
+            && !platformer.stomp_active
+        {
             platformer.stomp_active = true;
             movement.velocity.y = -platformer.stomp_speed;
             jetpack.is_active = false;
@@ -2168,7 +2193,7 @@ fn player_movement(
                 edge_grab.cooldown_timer = edge_grab.grab_cooldown;
                 state.force(PlayerState::Moving);
                 continue;
-            } else if pi.dodge
+            } else if pi.dodge && !sabre_claims_dodge
                 || pi.move_axis.y < -0.35
                 || stats.stamina <= 0.0
                 || edge_grab.hang_timer >= edge_grab.max_hang_time
@@ -2212,7 +2237,8 @@ fn player_movement(
 
         if climb.is_climbing {
             let wall_lost = !has_wall_contact;
-            let bail = pi.dodge || pi.move_axis.y < -0.6 && movement.is_grounded;
+            let bail =
+                pi.dodge && !sabre_claims_dodge || pi.move_axis.y < -0.6 && movement.is_grounded;
             let exhausted = climb.energy <= 0.0;
 
             if movement.jump_buffer_timer > 0.0 && movement.wall_jump_charges > 0 {
@@ -2363,6 +2389,7 @@ fn player_movement(
                         jetpack.is_active = true;
                         jetpack.mode = FlightMode::Hover;
                     } else if pi.dodge
+                        && !sabre_claims_dodge
                         && jetpack.air_dash_cooldown_timer <= 0.0
                         && jetpack.fuel >= 18.0
                     {
@@ -3874,6 +3901,31 @@ mod tests {
         let (_, strength) = movement_input_from_axes(Vec3::NEG_Z, Vec3::X, Vec2::new(1.0, 1.0));
 
         assert_eq!(strength, 1.0);
+    }
+
+    #[test]
+    fn drawn_sabre_claims_every_matching_movement_input() {
+        let sabre = BeamSabre {
+            active: true,
+            ..default()
+        };
+        let mut progression = PlayerProgression::default();
+        progression.upgrades.unlock_relic("cyclone_slash_blueprint");
+        progression.upgrades.unlock_relic("comet_dash_blueprint");
+
+        assert!(sabre_claims_movement_heavy(&sabre, &progression));
+        assert!(sabre_claims_movement_dodge(
+            &sabre,
+            &progression,
+            TraversalMode::Flight,
+            false,
+        ));
+        assert!(!sabre_claims_movement_dodge(
+            &sabre,
+            &progression,
+            TraversalMode::Hoverboard,
+            true,
+        ));
     }
 
     #[test]

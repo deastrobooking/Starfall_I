@@ -2252,6 +2252,16 @@ fn sabre_claims_heavy_input(sabre: Option<&BeamSabre>, upgrades: &UpgradeLedger)
     sabre.is_some_and(|s| s.active) && upgrades.sabre_spin_unlocked()
 }
 
+fn sabre_recovery_should_advance(
+    recovery: f32,
+    cancel_after: f32,
+    timer: f32,
+    buffered_slash: bool,
+) -> bool {
+    let elapsed = (recovery - timer).max(0.0);
+    timer <= 0.0 || buffered_slash && elapsed >= cancel_after
+}
+
 /// EC2 per-move i-frames: extend (never shorten) the shared invulnerability
 /// window owned by `player_invulnerability_update`.
 fn grant_iframes(damageable: &mut Damageable, iframes: f32) {
@@ -2815,6 +2825,14 @@ fn beam_sabre_update_system(
         if pi.sabre_toggle {
             if sabre.unlocked {
                 sabre.active = !sabre.active;
+                if !sabre.active {
+                    sabre.is_slashing = false;
+                    sabre.slash_index = 0;
+                    sabre.slash_hits.clear();
+                    sabre.buffered_slash = false;
+                    sabre.technique_timer = 0.0;
+                    sabre.technique = SabreTechnique::Ready;
+                }
                 msg_ev.write(UiMessageEvent {
                     text: if sabre.active {
                         "Star Sabre active — RT to slash".into()
@@ -2844,6 +2862,9 @@ fn beam_sabre_update_system(
         sabre.technique_timer = (sabre.technique_timer - dt).max(0.0);
         if sabre.technique_timer <= 0.0 {
             sabre.technique = SabreTechnique::Ready;
+        }
+        if sabre.is_slashing && pi.fire_just {
+            sabre.buffered_slash = true;
         }
 
         // ── Slash lifecycle: the same Startup→Active→Recovery machine as the
@@ -2935,7 +2956,13 @@ fn beam_sabre_update_system(
                     }
                 }
                 MeleePhase::Recovery => {
-                    if sabre.slash_timer <= 0.0 {
+                    if sabre_recovery_should_advance(
+                        def.recovery,
+                        def.cancel_after,
+                        sabre.slash_timer,
+                        sabre.buffered_slash,
+                    ) {
+                        sabre.buffered_slash = false;
                         sabre.slash_index += 1;
                         match library
                             .sabre_slash(sabre.slash_index as usize)
@@ -2950,6 +2977,7 @@ fn beam_sabre_update_system(
                             None => {
                                 sabre.is_slashing = false;
                                 sabre.slash_index = 0;
+                                sabre.slash_hits.clear();
                                 sm.transition(PlayerState::Idle);
                             }
                         }
@@ -3084,6 +3112,7 @@ fn beam_sabre_update_system(
             sabre.slash_phase = MeleePhase::Startup;
             sabre.slash_timer = def.startup;
             sabre.slash_hits.clear();
+            sabre.buffered_slash = false;
             sabre.cooldown_timer = sabre.cooldown;
             grant_iframes(&mut player_damageable, def.iframes);
             sm.force(PlayerState::Attacking);
@@ -3461,6 +3490,37 @@ mod move_def_wiring_tests {
         sabre.active = true;
         sabre.cooldown_timer = 10.0;
         assert!(sabre_claims_heavy_input(Some(&sabre), &upgrades));
+    }
+
+    #[test]
+    fn buffered_sabre_slash_obeys_the_authored_cancel_window() {
+        let recovery = 0.30;
+        let cancel_after = 0.12;
+
+        assert!(!sabre_recovery_should_advance(
+            recovery,
+            cancel_after,
+            0.20,
+            true,
+        ));
+        assert!(sabre_recovery_should_advance(
+            recovery,
+            cancel_after,
+            0.18,
+            true,
+        ));
+        assert!(!sabre_recovery_should_advance(
+            recovery,
+            cancel_after,
+            0.05,
+            false,
+        ));
+        assert!(sabre_recovery_should_advance(
+            recovery,
+            cancel_after,
+            0.0,
+            false,
+        ));
     }
 
     #[test]
