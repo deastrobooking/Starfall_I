@@ -18,9 +18,10 @@ use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot};
 use crate::components::player::{
     AimReticleState, AimSolution, BoardBoostState, ClimbState, JetpackState, Player, PlayerCamera,
-    PlayerCameraRef, PlayerIndex, PlayerInput, PlayerProgression, PlayerStats, TraversalMode,
-    TraversalModeState,
+    PlayerCameraRef, PlayerIndex, PlayerInput, PlayerProgression, PlayerStats, StuntRunState,
+    TraversalMode, TraversalModeState,
 };
+use crate::tricks::TrickState;
 use crate::components::weapon::{
     BeamSabre, SpecialWeaponInventory, TrackingMissile, WeaponInventory, WeaponRanks, WeaponType,
     MAX_WEAPON_RANK,
@@ -5147,7 +5148,13 @@ fn hud_update_system(
             &SpecialWeaponInventory,
             &ArmorSet,
             &BeamSabre,
-            (&TraversalModeState, &BoardBoostState, &PlayerProgression),
+            (
+                &TraversalModeState,
+                &BoardBoostState,
+                &PlayerProgression,
+                Option<&TrickState>,
+                Option<&StuntRunState>,
+            ),
         ),
         With<Player>,
     >,
@@ -5171,7 +5178,7 @@ fn hud_update_system(
         special,
         armor,
         sabre,
-        (traversal, board_boost, progression),
+        (traversal, board_boost, progression, tricks, stunt_run),
     ) in player_q.iter()
     {
         for (mut node, bar) in bar_q
@@ -5230,7 +5237,9 @@ fn hud_update_system(
                 }
                 PlayerHudTextKind::Ammo => "∞ AMMO".to_string(),
                 PlayerHudTextKind::SpecialAmmo => format!("SPECIALS ∞{}", lock_label),
-                PlayerHudTextKind::TraversalStatus => traversal_status_text(traversal, board_boost),
+                PlayerHudTextKind::TraversalStatus => {
+                    traversal_status_text(traversal, board_boost, tricks, stunt_run)
+                }
                 PlayerHudTextKind::SabreStatus => sabre_status_text(sabre, &progression.upgrades),
             });
         }
@@ -5244,9 +5253,47 @@ fn hud_update_system(
     }
 }
 
-fn traversal_status_text(traversal: &TraversalModeState, boost: &BoardBoostState) -> String {
+/// Live trick/combo readout for the board HUD line: the trick being held (or
+/// the last one landed) plus the running combo total and multiplier, in the
+/// arcade-skate idiom. `None` when no combo is in progress.
+fn live_combo_text(tricks: Option<&TrickState>, run: Option<&StuntRunState>) -> Option<String> {
+    let run = run?;
+    let tricks = tricks?;
+    if tricks.bailed {
+        return Some("BOARD: BAIL!".into());
+    }
+    let held = tricks.active.as_ref().map(|a| a.name.as_str());
+    let name = held.or(tricks.last_trick.as_deref());
+    if !run.active && name.is_none() {
+        return None;
+    }
+    let pending = run.pending_score.round() as u64;
+    match name {
+        Some(name) if run.multiplier > 1.0 || pending > 0 => Some(format!(
+            "BOARD: {}  {}  x{:.2}",
+            name.to_uppercase(),
+            pending,
+            run.multiplier
+        )),
+        Some(name) => Some(format!("BOARD: {}", name.to_uppercase())),
+        None if pending > 0 => Some(format!("BOARD: COMBO {}  x{:.2}", pending, run.multiplier)),
+        None => None,
+    }
+}
+
+fn traversal_status_text(
+    traversal: &TraversalModeState,
+    boost: &BoardBoostState,
+    tricks: Option<&TrickState>,
+    run: Option<&StuntRunState>,
+) -> String {
     if traversal.active != TraversalMode::Hoverboard {
         return format!("TRAVERSAL: {}", traversal.active.label().to_uppercase());
+    }
+    // A live combo readout outranks boost state — it is the thing the rider
+    // is actively managing, and it disappears the moment the run banks.
+    if let Some(text) = live_combo_text(tricks, run) {
+        return text;
     }
     if boost.timer > 0.0 {
         return "BOARD: OVERDRIVE".into();
@@ -7375,14 +7422,63 @@ mod menu_navigation_tests {
         };
         let mut boost = BoardBoostState::default();
         assert_eq!(
-            traversal_status_text(&traversal, &boost),
+            traversal_status_text(&traversal, &boost, None, None),
             "BOARD: B/EAST BOOST READY"
         );
 
         boost.timer = 0.4;
         boost.manual_cooldown = 0.8;
         assert_eq!(
-            traversal_status_text(&traversal, &boost),
+            traversal_status_text(&traversal, &boost, None, None),
+            "BOARD: OVERDRIVE"
+        );
+    }
+
+    #[test]
+    fn board_hud_shows_the_live_trick_combo_over_boost_state() {
+        let traversal = TraversalModeState {
+            active: TraversalMode::Hoverboard,
+            ..default()
+        };
+        // Overdrive would normally own the line…
+        let boost = BoardBoostState {
+            timer: 0.4,
+            ..default()
+        };
+        let run = StuntRunState {
+            active: true,
+            pending_score: 1_250.0,
+            multiplier: 2.5,
+            ..default()
+        };
+        let tricks = TrickState {
+            last_trick: Some("Kickflip".into()),
+            ..default()
+        };
+        // …but an in-progress combo outranks it.
+        assert_eq!(
+            traversal_status_text(&traversal, &boost, Some(&tricks), Some(&run)),
+            "BOARD: KICKFLIP  1250  x2.50"
+        );
+
+        // A bail is called out immediately.
+        let bailed = TrickState {
+            bailed: true,
+            ..default()
+        };
+        assert_eq!(
+            traversal_status_text(&traversal, &boost, Some(&bailed), Some(&run)),
+            "BOARD: BAIL!"
+        );
+
+        // With no run in progress the line falls back to boost state.
+        assert_eq!(
+            traversal_status_text(
+                &traversal,
+                &boost,
+                Some(&TrickState::default()),
+                Some(&StuntRunState::default())
+            ),
             "BOARD: OVERDRIVE"
         );
     }

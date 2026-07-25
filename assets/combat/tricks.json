@@ -1,0 +1,214 @@
+{
+  "tricks": [
+    {
+      "name": "Indy",
+      "category": "Grab",
+      "direction": "Neutral",
+      "base_score": 450.0,
+      "duration": 0.85,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Nosegrab",
+      "category": "Grab",
+      "direction": "Up",
+      "base_score": 520.0,
+      "duration": 0.85,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Tailgrab",
+      "category": "Grab",
+      "direction": "Down",
+      "base_score": 520.0,
+      "duration": 0.85,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Melon",
+      "category": "Grab",
+      "direction": "Left",
+      "base_score": 600.0,
+      "duration": 0.9,
+      "multiplier_bonus": 0.3,
+      "special": false
+    },
+    {
+      "name": "Stalefish",
+      "category": "Grab",
+      "direction": "Right",
+      "base_score": 600.0,
+      "duration": 0.9,
+      "multiplier_bonus": 0.3,
+      "special": false
+    },
+    {
+      "name": "Kickflip",
+      "category": "Flip",
+      "direction": "Neutral",
+      "base_score": 480.0,
+      "duration": 0.7,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Heelflip",
+      "category": "Flip",
+      "direction": "Up",
+      "base_score": 520.0,
+      "duration": 0.7,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Pop Shove-It",
+      "category": "Flip",
+      "direction": "Down",
+      "base_score": 500.0,
+      "duration": 0.7,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Varial Kickflip",
+      "category": "Flip",
+      "direction": "Left",
+      "base_score": 640.0,
+      "duration": 0.8,
+      "multiplier_bonus": 0.3,
+      "special": false
+    },
+    {
+      "name": "Impossible",
+      "category": "Flip",
+      "direction": "Right",
+      "base_score": 700.0,
+      "duration": 0.85,
+      "multiplier_bonus": 0.35,
+      "special": false
+    },
+    {
+      "name": "50-50",
+      "category": "Grind",
+      "direction": "Neutral",
+      "base_score": 250.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Nosegrind",
+      "category": "Grind",
+      "direction": "Up",
+      "base_score": 300.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.3,
+      "special": false
+    },
+    {
+      "name": "5-0",
+      "category": "Grind",
+      "direction": "Down",
+      "base_score": 300.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.3,
+      "special": false
+    },
+    {
+      "name": "Smith Grind",
+      "category": "Grind",
+      "direction": "Left",
+      "base_score": 350.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.35,
+      "special": false
+    },
+    {
+      "name": "Feeble Grind",
+      "category": "Grind",
+      "direction": "Right",
+      "base_score": 350.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.35,
+      "special": false
+    },
+    {
+      "name": "Manual",
+      "category": "Manual",
+      "direction": "Neutral",
+      "base_score": 120.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.2,
+      "special": false
+    },
+    {
+      "name": "Nose Manual",
+      "category": "Manual",
+      "direction": "Up",
+      "base_score": 160.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "One Wheel Manual",
+      "category": "Manual",
+      "direction": "Down",
+      "base_score": 160.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.25,
+      "special": false
+    },
+    {
+      "name": "Rocket Lip",
+      "category": "Lip",
+      "direction": "Neutral",
+      "base_score": 400.0,
+      "duration": 0.55,
+      "multiplier_bonus": 0.3,
+      "special": false
+    },
+    {
+      "name": "The 900",
+      "category": "Grab",
+      "direction": "Neutral",
+      "base_score": 3200.0,
+      "duration": 1.1,
+      "multiplier_bonus": 0.75,
+      "special": true
+    },
+    {
+      "name": "Christ Air",
+      "category": "Grab",
+      "direction": "Up",
+      "base_score": 2600.0,
+      "duration": 1.05,
+      "multiplier_bonus": 0.6,
+      "special": true
+    },
+    {
+      "name": "Kickflip McTwist",
+      "category": "Flip",
+      "direction": "Neutral",
+      "base_score": 2800.0,
+      "duration": 1.0,
+      "multiplier_bonus": 0.65,
+      "special": true
+    },
+    {
+      "name": "Darkslide",
+      "category": "Grind",
+      "direction": "Neutral",
+      "base_score": 1800.0,
+      "duration": 0.0,
+      "multiplier_bonus": 0.6,
+      "special": true
+    }
+  ],
+  "special_multiplier_threshold": 3.0,
+  "spin_score_per_rotation": 325.0,
+  "max_multiplier": 8.0
+}

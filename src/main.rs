@@ -53,6 +53,7 @@ mod shop_transactions;
 mod spatial_lod;
 mod state;
 mod tool_windows;
+mod tricks;
 mod upgrades;
 
 use character_blueprint::{BodyRecipe, CartoonAppearanceRecipe};
@@ -236,6 +237,8 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         // death dissolve, damage numbers, outgoing shake/rumble).
         .add_plugins(hitstop::HitstopPlugin)
         .add_plugins(combat_data::CombatDataPlugin)
+        // Hoverboard trick roster (data-driven, assets/combat/tricks.json).
+        .add_plugins(tricks::TrickDataPlugin)
         .add_plugins(combat_feedback::CombatFeedbackPlugin)
         // S3: procedural retro SFX bus (zero external assets).
         .add_plugins(sfx::SfxPlugin)

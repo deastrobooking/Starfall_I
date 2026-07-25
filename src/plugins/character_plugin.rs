@@ -21,6 +21,7 @@ use crate::components::player::{
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
 use crate::state::AppState;
+use crate::tricks::{TrickCategory, TrickState};
 
 pub struct CharacterPlugin;
 
@@ -168,6 +169,136 @@ struct PoseSample {
     ik: CharacterIkPose,
     hands: HandEngine,
     wall_clasp_time: f32,
+    /// Trick being performed on the hoverboard, if any. Modifies the riding
+    /// stance rather than replacing it — the rider is still on the board.
+    board_trick: Option<TrickCategory>,
+    /// Signed carve input (-1..1) for stance lean and counter-balance arms.
+    board_carve: f32,
+}
+
+/// Resolved hoverboard riding stance: the sideways skate posture plus
+/// whatever the active trick layers on top. Kept as plain data so the pose
+/// can be unit-tested without spawning a character rig.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BoardStancePose {
+    /// Torso yaw onto the board's long axis (regular stance, ~60°).
+    stance_yaw: f32,
+    torso_pitch: f32,
+    torso_roll: f32,
+    head_pitch: f32,
+    /// How far the hips drop — deeper while grinding or tucking a flip.
+    crouch: f32,
+    left_arm_out: f32,
+    right_arm_out: f32,
+    left_arm_pitch: f32,
+    right_arm_pitch: f32,
+    front_foot_yaw: f32,
+    back_foot_yaw: f32,
+    front_knee: f32,
+    back_knee: f32,
+}
+
+/// Base skate stance, carve response, and per-trick overlay.
+fn board_stance_pose(sample: PoseSample) -> BoardStancePose {
+    // Regular stance: torso rotated onto the deck's long axis.
+    const STANCE_YAW: f32 = 1.05;
+    let carve = sample.board_carve.clamp(-1.0, 1.0);
+    let airborne = !sample.grounded;
+    // Faster riding = lower, more committed stance.
+    let speed_crouch = (sample.speed * 0.02).clamp(0.0, 0.10);
+
+    let mut pose = BoardStancePose {
+        stance_yaw: STANCE_YAW,
+        torso_pitch: -0.16,
+        // Lean into the turn.
+        torso_roll: carve * 0.28,
+        head_pitch: -0.08,
+        crouch: 0.06 + speed_crouch,
+        // Arms out for balance; the trailing arm lifts higher through a carve
+        // so the rider visibly counter-balances instead of holding a T-pose.
+        left_arm_out: -0.72 - carve * 0.30,
+        right_arm_out: 0.72 - carve * 0.30,
+        left_arm_pitch: -0.10 - carve * 0.18,
+        right_arm_pitch: -0.10 + carve * 0.18,
+        front_foot_yaw: 0.55,
+        back_foot_yaw: 0.42,
+        front_knee: 0.32,
+        back_knee: 0.30,
+    };
+
+    if airborne {
+        // Tuck slightly and bring the arms in when off the ground.
+        pose.crouch += 0.04;
+        pose.front_knee += 0.16;
+        pose.back_knee += 0.16;
+        pose.left_arm_out += 0.10;
+        pose.right_arm_out -= 0.10;
+    }
+
+    match sample.board_trick {
+        // Grab: reach down and hold the deck, torso folds over the knees.
+        Some(TrickCategory::Grab) => {
+            pose.torso_pitch = -0.62;
+            pose.crouch += 0.16;
+            pose.front_knee = 1.05;
+            pose.back_knee = 0.95;
+            // Leading hand drops to the board, trailing arm flares for style.
+            pose.left_arm_out = -0.28;
+            pose.left_arm_pitch = 1.15;
+            pose.right_arm_out = 1.05;
+            pose.right_arm_pitch = -0.35;
+            pose.head_pitch = 0.22;
+        }
+        // Flip: tight tuck, knees to chest, arms pulled in to spin fast.
+        Some(TrickCategory::Flip) => {
+            pose.torso_pitch = -0.48;
+            pose.crouch += 0.20;
+            pose.front_knee = 1.30;
+            pose.back_knee = 1.20;
+            pose.left_arm_out = -0.34;
+            pose.right_arm_out = 0.34;
+            pose.left_arm_pitch = 0.45;
+            pose.right_arm_pitch = 0.45;
+            pose.head_pitch = 0.16;
+        }
+        // Grind: deep squat, board locked to the rail, arms wide to hold it.
+        Some(TrickCategory::Grind) => {
+            pose.torso_pitch = -0.30;
+            pose.torso_roll = carve * 0.16;
+            pose.crouch += 0.22;
+            pose.front_knee = 0.78;
+            pose.back_knee = 0.72;
+            pose.left_arm_out = -1.05;
+            pose.right_arm_out = 1.05;
+            pose.left_arm_pitch = -0.22;
+            pose.right_arm_pitch = -0.22;
+        }
+        // Manual: weight back over the tail, chest up, arms level.
+        Some(TrickCategory::Manual) => {
+            pose.torso_pitch = 0.24;
+            pose.crouch = (pose.crouch - 0.02).max(0.0);
+            pose.front_knee = 0.14;
+            pose.back_knee = 0.52;
+            pose.left_arm_out = -0.95;
+            pose.right_arm_out = 0.95;
+            pose.left_arm_pitch = -0.30;
+            pose.right_arm_pitch = -0.30;
+            pose.head_pitch = -0.18;
+        }
+        // Lip / Special: big showboat extension.
+        Some(TrickCategory::Lip) | Some(TrickCategory::Special) => {
+            pose.torso_pitch = -0.72;
+            pose.crouch += 0.10;
+            pose.left_arm_out = -1.25;
+            pose.right_arm_out = 1.25;
+            pose.left_arm_pitch = -0.55;
+            pose.right_arm_pitch = -0.55;
+            pose.front_knee = 0.60;
+            pose.back_knee = 0.55;
+        }
+        None => {}
+    }
+    pose
 }
 
 /// Natural locomotion keeps the arms close to the torso and swings them along
@@ -646,7 +777,7 @@ fn cartoon_animation_system(
             Option<&ParryState>,
             Option<&PlayerInput>,
             Option<&BeamSabre>,
-            Option<&MeleeCombo>,
+            (Option<&MeleeCombo>, Option<&TrickState>),
         ),
         (Without<CartoonPart>, Without<JointMarker>),
     >,
@@ -675,7 +806,7 @@ fn cartoon_animation_system(
         parry,
         player_input,
         sabre,
-        melee,
+        (melee, tricks),
     ) in roots.iter_mut()
     {
         let delta = transform.translation - animator.last_position;
@@ -696,6 +827,8 @@ fn cartoon_animation_system(
             .map(|s| s.unlocked && s.active && s.is_slashing)
             .unwrap_or(false);
         let melee_attacking = melee.map(|m| m.active.is_some()).unwrap_or(false);
+        let board_trick = tricks.and_then(|t| t.active.as_ref().map(|a| a.category));
+        let board_carve = player_input.map(|pi| pi.move_axis.x).unwrap_or(0.0);
         animator.pose = select_cartoon_pose(PoseInput {
             state: current_state,
             grounded: movement.map(|m| m.is_grounded).unwrap_or(true),
@@ -825,6 +958,8 @@ fn cartoon_animation_system(
                 ik,
                 hands,
                 wall_clasp_time,
+                board_trick,
+                board_carve,
             },
         );
     }
@@ -1156,39 +1291,50 @@ fn apply_joint_pose(
                 _ => {}
             }
         }
+        // Same sideways skate stance as the cartoon-part path, mapped onto a
+        // joint rig so imported/Studio characters ride identically.
         CartoonPose::Hoverboard => {
-            let carve = (sample.phase * 0.8).sin();
+            let board = board_stance_pose(sample);
+            let idle_sway = (sample.phase * 0.8).sin() * 0.04;
             match marker.kind {
                 JointKind::Pelvis => {
-                    transform.translation.y -= 0.08;
-                    transform.translation.x += carve * 0.018 * sample.scale;
-                    transform.rotation *= Quat::from_rotation_z(carve * 0.12);
+                    transform.translation.y -= board.crouch;
+                    transform.translation.x += board.torso_roll * 0.06 * sample.scale;
+                    transform.rotation *= Quat::from_rotation_y(board.stance_yaw)
+                        * Quat::from_rotation_z(board.torso_roll + idle_sway);
                 }
                 JointKind::Spine | JointKind::Chest => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(-0.18) * Quat::from_rotation_z(-carve * 0.10);
+                    transform.rotation *= Quat::from_rotation_x(board.torso_pitch)
+                        * Quat::from_rotation_z(-board.torso_roll * 0.35);
                 }
                 JointKind::Head | JointKind::Neck => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(-0.08) * Quat::from_rotation_y(carve * 0.10);
+                    // Keep the eyes down the direction of travel.
+                    transform.rotation *= Quat::from_rotation_y(-board.stance_yaw * 0.62)
+                        * Quat::from_rotation_x(board.head_pitch);
                 }
                 JointKind::LeftShoulder => {
-                    transform.rotation *=
-                        Quat::from_rotation_z(-0.72) * Quat::from_rotation_x(-0.12);
+                    transform.rotation *= Quat::from_rotation_z(board.left_arm_out)
+                        * Quat::from_rotation_x(board.left_arm_pitch);
                 }
                 JointKind::RightShoulder => {
-                    transform.rotation *=
-                        Quat::from_rotation_z(0.72) * Quat::from_rotation_x(-0.12);
+                    transform.rotation *= Quat::from_rotation_z(board.right_arm_out)
+                        * Quat::from_rotation_x(board.right_arm_pitch);
                 }
                 JointKind::LeftHip => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(0.34) * Quat::from_rotation_z(-0.12);
+                    transform.rotation *= Quat::from_rotation_y(board.front_foot_yaw)
+                        * Quat::from_rotation_x(board.front_knee * 0.55)
+                        * Quat::from_rotation_z(-0.12);
                 }
                 JointKind::RightHip => {
-                    transform.rotation *= Quat::from_rotation_x(0.30) * Quat::from_rotation_z(0.12);
+                    transform.rotation *= Quat::from_rotation_y(board.back_foot_yaw)
+                        * Quat::from_rotation_x(board.back_knee * 0.55)
+                        * Quat::from_rotation_z(0.12);
                 }
-                JointKind::LeftKnee | JointKind::RightKnee => {
-                    transform.rotation *= Quat::from_rotation_x(0.42);
+                JointKind::LeftKnee => {
+                    transform.rotation *= Quat::from_rotation_x(board.front_knee);
+                }
+                JointKind::RightKnee => {
+                    transform.rotation *= Quat::from_rotation_x(board.back_knee);
                 }
                 _ => {}
             }
@@ -1850,40 +1996,53 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
         }
 
         // ── Hoverboard ───────────────────────────────────────────────────────
+        // Skate stance: the rider stands *sideways* on the deck (regular
+        // stance, left shoulder leading), knees bent, arms out for balance.
+        // Carving leans the whole body into the turn while the arms
+        // counter-rotate, and an active trick layers on top of that base.
         CartoonPose::Hoverboard => {
-            let carve = (sample.phase * 0.8).sin();
+            let board = board_stance_pose(sample);
+            let idle_sway = (sample.phase * 0.8).sin() * 0.04;
             match part.kind {
                 CartoonPartKind::Body => {
-                    transform.translation.y -= 0.06;
-                    transform.rotation *=
-                        Quat::from_rotation_x(-0.16) * Quat::from_rotation_z(carve * 0.10);
+                    transform.translation.y -= board.crouch;
+                    transform.rotation *= Quat::from_rotation_y(board.stance_yaw)
+                        * Quat::from_rotation_x(board.torso_pitch)
+                        * Quat::from_rotation_z(board.torso_roll + idle_sway);
                 }
                 CartoonPartKind::Head
                 | CartoonPartKind::Hair
                 | CartoonPartKind::Hood
                 | CartoonPartKind::Hat => {
-                    transform.translation.y -= 0.03;
-                    transform.rotation *=
-                        Quat::from_rotation_x(-0.08) * Quat::from_rotation_y(carve * 0.08);
+                    transform.translation.y -= board.crouch * 0.5;
+                    // The head stays looking down the direction of travel,
+                    // counter-rotating against the sideways torso.
+                    transform.rotation *= Quat::from_rotation_y(-board.stance_yaw * 0.62)
+                        * Quat::from_rotation_x(board.head_pitch);
                 }
                 CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
-                    transform.rotation *=
-                        Quat::from_rotation_z(-0.72) * Quat::from_rotation_x(-0.10);
+                    transform.rotation *= Quat::from_rotation_z(board.left_arm_out)
+                        * Quat::from_rotation_x(board.left_arm_pitch);
                 }
                 CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
-                    transform.rotation *=
-                        Quat::from_rotation_z(0.72) * Quat::from_rotation_x(-0.10);
+                    transform.rotation *= Quat::from_rotation_z(board.right_arm_out)
+                        * Quat::from_rotation_x(board.right_arm_pitch);
                 }
                 CartoonPartKind::LeftLeg
                 | CartoonPartKind::LeftFoot
                 | CartoonPartKind::LeftBoot => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(0.32) * Quat::from_rotation_z(-0.08);
+                    // Front foot: angled across the deck, absorbing the ride.
+                    transform.rotation *= Quat::from_rotation_y(board.front_foot_yaw)
+                        * Quat::from_rotation_x(board.front_knee)
+                        * Quat::from_rotation_z(-0.08);
                 }
                 CartoonPartKind::RightLeg
                 | CartoonPartKind::RightFoot
                 | CartoonPartKind::RightBoot => {
-                    transform.rotation *= Quat::from_rotation_x(0.30) * Quat::from_rotation_z(0.08);
+                    // Back foot over the tail, deeper bend when tucking.
+                    transform.rotation *= Quat::from_rotation_y(board.back_foot_yaw)
+                        * Quat::from_rotation_x(board.back_knee)
+                        * Quat::from_rotation_z(0.08);
                 }
                 CartoonPartKind::Shadow => {
                     transform.scale *= Vec3::new(1.24, 1.0, 0.68);
@@ -1891,17 +2050,18 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                 _ => {}
             }
             if is_face {
-                transform.translation.y -= 0.03;
-                transform.rotation *= Quat::from_rotation_y(carve * 0.08);
+                transform.translation.y -= board.crouch * 0.5;
+                transform.rotation *= Quat::from_rotation_y(-board.stance_yaw * 0.62);
             }
             if is_body_acc {
-                transform.translation.y -= 0.06;
-                transform.rotation *=
-                    Quat::from_rotation_x(-0.16) * Quat::from_rotation_z(carve * 0.10);
+                transform.translation.y -= board.crouch;
+                transform.rotation *= Quat::from_rotation_y(board.stance_yaw)
+                    * Quat::from_rotation_x(board.torso_pitch)
+                    * Quat::from_rotation_z(board.torso_roll + idle_sway);
             }
             if is_cape {
                 transform.rotation *= Quat::from_rotation_x(cape_flap * 1.25);
-                transform.rotation *= Quat::from_rotation_z(carve * 0.10 * cape_flap);
+                transform.rotation *= Quat::from_rotation_z(board.torso_roll * cape_flap);
             }
         }
 
@@ -2799,6 +2959,79 @@ mod tests {
         assert!(grapple.right.weight > sabre.right.weight);
     }
 
+    fn board_sample(carve: f32, grounded: bool, trick: Option<TrickCategory>) -> PoseSample {
+        PoseSample {
+            pose: CartoonPose::Hoverboard,
+            phase: 0.0,
+            speed: 6.0,
+            scale: 1.0,
+            stride: 1.0,
+            agility: 1.0,
+            vertical_velocity: 0.0,
+            local_velocity: Vec3::ZERO,
+            grounded,
+            wall_normal_local: Vec3::ZERO,
+            hanging: false,
+            dodge_direction_local: Vec3::ZERO,
+            grapple_attach_local: None,
+            ik: CharacterIkPose::default(),
+            hands: HandEngine::default(),
+            wall_clasp_time: 0.0,
+            board_trick: trick,
+            board_carve: carve,
+        }
+    }
+
+    #[test]
+    fn board_stance_is_sideways_with_bent_knees_and_open_arms() {
+        let pose = board_stance_pose(board_sample(0.0, true, None));
+        // Rider stands across the deck, not facing forward.
+        assert!(pose.stance_yaw > 0.9, "stance should be sideways");
+        // Knees bent and hips dropped.
+        assert!(pose.front_knee > 0.2 && pose.back_knee > 0.2);
+        assert!(pose.crouch > 0.0);
+        // Arms out to both sides for balance.
+        assert!(pose.left_arm_out < -0.5 && pose.right_arm_out > 0.5);
+    }
+
+    #[test]
+    fn carving_leans_the_body_and_counter_balances_the_arms() {
+        let left = board_stance_pose(board_sample(-1.0, true, None));
+        let neutral = board_stance_pose(board_sample(0.0, true, None));
+        let right = board_stance_pose(board_sample(1.0, true, None));
+
+        // Torso rolls into the turn, opposite ways for opposite carves.
+        assert!(left.torso_roll < neutral.torso_roll);
+        assert!(right.torso_roll > neutral.torso_roll);
+        // Arms swing as a pair to counter-balance rather than staying fixed.
+        assert!(right.left_arm_out < neutral.left_arm_out);
+        assert!(left.left_arm_out > neutral.left_arm_out);
+        assert!(left.left_arm_pitch > neutral.left_arm_pitch);
+        assert!(right.left_arm_pitch < neutral.left_arm_pitch);
+    }
+
+    #[test]
+    fn each_trick_category_produces_a_distinct_readable_pose() {
+        let ride = board_stance_pose(board_sample(0.0, false, None));
+        let grab = board_stance_pose(board_sample(0.0, false, Some(TrickCategory::Grab)));
+        let flip = board_stance_pose(board_sample(0.0, false, Some(TrickCategory::Flip)));
+        let grind = board_stance_pose(board_sample(0.0, true, Some(TrickCategory::Grind)));
+        let manual = board_stance_pose(board_sample(0.0, true, Some(TrickCategory::Manual)));
+
+        // Grab folds over the board and reaches a hand down to the deck.
+        assert!(grab.torso_pitch < ride.torso_pitch);
+        assert!(grab.left_arm_pitch > 1.0, "leading hand reaches the deck");
+        // Flip is the tightest tuck of them all.
+        assert!(flip.front_knee > grab.front_knee);
+        assert!(flip.left_arm_out > ride.left_arm_out, "arms pull in to spin");
+        // Grind squats lowest with the widest arms.
+        assert!(grind.crouch > ride.crouch);
+        assert!(grind.left_arm_out < ride.left_arm_out);
+        // Manual leans back over the tail — the only pose pitching backward.
+        assert!(manual.torso_pitch > 0.0);
+        assert!(manual.back_knee > manual.front_knee);
+    }
+
     #[test]
     fn hand_engine_hoverboard_opens_balance_hands() {
         let mut input = hand_input();
@@ -2843,6 +3076,8 @@ mod tests {
             ik: CharacterIkPose::default(),
             hands: HandEngine::default(),
             wall_clasp_time: 0.0,
+            board_trick: None,
+            board_carve: 0.0,
         };
         let mut transform = Transform::default();
 

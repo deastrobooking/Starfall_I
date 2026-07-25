@@ -74,9 +74,51 @@ struct SharedEncounterCamera {
     reversion_cooldown: f32,
 }
 
+/// The rocket hoverboard's rendered deck. Pose inputs (contact normal, stick
+/// axis, speed) are noisy per frame, so the visual keeps its own damped state
+/// and eases toward the targets instead of snapping — see
+/// [`update_rocket_hoverboard_visuals`].
 #[derive(Component, Debug, Clone, Copy)]
 struct RocketHoverboardVisual {
     owner: u8,
+    /// Damped surface normal in player-local space. Starts level; eases toward
+    /// the contact normal while grounded and back to level in the air.
+    smoothed_normal: Vec3,
+    /// Damped carve/bank roll (radians).
+    smoothed_bank: f32,
+    /// Damped nose pitch (radians).
+    smoothed_pitch: f32,
+    /// Damped trick spin (radians) so a snapped `spin_degrees` never pops.
+    smoothed_spin: f32,
+}
+
+impl RocketHoverboardVisual {
+    fn new(owner: u8) -> Self {
+        Self {
+            owner,
+            smoothed_normal: Vec3::Y,
+            smoothed_bank: 0.0,
+            smoothed_pitch: 0.0,
+            smoothed_spin: 0.0,
+        }
+    }
+}
+
+/// Frame-rate independent easing factor for a given half-life-ish rate.
+/// Matches the `1 - exp(-rate * dt)` idiom used by the camera smoothing.
+fn damp_factor(rate: f32, dt: f32) -> f32 {
+    1.0 - (-rate * dt.max(0.0)).exp()
+}
+
+/// Smooth 0→1 ramp over `[edge0, edge1]`, used instead of hard speed
+/// thresholds so a value hovering at the edge cannot flicker between two
+/// pose targets on consecutive frames.
+fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
+    if (edge1 - edge0).abs() <= f32::EPSILON {
+        return if value < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 impl Default for SharedEncounterCamera {
@@ -809,6 +851,7 @@ fn spawn_players(
                 TerrainRecoveryState::new(spawn_pos),
                 StuntRunState::default(),
                 StuntRaceProgress::default(),
+                crate::tricks::TrickState::default(),
                 ArmorSet::default(),
                 ArmorRechargeState::default(),
                 starter_inventory,
@@ -978,7 +1021,7 @@ fn attach_rocket_hoverboard(
                     visibility: Visibility::Hidden,
                     ..default()
                 },
-                RocketHoverboardVisual { owner },
+                RocketHoverboardVisual::new(owner),
                 Name::new(format!("P{} Rocket Hoverboard", owner + 1)),
             ))
             .with_children(|board| {
@@ -1028,9 +1071,17 @@ fn update_rocket_hoverboard_visuals(
         ),
         With<Player>,
     >,
-    mut boards: Query<(&RocketHoverboardVisual, &mut Visibility, &mut Transform), Without<Player>>,
+    mut boards: Query<
+        (
+            &mut RocketHoverboardVisual,
+            &mut Visibility,
+            &mut Transform,
+        ),
+        Without<Player>,
+    >,
 ) {
-    for (board, mut visibility, mut transform) in boards.iter_mut() {
+    let dt = time.delta_secs();
+    for (mut board, mut visibility, mut transform) in boards.iter_mut() {
         let Some((_, traversal, movement, jetpack, boost, input, stunt, output, player_transform)) =
             players.iter().find(|(index, ..)| index.0 == board.owner)
         else {
@@ -1057,31 +1108,54 @@ fn update_rocket_hoverboard_visuals(
         };
         transform.translation.y =
             -1.24 + pulse * if rocket { 0.045 } else { 0.016 } - landing_compression * 0.12;
-        let aerial_spin = if !movement.is_grounded {
+        // ── Damped pose ──────────────────────────────────────────────────────
+        // Every input here is noisy frame to frame: the contact normal pops
+        // between trimesh triangles (and vanishes entirely on brief airborne
+        // frames), the stick axis is analog-noisy, and `spin_degrees` resets
+        // on landing. Easing toward the targets keeps the deck steady while
+        // still reacting within a couple of frames.
+        let airborne = !movement.is_grounded;
+        let spin_target = if airborne {
             stunt.spin_degrees.to_radians()
         } else {
             0.0
         };
-        let turn_bank = -input.move_axis.x * if speed > 0.35 { 0.42 } else { 0.24 };
-        let aerial_roll = if !movement.is_grounded {
+        // Smooth speed ramp instead of a hard `speed > 0.35` branch, which
+        // flickered the bank angle when cruising near the threshold.
+        let carve_authority = 0.24 + 0.18 * smoothstep(0.15, 0.65, speed);
+        let bank_target = if airborne {
             -input.move_axis.x * 0.34
         } else {
-            turn_bank + pulse * 0.018
+            -input.move_axis.x * carve_authority + pulse * 0.018
         };
-        let surface_tilt = ground_normal_from_controller_output(output)
-            .map(|normal| {
-                let local_normal = player_transform.rotation.inverse() * normal;
-                Quat::from_rotation_arc(Vec3::Y, local_normal)
-            })
-            .unwrap_or(Quat::IDENTITY);
+        let pitch_target = (-movement.velocity.y * 0.12 - speed * 0.018
+            + boost.landing_approach * 0.14
+            - landing_compression * 0.10)
+            .clamp(-0.30, 0.30);
+        // Level out in the air rather than snapping to identity when the
+        // controller reports no upright contact.
+        let normal_target = if airborne {
+            Vec3::Y
+        } else {
+            ground_normal_from_controller_output(output)
+                .map(|normal| (player_transform.rotation.inverse() * normal).normalize_or(Vec3::Y))
+                .unwrap_or(board.smoothed_normal)
+        };
+
+        board.smoothed_normal = board
+            .smoothed_normal
+            .lerp(normal_target, damp_factor(14.0, dt))
+            .normalize_or(Vec3::Y);
+        board.smoothed_bank += (bank_target - board.smoothed_bank) * damp_factor(16.0, dt);
+        board.smoothed_pitch += (pitch_target - board.smoothed_pitch) * damp_factor(16.0, dt);
+        // Spin tracks fast (it is the trick read) but still never teleports.
+        board.smoothed_spin += (spin_target - board.smoothed_spin) * damp_factor(26.0, dt);
+
+        let surface_tilt = Quat::from_rotation_arc(Vec3::Y, board.smoothed_normal);
         transform.rotation = surface_tilt
-            * Quat::from_rotation_y(aerial_spin)
-            * Quat::from_rotation_x(
-                (-movement.velocity.y * 0.12 - speed * 0.018 + boost.landing_approach * 0.14
-                    - landing_compression * 0.10)
-                    .clamp(-0.30, 0.30),
-            )
-            * Quat::from_rotation_z(aerial_roll);
+            * Quat::from_rotation_y(board.smoothed_spin)
+            * Quat::from_rotation_x(board.smoothed_pitch)
+            * Quat::from_rotation_z(board.smoothed_bank);
         let boost_scale = if boost.timer > 0.0 { 1.08 } else { 1.0 };
         let board_scale = 1.10;
         transform.scale = Vec3::new(
@@ -3422,9 +3496,14 @@ fn player_dodge_update(
                     .upgrades
                     .sabre_dodge_technique_applicable(movement.is_grounded)
         });
+        // Riding the board rebinds dodge to the grind trick.
+        let board_claims_dodge = sabre_ctx.is_some_and(|(_, _, traversal)| {
+            crate::tricks::hoverboard_claims_trick_input(traversal.active)
+        });
 
         if pi.dodge
             && !sabre_claims_dodge
+            && !board_claims_dodge
             && !dodge.is_dodging
             && dodge.cooldown_timer <= 0.0
             && stats.stamina >= dodge_cost
@@ -3467,13 +3546,20 @@ fn player_parry_update(
             &mut PlayerStateMachine,
             &PlayerInput,
             &PlayerProgression,
+            Option<&TraversalModeState>,
         ),
         With<Player>,
     >,
 ) {
     let dt = time.delta_secs();
-    for (mut parry, state, pi, progression) in player_q.iter_mut() {
+    for (mut parry, state, pi, progression, traversal) in player_q.iter_mut() {
         parry.cooldown_timer = (parry.cooldown_timer - dt).max(0.0);
+        // Riding the board rebinds parry to the manual trick.
+        if traversal
+            .is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active))
+        {
+            continue;
+        }
 
         if parry.is_parrying {
             parry.parry_timer -= dt;
@@ -3701,6 +3787,60 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn board_pose_damping_rejects_per_frame_contact_normal_noise() {
+        // Reproduces the jitter: a trimesh contact normal that pops between
+        // two triangles (and vanishes on brief airborne frames) used to be
+        // written straight into the deck rotation. Damped, an alternating
+        // target must never move the pose more than a fraction of the gap.
+        let dt = 1.0 / 120.0;
+        let a = Vec3::new(0.12, 0.99, 0.0).normalize();
+        let b = Vec3::new(-0.12, 0.99, 0.0).normalize();
+        let mut smoothed = Vec3::Y;
+        let mut max_step: f32 = 0.0;
+        for frame in 0..120 {
+            let target = if frame % 2 == 0 { a } else { b };
+            let previous = smoothed;
+            smoothed = smoothed
+                .lerp(target, damp_factor(14.0, dt))
+                .normalize_or(Vec3::Y);
+            max_step = max_step.max(previous.angle_between(smoothed));
+        }
+        // Per-frame swing stays far below the 0.24 rad gap between targets.
+        assert!(max_step < 0.03, "damped normal still snaps: {max_step}");
+        // And it settles between the two, not pinned to whichever came last.
+        assert!(smoothed.x.abs() < 0.05);
+        assert!(smoothed.y > 0.9);
+    }
+
+    #[test]
+    fn damp_factor_is_frame_rate_independent_and_bounded() {
+        // Same elapsed time reached in one big step or many small ones must
+        // land in the same place (within tolerance), so the pose does not
+        // depend on frame rate.
+        let coarse = damp_factor(16.0, 0.1);
+        let mut fine = 0.0_f32;
+        for _ in 0..10 {
+            fine += (1.0 - fine) * damp_factor(16.0, 0.01);
+        }
+        assert!((coarse - fine).abs() < 1e-5);
+        assert_eq!(damp_factor(16.0, 0.0), 0.0);
+        assert!(damp_factor(16.0, 10.0) <= 1.0);
+    }
+
+    #[test]
+    fn smoothstep_removes_the_bank_angle_threshold_flicker() {
+        // The old code branched on `speed > 0.35`, so a speed dithering
+        // around the edge flipped bank between 0.24 and 0.42 every frame.
+        assert_eq!(smoothstep(0.15, 0.65, 0.10), 0.0);
+        assert_eq!(smoothstep(0.15, 0.65, 0.90), 1.0);
+        let just_below = smoothstep(0.15, 0.65, 0.349);
+        let just_above = smoothstep(0.15, 0.65, 0.351);
+        assert!((just_above - just_below).abs() < 0.02, "still steps");
+        // Monotonic across the range.
+        assert!(smoothstep(0.15, 0.65, 0.3) < smoothstep(0.15, 0.65, 0.5));
+    }
 
     #[test]
     fn pushbox_separation_pushes_apart_only_when_close_and_level() {

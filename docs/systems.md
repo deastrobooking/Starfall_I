@@ -823,6 +823,28 @@ over the strike zone for `EnemyConfig.attack_windup` seconds (scouts 0.22 s
 up to brutes 0.5 s) before the volume resolves, and a committed swing spends
 its cooldown even on a whiff — dodging the telegraph is the player's reward.
 Losing the target mid-windup aborts the swing with a short 0.4 s lockout.
+**Hoverboard tricks (2026-07-25):** the deck's rendered pose is damped rather
+than recomputed raw each frame — the contact normal (which pops between
+trimesh triangles and vanishes on brief airborne frames), carve bank, nose
+pitch, and trick spin all ease toward their targets, and the old hard
+`speed > 0.35` bank threshold is a smoothstep, removing the flicker when
+cruising near that speed. Riders stand in a real sideways skate stance
+(`board_stance_pose`): torso yawed onto the deck, knees bent, arms out and
+counter-balancing through carves, with distinct poses per trick category —
+grab folds over the deck and reaches a hand down, flip tucks tight, grind
+squats wide, manual leans back over the tail. The same stance drives both the
+cartoon-part and joint-rig paths so imported characters ride identically.
+Tricks themselves are authored data in `assets/combat/tricks.json`
+(`src/tricks.rs`): 23 shipped tricks across Grab/Flip/Grind/Manual/Lip plus
+multiplier-gated Specials (The 900, Christ Air, Kickflip McTwist, Darkslide).
+While the board is out it claims the combat buttons — flip on `melee_light`,
+grab on `melee_heavy`, grind on `dodge`, manual on `parry` — with the stick
+direction selecting the variant, so melee, evasion, and sabre techniques do
+not also fire. Air tricks must be landed before their hold expires or the
+rider bails and loses the combo; scoring applies the spin bonus (180° = 1.5x,
+360° = 2x) and Tony Hawk repeat decay (2nd ÷1.33, 3rd ÷1.5, 4th+ ÷2). The
+board HUD line shows the live trick, pending combo, and multiplier.
+
 Co-op players shoulder past each other (pushbox-lite): inside ~1.1 units on
 the same level, `player_pushbox_separation` feeds a gentle overlap-scaled
 shove (up to 4.5 u/s) into the shared external-shove channel, so separation

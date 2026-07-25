@@ -61,6 +61,7 @@ use crate::resources::{
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::{settlement_build_def, SettlementBuildKind, SettlementEconomy};
 use crate::sfx::ModularActionSfxEvent;
+use crate::tricks::{ActiveTrick, TrickCategory, TrickDir, TrickLibrary, TrickState};
 use crate::state::AppState;
 
 mod roads;
@@ -252,6 +253,9 @@ impl Plugin for WorldPlugin {
                     board_boost_pad_system,
                     stunt_grind_rail_system,
                     ApplyDeferred,
+                    // Tricks resolve before the combo system accrues airtime
+                    // and banks the run on landing.
+                    hoverboard_trick_system,
                     stunt_combo_system,
                     stunt_race_gate_system,
                 )
@@ -1974,6 +1978,167 @@ fn bank_stunt_run(run: &mut StuntRunState) -> u64 {
     run.trick_count = 0;
     run.active = false;
     banked
+}
+
+/// Which trick category a button press requests while riding the board.
+/// Mirrors the Tony Hawk face-button layout (flip / grab / grind / manual).
+fn requested_trick_category(input: &PlayerInput) -> Option<TrickCategory> {
+    if input.melee_light {
+        Some(TrickCategory::Flip)
+    } else if input.melee_heavy {
+        Some(TrickCategory::Grab)
+    } else if input.dodge {
+        Some(TrickCategory::Grind)
+    } else if input.parry {
+        Some(TrickCategory::Manual)
+    } else {
+        None
+    }
+}
+
+/// Can this category start given the rider's current situation?
+/// Air tricks need airtime, grinds need a rail, manuals need ground.
+fn trick_category_available(
+    category: TrickCategory,
+    is_grounded: bool,
+    is_grinding: bool,
+) -> bool {
+    match category {
+        TrickCategory::Grab | TrickCategory::Flip | TrickCategory::Special => {
+            !is_grounded && !is_grinding
+        }
+        TrickCategory::Grind => is_grinding,
+        TrickCategory::Manual => is_grounded && !is_grinding,
+        TrickCategory::Lip => !is_grounded,
+    }
+}
+
+/// Score a landed trick: base × spin bonus ÷ repeat decay.
+fn landed_trick_score(base_score: f32, spin_degrees: f32, times_already_used: u32) -> f32 {
+    base_score * TrickLibrary::spin_bonus(spin_degrees) / TrickLibrary::repeat_divisor(times_already_used)
+}
+
+/// Hoverboard trick execution: turn button+direction into a named trick,
+/// hold it, then land it (score) or blow it (bail). Runs before
+/// `stunt_combo_system`, which owns airtime/grind accrual and banking.
+#[allow(clippy::too_many_arguments)]
+fn hoverboard_trick_system(
+    time: Res<Time>,
+    library: Res<TrickLibrary>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &PlayerInput,
+            &PlayerMovement,
+            &TraversalModeState,
+            Option<&RailGrindState>,
+            &mut StuntRunState,
+            &mut TrickState,
+        ),
+        With<Player>,
+    >,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+    mut action_sfx: MessageWriter<ModularActionSfxEvent>,
+) {
+    let dt = time.delta_secs();
+    for (index, input, movement, traversal, grinding, mut run, mut tricks) in player_q.iter_mut() {
+        let on_board = traversal.active == TraversalMode::Hoverboard;
+        if !on_board {
+            // Stepping off the board abandons any held trick silently.
+            tricks.active = None;
+            tricks.bailed = false;
+            continue;
+        }
+        tricks.bailed = false;
+        let is_grinding = grinding.is_some();
+        let grounded = movement.is_grounded;
+
+        // ── Resolve the held trick ───────────────────────────────────────
+        if let Some(active) = tricks.active.clone() {
+            let air_trick = active.category.needs_air();
+            if air_trick && grounded {
+                // Landed it: bank the trick into the pending combo.
+                let times_used = tricks.times_used(active.index);
+                let score = landed_trick_score(active.base_score, run.spin_degrees, times_used);
+                run.active = true;
+                run.pending_score += score;
+                run.multiplier = (run.multiplier + active.multiplier_bonus).min(library.max_multiplier);
+                run.trick_count = run.trick_count.saturating_add(1);
+                tricks.record_use(active.index);
+                tricks.last_trick = Some(active.name.clone());
+                tricks.active = None;
+                action_sfx.write(ModularActionSfxEvent::new("hoverboard.trick_land"));
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "P{}  {} {}  +{}  x{:.2}",
+                        index.0 + 1,
+                        active.category.label().to_uppercase(),
+                        active.name,
+                        score.round() as u64,
+                        run.multiplier
+                    ),
+                    duration: 1.4,
+                });
+            } else if air_trick && active.remaining <= 0.0 {
+                // Held too long without landing — bail and lose the combo.
+                tricks.reset_combo();
+                tricks.bailed = true;
+                tricks.last_trick = None;
+                run.pending_score = 0.0;
+                run.multiplier = 1.0;
+                run.spin_degrees = 0.0;
+                run.trick_count = 0;
+                run.active = false;
+                action_sfx.write(ModularActionSfxEvent::new("hoverboard.land"));
+                msg_ev.write(UiMessageEvent {
+                    text: format!("P{}  BAIL — combo lost", index.0 + 1),
+                    duration: 1.6,
+                });
+            } else if !air_trick && !trick_category_available(active.category, grounded, is_grinding)
+            {
+                // Surface trick ended because its surface did (left the rail
+                // or the ground): score it, no bail.
+                let times_used = tricks.times_used(active.index);
+                let score = landed_trick_score(active.base_score, run.spin_degrees, times_used);
+                run.active = true;
+                run.pending_score += score;
+                run.multiplier =
+                    (run.multiplier + active.multiplier_bonus).min(library.max_multiplier);
+                run.trick_count = run.trick_count.saturating_add(1);
+                tricks.record_use(active.index);
+                tricks.last_trick = Some(active.name.clone());
+                tricks.active = None;
+            } else if let Some(held) = tricks.active.as_mut() {
+                held.remaining -= dt;
+            }
+        }
+
+        // ── Start a new trick ────────────────────────────────────────────
+        if tricks.active.is_none() {
+            if let Some(category) = requested_trick_category(input) {
+                if trick_category_available(category, grounded, is_grinding) {
+                    let direction = TrickDir::from_axis(input.move_axis);
+                    if let Some((index_in_lib, def)) = library
+                        .resolve(category, direction, run.multiplier)
+                        .and_then(|def| library.index_of(&def.name).map(|i| (i, def)))
+                    {
+                        tricks.active = Some(ActiveTrick {
+                            index: index_in_lib,
+                            name: def.name.clone(),
+                            category: def.category,
+                            remaining: def.duration,
+                            base_score: def.base_score,
+                            multiplier_bonus: def.multiplier_bonus,
+                        });
+                        run.active = true;
+                        if def.category == TrickCategory::Grind {
+                            action_sfx.write(ModularActionSfxEvent::new("hoverboard.grind_start"));
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn stunt_combo_system(
@@ -17404,6 +17569,54 @@ mod tests {
                 TraversalMode::Hoverboard
             );
         }
+    }
+
+    #[test]
+    fn trick_buttons_map_to_categories_in_tony_hawk_order() {
+        let mut input = PlayerInput::default();
+        assert_eq!(requested_trick_category(&input), None);
+        input.melee_light = true;
+        assert_eq!(requested_trick_category(&input), Some(TrickCategory::Flip));
+        input.melee_light = false;
+        input.melee_heavy = true;
+        assert_eq!(requested_trick_category(&input), Some(TrickCategory::Grab));
+        input.melee_heavy = false;
+        input.dodge = true;
+        assert_eq!(requested_trick_category(&input), Some(TrickCategory::Grind));
+        input.dodge = false;
+        input.parry = true;
+        assert_eq!(requested_trick_category(&input), Some(TrickCategory::Manual));
+    }
+
+    #[test]
+    fn trick_categories_require_their_surface() {
+        // Air tricks: airborne and off a rail.
+        assert!(trick_category_available(TrickCategory::Grab, false, false));
+        assert!(!trick_category_available(TrickCategory::Grab, true, false));
+        assert!(!trick_category_available(TrickCategory::Flip, false, true));
+        // Grinds need a rail.
+        assert!(trick_category_available(TrickCategory::Grind, false, true));
+        assert!(!trick_category_available(TrickCategory::Grind, false, false));
+        // Manuals need ground, not a rail.
+        assert!(trick_category_available(TrickCategory::Manual, true, false));
+        assert!(!trick_category_available(TrickCategory::Manual, false, false));
+        assert!(!trick_category_available(TrickCategory::Manual, true, true));
+    }
+
+    #[test]
+    fn landed_trick_score_applies_spin_bonus_and_repeat_decay() {
+        // Clean first landing, no spin: base score.
+        assert!((landed_trick_score(400.0, 0.0, 0) - 400.0).abs() < 1e-3);
+        // A full rotation doubles it.
+        assert!((landed_trick_score(400.0, 360.0, 0) - 800.0).abs() < 1e-3);
+        // Repeating the same trick in one combo is worth less each time.
+        let first = landed_trick_score(400.0, 0.0, 0);
+        let second = landed_trick_score(400.0, 0.0, 1);
+        let third = landed_trick_score(400.0, 0.0, 2);
+        let fourth = landed_trick_score(400.0, 0.0, 3);
+        assert!(second < first && third < second && fourth < third);
+        assert!((second - 400.0 / 1.33).abs() < 1e-3);
+        assert!((fourth - 200.0).abs() < 1e-3);
     }
 
     #[test]

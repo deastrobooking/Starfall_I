@@ -2011,6 +2011,7 @@ fn melee_combo_system(
             &PlayerProgression,
             Option<&BeamSabre>,
             &mut Damageable,
+            Option<&TraversalModeState>,
         ),
         (With<Player>, Without<Enemy>),
     >,
@@ -2035,8 +2036,12 @@ fn melee_combo_system(
         progression,
         sabre,
         mut player_damageable,
+        traversal,
     ) in player_q.iter_mut()
     {
+        // Riding the board rebinds the melee buttons to flip/grab tricks.
+        let board_claims_input = traversal
+            .is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active));
         let upgrades = &progression.upgrades;
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
@@ -2045,10 +2050,10 @@ fn melee_combo_system(
         combo.light_timer = (combo.light_timer - dt).max(0.0);
         combo.heavy_timer = (combo.heavy_timer - dt).max(0.0);
 
-        if pi.melee_light {
+        if pi.melee_light && !board_claims_input {
             combo.buffered_light = true;
         }
-        if pi.melee_heavy && !sabre_claims_heavy_input(sabre, upgrades) {
+        if pi.melee_heavy && !board_claims_input && !sabre_claims_heavy_input(sabre, upgrades) {
             combo.buffered_heavy = true;
         }
 
@@ -2990,7 +2995,12 @@ fn beam_sabre_update_system(
         // Technique blueprints add new verbs to the starter Saber. Heavy input
         // performs a 360-degree cyclone; B performs a double dash slash on the
         // ground or a meteor pound while airborne.
-        if pi.melee_heavy && upgrades.sabre_spin_unlocked() && sabre.cooldown_timer <= 0.0 {
+        // Riding the board rebinds heavy to the grab trick.
+        if pi.melee_heavy
+            && traversal.active != TraversalMode::Hoverboard
+            && upgrades.sabre_spin_unlocked()
+            && sabre.cooldown_timer <= 0.0
+        {
             let Some(def) = library.sabre_slash(0) else {
                 continue;
             };
