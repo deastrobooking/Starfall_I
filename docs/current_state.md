@@ -7,15 +7,16 @@
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 429 tests across the main crate and example targets,
+- Automated baseline: 432 tests across the main crate and example targets,
   `cargo build`, `cargo fmt --check`, and
   `cargo clippy --all-targets -- -D warnings` pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
   split-screen performance acceptance is still required. Automated success is
   not evidence that those hardware gates passed.
-- Core states are `MainMenu`, `ProjectHub`, `CreatureForge`, `PlayerSelect`,
-  `CharacterDesign`, `CharacterStudio`, `ChapterSelect`, `RobotGarage`,
-  `Playing`, `Paused`, `GameOver`, and `Victory`.
+- Core states are `MainMenu`, `ProjectHub`, `CreatureForge`,
+  `ImportedCharacterForge`, `PlayerSelect`, `CharacterDesign`,
+  `CharacterStudio`, `ChapterSelect`, `RobotGarage`, `Playing`, `Paused`,
+  `GameOver`, and `Victory`.
 
 ## Delivered foundations
 
@@ -93,6 +94,14 @@
   project-backed validation/save, and versioned preset export/load. Published
   creature records populate `PublishedCreatureCatalog`; dungeon spawners can
   opt into them by stable content ID and safely fall back when unavailable.
+- Imported Character Forge is a second Project Hub branch. It accepts external
+  `.glb` drag-and-drop, safely copies imports into the asset tree, inspects and
+  selects named meshes, preserves node hierarchy transforms in its rotating
+  preview, applies the shared Mirror/Array/Twist/Subdivide/Smooth/Noise stack
+  per rigid mesh, and saves root proportions plus non-destructive edit stacks
+  into Character payloads in the active Forge project. Skinning and morph data
+  remain intact: topology-changing preview operations are deliberately bypassed
+  for deformable meshes until a weight/morph-aware bake path is implemented.
 - App construction now has one authoritative
   `build_starfall_app(StarfallAppMode)` boundary. Production keeps the full
   window/render/audio stack; the headless profile keeps state, assets, physics,

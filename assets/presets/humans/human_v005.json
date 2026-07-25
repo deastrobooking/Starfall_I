@@ -1,0 +1,55 @@
+{
+  "sex": "Female",
+  "body": {
+    "height": 0.42508215,
+    "muscle": 0.557356,
+    "weight": 0.780974,
+    "shoulder_width": 0.23518616,
+    "waist_width": 0.52020204,
+    "hip_width": 0.81672424,
+    "limb_length": 0.547714,
+    "chest_shape": 0.5769773
+  },
+  "face": {
+    "face_length": 0.26948935,
+    "jaw_width": 0.41217035,
+    "chin_length": 0.23299436,
+    "chin_width": 0.56031394,
+    "nose_length": 0.7186229,
+    "nose_width": 0.49709082,
+    "nose_bridge": 0.33163938,
+    "nose_tip": 0.551633,
+    "brow_depth": 0.31467947,
+    "cheek_fullness": 0.66304696,
+    "eye_size": 0.51465833,
+    "eye_shape": 0.7344332,
+    "eye_spacing": 0.65843076,
+    "eye_tilt": 0.3533879,
+    "eye_depth": 0.63757175,
+    "brow_angle": 0.70370495,
+    "mouth_width": 0.49348086,
+    "lip_fullness": 0.29874092
+  },
+  "style": {
+    "skin_tone": 2,
+    "eye_color": 6,
+    "hair": "Long",
+    "hair_color": 1,
+    "wardrobe": {
+      "top": "Jacket",
+      "bottom": "FlaredPants",
+      "feet": "TallBoots",
+      "hands": "Gloves",
+      "armor": "DragonMecha"
+    },
+    "flair": "ArcaneHalo",
+    "primary_color": 6,
+    "secondary_color": 9
+  },
+  "modifiers": [
+    null,
+    null,
+    null,
+    null
+  ]
+}

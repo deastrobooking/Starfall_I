@@ -15,6 +15,8 @@ pub enum AppState {
     /// Human character generator studio — in-game mesh generation from preset
     /// templates (bodies, faces, clothes, super suits, mecha armor).
     CharacterStudio,
+    /// GLB-based character import, inspection, and non-destructive sculpting.
+    ImportedCharacterForge,
     ChapterSelect,
     RobotGarage,
     Playing,

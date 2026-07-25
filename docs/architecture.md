@@ -65,6 +65,7 @@ src/
     vehicle_plugin.rs       Vehicle enter/exit; GroundMode (Motorcycle/Tank/GiantMech) and AirMode (Jet/Ship) driven by assembly or blueprint
     robot_garage_plugin.rs  Assembly form browser; auto-selects eligible pets; MechCommandLink gating
     creature_forge_plugin.rs Project-backed CreatureSpec authoring, live preview, validation, and preset library
+    imported_character_forge_plugin.rs GLB ingestion, per-mesh non-destructive sculpt stacks, and project records
   lsystem/                  L-system string rewriting + 3-D turtle for procedural trees
   engine_tools/             Forge project/level persistence, validation, editor runtime and panels
   mesh_modifiers/           Reusable procedural mesh modifier pipeline
@@ -80,6 +81,7 @@ MainMenu ──► PlayerSelect ──► ChapterSelect ──► Playing ⇄ Pa
    │              └─► CharacterStudio              └─► Victory
    │
    └─► ProjectHub ──┬─► CreatureForge
+                    ├─► ImportedCharacterForge
                     └─► Forge Editing in Playing ──► startup-level Playtest
 
 ChapterSelect ──► CharacterDesign / RobotGarage ──► ChapterSelect
@@ -87,9 +89,13 @@ ChapterSelect ──► CharacterDesign / RobotGarage ──► ChapterSelect
 
 `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect` and return to it on Esc/confirm. Neither transitions to `Playing` directly.
 `CharacterDesign` and `CharacterStudio` are also available per joined slot from
-`PlayerSelect`. `CreatureForge` returns to `ProjectHub`; opening or creating a
-project enters `Playing` with `EngineToolMode::Editing` rather than creating a
-second editor-only gameplay state.
+`PlayerSelect`. `CreatureForge` and `ImportedCharacterForge` return to
+`ProjectHub`; opening or creating a project enters `Playing` with
+`EngineToolMode::Editing` rather than creating a second editor-only gameplay
+state. Imported Character Forge copies external `.glb` files under
+`assets/imported_characters/`, preserves their node transforms for preview, and
+stores root proportions plus per-mesh modifier stacks as Character payloads in
+the active Forge project.
 
 ## Core Data Flow
 

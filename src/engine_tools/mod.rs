@@ -6,6 +6,7 @@
 //! entities or depending on Bevy's runtime `Entity` values.
 
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
+pub mod character_records;
 pub mod creature_records;
 mod persistence;
 mod presets;

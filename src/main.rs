@@ -69,8 +69,8 @@ use perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
     CompanionPlugin, CraftingPlugin, CreatureForgePlugin, DiscoverablePlugin, EnemyPlugin,
-    HackingPlugin, InputPlugin, PlayerPlugin, RadioPlugin, RobotGaragePlugin, SavePlugin, UiPlugin,
-    VehiclePlugin, WeaponPlugin, WorldPlugin,
+    HackingPlugin, ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin,
+    RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
 use raids::RaidRegistry;
 use resources::{
@@ -279,6 +279,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         ModularCharacterPlugin,
         character_studio::CharacterStudioPlugin,
         CreatureForgePlugin,
+        ImportedCharacterForgePlugin,
     ));
 }
 

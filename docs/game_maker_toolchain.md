@@ -82,6 +82,24 @@ authored role, and fall back to their built-in enemy safely. Remaining GM2 work
 is topology-specific animation rigs, thumbnail publishing, window-layout
 persistence, and Level Composer authoring for creature spawn overrides.
 
+### GM1b — Imported Character Forge (first vertical slice active)
+
+Project Hub also opens `AppState::ImportedCharacterForge`. Authors can drop an
+external binary glTF file, after which Forge copies it to
+`assets/imported_characters/`, inventories its named meshes, and reconstructs
+the node transforms in a live rotating preview. Each rigid mesh owns an
+independent non-destructive stack using the shared Mirror, Array, Twist,
+Subdivide, Smooth, and Noise Displace tools. Root width, height, and depth are
+editable independently.
+
+The imported source path, selected mesh, root proportions, and modifier stacks
+save as a versioned Character payload in the active Forge project and reload
+without altering the source GLB. Meshes carrying joint weights or morph targets
+remain preview-safe and retain authored deformation data; topology modifiers
+are recorded but not baked onto those meshes yet. Next work is viewport picking,
+brush-based displacement/masking, material preservation, thumbnail publishing,
+and a skin/morph-aware GLB bake/export path.
+
 ### GM3 — World Kit Forge
 
 Create three recipe families sharing sockets and metrics:
