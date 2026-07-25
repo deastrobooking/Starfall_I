@@ -263,6 +263,17 @@ impl Default for PlayerMovement {
     }
 }
 
+impl PlayerMovement {
+    /// Cancel both fixed-tick translation that has not reached the controller
+    /// and the smoothed per-frame remainder. Hard traversal transitions
+    /// (teleports, rail snaps, hangs, grapple arrivals) must use this so motion
+    /// authored before the transition cannot leak into the constrained state.
+    pub fn clear_motor_delivery(&mut self) {
+        self.motor_accum = Vec3::ZERO;
+        self.motor_carry = Vec3::ZERO;
+    }
+}
+
 /// Explicit Sonic/Mario-inspired ground/air action state. Keeping these values
 /// out of the main motor avoids hidden one-frame flags and makes tuning/test
 /// behavior inspectable per local player.
@@ -395,6 +406,12 @@ impl Default for StuntRaceProgress {
 pub struct EdgeGrabState {
     pub is_hanging: bool,
     pub wall_normal: Vec3,
+    /// Stable root position while hanging. Unlike raw wall contact, this comes
+    /// from a validated wall/clearance/top-surface ledge probe.
+    pub ledge_anchor: Option<Vec3>,
+    /// Walkable top point associated with `ledge_anchor`, used by Grapple-mode
+    /// arrival to choose a hang or a direct mantle.
+    pub ledge_top: Option<Vec3>,
     pub cooldown_timer: f32,
     pub wall_contact_timer: f32,
     pub wall_clasp_timer: f32,
@@ -414,6 +431,8 @@ impl Default for EdgeGrabState {
         Self {
             is_hanging: false,
             wall_normal: Vec3::ZERO,
+            ledge_anchor: None,
+            ledge_top: None,
             cooldown_timer: 0.0,
             wall_contact_timer: 0.0,
             wall_clasp_timer: 0.0,
@@ -433,6 +452,21 @@ impl Default for EdgeGrabState {
 impl EdgeGrabState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn begin_hang(&mut self, anchor: Vec3, top: Vec3, normal: Vec3) {
+        self.is_hanging = true;
+        self.ledge_anchor = Some(anchor);
+        self.ledge_top = Some(top);
+        self.wall_normal = normal.with_y(0.0).normalize_or_zero();
+        self.hang_timer = 0.0;
+        self.wall_contact_timer = self.wall_contact_timer.max(0.16);
+    }
+
+    pub fn release_hang(&mut self) {
+        self.is_hanging = false;
+        self.ledge_anchor = None;
+        self.ledge_top = None;
     }
 }
 
@@ -1071,6 +1105,9 @@ pub struct PlayerInput {
     pub enter_vehicle: bool,
     pub open_map: bool,
     pub sabre_toggle: bool,
+    /// Per-frame Star Sabre slash request. Controller RB is intentionally
+    /// separate from RT ranged fire so both weapons remain available.
+    pub sabre_attack: bool,
     /// Per-frame request to cycle this player's active armor infusion.
     /// Negative selects the previous element; positive selects the next.
     pub armor_element_delta: i8,

@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary, RangedMoveDef};
 use crate::components::armor::ArmorSet;
-use crate::components::enemy::{DeadEnemy, Enemy};
+use crate::components::enemy::{CitySpyDrone, DeadEnemy, Enemy, FlyingDrone};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::NpcRoadVehicle;
@@ -199,6 +199,18 @@ fn direction_to_aim_point(muzzle: Vec3, aim_point: Vec3, fallback: Vec3) -> Vec3
     }
 }
 
+fn aim_assist_target(root: Vec3, airborne: bool) -> Vec3 {
+    root + Vec3::Y * if airborne { 0.0 } else { 0.9 }
+}
+
+fn aim_assist_cone_cos(base_cone_cos: f32, airborne: bool) -> f32 {
+    if airborne {
+        (base_cone_cos - 0.10).max(0.58)
+    } else {
+        base_cone_cos
+    }
+}
+
 fn update_aim_solution_system(
     spatial_query: SpatialQuery,
     mut player_q: Query<
@@ -214,7 +226,13 @@ fn update_aim_solution_system(
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
     enemy_q: Query<
-        (Entity, &GlobalTransform, &Health),
+        (
+            Entity,
+            &GlobalTransform,
+            &Health,
+            Option<&FlyingDrone>,
+            Option<&CitySpyDrone>,
+        ),
         (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>),
     >,
 ) {
@@ -244,18 +262,25 @@ fn update_aim_solution_system(
         let base_cone = if input.aim { 0.78 } else { 0.90 };
         let cone_cos = (base_cone - upgrades.gauntlet_aim_cone_relax()).clamp(0.62, 0.96);
         let mut best: Option<(f32, Entity, Vec3)> = None;
-        for (entity, transform, health) in enemy_q.iter() {
+        for (entity, transform, health, drone, city_spy) in enemy_q.iter() {
             if !health.is_alive() {
                 continue;
             }
-            let target_point = transform.translation() + Vec3::Y * 0.9;
+            let airborne = drone.is_some() || city_spy.is_some();
+            // Ground enemies are rooted at their feet, while both drone
+            // families are rooted at the center of their hurtbox. A torso
+            // offset put spy-drone assist just above its shallow collider.
+            let target_point = aim_assist_target(transform.translation(), airborne);
             let offset = target_point - camera_origin;
             let distance = offset.length();
             if distance <= 0.01 || distance > range {
                 continue;
             }
             let dot = offset.normalize_or_zero().dot(camera_forward);
-            if dot < cone_cos {
+            // Fast, elevated targets get modest extra magnetism without
+            // changing acquisition for grounded combatants.
+            let target_cone_cos = aim_assist_cone_cos(cone_cos, airborne);
+            if dot < target_cone_cos {
                 continue;
             }
             let target_direction = Dir3::new(offset.normalize_or_zero()).ok();
@@ -1172,7 +1197,6 @@ fn special_weapon_system(
             &PlayerCameraRef,
             &AimSolution,
             &ArmorSet,
-            &BeamSabre,
             &PlayerProgression,
         ),
         With<Player>,
@@ -1182,7 +1206,7 @@ fn special_weapon_system(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
-    for (player_entity, player_index, mut inv, pi, cam_ref, aim, armor, sabre, progression) in
+    for (player_entity, player_index, mut inv, pi, cam_ref, aim, armor, progression) in
         player_q.iter_mut()
     {
         let upgrades = &progression.upgrades;
@@ -1196,9 +1220,7 @@ fn special_weapon_system(
             if let Some(selected) = inv.select(slot) {
                 let name = selected.name;
                 msg_ev.write(UiMessageEvent {
-                    text: format!(
-                        "Selected {name} — RT to fire; RB/D-pad Left returns to primaries"
-                    ),
+                    text: format!("Selected {name} — RT to fire; D-pad Left returns to primaries"),
                     duration: 2.2,
                 });
             }
@@ -1207,7 +1229,7 @@ fn special_weapon_system(
         let Some(slot) = inv.active_slot else {
             continue;
         };
-        if !pi.fire_just || sabre.active {
+        if !pi.fire_just {
             continue;
         }
         let Ok(cam) = cam_q.get(cam_ref.0) else {
@@ -2840,7 +2862,7 @@ fn beam_sabre_update_system(
                 }
                 msg_ev.write(UiMessageEvent {
                     text: if sabre.active {
-                        "Star Sabre active — RT to slash".into()
+                        "Star Sabre active — RB to slash; RT fires beam".into()
                     } else {
                         "Star Sabre holstered".into()
                     },
@@ -2868,7 +2890,7 @@ fn beam_sabre_update_system(
         if sabre.technique_timer <= 0.0 {
             sabre.technique = SabreTechnique::Ready;
         }
-        if sabre.is_slashing && pi.fire_just {
+        if sabre.is_slashing && pi.sabre_attack {
             sabre.buffered_slash = true;
         }
 
@@ -3111,7 +3133,7 @@ fn beam_sabre_update_system(
             continue;
         }
 
-        if pi.fire_just && sabre.cooldown_timer <= 0.0 {
+        if pi.sabre_attack && sabre.cooldown_timer <= 0.0 {
             let Some(def) = library.sabre_slash(0) else {
                 continue;
             };
@@ -3429,6 +3451,15 @@ mod tracking_missile_tests {
             direction_to_aim_point(Vec3::ONE, Vec3::ONE, fallback),
             fallback
         );
+    }
+
+    #[test]
+    fn airborne_aim_assist_targets_hurtbox_center_with_wider_cone() {
+        let root = Vec3::new(4.0, 32.0, -8.0);
+        assert_eq!(aim_assist_target(root, true), root);
+        assert_eq!(aim_assist_target(root, false), root + Vec3::Y * 0.9);
+        assert!(aim_assist_cone_cos(0.78, true) < aim_assist_cone_cos(0.78, false));
+        assert_eq!(aim_assist_cone_cos(0.62, true), 0.58);
     }
 
     #[test]

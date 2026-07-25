@@ -121,9 +121,20 @@ Non-goals for MM7-MM11:
   sockets, enemies, drones, bosses, and Grapple-mode surface fallbacks feed the
   search; the movement motor consumes its zip and swing velocity, and enemy
   arrival resolves impact damage plus light-target pull.
+- Grapple-mode broad-surface fallback now raycasts real World geometry. A zip
+  arriving at a valid lip uses the shared three-probe ledge contract (wall,
+  head clearance, walkable top) and hands off to a stable hang or mantle.
+  Stunt rails, spring pads, and speed-loop apexes expose authored
+  `GrappleSocket`s. Hard constraints clear fixed motor carry so delayed motion
+  cannot push the player off a caught edge.
 - D-pad quick modes select traversal intent: Grapple, Hover Jet, Flight, and
   Hoverboard. Select+D-pad keeps legacy utility shortcuts such as interact,
   vehicle, previous weapon, and map.
+- The southeast Grand Raceway provides a dedicated high-speed acceptance
+  course: a wide terrain-following circuit with repeated pad acceleration,
+  authored ramp launches, ordered three-lap gates, recovery checkpoints, and
+  two direct world-map anchors. Motion Boot/Aegis ranks now produce bounded,
+  visible gains on road boosts.
 
 ## MVP Milestones
 

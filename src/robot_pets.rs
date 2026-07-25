@@ -99,6 +99,7 @@ pub enum RobotPetSource {
 pub enum RobotAssemblyForm {
     Car,
     Motorcycle,
+    JetBike,
     Tank,
     Boat,
     Submarine,
@@ -109,9 +110,10 @@ pub enum RobotAssemblyForm {
 }
 
 impl RobotAssemblyForm {
-    pub const ALL: [RobotAssemblyForm; 9] = [
+    pub const ALL: [RobotAssemblyForm; 10] = [
         RobotAssemblyForm::Car,
         RobotAssemblyForm::Motorcycle,
+        RobotAssemblyForm::JetBike,
         RobotAssemblyForm::Tank,
         RobotAssemblyForm::Boat,
         RobotAssemblyForm::Submarine,
@@ -125,6 +127,7 @@ impl RobotAssemblyForm {
         match self {
             RobotAssemblyForm::Car => "Car",
             RobotAssemblyForm::Motorcycle => "Motorcycle",
+            RobotAssemblyForm::JetBike => "Jet Bike",
             RobotAssemblyForm::Tank => "Tank",
             RobotAssemblyForm::Boat => "Boat",
             RobotAssemblyForm::Submarine => "Submarine",
@@ -138,6 +141,7 @@ impl RobotAssemblyForm {
     pub fn required_pets(self) -> usize {
         match self {
             RobotAssemblyForm::Car | RobotAssemblyForm::Motorcycle | RobotAssemblyForm::Boat => 1,
+            RobotAssemblyForm::JetBike => 2,
             RobotAssemblyForm::Tank
             | RobotAssemblyForm::Submarine
             | RobotAssemblyForm::SpaceJet => 2,
@@ -151,6 +155,7 @@ impl RobotAssemblyForm {
         match self {
             RobotAssemblyForm::Car => &CAR_RECIPE,
             RobotAssemblyForm::Motorcycle => &MOTORCYCLE_RECIPE,
+            RobotAssemblyForm::JetBike => &JET_BIKE_RECIPE,
             RobotAssemblyForm::Tank => &TANK_RECIPE,
             RobotAssemblyForm::Boat => &BOAT_RECIPE,
             RobotAssemblyForm::Submarine => &SUBMARINE_RECIPE,
@@ -183,6 +188,12 @@ const MOTORCYCLE_RECIPE: [PartCost; 3] = [
     PartCost::new(RobotPartKind::ScrapFrame, 3),
     PartCost::new(RobotPartKind::ServoMotor, 3),
     PartCost::new(RobotPartKind::CircuitBoard, 1),
+];
+const JET_BIKE_RECIPE: [PartCost; 4] = [
+    PartCost::new(RobotPartKind::ScrapFrame, 5),
+    PartCost::new(RobotPartKind::ServoMotor, 4),
+    PartCost::new(RobotPartKind::HoverJet, 3),
+    PartCost::new(RobotPartKind::EnergyCore, 2),
 ];
 const TANK_RECIPE: [PartCost; 3] = [
     PartCost::new(RobotPartKind::ScrapFrame, 8),
@@ -294,6 +305,7 @@ fn default_unlocked_forms(role: RobotPetRole, source: RobotPetSource) -> Vec<Rob
     match role {
         RobotPetRole::Scout => {
             forms.push(RobotAssemblyForm::SpaceJet);
+            forms.push(RobotAssemblyForm::JetBike);
         }
         RobotPetRole::Healer => {
             forms.push(RobotAssemblyForm::Boat);
@@ -309,6 +321,7 @@ fn default_unlocked_forms(role: RobotPetRole, source: RobotPetSource) -> Vec<Rob
         RobotPetRole::Pilot => {
             forms.push(RobotAssemblyForm::Boat);
             forms.push(RobotAssemblyForm::SpaceJet);
+            forms.push(RobotAssemblyForm::JetBike);
         }
     }
     forms.sort_by_key(|form| *form as u8);
@@ -584,6 +597,37 @@ mod tests {
 
         assert_eq!(assembly.form, RobotAssemblyForm::Tank);
         assert_eq!(collection.active_assembly.as_ref().unwrap().pet_ids, ids);
+    }
+
+    #[test]
+    fn two_pilots_can_assemble_the_dual_mode_jet_bike() {
+        let mut collection = loaded_collection();
+        for index in 0..2 {
+            collection.rescue_pet(RobotPetBlueprint::rescued(
+                format!("pilot-{index}"),
+                format!("Pilot {index}"),
+                RobotPetRole::Pilot,
+            ));
+        }
+        let ids = vec!["pilot-0".to_string(), "pilot-1".to_string()];
+        let assembly = collection
+            .assemble(RobotAssemblyForm::JetBike, &ids)
+            .expect("two pilots and the hybrid recipe should form a Jet Bike");
+        assert_eq!(assembly.form, RobotAssemblyForm::JetBike);
+        assert_eq!(RobotAssemblyForm::JetBike.required_pets(), 2);
+        assert_eq!(RobotAssemblyForm::JetBike.recipe(), &JET_BIKE_RECIPE);
+    }
+
+    #[test]
+    fn jet_bike_assembly_round_trips_through_save_json() {
+        let assembly = RobotAssembly {
+            form: RobotAssemblyForm::JetBike,
+            pet_ids: vec!["pilot-0".to_string(), "pilot-1".to_string()],
+        };
+        let json = serde_json::to_string(&assembly).expect("Jet Bike assembly should serialize");
+        let restored: RobotAssembly =
+            serde_json::from_str(&json).expect("Jet Bike assembly should deserialize");
+        assert_eq!(restored, assembly);
     }
 
     #[test]

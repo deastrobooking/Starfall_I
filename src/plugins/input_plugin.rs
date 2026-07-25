@@ -13,12 +13,12 @@
 ///  LT  (LTrigger2)  — aim
 ///  RT  (RTrigger2)  — fire
 ///  LB  (LTrigger)   — sprint
-///  RB  (RTrigger)   — weapon next
+///  RB  (RTrigger)   — Star Sabre slash
 ///  A / Cross / B    — jump                     (South)
 ///  B / Circle / A   — dodge                    (East)
 ///  X / Square / Y   — reload; LB+X uses equipped quick item (West)
 ///  Y / Triangle / X — parry                    (North)
-///  LB + Y / Triangle — toggle Star Sabre; RT swings it
+///  LB + Y / Triangle — toggle Star Sabre; RB swings it
 ///  (LT + Y and Guide/Home remain alternate mappings)
 ///  LB + DPad Up       — enable Rocket Hoverboard
 ///  LB + DPad Left     — return to Grapple traversal
@@ -518,10 +518,7 @@ fn update_player_inputs(
         let armor_keyboard_modifier =
             keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
         pi.weapon_next =
-            (is_p1 && !armor_keyboard_modifier && keyboard.just_pressed(KeyCode::BracketRight))
-                || (!select_held
-                    && (btn_just(GamepadButton::RightTrigger)
-                        || native_just(NativeButton::RightShoulder))); // RB only — DPadRight freed for open_map
+            is_p1 && !armor_keyboard_modifier && keyboard.just_pressed(KeyCode::BracketRight);
         pi.weapon_prev =
             is_p1 && !armor_keyboard_modifier && keyboard.just_pressed(KeyCode::BracketLeft);
 
@@ -651,7 +648,7 @@ fn update_player_inputs(
                 && (btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft)));
 
         // ── Open map ──────────────────────────────────────────────────────────
-        // DPadRight freed from weapon_next (RB covers that); assigned to map.
+        // DPadRight is assigned to the map; DPadLeft cycles weapons.
         pi.open_map = (is_p1 && keyboard.just_pressed(KeyCode::KeyM))
             || (dpad_free
                 && (btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight)));
@@ -690,6 +687,8 @@ fn update_player_inputs(
             || l3r3
             || (native_just(NativeButton::LeftThumb) && native_held(NativeButton::RightThumb))
             || (native_just(NativeButton::RightThumb) && native_held(NativeButton::LeftThumb));
+        pi.sabre_attack = (is_p1 && mouse_btn.just_pressed(MouseButton::Left))
+            || controller_sabre_attack(select_held, grapple_button_just);
 
         pi.ui_vertical = pi.move_axis.y;
         pi.ui_up = (is_p1 && keyboard.just_pressed(KeyCode::ArrowUp))
@@ -738,6 +737,10 @@ fn controller_traversal_mode(
     } else {
         None
     }
+}
+
+fn controller_sabre_attack(select_held: bool, right_shoulder_just: bool) -> bool {
+    right_shoulder_just && !select_held
 }
 
 fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
@@ -818,6 +821,13 @@ mod tests {
             controller_traversal_mode(false, true, false, false, false),
             None
         );
+    }
+
+    #[test]
+    fn right_shoulder_attacks_with_sabre_unless_select_claims_grapple() {
+        assert!(controller_sabre_attack(false, true));
+        assert!(!controller_sabre_attack(true, true));
+        assert!(!controller_sabre_attack(false, false));
     }
 
     #[test]

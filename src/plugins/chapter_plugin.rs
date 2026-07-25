@@ -38,8 +38,9 @@ struct AirshipLevelPiece;
 #[derive(Resource, Default)]
 struct PendingChapterTravel {
     chapter: Option<ChapterId>,
-    cave_anchor: Option<&'static str>,
-    cave_label: Option<&'static str>,
+    world_anchor: Option<&'static str>,
+    world_label: Option<&'static str>,
+    enter_dungeon: bool,
 }
 
 impl Plugin for ChapterPlugin {
@@ -106,14 +107,16 @@ fn start_chapter(
     *wave = WaveInfo::new();
     wave.wave_number = current.id.0 as u32;
     dungeon.clear();
-    if let (Some(anchor), Some(label)) = (fast_travel.anchor_id, fast_travel.cave_label) {
+    if let (Some(anchor), Some(label)) = (fast_travel.anchor_id, fast_travel.label) {
         pending_travel.chapter = None;
-        pending_travel.cave_anchor = Some(anchor);
-        pending_travel.cave_label = Some(label);
+        pending_travel.world_anchor = Some(anchor);
+        pending_travel.world_label = Some(label);
+        pending_travel.enter_dungeon = fast_travel.enter_dungeon;
     } else {
         pending_travel.chapter = Some(current.id);
-        pending_travel.cave_anchor = None;
-        pending_travel.cave_label = None;
+        pending_travel.world_anchor = None;
+        pending_travel.world_label = None;
+        pending_travel.enter_dungeon = false;
     }
     fast_travel.clear();
     started_ev.write(ChapterStartedEvent {
@@ -128,30 +131,39 @@ fn apply_pending_chapter_travel(
     anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
     mut dungeon: ResMut<DungeonCrawlState>,
 ) {
-    if let Some(anchor_id) = pending_travel.cave_anchor {
+    if let Some(anchor_id) = pending_travel.world_anchor {
         let Some(anchor) = resolve_anchor_position(&anchor_q, anchor_id) else {
             return;
         };
-        let Some(cave) = secret_cave_location(
-            crate::chapters::SECRET_CAVE_LOCATIONS
+        let cave = if pending_travel.enter_dungeon {
+            let Some(chapter) = crate::chapters::SECRET_CAVE_LOCATIONS
                 .iter()
                 .find(|cave| cave.anchor_id == anchor_id)
                 .map(|cave| cave.chapter)
-                .unwrap_or(ChapterId::FIRST),
-        ) else {
-            return;
+            else {
+                return;
+            };
+            let Some(cave) = secret_cave_location(chapter) else {
+                return;
+            };
+            Some(cave)
+        } else {
+            None
         };
         move_players_to_world_anchor(&mut commands, &mut player_q, anchor);
-        dungeon.activate(
-            cave.anchor_id,
-            cave.chapter,
-            pending_travel.cave_label.unwrap_or(cave.label),
-            anchor,
-            anchor,
-            64.0,
-        );
-        pending_travel.cave_anchor = None;
-        pending_travel.cave_label = None;
+        if let Some(cave) = cave {
+            dungeon.activate(
+                cave.anchor_id,
+                cave.chapter,
+                pending_travel.world_label.unwrap_or(cave.label),
+                anchor,
+                anchor,
+                64.0,
+            );
+        }
+        pending_travel.world_anchor = None;
+        pending_travel.world_label = None;
+        pending_travel.enter_dungeon = false;
         return;
     }
     let Some(chapter_id) = pending_travel.chapter else {
@@ -177,6 +189,7 @@ fn move_players_to_world_anchor(
         transform.translation = anchor + OFFSETS[index.0.min(3) as usize];
         movement.velocity = Vec3::ZERO;
         movement.ground_velocity = Vec3::ZERO;
+        movement.clear_motor_delivery();
         movement.is_grounded = false;
         commands.entity(entity).remove::<BoatPassenger>();
     }

@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use crate::chapters::{
     chapter_map_locations, map_settlements, MapSettlement, MapSettlementKind, SecretCaveLocation,
-    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE, SECRET_CAVE_LOCATIONS,
+    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE, RACE_REGION_TRAVEL_POINTS,
+    SECRET_CAVE_LOCATIONS,
 };
 use crate::commands::CommandRegistry;
 use crate::components::armor::ArmorSet;
@@ -28,8 +29,8 @@ use crate::components::enemy::{CitySpyDrone, Enemy, EnemyStateMachine, EnemyType
 use crate::components::faction::Faction;
 use crate::components::player::{
     BoardBoostState, ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement,
-    PlayerStateMachine, PlayerStats, StuntRaceProgress, StuntRunState, TraversalMode,
-    TraversalModeState,
+    PlayerProgression, PlayerStateMachine, PlayerStats, StuntRaceProgress, StuntRunState,
+    TraversalMode, TraversalModeState,
 };
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
@@ -898,7 +899,7 @@ fn dungeon_exit_portal_system(
         transform.translation = portal.return_positions[usize::from(index.0.min(3))];
         movement.velocity = Vec3::ZERO;
         movement.ground_velocity = Vec3::ZERO;
-        movement.motor_accum = Vec3::ZERO;
+        movement.clear_motor_delivery();
         movement.is_grounded = false;
         commands.entity(entity).remove::<BoatPassenger>();
     }
@@ -1879,6 +1880,7 @@ fn stunt_grind_rail_system(
                 commands.entity(entity).remove::<RailGrindState>();
                 continue;
             };
+            movement.clear_motor_delivery();
             let delta = rail.end - rail.start;
             let length = delta.length().max(0.001);
             let direction = delta / length * grinding.direction;
@@ -1948,6 +1950,7 @@ fn stunt_grind_rail_system(
             1.0
         };
         transform.translation = closest + Vec3::Y * 1.1;
+        movement.clear_motor_delivery();
         movement.is_grounded = false;
         traversal.active = TraversalMode::Hoverboard;
         commands.entity(entity).insert(RailGrindState {
@@ -2324,6 +2327,7 @@ fn board_boost_pad_system(
     mut pad_q: Query<(&Transform, &mut BoardBoostPad)>,
     mut player_q: Query<(
         &Transform,
+        &PlayerProgression,
         &mut PlayerMovement,
         &mut TraversalModeState,
         &mut BoardBoostState,
@@ -2343,7 +2347,7 @@ fn board_boost_pad_system(
         }
 
         let inv_rot = pad_transform.rotation.inverse();
-        for (player_transform, mut movement, mut traversal, mut boost, mut state) in
+        for (player_transform, progression, mut movement, mut traversal, mut boost, mut state) in
             player_q.iter_mut()
         {
             let local = inv_rot * (player_transform.translation - pad_transform.translation);
@@ -2359,13 +2363,17 @@ fn board_boost_pad_system(
                 traversal.active = TraversalMode::Hoverboard;
             }
 
-            boost.timer = boost.timer.max(pad.duration);
-            boost.speed_mult = boost.speed_mult.max(pad.speed_mult);
+            let upgrade_mult = road_boost_upgrade_mult(&progression.upgrades);
+            boost.timer = boost
+                .timer
+                .max(pad.duration * (1.0 + (upgrade_mult - 1.0) * 0.25));
+            boost.speed_mult = boost.speed_mult.max(pad.speed_mult * upgrade_mult.sqrt());
             boost.direction = direction;
 
             let current_along = movement.ground_velocity.dot(direction);
-            if current_along < pad.impulse {
-                movement.ground_velocity += direction * (pad.impulse - current_along);
+            let upgraded_impulse = pad.impulse * upgrade_mult;
+            if current_along < upgraded_impulse {
+                movement.ground_velocity += direction * (upgraded_impulse - current_along);
             }
             if pad.lift > 0.0 {
                 movement.velocity.y = movement.velocity.y.max(pad.lift);
@@ -2379,6 +2387,10 @@ fn board_boost_pad_system(
             break;
         }
     }
+}
+
+fn road_boost_upgrade_mult(upgrades: &crate::upgrades::UpgradeLedger) -> f32 {
+    (upgrades.boot_ground_speed_mult() * upgrades.armor_speed_mult()).clamp(1.0, 1.40)
 }
 
 fn npc_road_vehicle_system(
@@ -6286,7 +6298,9 @@ const TERRAIN_MESH_RESOLUTION: usize = 320;
 const TERRAIN_MESH_CELL_SIZE: f32 = TERRAIN_WORLD_SIZE / TERRAIN_MESH_RESOLUTION as f32;
 const MAX_CACHED_WORLD_SEEDS: usize = 4;
 const EVEREST_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/everest.png");
+const RACE_HEIGHTMAP_BYTES: &[u8] = include_bytes!("../../assets/terrain/RACE.png");
 static EVEREST_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
+static RACE_HEIGHTMAP: OnceLock<Option<EverestHeightmap>> = OnceLock::new();
 static TERRAIN_MESH_HEIGHT_GRIDS: OnceLock<Mutex<BoundedSeedCache<Vec<f32>>>> = OnceLock::new();
 static SKY_ROAD_ACCESS_CORRIDORS: OnceLock<Mutex<BoundedSeedCache<Vec<(Vec2, Vec3)>>>> =
     OnceLock::new();
@@ -6396,6 +6410,32 @@ const ROUTE_LINK_NORTHWEST_AURORA: &[(f32, f32)] =
     &[(-3300.0, 4300.0), (-900.0, 1500.0), (1300.0, 540.0)];
 const ROUTE_LINK_OUTER_NORTH: &[(f32, f32)] =
     &[(-6200.0, 6500.0), (-7700.0, 6000.0), (-7800.0, 4200.0)];
+// Starfall Grand Raceway. The imported RACE heightmap occupies the southeast
+// range; these two access roads join it to the existing Rockies and Antarctic
+// trunks, while the wide closed circuit and infield link make it a real map
+// district instead of an isolated arena.
+const ROUTE_RACE_NORTH_ACCESS: &[(f32, f32)] =
+    &[(8500.0, -5200.0), (8400.0, -6100.0), (8150.0, -6500.0)];
+const ROUTE_RACE_CIRCUIT: &[(f32, f32)] = &[
+    (8150.0, -6500.0),
+    (7600.0, -6350.0),
+    (6900.0, -6550.0),
+    (6200.0, -7100.0),
+    (6000.0, -7900.0),
+    (6350.0, -8600.0),
+    (7100.0, -8950.0),
+    (8000.0, -8750.0),
+    (8650.0, -8150.0),
+    (8800.0, -7350.0),
+    (8450.0, -6800.0),
+    (8150.0, -6500.0),
+];
+const ROUTE_RACE_WEST_ACCESS: &[(f32, f32)] =
+    &[(3300.0, -8400.0), (5000.0, -8800.0), (6350.0, -8600.0)];
+const ROUTE_RACE_INFIELD: &[(f32, f32)] =
+    &[(6900.0, -6550.0), (7100.0, -7600.0), (7100.0, -8950.0)];
+const BASE_MOUNTAIN_ROUTE_COUNT: usize = 14;
+const RACE_CIRCUIT_ROUTE_INDEX: usize = BASE_MOUNTAIN_ROUTE_COUNT + 1;
 const MOUNTAIN_ROUTES: &[&[(f32, f32)]] = &[
     ROUTE_CORE_AURORA,
     ROUTE_CORE_EVEREST,
@@ -6411,6 +6451,10 @@ const MOUNTAIN_ROUTES: &[&[(f32, f32)]] = &[
     ROUTE_LINK_EAST_SOUTH,
     ROUTE_LINK_NORTHWEST_AURORA,
     ROUTE_LINK_OUTER_NORTH,
+    ROUTE_RACE_NORTH_ACCESS,
+    ROUTE_RACE_CIRCUIT,
+    ROUTE_RACE_WEST_ACCESS,
+    ROUTE_RACE_INFIELD,
 ];
 
 struct EverestHeightmap {
@@ -6474,6 +6518,24 @@ fn everest_heightmap() -> Option<&'static EverestHeightmap> {
 fn load_everest_heightmap() -> Option<EverestHeightmap> {
     let image = Image::from_buffer(
         EVEREST_HEIGHTMAP_BYTES,
+        ImageType::Extension("png"),
+        CompressedImageFormats::NONE,
+        true,
+        ImageSampler::nearest(),
+        RenderAssetUsages::default(),
+    )
+    .ok()?;
+
+    heightmap_from_image(&image)
+}
+
+fn race_heightmap() -> Option<&'static EverestHeightmap> {
+    RACE_HEIGHTMAP.get_or_init(load_race_heightmap).as_ref()
+}
+
+fn load_race_heightmap() -> Option<EverestHeightmap> {
+    let image = Image::from_buffer(
+        RACE_HEIGHTMAP_BYTES,
         ImageType::Extension("png"),
         CompressedImageFormats::NONE,
         true,
@@ -6784,6 +6846,30 @@ fn everest_heightmap_relief(x: f32, z: f32, seed: u64) -> f32 {
         + authored_everest_summit
 }
 
+const RACE_REGION_CENTER: Vec2 = Vec2::new(7_250.0, -7_650.0);
+const RACE_REGION_HALF_EXTENT: f32 = 1_950.0;
+
+/// Sample the new race terrain as a local map tile. The feathered replacement
+/// preserves the surrounding Everest terrain at the tile edge, while the
+/// imported dark basin becomes a broad drivable floor ringed by high ridges.
+fn race_heightmap_surface(x: f32, z: f32, seed: u64) -> Option<(f32, f32)> {
+    let heightmap = race_heightmap()?;
+    let u =
+        (x - (RACE_REGION_CENTER.x - RACE_REGION_HALF_EXTENT)) / (RACE_REGION_HALF_EXTENT * 2.0);
+    let v =
+        ((RACE_REGION_CENTER.y + RACE_REGION_HALF_EXTENT) - z) / (RACE_REGION_HALF_EXTENT * 2.0);
+    if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+        return None;
+    }
+
+    let blend = edge_fade01(u, 0.14) * edge_fade01(v, 0.14);
+    let raw =
+        (heightmap.sample(u, v) * 0.35 + heightmap.smooth_sample(u, v) * 0.65).clamp(0.0, 1.0);
+    let basin = smoothstep(0.08, 0.82, raw).powf(1.28);
+    let detail = terrain_fbm_signed(x, z, seed, 3_301, 0.0022) * 7.5;
+    Some(((34.0 + basin * 385.0 + detail).max(18.0), blend))
+}
+
 /// Layered sine-wave height at world position (x, z).
 /// The city centre is kept near-flat; elevation builds toward the outer ring.
 fn terrain_height_uncarved(x: f32, z: f32, seed: u64) -> f32 {
@@ -6847,6 +6933,9 @@ fn terrain_height_uncarved(x: f32, z: f32, seed: u64) -> f32 {
     let everest = everest_heightmap_relief(x, z, seed);
 
     let mut raw_height = base + edge_lift + peak_boost + qilian + plateau + everest;
+    if let Some((race_height, race_blend)) = race_heightmap_surface(x, z, seed) {
+        raw_height = raw_height.lerp(race_height, race_blend);
+    }
     raw_height += (raw_height * 0.034 + terrain_fbm_signed(x, z, seed, 2_503, 0.00115) * 0.82)
         .sin()
         * 8.0
@@ -17149,6 +17238,52 @@ mod tests {
     }
 
     #[test]
+    fn race_heightmap_asset_loads_and_is_bounded_to_southeast_region() {
+        assert!(race_heightmap().is_some());
+        let (center_height, center_blend) =
+            race_heightmap_surface(RACE_REGION_CENTER.x, RACE_REGION_CENTER.y, 42)
+                .expect("race tile center should sample");
+        assert!((18.0..=430.0).contains(&center_height));
+        assert!(center_blend > 0.99);
+        assert!(race_heightmap_surface(0.0, 0.0, 42).is_none());
+    }
+
+    #[test]
+    fn race_region_has_wide_connected_roads_and_two_travel_points() {
+        assert_eq!(RACE_REGION_TRAVEL_POINTS.len(), 2);
+        assert!(speed_road_width_for_route(RACE_CIRCUIT_ROUTE_INDEX) > SPEED_ROAD_WIDTH);
+        assert_eq!(
+            ROUTE_RACE_CIRCUIT.first(),
+            ROUTE_RACE_CIRCUIT.last(),
+            "race circuit must close"
+        );
+        for point in RACE_REGION_TRAVEL_POINTS {
+            assert!(ROUTE_RACE_CIRCUIT.contains(&(point.x, point.z)));
+            assert!(
+                (point.x - RACE_REGION_CENTER.x).abs() <= RACE_REGION_HALF_EXTENT
+                    && (point.z - RACE_REGION_CENTER.y).abs() <= RACE_REGION_HALF_EXTENT
+            );
+        }
+        assert!(ROUTE_RACE_NORTH_ACCESS.contains(&ROUTE_RACE_CIRCUIT[0]));
+        assert!(ROUTE_RACE_WEST_ACCESS.contains(&ROUTE_RACE_CIRCUIT[5]));
+    }
+
+    #[test]
+    fn road_boosts_scale_with_motion_and_armor_logic_upgrades() {
+        let base = crate::upgrades::UpgradeLedger::default();
+        let upgraded = crate::upgrades::UpgradeLedger {
+            ranks: vec![
+                (crate::upgrades::TechUpgradeId::MotionBootSuite, 5),
+                (crate::upgrades::TechUpgradeId::AegisArmorSuite, 5),
+            ],
+            ..default()
+        };
+        assert_eq!(road_boost_upgrade_mult(&base), 1.0);
+        assert!(road_boost_upgrade_mult(&upgraded) > 1.30);
+        assert!(road_boost_upgrade_mult(&upgraded) <= 1.40);
+    }
+
+    #[test]
     fn city_core_terrain_stays_flat() {
         assert_eq!(terrain_height(0.0, 0.0, 42), 0.0);
     }
@@ -17406,7 +17541,7 @@ mod tests {
 
         let mut station_heights: HashMap<(i32, i32), Vec<f32>> = HashMap::new();
         for (route_index, profile) in profiles.iter().enumerate() {
-            let width = SPEED_ROAD_WIDTH + (route_index % 3) as f32 * 2.4;
+            let width = speed_road_width_for_route(route_index);
             for point in profile {
                 station_heights
                     .entry((point.x.round() as i32, point.z.round() as i32))

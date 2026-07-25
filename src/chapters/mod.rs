@@ -53,6 +53,34 @@ pub struct ChapterMapLocation {
     pub facing_yaw: f32,
 }
 
+/// Non-chapter world-map destination. These reuse the active chapter session
+/// while moving the party to a stable authored world anchor.
+#[derive(Debug, Clone, Copy)]
+pub struct WorldMapTravelPoint {
+    pub chapter: ChapterId,
+    pub anchor_id: &'static str,
+    pub label: &'static str,
+    pub x: f32,
+    pub z: f32,
+}
+
+pub const RACE_REGION_TRAVEL_POINTS: [WorldMapTravelPoint; 2] = [
+    WorldMapTravelPoint {
+        chapter: ChapterId(10),
+        anchor_id: "race_region_north_gate",
+        label: "Starfall Grand Raceway — North Gate",
+        x: 8_150.0,
+        z: -6_500.0,
+    },
+    WorldMapTravelPoint {
+        chapter: ChapterId(11),
+        anchor_id: "race_region_pit_lane",
+        label: "Starfall Grand Raceway — Pit Lane",
+        x: 6_350.0,
+        z: -8_600.0,
+    },
+];
+
 /// Authored mountain-cave destination shared by world generation, dungeon
 /// activation, and the fast-travel map.
 #[derive(Debug, Clone, Copy)]

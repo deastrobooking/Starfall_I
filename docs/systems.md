@@ -121,6 +121,16 @@ Analog movement preserves stick strength. Sprint requires the sprint input plus 
 
 Wall slide is the default wall-contact behavior while falling; it now behaves as a stamina-backed one-hand wall clasp, drains a small amount of stamina, refreshes wall-jump charges, slows descent, and falls back to a faster tired slide when stamina is gone. Hanging is intentional through `E` / D-pad Down. Wall jump is triggered from buffered jump input while `wall_contact_timer > 0` and airborne. It pushes away from wall normal + 25% input direction, has a short steering lockout for cleaner arcs, and carries two wall-jump charges that refresh on landing or renewed wall slide contact.
 
+Intentional edge grabs validate three pieces of level geometry before entering
+`Hanging`: a chest-height vertical wall, head clearance above that wall, and a
+walkable top surface within reach. The resulting root anchor/top point remain
+stable throughout the hang instead of following noisy triangle contacts.
+Hoverboard mode does not enter ordinary edge hangs. Grapple-mode surface
+fallbacks raycast World geometry, and zip arrival at a valid lip hands off to
+an anchored hang or a short mantle. Hard traversal constraints clear both the
+fixed-tick accumulator and its smoothed carry so pre-catch movement cannot leak
+into a hang, rail/loop snap, recovery, or teleport.
+
 Procedural character poses now distinguish idle, walk, run, jump, fall, flight,
 one-hand wall slide, hang, combat, Star Sabre slash, and grapple wind-up. The
 long-form roadmap for turning this into a full humanoid traversal/combat system
@@ -174,11 +184,13 @@ Ready/Windup/Searching/Swinging/Zipping/Recovering/Cooldown modes and bounded
 cable, zip, mountain, attack-pull, spring, and damping tuning. Search scores
 forward `GrappleSocket`s, open/contested route markers, drones, ordinary
 enemies, and boss/heavy weak points within cable range. Grapple traversal mode
-also supplies a forward surface latch when no authored target wins. Target kind
+also supplies a World-raycast surface latch when no authored target wins;
+stunt rails, spring pads, and speed-loop apexes supply authored sockets. Target kind
 selects swing or zip behavior; movement pumps a swing, while jump or dodge
 releases either mode. Reaching an enemy applies kinetic impact damage and pulls
 non-heavy enemies toward the player; boss/heavy targets take the hit without
-being displaced.
+being displaced. A zip that reaches a validated ledge transfers into the shared
+edge hang/mantle path rather than dropping after hook recovery.
 
 Climb-up: `E` / D-pad Down while hanging. Boosts player upward `climb_boost * dt * 60`.
 
@@ -207,6 +219,16 @@ instead of propagating a remote summit backward and lifting the whole network.
 re-runs grade propagation across the connected graph, keeping intersections
 vertically flush. NPC traffic consumes the same profiles as deck generation.
 Non-route settlement rings and spurs retain their local terrain-lift solver.
+The southeast Grand Raceway is a dedicated local terrain tile sourced from
+`assets/terrain/RACE.png`, feathered into the existing Everest height function
+so the render mesh, trimesh collider, road solver, anchors, and recovery queries
+all see the same surface. Two access roads connect the district to the Rockies
+and Antarctic trunks. Its closed circuit is 94 units wide and adds dense
+ground-level boost lanes, four course-specific launch ramps, six ordered
+three-lap gates, two NPC rivals, and two `R` world-map travel points. These
+travel points reuse the active chapter session without activating dungeon mode.
+Boost-pad impulse and effective sustain/cap consume the owning player's Motion
+Boot and Aegis upgrade multipliers, clamped to preserve authored course bounds.
 Every authored route endpoint gets a terrain-sampled entrance built by
 `spawn_speed_road_ground_access`: it begins with its deck surface at ground
 level, uses an eased ramp capped around an 8% target grade, and merges flush
@@ -840,7 +862,9 @@ multiplier-gated Specials (The 900, Christ Air, Kickflip McTwist, Darkslide).
 While the board is out it claims the combat buttons — flip on `melee_light`,
 grab on `melee_heavy`, grind on `dodge`, manual on `parry` — with the stick
 direction selecting the variant, so melee, evasion, and sabre techniques do
-not also fire. Air tricks must be landed before their hold expires or the
+not also fire. B/East remains overdrive off rails, but once rail-bound that
+input belongs exclusively to Grind and cannot trigger both mechanics. Air
+tricks must be landed before their hold expires or the
 rider bails and loses the combo; scoring applies the spin bonus (180° = 1.5x,
 360° = 2x) and Tony Hawk repeat decay (2nd ÷1.33, 3rd ÷1.5, 4th+ ÷2). The
 board HUD line shows the live trick, pending combo, and multiplier.
@@ -884,14 +908,15 @@ proximity-scaled outgoing **camera shake**, and the rumble hook. See
 | Moon Bubble | 9 | 4.0s | Unlimited |
 | Sprite Turret | 0 | 10.0s | Unlimited |
 
-Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Player and enemy projectile collision sweeps the full per-frame travel segment through typed Avian layers. Candidate impacts resolve nearest-first, piercing player shots continue through hostile sensor hurtboxes but stop at world geometry, and explosive shots detonate at the resolved surface. Radial player explosives, enemy fireballs, and boss shockwaves require World-layer line of sight to each target before applying falloff, so walls provide real blast cover. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Tracking weapons display a pulsing world-space lock ring: gold for Homing Star and cyan for magic beams. Characters designed with `DariaCannon` arms can hold and release a charge shot. Charged hits resolve through the shared critical path at 1.5x damage and add a damage/element-scaled hot-pink impact core. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
+Primary and special ammo counters are retained for save compatibility but no longer gate or decrement during play; cooldown/fire rate is the only firing limit. Player and enemy projectile collision sweeps the full per-frame travel segment through typed Avian layers. Candidate impacts resolve nearest-first, piercing player shots continue through hostile sensor hurtboxes but stop at world geometry, and explosive shots detonate at the resolved surface. Radial player explosives, enemy fireballs, and boss shockwaves require World-layer line of sight to each target before applying falloff, so walls provide real blast cover. Aim assist targets living enemy torsos up to long combat range, uses a broader reticle cone, and fully converges while LT/RMB aim is held. Flying and city-spy drones target their center-rooted hurtboxes instead of adding the grounded torso offset and receive a modestly wider acquisition cone. Tracking weapons display a pulsing world-space lock ring: gold for Homing Star and cyan for magic beams. Characters designed with `DariaCannon` arms can hold and release a charge shot. Charged hits resolve through the shared critical path at 1.5x damage and add a damage/element-scaled hot-pink impact core. Heroes with magic power 1.10 or higher add fast tracking steering and a beam trail to primary shots.
 
 **Star Sabre / Beam Sabre** (`BeamSabre`): controller ownership follows the
 assigned `PlayerIndex`. The base Saber is starter equipment; toggle `T` or
-controller LB+North/Y, with LT+North/Y, Guide, and L3+R3 as fallbacks. RT/LMB
-performs the animated slash while active. Its second combo slash launches one
-small starter wave. Normal beam weapons use that same player's LT aim and RT
-fire inputs. Saber level, Solar Sabre Glyph, and Beam Capacitors combine into a
+controller LB+North/Y, with LT+North/Y, Guide, and L3+R3 as fallbacks. RB/LMB
+performs the animated slash while active; RT remains dedicated to the selected
+ranged weapon even while the Saber is drawn. Its second combo slash launches
+one small starter wave. Normal beam weapons use that same player's LT aim and
+RT fire inputs. Saber level, Solar Sabre Glyph, and Beam Capacitors combine into a
 bounded wave tier: upgrades grow the projectile mesh, damage, and speed; add up
 to four spread waves; add piercing at tier 3; add another emission on slash four
 when the combo is long enough; and add splash at tier 5.
@@ -938,7 +963,7 @@ were increased with it so the rendered weapon and gameplay reach agree better.
 
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 
-Special tools are selected with keyboard `7`, `8`, `9`, `0`, or controller Select + D-pad Up/Down/Left/Right, then fired with RT/LMB. Homing Star—the tracking missile—is Select+D-pad Up. Its name replaces the primary weapon name in the HUD while selected. RB, D-pad Left, or primary number keys return RT to primary weapons.
+Special tools are selected with keyboard `7`, `8`, `9`, `0`, or controller Select + D-pad Up/Down/Left/Right, then fired with RT/LMB. Homing Star—the tracking missile—is Select+D-pad Up. Its name replaces the primary weapon name in the HUD while selected. D-pad Left or primary number keys return RT to primary weapons.
 
 ---
 
@@ -1405,12 +1430,18 @@ See `docs/audio_modding.md` for the player workflow and manifest schema.
 
 - `GroundMode`: `None`, `Motorcycle`, `Tank`, `GiantMech`
 - `AirMode`: `None`, `Jet`, `Ship`
+- `JetBikeMode`: `Ground`, `Flight` (one hybrid vehicle owning exactly one of
+  the above physics profiles at a time)
 
-**M key** cycles ground mode. **J key** cycles air/boat mode. Access is gated by either a `PlayerLoadout` blueprint OR `RobotPetCollection.active_assembly`:
+**J / Enter Vehicle** toggles the available single-mode vehicle, handles nearby
+boats, or cycles an assembled Jet Bike through ground → flight → off. **M /
+Open Map** is not consumed by vehicles. Access is gated by either a
+`PlayerLoadout` blueprint or `RobotPetCollection.active_assembly`:
 
 | Assembly form | Ground mode | Air mode |
 |---|---|---|
 | Car / Motorcycle | Motorcycle | — |
+| Jet Bike | Motorcycle | Jet |
 | Tank | Tank | — |
 | GiantMech | GiantMech | — |
 | SpaceJet or jet_blueprint | — | Jet |
@@ -1427,6 +1458,12 @@ See `docs/audio_modding.md` for the player workflow and manifest schema.
 | Ship | 1.5× jet | — | Best air mode |
 
 The party still shares one active vehicle mode at a time. 3-D mech/ship controller runtimes are future work.
+The two-pet Jet Bike assembly is the first spawned hybrid body: a single
+party-owned visual follows its rider, shows wheels in ground mode, deploys
+wings/thrusters in flight mode, and transitions between the existing
+Motorcycle and Jet tuning without stacking both movement profiles. Enter
+Vehicle cycles ground → flight → off. Its assembly recipe uses Scrap Frames, Servo Motors, Hover
+Jets, and Energy Cores, and Scout/Pilot rescue forms can support it.
 
 ---
 

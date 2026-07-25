@@ -39,7 +39,8 @@
   bounded four-seed terrain/road caches, connected speed roads, caves,
   settlements, dungeons, raids, and campaign anchors.
 - Authoritative per-player aiming, viewport reticles, Homing Star tracking,
-  Star Sabre controls, procedural weapon poses, loot attraction, road ramp
+  independent RB Star Sabre slash and RT ranged-fire controls, airborne-target
+  aim assistance, procedural weapon poses, loot attraction, road ramp
   alignment tests, and the MVP animation/rig bridge are present.
 - Character Studio exposes 26 body/face morphs, including face length, eye
   shape/depth, nose bridge/tip, chin width, and sex-aware chest shape. Its
@@ -53,7 +54,13 @@
   jump/rocket profile, B/East overdrive, uphill wave assistance, contact-normal
   banking, forward-momentum retention in the air and during coast, a short
   ground-approach descent assist, a compressed landing pose, and a 10% larger
-  sole-height visual. The Star Saber is starter equipment
+  sole-height visual. Rail-bound B/East belongs exclusively to Grind instead
+  of also firing overdrive. Fixed-motor carry is cleared at hard traversal
+  constraints, so rail/loop snaps, recovery, ledge hangs, grapple arrivals, and
+  teleports cannot leak delayed movement. Edge grabs validate a wall, head
+  clearance, and walkable top before anchoring; Grapple-mode surface latches
+  raycast real geometry and hand off into a mantle or stable hang. Stunt rails,
+  springs, and loop apexes expose authored grapple sockets. The Star Saber is starter equipment
   with a small second-slash wave; the Solar Glyph and Beam Capacitors add wider,
   larger, stronger waves while save-backed world blueprints/gems unlock cyclone,
   double-dash/pound, elemental, and legendary upgrades per player.
@@ -77,6 +84,18 @@
   4.6-unit edge barriers. Settlement rings remain narrower road/path variants.
   Forge road recipes compile finer Hermite curves, curved 12-slice junctions,
   deck barriers, and expose an `AUTO ROUND ALL SPLINE POINTS` controller action.
+- `assets/terrain/RACE.png` is blended as a feathered southeast terrain tile.
+  Its Grand Raceway district connects to the Rockies and Antarctic trunks,
+  carries a 94-unit-wide closed terrain-following course, six ordered race
+  gates, four launch ramps, boost lanes, two rivals, recovery checkpoints, and
+  two chapter-map `R` fast-travel anchors. Road-pad impulse, cap, and sustain
+  now scale conservatively from Motion Boot and Aegis logic upgrades.
+- The Robot Garage now offers a save-compatible two-pet `JetBike` assembly.
+  It spawns one party-owned transforming bike visual around the active rider,
+  uses the Motorcycle profile in ground mode and the Jet profile in flight
+  mode, and preserves the existing one-driver vehicle authority. Enter Vehicle
+  cycles ground → flight → off while ordinary single-mode forms toggle from the
+  same input. Map input no longer leaks into ground-vehicle activation.
 - City spy drones now carry canonical enemy hurtboxes, restoring projectile
   damage, hit flash, and damage-number feedback. Per-player armor durability
   begins recharging at 18 points/second after three seconds without a hit.

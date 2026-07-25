@@ -1,13 +1,12 @@
 //! Vehicle plugin — ground and air vehicle modes, gated by blueprints and robot assembly.
 //!
 //! Blueprint vehicles (discoverable pickups):
-//!   M / open_map  → motorcycle (walk_speed × 1.58, sprint × 1.58)
-//!   J / enter_vehicle → jet (boosted jetpack)
+//!   J / enter_vehicle → motorcycle when only a ground form is available
+//!   J / enter_vehicle → jet when only an air form is available
+//!   J / enter_vehicle → Jet Bike ground → flight → off when assembled
 //!
 //! Assembly vehicles (Robot Garage assembles a form from pets + parts):
-//!   M / open_map  → tank mode  (assembled Tank)     — slow but heavy armor bonus
-//!   M / open_map  → mech mode  (assembled GiantMech) — very slow, massive melee power
-//!   J / enter_vehicle → ship mode (SpaceShip/MegaShip)  — sustained flight upgrade
+//!   J / enter_vehicle → tank/mech/ship mode when its assembly is active
 //!
 //! Only one ground mode and one air mode may be active at a time.
 
@@ -19,6 +18,7 @@ use crate::components::player::{
 };
 use crate::components::world::{BoatPassenger, BoatVehicle};
 use crate::events::UiMessageEvent;
+use crate::rendering::{PbrBundle, SpatialBundle};
 use crate::resources::PlaySessionTransition;
 use crate::robot_pets::{RobotAssemblyForm, RobotPetCollection};
 use crate::state::AppState;
@@ -35,6 +35,7 @@ impl Plugin for VehiclePlugin {
                     vehicle_input,
                     clear_stale_boat_passengers_system,
                     apply_vehicle_buffs,
+                    sync_jet_bike_visual,
                     boat_drive_system,
                 )
                     .chain()
@@ -62,6 +63,12 @@ pub enum AirMode {
     Ship,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JetBikeMode {
+    Ground,
+    Flight,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct VehicleBaseline {
     walk_speed: f32,
@@ -79,11 +86,23 @@ pub struct VehicleState {
     pub active_owner: Option<u8>,
     pub active_boat: Option<Entity>,
     pub boat_heading: f32,
+    pub jet_bike_mode: Option<JetBikeMode>,
     baselines: [Option<VehicleBaseline>; 4],
     applied_armor_bonuses: [f32; 4],
     // Legacy accessors used by external code — kept as computed properties.
     pub mech_armor_bonus: f32,
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+struct JetBikeVisual {
+    owner: u8,
+}
+
+#[derive(Component)]
+struct JetBikeGroundPart;
+
+#[derive(Component)]
+struct JetBikeFlightPart;
 
 #[allow(dead_code)] // Mode query helpers for HUD/UI consumers that key off enum modes directly today.
 impl VehicleState {
@@ -104,10 +123,12 @@ impl VehicleState {
     }
     fn deactivate_ground(&mut self) {
         self.ground_mode = GroundMode::None;
+        self.jet_bike_mode = None;
         self.mech_armor_bonus = 0.0;
     }
     fn deactivate_air(&mut self) {
         self.air_mode = AirMode::None;
+        self.jet_bike_mode = None;
     }
     fn deactivate_all_vehicle(&mut self) {
         self.deactivate_ground();
@@ -115,6 +136,7 @@ impl VehicleState {
         self.boat_active = false;
         self.active_boat = None;
         self.active_owner = None;
+        self.jet_bike_mode = None;
     }
 }
 
@@ -134,7 +156,9 @@ fn assembled_ground_mode(robot_pets: &RobotPetCollection) -> Option<GroundMode> 
         .active_assembly
         .as_ref()
         .and_then(|a| match a.form {
-            RobotAssemblyForm::Car | RobotAssemblyForm::Motorcycle => Some(GroundMode::Motorcycle),
+            RobotAssemblyForm::Car | RobotAssemblyForm::Motorcycle | RobotAssemblyForm::JetBike => {
+                Some(GroundMode::Motorcycle)
+            }
             RobotAssemblyForm::Tank => Some(GroundMode::Tank),
             RobotAssemblyForm::GiantMech => Some(GroundMode::GiantMech),
             _ => None,
@@ -143,7 +167,10 @@ fn assembled_ground_mode(robot_pets: &RobotPetCollection) -> Option<GroundMode> 
 
 fn assembled_air_mode(robot_pets: &RobotPetCollection, loadout: &PlayerLoadout) -> AirMode {
     if let Some(a) = &robot_pets.active_assembly {
-        if matches!(a.form, RobotAssemblyForm::SpaceJet) {
+        if matches!(
+            a.form,
+            RobotAssemblyForm::SpaceJet | RobotAssemblyForm::JetBike
+        ) {
             return AirMode::Jet;
         }
         if matches!(
@@ -157,6 +184,48 @@ fn assembled_air_mode(robot_pets: &RobotPetCollection, loadout: &PlayerLoadout) 
         return AirMode::Jet;
     }
     AirMode::None
+}
+
+fn available_ground_mode(
+    robot_pets: &RobotPetCollection,
+    loadout: &PlayerLoadout,
+) -> Option<GroundMode> {
+    assembled_ground_mode(robot_pets).or_else(|| {
+        loadout
+            .has_blueprint("motorcycle_blueprint")
+            .then_some(GroundMode::Motorcycle)
+    })
+}
+
+fn jet_bike_available(robot_pets: &RobotPetCollection, loadout: &PlayerLoadout) -> bool {
+    robot_pets
+        .active_assembly
+        .as_ref()
+        .is_some_and(|assembly| assembly.form == RobotAssemblyForm::JetBike)
+        || (available_ground_mode(robot_pets, loadout) == Some(GroundMode::Motorcycle)
+            && assembled_air_mode(robot_pets, loadout) == AirMode::Jet)
+}
+
+fn set_jet_bike_mode(state: &mut VehicleState, owner: u8, mode: Option<JetBikeMode>) {
+    let Some(mode) = mode else {
+        state.deactivate_all_vehicle();
+        return;
+    };
+    state.active_owner = Some(owner);
+    state.active_boat = None;
+    state.boat_active = false;
+    state.mech_armor_bonus = 0.0;
+    state.jet_bike_mode = Some(mode);
+    match mode {
+        JetBikeMode::Ground => {
+            state.ground_mode = GroundMode::Motorcycle;
+            state.air_mode = AirMode::None;
+        }
+        JetBikeMode::Flight => {
+            state.ground_mode = GroundMode::None;
+            state.air_mode = AirMode::Jet;
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -186,60 +255,11 @@ fn vehicle_input(
         .collect::<Vec<_>>();
 
     for (entity, idx, player_transform, pi, passenger) in player_q.iter() {
-        // ── Ground vehicle toggle (M key / open_map) ──────────────────────────
-        if pi.open_map {
-            // Determine which ground mode is available (assembly takes priority over blueprint).
-            let available_ground = if let Some(mode) = assembled_ground_mode(&robot_pets) {
-                Some(mode)
-            } else if loadout.has_blueprint("motorcycle_blueprint") {
-                Some(GroundMode::Motorcycle)
-            } else {
-                None
-            };
+        let available_ground = available_ground_mode(&robot_pets, &loadout);
+        let available_air = assembled_air_mode(&robot_pets, &loadout);
+        let dual_jet_bike = jet_bike_available(&robot_pets, &loadout);
 
-            if let Some(mode) = available_ground {
-                if vehicle_owned_by_other(&state, idx.0) {
-                    msg_ev.write(UiMessageEvent {
-                        text: vehicle_in_use_message(&state),
-                        duration: 1.8,
-                    });
-                    continue;
-                }
-                let currently_on = state.ground_mode == mode && state.active_owner == Some(idx.0);
-                if currently_on {
-                    state.deactivate_ground();
-                    state.active_owner = None;
-                    msg_ev.write(UiMessageEvent {
-                        text: format!("P{} {}: OFF", idx.0 + 1, ground_mode_label(mode)),
-                        duration: 1.5,
-                    });
-                } else {
-                    state.ground_mode = mode;
-                    state.mech_armor_bonus = if mode == GroundMode::GiantMech {
-                        40.0
-                    } else {
-                        0.0
-                    };
-                    state.air_mode = AirMode::None;
-                    state.boat_active = false;
-                    state.active_boat = None;
-                    remove_boat_passengers(&mut commands, &player_q, None);
-                    state.active_owner = Some(idx.0);
-                    msg_ev.write(UiMessageEvent {
-                        text: format!("P{} {}: ON", idx.0 + 1, ground_mode_label(mode)),
-                        duration: 1.5,
-                    });
-                }
-            } else {
-                msg_ev.write(UiMessageEvent {
-                    text: "No ground vehicle — assemble one in the Garage or find a blueprint."
-                        .into(),
-                    duration: 2.0,
-                });
-            }
-        }
-
-        // ── Air/boat toggle (J key / enter_vehicle) ───────────────────────────
+        // ── Party vehicle toggle (J key / D-pad Up) ───────────────────────────
         if pi.enter_vehicle {
             // Boat passenger disembark takes priority.
             if let Some(passenger) = passenger {
@@ -338,6 +358,7 @@ fn vehicle_input(
                 state.boat_active = true;
                 state.ground_mode = GroundMode::None;
                 state.air_mode = AirMode::None;
+                state.jet_bike_mode = None;
                 state.active_owner = Some(idx.0);
                 state.active_boat = Some(boat_entity);
                 state.boat_heading = yaw_from_rotation(boat_transform.rotation);
@@ -361,9 +382,41 @@ fn vehicle_input(
                 continue;
             }
 
-            // Air mode toggle.
-            let available_air = assembled_air_mode(&robot_pets, &loadout);
-            if available_air != AirMode::None {
+            // A dual-mode Jet Bike cycles Ground → Flight → Off from the
+            // shared enter-vehicle input. M/open-map remains a direct ground
+            // mode shortcut.
+            if dual_jet_bike {
+                if vehicle_owned_by_other(&state, idx.0) {
+                    msg_ev.write(UiMessageEvent {
+                        text: vehicle_in_use_message(&state),
+                        duration: 1.8,
+                    });
+                    continue;
+                }
+                let next_mode = if state.active_owner != Some(idx.0) {
+                    Some(JetBikeMode::Ground)
+                } else {
+                    match state.jet_bike_mode {
+                        None => Some(JetBikeMode::Ground),
+                        Some(JetBikeMode::Ground) => Some(JetBikeMode::Flight),
+                        Some(JetBikeMode::Flight) => None,
+                    }
+                };
+                set_jet_bike_mode(&mut state, idx.0, next_mode);
+                remove_boat_passengers(&mut commands, &player_q, None);
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "P{} Jet Bike: {}",
+                        idx.0 + 1,
+                        match next_mode {
+                            Some(JetBikeMode::Ground) => "GROUND MODE",
+                            Some(JetBikeMode::Flight) => "FLIGHT MODE",
+                            None => "OFF",
+                        }
+                    ),
+                    duration: 1.8,
+                });
+            } else if available_air != AirMode::None {
                 if vehicle_owned_by_other(&state, idx.0) {
                     msg_ev.write(UiMessageEvent {
                         text: vehicle_in_use_message(&state),
@@ -382,6 +435,7 @@ fn vehicle_input(
                     });
                 } else {
                     state.air_mode = available_air;
+                    state.jet_bike_mode = None;
                     state.ground_mode = GroundMode::None;
                     state.boat_active = false;
                     state.active_boat = None;
@@ -392,11 +446,45 @@ fn vehicle_input(
                         duration: 1.5,
                     });
                 }
+            } else if let Some(mode) = available_ground {
+                if vehicle_owned_by_other(&state, idx.0) {
+                    msg_ev.write(UiMessageEvent {
+                        text: vehicle_in_use_message(&state),
+                        duration: 1.8,
+                    });
+                    continue;
+                }
+                let currently_on = state.ground_mode == mode && state.active_owner == Some(idx.0);
+                if currently_on {
+                    state.deactivate_ground();
+                    state.active_owner = None;
+                } else {
+                    state.ground_mode = mode;
+                    state.air_mode = AirMode::None;
+                    state.jet_bike_mode = None;
+                    state.mech_armor_bonus = if mode == GroundMode::GiantMech {
+                        40.0
+                    } else {
+                        0.0
+                    };
+                    state.boat_active = false;
+                    state.active_boat = None;
+                    state.active_owner = Some(idx.0);
+                    remove_boat_passengers(&mut commands, &player_q, None);
+                }
+                msg_ev.write(UiMessageEvent {
+                    text: format!(
+                        "P{} {}: {}",
+                        idx.0 + 1,
+                        ground_mode_label(mode),
+                        if currently_on { "OFF" } else { "ON" }
+                    ),
+                    duration: 1.5,
+                });
             } else {
                 msg_ev.write(UiMessageEvent {
-                    text:
-                        "No air vehicle — assemble SpaceJet in the Garage or find a jet blueprint."
-                            .into(),
+                    text: "No vehicle — assemble one in the Robot Garage or find a blueprint."
+                        .into(),
                     duration: 2.0,
                 });
             }
@@ -525,6 +613,174 @@ fn clear_stale_boat_passengers_system(
             commands.entity(entity).remove::<BoatPassenger>();
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sync_jet_bike_visual(
+    mut commands: Commands,
+    state: Res<VehicleState>,
+    time: Res<Time>,
+    player_q: Query<(&PlayerIndex, &Transform, &PlayerMovement), With<Player>>,
+    mut bike_q: Query<(Entity, &mut JetBikeVisual, &mut Transform), Without<Player>>,
+    mut ground_parts: Query<&mut Visibility, (With<JetBikeGroundPart>, Without<JetBikeFlightPart>)>,
+    mut flight_parts: Query<&mut Visibility, (With<JetBikeFlightPart>, Without<JetBikeGroundPart>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(mode) = state.jet_bike_mode else {
+        for (entity, _, _) in bike_q.iter_mut() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    let Some(owner) = state.active_owner else {
+        return;
+    };
+    let Some((_, rider_transform, movement)) =
+        player_q.iter().find(|(index, _, _)| index.0 == owner)
+    else {
+        return;
+    };
+
+    let flight_mode = mode == JetBikeMode::Flight;
+    for mut visibility in ground_parts.iter_mut() {
+        *visibility = if flight_mode {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+    }
+    for mut visibility in flight_parts.iter_mut() {
+        *visibility = if flight_mode {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+
+    let speed = movement.ground_velocity.with_y(0.0).length();
+    let hover = if flight_mode {
+        (time.elapsed_secs() * 7.0).sin() * 0.07
+    } else {
+        (time.elapsed_secs() * 10.0).sin() * (speed * 0.006).min(0.04)
+    };
+    let offset = if flight_mode {
+        Vec3::new(0.0, -0.38 + hover, 0.12)
+    } else {
+        Vec3::new(0.0, -0.72 + hover, 0.10)
+    };
+    let visual_transform = Transform::from_translation(
+        rider_transform.translation + rider_transform.rotation * offset,
+    )
+    .with_rotation(rider_transform.rotation);
+
+    if let Some((_, mut visual, mut transform)) = bike_q.iter_mut().next() {
+        visual.owner = owner;
+        *transform = visual_transform;
+        return;
+    }
+
+    let body_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.84, 0.08, 0.48),
+        metallic: 0.72,
+        perceptual_roughness: 0.24,
+        ..default()
+    });
+    let energy_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.08, 0.88, 1.0),
+        metallic: 0.35,
+        perceptual_roughness: 0.18,
+        ..default()
+    });
+    let tire_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.025, 0.035, 0.055),
+        metallic: 0.25,
+        perceptual_roughness: 0.58,
+        ..default()
+    });
+
+    commands
+        .spawn((
+            Name::new("Dual Mode Jet Bike"),
+            SpatialBundle::from_transform(visual_transform),
+            JetBikeVisual { owner },
+        ))
+        .with_children(|bike| {
+            bike.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(1.7, 0.55, 3.5))),
+                material: MeshMaterial3d(body_material.clone()),
+                transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                ..default()
+            });
+            bike.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(1.05, 0.38, 1.35))),
+                material: MeshMaterial3d(energy_material.clone()),
+                transform: Transform::from_xyz(0.0, 0.08, 2.10)
+                    .with_rotation(Quat::from_rotation_x(-0.20)),
+                ..default()
+            });
+            bike.spawn(PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.95, 0.28, 1.25))),
+                material: MeshMaterial3d(tire_material.clone()),
+                transform: Transform::from_xyz(0.0, 0.45, -0.45),
+                ..default()
+            });
+
+            let wheel_mesh = meshes.add(Torus {
+                major_radius: 0.62,
+                minor_radius: 0.16,
+            });
+            for z in [-1.25_f32, 1.25] {
+                bike.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(wheel_mesh.clone()),
+                        material: MeshMaterial3d(tire_material.clone()),
+                        transform: Transform::from_xyz(0.0, -0.48, z)
+                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                        visibility: if flight_mode {
+                            Visibility::Hidden
+                        } else {
+                            Visibility::Inherited
+                        },
+                        ..default()
+                    },
+                    JetBikeGroundPart,
+                ));
+            }
+
+            bike.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(5.2, 0.16, 1.45))),
+                    material: MeshMaterial3d(energy_material.clone()),
+                    transform: Transform::from_xyz(0.0, 0.02, -0.20),
+                    visibility: if flight_mode {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    },
+                    ..default()
+                },
+                JetBikeFlightPart,
+            ));
+            let thruster_mesh = meshes.add(Cylinder::new(0.34, 1.25));
+            for x in [-1.35_f32, 1.35] {
+                bike.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(thruster_mesh.clone()),
+                        material: MeshMaterial3d(energy_material.clone()),
+                        transform: Transform::from_xyz(x, -0.05, -1.45)
+                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                        visibility: if flight_mode {
+                            Visibility::Inherited
+                        } else {
+                            Visibility::Hidden
+                        },
+                        ..default()
+                    },
+                    JetBikeFlightPart,
+                ));
+            }
+        });
 }
 
 /// Apply vehicle speed/force buffs only to the player who activated the vehicle.
@@ -788,6 +1044,39 @@ mod tests {
             assembled_air_mode(&RobotPetCollection::default(), &loadout),
             AirMode::Jet
         );
+    }
+
+    #[test]
+    fn jet_bike_assembly_exposes_both_vehicle_profiles() {
+        let robots = robot_pets_with_assembly(RobotAssemblyForm::JetBike);
+        let loadout = PlayerLoadout::default();
+        assert_eq!(
+            available_ground_mode(&robots, &loadout),
+            Some(GroundMode::Motorcycle)
+        );
+        assert_eq!(assembled_air_mode(&robots, &loadout), AirMode::Jet);
+        assert!(jet_bike_available(&robots, &loadout));
+    }
+
+    #[test]
+    fn jet_bike_mode_transition_keeps_one_owner_and_one_physics_profile() {
+        let mut state = VehicleState::default();
+        set_jet_bike_mode(&mut state, 2, Some(JetBikeMode::Ground));
+        assert_eq!(state.active_owner, Some(2));
+        assert_eq!(state.jet_bike_mode, Some(JetBikeMode::Ground));
+        assert_eq!(state.ground_mode, GroundMode::Motorcycle);
+        assert_eq!(state.air_mode, AirMode::None);
+
+        set_jet_bike_mode(&mut state, 2, Some(JetBikeMode::Flight));
+        assert_eq!(state.jet_bike_mode, Some(JetBikeMode::Flight));
+        assert_eq!(state.ground_mode, GroundMode::None);
+        assert_eq!(state.air_mode, AirMode::Jet);
+
+        set_jet_bike_mode(&mut state, 2, None);
+        assert_eq!(state.active_owner, None);
+        assert_eq!(state.jet_bike_mode, None);
+        assert_eq!(state.ground_mode, GroundMode::None);
+        assert_eq!(state.air_mode, AirMode::None);
     }
 
     #[test]

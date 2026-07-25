@@ -63,6 +63,7 @@ pub struct EdgeInput {
     pub weapon_next: bool,
     pub weapon_prev: bool,
     pub sabre_toggle: bool,
+    pub sabre_attack: bool,
     pub enter_vehicle: bool,
     /// Summed mouse/stick look delta across frames coalesced into this tick.
     pub look_delta: Vec2,
@@ -87,6 +88,7 @@ impl EdgeInput {
         self.weapon_next |= input.weapon_next;
         self.weapon_prev |= input.weapon_prev;
         self.sabre_toggle |= input.sabre_toggle;
+        self.sabre_attack |= input.sabre_attack;
         self.enter_vehicle |= input.enter_vehicle;
         self.look_delta += input.look_delta;
         if input.weapon_slot.is_some() {
@@ -162,6 +164,7 @@ impl FixedInput {
         out.weapon_next = self.edges.weapon_next;
         out.weapon_prev = self.edges.weapon_prev;
         out.sabre_toggle = self.edges.sabre_toggle;
+        out.sabre_attack = self.edges.sabre_attack;
         out.enter_vehicle = self.edges.enter_vehicle;
         out.look_delta = self.edges.look_delta;
         if self.edges.weapon_slot.is_some() {

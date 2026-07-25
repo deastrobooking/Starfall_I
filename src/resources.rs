@@ -163,18 +163,27 @@ pub struct PlaySessionTransition {
 #[derive(Resource, Debug, Default, Clone)]
 pub struct FastTravelDestination {
     pub anchor_id: Option<&'static str>,
-    pub cave_label: Option<&'static str>,
+    pub label: Option<&'static str>,
+    pub enter_dungeon: bool,
 }
 
 impl FastTravelDestination {
     pub fn cave(&mut self, anchor_id: &'static str, label: &'static str) {
         self.anchor_id = Some(anchor_id);
-        self.cave_label = Some(label);
+        self.label = Some(label);
+        self.enter_dungeon = true;
+    }
+
+    pub fn world_anchor(&mut self, anchor_id: &'static str, label: &'static str) {
+        self.anchor_id = Some(anchor_id);
+        self.label = Some(label);
+        self.enter_dungeon = false;
     }
 
     pub fn clear(&mut self) {
         self.anchor_id = None;
-        self.cave_label = None;
+        self.label = None;
+        self.enter_dungeon = false;
     }
 }
 
@@ -1924,9 +1933,15 @@ mod tests {
         let mut destination = FastTravelDestination::default();
         destination.cave("secret_cave_ch03", "Sister Starwell Cave");
         assert_eq!(destination.anchor_id, Some("secret_cave_ch03"));
-        assert_eq!(destination.cave_label, Some("Sister Starwell Cave"));
+        assert_eq!(destination.label, Some("Sister Starwell Cave"));
+        assert!(destination.enter_dungeon);
+        destination.world_anchor("race_region_north_gate", "Grand Raceway");
+        assert_eq!(destination.anchor_id, Some("race_region_north_gate"));
+        assert_eq!(destination.label, Some("Grand Raceway"));
+        assert!(!destination.enter_dungeon);
         destination.clear();
         assert!(destination.anchor_id.is_none());
-        assert!(destination.cave_label.is_none());
+        assert!(destination.label.is_none());
+        assert!(!destination.enter_dungeon);
     }
 }

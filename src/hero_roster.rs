@@ -298,6 +298,10 @@ fn robot_pet_power_bonus(robots: &RobotPetCollection) -> HeroPowerSet {
     if let Some(assembly) = &robots.active_assembly {
         match assembly.form {
             RobotAssemblyForm::Car | RobotAssemblyForm::Motorcycle => bonus.speed += 0.06,
+            RobotAssemblyForm::JetBike => {
+                bonus.speed += 0.05;
+                bonus.flight += 0.07;
+            }
             RobotAssemblyForm::Tank => bonus.strength += 0.08,
             RobotAssemblyForm::Boat | RobotAssemblyForm::Submarine => bonus.magic += 0.05,
             RobotAssemblyForm::SpaceJet => bonus.flight += 0.10,

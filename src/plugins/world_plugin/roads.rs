@@ -5,6 +5,8 @@
 //! module via `use super::*`.
 
 use super::*;
+use crate::components::player::{GrappleSocket, GrappleTargetKind};
+use crate::rendering::SpatialBundle;
 
 // Shorter stations let the elevation solver see narrow ridges before a deck
 // reaches them.  This is also the maximum collider/deck seam spacing.
@@ -21,6 +23,15 @@ pub(super) const SPEED_ROAD_WIDTH: f32 = 64.0;
 pub(super) const SPEED_ROAD_TERRAIN_SAMPLE_SPACING: f32 = 1.5;
 pub(super) const SPEED_ROAD_TRAFFIC_LANE_OFFSET: f32 = 12.0;
 pub(super) const SPEED_ROAD_PATROL_VEHICLE_COUNT: usize = 18;
+pub(super) const RACE_REGION_ROAD_WIDTH: f32 = 94.0;
+
+pub(super) fn speed_road_width_for_route(route_index: usize) -> f32 {
+    if route_index >= BASE_MOUNTAIN_ROUTE_COUNT {
+        RACE_REGION_ROAD_WIDTH
+    } else {
+        SPEED_ROAD_WIDTH + (route_index % 3) as f32 * 2.4
+    }
+}
 
 pub(super) fn speed_road_segment_subdivision_count(length: f32) -> usize {
     (length / SPEED_ROAD_CHUNK_LEN).ceil().max(1.0) as usize
@@ -310,7 +321,7 @@ pub(super) fn spawn_speed_road_network(
     let road_profiles = speed_road_network_profiles(terrain_seed);
 
     for (ri, route) in mountain_routes().iter().enumerate() {
-        let width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
+        let width = speed_road_width_for_route(ri);
         let profile = &road_profiles[ri];
         let sky_access_chunks = speed_road_valid_sky_access_chunks(profile, terrain_seed);
         for (chunk, points) in profile.windows(2).enumerate() {
@@ -429,7 +440,7 @@ pub(super) fn spawn_speed_road_network(
         }
 
         // Round every interior corner of this route with a banked fillet.
-        let fillet_width = SPEED_ROAD_WIDTH + (ri % 3) as f32 * 2.4;
+        let fillet_width = speed_road_width_for_route(ri);
         // The spine itself is rounded now; feeding the rounded centerline in
         // lets the fillet pass self-disable on smooth spans and only patch
         // residual sharp samples (e.g. clamped hairpins), aligned to the deck.
@@ -466,6 +477,14 @@ pub(super) fn spawn_speed_road_network(
         meshes,
         pal,
         seed + 58_000,
+        terrain_seed,
+        &road_profiles,
+    );
+    spawn_race_region_features(
+        commands,
+        meshes,
+        pal,
+        seed + 61_000,
         terrain_seed,
         &road_profiles,
     );
@@ -577,7 +596,7 @@ pub(super) fn speed_road_network_profiles(terrain_seed: u64) -> Vec<Vec<Vec3>> {
             let rounded = rounded_speed_road_route(route);
             speed_road_route_profile(
                 &rounded,
-                SPEED_ROAD_WIDTH + (route_index % 3) as f32 * 2.4,
+                speed_road_width_for_route(route_index),
                 terrain_seed,
                 SPEED_ROAD_CLEARANCE + SPEED_ROAD_PROFILE_SAFETY_MARGIN,
             )
@@ -1726,6 +1745,9 @@ pub(super) fn spawn_sonic_spring_pad(
             cooldown_timer: 0.0,
             force_hoverboard,
         },
+        GrappleSocket::new(GrappleTargetKind::ZipPoint)
+            .with_radius(3.4)
+            .with_priority(1.18),
         WorldGeometry,
         WalkableSurface,
         crate::physics::prelude::RigidBody::Fixed,
@@ -1783,6 +1805,9 @@ pub(super) fn spawn_stunt_grind_rail(
             snap_radius: 2.8,
             exit_lift: 9.5,
         },
+        GrappleSocket::new(GrappleTargetKind::SwingPoint)
+            .with_radius(4.5)
+            .with_priority(1.28),
         WorldGeometry,
     ));
 
@@ -1876,6 +1901,157 @@ pub(super) fn spawn_stunt_park_features(
             }
             spawned += 1;
         }
+    }
+}
+
+pub(super) fn spawn_race_region_features(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+    terrain_seed: u64,
+    road_profiles: &[Vec<Vec3>],
+) {
+    let Some(profile) = road_profiles.get(RACE_CIRCUIT_ROUTE_INDEX) else {
+        return;
+    };
+
+    for point in RACE_REGION_TRAVEL_POINTS {
+        let y = road_profile_height_at(profile, point.x, point.z)
+            .unwrap_or_else(|| terrain_surface_y(point.x, point.z, terrain_seed) + 1.0);
+        let position = Vec3::new(point.x, y + 1.3, point.z);
+        spawn_world_anchor(commands, point.anchor_id, position);
+        commands.spawn((
+            Name::new(point.label),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cylinder::new(7.5, 0.42))),
+                material: MeshMaterial3d(pal.boost_lane.clone()),
+                transform: Transform::from_translation(position - Vec3::Y * 1.05),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cylinder(0.21, 7.5),
+        ));
+    }
+
+    const GATE_ROUTE_POINTS: [usize; 6] = [0, 2, 4, 5, 7, 9];
+    for (gate_index, route_point) in GATE_ROUTE_POINTS.into_iter().enumerate() {
+        let &(x, z) = ROUTE_RACE_CIRCUIT
+            .get(route_point)
+            .unwrap_or(&ROUTE_RACE_CIRCUIT[0]);
+        let y = road_profile_height_at(profile, x, z)
+            .unwrap_or_else(|| terrain_surface_y(x, z, terrain_seed) + SPEED_ROAD_CLEARANCE);
+        let tangent = road_profile_tangent_at(profile, x, z).unwrap_or(Vec3::Z);
+        let yaw = tangent.x.atan2(tangent.z);
+        commands.spawn((
+            Name::new(format!("Grand Raceway Gate {}", gate_index + 1)),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Torus {
+                    major_radius: 16.0,
+                    minor_radius: 0.82,
+                })),
+                material: MeshMaterial3d(if gate_index == 0 {
+                    pal.crystal_dragon.clone()
+                } else {
+                    pal.crystal_aurora.clone()
+                }),
+                transform: Transform::from_xyz(x, y + 16.0, z).with_rotation(
+                    Quat::from_rotation_y(yaw) * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                ),
+                ..default()
+            },
+            StuntRaceGate {
+                course_id: "starfall_grand_raceway",
+                course_label: "Starfall Grand Raceway",
+                gate_index: gate_index as u8,
+                gate_count: GATE_ROUTE_POINTS.len() as u8,
+                radius: 44.0,
+            },
+            WorldGeometry,
+        ));
+    }
+
+    // The circuit's shorter technical spans do not qualify for the trunk-road
+    // stunt-ramp pass, so give the terrain course its own four launch lines.
+    for (ramp_index, segment_index) in [1usize, 4, 7, 9].into_iter().enumerate() {
+        let pair = [
+            ROUTE_RACE_CIRCUIT[segment_index],
+            ROUTE_RACE_CIRCUIT[segment_index + 1],
+        ];
+        let authored_start = Vec2::new(pair[0].0, pair[0].1);
+        let authored_end = Vec2::new(pair[1].0, pair[1].1);
+        let xz = authored_start.lerp(authored_end, 0.52);
+        let authored_direction = (authored_end - authored_start).normalize_or_zero();
+        let mut direction = road_profile_tangent_at(profile, xz.x, xz.y).unwrap_or(Vec3::new(
+            authored_direction.x,
+            0.0,
+            authored_direction.y,
+        ));
+        if direction
+            .with_y(0.0)
+            .dot(Vec3::new(authored_direction.x, 0.0, authored_direction.y))
+            < 0.0
+        {
+            direction = -direction;
+        }
+        let y = road_profile_height_at(profile, xz.x, xz.y)
+            .unwrap_or_else(|| terrain_surface_y(xz.x, xz.y, terrain_seed) + 1.0);
+        spawn_board_boost_ramp(
+            commands,
+            meshes,
+            pal,
+            Vec3::new(xz.x, y + 0.55, xz.y),
+            direction,
+            30.0,
+            48.0 + ramp_index as f32 * 4.0,
+            8.0 + ramp_index as f32 * 1.4 + seeded(seed, ramp_index as u64 * 31) * 1.2,
+            6.0,
+            3.1 + ramp_index as f32 * 0.35,
+        );
+    }
+
+    let opponent_path = profile
+        .iter()
+        .copied()
+        .map(|point| point + Vec3::Y * 1.7)
+        .collect::<Vec<_>>();
+    if opponent_path.len() < 2 {
+        return;
+    }
+    let opponent_mesh = meshes.add(Cuboid::new(7.0, 1.8, 11.5));
+    for racer_id in 0..2u8 {
+        let vehicle = NpcRoadVehicle {
+            path: opponent_path.clone(),
+            segment: usize::from(racer_id) * (opponent_path.len() / 3).max(1),
+            progress: 0.0,
+            speed: 58.0 + racer_id as f32 * 6.0,
+            lane_offset: if racer_id == 0 { -10.0 } else { 10.0 },
+            hit_radius: 5.8,
+            wreck_timer: 4.0,
+        };
+        let (position, yaw) = road_vehicle_pose(&vehicle).unwrap_or((opponent_path[0], 0.0));
+        commands.spawn((
+            Name::new(format!("Grand Raceway Rival {}", racer_id + 1)),
+            PbrBundle {
+                mesh: Mesh3d(opponent_mesh.clone()),
+                material: MeshMaterial3d(if racer_id == 0 {
+                    pal.city_metal_panel.clone()
+                } else {
+                    pal.crystal_emerald.clone()
+                }),
+                transform: Transform::from_translation(position)
+                    .with_rotation(Quat::from_rotation_y(yaw)),
+                ..default()
+            },
+            vehicle,
+            StuntRaceOpponent {
+                racer_id,
+                course_id: "starfall_grand_raceway",
+            },
+            WorldGeometry,
+        ));
     }
 }
 
@@ -1988,6 +2164,17 @@ pub(super) fn spawn_speed_loop_gate(
     let segments = 18usize;
     let arc_len = TAU * radius / segments as f32 * 1.07;
     let segment_width = (width * 0.36).clamp(7.0, 10.0);
+
+    commands.spawn((
+        Name::new("Speed Loop Grapple Apex"),
+        SpatialBundle {
+            transform: Transform::from_translation(center + Vec3::Y * (radius * 2.0 + 1.5)),
+            ..default()
+        },
+        GrappleSocket::new(GrappleTargetKind::SwingPoint)
+            .with_radius(6.0)
+            .with_priority(1.42),
+    ));
 
     for segment in 0..segments {
         let a0 = segment as f32 * TAU / segments as f32;

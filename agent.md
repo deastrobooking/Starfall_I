@@ -86,9 +86,11 @@ together.
   gates. Chapter scripts already use robot rescue pods. The Robot Garage screen
   (`src/plugins/robot_garage_plugin.rs`, `AppState::RobotGarage`) lets players
   assemble forms from collected pets and parts. Assembled forms drive vehicle
-  modes at runtime: Motorcycle/Car assembly enables Motorcycle mode (M key),
-  Tank enables Tank mode, GiantMech enables Mech mode, SpaceJet enables Jet
-  mode (J key), SpaceShip/MegaShip enables Ship mode. `MechCommandLink` upgrade
+  modes at runtime: Motorcycle/Car assembly enables Motorcycle mode from Enter Vehicle,
+  the two-pet JetBike assembly spawns a transforming party-owned
+  Motorcycle/Jet visual and cycles ground/flight/off from Enter Vehicle, Tank
+  enables Tank mode, GiantMech enables Mech mode, SpaceJet enables Jet mode
+  (J key), SpaceShip/MegaShip enables Ship mode. `MechCommandLink` upgrade
   rank gates advanced forms. Runtime mech/ship 3D controllers are still future
   work.
 - Tech upgrade foundation lives in `src/upgrades.rs`: shared saved beam,

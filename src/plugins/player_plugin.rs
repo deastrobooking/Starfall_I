@@ -24,7 +24,8 @@ use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::{
-    BoatPassenger, SpeedLoopGuide, SpeedRoadCheckpoint, WorldAnchor, WorldRouteMarker,
+    BoatPassenger, RailGrindState, SpeedLoopGuide, SpeedRoadCheckpoint, WorldAnchor,
+    WorldRouteMarker,
 };
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
@@ -1761,7 +1762,15 @@ fn average_positions(positions: &[Vec3]) -> Option<Vec3> {
 fn shared_encounter_party_pull_system(
     time: Res<Time>,
     mode: Res<SharedEncounterCamera>,
-    mut player_q: Query<(&PlayerIndex, &mut Transform, Option<&BoatPassenger>), With<Player>>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &mut Transform,
+            &mut PlayerMovement,
+            Option<&BoatPassenger>,
+        ),
+        With<Player>,
+    >,
 ) {
     if !mode.active {
         return;
@@ -1770,7 +1779,7 @@ fn shared_encounter_party_pull_system(
     let dt = time.delta_secs();
     let soft_radius = 54.0;
     let hard_radius = 108.0;
-    for (index, mut transform, boat_passenger) in player_q.iter_mut() {
+    for (index, mut transform, mut movement, boat_passenger) in player_q.iter_mut() {
         if boat_passenger.is_some() {
             continue;
         }
@@ -1783,6 +1792,7 @@ fn shared_encounter_party_pull_system(
 
         let offset = boss_mode_player_slot_offset(index.0);
         if distance >= hard_radius {
+            movement.clear_motor_delivery();
             transform.translation = Vec3::new(
                 mode.anchor.x + offset.x,
                 mode.anchor.y.max(transform.translation.y) + 1.2,
@@ -1800,7 +1810,15 @@ fn shared_encounter_party_pull_system(
 fn dungeon_crawl_party_pull_system(
     time: Res<Time>,
     dungeon: Res<DungeonCrawlState>,
-    mut player_q: Query<(&PlayerIndex, &mut Transform, Option<&BoatPassenger>), With<Player>>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &mut Transform,
+            &mut PlayerMovement,
+            Option<&BoatPassenger>,
+        ),
+        With<Player>,
+    >,
 ) {
     if !dungeon.active {
         return;
@@ -1809,7 +1827,7 @@ fn dungeon_crawl_party_pull_system(
     let dt = time.delta_secs();
     let soft_radius = dungeon.radius * 0.52;
     let hard_radius = dungeon.radius * 0.92;
-    for (index, mut transform, boat_passenger) in player_q.iter_mut() {
+    for (index, mut transform, mut movement, boat_passenger) in player_q.iter_mut() {
         if boat_passenger.is_some() {
             continue;
         }
@@ -1822,6 +1840,7 @@ fn dungeon_crawl_party_pull_system(
 
         let offset = boss_mode_player_slot_offset(index.0);
         if distance >= hard_radius {
+            movement.clear_motor_delivery();
             transform.translation = Vec3::new(
                 dungeon.focus.x + offset.x,
                 dungeon.focus.y.max(transform.translation.y) + 1.2,
@@ -1949,6 +1968,82 @@ fn sabre_claims_movement_heavy(sabre: &BeamSabre, progression: &PlayerProgressio
     sabre.active && progression.upgrades.sabre_spin_unlocked()
 }
 
+#[derive(Debug, Clone, Copy)]
+struct LedgeCandidate {
+    anchor: Vec3,
+    top: Vec3,
+    normal: Vec3,
+}
+
+fn ledge_anchor_from_top(top: Vec3, wall_normal: Vec3) -> Vec3 {
+    top + wall_normal.with_y(0.0).normalize_or_zero() * 0.52 - Vec3::Y * 0.76
+}
+
+fn ledge_height_is_reachable(player_y: f32, top_y: f32) -> bool {
+    let rise = top_y - player_y;
+    (0.28..=1.55).contains(&rise)
+}
+
+fn hoverboard_overdrive_requested(
+    traversal: TraversalMode,
+    dodge_pressed: bool,
+    rail_bound: bool,
+    cooldown: f32,
+) -> bool {
+    traversal == TraversalMode::Hoverboard && dodge_pressed && !rail_bound && cooldown <= 0.0
+}
+
+/// Validate a real ledge rather than treating every vertical contact as one:
+/// chest ray hits a wall, head ray clears it, then a downward probe finds a
+/// walkable top within reach. The returned root anchor stays fixed throughout
+/// the hang so triangle-to-triangle contact noise cannot move the player.
+fn find_ledge_candidate(
+    spatial_query: &SpatialQuery,
+    player_entity: Entity,
+    player_position: Vec3,
+    wall_normal: Vec3,
+) -> Option<LedgeCandidate> {
+    let normal = wall_normal.with_y(0.0).normalize_or_zero();
+    if normal.length_squared() < 0.5 {
+        return None;
+    }
+    let inward = -normal;
+    let filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World)
+        .with_excluded_entities([player_entity]);
+
+    let chest_origin = player_position + Vec3::Y * 0.34 + normal * 0.12;
+    let chest =
+        spatial_query.cast_ray(chest_origin, Dir3::new(inward).ok()?, 1.15, false, &filter)?;
+    if chest.normal.y.abs() > 0.48 {
+        return None;
+    }
+
+    let head_origin = player_position + Vec3::Y * 1.42 + normal * 0.12;
+    if spatial_query
+        .cast_ray(head_origin, Dir3::new(inward).ok()?, 1.05, false, &filter)
+        .is_some()
+    {
+        return None;
+    }
+
+    let wall_point = chest_origin + inward * chest.distance;
+    let top_origin = wall_point + inward * 0.42 + Vec3::Y * 1.65;
+    let top_hit = spatial_query.cast_ray(top_origin, Dir3::NEG_Y, 2.0, false, &filter)?;
+    if top_hit.normal.y < 0.58 {
+        return None;
+    }
+    let top = top_origin + Vec3::NEG_Y * top_hit.distance;
+    if !ledge_height_is_reachable(player_position.y, top.y) {
+        return None;
+    }
+
+    Some(LedgeCandidate {
+        anchor: ledge_anchor_from_top(top, normal),
+        top,
+        normal,
+    })
+}
+
 fn player_movement(
     time: Res<Time>,
     spatial_query: SpatialQuery,
@@ -1960,7 +2055,7 @@ fn player_movement(
     mut action_sfx: MessageWriter<ModularActionSfxEvent>,
     mut player_q: Query<
         (
-            &mut KinematicCharacterController,
+            (Entity, &mut KinematicCharacterController),
             &KinematicCharacterControllerOutput,
             &mut PlayerMovement,
             &mut PlayerStats,
@@ -1971,17 +2066,22 @@ fn player_movement(
             &mut EdgeGrabState,
             &mut ClimbState,
             &mut DodgeState,
-            &Transform,
+            &mut Transform,
             &mut PlayerStateMachine,
             (&PlayerIndex, &PlayerInput),
-            (Option<&BoatPassenger>, &PlayerProgression, &BeamSabre),
+            (
+                Option<&BoatPassenger>,
+                &PlayerProgression,
+                &BeamSabre,
+                Option<&RailGrindState>,
+            ),
         ),
         With<Player>,
     >,
 ) {
     let dt = time.delta_secs();
     for (
-        mut controller,
+        (player_entity, mut controller),
         output,
         mut movement,
         mut stats,
@@ -1992,10 +2092,10 @@ fn player_movement(
         mut edge_grab,
         mut climb,
         dodge,
-        transform,
+        mut transform,
         mut state,
         (player_idx, pi),
-        (boat_passenger, progression, sabre),
+        (boat_passenger, progression, sabre, rail_grind),
     ) in player_q.iter_mut()
     {
         // EC1b: on the fixed tick, consume the latched command buffer so edge
@@ -2014,6 +2114,7 @@ fn player_movement(
         if boat_passenger.is_some() {
             movement.velocity = Vec3::ZERO;
             movement.ground_velocity = Vec3::ZERO;
+            movement.clear_motor_delivery();
             movement.is_grounded = true;
             movement.coyote_timer = movement.coyote_time;
             movement.jump_buffer_timer = 0.0;
@@ -2022,7 +2123,7 @@ fn player_movement(
             jetpack.is_active = false;
             jetpack.mode = FlightMode::Grounded;
             grapple.begin_recovery();
-            edge_grab.is_hanging = false;
+            edge_grab.release_hang();
             climb.is_climbing = false;
             *platformer = PlatformerMoveState::default();
             if sim.fixed_motor {
@@ -2086,7 +2187,7 @@ fn player_movement(
             climb.energy = (climb.energy + climb.regen_per_sec * dt).min(climb.max_energy);
             movement.velocity.y = movement.velocity.y.max(0.0);
             jetpack.mode = FlightMode::Grounded;
-            edge_grab.is_hanging = false;
+            edge_grab.release_hang();
             edge_grab.hang_timer = 0.0;
             edge_grab.wall_clasp_timer = 0.0;
             edge_grab.wall_contact_timer = 0.0;
@@ -2114,10 +2215,12 @@ fn player_movement(
             )
         };
         let (mut input, mut input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
-        if traversal.active == TraversalMode::Hoverboard
-            && pi.dodge
-            && board_boost.manual_cooldown <= 0.0
-        {
+        if hoverboard_overdrive_requested(
+            traversal.active,
+            pi.dodge,
+            rail_grind.is_some(),
+            board_boost.manual_cooldown,
+        ) {
             let boost_direction = if input.length_squared() > 0.05 {
                 input
             } else {
@@ -2270,7 +2373,16 @@ fn player_movement(
             stats.stamina = (stats.stamina - edge_grab.stamina_drain_per_sec * dt).max(0.0);
             movement.velocity = Vec3::ZERO;
             movement.ground_velocity = Vec3::ZERO;
+            movement.clear_motor_delivery();
             jetpack.is_active = false;
+            let Some(anchor) = edge_grab.ledge_anchor else {
+                edge_grab.release_hang();
+                edge_grab.cooldown_timer = edge_grab.grab_cooldown;
+                movement.velocity.y = -0.12;
+                state.force(PlayerState::Jetpack);
+                continue;
+            };
+            transform.translation = anchor;
 
             if movement.jump_buffer_timer > 0.0 {
                 let jump_dir = (edge_grab.wall_normal + input * 0.25)
@@ -2282,20 +2394,27 @@ fn player_movement(
                 movement.wall_jump_lock_timer = movement.wall_jump_lock_time;
                 movement.jump_buffer_timer = 0.0;
                 movement.coyote_timer = 0.0;
-                edge_grab.is_hanging = false;
+                edge_grab.release_hang();
                 edge_grab.cooldown_timer = edge_grab.grab_cooldown;
                 started_jump = true;
                 state.force(PlayerState::Jetpack);
             } else if pi.interact {
-                let climb =
-                    Vec3::Y * edge_grab.climb_boost * dt * 60.0 + edge_grab.wall_normal * 0.25;
-                if sim.fixed_motor {
-                    movement.motor_accum += climb;
+                if let Some(top) = edge_grab.ledge_top {
+                    transform.translation = top + edge_grab.wall_normal * 0.52 + Vec3::Y * 0.16;
+                    movement.clear_motor_delivery();
+                    movement.velocity.y = edge_grab.climb_boost;
+                    movement.ground_velocity = -edge_grab.wall_normal * 0.18;
                 } else {
-                    controller.translation = Some(climb);
+                    let climb =
+                        Vec3::Y * edge_grab.climb_boost * dt * 60.0 + edge_grab.wall_normal * 0.25;
+                    if sim.fixed_motor {
+                        movement.motor_accum += climb;
+                    } else {
+                        controller.translation = Some(climb);
+                    }
                 }
                 movement.is_grounded = false;
-                edge_grab.is_hanging = false;
+                edge_grab.release_hang();
                 edge_grab.cooldown_timer = edge_grab.grab_cooldown;
                 state.force(PlayerState::Moving);
                 continue;
@@ -2304,7 +2423,7 @@ fn player_movement(
                 || stats.stamina <= 0.0
                 || edge_grab.hang_timer >= edge_grab.max_hang_time
             {
-                edge_grab.is_hanging = false;
+                edge_grab.release_hang();
                 edge_grab.cooldown_timer = edge_grab.grab_cooldown;
                 movement.velocity.y = -0.12;
                 state.transition(PlayerState::Jetpack);
@@ -2431,24 +2550,31 @@ fn player_movement(
             state.transition(PlayerState::Jetpack);
         }
 
-        let can_grab_edge = !movement.is_grounded
+        let ledge_candidate = (!movement.is_grounded
             && !dodge.is_dodging
+            && traversal.active != TraversalMode::Hoverboard
             && edge_grab.cooldown_timer <= 0.0
             && movement.velocity.y <= -0.02
             && pushing_into_wall
             && pi.interact
-            && stats.stamina > 5.0;
+            && stats.stamina > 5.0)
+            .then(|| {
+                find_ledge_candidate(
+                    &spatial_query,
+                    player_entity,
+                    transform.translation,
+                    edge_grab.wall_normal,
+                )
+            })
+            .flatten();
 
-        if can_grab_edge {
-            edge_grab.is_hanging = true;
-            edge_grab.hang_timer = 0.0;
+        if let Some(ledge) = ledge_candidate {
+            edge_grab.begin_hang(ledge.anchor, ledge.top, ledge.normal);
             movement.velocity = Vec3::ZERO;
             movement.ground_velocity = Vec3::ZERO;
-            if sim.fixed_motor {
-                movement.motor_accum += Vec3::ZERO;
-            } else {
-                controller.translation = Some(Vec3::ZERO);
-            }
+            movement.clear_motor_delivery();
+            transform.translation = ledge.anchor;
+            controller.translation = Some(Vec3::ZERO);
             state.force(PlayerState::Hanging);
             continue;
         }
@@ -2712,7 +2838,7 @@ fn player_movement(
             movement.velocity.y = grapple_velocity.y;
             movement.ground_velocity = h_vel;
             movement.is_grounded = false;
-            edge_grab.is_hanging = false;
+            edge_grab.release_hang();
             state.force(PlayerState::Grappling);
         }
 
@@ -2809,7 +2935,7 @@ fn speed_loop_traversal_system(
         let target = speed_loop_position(center, forward, guide.radius, phi);
         transform.translation = target;
         controller.translation = Some(Vec3::ZERO);
-        movement.motor_accum = Vec3::ZERO;
+        movement.clear_motor_delivery();
         movement.velocity = Vec3::ZERO;
         movement.is_grounded = false;
 
@@ -2871,7 +2997,7 @@ fn road_checkpoint_recovery_system(
             transform.translation = checkpoint + Vec3::Y * 2.0;
             movement.velocity = Vec3::ZERO;
             movement.ground_velocity *= 0.35;
-            movement.motor_accum = Vec3::ZERO;
+            movement.clear_motor_delivery();
             recovery.cooldown = 1.0;
         }
     }
@@ -2950,10 +3076,10 @@ fn terrain_fall_recovery_system(
         controller.translation = Some(Vec3::ZERO);
         movement.velocity = Vec3::ZERO;
         movement.ground_velocity *= 0.25;
-        movement.motor_accum = Vec3::ZERO;
+        movement.clear_motor_delivery();
         movement.is_grounded = false;
         grapple.begin_recovery();
-        edge_grab.is_hanging = false;
+        edge_grab.release_hang();
         climb.is_climbing = false;
         recovery.cooldown = 0.8;
     }
@@ -3145,6 +3271,7 @@ fn enemy_grapple_kind(
 // ── Grapple Hook Foundation ──────────────────────────────────────────────────
 fn grapple_hook_update(
     time: Res<Time>,
+    spatial_query: SpatialQuery,
     route_registry: Res<WorldRouteRegistry>,
     sim: Res<SimConfig>,
     buffers: Res<PlayerInputBuffers>,
@@ -3275,22 +3402,35 @@ fn grapple_hook_update(
             }
 
             if best.is_none() && traversal.active == TraversalMode::Grapple && aim_dir.y > -0.35 {
-                let distance = max_distance.min(42.0);
-                let point = origin + aim_dir * distance + Vec3::Y * (aim_dir.y.max(0.0) * 8.0);
-                best = Some((
-                    GrappleCandidate {
-                        point,
-                        normal: -aim_dir,
-                        entity: None,
-                        kind: if aim_dir.y > 0.12 {
+                let max_surface_distance = max_distance.min(42.0);
+                let filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World)
+                    .with_excluded_entities([entity]);
+                if let Ok(direction) = Dir3::new(aim_dir) {
+                    if let Some(hit) = spatial_query.cast_ray(
+                        origin,
+                        direction,
+                        max_surface_distance,
+                        false,
+                        &filter,
+                    ) {
+                        let point = origin + direction.as_vec3() * hit.distance;
+                        let kind = if hit.normal.y < -0.45 && aim_dir.y > 0.12 {
                             GrappleTargetKind::SwingPoint
                         } else {
                             GrappleTargetKind::BroadSurface
-                        },
-                        distance,
-                    },
-                    0.15,
-                ));
+                        };
+                        best = Some((
+                            GrappleCandidate {
+                                point,
+                                normal: hit.normal,
+                                entity: None,
+                                kind,
+                                distance: hit.distance,
+                            },
+                            0.15,
+                        ));
+                    }
+                }
             }
 
             if let Some((candidate, _)) = best {
@@ -3335,7 +3475,20 @@ fn grapple_hook_update(
 }
 
 fn grapple_hook_impact_system(
-    mut player_q: Query<(&Transform, &mut GrappleHookState), With<Player>>,
+    spatial_query: SpatialQuery,
+    mut player_q: Query<
+        (
+            Entity,
+            &mut Transform,
+            &mut KinematicCharacterController,
+            &mut PlayerMovement,
+            &TraversalModeState,
+            &mut GrappleHookState,
+            &mut EdgeGrabState,
+            &mut PlayerStateMachine,
+        ),
+        With<Player>,
+    >,
     mut enemy_q: Query<
         (
             Entity,
@@ -3350,16 +3503,70 @@ fn grapple_hook_impact_system(
     mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
     mut killed_ev: MessageWriter<EnemyKilledEvent>,
 ) {
-    for (player_transform, mut grapple) in player_q.iter_mut() {
+    for (
+        player_entity,
+        mut player_transform,
+        mut controller,
+        mut movement,
+        traversal,
+        mut grapple,
+        mut edge_grab,
+        mut state,
+    ) in player_q.iter_mut()
+    {
         if !matches!(grapple.mode, GrappleHookMode::Zipping) {
             continue;
         }
-        let Some(target_entity) = grapple.target_entity else {
-            if let Some(point) = grapple.attach_point {
-                if player_transform.translation.distance(point) <= grapple.arrival_radius {
-                    grapple.begin_recovery();
+
+        let Some(point) = grapple.attach_point else {
+            grapple.begin_recovery();
+            continue;
+        };
+        let arrived = player_transform.translation.distance(point) <= grapple.arrival_radius + 0.35;
+        let combat_target = matches!(
+            grapple.target_kind,
+            GrappleTargetKind::EnemyPull | GrappleTargetKind::BossWeakPoint
+        );
+
+        // World surfaces and authored traversal sockets complete as movement
+        // targets, not enemy impacts. In Grapple mode, a validated nearby lip
+        // becomes a stable hang/mantle handoff.
+        if !combat_target {
+            if !arrived {
+                continue;
+            }
+            if traversal.active == TraversalMode::Grapple {
+                if let Some(ledge) = find_ledge_candidate(
+                    &spatial_query,
+                    player_entity,
+                    player_transform.translation,
+                    grapple.attach_normal,
+                ) {
+                    movement.velocity = Vec3::ZERO;
+                    movement.ground_velocity = Vec3::ZERO;
+                    movement.clear_motor_delivery();
+                    controller.translation = Some(Vec3::ZERO);
+                    let rise = ledge.top.y - player_transform.translation.y;
+                    if rise <= 0.62 {
+                        player_transform.translation =
+                            ledge.top + ledge.normal * 0.52 + Vec3::Y * 0.16;
+                        movement.velocity.y = 0.18;
+                        movement.ground_velocity = -ledge.normal * 0.24;
+                        edge_grab.release_hang();
+                        state.force(PlayerState::Moving);
+                    } else {
+                        player_transform.translation = ledge.anchor;
+                        edge_grab.begin_hang(ledge.anchor, ledge.top, ledge.normal);
+                        state.force(PlayerState::Hanging);
+                    }
                 }
             }
+            grapple.begin_recovery();
+            continue;
+        }
+
+        let Some(target_entity) = grapple.target_entity else {
+            grapple.begin_recovery();
             continue;
         };
         let Ok((entity, mut target_transform, mut health, mut damageable, enemy, boss)) =
@@ -3820,6 +4027,21 @@ fn update_camera_post_processing(
 mod tests {
     use super::*;
 
+    #[derive(Resource)]
+    struct LedgeProbeFixture {
+        player: Entity,
+        candidate: Option<LedgeCandidate>,
+    }
+
+    fn sample_ledge_probe(spatial_query: SpatialQuery, mut fixture: ResMut<LedgeProbeFixture>) {
+        fixture.candidate = find_ledge_candidate(
+            &spatial_query,
+            fixture.player,
+            Vec3::new(0.9, -0.2, 0.0),
+            Vec3::X,
+        );
+    }
+
     #[test]
     fn motor_carry_smooths_fixed_tick_stutter_without_losing_distance() {
         // 64 Hz sim rendered at ~120 Hz: alternating frames receive one
@@ -3866,6 +4088,89 @@ mod tests {
         assert_eq!(remainder, Vec3::ZERO);
         assert!(deliver.x > 0.0);
         assert_eq!(split_motor_carry(Vec3::ZERO), (Vec3::ZERO, Vec3::ZERO));
+    }
+
+    #[test]
+    fn hard_traversal_stop_clears_accumulated_and_smoothed_motion() {
+        let mut movement = PlayerMovement {
+            motor_accum: Vec3::new(0.4, 0.2, -0.1),
+            motor_carry: Vec3::new(0.3, 0.0, 0.2),
+            ..default()
+        };
+        movement.clear_motor_delivery();
+        assert_eq!(movement.motor_accum, Vec3::ZERO);
+        assert_eq!(movement.motor_carry, Vec3::ZERO);
+    }
+
+    #[test]
+    fn ledge_contract_requires_reachable_top_and_builds_stable_anchor() {
+        assert!(ledge_height_is_reachable(10.0, 10.30));
+        assert!(ledge_height_is_reachable(10.0, 11.50));
+        assert!(!ledge_height_is_reachable(10.0, 10.20));
+        assert!(!ledge_height_is_reachable(10.0, 11.70));
+
+        let top = Vec3::new(4.0, 11.0, -3.0);
+        let anchor = ledge_anchor_from_top(top, Vec3::X);
+        assert_eq!(anchor, Vec3::new(4.52, 10.24, -3.0));
+    }
+
+    #[test]
+    fn ledge_probe_requires_real_wall_clearance_and_walkable_top() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            PhysicsPlugins::default(),
+        ))
+        .init_asset::<Mesh>()
+        .add_message::<avian3d::prelude::CollisionStart>()
+        .add_message::<avian3d::prelude::CollisionEnd>();
+        let player = app.world_mut().spawn_empty().id();
+        app.insert_resource(LedgeProbeFixture {
+            player,
+            candidate: None,
+        })
+        .add_systems(Update, sample_ledge_probe);
+        app.world_mut().spawn((
+            avian3d::prelude::Collider::cuboid(0.5, 1.2, 3.0),
+            CollisionProfile::World.layers(),
+            avian3d::prelude::RigidBody::Static,
+            Transform::default(),
+        ));
+
+        app.update();
+        app.update();
+
+        let candidate = app
+            .world()
+            .resource::<LedgeProbeFixture>()
+            .candidate
+            .expect("short wall with open headroom should produce a ledge");
+        assert!(candidate.normal.dot(Vec3::X) > 0.9);
+        assert!((candidate.top.y - 0.6).abs() < 0.02);
+        assert!((candidate.anchor.y + 0.16).abs() < 0.02);
+    }
+
+    #[test]
+    fn rail_bound_grind_input_does_not_also_trigger_board_overdrive() {
+        assert!(hoverboard_overdrive_requested(
+            TraversalMode::Hoverboard,
+            true,
+            false,
+            0.0,
+        ));
+        assert!(!hoverboard_overdrive_requested(
+            TraversalMode::Hoverboard,
+            true,
+            true,
+            0.0,
+        ));
+        assert!(!hoverboard_overdrive_requested(
+            TraversalMode::Grapple,
+            true,
+            false,
+            0.0,
+        ));
     }
 
     #[test]

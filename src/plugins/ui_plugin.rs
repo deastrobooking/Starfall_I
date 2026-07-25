@@ -7,7 +7,8 @@ use bevy::input::ButtonState;
 
 use crate::chapters::{
     all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
-    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE, SECRET_CAVE_LOCATIONS,
+    EVEREST_RANGE_HALF_EXTENT, EVEREST_RANGE_WORLD_SIZE, RACE_REGION_TRAVEL_POINTS,
+    SECRET_CAVE_LOCATIONS,
 };
 use crate::commands::{CommandOverlayState, CommandRegistry};
 use crate::components::armor::ArmorSet;
@@ -287,6 +288,7 @@ impl Plugin for UiPlugin {
                     chapter_select_progression_owner_buttons,
                     chapter_select_fast_travel_buttons,
                     cave_fast_travel_buttons,
+                    world_anchor_fast_travel_buttons,
                     chapter_select_perk_buttons,
                     chapter_select_upgrade_buttons,
                     chapter_select_weapon_rank_buttons,
@@ -2268,6 +2270,12 @@ struct CaveFastTravelButton {
     label: &'static str,
 }
 #[derive(Component, Clone, Copy)]
+struct WorldAnchorFastTravelButton {
+    chapter: ChapterId,
+    anchor_id: &'static str,
+    label: &'static str,
+}
+#[derive(Component, Clone, Copy)]
 struct ChapterSelectActionButton(ChapterSelectAction);
 #[derive(Clone, Copy)]
 enum ChapterSelectAction {
@@ -2896,6 +2904,15 @@ fn spawn_fast_travel_map(
                 Color::srgba(0.08, 0.28, 0.44, 0.38),
                 "Antarctic Reach",
             );
+            spawn_map_region_band(
+                map,
+                76.0,
+                74.0,
+                20.0,
+                22.0,
+                Color::srgba(0.82, 0.16, 0.58, 0.30),
+                "Grand Raceway",
+            );
 
             for location in chapter_map_locations() {
                 let Some(chapter) = chapters.iter().find(|chapter| chapter.id == location.id)
@@ -3023,6 +3040,60 @@ fn spawn_fast_travel_map(
                 cave_button.with_children(|marker| {
                     marker.spawn((
                         Text::new(if discovered { "C" } else { "?" }),
+                        TextFont {
+                            font_size: FontSize::Px(10.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+            }
+
+            // The Grand Raceway is a full terrain district rather than a
+            // chapter. Its two entrances reuse the selected chapter session
+            // and move the whole party to authored world anchors.
+            for point in RACE_REGION_TRAVEL_POINTS {
+                let unlocked = progress.is_unlocked(point.chapter);
+                let mut travel_button = map.spawn((
+                    Button,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(point.x)),
+                        top: Val::Percent(world_to_map_top(point.z)),
+                        width: Val::Px(22.0),
+                        height: Val::Px(22.0),
+                        margin: UiRect {
+                            left: Val::Px(-11.0),
+                            top: Val::Px(-11.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(2.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(if unlocked {
+                        Color::srgb(0.92, 0.28, 0.72)
+                    } else {
+                        Color::srgb(0.18, 0.10, 0.18)
+                    }),
+                    BorderColor::all(if unlocked {
+                        Color::srgb(0.40, 0.95, 1.0)
+                    } else {
+                        Color::srgb(0.30, 0.24, 0.32)
+                    }),
+                    WorldAnchorFastTravelButton {
+                        chapter: point.chapter,
+                        anchor_id: point.anchor_id,
+                        label: point.label,
+                    },
+                ));
+                if !unlocked {
+                    travel_button.insert(MenuButtonDisabled);
+                }
+                travel_button.with_children(|marker| {
+                    marker.spawn((
+                        Text::new("R"),
                         TextFont {
                             font_size: FontSize::Px(10.0),
                             ..default()
@@ -3408,6 +3479,27 @@ fn cave_fast_travel_buttons(
         current.id = button.chapter;
         current.started = false;
         destination.cave(button.anchor_id, button.label);
+        next_state.set(AppState::Playing);
+    }
+}
+
+fn world_anchor_fast_travel_buttons(
+    progress: Res<ChapterProgress>,
+    mut current: ResMut<CurrentChapter>,
+    mut destination: ResMut<FastTravelDestination>,
+    mut next_state: ResMut<NextState<AppState>>,
+    interaction_q: Query<
+        (&Interaction, &WorldAnchorFastTravelButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+) {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed || !progress.is_unlocked(button.chapter) {
+            continue;
+        }
+        current.id = button.chapter;
+        current.started = false;
+        destination.world_anchor(button.anchor_id, button.label);
         next_state.set(AppState::Playing);
     }
 }

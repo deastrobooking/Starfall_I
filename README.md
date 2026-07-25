@@ -41,7 +41,7 @@ Implemented:
 - Frame-data melee combat: every combo move is authored in `assets/combat/moves.json` — startup/active/recovery windows, cancel timing, damage, knockback, per-move hitstop — editable without recompiling; attacks now wind up, strike, and chain through cancel windows like a fighting game.
 - Tiered loot: drop chance, quantity, and rolls scale with the kill — rift champions guarantee an energy core plus bonus drops, while scouts stay pocket change.
 - Faction boss variety: dragons fly and breathe fire, Scallarian rift champions blink around the arena summoning portal reinforcements and detonating laser novas, and corrupted-human reactor mechs strafe, barrage, charge-dash into shockwaves, and cycle invulnerable shield windows — three distinct boss brains with three HP phases each.
-- High-speed stunt-road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with protected guardrail merge mouths and its own support columns. Taller outer barriers contain players and vehicles, and collidable center medians separate opposite boost-arrow directions. The network combines vertical loops, strongly banked mega-curves, 28 boost ramps, 18 elevated neon grind lines, automatic Sonic-style approach/transfer springs, settlement rings/spurs, NPC traffic, checkpoints, recovery, and guided hoverboard adhesion. Rail grinding is per-player, supports either approach direction, forces the Rocket Hoverboard for stability, and allows jump-off transfers with preserved speed. Every settlement ring is also a three-lap four-gate race course with two hovercraft rivals. Airtime, rail transfers, and stick-driven aerial rotations build a per-player combo that banks on clean landing, animates the board spin, expands the stunt camera/FOV, reports score, and drives owner-mapped controller rumble.
+- High-speed stunt-road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with protected guardrail merge mouths and its own support columns. Taller outer barriers contain players and vehicles, and collidable center medians separate opposite boost-arrow directions. The southeast range now blends `assets/terrain/RACE.png` into a dedicated Grand Raceway district with two network entrances, a 94-unit-wide closed circuit, embedded boost lanes, four launch ramps, six ordered gates, two rivals, checkpoints/recovery, and two `R` fast-travel points on the chapter map. Motion Boot and Aegis logic upgrades strengthen road-pad impulse and sustain. The wider network also combines vertical loops, strongly banked mega-curves, 28 trunk boost ramps, 18 elevated neon grind lines, automatic Sonic-style approach/transfer springs, settlement rings/spurs, NPC traffic, and guided hoverboard adhesion. Rail grinding is per-player, supports either approach direction, forces the Rocket Hoverboard for stability, and allows jump-off transfers with preserved speed. Every settlement ring is also a three-lap four-gate race course with two hovercraft rivals. Airtime, rail transfers, and stick-driven aerial rotations build a per-player combo that banks on clean landing, animates the board spin, expands the stunt camera/FOV, reports score, and drives owner-mapped controller rumble.
 - Explorable buildings now replace selected solid blocks throughout downtown, industrial, residential, and settlement districts. These use textured exterior/interior materials, open doorways, hollow collision shells, multiple wood floors, smooth ramp-backed stair flights with visible treads, partitioned rooms, sparse furniture, interior lights, and windows. Background buildings remain lightweight for four-player performance.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
 - RPG combat with unlimited-ammo primary beams and special tools, swept projectile collision, stronger body-centered aim assistance, arm-cannon charge shots, magic-user tracking beams, Star Sabre controller support and animated slash poses, melee combos, armor elements, XP, perks, crafting, rewards, and save/load. Homing Star acquires/reacquires hostile targets, steers with a capped turn rate, leaves an energy trail, and reports SEEK/LOCK per player in the HUD.
@@ -172,7 +172,7 @@ Keyboard and mouse:
 | `C` | Crafting |
 | `I` | Open/close Star Loadout |
 | `H` | Use equipped quick item |
-| `J` | Enter vehicle / board nearby boat; dock before disembarking |
+| `J` | Enter vehicle / board nearby boat; Jet Bike cycles ground → flight → off |
 | `M` | Open map |
 | `Esc` | Back / pause |
 | `F7` | Command-asset roster overlay |
@@ -197,21 +197,21 @@ Controller:
 | Left stick | Analog move |
 | Right stick | Look |
 | South | Jump, wall jump, hold for jetpack; triple-tap to switch flight/hover control; trigger slingshots |
-| East | Dodge/drop; Rocket Hoverboard overdrive; Saber Comet Dash/Meteor Pound after blueprint |
+| East | Dodge/drop; Rocket Hoverboard overdrive (Grind while rail-bound); Saber Comet Dash/Meteor Pound after blueprint |
 | West | Reload active star beam |
 | North | Parry |
 | RT | Fire star beam |
 | LT | Aim |
-| LB + North | Toggle Star Sabre; RT performs its animated slash |
+| LB + North | Toggle Star Sabre; RB performs its animated slash |
 | LT + North | Alternate Star Sabre toggle |
 | LB | Sprint |
 | LB + Select | Open/close the owning player's Star Loadout |
 | LB + West | Use equipped quick item |
-| RB | Next beam |
+| RB | Star Sabre slash while drawn |
 | Select + RB | Fire the grapple hook; zip, swing, or pull the selected target |
 | D-Pad Left | Previous beam |
 | D-Pad Down | Interact / hang / climb / trigger slingshots |
-| D-Pad Up | Enter vehicle |
+| D-Pad Up | Enter vehicle; Jet Bike cycles ground → flight → off |
 | D-Pad Right | Open map |
 | Select | Crafting |
 | Select + D-Pad Up | Select Homing Star tracking missile; RT fires |
