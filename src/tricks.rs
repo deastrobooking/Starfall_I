@@ -127,6 +127,14 @@ pub struct TrickLibrary {
     /// Ceiling on the combo multiplier.
     #[serde(default = "default_max_multiplier")]
     pub max_multiplier: f32,
+    /// Seconds after landing an air trick during which another trick (or a
+    /// rail) links into the same combo — the THPS3 revert. Without it every
+    /// landing banks the run and long combos are impossible.
+    #[serde(default = "default_revert_window")]
+    pub revert_window: f32,
+    /// Multiplier added for chaining through a revert.
+    #[serde(default = "default_revert_bonus")]
+    pub revert_multiplier_bonus: f32,
 }
 
 fn default_special_threshold() -> f32 {
@@ -139,6 +147,14 @@ fn default_spin_score() -> f32 {
 
 fn default_max_multiplier() -> f32 {
     8.0
+}
+
+fn default_revert_window() -> f32 {
+    0.85
+}
+
+fn default_revert_bonus() -> f32 {
+    0.2
 }
 
 impl TrickLibrary {
@@ -255,6 +271,8 @@ impl TrickLibrary {
             special_multiplier_threshold: default_special_threshold(),
             spin_score_per_rotation: default_spin_score(),
             max_multiplier: default_max_multiplier(),
+            revert_window: default_revert_window(),
+            revert_multiplier_bonus: default_revert_bonus(),
         }
     }
 
@@ -305,6 +323,9 @@ impl TrickLibrary {
         if self.spin_score_per_rotation < 0.0 {
             return Err("spin_score_per_rotation must be >= 0".into());
         }
+        if self.revert_window < 0.0 || self.revert_multiplier_bonus < 0.0 {
+            return Err("revert window and bonus must be >= 0".into());
+        }
         Ok(())
     }
 }
@@ -343,6 +364,13 @@ pub struct TrickState {
     pub last_trick: Option<String>,
     /// Set for one frame when a trick is bailed, so feedback can react.
     pub bailed: bool,
+    /// Seconds left in the post-landing revert window. Landing an air trick
+    /// opens it; holding a trick button (or riding into a rail) inside the
+    /// window keeps the combo alive across the landing instead of banking it.
+    pub revert_window: f32,
+    /// True while the combo is being carried through a revert, so the HUD and
+    /// pose can show the rider still working.
+    pub reverting: bool,
 }
 
 impl TrickState {
@@ -366,6 +394,13 @@ impl TrickState {
     pub fn reset_combo(&mut self) {
         self.combo_uses.clear();
         self.active = None;
+        self.revert_window = 0.0;
+        self.reverting = false;
+    }
+
+    /// True while a landing can still be linked into the running combo.
+    pub fn can_revert(&self) -> bool {
+        self.revert_window > 0.0
     }
 }
 
@@ -508,6 +543,33 @@ mod tests {
         assert_eq!(TrickLibrary::spin_bonus(360.0), 2.0);
         assert_eq!(TrickLibrary::spin_bonus(-360.0), 2.0, "direction agnostic");
         assert_eq!(TrickLibrary::spin_bonus(900.0), 3.5);
+    }
+
+    #[test]
+    fn revert_window_keeps_a_combo_alive_across_a_landing() {
+        let lib = TrickLibrary::defaults();
+        assert!(lib.revert_window > 0.0, "reverts must be enabled");
+
+        let mut state = TrickState::default();
+        assert!(!state.can_revert(), "no window before a landing");
+
+        // Landing an air trick opens the window.
+        state.revert_window = lib.revert_window;
+        assert!(state.can_revert());
+
+        // It closes once it runs out…
+        state.revert_window = 0.0;
+        assert!(!state.can_revert());
+
+        // …and a bail clears everything, so a blown trick cannot be reverted
+        // back into a combo.
+        state.revert_window = lib.revert_window;
+        state.reverting = true;
+        state.record_use(2);
+        state.reset_combo();
+        assert!(!state.can_revert());
+        assert!(!state.reverting);
+        assert_eq!(state.times_used(2), 0);
     }
 
     #[test]

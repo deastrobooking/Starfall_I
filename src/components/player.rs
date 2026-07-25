@@ -210,6 +210,12 @@ pub struct PlayerMovement {
     /// here and flushed to the physics controller once per frame (physics steps
     /// per-frame, so we must not overwrite/double-apply). Unused in `Update` mode.
     pub motor_accum: Vec3,
+    /// EC1b judder fix: undelivered translation carried between frames. A
+    /// 64 Hz sim rendered at a higher rate hands some frames a whole tick of
+    /// motion and others none, which reads as stutter. The flush drains this
+    /// buffer by a fraction each frame so delivery is smooth while total
+    /// displacement is conserved. See `flush_motor_translation`.
+    pub motor_carry: Vec3,
     /// External shove channel in world-units/sec, integrated and
     /// exponentially decayed by the motor through the character controller
     /// (walls still stop the player). Fed by received knockback
@@ -251,6 +257,7 @@ impl Default for PlayerMovement {
             is_grounded: true,
             ground_velocity: Vec3::ZERO,
             motor_accum: Vec3::ZERO,
+            motor_carry: Vec3::ZERO,
             knockback_velocity: Vec3::ZERO,
         }
     }

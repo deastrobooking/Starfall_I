@@ -1880,15 +1880,47 @@ fn cache_previous_tick_positions(
     }
 }
 
+/// Fraction of the outstanding motor carry delivered each frame. Below 1.0 a
+/// tick's worth of motion is spread over a couple of frames, which removes the
+/// fixed-tick stutter; the remainder stays banked so nothing is lost.
+///
+/// With alternating tick delivery the steady-state ratio between a busy and a
+/// quiet frame settles at `1 / (1 - DELIVERY)`, so 0.4 lands at ~1.7x (versus
+/// unbounded for a raw flush) while costing only ~2.5 frames of latency.
+const MOTOR_CARRY_DELIVERY: f32 = 0.4;
+/// Distance under which the carry is delivered outright instead of chasing an
+/// ever-halving remainder (also stops denormal drift while standing still).
+const MOTOR_CARRY_SNAP: f32 = 1.0e-4;
+
+/// Split the outstanding carry into (deliver-now, keep-for-later).
+///
+/// A 64 Hz simulation rendered at a higher refresh rate hands some frames a
+/// whole tick of translation and others none, so a flush that delivered the
+/// raw accumulation made the player stutter while the interpolated camera
+/// glided — the "jitters when you move" report. Delivering a fixed fraction
+/// per frame smooths the motion without changing where the player ends up.
+fn split_motor_carry(carry: Vec3) -> (Vec3, Vec3) {
+    if carry.length() <= MOTOR_CARRY_SNAP {
+        return (carry, Vec3::ZERO);
+    }
+    let deliver = carry * MOTOR_CARRY_DELIVERY;
+    (deliver, carry - deliver)
+}
+
 /// Flush per-tick accumulated translation (EC1b fixed-motor mode) onto the
-/// controller once per frame, then clear it. Physics steps per-frame, so this is
-/// where many fixed ticks (or zero) collapse into a single move-and-slide input.
+/// controller once per frame. Physics steps per-frame, so this is where many
+/// fixed ticks (or zero) collapse into a single move-and-slide input — see
+/// [`split_motor_carry`] for why that is smoothed rather than applied raw.
 fn flush_motor_translation(
     mut q: Query<(&mut KinematicCharacterController, &mut PlayerMovement), With<Player>>,
 ) {
     for (mut controller, mut movement) in q.iter_mut() {
-        controller.translation = Some(movement.motor_accum);
+        let accumulated = movement.motor_accum;
+        movement.motor_carry += accumulated;
         movement.motor_accum = Vec3::ZERO;
+        let (deliver, remainder) = split_motor_carry(movement.motor_carry);
+        movement.motor_carry = remainder;
+        controller.translation = Some(deliver);
     }
 }
 
@@ -3787,6 +3819,54 @@ fn update_camera_post_processing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn motor_carry_smooths_fixed_tick_stutter_without_losing_distance() {
+        // 64 Hz sim rendered at ~120 Hz: alternating frames receive one
+        // tick of translation or none. Raw delivery is what made the player
+        // stutter while the interpolated camera glided.
+        let tick_step = Vec3::new(0.25, 0.0, 0.0);
+        let frames = 240;
+        let mut carry = Vec3::ZERO;
+        let mut delivered = Vec::new();
+        let mut total = Vec3::ZERO;
+        for frame in 0..frames {
+            if frame % 2 == 0 {
+                carry += tick_step;
+            }
+            let (deliver, remainder) = split_motor_carry(carry);
+            carry = remainder;
+            delivered.push(deliver.x);
+            total += deliver;
+        }
+
+        // Conservation: everything accumulated is eventually delivered, so
+        // the player ends up exactly where the simulation put them.
+        let accumulated = tick_step.x * (frames as f32 / 2.0);
+        assert!(
+            (total.x + carry.x - accumulated).abs() < 1e-4,
+            "carry must not lose or invent distance"
+        );
+
+        // Smoothness: no frame is left completely starved once the carry is
+        // primed, and the busiest frame is far below a full raw tick.
+        let steady = &delivered[8..];
+        let min = steady.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max = steady.iter().cloned().fold(0.0_f32, f32::max);
+        assert!(min > 0.0, "every frame must move: {min}");
+        assert!(max < tick_step.x * 0.85, "frame spike remains: {max}");
+        // Raw delivery swings from 0.0 to a full tick (unbounded ratio);
+        // smoothed, the steady state is 1/(1 - DELIVERY) ≈ 1.67.
+        assert!(max / min < 1.8, "still uneven: {max} vs {min}");
+    }
+
+    #[test]
+    fn motor_carry_snaps_the_last_sliver_instead_of_halving_forever() {
+        let (deliver, remainder) = split_motor_carry(Vec3::new(1.0e-5, 0.0, 0.0));
+        assert_eq!(remainder, Vec3::ZERO);
+        assert!(deliver.x > 0.0);
+        assert_eq!(split_motor_carry(Vec3::ZERO), (Vec3::ZERO, Vec3::ZERO));
+    }
 
     #[test]
     fn board_pose_damping_rejects_per_frame_contact_normal_noise() {

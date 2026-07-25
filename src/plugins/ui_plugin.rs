@@ -5268,9 +5268,15 @@ fn live_combo_text(tricks: Option<&TrickState>, run: Option<&StuntRunState>) -> 
         return None;
     }
     let pending = run.pending_score.round() as u64;
+    // A live revert is the thing the rider is racing against, so it leads.
+    let prefix = if tricks.active.is_none() && tricks.can_revert() {
+        "REVERT "
+    } else {
+        ""
+    };
     match name {
         Some(name) if run.multiplier > 1.0 || pending > 0 => Some(format!(
-            "BOARD: {}  {}  x{:.2}",
+            "BOARD: {prefix}{}  {}  x{:.2}",
             name.to_uppercase(),
             pending,
             run.multiplier

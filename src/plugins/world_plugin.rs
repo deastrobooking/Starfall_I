@@ -2052,6 +2052,14 @@ fn hoverboard_trick_system(
         tricks.bailed = false;
         let is_grinding = grinding.is_some();
         let grounded = movement.is_grounded;
+        // The revert window only ticks down on the ground; airborne time is
+        // already combo time, so it must not expire mid-flight.
+        if grounded && tricks.revert_window > 0.0 {
+            tricks.revert_window = (tricks.revert_window - dt).max(0.0);
+            if tricks.revert_window <= 0.0 {
+                tricks.reverting = false;
+            }
+        }
 
         // ── Resolve the held trick ───────────────────────────────────────
         if let Some(active) = tricks.active.clone() {
@@ -2067,6 +2075,10 @@ fn hoverboard_trick_system(
                 tricks.record_use(active.index);
                 tricks.last_trick = Some(active.name.clone());
                 tricks.active = None;
+                // Open the revert window: another trick (or a rail) started
+                // inside it links into this combo instead of banking it.
+                tricks.revert_window = library.revert_window;
+                tricks.reverting = false;
                 action_sfx.write(ModularActionSfxEvent::new("hoverboard.trick_land"));
                 msg_ev.write(UiMessageEvent {
                     text: format!(
@@ -2131,6 +2143,14 @@ fn hoverboard_trick_system(
                             multiplier_bonus: def.multiplier_bonus,
                         });
                         run.active = true;
+                        // Chaining inside the revert window keeps the combo
+                        // alive across the landing and pays a bonus.
+                        if tricks.can_revert() {
+                            tricks.reverting = true;
+                            tricks.revert_window = library.revert_window;
+                            run.multiplier = (run.multiplier + library.revert_multiplier_bonus)
+                                .min(library.max_multiplier);
+                        }
                         if def.category == TrickCategory::Grind {
                             action_sfx.write(ModularActionSfxEvent::new("hoverboard.grind_start"));
                         }
@@ -2153,6 +2173,7 @@ fn stunt_combo_system(
             &TraversalModeState,
             Option<&RailGrindState>,
             &mut StuntRunState,
+            &mut TrickState,
         ),
         With<Player>,
     >,
@@ -2163,7 +2184,7 @@ fn stunt_combo_system(
     let dt = time.delta_secs();
     let mut gamepads = gamepad_q.iter().collect::<Vec<_>>();
     gamepads.sort_by_key(|entity| entity.index());
-    for (index, input, movement, traversal, grinding, mut run) in player_q.iter_mut() {
+    for (index, input, movement, traversal, grinding, mut run, mut tricks) in player_q.iter_mut() {
         let is_grinding = grinding.is_some();
         if is_grinding {
             if !run.was_grinding {
@@ -2180,8 +2201,15 @@ fn stunt_combo_system(
             run.spin_degrees += input.move_axis.x * 270.0 * dt;
         }
 
-        let landed = movement.is_grounded && !run.was_grounded && !is_grinding;
+        // Hold the bank while the revert window is open or a trick is still
+        // being worked — that is what lets a combo survive a landing. The
+        // condition is state-based rather than a landing edge so the run also
+        // banks on the frame a revert window lapses (the rider is by then
+        // already grounded, so an edge test would never fire again).
+        let linking = tricks.can_revert() || tricks.active.is_some();
+        let landed = movement.is_grounded && !is_grinding && !linking;
         if landed && run.active {
+            tricks.reset_combo();
             let multiplier = run.multiplier;
             let banked = bank_stunt_run(&mut run);
             if banked > 0 {
@@ -17601,6 +17629,35 @@ mod tests {
         assert!(trick_category_available(TrickCategory::Manual, true, false));
         assert!(!trick_category_available(TrickCategory::Manual, false, false));
         assert!(!trick_category_available(TrickCategory::Manual, true, true));
+    }
+
+    #[test]
+    fn combo_banks_only_once_nothing_is_linking_anymore() {
+        // Mirrors the bank gate in stunt_combo_system: grounded, off a rail,
+        // and neither a held trick nor an open revert window.
+        let bankable = |grounded: bool, grinding: bool, tricks: &TrickState| {
+            grounded && !grinding && !(tricks.can_revert() || tricks.active.is_some())
+        };
+
+        let idle = TrickState::default();
+        assert!(bankable(true, false, &idle), "plain landing banks");
+        assert!(!bankable(false, false, &idle), "still airborne");
+        assert!(!bankable(true, true, &idle), "still grinding");
+
+        // An open revert window holds the bank so the combo survives.
+        let reverting = TrickState {
+            revert_window: 0.4,
+            ..default()
+        };
+        assert!(!bankable(true, false, &reverting));
+
+        // Once it lapses on the ground the run banks — this is why the gate
+        // is state-based, not a landing edge (the rider is already grounded).
+        let lapsed = TrickState {
+            revert_window: 0.0,
+            ..default()
+        };
+        assert!(bankable(true, false, &lapsed));
     }
 
     #[test]

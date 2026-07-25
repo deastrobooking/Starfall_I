@@ -210,5 +210,7 @@
   ],
   "special_multiplier_threshold": 3.0,
   "spin_score_per_rotation": 325.0,
-  "max_multiplier": 8.0
+  "max_multiplier": 8.0,
+  "revert_window": 0.85,
+  "revert_multiplier_bonus": 0.2
 }
