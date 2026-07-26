@@ -9,7 +9,7 @@ use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
     boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, Enemy, EnemyAIState,
     EnemyAttackVfx, EnemyProjectile, EnemyProjectileKind, EnemyStateMachine, EnemyType,
-    FlyingDrone, MechBoss, RiftBoss,
+    FlyingDrone, MechBoss, MountainSpiderMech, RiftBoss,
 };
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
@@ -478,6 +478,7 @@ fn enemy_ai_system(
         (
             Without<Player>,
             Without<HackedUnit>,
+            Without<MountainSpiderMech>,
             Without<crate::combat_feedback::Flinch>,
         ),
     >,
@@ -1743,15 +1744,17 @@ fn enemy_attack_system(
 fn enemy_dead_cleanup(
     mut commands: Commands,
     time: Res<Time>,
-    mut dead_q: Query<(Entity, &mut DeadEnemy)>,
+    mut dead_q: Query<(Entity, &mut DeadEnemy, Option<&MountainSpiderMech>)>,
     mut wave: ResMut<WaveInfo>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut dead) in dead_q.iter_mut() {
+    for (entity, mut dead, mountain_spider) in dead_q.iter_mut() {
         dead.despawn_timer -= dt;
         if dead.despawn_timer <= 0.0 {
             commands.entity(entity).despawn();
-            wave.enemy_count = wave.enemy_count.saturating_sub(1);
+            if mountain_spider.is_none() {
+                wave.enemy_count = wave.enemy_count.saturating_sub(1);
+            }
         }
     }
 }

@@ -444,6 +444,55 @@ pub struct BoatPassenger {
     pub is_driver: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaterBodyKind {
+    Ocean,
+    Lake,
+    River,
+    Waterfall,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum WaterFootprint {
+    Rectangle { half_extents: Vec2 },
+    Ellipse { radii: Vec2 },
+}
+
+impl WaterFootprint {
+    pub fn contains(self, local_xz: Vec2) -> bool {
+        match self {
+            Self::Rectangle { half_extents } => {
+                local_xz.x.abs() <= half_extents.x && local_xz.y.abs() <= half_extents.y
+            }
+            Self::Ellipse { radii } => {
+                let normalized = Vec2::new(
+                    local_xz.x / radii.x.max(0.001),
+                    local_xz.y / radii.y.max(0.001),
+                );
+                normalized.length_squared() <= 1.0
+            }
+        }
+    }
+}
+
+/// Queryable gameplay metadata attached to rendered water surfaces.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct WaterBody {
+    pub kind: WaterBodyKind,
+    pub surface_y: f32,
+    pub depth: f32,
+    pub navigable: bool,
+    pub footprint: WaterFootprint,
+}
+
+/// Named offshore destination reached through an authored boat lane.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TravelIsland {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub dock_position: Vec3,
+}
+
 /// Tags a world entity (enemy group, patrol, or visual marker) as belonging to
 /// a WorldSite so the liberation system can track enemy deaths by site.
 #[derive(Component, Debug, Clone, Copy)]
@@ -467,6 +516,32 @@ pub struct WorldSiteEnemySentinel {
     pub spawned: bool,
     pub enemy_count: u8,
     pub liberated_spawned: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rectangular_water_footprint_rejects_points_past_its_edges() {
+        let footprint = WaterFootprint::Rectangle {
+            half_extents: Vec2::new(8.0, 3.0),
+        };
+
+        assert!(footprint.contains(Vec2::new(7.9, -2.9)));
+        assert!(!footprint.contains(Vec2::new(8.1, 0.0)));
+        assert!(!footprint.contains(Vec2::new(0.0, 3.1)));
+    }
+
+    #[test]
+    fn elliptical_water_footprint_follows_the_shoreline() {
+        let footprint = WaterFootprint::Ellipse {
+            radii: Vec2::new(10.0, 5.0),
+        };
+
+        assert!(footprint.contains(Vec2::new(6.0, 3.0)));
+        assert!(!footprint.contains(Vec2::new(8.0, 4.0)));
+    }
 }
 
 /// Tags the beacon entity spawned at a world route midpoint.

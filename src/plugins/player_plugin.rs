@@ -24,8 +24,8 @@ use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::{
-    BoatPassenger, RailGrindState, SpeedLoopGuide, SpeedRoadCheckpoint, WorldAnchor,
-    WorldRouteMarker,
+    BoatPassenger, RailGrindState, SpeedLoopGuide, SpeedRoadCheckpoint, WaterBody, WaterBodyKind,
+    WorldAnchor, WorldRouteMarker,
 };
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
@@ -386,6 +386,7 @@ impl Plugin for PlayerPlugin {
                     player_pushbox_separation,
                     player_dodge_update,
                     player_parry_update,
+                    water_survival_system,
                     player_state_update,
                     player_stamina_regen,
                     player_perk_health_regen,
@@ -847,6 +848,7 @@ fn spawn_players(
                 Health::new(player_stats.max_health),
                 Damageable::default(),
             ))
+            .insert(WaterTraversalState::default())
             .insert((
                 RoadRecoveryState::default(),
                 TerrainRecoveryState::new(spawn_pos),
@@ -2044,9 +2046,37 @@ fn find_ledge_candidate(
     })
 }
 
+#[derive(Debug, Clone, Copy)]
+struct WaterContact {
+    entity: Entity,
+    surface_y: f32,
+}
+
+fn water_contact_at(
+    position: Vec3,
+    water_q: &Query<(Entity, &Transform, &WaterBody), Without<Player>>,
+) -> Option<WaterContact> {
+    water_q
+        .iter()
+        .filter(|(_, _, body)| body.kind != WaterBodyKind::Waterfall)
+        .filter_map(|(entity, transform, body)| {
+            let delta = position - transform.translation;
+            let local = transform.rotation.inverse() * delta;
+            let inside = body.footprint.contains(Vec2::new(local.x, local.z))
+                && position.y <= body.surface_y + 0.9
+                && position.y >= body.surface_y - body.depth - 1.0;
+            inside.then_some(WaterContact {
+                entity,
+                surface_y: body.surface_y,
+            })
+        })
+        .max_by(|a, b| a.surface_y.total_cmp(&b.surface_y))
+}
+
 fn player_movement(
     time: Res<Time>,
     spatial_query: SpatialQuery,
+    water_q: Query<(Entity, &Transform, &WaterBody), Without<Player>>,
     dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
     player_config: Res<LocalPlayerConfig>,
@@ -2074,6 +2104,7 @@ fn player_movement(
                 &PlayerProgression,
                 &BeamSabre,
                 Option<&RailGrindState>,
+                &mut WaterTraversalState,
             ),
         ),
         With<Player>,
@@ -2095,7 +2126,7 @@ fn player_movement(
         mut transform,
         mut state,
         (player_idx, pi),
-        (boat_passenger, progression, sabre, rail_grind),
+        (boat_passenger, progression, sabre, rail_grind, mut water),
     ) in player_q.iter_mut()
     {
         // EC1b: on the fixed tick, consume the latched command buffer so edge
@@ -2112,6 +2143,10 @@ fn player_movement(
             pi
         };
         if boat_passenger.is_some() {
+            water.body = None;
+            water.swimming = false;
+            water.submerged = false;
+            water.wake_requested = false;
             movement.velocity = Vec3::ZERO;
             movement.ground_velocity = Vec3::ZERO;
             movement.clear_motor_delivery();
@@ -2133,6 +2168,88 @@ fn player_movement(
             }
             state.force(PlayerState::Idle);
             continue;
+        }
+
+        if let Some(contact) = water_contact_at(transform.translation, &water_q) {
+            water.body = Some(contact.entity);
+            water.surface_y = contact.surface_y;
+            water.swimming = true;
+            water.submerged = transform.translation.y + 1.35 < contact.surface_y;
+            water.wake_cooldown = (water.wake_cooldown - dt).max(0.0);
+
+            jetpack.is_active = false;
+            jetpack.mode = FlightMode::Grounded;
+            grapple.begin_recovery();
+            edge_grab.release_hang();
+            climb.is_climbing = false;
+            movement.is_grounded = false;
+            movement.coyote_timer = 0.0;
+            movement.jump_buffer_timer = 0.0;
+            movement.wall_jump_lock_timer = 0.0;
+            movement.wall_jump_charges = movement.max_wall_jump_charges;
+            *platformer = PlatformerMoveState::default();
+
+            let (forward, right) = if dungeon.active {
+                (Vec3::NEG_Z, Vec3::X)
+            } else {
+                (
+                    transform
+                        .forward()
+                        .as_vec3()
+                        .with_y(0.0)
+                        .normalize_or_zero(),
+                    transform.right().as_vec3().with_y(0.0).normalize_or_zero(),
+                )
+            };
+            let (swim_input, input_strength) =
+                movement_input_from_axes(forward, right, pi.move_axis);
+            let swim_speed = if pi.sprint { 0.42 } else { 0.30 };
+            let target_horizontal = swim_input * swim_speed * input_strength;
+            movement.ground_velocity =
+                approach_vec3(movement.ground_velocity, target_horizontal, 2.8 * dt);
+
+            let rest_y = contact.surface_y - 0.72;
+            let buoyancy = ((rest_y - transform.translation.y) * 0.20).clamp(-0.20, 0.24);
+            let target_vertical = if pi.jump {
+                0.34
+            } else if pi.dodge {
+                -0.24
+            } else if water.breath <= 2.0 {
+                buoyancy.max(0.22)
+            } else {
+                buoyancy
+            };
+            movement.velocity.y = approach_f32(movement.velocity.y, target_vertical, 2.6 * dt);
+
+            let translation =
+                (movement.ground_velocity + Vec3::Y * movement.velocity.y) * dt * 60.0;
+            if sim.fixed_motor {
+                movement.motor_accum += translation;
+            } else {
+                controller.translation = Some(translation);
+            }
+            if state.current != PlayerState::Swimming {
+                state.force(PlayerState::Swimming);
+                action_sfx.write(ModularActionSfxEvent::new("water.enter"));
+            } else if water.wake_cooldown <= 0.0 && movement.ground_velocity.length_squared() > 0.02
+            {
+                water.wake_cooldown = 0.42;
+                water.wake_requested = true;
+                action_sfx.write(ModularActionSfxEvent::new("water.swim"));
+            }
+            platformer.was_grounded = false;
+            continue;
+        }
+
+        water.body = None;
+        water.swimming = false;
+        water.submerged = false;
+        water.wake_requested = false;
+        water.wake_cooldown = (water.wake_cooldown - dt).max(0.0);
+        if state.current == PlayerState::Swimming {
+            state.force(PlayerState::Idle);
+            movement.velocity.y = movement.velocity.y.max(0.08);
+            action_sfx.write(ModularActionSfxEvent::new("water.exit"));
         }
 
         jetpack.jump_tap_timer = (jetpack.jump_tap_timer - dt).max(0.0);
@@ -3140,6 +3257,10 @@ fn approach_vec3(current: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
     }
 }
 
+fn approach_f32(current: f32, target: f32, max_delta: f32) -> f32 {
+    current + (target - current).clamp(-max_delta, max_delta)
+}
+
 fn grapple_drive_velocity(
     grapple: &mut GrappleHookState,
     position: Vec3,
@@ -3820,6 +3941,59 @@ fn player_parry_update(
 }
 
 // ── State Update ──────────────────────────────────────────────────────────────
+fn water_survival_system(
+    time: Res<Time>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &mut WaterTraversalState,
+            &mut Health,
+            &mut Damageable,
+        ),
+        With<Player>,
+    >,
+    mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
+    mut ui_ev: MessageWriter<UiMessageEvent>,
+) {
+    let dt = time.delta_secs();
+    for (index, mut water, mut health, mut damageable) in player_q.iter_mut() {
+        if water.submerged {
+            water.breath = (water.breath - dt).max(0.0);
+            if water.breath <= 3.0 && !water.low_air_warned {
+                water.low_air_warned = true;
+                ui_ev.write(UiMessageEvent {
+                    text: format!("P{} AIR LOW — jump toward the surface", index.0 + 1),
+                    duration: 2.2,
+                });
+            }
+            if water.breath <= 0.0 {
+                water.drowning_tick -= dt;
+                if water.drowning_tick <= 0.0 {
+                    water.drowning_tick = 1.0;
+                    let result = apply_damage(
+                        &mut health,
+                        &mut damageable,
+                        &DamageInfo::new(10.0, DamageType::Drowning),
+                    );
+                    if result.damage_amount > 0.0 {
+                        damaged_ev.write(PlayerDamagedEvent {
+                            player_index: Some(index.0),
+                            amount: result.damage_amount,
+                            remaining: health.current,
+                        });
+                    }
+                }
+            }
+        } else {
+            water.breath = (water.breath + dt * 4.0).min(water.max_breath);
+            water.drowning_tick = 1.0;
+            if water.breath > 4.5 {
+                water.low_air_warned = false;
+            }
+        }
+    }
+}
+
 fn player_state_update(time: Res<Time>, mut q: Query<&mut PlayerStateMachine, With<Player>>) {
     let dt = time.delta_secs();
     for mut sm in q.iter_mut() {

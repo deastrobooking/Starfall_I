@@ -945,14 +945,7 @@ fn boat_drive_system(
             state.boat_heading = horizontal.x.atan2(horizontal.z);
         }
 
-        let min_z = boat.dock_position.z.min(boat.island_position.z) - boat.dock_radius;
-        let max_z = boat.dock_position.z.max(boat.island_position.z) + boat.dock_radius;
-        let route_center_x = (boat.dock_position.x + boat.island_position.x) * 0.5;
-        boat_transform.translation.x = boat_transform.translation.x.clamp(
-            route_center_x - boat.route_half_width,
-            route_center_x + boat.route_half_width,
-        );
-        boat_transform.translation.z = boat_transform.translation.z.clamp(min_z, max_z);
+        boat_transform.translation = clamp_boat_to_route(boat_transform.translation, boat);
 
         let bob = (time.elapsed_secs() * 2.8).sin() * 0.10;
         boat_transform.translation.y = boat.dock_position.y + bob;
@@ -973,6 +966,29 @@ fn boat_drive_system(
         player_transform.translation = boat_translation + boat_rotation * seat;
         player_transform.rotation = boat_rotation;
     }
+}
+
+fn clamp_boat_to_route(position: Vec3, boat: &BoatVehicle) -> Vec3 {
+    let start = Vec2::new(boat.dock_position.x, boat.dock_position.z);
+    let end = Vec2::new(boat.island_position.x, boat.island_position.z);
+    let axis = end - start;
+    let length = axis.length();
+    if length <= 0.001 {
+        return Vec3::new(start.x, position.y, start.y);
+    }
+
+    let forward = axis / length;
+    let right = Vec2::new(forward.y, -forward.x);
+    let point = Vec2::new(position.x, position.z);
+    let offset = point - start;
+    let along = offset
+        .dot(forward)
+        .clamp(-boat.dock_radius, length + boat.dock_radius);
+    let lateral = offset
+        .dot(right)
+        .clamp(-boat.route_half_width, boat.route_half_width);
+    let clamped = start + forward * along + right * lateral;
+    Vec3::new(clamped.x, position.y, clamped.y)
 }
 
 fn boat_seat_offset(seat: u8) -> Vec3 {
@@ -1115,6 +1131,34 @@ mod tests {
             Some(1)
         );
         assert_eq!(replacement_boat_driver(&[], Some(2)), None);
+    }
+
+    #[test]
+    fn boat_route_clamp_supports_diagonal_and_east_west_lanes() {
+        let diagonal = BoatVehicle {
+            embark_radius: 8.0,
+            passenger_radius: 12.0,
+            dock_radius: 20.0,
+            route_half_width: 15.0,
+            speed: 24.0,
+            dock_position: Vec3::new(-100.0, 4.0, -50.0),
+            island_position: Vec3::new(200.0, 4.0, 250.0),
+        };
+        let clamped = clamp_boat_to_route(Vec3::new(400.0, 4.0, -200.0), &diagonal);
+        let route = (diagonal.island_position - diagonal.dock_position)
+            .with_y(0.0)
+            .normalize();
+        let right = Vec3::new(route.z, 0.0, -route.x);
+        let lateral = (clamped - diagonal.dock_position).dot(right).abs();
+        assert!(lateral <= diagonal.route_half_width + 0.001);
+
+        let east_west = BoatVehicle {
+            island_position: Vec3::new(500.0, 4.0, 0.0),
+            dock_position: Vec3::new(0.0, 4.0, 0.0),
+            ..diagonal
+        };
+        let clamped = clamp_boat_to_route(Vec3::new(250.0, 4.0, 80.0), &east_west);
+        assert!((clamped.z.abs() - east_west.route_half_width).abs() < 0.001);
     }
 
     #[test]

@@ -310,6 +310,21 @@ pub(super) fn speed_road_loop_gate_count() -> usize {
     route_gate_count + map_settlements().len()
 }
 
+#[allow(dead_code)]
+pub(super) fn full_speed_road_loop_count() -> usize {
+    mountain_routes()
+        .iter()
+        .enumerate()
+        .flat_map(|(ri, route)| {
+            route.windows(2).enumerate().filter(move |(si, pair)| {
+                let (ax, az) = pair[0];
+                let (bx, bz) = pair[1];
+                Vec2::new(bx - ax, bz - az).length() > 1_800.0 && (ri + *si) % 2 == 0
+            })
+        })
+        .count()
+}
+
 pub(super) fn spawn_speed_road_network(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -436,6 +451,28 @@ pub(super) fn spawn_speed_road_network(
                     },
                     WorldGeometry,
                 ));
+
+                // The guide takes over once the rider reaches the loop mouth,
+                // but it does not provide any acceleration itself. Previously
+                // these full loops only used boost-colored materials, so no
+                // BoardBoostPad entity existed for board_boost_pad_system to
+                // detect. Populate every loop with a real entrance pad that
+                // supplies enough sustained speed to complete the stunt.
+                spawn_board_boost_pad(
+                    commands,
+                    meshes,
+                    pal,
+                    base + Vec3::Y * 0.52,
+                    delta.x.atan2(delta.y),
+                    0.0,
+                    dir3,
+                    loop_w * 0.72,
+                    radius * 0.78,
+                    3.45,
+                    4.25,
+                    0.0,
+                    2.10,
+                );
             }
         }
 

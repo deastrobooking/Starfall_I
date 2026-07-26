@@ -1011,6 +1011,15 @@ pub enum CharacterDesignReturnTarget {
     ChapterSelect,
 }
 
+/// Screen that opened the imported-character asset editor. The forge is shared
+/// by the creator Project Hub and the player-facing character selection flow.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImportedForgeReturnTarget {
+    #[default]
+    ProjectHub,
+    PlayerSelect,
+}
+
 /// Transient resource holding the in-progress customization for one player slot.
 /// Set `player_index` before transitioning to `AppState::CharacterDesign`.
 #[derive(Resource, Debug)]

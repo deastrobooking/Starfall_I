@@ -378,6 +378,9 @@ fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
     if input.wall_sliding || input.state == Some(PlayerState::WallSliding) {
         return CartoonPose::WallSlide;
     }
+    if input.state == Some(PlayerState::Swimming) {
+        return CartoonPose::Glide;
+    }
     if input.traversal_mode == TraversalMode::Hoverboard
         && (input.horizontal_speed > 0.08 || input.jetpack_active || !input.grounded)
     {

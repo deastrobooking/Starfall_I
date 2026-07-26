@@ -13,6 +13,7 @@ use crate::engine_tools::character_records::{self, ImportedCharacterSpec, Import
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::mesh_modifiers::{apply_stack_to_mesh, MeshModifier};
 use crate::rendering::{Camera3dBundle, DirectionalLightBundle, PbrBundle};
+use crate::resources::ImportedForgeReturnTarget;
 use crate::state::AppState;
 use crate::tool_windows::{spawn_tool_window, ToolWindowStyle};
 
@@ -22,6 +23,7 @@ impl Plugin for ImportedCharacterForgePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FileDragAndDrop>()
             .init_resource::<ImportedForgeState>()
+            .init_resource::<ImportedForgeReturnTarget>()
             .add_systems(OnEnter(AppState::ImportedCharacterForge), setup_forge)
             .add_systems(OnExit(AppState::ImportedCharacterForge), cleanup_forge)
             .add_systems(
@@ -510,6 +512,7 @@ fn imported_forge_actions(
     buttons: Query<(&Interaction, &ImportedForgeButton), (Changed<Interaction>, With<Button>)>,
     asset_server: Res<AssetServer>,
     registry: Res<ForgeProjectRegistry>,
+    return_target: Res<ImportedForgeReturnTarget>,
     mut state: ResMut<ImportedForgeState>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
@@ -634,7 +637,10 @@ fn imported_forge_actions(
                 state.labels_dirty = true;
                 state.status = "Non-destructive edits reset; source GLB unchanged".into();
             }
-            ImportedForgeAction::Back => next_state.set(AppState::ProjectHub),
+            ImportedForgeAction::Back => next_state.set(match *return_target {
+                ImportedForgeReturnTarget::ProjectHub => AppState::ProjectHub,
+                ImportedForgeReturnTarget::PlayerSelect => AppState::PlayerSelect,
+            }),
         }
     }
 }

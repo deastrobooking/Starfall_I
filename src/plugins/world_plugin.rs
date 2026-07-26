@@ -25,12 +25,15 @@ use crate::chapters::{
 use crate::commands::CommandRegistry;
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::DiscoverableKind;
-use crate::components::enemy::{CitySpyDrone, Enemy, EnemyStateMachine, EnemyType};
+use crate::components::enemy::{
+    CitySpyDrone, Enemy, EnemyAIState, EnemyStateMachine, EnemyType, MountainSpiderMech,
+    SpiderMechLeg,
+};
 use crate::components::faction::Faction;
 use crate::components::player::{
     BoardBoostState, ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement,
     PlayerProgression, PlayerStateMachine, PlayerStats, StuntRaceProgress, StuntRunState,
-    TraversalMode, TraversalModeState,
+    TraversalMode, TraversalModeState, WaterTraversalState,
 };
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
@@ -52,7 +55,8 @@ use crate::raids::{
     RaidThreatMarker, RaidTickEvent, RaidUfoMarker, CLOUDRAIL_TUTORIAL_RAID_SITE,
 };
 use crate::rendering::{
-    DirectionalLightBundle, PbrBundle, PointLightBundle, WaterMaterial, WaterMaterialUniform,
+    DirectionalLightBundle, PbrBundle, PointLightBundle, SpatialBundle, TerrainMaterial,
+    TerrainMaterialUniform, TerrainPbrBundle, WaterMaterial, WaterMaterialUniform,
 };
 use crate::resources::{
     initial_world_routes, initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState,
@@ -78,6 +82,18 @@ struct ColliderDebugSource;
 
 #[derive(Component)]
 struct ColliderDebugVisual;
+
+#[derive(Resource, Clone)]
+struct WaterWakeAssets {
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+}
+
+#[derive(Component)]
+struct WaterWakeRipple {
+    remaining: f32,
+    duration: f32,
+}
 
 #[derive(Component, Debug, Clone, Copy)]
 struct DebugColliderBox {
@@ -219,6 +235,7 @@ impl Plugin for WorldPlugin {
             .init_resource::<RaidRegistry>()
             .init_resource::<DiscussionState>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
+            .add_plugins(MaterialPlugin::<TerrainMaterial>::default())
             .add_systems(
                 OnEnter(AppState::Playing),
                 (generate_city, build_building_cluster_lods).chain(),
@@ -230,6 +247,8 @@ impl Plugin for WorldPlugin {
                     update_day_night,
                     animate_nature,
                     guardian_ship_patrol_system,
+                    mountain_spider_mech_movement_system,
+                    animate_mountain_spider_legs,
                     city_spy_drone_patrol_system,
                     city_spy_drone_data_drop_system,
                     discussion_interaction_system,
@@ -245,6 +264,11 @@ impl Plugin for WorldPlugin {
                     laser_beam_cleanup_system,
                     collider_debug_toggle_system,
                 )
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (water_wake_spawn_system, water_wake_update_system)
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -2650,6 +2674,7 @@ fn generate_city(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut grass_mats: ResMut<Assets<GrassMaterial>>,
+    mut terrain_mats: ResMut<Assets<TerrainMaterial>>,
     mut water_mats: ResMut<Assets<WaterMaterial>>,
     asset_server: Res<AssetServer>,
     transition: Res<PlaySessionTransition>,
@@ -2669,16 +2694,33 @@ fn generate_city(
     let m = &mut *mats;
 
     let pal = Palette::build(m, &asset_server);
+    let terrain_material = terrain_mats.add(TerrainMaterial {
+        settings: TerrainMaterialUniform::default(),
+        grass_texture: Some(repeating_texture(&asset_server, "Materials/grass (1).png")),
+        rock_texture: Some(repeating_texture(&asset_server, "Materials/stone (1).png")),
+        snow_texture: Some(repeating_texture(
+            &asset_server,
+            "Materials/rock_snow (1).png",
+        )),
+        path_texture: Some(repeating_texture(&asset_server, "Materials/asphalt.png")),
+    });
+    commands.insert_resource(WaterWakeAssets {
+        mesh: meshes.add(Torus::new(0.72, 1.0)),
+        material: pal.waterfall_mist.clone(),
+    });
     let ocean_water = water_mats.add(WaterMaterial {
         settings: WaterMaterialUniform::default(),
     });
     let river_water = water_mats.add(WaterMaterial {
         settings: WaterMaterialUniform::river(),
     });
+    let lake_water = water_mats.add(WaterMaterial {
+        settings: WaterMaterialUniform::lake(),
+    });
 
     spawn_lighting(&mut commands, &mut meshes, m);
     spawn_ground_plane(&mut commands);
-    spawn_terrain(&mut commands, &mut meshes, &pal, seed);
+    spawn_terrain(&mut commands, &mut meshes, &terrain_material, seed);
     spawn_downtown(&mut commands, &mut meshes, &pal, seed);
     spawn_industrial(&mut commands, &mut meshes, &pal, seed + 1, seed);
     spawn_residential(&mut commands, &mut meshes, &pal, seed + 2, seed);
@@ -2693,6 +2735,16 @@ fn generate_city(
     spawn_laser_turrets(&mut commands, &mut meshes, &pal, seed + 16, seed);
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
     spawn_everest_range_biomes(&mut commands, &mut meshes, &pal, seed);
+    spawn_mountain_spider_mechs(&mut commands, &mut meshes, &pal, seed);
+    spawn_perimeter_ocean_and_islands(&mut commands, &mut meshes, &pal, &ocean_water, seed);
+    spawn_mountain_water_network(
+        &mut commands,
+        &mut meshes,
+        &pal,
+        &lake_water,
+        &river_water,
+        seed,
+    );
     if current.id.0 == 1 {
         spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal, &ocean_water);
     }
@@ -2720,6 +2772,63 @@ fn generate_city(
     setup_world_site_registry(&mut world_site_registry);
     spawn_world_site_props(&mut commands, &mut meshes, m, &world_site_registry, seed);
     setup_world_route_registry(&mut world_route_registry);
+}
+
+fn water_wake_spawn_system(
+    mut commands: Commands,
+    assets: Option<Res<WaterWakeAssets>>,
+    mut player_q: Query<(&Transform, &mut WaterTraversalState), With<Player>>,
+) {
+    let Some(assets) = assets else {
+        return;
+    };
+    for (transform, mut water) in player_q.iter_mut() {
+        if !water.wake_requested {
+            continue;
+        }
+        water.wake_requested = false;
+        if !water.swimming {
+            continue;
+        }
+
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(assets.mesh.clone()),
+                material: MeshMaterial3d(assets.material.clone()),
+                transform: Transform::from_xyz(
+                    transform.translation.x,
+                    water.surface_y + 0.06,
+                    transform.translation.z,
+                )
+                .with_scale(Vec3::new(0.8, 0.12, 0.8)),
+                ..default()
+            },
+            WorldGeometry,
+            WaterWakeRipple {
+                remaining: 0.62,
+                duration: 0.62,
+            },
+        ));
+    }
+}
+
+fn water_wake_update_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut wake_q: Query<(Entity, &mut Transform, &mut WaterWakeRipple)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut transform, mut ripple) in wake_q.iter_mut() {
+        ripple.remaining -= dt;
+        if ripple.remaining <= 0.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        let life = 1.0 - ripple.remaining / ripple.duration;
+        let radius = 0.8 + life * 2.4;
+        transform.scale = Vec3::new(radius, 0.12, radius);
+    }
 }
 
 // ── Seeded RNG helper ─────────────────────────────────────────────────────────
@@ -2769,7 +2878,6 @@ struct Palette {
     street_asphalt: Handle<StandardMaterial>,
     street_paint: Handle<StandardMaterial>,
 
-    terrain_surface: Handle<StandardMaterial>,
     mountain_path: Handle<StandardMaterial>,
     bridge_deck: Handle<StandardMaterial>,
     bridge_stone: Handle<StandardMaterial>,
@@ -3090,18 +3198,6 @@ impl Palette {
                 metallic: 0.02,
                 perceptual_roughness: 0.72,
                 reflectance: 0.28,
-                ..default()
-            }),
-            terrain_surface: m.add(StandardMaterial {
-                base_color: Color::srgb(0.86, 0.94, 0.82),
-                base_color_texture: Some(repeating_texture(
-                    asset_server,
-                    "Materials/rock_grass.png",
-                )),
-                uv_transform: Affine2::from_scale(Vec2::splat(96.0)),
-                metallic: 0.0,
-                perceptual_roughness: 0.96,
-                reflectance: 0.18,
                 ..default()
             }),
             mountain_path: m.add(StandardMaterial {
@@ -6981,6 +7077,43 @@ fn secret_cave_terrain_inset(x: f32, z: f32, seed: u64, base_height: f32) -> f32
     height.max(0.0)
 }
 
+fn perimeter_coast_terrain_inset(x: f32, z: f32, base_height: f32) -> f32 {
+    let point = Vec2::new(x, z);
+    let mut height = base_height;
+    for island in TRAVEL_ISLANDS {
+        let distance = point.distance(island.coast_dock);
+        let influence = 1.0 - smoothstep(170.0, 540.0, distance);
+        if influence > 0.0 {
+            height = height.lerp(PERIMETER_OCEAN_LEVEL - 1.4, influence);
+        }
+    }
+    height
+}
+
+fn mountain_lake_surface_y(center_x: f32, center_z: f32, seed: u64) -> f32 {
+    (terrain_height_uncarved(center_x, center_z, seed) - 2.0).max(1.0)
+}
+
+fn mountain_lake_terrain_inset(x: f32, z: f32, seed: u64, base_height: f32) -> f32 {
+    let mut height = base_height;
+    for &(_, center_x, center_z, radius_x, radius_z) in MOUNTAIN_LAKES {
+        let normalized = Vec2::new((x - center_x) / radius_x, (z - center_z) / radius_z).length();
+        let influence = 1.0 - smoothstep(0.72, 1.06, normalized);
+        if influence <= 0.0 {
+            continue;
+        }
+        let basin_floor = mountain_lake_surface_y(center_x, center_z, seed) - 4.5;
+        height = height.lerp(height.min(basin_floor), influence);
+    }
+    height
+}
+
+fn final_terrain_insets(x: f32, z: f32, seed: u64, base_height: f32) -> f32 {
+    let cave_height = secret_cave_terrain_inset(x, z, seed, base_height);
+    let lake_height = mountain_lake_terrain_inset(x, z, seed, cave_height);
+    perimeter_coast_terrain_inset(x, z, lake_height)
+}
+
 fn terrain_height(x: f32, z: f32, seed: u64) -> f32 {
     terrain_height_uncarved(x, z, seed)
 }
@@ -7049,10 +7182,10 @@ fn terrain_mesh_height_grid(seed: u64) -> Arc<Vec<f32>> {
 fn terrain_mesh_vertex_height(x: f32, z: f32, seed: u64) -> f32 {
     let height = terrain_height(x, z, seed);
     let Some(projection) = nearest_mountain_route_point(x, z) else {
-        return secret_cave_terrain_inset(x, z, seed, height);
+        return final_terrain_insets(x, z, seed, height);
     };
     if projection.distance >= 190.0 {
-        return secret_cave_terrain_inset(x, z, seed, height);
+        return final_terrain_insets(x, z, seed, height);
     }
     // Smooth the shelf longitudinally so the mesh itself provides a curving
     // mountain ascent instead of preserving every sharp summit under the road.
@@ -7074,7 +7207,7 @@ fn terrain_mesh_vertex_height(x: f32, z: f32, seed: u64) -> f32 {
     // Cave interiors are the final terrain authority where a road shelf and a
     // cave mouth overlap; otherwise the road pass can reintroduce a mountain
     // wedge through an already validated dungeon floor.
-    secret_cave_terrain_inset(x, z, seed, road_terraced_height)
+    final_terrain_insets(x, z, seed, road_terraced_height)
 }
 
 fn mix_rgba(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
@@ -7127,9 +7260,12 @@ fn terrain_vertex_color(x: f32, z: f32, y: f32, normal: Vec3, seed: u64) -> [f32
     color = mix_rgba(color, dark_rock, striation * 0.36);
     color = mix_rgba(color, snow, snowline);
     color = mix_rgba(color, blue_ice, ice_line * 0.28);
-    color = mix_rgba(color, trail, mountain_route_influence(x, z) * 0.72);
+    let path_mask = mountain_route_influence(x, z);
+    color = mix_rgba(color, trail, path_mask * 0.72);
 
-    scale_rgba(color, 0.90 + detail * 0.18)
+    let mut color = scale_rgba(color, 0.90 + detail * 0.18);
+    color[3] = path_mask;
+    color
 }
 
 const TERRAIN_PATCH_CELLS: usize = 40;
@@ -7218,7 +7354,12 @@ fn terrain_patch_mesh(
     (mesh, origin)
 }
 
-fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
+fn spawn_terrain(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    terrain_material: &Handle<TerrainMaterial>,
+    seed: u64,
+) {
     const RES: usize = TERRAIN_MESH_RESOLUTION;
     let h = terrain_mesh_height_grid(seed);
 
@@ -7289,9 +7430,9 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
                 );
                 debug_assert_eq!(origin, proxy_origin);
                 parent.spawn((
-                    PbrBundle {
+                    TerrainPbrBundle {
                         mesh: Mesh3d(meshes.add(high_mesh)),
-                        material: MeshMaterial3d(pal.terrain_surface.clone()),
+                        material: MeshMaterial3d(terrain_material.clone()),
                         transform: Transform::from_translation(origin),
                         ..default()
                     },
@@ -7300,9 +7441,9 @@ fn spawn_terrain(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palet
                     TerrainHighLodPatch,
                 ));
                 parent.spawn((
-                    PbrBundle {
+                    TerrainPbrBundle {
                         mesh: Mesh3d(meshes.add(proxy_mesh)),
-                        material: MeshMaterial3d(pal.terrain_surface.clone()),
+                        material: MeshMaterial3d(terrain_material.clone()),
                         transform: Transform::from_translation(origin),
                         ..default()
                     },
@@ -7331,6 +7472,315 @@ fn spawn_everest_range_biomes(
     spawn_speed_road_network(commands, meshes, pal, seed + 1_241, seed);
     spawn_range_outposts(commands, meshes, pal, seed);
     spawn_dragon_lair_silhouettes(commands, meshes, pal, seed);
+}
+
+const MOUNTAIN_SPIDER_MECH_SPAWNS: &[(&str, f32, f32, f32)] = &[
+    ("Widow Engine Asterion", -7_050.0, -6_750.0, 520.0),
+    ("Widow Engine Bellatrix", -5_450.0, 4_650.0, 430.0),
+    ("Widow Engine Caligo", -2_950.0, -3_850.0, 470.0),
+    ("Widow Engine Dreadstar", 2_900.0, 2_150.0, 500.0),
+    ("Widow Engine Erebus", 5_950.0, -2_650.0, 460.0),
+    ("Widow Engine Fang", 7_850.0, 4_250.0, 390.0),
+    ("Widow Engine Gloom", 2_250.0, -7_650.0, 440.0),
+    ("Widow Engine Hex", -7_250.0, 5_750.0, 410.0),
+];
+
+#[allow(dead_code)]
+fn mountain_spider_mech_spawn_count() -> usize {
+    MOUNTAIN_SPIDER_MECH_SPAWNS.len()
+}
+
+fn spawn_mountain_spider_mechs(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    seed: u64,
+) {
+    let body_mesh = meshes.add(Cuboid::new(10.5, 3.4, 12.0));
+    let abdomen_mesh = meshes.add(Sphere::new(1.0));
+    let head_mesh = meshes.add(Cuboid::new(7.2, 3.0, 5.0));
+    let turret_mesh = meshes.add(Cylinder::new(1.25, 3.8));
+    let barrel_mesh = meshes.add(Cuboid::new(0.72, 0.72, 7.0));
+    let eye_mesh = meshes.add(Sphere::new(0.48));
+    let joint_mesh = meshes.add(Sphere::new(0.82));
+    let leg_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let fang_mesh = meshes.add(Cuboid::new(0.55, 2.5, 0.55));
+
+    for (index, &(name, anchor_x, anchor_z, patrol_radius)) in
+        MOUNTAIN_SPIDER_MECH_SPAWNS.iter().enumerate()
+    {
+        let offset_angle = seeded(seed + 4_901, index as u64 * 3) * TAU;
+        let offset_radius = 80.0 + seeded(seed + 4_901, index as u64 * 3 + 1) * 170.0;
+        let x = anchor_x + offset_angle.cos() * offset_radius;
+        let z = anchor_z + offset_angle.sin() * offset_radius;
+        let body_clearance = 6.2;
+        let position = Vec3::new(x, terrain_surface_y(x, z, seed) + body_clearance, z);
+
+        let mut enemy = Enemy::new(EnemyType::Hybrid, position, 2.2);
+        enemy.config.max_health = 1_100.0;
+        enemy.config.attack_damage = 24.0;
+        enemy.config.defense = 30.0;
+        enemy.config.attack_cooldown = 3.2;
+        enemy.config.attack_windup = 0.92;
+        enemy.config.knockback_force = 950.0;
+        enemy.config.experience_value = 360;
+        enemy.config.credits = 260;
+        enemy.config.detection_range = 280.0;
+        enemy.config.chase_range = 420.0;
+        enemy.config.attack_range = 18.0;
+        let max_health = enemy.scaled_health();
+
+        let root = commands
+            .spawn((
+                Name::new(name),
+                SpatialBundle {
+                    transform: Transform::from_translation(position),
+                    ..default()
+                },
+                WorldGeometry,
+                enemy,
+                EnemyStateMachine::default(),
+                Health::new(max_health),
+                Damageable::with_defense(30.0, Vec::new()),
+                Faction::DimensionalAlien,
+                MountainSpiderMech {
+                    home: position,
+                    patrol_radius,
+                    patrol_angle: offset_angle,
+                    body_clearance,
+                    gait_phase: index as f32 * 0.73,
+                },
+                crate::physics::prelude::RigidBody::KinematicPositionBased,
+                crate::physics::prelude::Collider::cuboid(6.0, 3.4, 7.2),
+                crate::physics::prelude::CollisionProfile::EnemyHurtbox,
+                avian3d::prelude::Sensor,
+            ))
+            .id();
+
+        commands.entity(root).with_children(|spider| {
+            spider.spawn(PbrBundle {
+                mesh: Mesh3d(body_mesh.clone()),
+                material: MeshMaterial3d(pal.industrial_metal.clone()),
+                transform: Transform::from_xyz(0.0, 0.3, 0.0),
+                ..default()
+            });
+            spider.spawn(PbrBundle {
+                mesh: Mesh3d(abdomen_mesh.clone()),
+                material: MeshMaterial3d(pal.industrial_rust.clone()),
+                transform: Transform::from_xyz(0.0, 0.5, -5.7).with_scale(Vec3::new(5.8, 3.5, 6.8)),
+                ..default()
+            });
+            spider.spawn(PbrBundle {
+                mesh: Mesh3d(head_mesh.clone()),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_xyz(0.0, 0.1, 6.4),
+                ..default()
+            });
+            spider.spawn(PbrBundle {
+                mesh: Mesh3d(turret_mesh.clone()),
+                material: MeshMaterial3d(pal.industrial_rust.clone()),
+                transform: Transform::from_xyz(0.0, 3.0, -0.4)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ..default()
+            });
+            spider.spawn(PbrBundle {
+                mesh: Mesh3d(barrel_mesh.clone()),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_xyz(0.0, 3.4, 3.8),
+                ..default()
+            });
+
+            for eye_x in [-2.25_f32, -0.75, 0.75, 2.25] {
+                spider.spawn(PbrBundle {
+                    mesh: Mesh3d(eye_mesh.clone()),
+                    material: MeshMaterial3d(pal.boost_pad.clone()),
+                    transform: Transform::from_xyz(eye_x, 0.65, 9.0),
+                    ..default()
+                });
+            }
+            for fang_x in [-1.65_f32, 1.65] {
+                spider.spawn(PbrBundle {
+                    mesh: Mesh3d(fang_mesh.clone()),
+                    material: MeshMaterial3d(pal.boost_ramp.clone()),
+                    transform: Transform::from_xyz(fang_x, -1.7, 8.4)
+                        .with_rotation(Quat::from_rotation_z(fang_x.signum() * 0.28)),
+                    ..default()
+                });
+            }
+
+            for side in [-1.0_f32, 1.0] {
+                for leg_index in 0..4 {
+                    let z = -5.2 + leg_index as f32 * 3.5;
+                    let sweep = (leg_index as f32 - 1.5) * 0.24;
+                    let base_rotation = Quat::from_rotation_y(-side * sweep);
+                    spider
+                        .spawn((
+                            SpatialBundle {
+                                transform: Transform::from_xyz(side * 4.3, -0.2, z)
+                                    .with_rotation(base_rotation),
+                                ..default()
+                            },
+                            SpiderMechLeg {
+                                mech: root,
+                                base_rotation,
+                                phase_offset: leg_index as f32 * std::f32::consts::FRAC_PI_2
+                                    + if side > 0.0 {
+                                        std::f32::consts::PI
+                                    } else {
+                                        0.0
+                                    },
+                                side,
+                            },
+                        ))
+                        .with_children(|leg| {
+                            leg.spawn(PbrBundle {
+                                mesh: Mesh3d(joint_mesh.clone()),
+                                material: MeshMaterial3d(pal.boost_lane.clone()),
+                                transform: Transform::IDENTITY,
+                                ..default()
+                            });
+                            leg.spawn(PbrBundle {
+                                mesh: Mesh3d(leg_mesh.clone()),
+                                material: MeshMaterial3d(pal.industrial_metal.clone()),
+                                transform: Transform::from_xyz(side * 3.2, -0.9, 0.0)
+                                    .with_rotation(Quat::from_rotation_z(side * -0.28))
+                                    .with_scale(Vec3::new(6.8, 0.82, 0.92)),
+                                ..default()
+                            });
+                            leg.spawn(PbrBundle {
+                                mesh: Mesh3d(leg_mesh.clone()),
+                                material: MeshMaterial3d(pal.industrial_rust.clone()),
+                                transform: Transform::from_xyz(side * 7.7, -3.45, 0.0)
+                                    .with_rotation(Quat::from_rotation_z(side * 0.55))
+                                    .with_scale(Vec3::new(5.4, 0.72, 0.82)),
+                                ..default()
+                            });
+                        });
+                }
+            }
+        });
+    }
+}
+
+fn mountain_spider_mech_movement_system(
+    time: Res<Time>,
+    settings: Res<GameSettings>,
+    player_q: Query<&Transform, (With<Player>, Without<MountainSpiderMech>)>,
+    mut mech_q: Query<
+        (
+            &mut Transform,
+            &mut MountainSpiderMech,
+            &mut Enemy,
+            &mut EnemyStateMachine,
+            &Health,
+        ),
+        Without<Player>,
+    >,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut mech, mut enemy, mut state, health) in mech_q.iter_mut() {
+        if !health.is_alive() {
+            continue;
+        }
+        state.timer += dt;
+        enemy.attack_cooldown_timer = (enemy.attack_cooldown_timer - dt).max(0.0);
+
+        let nearest_player = player_q
+            .iter()
+            .map(|player| {
+                let delta = (player.translation - transform.translation).with_y(0.0);
+                (player.translation, delta.length())
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+
+        let (target, desired_state) = match nearest_player {
+            Some((player, distance)) if distance <= enemy.config.attack_range => {
+                (player, EnemyAIState::Attack)
+            }
+            Some((player, distance)) if distance <= enemy.config.detection_range => {
+                (player, EnemyAIState::Chase)
+            }
+            _ => {
+                mech.patrol_angle = (mech.patrol_angle + dt * 0.065) % TAU;
+                (
+                    mech.home
+                        + Vec3::new(
+                            mech.patrol_angle.cos() * mech.patrol_radius,
+                            0.0,
+                            mech.patrol_angle.sin() * mech.patrol_radius * 0.72,
+                        ),
+                    EnemyAIState::Patrol,
+                )
+            }
+        };
+        if state.current != desired_state {
+            state.force(desired_state);
+        }
+
+        let to_target = (target - transform.translation).with_y(0.0);
+        let direction = to_target.normalize_or_zero();
+        let speed = match desired_state {
+            EnemyAIState::Chase => 11.5,
+            EnemyAIState::Patrol => 5.4,
+            _ => 0.0,
+        };
+        if speed > 0.0 && direction.length_squared() > 0.001 {
+            transform.translation += direction * speed * dt;
+            mech.gait_phase = (mech.gait_phase + speed * dt * 0.48) % TAU;
+            enemy.velocity = direction * speed;
+        } else {
+            enemy.velocity = Vec3::ZERO;
+        }
+
+        let ground_y = terrain_surface_y(
+            transform.translation.x,
+            transform.translation.z,
+            settings.world_seed,
+        );
+        transform.translation.y = ground_y + mech.body_clearance;
+        if direction.length_squared() > 0.001 {
+            let normal = mountain_spider_terrain_normal(
+                transform.translation.x,
+                transform.translation.z,
+                settings.world_seed,
+            );
+            let yaw = direction.x.atan2(direction.z);
+            let target_rotation =
+                Quat::from_rotation_arc(Vec3::Y, normal) * Quat::from_rotation_y(yaw);
+            transform.rotation = transform
+                .rotation
+                .slerp(target_rotation, (dt * 3.2).clamp(0.0, 1.0));
+        }
+    }
+}
+
+fn animate_mountain_spider_legs(
+    time: Res<Time>,
+    mech_q: Query<&MountainSpiderMech>,
+    mut leg_q: Query<(&SpiderMechLeg, &mut Transform)>,
+) {
+    let elapsed = time.elapsed_secs();
+    for (leg, mut transform) in leg_q.iter_mut() {
+        let Ok(mech) = mech_q.get(leg.mech) else {
+            continue;
+        };
+        let phase = mech.gait_phase + leg.phase_offset;
+        let stride = phase.sin() * 0.32;
+        let lift = phase.cos().max(0.0) * 0.22;
+        let menace = (elapsed * 1.7 + leg.phase_offset).sin() * 0.025;
+        transform.rotation = leg.base_rotation
+            * Quat::from_rotation_y(stride)
+            * Quat::from_rotation_z(leg.side * (lift + menace));
+    }
+}
+
+fn mountain_spider_terrain_normal(x: f32, z: f32, seed: u64) -> Vec3 {
+    let sample = 5.0;
+    let left = terrain_surface_y(x - sample, z, seed);
+    let right = terrain_surface_y(x + sample, z, seed);
+    let back = terrain_surface_y(x, z - sample, seed);
+    let front = terrain_surface_y(x, z + sample, seed);
+    Vec3::new(left - right, sample * 2.0, back - front).normalize_or_zero()
 }
 
 fn spawn_range_snowfields(
@@ -14029,6 +14479,455 @@ fn spawn_outer_districts(
 }
 
 // ── River ─────────────────────────────────────────────────────────────────────
+const PERIMETER_OCEAN_LEVEL: f32 = 126.0;
+
+#[derive(Clone, Copy)]
+struct TravelIslandSpec {
+    id: &'static str,
+    label: &'static str,
+    center: Vec2,
+    coast_dock: Vec2,
+    island_dock: Vec2,
+    radius: f32,
+}
+
+const TRAVEL_ISLANDS: &[TravelIslandSpec] = &[
+    TravelIslandSpec {
+        id: "island_aurora_reach",
+        label: "Aurora Reach",
+        center: Vec2::new(850.0, 11_200.0),
+        coast_dock: Vec2::new(120.0, 9_350.0),
+        island_dock: Vec2::new(760.0, 10_830.0),
+        radius: 185.0,
+    },
+    TravelIslandSpec {
+        id: "island_stormglass",
+        label: "Stormglass Isle",
+        center: Vec2::new(11_200.0, -1_700.0),
+        coast_dock: Vec2::new(9_350.0, -1_180.0),
+        island_dock: Vec2::new(10_820.0, -1_590.0),
+        radius: 210.0,
+    },
+    TravelIslandSpec {
+        id: "island_emberwake",
+        label: "Emberwake Atoll",
+        center: Vec2::new(1_900.0, -11_200.0),
+        coast_dock: Vec2::new(1_250.0, -9_350.0),
+        island_dock: Vec2::new(1_790.0, -10_820.0),
+        radius: 195.0,
+    },
+    TravelIslandSpec {
+        id: "island_moonwreck",
+        label: "Moonwreck Cay",
+        center: Vec2::new(-11_200.0, 2_450.0),
+        coast_dock: Vec2::new(-9_350.0, 1_850.0),
+        island_dock: Vec2::new(-10_820.0, 2_320.0),
+        radius: 175.0,
+    },
+];
+
+const MOUNTAIN_LAKES: &[(&str, f32, f32, f32, f32)] = &[
+    ("Lake Crownmirror", -5_900.0, 6_050.0, 245.0, 175.0),
+    ("Lake Riftglass", -3_050.0, -3_350.0, 210.0, 150.0),
+    ("Lake Starfall", 3_550.0, 1_450.0, 280.0, 185.0),
+    ("Lake Dragontear", 6_250.0, -3_650.0, 230.0, 165.0),
+    ("Lake Southlight", 1_150.0, -6_550.0, 260.0, 170.0),
+    ("Lake Aurora", -1_300.0, 4_250.0, 225.0, 155.0),
+];
+
+#[allow(dead_code)]
+fn perimeter_travel_island_count() -> usize {
+    TRAVEL_ISLANDS.len()
+}
+
+#[allow(dead_code)]
+fn mountain_lake_count() -> usize {
+    MOUNTAIN_LAKES.len()
+}
+
+fn spawn_perimeter_ocean_and_islands(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    ocean_water: &Handle<WaterMaterial>,
+    seed: u64,
+) {
+    // Four overlapping slabs form a continuous sea around the 20 km terrain
+    // square without putting transparent water beneath the whole playable map.
+    for (center, size) in [
+        (Vec2::new(0.0, 11_000.0), Vec2::new(26_000.0, 4_000.0)),
+        (Vec2::new(0.0, -11_000.0), Vec2::new(26_000.0, 4_000.0)),
+        (Vec2::new(11_000.0, 0.0), Vec2::new(4_000.0, 18_000.0)),
+        (Vec2::new(-11_000.0, 0.0), Vec2::new(4_000.0, 18_000.0)),
+    ] {
+        commands.spawn((
+            Name::new("Perimeter Ocean"),
+            Mesh3d(meshes.add(Cuboid::new(size.x, 0.10, size.y))),
+            MeshMaterial3d(ocean_water.clone()),
+            Transform::from_xyz(center.x, PERIMETER_OCEAN_LEVEL, center.y),
+            WorldGeometry,
+            WaterBody {
+                kind: WaterBodyKind::Ocean,
+                surface_y: PERIMETER_OCEAN_LEVEL,
+                depth: 90.0,
+                navigable: true,
+                footprint: WaterFootprint::Rectangle {
+                    half_extents: size * 0.5,
+                },
+            },
+        ));
+    }
+
+    for (index, spec) in TRAVEL_ISLANDS.iter().copied().enumerate() {
+        spawn_travel_island(commands, meshes, pal, spec, seed + index as u64 * 113);
+    }
+}
+
+fn spawn_travel_island(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    spec: TravelIslandSpec,
+    seed: u64,
+) {
+    let island_y = PERIMETER_OCEAN_LEVEL + 1.8;
+    let island_dock = Vec3::new(
+        spec.island_dock.x,
+        PERIMETER_OCEAN_LEVEL + 0.52,
+        spec.island_dock.y,
+    );
+    commands.spawn((
+        Name::new(spec.label),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(spec.radius, 3.6))),
+            material: MeshMaterial3d(pal.moss.clone()),
+            transform: Transform::from_xyz(spec.center.x, island_y, spec.center.y),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        TravelIsland {
+            id: spec.id,
+            label: spec.label,
+            dock_position: island_dock,
+        },
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(1.8, spec.radius),
+    ));
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cone {
+                radius: spec.radius * 0.52,
+                height: 58.0,
+            })),
+            material: MeshMaterial3d(pal.rock.clone()),
+            transform: Transform::from_xyz(
+                spec.center.x,
+                PERIMETER_OCEAN_LEVEL + 29.0,
+                spec.center.y,
+            ),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for prop in 0..10u64 {
+        let angle = prop as f32 / 10.0 * TAU + seeded(seed, prop) * 0.35;
+        let radius = spec.radius * (0.42 + seeded(seed, 20 + prop) * 0.38);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(5.0 + seeded(seed, 40 + prop) * 7.0))),
+                material: MeshMaterial3d(if prop % 3 == 0 {
+                    pal.crystal_emerald.clone()
+                } else {
+                    pal.rock_dark.clone()
+                }),
+                transform: Transform::from_xyz(
+                    spec.center.x + angle.cos() * radius,
+                    PERIMETER_OCEAN_LEVEL + 5.0,
+                    spec.center.y + angle.sin() * radius,
+                )
+                .with_scale(Vec3::new(1.0, 1.8, 1.0)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let coast_dock = Vec3::new(
+        spec.coast_dock.x,
+        PERIMETER_OCEAN_LEVEL + 0.52,
+        spec.coast_dock.y,
+    );
+    spawn_ferry_route(commands, meshes, pal, coast_dock, island_dock);
+    spawn_world_anchor(commands, spec.id, island_dock + Vec3::Y * 1.0);
+}
+
+fn spawn_ferry_route(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    coast_dock: Vec3,
+    island_dock: Vec3,
+) {
+    let route = island_dock - coast_dock;
+    let route_length = route.with_y(0.0).length();
+    let forward = route.with_y(0.0).normalize_or_zero();
+    let yaw = forward.x.atan2(forward.z);
+    let midpoint = coast_dock.lerp(island_dock, 0.5);
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(26.0, 0.05, route_length))),
+            material: MeshMaterial3d(pal.glass_panel.clone()),
+            transform: Transform::from_translation(midpoint + Vec3::Y * 0.04)
+                .with_rotation(Quat::from_rotation_y(yaw)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for dock in [coast_dock, island_dock] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(34.0, 0.7, 46.0))),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(dock)
+                    .with_rotation(Quat::from_rotation_y(yaw)),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(17.0, 0.35, 23.0),
+        ));
+    }
+
+    let boat_start = coast_dock + forward * 34.0;
+    let boat = commands
+        .spawn((
+            Name::new("Island Ferry"),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(7.0, 1.1, 13.5))),
+                material: MeshMaterial3d(pal.rooftop.clone()),
+                transform: Transform::from_translation(boat_start)
+                    .with_rotation(Quat::from_rotation_y(yaw)),
+                ..default()
+            },
+            WorldGeometry,
+            BoatVehicle {
+                embark_radius: 11.0,
+                passenger_radius: 18.0,
+                dock_radius: 28.0,
+                route_half_width: 30.0,
+                speed: 34.0,
+                dock_position: coast_dock,
+                island_position: island_dock,
+            },
+        ))
+        .id();
+    commands.entity(boat).with_children(|ferry| {
+        ferry.spawn(PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(5.8, 2.4, 4.4))),
+            material: MeshMaterial3d(pal.window_cool.clone()),
+            transform: Transform::from_xyz(0.0, 1.6, -1.0),
+            ..default()
+        });
+        ferry.spawn(PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(0.14, 5.5))),
+            material: MeshMaterial3d(pal.stainless_metal.clone()),
+            transform: Transform::from_xyz(0.0, 3.8, 0.8),
+            ..default()
+        });
+        ferry.spawn(PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(0.55))),
+            material: MeshMaterial3d(pal.boost_pad.clone()),
+            transform: Transform::from_xyz(0.0, 6.5, 0.8),
+            ..default()
+        });
+    });
+}
+
+fn spawn_mountain_water_network(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    lake_water: &Handle<WaterMaterial>,
+    river_water: &Handle<WaterMaterial>,
+    seed: u64,
+) {
+    for (lake_index, &(label, x, z, radius_x, radius_z)) in MOUNTAIN_LAKES.iter().enumerate() {
+        let surface_y = mountain_lake_surface_y(x, z, seed);
+        let radius = radius_x.max(radius_z);
+        commands.spawn((
+            Name::new(label),
+            Mesh3d(meshes.add(Cylinder::new(radius, 0.12))),
+            MeshMaterial3d(lake_water.clone()),
+            Transform::from_xyz(x, surface_y, z).with_scale(Vec3::new(
+                radius_x / radius,
+                1.0,
+                radius_z / radius,
+            )),
+            WorldGeometry,
+            WaterBody {
+                kind: WaterBodyKind::Lake,
+                surface_y,
+                depth: 5.0,
+                navigable: true,
+                footprint: WaterFootprint::Ellipse {
+                    radii: Vec2::new(radius_x, radius_z),
+                },
+            },
+        ));
+
+        let outlet_direction =
+            Vec2::from_angle(seeded(seed + 8_117, lake_index as u64) * TAU).normalize_or_zero();
+        let outlet = Vec2::new(x, z) + outlet_direction * radius_x.max(radius_z) * 0.80;
+        spawn_downhill_stream(
+            commands,
+            meshes,
+            pal,
+            river_water,
+            outlet,
+            seed,
+            lake_index as u64,
+        );
+    }
+}
+
+fn spawn_downhill_stream(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    river_water: &Handle<WaterMaterial>,
+    source: Vec2,
+    seed: u64,
+    stream_index: u64,
+) {
+    let mut current = source;
+    let mut previous_direction =
+        Vec2::from_angle(seeded(seed + 8_117, stream_index) * TAU).normalize_or_zero();
+    for step in 0..18u64 {
+        let current_height = terrain_surface_y(current.x, current.y, seed);
+        let Some((next, next_height)) =
+            downhill_stream_step(current, previous_direction, seed, stream_index * 31 + step)
+        else {
+            break;
+        };
+        let direction = (next - current).normalize_or_zero();
+        previous_direction = direction;
+        let start = Vec3::new(current.x, current_height + 0.32, current.y);
+        let end = Vec3::new(next.x, next_height + 0.32, next.y);
+        let drop = current_height - next_height;
+        if drop >= 7.0 {
+            spawn_world_waterfall(commands, meshes, pal, start, end, drop);
+        } else {
+            spawn_river_water_segment(commands, meshes, river_water, start, end);
+        }
+        current = next;
+    }
+}
+
+fn downhill_stream_step(
+    current: Vec2,
+    previous_direction: Vec2,
+    seed: u64,
+    salt: u64,
+) -> Option<(Vec2, f32)> {
+    let current_height = terrain_surface_y(current.x, current.y, seed);
+    let step_length = 125.0;
+    (0..12)
+        .map(|candidate| {
+            let angle = candidate as f32 / 12.0 * TAU + seeded(seed + salt, candidate) * 0.08;
+            let direction = Vec2::from_angle(angle);
+            let point = current + direction * step_length;
+            let height = terrain_surface_y(point.x, point.y, seed);
+            let turn_penalty = (1.0 - direction.dot(previous_direction).max(-0.5)) * 2.5;
+            (point, height, height + turn_penalty)
+        })
+        .filter(|(_, height, _)| *height <= current_height + 1.5)
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(point, height, _)| (point, height))
+}
+
+fn spawn_river_water_segment(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    river_water: &Handle<WaterMaterial>,
+    start: Vec3,
+    end: Vec3,
+) {
+    let delta = end - start;
+    let horizontal = delta.with_y(0.0);
+    let horizontal_length = horizontal.length();
+    if horizontal_length <= 0.1 {
+        return;
+    }
+    let yaw = horizontal.x.atan2(horizontal.z);
+    let pitch = (delta.y / horizontal_length).atan();
+    let midpoint = start.lerp(end, 0.5);
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(24.0, 0.10, delta.length() * 1.06))),
+        MeshMaterial3d(river_water.clone()),
+        Transform::from_translation(midpoint)
+            .with_rotation(Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch)),
+        WorldGeometry,
+        WaterBody {
+            kind: WaterBodyKind::River,
+            surface_y: midpoint.y,
+            depth: 2.2,
+            navigable: false,
+            footprint: WaterFootprint::Rectangle {
+                half_extents: Vec2::new(12.0, delta.length() * 0.53),
+            },
+        },
+    ));
+}
+
+fn spawn_world_waterfall(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    start: Vec3,
+    end: Vec3,
+    drop: f32,
+) {
+    let horizontal = (end - start).with_y(0.0);
+    let forward = horizontal.normalize_or_zero();
+    let yaw = forward.x.atan2(forward.z);
+    let center = Vec3::new(end.x, end.y + drop * 0.5, end.z);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(26.0, drop, 1.2))),
+            material: MeshMaterial3d(pal.water.clone()),
+            transform: Transform::from_translation(center)
+                .with_rotation(Quat::from_rotation_y(yaw)),
+            ..default()
+        },
+        WorldGeometry,
+        WaterBody {
+            kind: WaterBodyKind::Waterfall,
+            surface_y: start.y,
+            depth: drop,
+            navigable: false,
+            footprint: WaterFootprint::Rectangle {
+                half_extents: Vec2::new(13.0, 0.6),
+            },
+        },
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Sphere::new(7.0))),
+            material: MeshMaterial3d(pal.waterfall_mist.clone()),
+            transform: Transform::from_translation(end + Vec3::Y * 1.8)
+                .with_scale(Vec3::new(2.4, 0.55, 1.4)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
 fn spawn_river(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -14044,6 +14943,15 @@ fn spawn_river(
             MeshMaterial3d(water.clone()),
             Transform::from_xyz(x, -0.1, z),
             WorldGeometry,
+            WaterBody {
+                kind: WaterBodyKind::River,
+                surface_y: -0.1,
+                depth: 2.0,
+                navigable: false,
+                footprint: WaterFootprint::Rectangle {
+                    half_extents: Vec2::new(12.5, 21.0),
+                },
+            },
         ));
     }
 
@@ -14144,6 +15052,15 @@ fn spawn_chapter_one_ocean_island(
         MeshMaterial3d(water.clone()),
         ocean_transform,
         WorldGeometry,
+        WaterBody {
+            kind: WaterBodyKind::Ocean,
+            surface_y: ocean_transform.translation.y,
+            depth: 28.0,
+            navigable: true,
+            footprint: WaterFootprint::Rectangle {
+                half_extents: Vec2::new(420.0, 215.0),
+            },
+        },
         NatureSway::new(&ocean_transform, 1.7, 0.7, 0.001, 0.035, 0.004),
     ));
 
@@ -14158,6 +15075,11 @@ fn spawn_chapter_one_ocean_island(
         },
         WorldGeometry,
         WalkableSurface,
+        TravelIsland {
+            id: "ch01_ocean_island",
+            label: "North-Coast Island",
+            dock_position: Vec3::new(0.0, 0.52, 826.0),
+        },
         crate::physics::prelude::RigidBody::Fixed,
         crate::physics::prelude::Collider::cuboid(15.0, 0.07, 157.0),
     ));
@@ -17404,6 +18326,68 @@ mod tests {
     }
 
     #[test]
+    fn speed_roads_populate_full_vertical_loops() {
+        assert!(
+            full_speed_road_loop_count() >= 6,
+            "authored road spans should qualify multiple full boost loops"
+        );
+    }
+
+    #[test]
+    fn mountain_ranges_spawn_a_pack_of_giant_spider_mechs() {
+        assert_eq!(mountain_spider_mech_spawn_count(), 8);
+        for &(_, x, z, patrol_radius) in MOUNTAIN_SPIDER_MECH_SPAWNS {
+            assert!(x.abs() > 2_000.0 || z.abs() > 2_000.0);
+            assert!(patrol_radius >= 350.0);
+        }
+    }
+
+    #[test]
+    fn spider_mech_terrain_normal_is_stable_and_upward() {
+        let normal = mountain_spider_terrain_normal(-5_200.0, 4_300.0, 42);
+        assert!((normal.length() - 1.0).abs() < 0.001);
+        assert!(normal.y > 0.2);
+    }
+
+    #[test]
+    fn water_network_populates_lakes_and_reachable_islands() {
+        assert_eq!(mountain_lake_count(), 6);
+        assert_eq!(perimeter_travel_island_count(), 4);
+        for island in TRAVEL_ISLANDS {
+            assert!(island.center.length() > EVEREST_RANGE_HALF_EXTENT * 0.9);
+            assert!(island.coast_dock.distance(island.island_dock) > 1_000.0);
+            assert!(island.radius >= 170.0);
+            let coast_y = terrain_surface_y(island.coast_dock.x, island.coast_dock.y, 42_195);
+            assert!(
+                (coast_y - PERIMETER_OCEAN_LEVEL).abs() < 4.0,
+                "{} needs a walkable shoreline at its ferry dock",
+                island.label
+            );
+        }
+    }
+
+    #[test]
+    fn mountain_lakes_find_bounded_downhill_outlets() {
+        let mut outlet_count = 0;
+        for (index, &(_, x, z, _, _)) in MOUNTAIN_LAKES.iter().enumerate() {
+            let source = Vec2::new(x, z);
+            assert!(
+                terrain_surface_y(x, z, 42) < mountain_lake_surface_y(x, z, 42) - 3.5,
+                "lake center needs a visible basin below its waterline"
+            );
+            let direction = Vec2::from_angle(index as f32);
+            if let Some((next, next_height)) =
+                downhill_stream_step(source, direction, 42, index as u64)
+            {
+                outlet_count += 1;
+                assert!((next - source).length() <= 125.01);
+                assert!(next_height <= terrain_surface_y(x, z, 42) + 1.5);
+            }
+        }
+        assert!(outlet_count >= 4);
+    }
+
+    #[test]
     fn speed_roads_are_wide_enough_for_patrol_traffic() {
         const { assert!(SPEED_ROAD_WIDTH >= 60.0) };
         const { assert!(SPEED_ROAD_CHUNK_LEN <= 32.0) };
@@ -17990,9 +18974,13 @@ mod tests {
     fn terrain_vertex_color_adds_high_snowline() {
         let low = terrain_vertex_color(900.0, 1400.0, 40.0, Vec3::Y, 42);
         let high = terrain_vertex_color(-8400.0, -7800.0, 780.0, Vec3::Y, 42);
+        let route = ROUTE_CORE_AURORA[1];
+        let path = terrain_vertex_color(route.0, route.1, 220.0, Vec3::Y, 42);
 
         assert!(high[0] > low[0]);
         assert!(high[2] > low[2]);
+        assert!(path[3] > 0.99, "route vertices carry the shader path mask");
+        assert_eq!(low[3], 0.0, "off-route terrain has no path mask");
     }
 
     #[test]

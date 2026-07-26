@@ -224,6 +224,38 @@ pub struct PlayerMovement {
     pub knockback_velocity: Vec3,
 }
 
+/// Per-player contact, breath, and wake state for gameplay water volumes.
+#[derive(Component, Debug, Clone)]
+pub struct WaterTraversalState {
+    pub body: Option<Entity>,
+    pub surface_y: f32,
+    pub swimming: bool,
+    pub submerged: bool,
+    pub breath: f32,
+    pub max_breath: f32,
+    pub drowning_tick: f32,
+    pub wake_cooldown: f32,
+    pub wake_requested: bool,
+    pub low_air_warned: bool,
+}
+
+impl Default for WaterTraversalState {
+    fn default() -> Self {
+        Self {
+            body: None,
+            surface_y: 0.0,
+            swimming: false,
+            submerged: false,
+            breath: 12.0,
+            max_breath: 12.0,
+            drowning_tick: 1.0,
+            wake_cooldown: 0.0,
+            wake_requested: false,
+            low_air_warned: false,
+        }
+    }
+}
+
 impl Default for PlayerMovement {
     fn default() -> Self {
         Self {
@@ -955,6 +987,7 @@ pub enum PlayerState {
     Hanging,
     Climbing,
     Grappling,
+    Swimming,
 }
 
 #[derive(Component, Debug, Clone, Default)]
@@ -1041,7 +1074,9 @@ impl PlayerStateMachine {
                     | WallSliding
                     | Hanging
                     | Climbing
+                    | Swimming
             ),
+            Swimming => matches!(next, Idle | Moving | Stunned | Dead | Jetpack),
         };
         if allowed {
             self.previous = Some(self.current);
@@ -1275,5 +1310,16 @@ mod tests {
         aim.target = Some(world.spawn_empty().id());
         assert_eq!(aim.reticle_state(false), AimReticleState::Locked);
         assert_eq!(aim.reticle_state(true), AimReticleState::Charging);
+    }
+
+    #[test]
+    fn water_traversal_starts_dry_with_a_full_air_reserve() {
+        let water = WaterTraversalState::default();
+
+        assert!(!water.swimming);
+        assert!(!water.submerged);
+        assert_eq!(water.breath, 12.0);
+        assert_eq!(water.breath, water.max_breath);
+        assert!(!water.wake_requested);
     }
 }

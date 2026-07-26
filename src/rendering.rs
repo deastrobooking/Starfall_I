@@ -62,6 +62,32 @@ impl Default for StarfallSpatialBundle {
 pub type PbrBundle = StarfallPbrBundle;
 pub type SpatialBundle = StarfallSpatialBundle;
 
+/// Custom-material bundle used by the streamed high/proxy terrain patches.
+#[derive(Bundle)]
+pub struct TerrainPbrBundle {
+    pub mesh: Mesh3d,
+    pub material: MeshMaterial3d<TerrainMaterial>,
+    pub transform: Transform,
+    pub global_transform: GlobalTransform,
+    pub visibility: Visibility,
+    pub inherited_visibility: InheritedVisibility,
+    pub view_visibility: ViewVisibility,
+}
+
+impl Default for TerrainPbrBundle {
+    fn default() -> Self {
+        Self {
+            mesh: Mesh3d(default()),
+            material: MeshMaterial3d(default()),
+            transform: default(),
+            global_transform: default(),
+            visibility: default(),
+            inherited_visibility: default(),
+            view_visibility: default(),
+        }
+    }
+}
+
 /// Custom-material equivalent of [`StarfallPbrBundle`] for emissive combat VFX.
 #[derive(Bundle)]
 pub struct EnergyPbrBundle {
@@ -229,6 +255,62 @@ impl Material for ToonMaterial {
     }
 }
 
+// ── Terrain Material ─────────────────────────────────────────────────────────
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct TerrainMaterial {
+    #[uniform(0)]
+    pub settings: TerrainMaterialUniform,
+    #[texture(1)]
+    #[sampler(2)]
+    pub grass_texture: Option<Handle<Image>>,
+    #[texture(3)]
+    #[sampler(4)]
+    pub rock_texture: Option<Handle<Image>>,
+    #[texture(5)]
+    #[sampler(6)]
+    pub snow_texture: Option<Handle<Image>>,
+    #[texture(7)]
+    #[sampler(8)]
+    pub path_texture: Option<Handle<Image>>,
+}
+
+#[derive(ShaderType, Debug, Clone, Copy)]
+pub struct TerrainMaterialUniform {
+    pub grass_tint: Vec4,
+    pub rock_tint: Vec4,
+    pub snow_tint: Vec4,
+    pub ice_tint: Vec4,
+    pub path_tint: Vec4,
+    /// X texture scale, Y tri-planar sharpness, Z normal detail, W path strength.
+    pub detail: Vec4,
+    /// X/Y rock slope blend, Z/W snow altitude blend.
+    pub biome: Vec4,
+    /// X ice start altitude, Y ice slope start, Z wetness height, W specular strength.
+    pub climate: Vec4,
+}
+
+impl Default for TerrainMaterialUniform {
+    fn default() -> Self {
+        Self {
+            grass_tint: Vec4::new(0.48, 0.68, 0.40, 1.0),
+            rock_tint: Vec4::new(0.64, 0.61, 0.57, 1.0),
+            snow_tint: Vec4::new(0.90, 0.95, 1.0, 1.0),
+            ice_tint: Vec4::new(0.48, 0.78, 0.94, 1.0),
+            path_tint: Vec4::new(0.58, 0.48, 0.34, 1.0),
+            detail: Vec4::new(0.018, 5.0, 0.055, 0.92),
+            biome: Vec4::new(0.10, 0.42, 470.0, 760.0),
+            climate: Vec4::new(640.0, 0.20, 150.0, 0.26),
+        }
+    }
+}
+
+impl Material for TerrainMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/terrain.wgsl".into()
+    }
+}
+
 // ── Water Material ───────────────────────────────────────────────────────────
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -280,6 +362,20 @@ impl WaterMaterialUniform {
             wave: Vec4::new(0.48, 0.075, 0.085, 0.44),
             optics: Vec4::new(0.72, 72.0, 0.36, 0.46),
             foam: Vec4::new(0.77, 0.10, 0.0, 0.0),
+            ..Self::default()
+        }
+    }
+
+    /// Broad inland lakes retain readable reflections but use shorter, softer
+    /// waves than either open ocean or fast river water.
+    pub fn lake() -> Self {
+        Self {
+            deep_color: Vec4::new(0.008, 0.075, 0.16, 0.90),
+            shallow_color: Vec4::new(0.035, 0.30, 0.32, 0.80),
+            wave: Vec4::new(0.31, 0.042, 0.055, 0.36),
+            surface: Vec4::new(4.8, 0.74, 0.90, 0.28),
+            optics: Vec4::new(0.82, 88.0, 0.30, 0.52),
+            foam: Vec4::new(0.82, 0.09, 0.018, 0.30),
             ..Self::default()
         }
     }
@@ -441,6 +537,7 @@ mod shader_contract_tests {
     use super::*;
 
     const TOON_SHADER: &str = include_str!("../assets/shaders/toon.wgsl");
+    const TERRAIN_SHADER: &str = include_str!("../assets/shaders/terrain.wgsl");
     const GRASS_SHADER: &str = include_str!("../assets/shaders/grass.wgsl");
     const WATER_SHADER: &str = include_str!("../assets/shaders/water.wgsl");
     const ENERGY_SHADER: &str = include_str!("../assets/shaders/energy.wgsl");
@@ -452,6 +549,7 @@ mod shader_contract_tests {
     fn custom_shaders_use_bevy_material_bind_group_contract() {
         for shader in [
             TOON_SHADER,
+            TERRAIN_SHADER,
             GRASS_SHADER,
             WATER_SHADER,
             ENERGY_SHADER,
@@ -468,6 +566,7 @@ mod shader_contract_tests {
     fn scene_lit_surface_shaders_consume_bevy_lights() {
         for shader in [
             TOON_SHADER,
+            TERRAIN_SHADER,
             GRASS_SHADER,
             WATER_SHADER,
             ICE_SHADER,
@@ -486,6 +585,22 @@ mod shader_contract_tests {
         assert!(settings.bands.w < 1.0);
         assert!(TOON_SHADER.contains("step(toon.bands.x"));
         assert!(!TOON_SHADER.contains("if ndotl"));
+    }
+
+    #[test]
+    fn terrain_biome_thresholds_and_triplanar_contract_are_safe() {
+        let settings = TerrainMaterialUniform::default();
+
+        assert!(settings.detail.x > 0.0);
+        assert!(settings.detail.y >= 1.0);
+        assert!((0.0..=1.0).contains(&settings.detail.z));
+        assert!((0.0..=1.0).contains(&settings.detail.w));
+        assert!(settings.biome.x < settings.biome.y);
+        assert!(settings.biome.z < settings.biome.w);
+        assert!(settings.climate.x < settings.biome.w);
+        assert!(TERRAIN_SHADER.contains("fn triplanar_sample"));
+        assert!(TERRAIN_SHADER.contains("in.color.a"));
+        assert!(TERRAIN_SHADER.contains("smoothstep(terrain.biome.z"));
     }
 
     #[test]
@@ -510,9 +625,12 @@ mod shader_contract_tests {
     fn realistic_water_keeps_ocean_and_tiled_river_profiles_safe() {
         let ocean = WaterMaterialUniform::default();
         let river = WaterMaterialUniform::river();
+        let lake = WaterMaterialUniform::lake();
 
         assert!(ocean.wave.z > river.wave.z);
+        assert!(river.wave.z > lake.wave.z);
         assert!(ocean.foam.w > 0.0);
+        assert!(lake.surface.y > 0.0 && lake.surface.y <= 1.0);
         assert_eq!(river.foam.z, 0.0);
         assert_eq!(river.foam.w, 0.0);
         assert!(WATER_SHADER.contains("let phase_d"));

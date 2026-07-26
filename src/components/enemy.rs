@@ -387,6 +387,27 @@ impl MechBoss {
     }
 }
 
+/// Ambient boss-scale spider machine that patrols the Everest wilderness.
+/// World generation owns its terrain-following locomotion while the standard
+/// enemy pipeline owns damage, melee telegraphs, death, loot, and salvage.
+#[derive(Component, Debug, Clone)]
+pub struct MountainSpiderMech {
+    pub home: Vec3,
+    pub patrol_radius: f32,
+    pub patrol_angle: f32,
+    pub body_clearance: f32,
+    pub gait_phase: f32,
+}
+
+/// Animated hip pivot belonging to one of a spider mech's eight legs.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpiderMechLeg {
+    pub mech: Entity,
+    pub base_rotation: Quat,
+    pub phase_offset: f32,
+    pub side: f32,
+}
+
 /// Shared boss phase thresholds: 1 above 66% health, 2 above 33%, 3 below.
 pub fn boss_phase(current: f32, max: f32) -> u8 {
     let ratio = (current / max.max(1.0)).clamp(0.0, 1.0);

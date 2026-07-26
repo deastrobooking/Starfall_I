@@ -44,8 +44,9 @@ use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
     DungeonCrawlState, FastTravelDestination, GameSettings, LocalPlayerConfig,
-    PlaySessionTransition, PlayerGuidance, PlayerSelectState, ShopCatalog, ShopCategory,
-    UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
+    ImportedForgeReturnTarget, PlaySessionTransition, PlayerGuidance, PlayerSelectState,
+    ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry,
+    HERO_ROSTER,
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
@@ -904,6 +905,7 @@ fn menu_back_navigation(
     native: Res<NativeControllerState>,
     state: Res<State<AppState>>,
     design_data: Res<CharacterDesignData>,
+    imported_forge_return: Res<ImportedForgeReturnTarget>,
     mut pause_menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -923,7 +925,10 @@ fn menu_back_navigation(
         AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
         AppState::ProjectHub => next_state.set(AppState::MainMenu),
         AppState::CreatureForge => next_state.set(AppState::ProjectHub),
-        AppState::ImportedCharacterForge => next_state.set(AppState::ProjectHub),
+        AppState::ImportedCharacterForge => next_state.set(match *imported_forge_return {
+            ImportedForgeReturnTarget::ProjectHub => AppState::ProjectHub,
+            ImportedForgeReturnTarget::PlayerSelect => AppState::PlayerSelect,
+        }),
         AppState::PlayerSelect => next_state.set(AppState::MainMenu),
         AppState::CharacterDesign => next_state.set(match design_data.return_target {
             CharacterDesignReturnTarget::PlayerSelect => AppState::PlayerSelect,
@@ -1381,6 +1386,7 @@ fn spawn_project_hub_button(
 fn project_hub_action_system(
     interactions: Query<(&Interaction, &ProjectHubButton), (Changed<Interaction>, With<Button>)>,
     mut registry: ResMut<ForgeProjectRegistry>,
+    mut imported_forge_return: ResMut<ImportedForgeReturnTarget>,
     mut next_state: ResMut<NextState<AppState>>,
     mut next_tool_mode: ResMut<NextState<EngineToolMode>>,
 ) {
@@ -1423,6 +1429,7 @@ fn project_hub_action_system(
             },
             ProjectHubAction::CreatureForge => next_state.set(AppState::CreatureForge),
             ProjectHubAction::ImportedCharacterForge => {
+                *imported_forge_return = ImportedForgeReturnTarget::ProjectHub;
                 next_state.set(AppState::ImportedCharacterForge)
             }
             ProjectHubAction::Back => next_state.set(AppState::MainMenu),
@@ -3930,6 +3937,7 @@ enum PlayerSelectAction {
     ToggleReady,
     Customize,
     AdvancedDesign,
+    CharacterAssets,
     JoinLeave,
     Back,
     Begin,
@@ -4144,6 +4152,13 @@ fn setup_player_select(
                                 PlayerSelectAction::AdvancedDesign,
                                 108.0,
                             );
+                            spawn_player_select_button(
+                                row,
+                                "ASSET EDITOR",
+                                i,
+                                PlayerSelectAction::CharacterAssets,
+                                108.0,
+                            );
                         });
                     });
                 }
@@ -4213,6 +4228,7 @@ fn player_select_update(
     assignments: Res<GamepadAssignments>,
     mut config: ResMut<LocalPlayerConfig>,
     mut design_data: ResMut<CharacterDesignData>,
+    mut imported_forge_return: ResMut<ImportedForgeReturnTarget>,
     mut next_state: ResMut<NextState<AppState>>,
     // Text queries — each set is disjoint via Without<> guards
     mut char_q: Query<
@@ -4297,6 +4313,11 @@ fn player_select_update(
                         design_data.player_index = idx;
                         design_data.return_target = CharacterDesignReturnTarget::PlayerSelect;
                         next_state.set(AppState::CharacterStudio);
+                        return;
+                    }
+                    PlayerSelectAction::CharacterAssets if slot.joined && !slot.ready => {
+                        *imported_forge_return = ImportedForgeReturnTarget::PlayerSelect;
+                        next_state.set(AppState::ImportedCharacterForge);
                         return;
                     }
                     PlayerSelectAction::JoinLeave if idx > 0 => {
