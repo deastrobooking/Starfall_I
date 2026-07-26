@@ -20,7 +20,7 @@ use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot
 use crate::components::player::{
     AimReticleState, AimSolution, BoardBoostState, ClimbState, JetpackState, Player, PlayerCamera,
     PlayerCameraRef, PlayerIndex, PlayerInput, PlayerProgression, PlayerStats, StuntRunState,
-    TraversalMode, TraversalModeState,
+    TraversalMode, TraversalModeState, WaterTraversalState,
 };
 use crate::tricks::TrickState;
 use crate::components::weapon::{
@@ -486,6 +486,17 @@ struct PlayerHudBar {
     kind: PlayerHudBarKind,
 }
 
+#[derive(Component)]
+struct PlayerHudBarRow {
+    player_index: u8,
+    kind: PlayerHudBarKind,
+}
+
+#[derive(Component)]
+struct UnderwaterOverlay {
+    player_index: u8,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PlayerHudBarKind {
     Health,
@@ -493,6 +504,7 @@ enum PlayerHudBarKind {
     Stamina,
     Jetpack,
     Climb,
+    Air,
 }
 
 #[derive(Component)]
@@ -4488,6 +4500,11 @@ fn setup_hud(
                         alpha: 0.0,
                     },
                 ));
+                root.spawn((
+                    damage_vignette_node(player_index, active),
+                    BackgroundColor(Color::srgba(0.0, 0.42, 0.58, 0.0)),
+                    UnderwaterOverlay { player_index },
+                ));
                 spawn_player_hud_panel(root, player_index, &theme);
             }
 
@@ -5076,6 +5093,13 @@ fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8, t
                 PlayerHudBarKind::Climb,
                 theme.climb,
             );
+            spawn_bar(
+                panel,
+                player_index,
+                "AIR",
+                PlayerHudBarKind::Air,
+                theme.energy,
+            );
             spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Credits, "¢ 0", 13.0);
             spawn_player_hud_text(panel, player_index, PlayerHudTextKind::Level, "LVL 1", 13.0);
             spawn_player_hud_text(
@@ -5149,12 +5173,20 @@ fn spawn_bar(
     color: Color,
 ) {
     parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(6.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            },
+            PlayerHudBarRow { player_index, kind },
+            if kind == PlayerHudBarKind::Air {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
+            },
+        ))
         .with_children(|row| {
             row.spawn((
                 Text::new(label),
@@ -5267,6 +5299,7 @@ fn hud_update_system(
                 &PlayerProgression,
                 Option<&TrickState>,
                 Option<&StuntRunState>,
+                &WaterTraversalState,
             ),
         ),
         With<Player>,
@@ -5274,7 +5307,11 @@ fn hud_update_system(
     wave: Res<WaveInfo>,
     current: Res<CurrentChapter>,
     missile_q: Query<&TrackingMissile>,
-    mut bar_q: Query<(&mut Node, &PlayerHudBar)>,
+    mut row_q: Query<(&mut Visibility, &PlayerHudBarRow)>,
+    mut hud_visuals: ParamSet<(
+        Query<(&mut Node, &mut BackgroundColor, &PlayerHudBar)>,
+        Query<(&mut BackgroundColor, &UnderwaterOverlay)>,
+    )>,
     mut text_sets: ParamSet<(
         Query<(&mut Text, &PlayerHudText)>,
         Query<&mut Text, With<WaveText>>,
@@ -5291,12 +5328,13 @@ fn hud_update_system(
         special,
         armor,
         sabre,
-        (traversal, board_boost, progression, tricks, stunt_run),
+        (traversal, board_boost, progression, tricks, stunt_run, water),
     ) in player_q.iter()
     {
-        for (mut node, bar) in bar_q
+        for (mut node, mut color, bar) in hud_visuals
+            .p0()
             .iter_mut()
-            .filter(|(_, bar)| bar.player_index == index.0)
+            .filter(|(_, _, bar)| bar.player_index == index.0)
         {
             let percent = match bar.kind {
                 PlayerHudBarKind::Health => health.current / health.max,
@@ -5304,8 +5342,32 @@ fn hud_update_system(
                 PlayerHudBarKind::Stamina => stats.stamina / stats.max_stamina,
                 PlayerHudBarKind::Jetpack => jetpack.fuel / jetpack.max_fuel,
                 PlayerHudBarKind::Climb => climb.energy / climb.max_energy,
+                PlayerHudBarKind::Air => water.breath / water.max_breath,
             };
             node.width = Val::Percent((percent * 100.0).clamp(0.0, 100.0));
+            if bar.kind == PlayerHudBarKind::Air {
+                color.0 = air_meter_color(percent);
+            }
+        }
+        for (mut visibility, row) in row_q
+            .iter_mut()
+            .filter(|(_, row)| row.player_index == index.0)
+        {
+            if row.kind == PlayerHudBarKind::Air {
+                *visibility = if water.swimming || water.breath < water.max_breath - 0.01 {
+                    Visibility::Visible
+                } else {
+                    Visibility::Hidden
+                };
+            }
+        }
+        for (mut color, _overlay) in hud_visuals
+            .p1()
+            .iter_mut()
+            .filter(|(_, overlay)| overlay.player_index == index.0)
+        {
+            let alpha = if water.submerged { 0.085 } else { 0.0 };
+            color.0 = Color::srgba(0.0, 0.42, 0.58, alpha);
         }
 
         let weapon = weapons.active();
@@ -5363,6 +5425,16 @@ fn hud_update_system(
     }
     if let Ok(mut t) = text_sets.p2().single_mut() {
         *t = Text::new(format!("Enemies: {}", wave.enemy_count));
+    }
+}
+
+fn air_meter_color(percent: f32) -> Color {
+    if percent <= 0.25 {
+        Color::srgb(1.0, 0.28, 0.12)
+    } else if percent <= 0.50 {
+        Color::srgb(1.0, 0.72, 0.12)
+    } else {
+        Color::srgb(0.05, 0.90, 0.95)
     }
 }
 
@@ -7631,5 +7703,12 @@ mod menu_navigation_tests {
             }
         }
         assert_eq!(theme.player_accent(99), theme.players[3]);
+    }
+
+    #[test]
+    fn air_meter_escalates_from_cyan_to_amber_to_red() {
+        assert_eq!(air_meter_color(1.0), Color::srgb(0.05, 0.90, 0.95));
+        assert_eq!(air_meter_color(0.5), Color::srgb(1.0, 0.72, 0.12));
+        assert_eq!(air_meter_color(0.25), Color::srgb(1.0, 0.28, 0.12));
     }
 }

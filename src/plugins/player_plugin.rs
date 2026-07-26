@@ -58,6 +58,9 @@ const USE_MODULAR_PLAYER_MESH: bool = true;
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct PlayerPlugin;
 
+#[derive(Component, Default)]
+struct UnderwaterCameraBlend(f32);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SharedEncounterReason {
     None,
@@ -988,6 +991,7 @@ fn spawn_players(
                     intensity: 0.25,
                     ..default()
                 },
+                UnderwaterCameraBlend::default(),
                 DistanceFog {
                     color: Color::srgba(0.02, 0.02, 0.08, 1.0),
                     falloff: FogFalloff::ExponentialSquared { density: 0.00018 },
@@ -4180,21 +4184,61 @@ pub fn damage_player(
 }
 
 fn update_camera_post_processing(
+    time: Res<Time>,
     chapter: Res<CurrentChapter>,
+    player_q: Query<(&PlayerCameraRef, &WaterTraversalState), With<Player>>,
     mut cameras: Query<
-        (&mut bevy::post_process::bloom::Bloom, &mut DistanceFog),
+        (
+            &mut bevy::post_process::bloom::Bloom,
+            &mut DistanceFog,
+            &mut UnderwaterCameraBlend,
+        ),
         With<PlayerCamera>,
     >,
 ) {
-    if chapter.is_changed() {
-        let (bloom, fog) = chapter.biome.atmosphere_settings();
-        let (_, fog_col, _, _) = chapter.biome.palette();
-        for (mut b, mut f) in cameras.iter_mut() {
-            b.intensity = bloom;
-            f.color = fog_col;
-            f.falloff = FogFalloff::ExponentialSquared { density: fog };
-        }
+    let (base_bloom, base_fog) = chapter.biome.atmosphere_settings();
+    let (_, base_fog_color, _, _) = chapter.biome.palette();
+    for (camera_ref, water) in player_q.iter() {
+        let Ok((mut bloom, mut fog, mut underwater)) = cameras.get_mut(camera_ref.0) else {
+            continue;
+        };
+        let target = if water.submerged { 1.0 } else { 0.0 };
+        underwater.0 = approach_f32(underwater.0, target, time.delta_secs() * 2.8);
+        let (bloom_intensity, fog_density, fog_color) =
+            underwater_post_process(base_bloom, base_fog, base_fog_color, underwater.0);
+        bloom.intensity = bloom_intensity;
+        fog.color = fog_color;
+        fog.falloff = FogFalloff::ExponentialSquared {
+            density: fog_density,
+        };
     }
+}
+
+fn underwater_post_process(
+    base_bloom: f32,
+    base_fog: f32,
+    base_fog_color: Color,
+    blend: f32,
+) -> (f32, f32, Color) {
+    let blend = blend.clamp(0.0, 1.0);
+    let underwater_color = Color::srgba(0.005, 0.16, 0.22, 1.0);
+    (
+        base_bloom * (1.0 - blend * 0.38),
+        base_fog + (0.0065 - base_fog).max(0.0) * blend,
+        lerp_srgba(base_fog_color, underwater_color, blend),
+    )
+}
+
+fn lerp_srgba(from: Color, to: Color, amount: f32) -> Color {
+    let from = from.to_srgba();
+    let to = to.to_srgba();
+    let amount = amount.clamp(0.0, 1.0);
+    Color::srgba(
+        from.red + (to.red - from.red) * amount,
+        from.green + (to.green - from.green) * amount,
+        from.blue + (to.blue - from.blue) * amount,
+        from.alpha + (to.alpha - from.alpha) * amount,
+    )
 }
 
 #[cfg(test)]
@@ -4746,6 +4790,20 @@ mod tests {
         let exit = speed_loop_position(center, Vec3::Z, 24.0, std::f32::consts::TAU);
         assert!(entry.distance(exit) < 0.001);
         assert!((top.y - entry.y - 48.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn underwater_post_process_thickens_fog_and_reduces_bloom() {
+        let base_color = Color::srgb(0.30, 0.38, 0.52);
+        let dry = underwater_post_process(0.25, 0.0002, base_color, 0.0);
+        let submerged = underwater_post_process(0.25, 0.0002, base_color, 1.0);
+
+        assert_eq!(dry.0, 0.25);
+        assert_eq!(dry.1, 0.0002);
+        assert_eq!(dry.2, base_color);
+        assert!(submerged.0 < dry.0);
+        assert!(submerged.1 > dry.1);
+        assert!(submerged.2.to_srgba().blue > submerged.2.to_srgba().red);
     }
 }
 #[test]
