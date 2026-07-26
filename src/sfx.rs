@@ -440,6 +440,8 @@ fn modular_action_sfx_system(
 fn modular_fallback_kind(action_id: &str) -> SfxKind {
     if action_id.starts_with("sabre.") || action_id.contains("slash") {
         SfxKind::Slash
+    } else if action_id.starts_with("water.") || action_id.starts_with("waterfall.") {
+        SfxKind::Hit
     } else if action_id.contains("loot") || action_id.contains("reward") {
         SfxKind::Loot
     } else {
@@ -526,6 +528,7 @@ mod tests {
             modular_fallback_kind("hoverboard.overdrive"),
             SfxKind::Shoot
         );
+        assert_eq!(modular_fallback_kind("waterfall.splash"), SfxKind::Hit);
         assert_eq!(modular_fallback_kind("world.reward"), SfxKind::Loot);
     }
 }

@@ -236,6 +236,22 @@ pub fn preset_reload() -> SfxParams {
     }
 }
 
+/// Long, nearly steady filtered-noise bed intended for seamless ambient
+/// waterfall looping. The short attack/release keeps loop boundaries soft.
+pub fn preset_waterfall_ambience() -> SfxParams {
+    SfxParams {
+        waveform: Waveform::Noise,
+        freq_start: 72.0,
+        freq_end: 58.0,
+        duration: 2.8,
+        attack: 0.08,
+        decay: 0.055,
+        gain: 0.28,
+        crush_steps: 192,
+        noise_mix: 0.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +283,7 @@ mod tests {
             preset_chest(),
             preset_level_up(),
             preset_reload(),
+            preset_waterfall_ambience(),
         ] {
             let a = render_wav(&params);
             let b = render_wav(&params);

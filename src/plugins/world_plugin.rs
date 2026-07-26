@@ -1,4 +1,5 @@
 use bevy::asset::RenderAssetUsages;
+use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, SpatialScale, Volume};
 use bevy::image::{
     CompressedImageFormats, Image, ImageAddressMode, ImageLoaderSettings, ImageSampler,
     ImageSamplerDescriptor, ImageType,
@@ -93,6 +94,41 @@ struct WaterWakeAssets {
 struct WaterWakeRipple {
     remaining: f32,
     duration: f32,
+}
+
+#[derive(Resource, Clone)]
+struct WaterfallFxAssets {
+    mist_mesh: Handle<Mesh>,
+    droplet_mesh: Handle<Mesh>,
+    mist_material: Handle<StandardMaterial>,
+    audio: Handle<AudioSource>,
+    volume: f32,
+}
+
+#[derive(Component)]
+struct WaterfallFlowRibbon {
+    base_translation: Vec3,
+    base_scale: Vec3,
+    phase: f32,
+}
+
+#[derive(Component)]
+struct WaterfallParticle {
+    origin: Vec3,
+    velocity: Vec3,
+    base_scale: Vec3,
+    age: f32,
+    lifetime: f32,
+    gravity: f32,
+    looped: bool,
+    phase: f32,
+}
+
+#[derive(Component)]
+struct WaterfallSplashZone {
+    radius: f32,
+    height: f32,
+    occupied_players: u8,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -268,7 +304,13 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
-                (water_wake_spawn_system, water_wake_update_system)
+                (
+                    water_wake_spawn_system,
+                    water_wake_update_system,
+                    animate_waterfall_flow_system,
+                    waterfall_particle_system,
+                    waterfall_splash_zone_system,
+                )
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -2676,6 +2718,7 @@ fn generate_city(
     mut grass_mats: ResMut<Assets<GrassMaterial>>,
     mut terrain_mats: ResMut<Assets<TerrainMaterial>>,
     mut water_mats: ResMut<Assets<WaterMaterial>>,
+    mut audio_sources: ResMut<Assets<AudioSource>>,
     asset_server: Res<AssetServer>,
     transition: Res<PlaySessionTransition>,
     settings: Res<GameSettings>,
@@ -2704,6 +2747,17 @@ fn generate_city(
         )),
         path_texture: Some(repeating_texture(&asset_server, "Materials/asphalt.png")),
     });
+    let waterfall_fx = WaterfallFxAssets {
+        mist_mesh: meshes.add(Sphere::new(1.0)),
+        droplet_mesh: meshes.add(Sphere::new(0.34)),
+        mist_material: pal.waterfall_mist.clone(),
+        audio: audio_sources.add(AudioSource {
+            bytes: crate::audio_synth::render_wav(&crate::audio_synth::preset_waterfall_ambience())
+                .into(),
+        }),
+        volume: settings.sfx_volume.clamp(0.0, 1.0) * 0.24,
+    };
+    commands.insert_resource(waterfall_fx.clone());
     commands.insert_resource(WaterWakeAssets {
         mesh: meshes.add(Torus::new(0.72, 1.0)),
         material: pal.waterfall_mist.clone(),
@@ -2743,6 +2797,7 @@ fn generate_city(
         &pal,
         &lake_water,
         &river_water,
+        &waterfall_fx,
         seed,
     );
     if current.id.0 == 1 {
@@ -2754,7 +2809,14 @@ fn generate_city(
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8, seed);
     spawn_river(&mut commands, &mut meshes, &pal, &river_water);
     spawn_water_gardens(&mut commands, &mut meshes, &pal, seed + 12, seed);
-    spawn_mana_waterfalls(&mut commands, &mut meshes, &pal, seed + 18, seed);
+    spawn_mana_waterfalls(
+        &mut commands,
+        &mut meshes,
+        &pal,
+        &waterfall_fx,
+        seed + 18,
+        seed,
+    );
     spawn_mana_forests(&mut commands, &mut meshes, &pal, seed + 19, seed);
     spawn_bio_city_tamborn(&mut commands, &mut meshes, &pal, seed + 20, seed);
     spawn_rock_fields(&mut commands, &mut meshes, &pal, seed + 13, seed);
@@ -2831,6 +2893,192 @@ fn water_wake_update_system(
     }
 }
 
+fn animate_waterfall_flow_system(
+    time: Res<Time>,
+    mut ribbon_q: Query<(&WaterfallFlowRibbon, &mut Transform)>,
+) {
+    let elapsed = time.elapsed_secs();
+    for (ribbon, mut transform) in ribbon_q.iter_mut() {
+        let flow = (elapsed * 0.72 + ribbon.phase).fract();
+        let pulse = (elapsed * 4.6 + ribbon.phase * TAU).sin();
+        transform.translation = ribbon.base_translation + Vec3::Y * (-flow * 1.6 + pulse * 0.16);
+        transform.scale = Vec3::new(
+            ribbon.base_scale.x * (1.0 + pulse * 0.025),
+            ribbon.base_scale.y * (1.0 + pulse * 0.018),
+            ribbon.base_scale.z * (1.0 - pulse * 0.06),
+        );
+    }
+}
+
+fn waterfall_particle_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut particle_q: Query<(Entity, &mut Transform, &mut WaterfallParticle)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut transform, mut particle) in particle_q.iter_mut() {
+        particle.age += dt;
+        if particle.age >= particle.lifetime {
+            if particle.looped {
+                particle.age %= particle.lifetime;
+            } else {
+                commands.entity(entity).despawn();
+                continue;
+            }
+        }
+
+        let t = particle.age;
+        let life = (t / particle.lifetime).clamp(0.0, 1.0);
+        let swirl = Vec3::new(
+            (life * TAU * 1.4 + particle.phase).sin(),
+            0.0,
+            (life * TAU * 1.1 + particle.phase).cos(),
+        ) * (0.16 + life * 0.42);
+        transform.translation = particle.origin
+            + particle.velocity * t
+            + Vec3::Y * (0.5 * particle.gravity * t * t)
+            + swirl;
+        let fade = if particle.looped {
+            (1.0 - life).max(0.12)
+        } else {
+            (1.0 - life).max(0.0)
+        };
+        transform.scale = particle.base_scale * fade;
+    }
+}
+
+fn waterfall_splash_zone_system(
+    mut commands: Commands,
+    assets: Option<Res<WaterfallFxAssets>>,
+    mut zone_q: Query<(&Transform, &mut WaterfallSplashZone)>,
+    player_q: Query<(&Transform, &PlayerIndex), With<Player>>,
+    mut action_sfx: MessageWriter<ModularActionSfxEvent>,
+) {
+    let Some(assets) = assets else {
+        return;
+    };
+    for (zone_transform, mut zone) in zone_q.iter_mut() {
+        let mut occupied = 0u8;
+        for (player_transform, index) in player_q.iter() {
+            let bit = 1u8 << index.0.min(7);
+            if !waterfall_zone_contains(
+                player_transform.translation - zone_transform.translation,
+                zone.radius,
+                zone.height,
+            ) {
+                continue;
+            }
+            occupied |= bit;
+            if zone.occupied_players & bit != 0 {
+                continue;
+            }
+
+            action_sfx.write(ModularActionSfxEvent::new("waterfall.splash"));
+            for burst in 0..6u8 {
+                let angle = burst as f32 / 6.0 * TAU + index.0 as f32 * 0.71;
+                let velocity = Vec3::new(
+                    angle.cos() * 3.2,
+                    4.8 + burst as f32 * 0.18,
+                    angle.sin() * 3.2,
+                );
+                commands.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(assets.droplet_mesh.clone()),
+                        material: MeshMaterial3d(assets.mist_material.clone()),
+                        transform: Transform::from_translation(
+                            player_transform.translation + Vec3::Y * 0.35,
+                        ),
+                        ..default()
+                    },
+                    WorldGeometry,
+                    WaterfallParticle {
+                        origin: player_transform.translation + Vec3::Y * 0.35,
+                        velocity,
+                        base_scale: Vec3::splat(0.75),
+                        age: 0.0,
+                        lifetime: 0.72,
+                        gravity: -7.5,
+                        looped: false,
+                        phase: angle,
+                    },
+                ));
+            }
+        }
+        zone.occupied_players = occupied;
+    }
+}
+
+fn waterfall_zone_contains(local: Vec3, radius: f32, height: f32) -> bool {
+    local.y >= -1.5 && local.y <= height && local.x * local.x + local.z * local.z <= radius * radius
+}
+
+fn spawn_waterfall_fx(
+    commands: &mut Commands,
+    assets: &WaterfallFxAssets,
+    base: Vec3,
+    forward: Vec3,
+    right: Vec3,
+    width: f32,
+    drop: f32,
+    seed: u64,
+) {
+    let volume = assets.volume * (0.68 + (drop / 260.0).clamp(0.0, 1.0) * 0.32);
+    commands.spawn((
+        Transform::from_translation(base + forward * 4.0 + Vec3::Y * 2.0),
+        GlobalTransform::default(),
+        AudioPlayer::new(assets.audio.clone()),
+        PlaybackSettings::LOOP
+            .with_volume(Volume::Linear(volume))
+            .with_spatial(true)
+            .with_spatial_scale(SpatialScale::new(0.018)),
+        WaterfallSplashZone {
+            radius: (width * 0.62).max(10.0),
+            height: (drop * 0.24).clamp(12.0, 42.0),
+            occupied_players: 0,
+        },
+        WorldGeometry,
+    ));
+
+    for particle_index in 0..14u64 {
+        let lateral = (seeded(seed, particle_index * 7) - 0.5) * width * 0.92;
+        let forward_offset = seeded(seed, particle_index * 7 + 1) * width * 0.34;
+        let scale = width * (0.025 + seeded(seed, particle_index * 7 + 2) * 0.035);
+        let lifetime = 1.4 + seeded(seed, particle_index * 7 + 3) * 1.5;
+        let velocity = forward * (2.2 + seeded(seed, particle_index * 7 + 4) * 4.2)
+            + right * ((seeded(seed, particle_index * 7 + 5) - 0.5) * 1.8)
+            + Vec3::Y * (1.8 + seeded(seed, particle_index * 7 + 6) * 3.8);
+        let origin = base + right * lateral + forward * (2.0 + forward_offset) + Vec3::Y * 0.8;
+        let age = seeded(seed + 91, particle_index) * lifetime;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(if particle_index % 3 == 0 {
+                    assets.mist_mesh.clone()
+                } else {
+                    assets.droplet_mesh.clone()
+                }),
+                material: MeshMaterial3d(assets.mist_material.clone()),
+                transform: Transform::from_translation(origin).with_scale(Vec3::new(
+                    scale * 1.5,
+                    scale * 0.58,
+                    scale,
+                )),
+                ..default()
+            },
+            WorldGeometry,
+            WaterfallParticle {
+                origin,
+                velocity,
+                base_scale: Vec3::new(scale * 1.5, scale * 0.58, scale),
+                age,
+                lifetime,
+                gravity: -1.25,
+                looped: true,
+                phase: seeded(seed + 117, particle_index) * TAU,
+            },
+        ));
+    }
+}
+
 // ── Seeded RNG helper ─────────────────────────────────────────────────────────
 fn seeded(seed: u64, index: u64) -> f32 {
     let x = ((seed.wrapping_mul(127) + index.wrapping_mul(311)).wrapping_mul(43758)) as f64;
@@ -2869,6 +3117,11 @@ struct Palette {
 
     residential_a: Handle<StandardMaterial>,
     residential_b: Handle<StandardMaterial>,
+    city_coral: Handle<StandardMaterial>,
+    city_sun: Handle<StandardMaterial>,
+    city_mint: Handle<StandardMaterial>,
+    city_lilac: Handle<StandardMaterial>,
+    city_aqua: Handle<StandardMaterial>,
     brick_line: Handle<StandardMaterial>,
     stone_block: Handle<StandardMaterial>,
     small_window_warm: Handle<StandardMaterial>,
@@ -2994,11 +3247,11 @@ impl Palette {
                 ..default()
             }),
             downtown_facade: m.add(StandardMaterial {
-                base_color: Color::srgb(0.34, 0.36, 0.44),
-                emissive: LinearRgba::new(0.06, 0.08, 0.14, 1.0),
-                metallic: 0.88,
-                perceptual_roughness: 0.22,
-                reflectance: 0.78,
+                base_color: Color::srgb(0.57, 0.34, 0.88),
+                emissive: LinearRgba::new(0.24, 0.07, 0.54, 1.0),
+                metallic: 0.42,
+                perceptual_roughness: 0.38,
+                reflectance: 0.62,
                 ..default()
             }),
             glass_panel: m.add(StandardMaterial {
@@ -3101,20 +3354,20 @@ impl Palette {
             }),
 
             industrial_metal: m.add(StandardMaterial {
-                base_color: Color::srgb(0.50, 0.52, 0.58),
+                base_color: Color::srgb(0.20, 0.78, 0.84),
                 base_color_texture: Some(repeating_texture(asset_server, "Materials/metal.png")),
                 uv_transform: Affine2::from_scale(Vec2::splat(3.4)),
-                emissive: LinearRgba::new(0.10, 0.12, 0.18, 1.0),
-                metallic: 0.78,
+                emissive: LinearRgba::new(0.04, 0.32, 0.42, 1.0),
+                metallic: 0.64,
                 perceptual_roughness: 0.36,
                 reflectance: 0.72,
                 ..default()
             }),
             industrial_rust: m.add(StandardMaterial {
-                base_color: Color::srgb(0.72, 0.42, 0.22),
+                base_color: Color::srgb(0.98, 0.54, 0.18),
                 base_color_texture: Some(repeating_texture(asset_server, "Materials/Copper.png")),
                 uv_transform: Affine2::from_scale(Vec2::splat(3.0)),
-                emissive: LinearRgba::new(0.11, 0.05, 0.02, 1.0),
+                emissive: LinearRgba::new(0.38, 0.12, 0.02, 1.0),
                 metallic: 0.42,
                 perceptual_roughness: 0.74,
                 reflectance: 0.46,
@@ -3123,19 +3376,49 @@ impl Palette {
 
             // Smaller buildings: painterly brick and cinder block with old-anime warmth.
             residential_a: m.add(StandardMaterial {
-                base_color: Color::srgb(0.72, 0.46, 0.34),
-                emissive: LinearRgba::new(0.12, 0.05, 0.03, 1.0),
+                base_color: Color::srgb(0.98, 0.48, 0.58),
+                emissive: LinearRgba::new(0.34, 0.06, 0.10, 1.0),
                 metallic: 0.02,
-                perceptual_roughness: 0.93,
-                reflectance: 0.20,
+                perceptual_roughness: 0.82,
+                reflectance: 0.26,
                 ..default()
             }),
             residential_b: m.add(StandardMaterial {
-                base_color: Color::srgb(0.62, 0.64, 0.68),
-                emissive: LinearRgba::new(0.04, 0.04, 0.06, 1.0),
+                base_color: Color::srgb(0.68, 0.82, 0.96),
+                emissive: LinearRgba::new(0.08, 0.16, 0.28, 1.0),
                 metallic: 0.01,
-                perceptual_roughness: 0.95,
-                reflectance: 0.18,
+                perceptual_roughness: 0.82,
+                reflectance: 0.28,
+                ..default()
+            }),
+            city_coral: m.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.31, 0.48),
+                emissive: LinearRgba::new(0.62, 0.06, 0.12, 1.0),
+                perceptual_roughness: 0.62,
+                ..default()
+            }),
+            city_sun: m.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.82, 0.16),
+                emissive: LinearRgba::new(0.75, 0.38, 0.025, 1.0),
+                perceptual_roughness: 0.58,
+                ..default()
+            }),
+            city_mint: m.add(StandardMaterial {
+                base_color: Color::srgb(0.24, 0.95, 0.63),
+                emissive: LinearRgba::new(0.06, 0.62, 0.24, 1.0),
+                perceptual_roughness: 0.56,
+                ..default()
+            }),
+            city_lilac: m.add(StandardMaterial {
+                base_color: Color::srgb(0.72, 0.42, 1.0),
+                emissive: LinearRgba::new(0.34, 0.08, 0.72, 1.0),
+                perceptual_roughness: 0.54,
+                ..default()
+            }),
+            city_aqua: m.add(StandardMaterial {
+                base_color: Color::srgb(0.18, 0.87, 1.0),
+                emissive: LinearRgba::new(0.03, 0.58, 0.84, 1.0),
+                perceptual_roughness: 0.50,
                 ..default()
             }),
             brick_line: m.add(StandardMaterial {
@@ -9120,6 +9403,7 @@ fn spawn_mana_waterfalls(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    waterfall_fx: &WaterfallFxAssets,
     seed: u64,
     terrain_seed: u64,
 ) {
@@ -9140,6 +9424,7 @@ fn spawn_mana_waterfalls(
             commands,
             meshes,
             pal,
+            waterfall_fx,
             Vec3::new(x, ground, z),
             yaw,
             width,
@@ -9153,6 +9438,7 @@ fn spawn_mana_waterfall(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    waterfall_fx: &WaterfallFxAssets,
     base: Vec3,
     yaw: f32,
     width: f32,
@@ -9197,14 +9483,11 @@ fn spawn_mana_waterfall(
                 ..default()
             },
             WorldGeometry,
-            NatureSway::new(
-                &transform,
-                seed as f32 * 0.001 + strip as f32,
-                1.1,
-                0.010,
-                0.045,
-                0.006,
-            ),
+            WaterfallFlowRibbon {
+                base_translation: transform.translation,
+                base_scale: transform.scale,
+                phase: seeded(seed + 41, strip),
+            },
         ));
     }
 
@@ -9257,6 +9540,17 @@ fn spawn_mana_waterfall(
             WorldGeometry,
         ));
     }
+
+    spawn_waterfall_fx(
+        commands,
+        waterfall_fx,
+        base,
+        forward,
+        right,
+        width,
+        drop,
+        seed + 2_701,
+    );
 }
 
 fn spawn_range_waylines(
@@ -11816,7 +12110,7 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
         } else {
             glass[(i % 4) as usize].clone()
         };
-        let enterable = i.is_multiple_of(10)
+        let enterable = i.is_multiple_of(4)
             && spawn_enterable_building(
                 commands,
                 meshes,
@@ -11841,6 +12135,20 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
                 d,
                 WorldZone::Downtown,
             );
+            if i.is_multiple_of(3) && building_footprint_clears_speed_roads(x, z, w, d) {
+                spawn_city_roof_route_and_crown(
+                    commands,
+                    meshes,
+                    pal,
+                    Vec3::new(x, 0.0, z),
+                    Quat::IDENTITY,
+                    w,
+                    h,
+                    d,
+                    (h / 1.25).floor() as usize,
+                    seed + i * 101,
+                );
+            }
         }
 
         // Facade accent band near base
@@ -13112,7 +13420,7 @@ fn spawn_industrial(
         } else {
             pal.industrial_rust.clone()
         };
-        let enterable = i.is_multiple_of(9)
+        let enterable = i.is_multiple_of(4)
             && spawn_enterable_building(
                 commands,
                 meshes,
@@ -13147,6 +13455,20 @@ fn spawn_industrial(
                 d,
                 seed + i * 23,
             );
+            if i.is_multiple_of(3) && building_footprint_clears_speed_roads(x, z, w, d) {
+                spawn_city_roof_route_and_crown(
+                    commands,
+                    meshes,
+                    pal,
+                    Vec3::new(x, ground_y, z),
+                    Quat::IDENTITY,
+                    w,
+                    h,
+                    d,
+                    (h / 1.25).floor() as usize,
+                    seed + i * 109,
+                );
+            }
         }
         if !enterable && i % 3 == 0 {
             spawn_factory_window_ribbons(commands, meshes, pal, x, ground_y, z, h, w, d);
@@ -13192,7 +13514,7 @@ fn spawn_residential(
         } else {
             pal.residential_b.clone()
         };
-        let enterable = i.is_multiple_of(12)
+        let enterable = i.is_multiple_of(4)
             && spawn_enterable_building(
                 commands,
                 meshes,
@@ -13228,6 +13550,20 @@ fn spawn_residential(
                 seed + i,
                 stone_variant,
             );
+            if i.is_multiple_of(3) && building_footprint_clears_speed_roads(x, z, w, d) {
+                spawn_city_roof_route_and_crown(
+                    commands,
+                    meshes,
+                    pal,
+                    Vec3::new(x, ground_y, z),
+                    Quat::IDENTITY,
+                    w,
+                    h,
+                    d,
+                    (h / 1.25).floor() as usize,
+                    seed + i * 113,
+                );
+            }
         }
     }
 }
@@ -14453,27 +14789,57 @@ fn spawn_outer_districts(
                 pal.residential_b.clone()
             };
 
-            spawn_building(
-                commands,
-                meshes,
-                mat,
-                Vec3::new(x, ground_y + h * 0.5, z),
-                w,
-                h,
-                d,
-                WorldZone::OuterDistrict,
-            );
-            spawn_small_building_details(
-                commands,
-                meshes,
-                pal,
-                Vec3::new(x, ground_y + h * 0.5, z),
-                w,
-                h,
-                d,
-                seed + idx,
-                stone_variant,
-            );
+            let enterable = idx.is_multiple_of(5)
+                && spawn_enterable_building(
+                    commands,
+                    meshes,
+                    pal,
+                    mat.clone(),
+                    Vec3::new(x, ground_y + h * 0.5, z),
+                    w,
+                    h,
+                    d,
+                    0.0,
+                    WorldZone::OuterDistrict,
+                    seed + idx * 127,
+                );
+            if !enterable {
+                spawn_building(
+                    commands,
+                    meshes,
+                    mat,
+                    Vec3::new(x, ground_y + h * 0.5, z),
+                    w,
+                    h,
+                    d,
+                    WorldZone::OuterDistrict,
+                );
+                spawn_small_building_details(
+                    commands,
+                    meshes,
+                    pal,
+                    Vec3::new(x, ground_y + h * 0.5, z),
+                    w,
+                    h,
+                    d,
+                    seed + idx,
+                    stone_variant,
+                );
+                if idx.is_multiple_of(3) && building_footprint_clears_speed_roads(x, z, w, d) {
+                    spawn_city_roof_route_and_crown(
+                        commands,
+                        meshes,
+                        pal,
+                        Vec3::new(x, ground_y, z),
+                        Quat::IDENTITY,
+                        w,
+                        h,
+                        d,
+                        (h / 1.25).floor() as usize,
+                        seed + idx * 127,
+                    );
+                }
+            }
         }
     }
 }
@@ -14755,6 +15121,7 @@ fn spawn_mountain_water_network(
     pal: &Palette,
     lake_water: &Handle<WaterMaterial>,
     river_water: &Handle<WaterMaterial>,
+    waterfall_fx: &WaterfallFxAssets,
     seed: u64,
 ) {
     for (lake_index, &(label, x, z, radius_x, radius_z)) in MOUNTAIN_LAKES.iter().enumerate() {
@@ -14789,6 +15156,7 @@ fn spawn_mountain_water_network(
             meshes,
             pal,
             river_water,
+            waterfall_fx,
             outlet,
             seed,
             lake_index as u64,
@@ -14801,6 +15169,7 @@ fn spawn_downhill_stream(
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
     river_water: &Handle<WaterMaterial>,
+    waterfall_fx: &WaterfallFxAssets,
     source: Vec2,
     seed: u64,
     stream_index: u64,
@@ -14821,7 +15190,7 @@ fn spawn_downhill_stream(
         let end = Vec3::new(next.x, next_height + 0.32, next.y);
         let drop = current_height - next_height;
         if drop >= 7.0 {
-            spawn_world_waterfall(commands, meshes, pal, start, end, drop);
+            spawn_world_waterfall(commands, meshes, pal, waterfall_fx, start, end, drop);
         } else {
             spawn_river_water_segment(commands, meshes, river_water, start, end);
         }
@@ -14889,6 +15258,7 @@ fn spawn_world_waterfall(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    waterfall_fx: &WaterfallFxAssets,
     start: Vec3,
     end: Vec3,
     drop: f32,
@@ -14906,6 +15276,14 @@ fn spawn_world_waterfall(
             ..default()
         },
         WorldGeometry,
+        WaterfallFlowRibbon {
+            base_translation: center,
+            base_scale: Vec3::ONE,
+            phase: seeded(
+                start.x.to_bits() as u64 ^ start.z.to_bits() as u64,
+                end.y.to_bits() as u64,
+            ),
+        },
         WaterBody {
             kind: WaterBodyKind::Waterfall,
             surface_y: start.y,
@@ -14926,6 +15304,17 @@ fn spawn_world_waterfall(
         },
         WorldGeometry,
     ));
+    let right = Vec3::new(forward.z, 0.0, -forward.x).normalize_or_zero();
+    spawn_waterfall_fx(
+        commands,
+        waterfall_fx,
+        end,
+        forward,
+        right,
+        26.0,
+        drop,
+        start.x.to_bits() as u64 ^ end.z.to_bits() as u64,
+    );
 }
 
 fn spawn_river(
@@ -15815,6 +16204,38 @@ fn enterable_floor_layout(height: f32) -> (usize, f32) {
     (floor_count, story_height)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CityAccessPlan {
+    balcony_floor: usize,
+    balcony_y: f32,
+    balcony_width: f32,
+    stair_run: f32,
+    ladder_rungs: usize,
+}
+
+fn city_access_plan(
+    width: f32,
+    height: f32,
+    floor_count: usize,
+    story_height: f32,
+) -> CityAccessPlan {
+    let balcony_floor = 1.min(floor_count.saturating_sub(1));
+    let balcony_y = balcony_floor as f32 * story_height + 0.18;
+    CityAccessPlan {
+        balcony_floor,
+        balcony_y,
+        balcony_width: (width * 0.62).clamp(6.5, 11.0),
+        stair_run: (balcony_y * 1.75).clamp(7.5, 13.0),
+        ladder_rungs: (height / 1.25).floor().max(4.0) as usize,
+    }
+}
+
+fn building_footprint_clears_speed_roads(x: f32, z: f32, width: f32, depth: f32) -> bool {
+    let road_dist = distance_to_speed_road_network(x, z, road_network_seed());
+    let half_diag = Vec2::new(width, depth).length() * 0.5;
+    road_dist >= half_diag.max(SPEED_ROAD_WIDTH * 0.5)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_enterable_building(
     commands: &mut Commands,
@@ -15832,9 +16253,7 @@ fn spawn_enterable_building(
     if width < 11.5 || depth < 11.5 || height < 9.0 {
         return false;
     }
-    let road_dist = distance_to_speed_road_network(center.x, center.z, road_network_seed());
-    let half_diag = Vec2::new(width, depth).length() * 0.5;
-    if road_dist < half_diag.max(SPEED_ROAD_WIDTH * 0.5) {
+    if !building_footprint_clears_speed_roads(center.x, center.z, width, depth) {
         return false;
     }
 
@@ -15846,6 +16265,7 @@ fn spawn_enterable_building(
     let door_height = 3.8_f32.min(height - 1.0);
     let front_segment = ((width - door_width) * 0.5).max(1.0);
     let (floor_count, story_height) = enterable_floor_layout(height);
+    let access = city_access_plan(width, height, floor_count, story_height);
 
     commands.spawn((
         Transform::from_translation(base).with_rotation(rotation),
@@ -15858,8 +16278,8 @@ fn spawn_enterable_building(
         Name::new(format!("Explorable {:?} Building", zone)),
     ));
 
-    // Four independent wall colliders form a hollow shell. The front is split
-    // into two jambs and a header, leaving a real walk-through doorway.
+    // Three full walls and a banded front form a hollow shell. Both the ground
+    // door and the upper balcony door are true openings through the collider.
     spawn_enterable_piece(
         commands,
         meshes,
@@ -15881,35 +16301,73 @@ fn spawn_enterable_building(
             Vec3::new(wall, height, depth),
             false,
         );
+    }
+    let facade_story_count = floor_count;
+    for floor in 0..facade_story_count {
+        let bottom = floor as f32 * story_height;
+        let top = ((floor + 1) as f32 * story_height).min(height);
+        let band_height = top - bottom;
+        let has_door = floor == 0 || floor == access.balcony_floor;
+        if has_door {
+            for side in [-1.0_f32, 1.0] {
+                spawn_enterable_piece(
+                    commands,
+                    meshes,
+                    exterior.clone(),
+                    base,
+                    rotation,
+                    Vec3::new(
+                        side * (door_width * 0.5 + front_segment * 0.5),
+                        bottom + door_height * 0.5,
+                        -depth * 0.5,
+                    ),
+                    Vec3::new(front_segment, door_height, wall),
+                    false,
+                );
+            }
+            let header_height = band_height - door_height;
+            if header_height > 0.2 {
+                spawn_enterable_piece(
+                    commands,
+                    meshes,
+                    exterior.clone(),
+                    base,
+                    rotation,
+                    Vec3::new(
+                        0.0,
+                        bottom + door_height + header_height * 0.5,
+                        -depth * 0.5,
+                    ),
+                    Vec3::new(width, header_height, wall),
+                    false,
+                );
+            }
+        } else {
+            spawn_enterable_piece(
+                commands,
+                meshes,
+                exterior.clone(),
+                base,
+                rotation,
+                Vec3::new(0.0, bottom + band_height * 0.5, -depth * 0.5),
+                Vec3::new(width, band_height, wall),
+                false,
+            );
+        }
+    }
+    let facade_top = facade_story_count as f32 * story_height;
+    if facade_top < height {
         spawn_enterable_piece(
             commands,
             meshes,
             exterior.clone(),
             base,
             rotation,
-            Vec3::new(
-                side * (door_width * 0.5 + front_segment * 0.5),
-                door_height * 0.5,
-                -depth * 0.5,
-            ),
-            Vec3::new(front_segment, door_height, wall),
+            Vec3::new(0.0, facade_top + (height - facade_top) * 0.5, -depth * 0.5),
+            Vec3::new(width, height - facade_top, wall),
             false,
         );
     }
-    spawn_enterable_piece(
-        commands,
-        meshes,
-        exterior.clone(),
-        base,
-        rotation,
-        Vec3::new(
-            0.0,
-            door_height + (height - door_height) * 0.5,
-            -depth * 0.5,
-        ),
-        Vec3::new(width, height - door_height, wall),
-        false,
-    );
 
     let opening_width = (width * 0.27).clamp(3.2, 4.6);
     let opening_depth = (depth - 3.0).max(7.0);
@@ -16171,7 +16629,279 @@ fn spawn_enterable_building(
         }
     }
 
+    spawn_enterable_city_access(
+        commands, meshes, pal, base, rotation, width, height, depth, access, seed,
+    );
+
     true
+}
+
+fn city_accent_material(pal: &Palette, seed: u64) -> Handle<StandardMaterial> {
+    match seed % 5 {
+        0 => pal.city_coral.clone(),
+        1 => pal.city_sun.clone(),
+        2 => pal.city_mint.clone(),
+        3 => pal.city_lilac.clone(),
+        _ => pal.city_aqua.clone(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_enterable_city_access(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    rotation: Quat,
+    width: f32,
+    height: f32,
+    depth: f32,
+    access: CityAccessPlan,
+    seed: u64,
+) {
+    let accent = city_accent_material(pal, seed);
+    let trim = city_accent_material(pal, seed + 2);
+    let front_z = -depth * 0.5;
+    let balcony_depth = 2.8;
+    let balcony_z = front_z - balcony_depth * 0.5 + 0.12;
+
+    // Candy-colored portal frames make both true openings readable at speed.
+    for (door_y, kind) in [
+        (0.0, CityAccessKind::GroundEntrance),
+        (access.balcony_y, CityAccessKind::BalconyEntrance),
+    ] {
+        for side in [-1.0_f32, 1.0] {
+            let local = Vec3::new(side * 2.08, door_y + 1.95, front_z - 0.34);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(0.34, 3.9, 0.34))),
+                    material: MeshMaterial3d(accent.clone()),
+                    transform: Transform::from_translation(base + rotation * local)
+                        .with_rotation(rotation),
+                    ..default()
+                },
+                WorldGeometry,
+                kind,
+            ));
+        }
+        let local = Vec3::new(0.0, door_y + 3.9, front_z - 0.34);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(4.5, 0.34, 0.34))),
+                material: MeshMaterial3d(trim.clone()),
+                transform: Transform::from_translation(base + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+            kind,
+        ));
+    }
+
+    // The balcony aligns exactly with the opened facade band and interior floor.
+    let balcony_size = Vec3::new(access.balcony_width, 0.34, balcony_depth);
+    let balcony_local = Vec3::new(0.0, access.balcony_y, balcony_z);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::from_size(balcony_size))),
+            material: MeshMaterial3d(accent.clone()),
+            transform: Transform::from_translation(base + rotation * balcony_local)
+                .with_rotation(rotation),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        CityAccessKind::Balcony,
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
+            balcony_size.x * 0.5,
+            balcony_size.y * 0.5,
+            balcony_size.z * 0.5,
+        ),
+    ));
+
+    // Low rails preserve the playful open-air route without hiding its doorway.
+    for side in [-1.0_f32, 1.0] {
+        let local =
+            balcony_local + Vec3::new(side * (access.balcony_width * 0.5 - 0.12), 0.72, 0.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.18, 1.25, balcony_depth))),
+                material: MeshMaterial3d(trim.clone()),
+                transform: Transform::from_translation(base + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let low_z = front_z - access.stair_run - balcony_depth + 0.4;
+    let high_z = balcony_z - balcony_depth * 0.32;
+    let run = high_z - low_z;
+    let stair_end_world = base + rotation * Vec3::new(0.0, 0.0, low_z);
+    let road_clearance =
+        distance_to_speed_road_network(stair_end_world.x, stair_end_world.z, road_network_seed());
+    if road_clearance > SPEED_ROAD_WIDTH * 0.5 + 2.5 {
+        let stair_length = (run * run + access.balcony_y * access.balcony_y).sqrt();
+        let pitch = -(access.balcony_y / run).atan();
+        let stair_center = Vec3::new(0.0, access.balcony_y * 0.5, (low_z + high_z) * 0.5);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(
+                    (access.balcony_width - 1.2).min(5.4),
+                    0.34,
+                    stair_length,
+                ))),
+                material: MeshMaterial3d(pal.city_aqua.clone()),
+                transform: Transform::from_translation(base + rotation * stair_center)
+                    .with_rotation(rotation * Quat::from_rotation_x(pitch)),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            CityAccessKind::ExteriorStair,
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(
+                ((access.balcony_width - 1.2).min(5.4)) * 0.5,
+                0.17,
+                stair_length * 0.5,
+            ),
+        ));
+        for tread in 0..10u32 {
+            let t = (tread as f32 + 0.5) / 10.0;
+            let local = Vec3::new(0.0, access.balcony_y * t + 0.26, low_z + run * t);
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::new(
+                        (access.balcony_width - 0.8).min(5.8),
+                        0.08,
+                        run / 10.0 * 0.72,
+                    ))),
+                    material: MeshMaterial3d(if tread.is_multiple_of(2) {
+                        accent.clone()
+                    } else {
+                        trim.clone()
+                    }),
+                    transform: Transform::from_translation(base + rotation * local)
+                        .with_rotation(rotation),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        }
+    }
+
+    spawn_city_roof_route_and_crown(
+        commands,
+        meshes,
+        pal,
+        base,
+        rotation,
+        width,
+        height,
+        depth,
+        access.ladder_rungs,
+        seed,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_city_roof_route_and_crown(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    rotation: Quat,
+    width: f32,
+    height: f32,
+    depth: f32,
+    ladder_rungs: usize,
+    seed: u64,
+) {
+    let accent = city_accent_material(pal, seed + 1);
+    let ladder_x = width * 0.5 + 0.30;
+    let ladder_z = (seeded(seed, 77) - 0.5) * depth * 0.35;
+    for rung in 0..ladder_rungs {
+        let y = 0.75 + rung as f32 * 1.25;
+        if y >= height + 0.2 {
+            break;
+        }
+        let local = Vec3::new(ladder_x, y, ladder_z);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.18, 0.13, 2.1))),
+                material: MeshMaterial3d(accent.clone()),
+                transform: Transform::from_translation(base + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+            CityAccessKind::Ladder,
+        ));
+    }
+    for side in [-1.0_f32, 1.0] {
+        let local = Vec3::new(ladder_x, height * 0.5, ladder_z + side * 0.92);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.16, height, 0.16))),
+                material: MeshMaterial3d(pal.city_sun.clone()),
+                transform: Transform::from_translation(base + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+            CityAccessKind::Ladder,
+        ));
+    }
+
+    let landing_size = Vec3::new(2.8, 0.32, 3.4);
+    let landing_local = Vec3::new(width * 0.5 + 1.15, height + 0.12, ladder_z);
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::from_size(landing_size))),
+            material: MeshMaterial3d(accent.clone()),
+            transform: Transform::from_translation(base + rotation * landing_local)
+                .with_rotation(rotation),
+            ..default()
+        },
+        WorldGeometry,
+        WalkableSurface,
+        CityAccessKind::RoofLanding,
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
+            landing_size.x * 0.5,
+            landing_size.y * 0.5,
+            landing_size.z * 0.5,
+        ),
+    ));
+
+    // A sun-disc and tapered fantasy spire give the skyline its optimistic
+    // seventies storybook-sci-fi silhouette without compromising the roof.
+    let crown_x = (seeded(seed, 81) - 0.5) * width * 0.28;
+    let crown_z = (seeded(seed, 82) - 0.5) * depth * 0.28;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(1.3, 2.4))),
+            material: MeshMaterial3d(pal.city_lilac.clone()),
+            transform: Transform::from_translation(
+                base + rotation * Vec3::new(crown_x, height + 1.2, crown_z),
+            ),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cone::new(2.8, 3.2))),
+            material: MeshMaterial3d(accent),
+            transform: Transform::from_translation(
+                base + rotation * Vec3::new(crown_x, height + 4.0, crown_z),
+            ),
+            ..default()
+        },
+        WorldGeometry,
+    ));
 }
 
 fn spawn_building(
@@ -18367,6 +19097,26 @@ mod tests {
     }
 
     #[test]
+    fn waterfall_splash_zone_respects_radius_and_vertical_bounds() {
+        assert!(waterfall_zone_contains(Vec3::new(4.0, 3.0, 2.0), 8.0, 12.0));
+        assert!(!waterfall_zone_contains(
+            Vec3::new(8.1, 3.0, 0.0),
+            8.0,
+            12.0
+        ));
+        assert!(!waterfall_zone_contains(
+            Vec3::new(0.0, 12.1, 0.0),
+            8.0,
+            12.0
+        ));
+        assert!(!waterfall_zone_contains(
+            Vec3::new(0.0, -1.6, 0.0),
+            8.0,
+            12.0
+        ));
+    }
+
+    #[test]
     fn mountain_lakes_find_bounded_downhill_outlets() {
         let mut outlet_count = 0;
         for (index, &(_, x, z, _, _)) in MOUNTAIN_LAKES.iter().enumerate() {
@@ -19116,6 +19866,20 @@ mod tests {
         assert!((4.5..=6.8).contains(&small_story));
         assert_eq!(tower_floors, 12);
         assert!((4.5..=6.8).contains(&tower_story));
+    }
+
+    #[test]
+    fn city_access_plan_aligns_balconies_and_scales_roof_ladders() {
+        let (house_floors, house_story) = enterable_floor_layout(18.0);
+        let (tower_floors, tower_story) = enterable_floor_layout(90.0);
+        let house = city_access_plan(14.0, 18.0, house_floors, house_story);
+        let tower = city_access_plan(26.0, 90.0, tower_floors, tower_story);
+
+        assert_eq!(house.balcony_floor, 1);
+        assert!((house.balcony_y - (house_story + 0.18)).abs() < 0.001);
+        assert!((6.5..=11.0).contains(&house.balcony_width));
+        assert!((7.5..=13.0).contains(&house.stair_run));
+        assert!(tower.ladder_rungs > house.ladder_rungs);
     }
 
     #[test]

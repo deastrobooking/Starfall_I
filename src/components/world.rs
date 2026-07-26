@@ -19,6 +19,17 @@ pub struct EnterableBuilding {
     pub accessible_floors: u8,
 }
 
+/// Identifies the readable traversal pieces attached to city buildings.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CityAccessKind {
+    GroundEntrance,
+    ExteriorStair,
+    Balcony,
+    BalconyEntrance,
+    Ladder,
+    RoofLanding,
+}
+
 /// Zone classification for buildings / terrain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum WorldZone {

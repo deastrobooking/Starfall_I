@@ -1,4 +1,5 @@
 use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
+use bevy::audio::SpatialListener;
 use bevy::camera::Hdr;
 use bevy::camera::{PerspectiveProjection, Projection, Viewport};
 use bevy::prelude::*;
@@ -999,6 +1000,11 @@ fn spawn_players(
                 },
             ))
             .id();
+        if i == 0 {
+            commands
+                .entity(cam_entity)
+                .insert(SpatialListener::new(2.0));
+        }
 
         commands.entity(player).insert(PlayerCameraRef(cam_entity));
     }
