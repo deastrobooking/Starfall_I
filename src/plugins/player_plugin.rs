@@ -25,8 +25,8 @@ use crate::components::inventory::{Inventory, QuickItemSlot};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::{
-    BoatPassenger, RailGrindState, SpeedLoopGuide, SpeedRoadCheckpoint, WaterBody, WaterBodyKind,
-    WorldAnchor, WorldRouteMarker,
+    BoatPassenger, Building, EnterableBuilding, RailGrindState, SpeedLoopGuide,
+    SpeedRoadCheckpoint, WaterBody, WaterBodyKind, WorldAnchor, WorldRouteMarker,
 };
 use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
@@ -61,6 +61,9 @@ pub struct PlayerPlugin;
 
 #[derive(Component, Default)]
 struct UnderwaterCameraBlend(f32);
+
+#[derive(Component, Default)]
+struct InteriorCameraBlend(f32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SharedEncounterReason {
@@ -998,6 +1001,7 @@ fn spawn_players(
                     ..default()
                 },
                 UnderwaterCameraBlend::default(),
+                InteriorCameraBlend::default(),
                 DistanceFog {
                     color: Color::srgba(0.02, 0.02, 0.08, 1.0),
                     falloff: FogFalloff::ExponentialSquared { density: 0.00018 },
@@ -1380,7 +1384,12 @@ fn player_camera_follow_system(
     mut transition: ResMut<CameraDisplayTransition>,
     dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
+    spatial_query: SpatialQuery,
     window_q: Query<&Window, With<PrimaryWindow>>,
+    building_q: Query<
+        (&Transform, &Building, &EnterableBuilding),
+        (Without<Player>, Without<PlayerCamera>),
+    >,
     player_q: Query<
         (
             &PlayerIndex,
@@ -1401,6 +1410,7 @@ fn player_camera_follow_system(
             &CameraPitch,
             &mut Camera,
             &mut Projection,
+            &mut InteriorCameraBlend,
         ),
         (With<PlayerCamera>, Without<Player>),
     >,
@@ -1471,10 +1481,47 @@ fn player_camera_follow_system(
             _ => player_transform,
         };
         referenced.push(camera_ref.0);
-        if let Ok((camera_entity, mut camera_transform, pitch, mut camera, mut projection)) =
-            cam_q.get_mut(camera_ref.0)
+        if let Ok((
+            camera_entity,
+            mut camera_transform,
+            pitch,
+            mut camera,
+            mut projection,
+            mut interior_blend,
+        )) = cam_q.get_mut(camera_ref.0)
         {
-            let mut local_ind_transform = player_camera_transform(player_transform, pitch.0);
+            let inside_building =
+                building_q
+                    .iter()
+                    .any(|(building_transform, building, enterable)| {
+                        enterable_building_contains_player(
+                            player_transform.translation,
+                            building_transform,
+                            building,
+                            enterable,
+                        )
+                    });
+            let interior_target = f32::from(inside_building);
+            interior_blend.0 += (interior_target - interior_blend.0) * (1.0 - (-dt * 8.5).exp());
+            let exterior_transform = player_camera_transform(player_transform, pitch.0);
+            let mut interior_transform =
+                interior_player_camera_transform(player_transform, pitch.0);
+            interior_transform.translation = clip_interior_camera_position(
+                player_transform.translation + Vec3::Y * 1.35,
+                interior_transform.translation,
+                &spatial_query,
+            );
+            let interior_smooth =
+                interior_blend.0 * interior_blend.0 * (3.0 - 2.0 * interior_blend.0);
+            let mut local_ind_transform = Transform {
+                translation: exterior_transform
+                    .translation
+                    .lerp(interior_transform.translation, interior_smooth),
+                rotation: exterior_transform
+                    .rotation
+                    .slerp(interior_transform.rotation, interior_smooth),
+                scale: Vec3::ONE,
+            };
             let hook_pullback = grapple
                 .map(|g| if g.is_active() { 3.0 } else { 0.0 })
                 .unwrap_or(0.0);
@@ -1510,7 +1557,8 @@ fn player_camera_follow_system(
             if let Projection::Perspective(ref mut perspective) = *projection {
                 let target_fov =
                     (58.0 + hook_pullback * 1.2 + board_pullback * 1.6 + stunt_intensity * 2.1)
-                        .to_radians();
+                        .to_radians()
+                        + interior_blend.0 * 9.0_f32.to_radians();
                 perspective.fov += (target_fov - perspective.fov) * (1.0 - (-dt * 8.0).exp());
             }
             let is_lead = Some(camera_entity) == lead_camera;
@@ -1573,7 +1621,7 @@ fn player_camera_follow_system(
         }
     }
 
-    for (camera, mut camera_transform, _, mut camera_component, _) in cam_q.iter_mut() {
+    for (camera, mut camera_transform, _, mut camera_component, _, _) in cam_q.iter_mut() {
         if !referenced.contains(&camera) {
             camera_component.is_active = false;
             camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
@@ -1589,6 +1637,50 @@ fn player_camera_transform(player_transform: &Transform, pitch: f32) -> Transfor
         rotation: player_transform.rotation * Quat::from_rotation_x(pitch),
         scale: Vec3::ONE,
     }
+}
+
+fn interior_player_camera_transform(player_transform: &Transform, pitch: f32) -> Transform {
+    let view_rotation = player_transform.rotation * Quat::from_rotation_x(pitch);
+    let focus = player_transform.translation + Vec3::Y * 1.35;
+    Transform {
+        translation: focus + view_rotation * Vec3::new(0.0, 0.35, 4.4),
+        rotation: view_rotation,
+        scale: Vec3::ONE,
+    }
+}
+
+fn enterable_building_contains_player(
+    player_position: Vec3,
+    building_transform: &Transform,
+    building: &Building,
+    enterable: &EnterableBuilding,
+) -> bool {
+    let local =
+        building_transform.rotation.inverse() * (player_position - building_transform.translation);
+    let inset = 0.30;
+    local.x.abs() <= (enterable.footprint.x * 0.5 - inset).max(0.0)
+        && local.z.abs() <= (enterable.footprint.y * 0.5 - inset).max(0.0)
+        && local.y >= 0.05
+        && local.y <= building.height - 0.20
+}
+
+fn camera_distance_before_obstruction(desired_distance: f32, hit_distance: Option<f32>) -> f32 {
+    hit_distance
+        .map(|distance| (distance - 0.28).clamp(0.70, desired_distance))
+        .unwrap_or(desired_distance)
+}
+
+fn clip_interior_camera_position(focus: Vec3, desired: Vec3, spatial_query: &SpatialQuery) -> Vec3 {
+    let offset = desired - focus;
+    let desired_distance = offset.length();
+    let Ok(direction) = Dir3::new(offset) else {
+        return desired;
+    };
+    let filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World);
+    let hit_distance = spatial_query
+        .cast_ray(focus, direction, desired_distance, true, &filter)
+        .map(|hit| hit.distance);
+    focus + direction.as_vec3() * camera_distance_before_obstruction(desired_distance, hit_distance)
 }
 
 fn smooth_camera_position(current: Vec3, target: Vec3, dt: f32) -> Vec3 {
@@ -4877,6 +4969,54 @@ mod tests {
         assert!(submerged.0 < dry.0);
         assert!(submerged.1 > dry.1);
         assert!(submerged.2.to_srgba().blue > submerged.2.to_srgba().red);
+    }
+
+    #[test]
+    fn enterable_building_occupancy_excludes_balconies_and_rooftops() {
+        let transform =
+            Transform::from_xyz(10.0, 3.0, -6.0).with_rotation(Quat::from_rotation_y(0.65));
+        let building = Building {
+            zone: crate::components::world::WorldZone::Downtown,
+            height: 18.0,
+        };
+        let enterable = EnterableBuilding {
+            accessible_floors: 3,
+            footprint: Vec2::new(20.0, 16.0),
+        };
+        let world = |local: Vec3| transform.translation + transform.rotation * local;
+
+        assert!(enterable_building_contains_player(
+            world(Vec3::new(0.0, 1.0, 0.0)),
+            &transform,
+            &building,
+            &enterable,
+        ));
+        assert!(!enterable_building_contains_player(
+            world(Vec3::new(0.0, 2.0, -8.4)),
+            &transform,
+            &building,
+            &enterable,
+        ));
+        assert!(!enterable_building_contains_player(
+            world(Vec3::new(0.0, 18.5, 0.0)),
+            &transform,
+            &building,
+            &enterable,
+        ));
+    }
+
+    #[test]
+    fn interior_camera_is_close_and_stops_before_walls() {
+        let player = Transform::from_xyz(4.0, 2.0, -3.0);
+        let exterior = player_camera_transform(&player, 0.0);
+        let interior = interior_player_camera_transform(&player, 0.0);
+        assert!(
+            interior.translation.distance(player.translation)
+                < exterior.translation.distance(player.translation)
+        );
+        assert_eq!(camera_distance_before_obstruction(4.5, None), 4.5);
+        assert!((camera_distance_before_obstruction(4.5, Some(2.0)) - 1.72).abs() < 1e-5);
+        assert_eq!(camera_distance_before_obstruction(4.5, Some(0.1)), 0.70);
     }
 }
 #[test]
