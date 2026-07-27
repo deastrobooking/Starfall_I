@@ -1,13 +1,58 @@
-# Starfall I — Gameplay Systems Reference
+# Starfall I — Master Feature Reference
 
-For the current verified baseline and production order, see
-`docs/current_state.md`. The dated menu/road/movement/weapon review remains in
-`docs/game_review_2026-07.md` as historical evidence.
+The single authoritative description of **what the game does**. For *how the
+code is organized and how to work on it*, see [DEVELOPMENT.md](DEVELOPMENT.md).
+Forward-looking engine work lives in [engine_roadmap.md](engine_roadmap.md);
+task-focused how-tos live in [guides/](guides/); superseded reviews, audits, and
+dated plans are preserved under [archive/](archive/).
 
-July runtime additions: `MenuFocus` supplies shared controller menu navigation;
-`PlatformerMoveState` owns roll/stomp tuning; `SpeedLoopTraversalState` and
-`RoadRecoveryState` own guided loops/checkpoints; `TrackingMissile` owns Homing
-Star target/steering state; and `WeaponVisualProfile` owns primary beam scale.
+Runtime state ownership worth knowing up front: `MenuFocus` supplies shared
+controller menu navigation, `PlatformerMoveState` owns roll/stomp tuning,
+`SpeedLoopTraversalState` and `RoadRecoveryState` own guided loops and
+checkpoints, `TrackingMissile` owns Homing Star targeting, and
+`WeaponVisualProfile` owns primary beam scale.
+
+## Contents
+
+- [Local Multiplayer](#local-multiplayer)
+- [Player Guidance HUD](#player-guidance-hud)
+- [Player Movement](#player-movement)
+- [Character Studio (Human Generator)](#character-studio-human-generator)
+- [Character Authoring](#character-authoring)
+- [Hero Combat Identity](#hero-combat-identity)
+- [Robot Pets And Combined Forms](#robot-pets-and-combined-forms)
+- [Settlement Builder And Economy](#settlement-builder-and-economy)
+- [Explorable Building Interiors](#explorable-building-interiors)
+- [World Sites / Reclaimable World State](#world-sites--reclaimable-world-state)
+- [World Routes / Connected Platformer Network (M7)](#world-routes--connected-platformer-network-m7)
+- [Raid Counteroffensives (M8)](#raid-counteroffensives-m8)
+- [Tech Hacking And Takeover (M10)](#tech-hacking-and-takeover-m10)
+- [Damage Pipeline](#damage-pipeline)
+- [Weapons](#weapons)
+- [Enemy AI](#enemy-ai)
+- [Chapter System](#chapter-system)
+- [Level Rewards](#level-rewards)
+- [Castle Airship Escalation](#castle-airship-escalation)
+- [Secret Caves](#secret-caves)
+- [Everest Range Fast Travel](#everest-range-fast-travel)
+- [Exploration Settlements](#exploration-settlements)
+- [Great Scientist Temple Subquests](#great-scientist-temple-subquests)
+- [Traversal Courses](#traversal-courses)
+- [Hidden Rewards](#hidden-rewards)
+- [Relic Puzzles](#relic-puzzles)
+- [Perk Tree](#perk-tree)
+- [Tech Upgrades](#tech-upgrades)
+- [Save / Load](#save--load)
+- [Companions](#companions)
+- [Music Deck And Modular Action Audio](#music-deck-and-modular-action-audio)
+- [Procedural World](#procedural-world)
+- [Character Designer](#character-designer)
+- [Vehicle System](#vehicle-system)
+- [Robot / Chassis System](#robot--chassis-system)
+- [Controller And Player Ownership](#controller-and-player-ownership)
+- [Player Music And Action SFX Modding](#player-music-and-action-sfx-modding)
+- [Character Studio Workflow](#character-studio-workflow)
+- [Creation Toolchain](#creation-toolchain)
 
 ## Local Multiplayer
 
@@ -134,7 +179,7 @@ into a hang, rail/loop snap, recovery, or teleport.
 Procedural character poses now distinguish idle, walk, run, jump, fall, flight,
 one-hand wall slide, hang, combat, Star Sabre slash, and grapple wind-up. The
 long-form roadmap for turning this into a full humanoid traversal/combat system
-lives in `docs/playerengine.md`.
+lives in `docs/archive/playerengine.md`.
 
 **Fixed-tick motor (EC1, default ON, 2026-07):** the traversal/grapple/motor
 chain runs at 64 Hz in `FixedUpdate`, consuming a per-player latched input
@@ -397,12 +442,12 @@ skeleton, morph targets, sockets, and animation clips remains a follow-up.
 The current editor is intentionally a constrained parametric modeler, not a
 free vertex editor: this keeps characters compatible with gameplay collision,
 animation, equipment slots, and local multiplayer. See
-`docs/character_studio.md` for its workflow, architecture boundaries, and the
+`docs/FEATURES.md` for its workflow, architecture boundaries, and the
 recommended route toward an RPG-maker-grade creator.
 
 ## Character Authoring
 
-**Files:** `src/character_blueprint.rs`, `src/characters.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
+**Files:** `src/character/blueprint.rs`, `src/character/presets.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
 
 The character designer now stores confirmed edits as `CharacterBlueprint` data rather than only transient UI overrides. The current runtime style target is a taller Dreamcast-anime sci-fantasy hero silhouette: smoother low-poly capsule limbs, expressive eyes/hair, layered armor plates, glow accents, and less tiny voxel/block mass. A blueprint includes:
 
@@ -436,7 +481,7 @@ The full procedural mesh/rig/timeline editor is still future work; the saved sch
 
 ## Hero Combat Identity
 
-**Files:** `src/hero_roster.rs`, `src/plugins/player_plugin.rs`, `src/components/weapon.rs`
+**Files:** `src/character/hero_roster.rs`, `src/plugins/player_plugin.rs`, `src/components/weapon.rs`
 
 All eight human siblings share the same core power categories: speed, strength,
 flight, and magic. Each hero has a distinct signature weapon/special profile
@@ -465,7 +510,7 @@ the hero identity data.
 
 ## Robot Pets And Combined Forms
 
-**File:** `src/robot_pets.rs` | **Runtime hooks:** `src/plugins/enemy_plugin.rs`, `src/plugins/save_plugin.rs`
+**File:** `src/world/robot_pets.rs` | **Runtime hooks:** `src/plugins/enemy_plugin.rs`, `src/plugins/save_plugin.rs`
 
 Robot pets are a campaign-shared collection that can eventually bridge companions, store crafting, vehicle modes, giant mechs, spaceships, and megaships. The current foundation stores:
 
@@ -503,7 +548,7 @@ Future runtime work: controller-friendly garage/store UI, runtime 3-D mech/ship 
 
 ## Settlement Builder And Economy
 
-**Files:** `src/settlement_economy.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`
+**Files:** `src/world/settlement_economy.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`
 
 `SettlementEconomy` is the current vertical slice for the Civilization-style
 reclamation layer. It is campaign-shared and save-backed, with a shared
@@ -669,7 +714,7 @@ Each `WorldRoute` has a `required_site: WorldSiteId`. Every frame, `world_route_
 
 ## Raid Counteroffensives (M8)
 
-**Files:** `src/raids.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`
+**Files:** `src/world/raids.rs`, `src/plugins/world_plugin.rs`, `src/plugins/save_plugin.rs`
 
 **Resource:** `RaidRegistry` (holds `Vec<RaidRecord>`)
 
@@ -706,7 +751,7 @@ route behavior.
 
 ## Tech Hacking And Takeover (M10)
 
-**Files:** `src/hacking.rs`, `src/plugins/hacking_plugin.rs`,
+**Files:** `src/world/hacking.rs`, `src/plugins/hacking_plugin.rs`,
 `src/plugins/enemy_plugin.rs`, `src/plugins/weapon_plugin.rs`,
 `src/plugins/save_plugin.rs`
 
@@ -747,7 +792,7 @@ blueprint reward tables, and UFO weak-point hacking.
 
 ## Damage Pipeline
 
-**File:** `src/damage.rs`, `src/plugins/player_plugin.rs`
+**File:** `src/combat/damage.rs`, `src/plugins/player_plugin.rs`
 
 ```
 Incoming DamageInfo
@@ -886,7 +931,7 @@ grab folds over the deck and reaches a hand down, flip tucks tight, grind
 squats wide, manual leans back over the tail. The same stance drives both the
 cartoon-part and joint-rig paths so imported characters ride identically.
 Tricks themselves are authored data in `assets/combat/tricks.json`
-(`src/tricks.rs`): 23 shipped tricks across Grab/Flip/Grind/Manual/Lip plus
+(`src/combat/tricks.rs`): 23 shipped tricks across Grab/Flip/Grind/Manual/Lip plus
 multiplier-gated Specials (The 900, Christ Air, Kickflip McTwist, Darkslide).
 While the board is out it claims the combat buttons — flip on `melee_light`,
 grab on `melee_heavy`, grind on `dodge`, manual on `parry` — with the stick
@@ -905,9 +950,9 @@ resolves through the character controller and fades on its own; a vertical
 gap over 2.2 units (jumping over a teammate) disables it.
 
 **Hit reactions (2026-07, EC2 first slice):** landed hits now produce bounded
-**hitstop** (`src/hitstop.rs`: 28–90 ms scaled by damage, max-not-sum, drains
+**hitstop** (`src/combat/hitstop.rs`: 28–90 ms scaled by damage, max-not-sum, drains
 on real time; simulation chains skip via `run_if(hitstop_inactive)` while
-cameras/UI keep running), plus the `src/combat_feedback.rs` layer: enemy
+cameras/UI keep running), plus the `src/combat/feedback.rs` layer: enemy
 **flinch** (AI/attack skip `With<Flinch>` entities), impact **hit-flash** orbs,
 **death dissolve** (shrink-out over the despawn window), split-screen-aware
 floating **damage numbers** (per-camera `world_to_viewport`, capped 32),
@@ -1158,11 +1203,11 @@ Chapter select renders those locations as the Everest Range fast-travel map. Key
 
 ## Exploration Settlements
 
-**Files:** `src/chapters/mod.rs`, `src/discussion.rs`, `src/plugins/world_plugin.rs`, `src/plugins/ui_plugin.rs`
+**Files:** `src/chapters/mod.rs`, `src/world/discussion.rs`, `src/plugins/world_plugin.rs`, `src/plugins/ui_plugin.rs`
 
 `map_settlements()` defines optional cities, villages, harbors, and outposts that fill the 200-mile map between chapter anchors. `WorldPlugin` samples local terrain relief for each settlement and assigns a grounded, terraced, or sky-district layout profile. Plazas, segmented roads, building pads, landmarks, discussion NPCs, caches, anchors, and spy activity all use that shared floor profile so interactables and visuals stay aligned with the heightmap. Mega cities now sit on large walkable floating platforms with giant ramp/bridge approaches, guide lights, tower pads, and underside lift columns; rough mountain edges can spawn inset stone/metal gates with dark openings and threshold paths. Chapter select renders matching non-clickable map markers: `C` city, `V` village, `H` harbor, and `O` outpost. Markers turn green after their cache reward id is collected.
 
-Each settlement also has one `DiscussionNpc` near its plaza. Press `E` / D-pad Down near that NPC to open the discussion panel. Dialogue scripts live in `src/discussion.rs`; each line may reference an MP3 under `assets/voice/...`, and the HUD spawns that clip once when the line appears. Missing voice files are acceptable during prototyping, but final recorded lines should keep the documented paths or update the script.
+Each settlement also has one `DiscussionNpc` near its plaza. Press `E` / D-pad Down near that NPC to open the discussion panel. Dialogue scripts live in `src/world/discussion.rs`; each line may reference an MP3 under `assets/voice/...`, and the HUD spawns that clip once when the line appears. Missing voice files are acceptable during prototyping, but final recorded lines should keep the documented paths or update the script.
 
 City settlements are peaceful mega-city hubs protected by orbiting `FreePeopleGuardianShip` patrols from the Free Peoples of Earth. They also hide a small counter-spy activity: Cloudrail City and Switchwork Borough each spawn two non-combat `CitySpyDrone`s. Spy drones carry an EnemyHurtbox sensor despite using kinematic patrol motion, so ordinary projectiles drive the shared enemy-damage, hit-flash, and floating-number path. Shoot them down, then collect the spawned `SpyData` beacon to earn save-backed credits, XP, and armor rewards.
 
@@ -1303,7 +1348,7 @@ HUD support:
 
 ## Perk Tree
 
-**File:** `src/perks.rs` | **Resource:** `PerkTree`
+**File:** `src/combat/perks.rs` | **Resource:** `PerkTree`
 
 Three branches, 6 perks total. One point per level-up via `PerkTree.award(1)`. Spend points in chapter select with `A/S/D/F/G/H`.
 
@@ -1329,7 +1374,7 @@ Current wiring:
 
 ## Tech Upgrades
 
-**File:** `src/upgrades.rs` | **Resource:** `UpgradeLedger`
+**File:** `src/combat/upgrades.rs` | **Resource:** `UpgradeLedger`
 
 Tech upgrades are the campaign-shared production spine for weapon, missile, turret, health, rejuvenation, and future mech/vehicle/ship upgrade paths. Spend robot salvage in chapter select with `Z/X/C/V/B/N`. The current UI is intentionally compact, but it already displays rank, next-rank cost, affordability, and rejuvenation reserve.
 
@@ -1416,7 +1461,7 @@ silent. The current traversal/Saber ids are `hoverboard.overdrive`,
 `hoverboard.land`,
 `sabre.cyclone`, `sabre.comet_dash`, `sabre.meteor_pound`, and `sabre.wave`.
 
-See `docs/audio_modding.md` for the player workflow and manifest schema.
+See `docs/FEATURES.md` for the player workflow and manifest schema.
 
 ## Procedural World
 
@@ -1443,7 +1488,7 @@ See `docs/audio_modding.md` for the player workflow and manifest schema.
 
 ## Character Designer
 
-**Files:** `src/characters.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
+**Files:** `src/character/presets.rs`, `src/plugins/character_design_plugin.rs`, `src/plugins/player_plugin.rs`
 
 - Player slots store optional outfit/accent/hair preset indices plus accessory toggles.
 - Preset indices are normalized before preview, saving, and player spawning, so stale save data cannot panic by indexing outside the palette.
@@ -1501,3 +1546,485 @@ Jets, and Energy Cores, and Scout/Pilot rescue forms can support it.
 **Module:** `src/robots/` | **Plugins:** `RobotGaragePlugin`
 
 `RobotStyle` in `designer.rs` defines colors and part config. `factory.rs` spawns the physical entity using Capsule3d/Sphere/Cylinder geometry. `presets.rs` has named robot builds (`amp()` is the default player chassis). Playable-character loadouts are now edited through `CharacterDesignPlugin`, while the robot garage handles pet assembly and advanced vehicle/mech forms.
+
+## Controller And Player Ownership
+
+This document defines local-player identity independently from controller
+connection order. `PlayerIndex` is the stable runtime/save identity; a gamepad
+is a replaceable input device assigned to that identity.
+
+### PO1 — Start-to-join assignment
+
+- In Player Select, pressing Start on an unassigned controller claims the first
+  joined-but-unassigned slot, then the next open slot.
+- The first claim normally attaches to P1, which remains available to keyboard
+  and mouse. Later claims attach to P2–P4.
+- A controller already assigned to a player cannot claim another slot.
+- Disconnecting releases the device binding but preserves the joined player,
+  character, readiness, and save identity. Pressing Start after reconnect can
+  reclaim that unassigned joined slot.
+- Runtime input and F8 diagnostics resolve through `GamepadAssignments`; they
+  must never infer ownership from gamepad query/enumeration order.
+- The native macOS controller fallback may claim a slot only when Bevy did not
+  report a Start press in the same frame. Native and Bevy bindings share one
+  occupancy check, so they cannot claim the same player; native disconnects
+  release their binding for the same Start-to-reclaim flow.
+
+### PO2 — Individual save ownership
+
+Campaign state remains shared: chapters, world sites/routes, settlements,
+raids, robot-pet collection, command assets, hacking, and final-war state.
+
+Each `PlayerSaveData`, keyed by `player_index`, owns:
+
+- level, XP, credits, health, stamina, and armor points;
+- inventory/acquired loot and equipped quick item;
+- selected primary/special weapon, armor element, and traversal mode;
+- perk tree, tech-upgrade ledger, and weapon ranks;
+- character blueprint, Studio recipe, and modular part loadout through the
+  corresponding player-select slot.
+
+Save schema version 4 retains the optional per-player progression fields added
+in v3 and adds atomic rotating generations. Old saves
+continue to load by seeding `PlayerProgression` from the legacy campaign-wide
+perk, upgrade, and weapon-rank records. New saves write independent progression
+for every active `PlayerIndex`.
+
+### Delivered progression ownership slice
+
+Each player-select slot now carries its own `PlayerProgression`. Chapter Select
+shows one `P# UPGRADES` owner button per joined player; perk, tech, and weapon
+rank purchases mutate only the selected slot. Spawning copies that slot into the
+runtime player, and level-up awards, movement perks, health regeneration, armor
+bonuses, aim assists, ammo caps, ranged/special damage, melee upgrades, and
+Star Sabre upgrades consume the owning player's component.
+
+Disk hydration seeds every slot from its matching `player_index`. Legacy saves
+seed all slots from the old campaign-wide progression fields, while optional v3
+player records override their matching slots. Entering gameplay no longer
+reapplies stale disk progression after Chapter Select, so a purchase made just
+before launch survives into the session and the next save.
+
+The legacy top-level perk, upgrade, and weapon-rank resources remain serialized
+for backward compatibility. The PX3 shop now uses the same explicit owner
+selector and persists per-player ownership/equipment in `players[]`; vehicles
+remain party-shared showcase entries. New runtime consumers must use
+`PlayerProgression`, not the compatibility resources.
+
+Manual acceptance still required: four physical controllers joining in arbitrary
+order, disconnect/reconnect in every slot, save with distinct inventories and
+progression, restart, reload, and verify no cross-player swaps.
+
+## Player Music And Action SFX Modding
+
+Starfall keeps background music, custom action MP3s, and built-in arcade effects
+on separate layers. Custom files are optional; an empty library remains fully
+playable and audible.
+
+### Background music
+
+1. Copy MP3 files into `assets/user_music`.
+2. Launch Starfall and press `F6`.
+3. Press `R` to rescan after adding or removing files.
+4. Use Left/Right or D-pad Left/Right to change tracks.
+5. Use Space or controller A to pause/resume. `S` toggles shuffle.
+
+Set `STARFALL_MUSIC_DIR=/absolute/path/to/music` before launch to keep personal
+music outside the installation. Files are sorted case-insensitively by name.
+The deck uses the Settings music slider and master volume; SFX remains active.
+
+### Action sound assignments
+
+Put MP3 one-shots in `assets/user_sfx`, then edit `actions.json`:
+
+```json
+{
+  "actions": {
+    "weapon.fire": "laser_shot.mp3",
+    "melee.slash": "energy_slash.mp3",
+    "hoverboard.grind_start": "rail_start.mp3"
+  }
+}
+```
+
+Press `F6`, then `R` to hot reload. Set `STARFALL_SFX_DIR` to use an external
+folder containing both `actions.json` and its MP3 files.
+
+Built-in IDs are `weapon.fire`, `weapon.reload`, `melee.slash`, `combat.hit`,
+`combat.parry`, `combat.kill`, `player.hurt`, `player.level_up`, `reward.loot`,
+and `reward.chest`. Modular systems may emit additional IDs through
+`ModularActionSfxEvent`. The stunt-road slice currently emits
+`hoverboard.spring`, `hoverboard.grind_start`, `hoverboard.grind_exit`, and
+`hoverboard.trick_land`.
+
+The hoverboard/Saber progression pass also emits `hoverboard.overdrive`,
+`hoverboard.land`,
+`sabre.cyclone`, `sabre.comet_dash`, `sabre.meteor_pound`, and `sabre.wave`.
+If an id is absent from `actions.json`, the game uses the appropriate synthesized
+arcade fallback so the action remains audible during prototyping.
+
+Action IDs may contain ASCII letters, digits, `.`, `_`, and `-`. MP3 paths must
+be relative and cannot contain `..`. Missing, rejected, unreadable, or malformed standard
+assignments automatically use Starfall's synthesized arcade effect.
+
+Only use music and sound effects you have permission to play and distribute.
+
+## Character Studio Workflow
+
+The Character Studio is Starfall I's player-facing humanoid authoring tool. It
+uses a constrained, non-destructive workflow inspired by RPG character makers
+and Blender's turntable/model-inspection tools. Players edit a compact
+`CharacterSpec`; procedural generators rebuild the preview. They never edit
+runtime mesh entities directly.
+
+### Player workflow
+
+1. Choose a male/female base or a gameplay archetype: STAR HERO,
+   SHADOW RAIDER, MANA ADVENTURER, STREET RUNNER, or MECHA ROBOT. Presets are
+   editable seeds, never locked character classes.
+2. Sculpt body and face proportions with sliders or precise `-` / `+` steps.
+   Soft, Heroic, Chibi, and Rival face seeds update only facial parameters and
+   leave the current body, wardrobe, colors, and flair intact.
+3. Use `R` on a row to restore only that field, or RESET ALL to return to a
+   neutral model. Both are protected by the 64-step undo history.
+4. Inspect the design with FRONT, PROFILE, BACK VIEW, FULL BODY, and FACE
+   CLOSE-UP. Preview Neutral, Joy, Determined, and Surprised expressions
+   non-destructively; expression choice is not written into the character
+   recipe. Right-drag/right-stick provides free orbit; wheel/triggers zoom.
+5. Mix wardrobe slots and colors. Palette fields show their actual color next
+   to the value instead of only a numeric index.
+6. SAVE VERSION writes a new JSON preset. Existing versions remain available
+   through the scrollable library. USE IN GAME assigns the exact generated
+   model to the active local-player slot.
+
+Controller layout:
+
+- D-pad or left stick: navigate rows; Left/Right changes the focused value.
+- South / A / Cross: activate the focused button.
+- West / X / Square: reset the focused sculpt or style field.
+- Left/Right shoulder: jump between presets, body, face, wardrobe, and library.
+- East / B / Circle: return to the standard character designer.
+- Right stick: orbit; triggers: zoom.
+
+### Architecture
+
+The authoring path is:
+
+```text
+UI controls -> CharacterSpec -> preset generators -> CharacterPatch -> procedural meshes
+```
+
+- `spec.rs` is the serialized source of truth. Morph values are normalized to
+  `0.0..=1.0`, with `0.5` as neutral.
+- `generators.rs` turns stable named properties into morph, material, and
+  wardrobe-slot patches.
+- `human_mesh.rs` builds the current mathematical preview. The named patch
+  boundary is also where future rigged GLB shape keys can be connected.
+- `mod.rs` owns the editor workspace, input, undo, camera, library, and preview
+  rebuild scheduling.
+
+Keeping the saved format parametric is important: a player-created character
+can remain animation-, equipment-, and gameplay-compatible after the rendering
+implementation is upgraded.
+
+### MVP visual library
+
+The generated base deliberately targets a broad 1980s cel-anime language:
+larger cranium, tapered lower face, wide eyes with upper lashes and catchlights,
+small readable nose, warm cheek marks, and graphic hair silhouettes. Eye
+spacing, tilt, and depth; brow angle; nose bridge; chin width; and lip fullness
+join the original face controls. The mouth has separate cavity and
+upper/lower-lip geometry. Generated
+eyes, brows, and mouth carry semantic feature tags so runtime animation can
+blink, emote, breathe, and open the mouth during attacks independently of the
+head. These are original procedural forms and are not tied to one show or
+artist.
+
+The current face pass adds Face Length, Eye Shape, and Nose Tip controls. Eye
+whites now use an original shallow parametric lens whose signed-power outline
+interpolates from rounded to pointed almond shapes. Skin-toned lower lids,
+short outer lashes, broad shallow cheek planes, a narrower bridge/tip nose, and
+restrained lip volumes keep the face cohesive in front and three-quarter view.
+This follows the same compact-parametric principle as Alan Barr's
+[superquadric formulation](https://authors.library.caltech.edu/records/rtr62-f2882/latest)
+and the low-control-cage/smooth-limit-surface rationale documented by
+[OpenSubdiv](https://graphics.pixar.com/opensubdiv/overview.html), while all
+forms and code remain original to Starfall.
+
+The workflow follows the preset-first/fine-adjustment pattern used by
+[MetaHuman Creator](https://dev.epicgames.com/documentation/metahuman/metahuman-creator-in-unreal-engine)
+and [VRoid Studio](https://vroid.com/en/news/1FI7DuaA77iAntDfxBFTRT).
+Expression preview is deliberately separate from the neutral saved design,
+matching the authoring distinction described by VRoid's
+[Expression Editor](https://vroid.pixiv.help/hc/en-us/articles/4408150140825-How-to-use-the-Expression-Editor).
+Starfall keeps its own original anime geometry, parameters, and runtime.
+
+The MECHA ROBOT preset preserves the generator's successful armored silhouette
+as a first-class character seed and now combines Crystal Mecha armor with mecha
+wings. STAR HERO and SHADOW RAIDER provide readable good-guy/bad-guy contrast;
+MANA ADVENTURER uses an arcane coat and moon gem for compact shared-camera
+fantasy play; STREET RUNNER demonstrates the city clothing stack.
+
+Wardrobe options currently include twelve top silhouettes, eight bottoms, nine
+footwear silhouettes, nine hairstyles, gloves/gauntlets, and four full armor
+overrides. The Arcane Coat and Star Knight Tunic add fantasy layering to the
+existing modern wardrobe. Mecha Armor, Crystal Mecha, and Dragon Mecha provide
+distinct armor suites. An independent fantasy-flair field offers None, Star
+Gem, Moon Gem, Royal Mantle, Arcane Halo, and Mecha Wings without consuming a
+wardrobe slot. Clothing uses separate cloth, denim, leather, sole, metal, and
+emissive material responses.
+
+Chest Shape is an explicit neutral morph shared by both bases. It drives fitted
+clothing depth and sex-aware procedural chest definition: broader pectoral
+planes on the male base and softer paired forms on the female base. The control
+remains editable on either body and does not change gameplay collision.
+
+Every non-armor character receives a fitted coverage garment around the pelvis
+and upper thighs before outer clothing is generated. This is an invariant of
+the mesh builder, not a UI convention, so randomization and old presets cannot
+create an accidentally uncovered model.
+
+### Unified procedural/imported rig MVP
+
+The studio has two visual backends feeding one animation contract. **GENERATED**
+builds the editable procedural character. **RIG TEST** loads
+`Characters/AMP.glb`, discovers its bone hierarchy after scene instantiation,
+and maps it atomically into the same 17-joint `SkeletonRig` used by procedural
+characters. Imported joints preserve authored translation, rotation, and scale;
+the runtime builds rest-pose-adjusted MVP clips for that rig and enables the
+same `CartoonAnimator`, gameplay pose selection, hand state, IK, and sockets.
+
+Character Studio reports `Pending`, `Ready`, or `Invalid` import status. A rig
+is rejected rather than partially animated when required joints are missing,
+multiple bones map to one canonical joint, or the hierarchy cannot be resolved.
+If the scene asset itself fails to load, the generated preview is restored.
+
+The repository asset audit found that AMP has one 40-bone skin and covers all
+17 Starfall gameplay joints, but contains no animations and no morph targets.
+Antonio, Chroma, Daria, and Vincenzo currently contain static meshes without a
+skin. RIG TEST is therefore a diagnostic integration seam, not a replacement
+for the editable generated model yet.
+
+Production Blender/export bone names:
+
+```text
+SF_PELVIS  SF_SPINE  SF_CHEST  SF_NECK  SF_HEAD
+SF_SHOULDER_L  SF_ELBOW_L  SF_WRIST_L
+SF_SHOULDER_R  SF_ELBOW_R  SF_WRIST_R
+SF_HIP_L  SF_KNEE_L  SF_ANKLE_L
+SF_HIP_R  SF_KNEE_R  SF_ANKLE_R
+```
+
+`rig_bridge.rs` accepts AMP's existing names plus common Mixamo, Blender
+Rigify, and Unreal-style upper-arm/forearm/hand/thigh/calf/foot aliases. Saved
+gameplay data references canonical joints only, never vendor bone names.
+
+Production shape keys must use the existing patch names:
+
+```text
+body_height body_muscle body_weight shoulders_wide waist_width hips_wide limb_length
+body_chest_shape face_length face_jaw_wide face_chin_long face_chin_wide
+face_nose_long face_nose_wide face_nose_bridge face_nose_tip face_brow_heavy
+face_cheek_full face_eye_large face_eye_shape face_eye_spacing face_eye_tilt
+face_eye_depth face_brow_angle face_mouth_wide face_lip_full
+```
+
+This contract means a future Blender model can replace the preview renderer
+without changing `CharacterSpec` JSON or invalidating saved player designs.
+
+### Review and next milestones
+
+The studio now has a viable modeling loop, but it is not yet a Blender-style
+mesh editor. The next upgrades should preserve constrained output while adding
+more visual authoring power:
+
+1. Add collapsible Body, Face, Hair, Wardrobe, and Materials tabs with preset
+   presets and thumbnail grids. This is the largest remaining RPG-maker UX gap.
+2. Author a production humanoid base using the documented 17-bone and
+   shape-key contract. Runtime rig discovery, validation, rest-pose retargeting,
+   shared animation, and fallback are complete; AMP still lacks editable shape
+   keys and authored animation clips.
+3. Add region selection in the viewport: selecting the head, torso, arm, or leg
+   should open the matching parameter group and outline that region.
+4. Add paired/asymmetric controls for ear shape, hand/foot scale, arm/leg length
+   separately, and optional left/right details.
+5. Promote the delivered neutral/joy/determined/surprised Studio previews into
+   authorable expression channels (fear, anger, pain, phonemes), then add
+   locomotion/combat preview poses and equipment-clearance checks.
+6. Add named character projects, duplicate/rename, thumbnail capture, and an
+   explicit APPLY TO PLAYER SLOT action. Keep version history for recovery.
+7. Upgrade generated GLB export from rigid preview geometry to a skinned
+   canonical skeleton with weights, sockets, morphs, and optional animations.
+
+The next rig-tooling phase is an import wizard that persists one reusable rig
+profile per asset: detected convention, manual mapping overrides, axis/unit
+normalization, T/A-pose calibration, root-motion policy, socket offsets, and
+validation results. After that come animation layers/masks, blend trees,
+timeline events, IK gizmos, retarget comparison, and equipment-clearance tests.
+
+Free vertex sculpting is deliberately not the immediate target. Unrestricted
+topology edits would make animation, collision, clothing, and multiplayer asset
+budgets unreliable; shape-key and part-based modeling provides the useful
+creative range while keeping authored characters game-ready.
+
+## Creation Toolchain
+
+Starfall is both a four-player game and a constrained game-making system. The
+editor strategy is therefore not a collection of debug menus. Every tool must
+compile a small, versioned recipe into validated runtime content through the
+same deterministic pipeline.
+
+```text
+editable recipe -> generator -> preview -> validators -> compiled runtime asset
+       |                |           |             |                |
+   JSON/RON save    seeded RNG   undo/orbit   budget/playtest   game/save ID
+```
+
+### Scientific foundation
+
+All generators follow these rules:
+
+- The recipe is the source of truth; generated entities and meshes are output.
+- Every schema has a version and migration path. Old player saves remain valid.
+- Random generation accepts an explicit seed and produces repeatable output.
+- Dimensions use meters, angles use radians internally, colors use linear or
+  documented sRGB values, and normalized creative controls use `0.0..=1.0`.
+- Generators expose semantic tags (face feature, robot socket, road lane, room,
+  cave portal) instead of depending on entity names or scene hierarchy.
+- Validation runs before publish: geometry/material budgets, collision,
+  traversal clearance, spawn safety, connectivity, and four-player camera fit.
+- Preview and runtime use the same compiler. A beautiful editor-only result
+  that changes in gameplay is a defect.
+- Recipes receive stable content IDs so levels reference content without
+  copying generated geometry into campaign saves.
+
+The broader Blender-inspired capability triage, current-Bevy corrections, and
+ET1–ET11 delivery gates are specified in `docs/archive/engine_tools_multistage_pass.md`.
+
+### Tool sequence
+
+#### GM1 — Humanoid Character Studio (active)
+
+The current `CharacterSpec -> CharacterPatch -> procedural mesh` path is the
+reference implementation. Its 26-morph contract includes face length, eye
+shape/depth, nose bridge/tip, chin width, and chest shape; fantasy
+gems/mantles/halos/wings layer
+independently over twelve tops and three mecha suites. Four face seeds and four
+non-destructive expression previews provide a preset-first refinement loop.
+Immediate completion gates are authorable expression channels, animation
+preview poses, thumbnail presets, attachment
+clearance, seeded randomize, and explicit schema versioning. Art direction
+combines compact fantasy readability, colorful action robots, and original
+1970s space-opera shapes without copying protected characters or assets.
+
+#### GM2 — Robot and Monster Forge (playable vertical slice active)
+
+Unify the existing `src/robots` archetypes and drone factory behind a serializable
+`CreatureSpec`. Use composable morphology modules rather than separate hardcoded
+models:
+
+- topology: humanoid, quadruped, flyer, crawler, serpent, drone;
+- parts: core, head/sensor, torso, limbs, wings, tail, armor, weapon sockets;
+- behavior role: ally, civilian, scout, bruiser, artillery, boss;
+- materials: painted metal, bare alloy, crystal, organic, energy;
+- rig contract and procedural locomotion selected from topology;
+- faction palette and silhouette rules applied as a layer, not baked geometry.
+
+Acceptance: create, save, reload, animate, validate, and spawn at least three
+distinct robots and three monsters from recipes; generated enemies must work
+with targeting, damage, navigation, and campaign saves.
+
+Current status: `src/robots/creature.rs` provides schema-versioned JSON recipes,
+deterministic seeded generation, robot/monster kinds, six topologies, seven
+gameplay roles, six factions, five material responses, publish validation, and
+six curated seeds. `CreatureSpec::from_legacy` wraps an existing preset without
+losing its `RobotStyle`, while `spawn_creature` compiles topology into the
+procedural factory and adds stable runtime metadata.
+
+The Project Hub now opens a player-facing `AppState::CreatureForge` workspace
+with live preview, controller focus, bounded morphology/features/modifier
+editing, undo/reset, project-backed validation/save, and versioned preset
+export/load. Published creature payloads enter `PublishedCreatureCatalog` only
+when published and draft hashes match. Dungeon spawners can resolve a
+`CreatureSpawnOverride` by stable content ID, derive combat stats from the
+authored role, and fall back to their built-in enemy safely. Remaining GM2 work
+is topology-specific animation rigs, thumbnail publishing, window-layout
+persistence, and Level Composer authoring for creature spawn overrides.
+
+#### GM1b — Imported Character Forge (first vertical slice active)
+
+Project Hub also opens `AppState::ImportedCharacterForge`. Authors can drop an
+external binary glTF file, after which Forge copies it to
+`assets/imported_characters/`, inventories its named meshes, and reconstructs
+the node transforms in a live rotating preview. Each rigid mesh owns an
+independent non-destructive stack using the shared Mirror, Array, Twist,
+Subdivide, Smooth, and Noise Displace tools. Root width, height, and depth are
+editable independently.
+
+The imported source path, selected mesh, root proportions, and modifier stacks
+save as a versioned Character payload in the active Forge project and reload
+without altering the source GLB. Meshes carrying joint weights or morph targets
+remain preview-safe and retain authored deformation data; topology modifiers
+are recorded but not baked onto those meshes yet. Next work is viewport picking,
+brush-based displacement/masking, material preservation, thumbnail publishing,
+and a skin/morph-aware GLB bake/export path.
+
+#### GM3 — World Kit Forge
+
+Create three recipe families sharing sockets and metrics:
+
+- `RoadKitSpec`: deck profile, lane count, spline grade/curvature limits, ramp,
+  loop, jump, guard, support-column, and terrain-clearance policies.
+- `SettlementKitSpec`: street graph, parcels, building/castle modules, doors,
+  rooms, stairs, encounter sockets, materials, and faction dressing.
+- `DungeonKitSpec`: cave/room graph, elevation layers, gates, secrets, hazards,
+  fast-travel anchors, and shared-camera encounter bounds.
+
+Generators publish both visuals and gameplay metadata. Roads must output a
+connected traversal graph; buildings must output navigable room/portal graphs;
+caves must output encounter and fast-travel graphs.
+
+#### GM4 — Level Scene Composer
+
+The scene editor consumes published character, creature, and world-kit assets.
+It needs a full-level map plus local 3D viewport, selection/outliner,
+translate/rotate/scale gizmos, terrain height/paint tools, spline editing,
+prefab placement, duplicate/delete, undo/redo, and property inspection.
+
+Terrain authoring uses non-destructive layers: base heightmap, sculpt delta,
+material/biome masks, exclusion masks, and placed landmarks. Cities, castles,
+caves, roads, encounters, and fast-travel points are referenced by stable IDs.
+The editor must visualize road connectivity, cave portals, spawn radii,
+navigation, camera bounds, and terrain collision before publishing.
+
+Acceptance: load an entire chapter, add a terrain landmark, connect a road,
+place a generated castle and cave, add spawns and fast travel, validate, save,
+reload, then play the result without code changes.
+
+### Shared editor services
+
+Build these once and reuse them across all four tools:
+
+1. Versioned asset registry and migrations.
+2. Command-based undo/redo transactions.
+3. Selection, outliner, inspector, searchable palette, and thumbnail browser.
+4. Orbit/free cameras plus transform and spline gizmos.
+5. Seeded generation and variant comparison.
+6. Validation report with errors, warnings, metrics, and viewport highlights.
+7. Draft/published lifecycle with atomic save and recovery snapshots.
+8. Performance budgets and automated headless compile/playability tests.
+
+### Near-term order
+
+1. Finish GM1 expression channels, animation preview, schema version, and
+   thumbnail preset browser.
+2. Adapt the existing robot designer/factory to the shared recipe/validator
+   contract; do not replace its working drone geometry.
+3. Extract shared editor services only after both GM1 and GM2 exercise them.
+4. Implement road-kit recipes first in GM3 because terrain-aware roads already
+   have measurable grade, clearance, ramp, and connectivity tests.
+5. Add settlement/castle and cave kits, then build GM4 on their published
+   content contracts.
+
+This order keeps the game playable while the maker layer grows and prevents the
+scene editor from being designed before its asset schemas exist.

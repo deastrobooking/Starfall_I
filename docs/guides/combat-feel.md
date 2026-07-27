@@ -1,7 +1,7 @@
 # Combat Feel — hitstop, knockback, and hit feedback
 
 How a landed hit becomes *felt*. Two modules own this:
-`src/hitstop.rs` (the freeze) and `src/combat_feedback.rs` (everything visible).
+`src/combat/hitstop.rs` (the freeze) and `src/combat/feedback.rs` (everything visible).
 
 ## The hit pipeline
 
@@ -28,7 +28,7 @@ noted):
 | Damage numbers | `EnemyDamagedEvent` | per-active-camera `world_to_viewport` + viewport offset (split-screen correct), rise/fade, capped at 32 |
 | Camera shake | damage + kills | proximity-scaled `CameraShake::add_player_trauma` per player |
 | Rumble | same | `trigger_player_rumble` (currently a stub body — wire when Bevy exposes rumble) |
-| SFX | 10 events (fire/slash/hit/parry/kill/hurt/loot/chest/level-up/reload) | `src/sfx.rs` bus over the procedural retro palette in `src/audio_synth.rs` — zero external assets, 50 ms per-kind cooldown, deterministic ±5% pitch jitter, obeys `GameSettings.sfx_volume` |
+| SFX | 10 events (fire/slash/hit/parry/kill/hurt/loot/chest/level-up/reload) | `src/audio/sfx.rs` bus over the procedural retro palette in `src/audio/synth.rs` — zero external assets, 50 ms per-kind cooldown, deterministic ±5% pitch jitter, obeys `GameSettings.sfx_volume` |
 
 ## Rules of thumb
 
@@ -55,7 +55,7 @@ move's `startup` (wind-up) / `active` (strike) / `recovery` phases,
 `cancel_after` (seconds into recovery when a buffered next attack may chain),
 `damage`, `knockback`, and per-move `hitstop`. Edit + relaunch to retune —
 no recompile. Delete the file to restore defaults (they're also written on
-first run). Loading/validation: `src/combat_data.rs` (`MoveLibrary`; invalid
+first run). Loading/validation: `src/combat/data.rs` (`MoveLibrary`; invalid
 files log a warning and fall back to defaults, never soft-lock).
 
 Execution: `melee_combo_system` runs a Startup→Active→Recovery machine per

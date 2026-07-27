@@ -1,15 +1,15 @@
 # Starfall Engine Core Roadmap (`EC#`)
 
-Current cross-roadmap order is in `docs/current_state.md`; the July menu, road,
-movement, and weapon audit remains in `docs/game_review_2026-07.md`.
+Current cross-roadmap order is in `docs/archive/current_state.md`; the July menu, road,
+movement, and weapon audit remains in `docs/archive/game_review_2026-07.md`.
 
 > **Track prefix:** `EC#` — *Engine Core*. The substrate that makes the game feel
 > like a tight character-action game: fixed-tick determinism, input buffering,
 > frame-data combat, profiling, and (eventually) reusable engine crates.
 >
 > Sits alongside the existing roadmaps:
-> - `M#`  — engine/campaign strategy (`docs/engine_upgrade_milestones.md`)
-> - `MM#` — motion mechanics / traversal (`docs/playerengine.md`)
+> - `M#`  — engine/campaign strategy (`docs/archive/engine_upgrade_milestones.md`)
+> - `MM#` — motion mechanics / traversal (`docs/archive/playerengine.md`)
 > - `AI#` — enemy AI behavior (future)
 >
 > **North star:** *A low-latency, 4-player-first character-action engine on Bevy.*
@@ -119,7 +119,7 @@ promise first:
 **Acceptance:** overlay shows live FPS/frame-time; `GameSet` ordering compiles and
 is configured; budgets documented (sim < 2–4 ms, motor < 0.5 ms, combat < 0.5 ms).
 **Status:** perf overlay + Tracy flag + `GameSet` scaffold landed via `GameLoopPlugin`
-(`src/game_loop.rs`). First `.in_set()` opt-ins landed 2026-07-24: the player
+(`src/engine/game_loop.rs`). First `.in_set()` opt-ins landed 2026-07-24: the player
 action chain (dodge/parry/state/stamina) runs in `Motor` and the weapon systems
 (melee, sabre, ranged, projectiles) in `Combat`, so player actions consume their
 inputs deterministically before attacks resolve. Remaining per-system
@@ -155,8 +155,8 @@ last green engine baseline until the branch passes.
 smooth (no jitter) under frame drops; input latency visible in overlay.
 **Status:**
 - *EC1a (done)* — `Time<Fixed>` pinned to `FIXED_HZ` (64), `FixedTickCount` + perf
-  overlay "sim ticks" line (`src/game_loop.rs`), and a unit-tested per-player
-  input command buffer (`src/input_buffer.rs`: latch every render frame in
+  overlay "sim ticks" line (`src/engine/game_loop.rs`), and a unit-tested per-player
+  input command buffer (`src/engine/input_buffer.rs`: latch every render frame in
   `RunFixedMainLoop::BeforeFixedMainLoop`, consume once per `FixedUpdate` tick →
   `PlayerInputBuffers::fixed(idx)`). **Additive** — motor still reads `PlayerInput`
   in `Update`, so behavior is unchanged; 3 tests cover the buffer, and the local
@@ -198,9 +198,9 @@ smooth (no jitter) under frame drops; input latency visible in overlay.
   (reuse per-player `CameraShake`).
 **Acceptance:** a move's frames/cancels are editable as data without recompiling
 gameplay logic; hits produce hitstop + knockback + shake.
-**Status (first slice landed 2026-07-15):** bounded hitstop (`src/hitstop.rs`,
+**Status (first slice landed 2026-07-15):** bounded hitstop (`src/combat/hitstop.rs`,
 28–90 ms max-not-sum, drains on `Time<Real>`, sim chains gated via
-`run_if(hitstop_inactive)`) + the `src/combat_feedback.rs` reaction layer
+`run_if(hitstop_inactive)`) + the `src/combat/feedback.rs` reaction layer
 (flinch with `Without<Flinch>` AI/attack filters, hit-flash orbs, death
 dissolve, split-screen damage numbers, proximity outgoing shake, rumble hook).
 2 hitstop unit tests; suite 244. **Collision foundation landed 2026-07-17:**
@@ -238,25 +238,25 @@ as distance-based soft separation through the external-shove channel
 role yet. Remaining EC2: authored GrappleSensor/Interaction collider
 entities (and a collider-backed Pushbox if enemy-enemy separation is ever
 wanted), plus `MoveDef` expansion.
-**Audio slice (S3, 2026-07-15):** `src/audio_synth.rs` (deterministic chip
-synth → WAV bytes, 10 presets, 3 unit tests) + `src/sfx.rs` bus mapping 10
+**Audio slice (S3, 2026-07-15):** `src/audio/synth.rs` (deterministic chip
+synth → WAV bytes, 10 presets, 3 unit tests) + `src/audio/sfx.rs` bus mapping 10
 gameplay events to one-shots with cooldowns/jitter/`sfx_volume`. Combat is no
 longer silent; file-based sounds can replace presets handle-for-handle.
 **Ownership slice (S4, 2026-07-15):** studio **GLB export** — `EXPORT GLB`
 button walks the preview and writes versioned `human_vNNN.glb` via the
 hand-rolled writer in `src/character_studio/glb_export.rs` (no new deps).
-**Deterministic RNG seam** — `src/game_rng.rs` `GameRng` (StdRng streams:
+**Deterministic RNG seam** — `src/engine/game_rng.rs` `GameRng` (StdRng streams:
 combat/loot/world/cosmetic; seed logged, `STARFALL_SEED` reproduces) replaced
 every gameplay `thread_rng()`; sole exemption: camera-shake offset
 (presentation-only, annotated). EC6 replay now has its randomness seam.
 **Frame-data slice (S5, 2026-07-15):** `MoveDef`/`MoveLibrary`
-(`src/combat_data.rs`) — melee chains load from editable
+(`src/combat/data.rs`) — melee chains load from editable
 `assets/combat/moves.json` (defaults written on first run, validated with
 fallback); `melee_combo_system` rebuilt as a Startup→Active→Recovery phase
 machine with cancel-window chaining and per-move hitstop. Loot drops tiered by
 enemy type (champion = guaranteed core + extra rolls). MoveDefs for
 sabre/ranged and the sabre technique defs have since landed in
-`src/combat_data.rs`; player-received knockback and per-move i-frames landed
+`src/combat/data.rs`; player-received knockback and per-move i-frames landed
 2026-07-24. Remaining EC2: the remaining move-scoped collision roles
 (pushbox/grapple/interaction split).
 **Boss variety (2026-07-15):** RiftBoss + MechBoss controllers
@@ -284,7 +284,7 @@ rodio; without it any first sound panicked `UnrecognizedFormat`).
 **Acceptance:** base locomotion uses authored clips; procedural IK corrects to
 ground/targets; motor state drives blend weights.
 
-**MVP slice shipped 2026-07-16:** `src/animation_mvp.rs` now builds a shared
+**MVP slice shipped 2026-07-16:** `src/character/animation_mvp.rs` now builds a shared
 Bevy `AnimationGraph` with independent per-player playback, speed scaling, and
 crossfades for idle, walk, run, sprint, jump, fall, wall slide/climb, and hang.
 The graph owns torso/shoulder/hip base motion while procedural wrists, weapon

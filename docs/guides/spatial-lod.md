@@ -69,7 +69,7 @@ not lose the nearby tier.
 5. Fast-travel to outer settlements and caves. Confirm terrain seams stay closed,
    roads retain their grades, and F9 colliders do not change as tiers swap.
 
-Automated coverage lives beside the service in `src/spatial_lod.rs` and checks
+Automated coverage lives beside the service in `src/engine/spatial_lod.rs` and checks
 profile bounds, hierarchy propagation, and clean removal.
 
 ## Next slices

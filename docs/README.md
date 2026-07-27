@@ -1,54 +1,32 @@
-# Starfall I — Documentation Map
+# Starfall I — Documentation
 
-Documentation has accumulated across several workstreams. This index says what
-each document is FOR and whether it's **living** (kept current, edit it) or a **snapshot**
-(point-in-time review/triage — read for history, don't update).
+Five active documents. Everything else is either a task-focused guide or a
+preserved historical record.
 
-## Start here
-
-| Doc | Status | What it is |
-|---|---|---|
-| [current_state.md](current_state.md) | living | **Canonical current handoff**: verified baseline, delivered foundations, next production order, authority map |
-| [guides/](guides/README.md) | living | **Process how-tos**: verification gates, fixed-tick motor, combat feel, character-studio pipeline |
-| [architecture.md](architecture.md) | living | Module map, state flow, ownership policy, key design choices |
-| [systems.md](systems.md) | living | Gameplay systems reference (movement, combat, world, saves…) — the encyclopedia |
-
-## Roadmaps (milestone prefixes never mix)
-
-| Doc | Prefix | Scope |
-|---|---|---|
-| [engine_roadmap.md](engine_roadmap.md) | `EC#` | Engine core: fixed tick, frame-data combat, profiling, extraction |
-| [engine_upgrade_milestones.md](engine_upgrade_milestones.md) | `M#` | Campaign/engine strategy milestones + upgrade procedure + naming table |
-| [playerengine.md](playerengine.md) | `MM#` | Motion mechanics / traversal / skeletal-animation roadmap |
-| [agent_next_steps.md](agent_next_steps.md) | — | Near-term priorities + work rules for agents |
-| [player_creator_experience_plan.md](player_creator_experience_plan.md) | `PX#` / `PM#` | Aiming, weapon presentation, shop UX, editor launcher, projects, presets, and multi-level support |
-| [controller_player_ownership.md](controller_player_ownership.md) | `PO#` | Start-to-join controller assignment and per-player persistence ownership |
-
-## Subsystem references (living)
-
-| Doc | Covers |
+| Document | Read it when you want… |
 |---|---|
-| [character_studio.md](character_studio.md) | Character Studio feature reference (pipeline how-to: [guides/character-studio-pipeline.md](guides/character-studio-pipeline.md)) |
-| [audio_modding.md](audio_modding.md) | Player music and modular action-SFX workflow |
-| [engine_tools_multistage_pass.md](engine_tools_multistage_pass.md) | Starfall Forge in-game editor architecture (ET# passes) |
-| [EDITOR_DESIGNER.MD](EDITOR_DESIGNER.MD) / [game_maker_toolchain.md](game_maker_toolchain.md) | Forge/editor design vision + toolchain plan |
-| [rendering_shader_pass.md](rendering_shader_pass.md) | Rendering R# shader-material suite (toon/grass/water/energy/shield/ice/lava) |
-| [ui_architecture.md](ui_architecture.md) | UI lifecycle per AppState, HUD, overlays |
-| [naming.md](naming.md) | Canonical names: cast, factions, chapters, enums |
+| **[FEATURES.md](FEATURES.md)** | …to know **what the game does**. The master feature reference: every system, from movement and combat to settlements, raids, creation tools, and audio. |
+| **[DEVELOPMENT.md](DEVELOPMENT.md)** | …to **work on the code**. Build and run, repository layout, architectural rules, the simulation frame, data-driven combat, verification, conventions. |
+| **[engine_roadmap.md](engine_roadmap.md)** | …to see **where the engine is going**. The EC# track: phases, acceptance criteria, and what has landed. |
+| **[naming.md](naming.md)** | …the canonical cast, place, and terminology list for player-facing text. |
+| **[guides/](guides/README.md)** | …a focused how-to: fixed-tick motor, combat feel, spatial LOD, Character Studio pipeline, verification procedure. |
 
-Repository-level `README.md` is the player/developer overview. `agent.md` is
-the compact operating contract and must point here rather than maintain a
-competing priority list. Asset-folder READMEs under `assets/` are user-facing
-drop-in instructions.
+The repository-level `README.md` is the player/developer overview; `agent.md` is
+the compact operating contract and points here rather than maintaining a
+competing list. Asset-folder READMEs under `assets/` are user-facing drop-in
+instructions.
 
-## Snapshots (historical — do not update)
+## Archive
 
-| Doc | When | What it captured |
-|---|---|---|
-| [game_review_2026-06.md](game_review_2026-06.md) | Jun 2026 | Full-game triage: city physics, dead logic, gameplay top-10 (most items since fixed — see roadmap statuses) |
-| [game_review_2026-07.md](game_review_2026-07.md) | Jul 2026 | Follow-up review |
-| [parallel_review_triage_2026-07.md](parallel_review_triage_2026-07.md) | Jul 2026 | Parallel review triage |
-| [codebase_alignment_2026-07.md](codebase_alignment_2026-07.md) | Jul 2026 | Code-review reconciliation: accepted fixes, stale findings, and staged follow-up |
-| [software_audit_triage_2026-07-17.md](software_audit_triage_2026-07-17.md) | Jul 2026 | Follow-up architecture audit disposition: retained winners and rejected stale sequencing |
-| [terra_gameplay_audit_triage_2026-07-17.md](terra_gameplay_audit_triage_2026-07-17.md) | Jul 2026 | Terra gameplay audit disposition: collision, timing, ownership, economy, vehicles, and performance |
-| [improvements.md](improvements.md) | May 2026 | Early backlog (superseded by roadmaps) |
+[archive/](archive/README.md) preserves dated reviews, audits, triage passes,
+milestone logs (`M#`, `MM#`, `ET#`, `PX#`), and superseded plans. They are
+evidence of how the project got here, not current instruction — **prefer the
+five documents above** when they disagree.
+
+## Keeping docs honest
+
+- A feature is not done until FEATURES.md describes it.
+- If a doc and the code disagree, the code wins — fix the doc in the same change
+  that caused the drift.
+- Point-in-time documents (reviews, audits, dated plans) belong in `archive/`
+  from the day they are written; they should never accumulate in the root.

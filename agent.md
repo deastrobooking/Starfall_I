@@ -1,10 +1,10 @@
 # Starfall I Agent Guide
 
 This file is the concise handoff for future Codex/agent work on Starfall I.
-Read `docs/current_state.md` first for the reconciled baseline and production
-order. For detailed next steps, use `docs/agent_next_steps.md`. For the
+Read `docs/archive/current_state.md` first for the reconciled baseline and production
+order. For detailed next steps, use `docs/archive/agent_next_steps.md`. For the
 detailed engine upgrade and milestone process, use
-`docs/engine_upgrade_milestones.md`.
+`docs/archive/engine_upgrade_milestones.md`.
 
 ## Project North Star
 
@@ -51,8 +51,8 @@ together.
   workspace integration also remains.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
-- Local Bevy render bundle compatibility helpers live in `src/rendering.rs`.
-- Rendering R2 lives in `src/rendering.rs` and `assets/shaders/`: Toon, Grass,
+- Local Bevy render bundle compatibility helpers live in `src/engine/rendering.rs`.
+- Rendering R2 lives in `src/engine/rendering.rs` and `assets/shaders/`: Toon, Grass,
   Water, Energy, Shield, Ice/Snow, and Lava use Bevy 0.19 material contracts.
   Weapon VFX reuse five bounded Energy handles; each local-player slot owns one
   persistent damage/parry Shield handle. Forge compiles all material families
@@ -81,7 +81,7 @@ together.
   clustered-light evaluation, and four-camera GPU timing work remain in
   `docs/rendering_shader_pass.md`; do not copy legacy fixed-group WGSL examples
   or claim unmeasured millisecond budgets.
-- Robot pet foundation lives in `src/robot_pets.rs`: shared saved pet records,
+- Robot pet foundation lives in `src/world/robot_pets.rs`: shared saved pet records,
   enemy salvage parts, store-build recipes, and combined vehicle/mech/ship form
   gates. Chapter scripts already use robot rescue pods. The Robot Garage screen
   (`src/plugins/robot_garage_plugin.rs`, `AppState::RobotGarage`) lets players
@@ -93,7 +93,7 @@ together.
   (J key), SpaceShip/MegaShip enables Ship mode. `MechCommandLink` upgrade
   rank gates advanced forms. Runtime mech/ship 3D controllers are still future
   work.
-- Tech upgrade foundation lives in `src/upgrades.rs`: shared saved beam,
+- Tech upgrade foundation lives in `src/combat/upgrades.rs`: shared saved beam,
   missile, turret, health, rejuvenation, and mech-link ranks. Chapter select
   spends robot salvage on ranks; chapter tech caches grant parts/route hints;
   rejuvenation healing consumes saved reserve.
@@ -130,7 +130,7 @@ together.
   persistent mechanics upgrades: flight core, solar sabre/laser, nova missile,
   and Aegis armor traversal. `player_plugin::apply_scientist_temple_progress`
   reapplies these unlocks from `ChapterProgress` whenever players spawn.
-- Human hero combat identity lives in `src/hero_roster.rs`: all eight siblings
+- Human hero combat identity lives in `src/character/hero_roster.rs`: all eight siblings
   have unique signature weapons/specials plus shared speed, strength, flight,
   and magic axes. Rescued robot pets amplify those axes by role.
 - Terrain uses deterministic waves plus `assets/terrain/everest.png` mapped
@@ -150,7 +150,7 @@ together.
   float on large walkable platforms with giant ramps/bridges and guide lights;
   rough settlement edges can spawn mountain-inset gates/thresholds.
 - Settlement builder/economy vertical slice lives in
-  `src/settlement_economy.rs`, `src/plugins/world_plugin.rs`, and
+  `src/world/settlement_economy.rs`, `src/plugins/world_plugin.rs`, and
   `src/plugins/save_plugin.rs`. `SettlementEconomy` is campaign-shared and
   save-backed. Settlement terminals unlock after cache recovery or matching M5
   site liberation, spend shared stockpile plus robot parts, spawn visible farm,
@@ -158,14 +158,14 @@ together.
   props, and tick bounded passive outputs. Route unlocks are Engine M7,
   assigned units/strategy overlays are Engine M9, and confirmation UX is still
   future polish.
-- Engine M8 raid counteroffensives live in `src/raids.rs`,
+- Engine M8 raid counteroffensives live in `src/world/raids.rs`,
   `src/plugins/world_plugin.rs`, and `src/plugins/save_plugin.rs`.
   `RaidRegistry` is save-backed through `SaveData.raids`. The first playable
   slice is a recoverable Cloudrail City `DroneSwarm`: warning sets the site to
   `UnderAttack`, active phase spawns a visible UFO marker plus tagged drones,
   player victory returns the site to `Liberated`, static defenses can resolve it
   as `Shielded`, and failure marks the site `Damaged` without deleting progress.
-- Engine M10 tech hacking lives in `src/hacking.rs`,
+- Engine M10 tech hacking lives in `src/world/hacking.rs`,
   `src/plugins/hacking_plugin.rs`, `src/plugins/enemy_plugin.rs`,
   `src/plugins/weapon_plugin.rs`, and `src/plugins/save_plugin.rs`.
   `HackingRegistry` is save-backed through
@@ -174,7 +174,7 @@ together.
   `blueprint_scallarian_drone_core`, adds a `ScoutDrone` command asset, converts
   the drone into a temporary friendly `HackedUnit`, removes raid threat markers,
   and lets the owner fire a basic pulse through the linked drone.
-- Settlement conversations are data-driven in `src/discussion.rs`.
+- Settlement conversations are data-driven in `src/world/discussion.rs`.
   `DiscussionNpc` entities open the HUD discussion panel from `E` / D-pad
   Down, and each line can spawn an MP3 voice file from `assets/voice/...`.
   Cloudrail City and Switchwork Borough are peaceful mega-city hubs with
@@ -192,10 +192,10 @@ together.
   selection. Legacy top-level progression fields remain compatibility mirrors;
   do not restore them as the runtime ownership authority.
 - Roadmap labels are intentionally namespaced: Engine M# refers to
-  `docs/engine_upgrade_milestones.md`; Motion MM# refers to
-  `docs/playerengine.md`; future enemy behavior planning should use Enemy AI
+  `docs/archive/engine_upgrade_milestones.md`; Motion MM# refers to
+  `docs/archive/playerengine.md`; future enemy behavior planning should use Enemy AI
   AI# labels.
-- Humanoid traversal planning lives in `docs/playerengine.md`.
+- Humanoid traversal planning lives in `docs/archive/playerengine.md`.
   `GrappleHookState` is the single star-tech grappling source of truth;
   targeting, route/mountain zip, swing cable motion, enemy/boss pull behavior,
   procedural cable visuals, and pose/IK integration are present. Bespoke
@@ -216,15 +216,15 @@ together.
   `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect`
   via [E] and [G] and return to `ChapterSelect`.
 - The documentation authority map is `docs/README.md`; the canonical current
-  handoff is `docs/current_state.md`. `docs/improvements.md` and dated reviews
+  handoff is `docs/archive/current_state.md`. `docs/archive/improvements.md` and dated reviews
   are historical snapshots, not active backlogs. The current PX#/PM# player
   experience and repeatable
-  creator-workflow plan is `docs/player_creator_experience_plan.md`; PX1
+  creator-workflow plan is `docs/archive/player_creator_experience_plan.md`; PX1
   authoritative per-player aiming and the PM1 Start Editor / Project Hub shell
   plus the PM1 multi-project registry, PX3 shop transaction flow, PM2 lock and
   preset records, and PM3 multi-level/playtest slices are delivered. Manual
   four-pad acceptance and the remaining creator gaps are recorded in
-  `docs/current_state.md`.
+  `docs/archive/current_state.md`.
   The evidence-based memory for the external 156-item
   review is `docs/parallel_review_triage_2026-07.md`; do not treat its raw idea
   inventory as verified defects or implicit product commitments. Its July 15
@@ -234,7 +234,7 @@ together.
   four-pad acceptance, broader vehicle bodies, and missile obstacle casts remain.
 - Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
-- The July 2026 audit is `docs/game_review_2026-07.md`. Shared menu navigation
+- The July 2026 audit is `docs/archive/game_review_2026-07.md`. Shared menu navigation
   now includes spatial D-pad/stick focus, repeat, Confirm, Back, and disabled
   skipping/styles. Speed roads include checkpoints, recovery, and guided
   hoverboard loop traversal plus 18 per-player bidirectional grind rails,
@@ -255,7 +255,7 @@ together.
 
 1. Keep the engine stack pinned unless the task is explicitly an engine
    migration. Future engine upgrades must follow
-   `docs/engine_upgrade_milestones.md`.
+   `docs/archive/engine_upgrade_milestones.md`.
 2. Run the relevant local gates after Rust changes. At minimum, run
    `cargo check`; for engine, CI, ownership, save, input, or broad gameplay
    changes, run the full gate set.

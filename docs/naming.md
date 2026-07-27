@@ -1,6 +1,6 @@
 # Starfall I Naming Guide
 
-Feature status is tracked separately in `docs/game_review_2026-07.md`.
+Feature status is tracked separately in `docs/archive/game_review_2026-07.md`.
 
 This is the canonical naming reference for story, UI, docs, and future content.
 Prefer these names in player-facing text. Internal Rust enum names can remain
