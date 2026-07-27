@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::character::face::{BrowStyle, Expression, EyeStyle, FaceRecipe};
+
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 
 use crate::character::blueprint::{
@@ -42,18 +44,27 @@ impl Plugin for CharacterDesignPlugin {
                     part_preset_interaction,
                     physique_preset_interaction,
                     body_stepper_interaction,
+                    // Grouped: Bevy caps a system tuple at 20 entries.
+                    (
+                        face_stepper_interaction,
+                        face_cycle_interaction,
+                        update_face_ui_text,
+                    ),
                     button_interaction,
                     human_studio_interaction,
                     prefab_action_interaction,
                     preview_zoom_interaction,
                     scroll_design_panel,
-                    update_swatch_borders,
-                    update_base_model_status_text,
-                    update_design_preset_colors,
-                    update_toggle_colors,
-                    update_part_preset_text,
-                    update_physique_preset_colors,
-                    update_body_value_text,
+                    // Grouped: Bevy caps a system tuple at 20 entries.
+                    (
+                        update_swatch_borders,
+                        update_base_model_status_text,
+                        update_design_preset_colors,
+                        update_toggle_colors,
+                        update_part_preset_text,
+                        update_physique_preset_colors,
+                        update_body_value_text,
+                    ),
                 )
                     .run_if(in_state(AppState::CharacterDesign)),
             );
@@ -132,6 +143,21 @@ struct BodyStepper {
 #[derive(Component, Clone, Copy)]
 struct BodyValueText(BodyField);
 
+#[derive(Component)]
+struct FaceStepper {
+    field: FaceField,
+    delta: f32,
+}
+
+#[derive(Component)]
+struct FaceValueText(FaceField);
+
+#[derive(Component)]
+struct FaceCycleButton(FaceCycle);
+
+#[derive(Component)]
+struct FaceCycleText(FaceCycle);
+
 #[derive(Component, Clone, Copy)]
 struct PartPresetButton {
     slot: DesignerPartSlot,
@@ -171,6 +197,30 @@ enum PhysiquePreset {
     Arcanist,
     Lancer,
     Titan,
+}
+
+/// Scalar face sliders. Enum-valued face choices (eye style, brow style,
+/// expression) cycle through `FaceCycle` instead.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum FaceField {
+    EyeSize,
+    EyeSpacing,
+    EyeHeight,
+    EyeTilt,
+    Pupil,
+    Highlight,
+    Lash,
+    BrowHeight,
+    Nose,
+    MouthWidth,
+}
+
+/// Cycles a face choice forward through its list.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum FaceCycle {
+    EyeStyle,
+    BrowStyle,
+    Expression,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -241,6 +291,13 @@ fn setup_character_design(
         base.eye_color,
         &eye_presets(),
     );
+    // Seed the face from the saved blueprint if there is one, else from the
+    // hero's authored face — entering the designer must never flatten a
+    // character back to the default.
+    design_data.face = blueprint
+        .map(|bp| bp.face)
+        .unwrap_or(base.face)
+        .sanitized();
     let slot_loadout =
         PlayerPartLoadout::resolve_for_hero(hero_name, slot.part_loadout, *part_loadout);
     design_data.body_preset = slot_loadout.body;
@@ -404,6 +461,9 @@ fn rebuild_preview_if_dirty(
     .with_body_recipe(design_data.body);
     config.skin = skin_preset(design_data.skin_idx);
     config.eye_color = eye_preset(design_data.eye_idx);
+    // The designer edits the anime face directly; sanitize so a slider can
+    // never hand the mesh builder out-of-range geometry.
+    config.face = design_data.face.sanitized();
     config.emissive_eyes = config.emissive_eyes || design_data.has_visor;
 
     let loadout = CharacterLoadout {
@@ -528,6 +588,52 @@ fn body_stepper_interaction(
         adjust_body_field(&mut design_data.body, stepper.field, stepper.delta);
         design_data.body.validate();
         design_data.dirty = true;
+    }
+}
+
+fn face_stepper_interaction(
+    interaction_q: Query<(&Interaction, &FaceStepper), Changed<Interaction>>,
+    mut design_data: ResMut<CharacterDesignData>,
+) {
+    for (interaction, stepper) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let mut face = design_data.face;
+        apply_face_field(&mut face, stepper.field, stepper.delta);
+        design_data.face = face;
+        design_data.dirty = true;
+    }
+}
+
+fn face_cycle_interaction(
+    interaction_q: Query<(&Interaction, &FaceCycleButton), Changed<Interaction>>,
+    mut design_data: ResMut<CharacterDesignData>,
+) {
+    for (interaction, button) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let mut face = design_data.face;
+        cycle_face_choice(&mut face, button.0);
+        design_data.face = face;
+        design_data.dirty = true;
+    }
+}
+
+fn update_face_ui_text(
+    design_data: Res<CharacterDesignData>,
+    mut value_q: Query<(&FaceValueText, &mut Text), Without<FaceCycleText>>,
+    mut cycle_q: Query<(&FaceCycleText, &mut Text), Without<FaceValueText>>,
+) {
+    if !design_data.is_changed() {
+        return;
+    }
+    for (marker, mut text) in value_q.iter_mut() {
+        *text = Text::new(format!("{:.2}", face_field_value(&design_data.face, marker.0)));
+    }
+    for (marker, mut text) in cycle_q.iter_mut() {
+        *text = Text::new(face_choice_label(&design_data.face, marker.0).to_uppercase());
     }
 }
 
@@ -727,6 +833,13 @@ fn save_design(
             has_visor: design_data.has_visor,
         },
     );
+    // `CharacterBlueprint::hero` has no face parameter, so the authored face
+    // is stamped on after construction — without this every designer edit to
+    // the face would be discarded on confirm.
+    let blueprint = CharacterBlueprint {
+        face: design_data.face.sanitized(),
+        ..blueprint
+    };
 
     let Some(slot) = select_state.slots.get_mut(design_data.player_index) else {
         return;
@@ -1150,6 +1263,40 @@ fn spawn_design_ui(
                             PhysiquePreset::Titan,
                         ] {
                             spawn_physique_preset_button(row, preset, &design_data.body);
+                        }
+                    });
+
+                // ── Face ──────────────────────────────────────────────
+                spawn_section_label(panel, "FACE");
+                panel
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(7.0),
+                        row_gap: Val::Px(6.0),
+                        ..default()
+                    })
+                    .with_children(|grid| {
+                        for (label, cycle) in [
+                            ("EYES", FaceCycle::EyeStyle),
+                            ("BROWS", FaceCycle::BrowStyle),
+                            ("MOOD", FaceCycle::Expression),
+                        ] {
+                            spawn_face_cycle_row(grid, label, cycle, &design_data.face);
+                        }
+                        for (label, field) in [
+                            ("EYE SIZE", FaceField::EyeSize),
+                            ("SPACING", FaceField::EyeSpacing),
+                            ("EYE Y", FaceField::EyeHeight),
+                            ("TILT", FaceField::EyeTilt),
+                            ("PUPIL", FaceField::Pupil),
+                            ("SPARKLE", FaceField::Highlight),
+                            ("LASHES", FaceField::Lash),
+                            ("BROW Y", FaceField::BrowHeight),
+                            ("NOSE", FaceField::Nose),
+                            ("MOUTH", FaceField::MouthWidth),
+                        ] {
+                            spawn_face_row(grid, label, field, &design_data.face);
                         }
                     });
 
@@ -1597,6 +1744,143 @@ fn spawn_body_row(
         });
 }
 
+/// One face slider row: label, minus, live value, plus. Mirrors
+/// `spawn_body_row` so the two sections read identically.
+fn spawn_face_row(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    field: FaceField,
+    face: &FaceRecipe,
+) {
+    parent
+        .spawn(Node {
+            width: Val::Px(142.0),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(4.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(10.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.56, 0.58, 0.64)),
+                Node {
+                    width: Val::Px(54.0),
+                    ..default()
+                },
+            ));
+            spawn_face_step_button(row, field, -0.04, "-");
+            row.spawn((
+                Text::new(format!("{:.2}", face_field_value(face, field))),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.90, 0.86, 0.76)),
+                Node {
+                    width: Val::Px(34.0),
+                    ..default()
+                },
+                FaceValueText(field),
+            ));
+            spawn_face_step_button(row, field, 0.04, "+");
+        });
+}
+
+fn spawn_face_step_button(
+    parent: &mut ChildSpawnerCommands,
+    field: FaceField,
+    delta: f32,
+    label: &str,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(24.0),
+                height: Val::Px(22.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.10, 0.105, 0.12)),
+            BorderColor::all(Color::srgba(0.36, 0.32, 0.24, 0.84)),
+            FaceStepper { field, delta },
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.88, 0.84, 0.74)),
+            ));
+        });
+}
+
+/// A wide button that cycles one enum-valued face choice and shows its
+/// current name.
+fn spawn_face_cycle_row(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    cycle: FaceCycle,
+    face: &FaceRecipe,
+) {
+    parent
+        .spawn(Node {
+            width: Val::Px(142.0),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(4.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: FontSize::Px(10.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.56, 0.58, 0.64)),
+                Node {
+                    width: Val::Px(54.0),
+                    ..default()
+                },
+            ));
+            row.spawn((
+                Button,
+                Node {
+                    width: Val::Px(84.0),
+                    height: Val::Px(22.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.10, 0.105, 0.12)),
+                BorderColor::all(Color::srgba(0.36, 0.32, 0.24, 0.84)),
+                FaceCycleButton(cycle),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new(face_choice_label(face, cycle).to_uppercase()),
+                    TextFont {
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.90, 0.86, 0.76)),
+                    FaceCycleText(cycle),
+                ));
+            });
+        });
+}
+
 fn spawn_step_button(parent: &mut ChildSpawnerCommands, field: BodyField, delta: f32, label: &str) {
     parent
         .spawn((
@@ -1643,6 +1927,62 @@ fn adjust_body_field(body: &mut BodyRecipe, field: BodyField, delta: f32) {
         BodyField::Muscle => body.muscle += delta,
         BodyField::BodyFat => body.body_fat += delta,
         BodyField::Asymmetry => body.asymmetry += delta,
+    }
+}
+
+/// Step a face slider. Ranges are enforced by `FaceRecipe::sanitized`, so a
+/// held button can never drive geometry out of range.
+fn apply_face_field(face: &mut FaceRecipe, field: FaceField, delta: f32) {
+    match field {
+        FaceField::EyeSize => face.eye_size += delta,
+        FaceField::EyeSpacing => face.eye_spacing += delta,
+        // Positional knobs are far smaller in scale than the multipliers.
+        FaceField::EyeHeight => face.eye_height += delta * 0.05,
+        FaceField::EyeTilt => face.eye_tilt += delta * 0.35,
+        FaceField::Pupil => face.pupil_scale += delta,
+        FaceField::Highlight => face.highlight_scale += delta,
+        FaceField::Lash => face.lash_thickness += delta,
+        FaceField::BrowHeight => face.brow_height += delta * 0.04,
+        FaceField::Nose => face.nose_scale += delta,
+        FaceField::MouthWidth => face.mouth_width += delta,
+    }
+    *face = face.sanitized();
+}
+
+fn face_field_value(face: &FaceRecipe, field: FaceField) -> f32 {
+    match field {
+        FaceField::EyeSize => face.eye_size,
+        FaceField::EyeSpacing => face.eye_spacing,
+        FaceField::EyeHeight => face.eye_height,
+        FaceField::EyeTilt => face.eye_tilt,
+        FaceField::Pupil => face.pupil_scale,
+        FaceField::Highlight => face.highlight_scale,
+        FaceField::Lash => face.lash_thickness,
+        FaceField::BrowHeight => face.brow_height,
+        FaceField::Nose => face.nose_scale,
+        FaceField::MouthWidth => face.mouth_width,
+    }
+}
+
+/// Advance one of the enum-valued face choices, wrapping at the end.
+fn cycle_face_choice(face: &mut FaceRecipe, cycle: FaceCycle) {
+    fn next<T: PartialEq + Copy>(all: &[T], current: T) -> T {
+        let index = all.iter().position(|value| *value == current).unwrap_or(0);
+        all[(index + 1) % all.len()]
+    }
+    match cycle {
+        FaceCycle::EyeStyle => face.eye_style = next(&EyeStyle::ALL, face.eye_style),
+        FaceCycle::BrowStyle => face.brow_style = next(&BrowStyle::ALL, face.brow_style),
+        FaceCycle::Expression => face.expression = next(&Expression::ALL, face.expression),
+    }
+}
+
+/// Current label for a face choice, for the cycle button's caption.
+fn face_choice_label(face: &FaceRecipe, cycle: FaceCycle) -> &'static str {
+    match cycle {
+        FaceCycle::EyeStyle => face.eye_style.label(),
+        FaceCycle::BrowStyle => face.brow_style.label(),
+        FaceCycle::Expression => face.expression.label(),
     }
 }
 

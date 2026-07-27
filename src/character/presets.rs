@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+
+use crate::character::face::{BrowStyle, Expression, EyeStyle, FaceRecipe};
 use std::f32::consts::PI;
 
 use crate::character::blueprint::{BodyRecipe, CharacterBlueprint};
@@ -18,6 +20,8 @@ use crate::engine::rendering::PbrBundle;
 
 #[derive(Debug, Clone)]
 pub struct CartoonCharacterConfig {
+    /// Anime face authoring (eye/brow style, expression, proportions).
+    pub face: crate::character::face::FaceRecipe,
     pub name: &'static str,
     pub role: CartoonRole,
     pub skin: Color,
@@ -85,6 +89,14 @@ impl CartoonCharacterConfig {
 pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
     match name {
         "Vincenzo" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Sharp,
+                brow_style: BrowStyle::Straight,
+                expression: Expression::Determined,
+                eye_size: 1.0,
+                eye_spacing: 1.02,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.93, 0.70, 0.48),
@@ -116,6 +128,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         "Antonio" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Almond,
+                brow_style: BrowStyle::Thick,
+                expression: Expression::Neutral,
+                eye_size: 0.96,
+                eye_spacing: 1.0,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.90, 0.74, 0.56),
@@ -147,6 +167,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         "Angelo" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Round,
+                brow_style: BrowStyle::Soft,
+                expression: Expression::Happy,
+                eye_size: 1.12,
+                eye_spacing: 1.0,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.88, 0.68, 0.48),
@@ -178,6 +206,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         "Joseph" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Fierce,
+                brow_style: BrowStyle::Thick,
+                expression: Expression::Angry,
+                eye_size: 0.92,
+                eye_spacing: 0.98,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.76, 0.54, 0.36), // deeper warm brown
@@ -209,6 +245,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         "Gabriella" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Gentle,
+                brow_style: BrowStyle::Arched,
+                expression: Expression::Neutral,
+                eye_size: 1.16,
+                eye_spacing: 1.02,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.91, 0.69, 0.50),
@@ -240,6 +284,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         "Nova" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Wide,
+                brow_style: BrowStyle::Thin,
+                expression: Expression::Surprised,
+                eye_size: 1.24,
+                eye_spacing: 1.04,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.84, 0.64, 0.50),
@@ -271,6 +323,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: true,
         },
         "Aurora" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Round,
+                brow_style: BrowStyle::Arched,
+                expression: Expression::Happy,
+                eye_size: 1.2,
+                eye_spacing: 1.03,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.90, 0.72, 0.55),
@@ -302,6 +362,14 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         "Fortuna" => CartoonCharacterConfig {
+            face: FaceRecipe {
+                eye_style: EyeStyle::Sleepy,
+                brow_style: BrowStyle::Thin,
+                expression: Expression::Neutral,
+                eye_size: 1.06,
+                eye_spacing: 1.0,
+                ..FaceRecipe::DEFAULT
+            },
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.92, 0.70, 0.52),
@@ -333,6 +401,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         _ => CartoonCharacterConfig {
+        face: FaceRecipe::DEFAULT,
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.95, 0.68, 0.45),
@@ -497,6 +566,7 @@ pub fn enemy_config(
     };
 
     let mut config = CartoonCharacterConfig {
+        face: FaceRecipe::DEFAULT,
         name,
         role,
         skin,
@@ -877,6 +947,7 @@ pub fn attach_native_playable_character(
     let s = config.scale;
     let bw = config.body_width * (body.shoulder_width * 0.62 + body.chest_size * 0.38);
     let visual_cfg = CharacterVisualConfig {
+        face: config.face,
         scale: s,
         body_width: bw,
         hip_width: config.body_width * body.hip_width,
@@ -1703,6 +1774,7 @@ pub fn attach_cartoon_character(
 
     // Store visual config for runtime part swaps, then lift all spawned parts.
     let visual_cfg = CharacterVisualConfig {
+        face: config.face,
         scale: s,
         body_width: bw,
         hip_width,

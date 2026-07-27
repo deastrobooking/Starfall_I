@@ -1086,6 +1086,8 @@ pub enum ImportedForgeReturnTarget {
 /// Set `player_index` before transitioning to `AppState::CharacterDesign`.
 #[derive(Resource, Debug)]
 pub struct CharacterDesignData {
+    /// Anime face authoring edited by the designer's FACE section.
+    pub face: crate::character::face::FaceRecipe,
     pub player_index: usize,
     pub return_target: CharacterDesignReturnTarget,
     pub base_model: CharacterBaseModel,
@@ -1116,6 +1118,7 @@ impl Default for CharacterDesignData {
     fn default() -> Self {
         let loadout = PlayerPartLoadout::vincenzo_reference();
         Self {
+            face: crate::character::face::FaceRecipe::DEFAULT,
             player_index: 0,
             return_target: CharacterDesignReturnTarget::PlayerSelect,
             base_model: CharacterBaseModel::VincenzoDeep,
@@ -1834,6 +1837,7 @@ mod tests {
     #[test]
     fn character_design_snapshot_round_trips_editable_state() {
         let mut design = CharacterDesignData {
+            face: crate::character::face::FaceRecipe::DEFAULT,
             player_index: 2,
             return_target: CharacterDesignReturnTarget::PlayerSelect,
             base_model: CharacterBaseModel::AntonioRift,

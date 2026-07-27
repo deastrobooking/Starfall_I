@@ -12,6 +12,10 @@ pub struct CharacterBlueprint {
     pub body: BodyRecipe,
     #[serde(default)]
     pub cartoon_appearance: CartoonAppearanceRecipe,
+    /// Anime face authoring. `serde(default)` so blueprints saved before the
+    /// face system existed load with a neutral round-eyed face.
+    #[serde(default)]
+    pub face: crate::character::face::FaceRecipe,
     pub parts: Vec<PartRecipe>,
     pub materials: Vec<MaterialRecipe>,
     pub rig: RigRecipe,
@@ -32,6 +36,7 @@ impl CharacterBlueprint {
     ) -> Self {
         let body = body.validated();
         let mut blueprint = Self {
+            face: crate::character::face::FaceRecipe::DEFAULT,
             schema_version: CHARACTER_BLUEPRINT_SCHEMA_VERSION,
             name: name.to_string(),
             archetype: CharacterArchetype::Human,

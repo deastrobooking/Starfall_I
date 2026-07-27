@@ -18,6 +18,7 @@ checkpoints, `TrackingMissile` owns Homing Star targeting, and
 - [Player Guidance HUD](#player-guidance-hud)
 - [Player Movement](#player-movement)
 - [Character Studio (Human Generator)](#character-studio-human-generator)
+- [Anime Face System](#anime-face-system)
 - [Character Authoring](#character-authoring)
 - [Hero Combat Identity](#hero-combat-identity)
 - [Robot Pets And Combined Forms](#robot-pets-and-combined-forms)
@@ -444,6 +445,43 @@ free vertex editor: this keeps characters compatible with gameplay collision,
 animation, equipment slots, and local multiplayer. See
 `docs/FEATURES.md` for its workflow, architecture boundaries, and the
 recommended route toward an RPG-maker-grade creator.
+
+## Anime Face System
+
+**(2026-07-27)** Faces are authored, not fixed. The previous head had one
+emissive sphere per eye, a fixed brow bar, a cuboid mouth, and no customization
+beyond iris colour; `src/character/face.rs` replaces that with a full anime-RPG
+face model, and every part of it is pure data and maths so the whole face is
+unit-tested without spawning a rig.
+
+**Layered eyes.** Each eye is five stacked shapes — sclera, iris, pupil,
+catchlight, and a heavy upper lash line — solved by `FaceRecipe::eye_layout`.
+The catchlight is placed up and outward with both eyes sharing one light
+direction; without it an eye reads as a doll's, which is why it is an explicit
+slider (`SPARKLE`) rather than a constant.
+
+**Seven eye styles.** Round, Almond, Sharp (tsurime — upswept outer corner),
+Gentle (tareme — downswept), Sleepy, Wide, and Fierce. Each carries its own
+silhouette, corner tilt, lid heaviness, and iris ratio, so style sets a
+character's personality while the sliders set their individuality. Five brow
+styles (Soft, Straight, Arched, Thick, Thin) layer on top.
+
+**Seven expressions.** Neutral, Happy, Angry, Surprised, Sad, Determined, and
+Joyful resolve through `ExpressionPose` into brow angle and height, lid closure,
+mouth curve, mouth opening, and iris dilation. Expressions are *derived*, so a
+designer picks "Angry" instead of dialing eleven numbers, and gameplay can drive
+the same poses at runtime. Brows mirror per side, which is what makes anger
+converge inward rather than look quizzical; Joyful closes the eyes into the
+classic `^_^` lash arc. The mouth is three segments so corners genuinely lift
+into a smile or drop into a frown.
+
+**Designer controls.** The Character Designer gained a **FACE** section: cycle
+buttons for EYES / BROWS / MOOD and ten live sliders (eye size, spacing, height,
+tilt, pupil, sparkle, lashes, brow height, nose, mouth). Every value is clamped
+by `FaceRecipe::sanitized`, so a slider can never produce inside-out geometry.
+Faces save with the character blueprint (`serde(default)`, so older records load
+as a neutral round-eyed face) and each of the eight heroes ships with a distinct
+authored face.
 
 ## Character Authoring
 

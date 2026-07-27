@@ -15,9 +15,13 @@
 //! 6. [`mesh_modifiers`] / [`procedural_meshes`] — mesh generation and deformation.
 //! 7. [`hero_roster`] — per-hero gameplay stat/loadout profiles applied on spawn.
 //! 8. [`animation_mvp`] — the baseline clip set characters ship with.
+//!
+//! [`face`] is the anime-RPG face system: eye styles, expressions, and the
+//! layered eye geometry that [`parts`] turns into meshes.
 
 pub mod animation_mvp;
 pub mod blueprint;
+pub mod face;
 pub mod hero_roster;
 pub mod mesh_modifiers;
 pub mod modular;

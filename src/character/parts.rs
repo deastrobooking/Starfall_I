@@ -1,5 +1,7 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use bevy::prelude::*;
+
+use crate::character::face::FaceSide;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
@@ -367,6 +369,10 @@ pub struct CharacterVisualConfig {
     pub skin: Color,
     pub hair: Color,
     pub eye: Color,
+    /// Anime face authoring: eye/brow style, expression, and proportions.
+    /// Defaults to a neutral round-eyed face so every existing caller keeps
+    /// working without naming it.
+    pub face: crate::character::face::FaceRecipe,
     pub has_hood: bool,
     pub has_cape: bool,
     pub has_gloves: bool,
@@ -3937,7 +3943,6 @@ fn spawn_head_open_face(
     let hair_mat = soft_mat(materials, cfg.hair);
     let brow_mat = soft_mat(materials, darken(cfg.hair, 0.62));
     let mouth_mat = soft_mat(materials, darken(cfg.skin, 0.48));
-    let eye_mat = emissive_mat(materials, cfg.eye, 5.0);
     let visor_mat = emissive_mat(materials, cfg.eye, 3.2);
     let purple = Color::srgb(0.42, 0.07, 0.62);
     let cape_mat = soft_mat(materials, purple);
@@ -4022,62 +4027,218 @@ fn spawn_head_open_face(
         );
     }
 
-    // Eyes
-    for (kind, eye_x) in [
-        (CartoonPartKind::LeftEye, -0.13_f32),
-        (CartoonPartKind::RightEye, 0.13_f32),
+    // ── Anime eyes ────────────────────────────────────────────────────────
+    // Five stacked layers per eye — sclera, iris, pupil, catchlight, lash —
+    // solved by `FaceRecipe` so style, expression, and proportion all apply.
+    // The catchlight is what makes the eye read as alive rather than painted.
+    let face = cfg.face.sanitized();
+    let sclera_mat = soft_mat(materials, Color::srgb(0.98, 0.98, 1.0));
+    let iris_mat = emissive_mat(materials, cfg.eye, 3.2);
+    let pupil_mat = soft_mat(materials, Color::srgb(0.06, 0.05, 0.09));
+    let highlight_mat = emissive_mat(materials, Color::srgb(1.0, 1.0, 1.0), 7.5);
+    let lash_mat = soft_mat(materials, darken(cfg.hair, 0.45));
+    // Slightly in front of the skull so layers never z-fight.
+    let face_z = -0.32 * s;
+    let layer = |depth: f32| face_z - depth * s;
+
+    for (kind, side) in [
+        (CartoonPartKind::LeftEye, FaceSide::Left),
+        (CartoonPartKind::RightEye, FaceSide::Right),
     ] {
+        let eye = face.eye_layout(side);
+        let ex = eye.offset_x * s;
+        let ey = head_y + (0.04 + eye.offset_y) * s;
+        let tilt = Quat::from_rotation_z(eye.tilt);
+
+        if eye.is_closed() {
+            // A shut eye is a lash arc, not a flattened eyeball.
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                kind,
+                Mesh::from(Cuboid::new(
+                    eye.sclera_half_width * 2.0 * s,
+                    eye.lash_thickness.max(0.006) * 2.2 * s,
+                    0.018 * s,
+                )),
+                lash_mat.clone(),
+                Transform::from_xyz(ex, ey, layer(0.030)).with_rotation(tilt),
+                PartSlotTag::Head,
+            );
+            continue;
+        }
+
+        // Sclera — the eye's silhouette.
         spawn_part(
             commands,
             meshes,
             root,
             kind,
-            Mesh::from(Sphere::new(0.060 * s)),
-            eye_mat.clone(),
-            Transform::from_xyz(eye_x * s, head_y + 0.04 * s, -0.32 * s)
-                .with_scale(Vec3::new(0.82, 1.18, 0.30)),
+            Mesh::from(Sphere::new(1.0)),
+            sclera_mat.clone(),
+            Transform::from_xyz(ex, ey, layer(0.020))
+                .with_rotation(tilt)
+                .with_scale(Vec3::new(
+                    eye.sclera_half_width * s,
+                    eye.sclera_half_height * s,
+                    0.016 * s,
+                )),
             PartSlotTag::Head,
         );
-    }
-    for (eye_x, rot_z) in [(-0.13_f32, 0.14_f32), (0.13_f32, -0.14_f32)] {
+        // Iris — the colour the player picked, oversized in genre style.
         spawn_part(
             commands,
             meshes,
             root,
-            CartoonPartKind::Hair,
-            Mesh::from(Cuboid::new(0.135 * s, 0.024 * s, 0.020 * s)),
+            CartoonPartKind::Head,
+            Mesh::from(Sphere::new(1.0)),
+            iris_mat.clone(),
+            Transform::from_xyz(ex, ey, layer(0.030))
+                .with_rotation(tilt)
+                .with_scale(Vec3::new(
+                    eye.iris_radius * s,
+                    eye.iris_radius.min(eye.sclera_half_height) * s,
+                    0.012 * s,
+                )),
+            PartSlotTag::Head,
+        );
+        // Pupil.
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Head,
+            Mesh::from(Sphere::new(1.0)),
+            pupil_mat.clone(),
+            Transform::from_xyz(ex, ey, layer(0.038))
+                .with_rotation(tilt)
+                .with_scale(Vec3::new(
+                    eye.pupil_radius * s,
+                    eye.pupil_radius.min(eye.sclera_half_height) * s,
+                    0.010 * s,
+                )),
+            PartSlotTag::Head,
+        );
+        // Catchlight — up and outward, shared direction across both eyes.
+        if eye.highlight_radius > 0.0005 {
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                CartoonPartKind::Head,
+                Mesh::from(Sphere::new(eye.highlight_radius * s)),
+                highlight_mat.clone(),
+                Transform::from_xyz(
+                    ex + eye.highlight_offset.x * s,
+                    ey + eye.highlight_offset.y * s,
+                    layer(0.046),
+                ),
+                PartSlotTag::Head,
+            );
+        }
+        // Upper lash line — the heavy stroke that frames an anime eye.
+        if eye.lash_thickness > 0.0005 {
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                CartoonPartKind::Head,
+                Mesh::from(Cuboid::new(
+                    eye.sclera_half_width * 2.1 * s,
+                    eye.lash_thickness * 2.0 * s,
+                    0.014 * s,
+                )),
+                lash_mat.clone(),
+                Transform::from_xyz(ex, ey + eye.lash_drop * s, layer(0.042))
+                    .with_rotation(tilt),
+                PartSlotTag::Head,
+            );
+        }
+    }
+
+    // ── Eyebrows ──────────────────────────────────────────────────────────
+    for (kind, side) in [
+        (CartoonPartKind::LeftEyebrow, FaceSide::Left),
+        (CartoonPartKind::RightEyebrow, FaceSide::Right),
+    ] {
+        let brow = face.brow_layout(side);
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            kind,
+            Mesh::from(Cuboid::new(
+                brow.length * s,
+                brow.thickness * s,
+                0.020 * s,
+            )),
             brow_mat.clone(),
-            Transform::from_xyz(eye_x * s, head_y + 0.125 * s, -0.345 * s)
-                .with_rotation(Quat::from_rotation_z(rot_z)),
+            Transform::from_xyz(brow.offset_x * s, head_y + brow.offset_y * s, layer(0.025))
+                .with_rotation(Quat::from_rotation_z(brow.angle)),
             PartSlotTag::Head,
         );
     }
-    spawn_part(
-        commands,
-        meshes,
-        root,
-        CartoonPartKind::Nose,
-        superellipsoid_mesh(
-            Vec3::new(0.030 * s, 0.048 * s, 0.026 * s),
-            0.55,
-            0.78,
-            8,
-            14,
-        ),
-        skin_mat.clone(),
-        Transform::from_xyz(0.0, head_y - 0.016 * s, -0.352 * s),
-        PartSlotTag::Head,
-    );
+    // Anime noses are barely suggested; the slider can remove it entirely.
+    let nose = face.nose_size();
+    if nose > 0.02 {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Nose,
+            superellipsoid_mesh(
+                Vec3::new(0.030 * s * nose, 0.048 * s * nose, 0.026 * s * nose),
+                0.55,
+                0.78,
+                8,
+                14,
+            ),
+            skin_mat.clone(),
+            Transform::from_xyz(0.0, head_y - 0.016 * s, -0.352 * s),
+            PartSlotTag::Head,
+        );
+    }
+    // Mouth: three segments so the corners can lift into a smile or drop into
+    // a frown — a single bar can only ever look neutral.
+    let mouth = face.mouth_layout();
     spawn_part(
         commands,
         meshes,
         root,
         CartoonPartKind::Mouth,
-        Mesh::from(Cuboid::new(0.128 * s, 0.018 * s, 0.014 * s)),
+        Mesh::from(Cuboid::new(
+            mouth.width * 0.52 * s,
+            mouth.height * s,
+            0.014 * s,
+        )),
         mouth_mat.clone(),
         Transform::from_xyz(0.0, head_y - 0.115 * s, -0.350 * s),
         PartSlotTag::Head,
     );
+    for corner in [-1.0_f32, 1.0] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Mouth,
+            Mesh::from(Cuboid::new(
+                mouth.width * 0.30 * s,
+                mouth.height.min(0.020) * s,
+                0.014 * s,
+            )),
+            mouth_mat.clone(),
+            Transform::from_xyz(
+                corner * mouth.width * 0.38 * s,
+                head_y + (-0.115 + mouth.corner_lift) * s,
+                -0.350 * s,
+            )
+            .with_rotation(Quat::from_rotation_z(
+                -corner * mouth.corner_lift * 14.0,
+            )),
+            PartSlotTag::Head,
+        );
+    }
     for sign in [-1.0_f32, 1.0_f32] {
         spawn_part(
             commands,
