@@ -5,11 +5,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::robot_pets::{PartCost, RobotPartKind, RobotPetCollection};
 
-pub const SABRE_RELIC_IDS: [&str; 9] = [
+pub const SABRE_RELIC_IDS: [&str; 13] = [
     "solar_sabre_glyph",
     "cyclone_slash_blueprint",
     "comet_dash_blueprint",
     "meteor_pound_blueprint",
+    "rising_slash_blueprint",
+    "spiral_slash_blueprint",
+    "sabre_throw_blueprint",
+    "tempest_wave_core",
     "solar_fire_gem",
     "storm_gem",
     "frost_gem",
@@ -17,14 +21,17 @@ pub const SABRE_RELIC_IDS: [&str; 9] = [
     "legendary_starheart_gem",
 ];
 
-/// The complete starter technique kit. Elemental and legendary gems remain
-/// exploration upgrades, but every player can use the wave, cyclone, dash, and
-/// aerial pound from their first minute.
-pub const STARTER_SABRE_RELIC_IDS: [&str; 4] = [
+/// The complete starter technique kit — the fighting moveset every player has
+/// from their first minute, so the Saber's controls are learned once and never
+/// change. Elemental gems, the thrown blade, and the tempest wave stay
+/// exploration upgrades that layer on top.
+pub const STARTER_SABRE_RELIC_IDS: [&str; 6] = [
     "solar_sabre_glyph",
     "cyclone_slash_blueprint",
     "comet_dash_blueprint",
     "meteor_pound_blueprint",
+    "rising_slash_blueprint",
+    "spiral_slash_blueprint",
 ];
 
 pub fn is_sabre_relic(id: &str) -> bool {
@@ -62,7 +69,7 @@ pub struct SabreRelicDef {
     pub source_hint: &'static str,
 }
 
-pub const SABRE_RELIC_CATALOG: [SabreRelicDef; 9] = [
+pub const SABRE_RELIC_CATALOG: [SabreRelicDef; 13] = [
     SabreRelicDef {
         id: "solar_sabre_glyph",
         name: "Solar Sabre Glyph",
@@ -94,6 +101,38 @@ pub const SABRE_RELIC_CATALOG: [SabreRelicDef; 9] = [
         effect: "Converts the dash input into an airborne radial pound.",
         input: "B / East / Q while airborne",
         source_hint: "Solar Observatory ridge",
+    },
+    SabreRelicDef {
+        id: "rising_slash_blueprint",
+        name: "Rising Slash Blueprint",
+        kind: SabreRelicKind::Technique,
+        effect: "Unlocks a launching up-slash that opens aerial combos.",
+        input: "Hold Up + RB while grounded",
+        source_hint: "Skyward Trial spire",
+    },
+    SabreRelicDef {
+        id: "spiral_slash_blueprint",
+        name: "Spiral Slash Blueprint",
+        kind: SabreRelicKind::Technique,
+        effect: "Unlocks an airborne corkscrew cut that strikes twice.",
+        input: "Heavy while airborne",
+        source_hint: "Skyward Trial summit",
+    },
+    SabreRelicDef {
+        id: "sabre_throw_blueprint",
+        name: "Sabre Throw Blueprint",
+        kind: SabreRelicKind::Technique,
+        effect: "Hurls the blade as a returning projectile.",
+        input: "Hold Down + RB while grounded",
+        source_hint: "Rift Foundry vault",
+    },
+    SabreRelicDef {
+        id: "tempest_wave_core",
+        name: "Tempest Wave Core",
+        kind: SabreRelicKind::Core,
+        effect: "Adds a third-slash wave burst to the Saber chain.",
+        input: "Third slash of the RB chain",
+        source_hint: "Solar Sabre Observatory depths",
     },
     SabreRelicDef {
         id: "solar_fire_gem",
@@ -384,6 +423,24 @@ impl UpgradeLedger {
 
     pub fn sabre_pound_unlocked(&self) -> bool {
         self.has_relic("meteor_pound_blueprint")
+    }
+
+    pub fn sabre_rising_unlocked(&self) -> bool {
+        self.has_relic("rising_slash_blueprint")
+    }
+
+    pub fn sabre_spiral_unlocked(&self) -> bool {
+        self.has_relic("spiral_slash_blueprint")
+    }
+
+    pub fn sabre_throw_unlocked(&self) -> bool {
+        self.has_relic("sabre_throw_blueprint")
+    }
+
+    /// The Tempest Wave Core adds a third-slash wave burst on top of the
+    /// second-slash wave every Saber ships with.
+    pub fn sabre_third_slash_wave(&self) -> bool {
+        self.has_relic("tempest_wave_core")
     }
 
     /// Whether a dodge press can resolve into a sabre technique right now:

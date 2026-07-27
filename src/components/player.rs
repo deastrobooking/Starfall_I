@@ -1178,6 +1178,11 @@ pub struct PlayerInput {
     pub pause: bool,
     pub weapon_next: bool,
     pub weapon_prev: bool,
+    /// Cycle the equipped special weapon (D-pad up/down). Wraps through the
+    /// four special slots and back to "no special" so the primary weapon is
+    /// always one press away.
+    pub special_next: bool,
+    pub special_prev: bool,
     pub enter_vehicle: bool,
     pub open_map: bool,
     pub sabre_toggle: bool,
@@ -1194,6 +1199,8 @@ pub struct PlayerInput {
     pub ui_left: bool,
     pub ui_right: bool,
     pub ui_confirm: bool,
+    /// UI-only cancel/back request (Escape or East/B/Circle).
+    pub ui_cancel: bool,
     pub weapon_slot: Option<usize>,
     pub traversal_mode_switch: Option<TraversalMode>,
     /// Digit 7/8/9/0 or Select + D-pad → slots 0–3.

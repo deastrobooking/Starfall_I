@@ -845,6 +845,35 @@ over the strike zone for `EnemyConfig.attack_windup` seconds (scouts 0.22 s
 up to brutes 0.5 s) before the volume resolves, and a committed swing spends
 its cooldown even on a whiff — dodging the telegraph is the player's reward.
 Losing the target mid-windup aborts the swing with a short 0.4 s lockout.
+**Controller layout (2026-07-27):** the bare D-pad now swaps what RT fires —
+left/right cycle primary weapons, up/down cycle the special through
+`none → 0 → 1 → 2 → 3 → none` so the primary is always one more press away.
+LB stays the global modifier (LB + D-pad selects traversal/flight mode), RB is
+the primary attack (Star Sabre swing / physical weapon), and the displaced
+utility actions moved onto Select + D-pad (up = enter vehicle, down =
+interact, right = open map). The old Select + D-pad direct special-slot chord
+was retired since it would double-fire with the utilities; keyboard 7–0 still
+selects specials directly.
+
+**Star Sabre moveset (2026-07-27):** techniques resolve through one pure
+`resolve_sabre_technique` predicate (stance + input → verb), so the control
+scheme is unit-testable and a bare swing always falls through to the base
+slash chain — the fighting moveset never changes under the player. Heavy is
+Cyclone Slash grounded / **Spiral Slash** airborne; dodge is Comet Dash
+grounded / Meteor Pound airborne; holding **up** + attack is the launching
+**Rising Slash** and **down** + attack is the **Sabre Throw**, a piercing
+returning blade that rides the normal projectile pipeline (so world cover and
+sweeps apply). All six are authored in `sabre_techniques` in
+`assets/combat/moves.json`, now including `rise_speed`, `throw_speed`, and
+`throw_lifetime`. The starter kit ships wave + cyclone + dash + pound +
+rising + spiral; the **Sabre Throw Blueprint** and **Tempest Wave Core**
+(which adds a third-slash wave burst on top of the second-slash wave) remain
+exploration relics, alongside the elemental/legendary gems that recolor the
+blade and stack damage. The slash pose is driven by the real phase machine
+(`sabre_swing_position`) rather than a free-running sine: the blade winds back
+through startup, snaps across the active window, and settles through recovery,
+alternating sides per slash so a chain reads as a combo.
+
 **Hoverboard tricks (2026-07-25):** the deck's rendered pose is damped rather
 than recomputed raw each frame — the contact normal (which pops between
 trimesh triangles and vanishes on brief airborne frames), carve bank, nose

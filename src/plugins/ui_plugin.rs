@@ -352,6 +352,7 @@ enum PausePage {
 #[derive(Resource)]
 struct PauseMenuState {
     page: PausePage,
+    requested_page: Option<PausePage>,
     resume_lockout: f32,
     resume_armed: bool,
 }
@@ -366,6 +367,7 @@ impl Default for PauseMenuState {
     fn default() -> Self {
         Self {
             page: PausePage::Main,
+            requested_page: None,
             resume_lockout: 0.0,
             resume_armed: true,
         }
@@ -1484,7 +1486,7 @@ fn setup_pause_menu(
     theme: Res<UiTheme>,
     player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
 ) {
-    menu.page = PausePage::Main;
+    menu.page = menu.requested_page.take().unwrap_or(PausePage::Main);
     menu.resume_lockout = 0.20;
     menu.resume_armed = false;
     let chapters = all_chapters();
@@ -2236,6 +2238,7 @@ fn pause_input_system(
     native: Res<NativeControllerState>,
     mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     input_q: Query<&PlayerInput, With<Player>>,
+    capture: Res<UiGameplayCapture>,
     state: Res<State<AppState>>,
     mut menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
@@ -2274,7 +2277,13 @@ fn pause_input_system(
 
     match state.get() {
         AppState::Playing => {
-            if !(raw_pause_pressed || player_pause_pressed) {
+            let map_pressed = input_q.iter().any(|input| input.open_map);
+            if map_pressed {
+                menu.requested_page = Some(PausePage::Map);
+            }
+            if capture.owner.is_some()
+                || !(raw_pause_pressed || player_pause_pressed || map_pressed)
+            {
                 return;
             }
             transition.pausing = true;
@@ -5162,7 +5171,7 @@ fn setup_hud(
                     LoadoutTitleText,
                 ));
                 panel.spawn((
-                    Text::new("D-PAD/STICK: navigate   A: equip   LB+SELECT / I: close"),
+                    Text::new("D-PAD/STICK: navigate   A: equip   B or LB+SELECT: close"),
                     TextFont {
                         font_size: FontSize::Px(13.0),
                         ..default()
@@ -5197,7 +5206,7 @@ fn setup_hud(
                                     font_size: FontSize::Px(13.0),
                                     ..default()
                                 },
-                                    TextColor(theme.text_primary),
+                                TextColor(theme.text_primary),
                             ));
                         }
                     });
@@ -5216,10 +5225,7 @@ fn setup_hud(
                                     Node {
                                         width: Val::Percent(100.0),
                                         min_height: Val::Px(38.0),
-                                        padding: UiRect::axes(
-                                            Val::Px(12.0),
-                                            Val::Px(7.0),
-                                        ),
+                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
                                         align_items: AlignItems::Center,
                                         ..default()
                                     },
@@ -5289,9 +5295,7 @@ fn setup_hud(
             ))
             .with_children(|panel| {
                 panel.spawn((
-                    Text::new(
-                        "CRAFTING — D-PAD / STICK: choose   A: craft   SELECT: close   Keyboard: 1-5",
-                    ),
+                    Text::new("CRAFTING — D-PAD / STICK: choose   A: craft   B or SELECT: close"),
                     TextFont {
                         font_size: FontSize::Px(15.0),
                         ..default()
@@ -6252,6 +6256,7 @@ fn discussion_panel_system(
     asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut discussion: ResMut<DiscussionState>,
+    mut input_capture: ResMut<UiGameplayCapture>,
     mut last_voice_token: Local<u64>,
     mut panel_q: Query<&mut Node, With<DiscussionPanelRoot>>,
     mut text_sets: ParamSet<(
@@ -6277,6 +6282,8 @@ fn discussion_panel_system(
     if !discussion.active {
         return;
     }
+
+    input_capture.owner = Some(discussion.player_index);
 
     let Some(script) = discussion.script() else {
         discussion.close();
@@ -6312,23 +6319,31 @@ fn discussion_panel_system(
     }
     if let Ok(mut text) = text_sets.p3().single_mut() {
         *text = Text::new(format!(
-            "Interact / Enter / Space: next   Line {}/{}   Voice: {}",
+            "A / Interact: next   B: close   Line {}/{}   Voice: {}",
             discussion.line_index + 1,
             script.lines.len(),
             line.voice_mp3.unwrap_or("none")
         ));
     }
 
-    let owner_interact = player_input_q
+    let owner_input = player_input_q
         .iter()
-        .any(|(idx, input)| idx.0 == discussion.player_index && input.interact);
+        .find_map(|(idx, input)| (idx.0 == discussion.player_index).then_some(input));
+    let owner_interact = owner_input.is_some_and(|input| input.interact || input.ui_confirm);
+    let owner_cancel = owner_input.is_some_and(|input| input.ui_cancel);
     let keyboard_next = keyboard.just_pressed(KeyCode::Enter)
         || keyboard.just_pressed(KeyCode::NumpadEnter)
         || keyboard.just_pressed(KeyCode::Space)
         || keyboard.just_pressed(KeyCode::KeyE);
 
-    if discussion.input_cooldown <= 0.0 && (owner_interact || keyboard_next) {
+    if discussion.input_cooldown <= 0.0 && owner_cancel {
+        discussion.close();
+        input_capture.owner = None;
+    } else if discussion.input_cooldown <= 0.0 && (owner_interact || keyboard_next) {
         discussion.advance();
+        if !discussion.active {
+            input_capture.owner = None;
+        }
     }
 }
 
@@ -6421,6 +6436,13 @@ fn crafting_panel_system(
     let owner_input = player_input_q
         .iter()
         .find_map(|(idx, input)| (idx.0 == owner).then_some(input));
+
+    if owner_input.is_some_and(|input| input.ui_cancel) {
+        panel_state.visible = false;
+        panel_state.owner = None;
+        input_capture.owner = None;
+        return;
+    }
 
     let Some((_, mut inventory, stats)) = player_q.iter_mut().find(|(idx, _, _)| idx.0 == owner)
     else {
@@ -6635,6 +6657,13 @@ fn loadout_panel_system(
     let owner_input = input_q
         .iter()
         .find_map(|(index, input)| (index.0 == owner).then_some(input));
+
+    if owner_input.is_some_and(|input| input.ui_cancel) {
+        state.visible = false;
+        state.owner = None;
+        capture.owner = None;
+        return;
+    }
 
     if let Some(tab) = clicked_tab {
         state.tab = tab;

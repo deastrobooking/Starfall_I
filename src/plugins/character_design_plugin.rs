@@ -15,6 +15,7 @@ use crate::characters::{
 };
 use crate::components::player::PlayerCamera;
 use crate::player_mesh::spawn_modular_player_preview;
+use crate::plugins::ui_plugin::MenuScrollPanel;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     CharacterBaseModel, CharacterDesignData, CharacterDesignReturnTarget, CharacterDesignSnapshot,
@@ -974,6 +975,7 @@ fn spawn_design_ui(
                 BackgroundColor(Color::srgba(0.025, 0.026, 0.030, 0.96)),
                 ScrollPosition::default(),
                 DesignScrollPanel,
+                MenuScrollPanel,
             ))
             .with_children(|panel| {
                 panel.spawn((

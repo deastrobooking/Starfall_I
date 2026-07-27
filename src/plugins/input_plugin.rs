@@ -12,8 +12,8 @@
 ///  Right stick       — look (quadratic curve applied)
 ///  LT  (LTrigger2)  — aim
 ///  RT  (RTrigger2)  — fire
-///  LB  (LTrigger)   — sprint
-///  RB  (RTrigger)   — Star Sabre slash
+///  LB  (LTrigger)   — sprint, and the global modifier (LB + X = alt action)
+///  RB  (RTrigger)   — primary attack: Star Sabre slash / physical weapon
 ///  A / Cross / B    — jump                     (South)
 ///  B / Circle / A   — dodge                    (East)
 ///  X / Square / Y   — reload; LB+X uses equipped quick item (West)
@@ -26,18 +26,20 @@
 ///  LB + DPad Right    — enable Flight
 ///  L3 (left click)  — melee heavy              (LeftThumb)
 ///  R3 (right click) — melee light              (RightThumb)
-///  Select/Back/Share/View — crafting (alone), loadout (LB+Select), or special modifier (+ DPad)
+///  Select/Back/Share/View — crafting (alone), loadout (LB+Select), or the
+///                           utility modifier (+ DPad)
 ///  Start/Options/Menu     — pause              (Start)
 ///  Guide/Home             — sabre toggle       (Mode)  [fallback: L3+R3]
 ///  G / Select+RB      — grapple hook foundation
-///  DPad Up           — enter vehicle
-///  DPad Down         — interact
-///  DPad Left         — weapon prev
-///  DPad Right        — open map
 ///
-///  Select + DPad (held Select, then tap DPad):
-///    Up → select tracking missile | Down → special slot 1
-///    Left → special slot 2 | Right → special slot 3
+///  DPad (bare) — swaps what RT fires:
+///    Left/Right  — cycle primary weapon
+///    Up/Down     — cycle special weapon (wraps through "none" = primary)
+///
+///  Select + DPad — utility actions:
+///    Up → enter vehicle | Down → interact | Right → open map
+///
+///  LT + DPad Left/Right — cycle armor infusion element
 use bevy::input::gamepad::{
     Gamepad, GamepadAxis, GamepadButton, GamepadButtonStateChangedEvent, GamepadConnection,
     GamepadConnectionEvent,
@@ -556,6 +558,9 @@ fn update_player_inputs(
             || native_just(NativeButton::DPadLeft)
             || native_just(NativeButton::DPadRight);
 
+        // Controller special selection is now the D-pad up/down cycle below;
+        // Select + D-pad carries the utility actions instead, so the direct
+        // slot chord would double-fire and has been retired.
         pi.special_slot = if is_p1 {
             if keyboard.just_pressed(KeyCode::Digit7) {
                 Some(0)
@@ -565,34 +570,8 @@ fn update_player_inputs(
                 Some(2)
             } else if keyboard.just_pressed(KeyCode::Digit0) {
                 Some(3)
-            } else if select_held
-                && (btn_just(GamepadButton::DPadUp) || native_just(NativeButton::DPadUp))
-            {
-                Some(0)
-            } else if select_held
-                && (btn_just(GamepadButton::DPadDown) || native_just(NativeButton::DPadDown))
-            {
-                Some(1)
-            } else if select_held
-                && (btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft))
-            {
-                Some(2)
-            } else if select_held
-                && (btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight))
-            {
-                Some(3)
             } else {
                 None
-            }
-        } else if select_held && dpad_any_just {
-            if btn_just(GamepadButton::DPadUp) || native_just(NativeButton::DPadUp) {
-                Some(0)
-            } else if btn_just(GamepadButton::DPadDown) || native_just(NativeButton::DPadDown) {
-                Some(1)
-            } else if btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft) {
-                Some(2)
-            } else {
-                Some(3)
             }
         } else {
             None
@@ -634,24 +613,32 @@ fn update_player_inputs(
         );
 
         let dpad_free = !select_held && !armor_controller_modifier && !ride_controller_modifier;
+        let dpad_up_just = btn_just(GamepadButton::DPadUp) || native_just(NativeButton::DPadUp);
+        let dpad_down_just =
+            btn_just(GamepadButton::DPadDown) || native_just(NativeButton::DPadDown);
+        let dpad_left_just =
+            btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft);
+        let dpad_right_just =
+            btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight);
 
-        pi.interact = (is_p1 && keyboard.just_pressed(KeyCode::KeyE))
-            || (dpad_free
-                && (btn_just(GamepadButton::DPadDown) || native_just(NativeButton::DPadDown)));
+        // ── D-pad: weapons on the horizontal, specials on the vertical ───────
+        // The bare D-pad is reserved for swapping what RT fires. Utility
+        // actions (vehicle, interact, map) move onto the Select chord, and
+        // LB + D-pad stays the traversal/flight selector.
+        pi.weapon_prev = pi.weapon_prev || (dpad_free && dpad_left_just);
+        pi.weapon_next = pi.weapon_next || (dpad_free && dpad_right_just);
+        pi.special_next = dpad_free && dpad_up_just;
+        pi.special_prev = dpad_free && dpad_down_just;
 
-        pi.enter_vehicle = (is_p1 && keyboard.just_pressed(KeyCode::KeyJ))
-            || (dpad_free
-                && (btn_just(GamepadButton::DPadUp) || native_just(NativeButton::DPadUp)));
+        // ── Utility actions (Select + D-pad, or keyboard) ─────────────────────
+        pi.interact =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyE)) || (select_held && dpad_down_just);
 
-        pi.weapon_prev = pi.weapon_prev
-            || (dpad_free
-                && (btn_just(GamepadButton::DPadLeft) || native_just(NativeButton::DPadLeft)));
+        pi.enter_vehicle =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyJ)) || (select_held && dpad_up_just);
 
-        // ── Open map ──────────────────────────────────────────────────────────
-        // DPadRight is assigned to the map; DPadLeft cycles weapons.
-        pi.open_map = (is_p1 && keyboard.just_pressed(KeyCode::KeyM))
-            || (dpad_free
-                && (btn_just(GamepadButton::DPadRight) || native_just(NativeButton::DPadRight)));
+        pi.open_map =
+            (is_p1 && keyboard.just_pressed(KeyCode::KeyM)) || (select_held && dpad_right_just);
 
         // ── In-game equipment menus ───────────────────────────────────────────
         // Select alone opens crafting. LB+Select opens the unified loadout;
@@ -706,6 +693,9 @@ fn update_player_inputs(
         pi.ui_confirm = (is_p1 && keyboard.just_pressed(KeyCode::Enter))
             || btn_just(GamepadButton::South)
             || native_just(NativeButton::South);
+        pi.ui_cancel = (is_p1 && keyboard.just_pressed(KeyCode::Escape))
+            || btn_just(GamepadButton::East)
+            || native_just(NativeButton::East);
 
         if capture.owner == Some(idx.0) {
             suppress_gameplay_for_ui(&mut pi);
@@ -754,6 +744,7 @@ fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
         input.ui_left,
         input.ui_right,
         input.ui_confirm,
+        input.ui_cancel,
     );
     *input = PlayerInput::default();
     (
@@ -766,6 +757,7 @@ fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
         input.ui_left,
         input.ui_right,
         input.ui_confirm,
+        input.ui_cancel,
     ) = preserved;
 }
 
@@ -843,6 +835,7 @@ mod tests {
             ui_down: true,
             ui_right: true,
             ui_confirm: true,
+            ui_cancel: true,
             ..default()
         };
         suppress_gameplay_for_ui(&mut input);
@@ -856,6 +849,7 @@ mod tests {
         assert!(input.ui_down);
         assert!(input.ui_right);
         assert!(input.ui_confirm);
+        assert!(input.ui_cancel);
     }
 
     #[test]

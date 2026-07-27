@@ -62,6 +62,8 @@ pub struct EdgeInput {
     pub reload: bool,
     pub weapon_next: bool,
     pub weapon_prev: bool,
+    pub special_next: bool,
+    pub special_prev: bool,
     pub sabre_toggle: bool,
     pub sabre_attack: bool,
     pub enter_vehicle: bool,
@@ -87,6 +89,8 @@ impl EdgeInput {
         self.reload |= input.reload;
         self.weapon_next |= input.weapon_next;
         self.weapon_prev |= input.weapon_prev;
+        self.special_next |= input.special_next;
+        self.special_prev |= input.special_prev;
         self.sabre_toggle |= input.sabre_toggle;
         self.sabre_attack |= input.sabre_attack;
         self.enter_vehicle |= input.enter_vehicle;
@@ -163,6 +167,8 @@ impl FixedInput {
         out.reload = self.edges.reload;
         out.weapon_next = self.edges.weapon_next;
         out.weapon_prev = self.edges.weapon_prev;
+        out.special_next = self.edges.special_next;
+        out.special_prev = self.edges.special_prev;
         out.sabre_toggle = self.edges.sabre_toggle;
         out.sabre_attack = self.edges.sabre_attack;
         out.enter_vehicle = self.edges.enter_vehicle;

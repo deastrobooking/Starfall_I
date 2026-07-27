@@ -4659,12 +4659,21 @@ mod tests {
         let mut player = PlayerProgression::default();
         player.upgrades.unlock_relic("cyclone_slash_blueprint");
 
-        assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 4);
+        // Newly granted: storm_gem from the chapter plus the five starter
+        // techniques the player did not already own (cyclone was pre-owned).
+        assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 6);
         assert!(player.upgrades.has_relic("solar_sabre_glyph"));
         assert!(player.upgrades.has_relic("storm_gem"));
         assert!(player.upgrades.has_relic("cyclone_slash_blueprint"));
         assert!(player.upgrades.has_relic("comet_dash_blueprint"));
         assert!(player.upgrades.has_relic("meteor_pound_blueprint"));
+        // The core fighting moveset ships with every player so the Saber's
+        // controls never change out from under them.
+        assert!(player.upgrades.sabre_rising_unlocked());
+        assert!(player.upgrades.sabre_spiral_unlocked());
+        // Throw and the tempest wave stay exploration upgrades.
+        assert!(!player.upgrades.sabre_throw_unlocked());
+        assert!(!player.upgrades.sabre_third_slash_wave());
         assert!(!player.upgrades.has_relic("unrelated_world_secret"));
         assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 0);
     }

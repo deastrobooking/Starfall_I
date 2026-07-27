@@ -106,19 +106,47 @@ pub struct SabreTechniqueDef {
     /// is drawn — the technique keeps a slice of the roll's defense.
     #[serde(default)]
     pub iframes: f32,
+    /// Upward launch speed applied on activation (Rising Slash; 0 = none).
+    #[serde(default)]
+    pub rise_speed: f32,
+    /// Muzzle speed of a thrown blade (Sabre Throw; 0 = not a throw). A
+    /// technique with a positive value spawns a returning projectile instead
+    /// of resolving its strikes as melee.
+    #[serde(default)]
+    pub throw_speed: f32,
+    /// Seconds a thrown blade flies before returning/expiring.
+    #[serde(default)]
+    pub throw_lifetime: f32,
 }
 
-/// The three relic-unlocked sabre techniques.
+/// The relic-unlocked sabre techniques.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SabreTechniqueDefs {
     pub cyclone_slash: SabreTechniqueDef,
     pub comet_dash: SabreTechniqueDef,
     pub meteor_pound: SabreTechniqueDef,
+    /// Rising up-slash (ground + up). Serde-defaulted so libraries authored
+    /// before these techniques existed keep loading.
+    #[serde(default = "default_rising_slash")]
+    pub rising_slash: SabreTechniqueDef,
+    /// Airborne corkscrew (air + heavy).
+    #[serde(default = "default_spiral_slash")]
+    pub spiral_slash: SabreTechniqueDef,
+    /// Thrown returning blade (ground + down).
+    #[serde(default = "default_sabre_throw")]
+    pub sabre_throw: SabreTechniqueDef,
 }
 
 impl SabreTechniqueDefs {
-    pub fn all(&self) -> [&SabreTechniqueDef; 3] {
-        [&self.cyclone_slash, &self.comet_dash, &self.meteor_pound]
+    pub fn all(&self) -> [&SabreTechniqueDef; 6] {
+        [
+            &self.cyclone_slash,
+            &self.comet_dash,
+            &self.meteor_pound,
+            &self.rising_slash,
+            &self.spiral_slash,
+            &self.sabre_throw,
+        ]
     }
 }
 
@@ -410,6 +438,9 @@ fn default_sabre_techniques() -> SabreTechniqueDefs {
             dash_speed: 0.0,
             plunge_speed: 0.0,
             iframes: 0.0,
+            rise_speed: 0.0,
+            throw_speed: 0.0,
+            throw_lifetime: 0.0,
         },
         comet_dash: SabreTechniqueDef {
             name: "Comet Dash".to_string(),
@@ -427,6 +458,9 @@ fn default_sabre_techniques() -> SabreTechniqueDefs {
             // The dash claims the dodge input while the sabre is drawn, so it
             // keeps a slice of the roll's defensive window (roll ≈ 0.35 s).
             iframes: 0.28,
+            rise_speed: 0.0,
+            throw_speed: 0.0,
+            throw_lifetime: 0.0,
         },
         meteor_pound: SabreTechniqueDef {
             name: "Meteor Pound".to_string(),
@@ -442,7 +476,81 @@ fn default_sabre_techniques() -> SabreTechniqueDefs {
             dash_speed: 0.0,
             plunge_speed: 1.85,
             iframes: 0.0,
+            rise_speed: 0.0,
+            throw_speed: 0.0,
+            throw_lifetime: 0.0,
         },
+        rising_slash: default_rising_slash(),
+        spiral_slash: default_spiral_slash(),
+        sabre_throw: default_sabre_throw(),
+    }
+}
+
+/// Rising up-slash: launches the rider skyward on a tight forward arc, the
+/// natural opener into an aerial combo.
+fn default_rising_slash() -> SabreTechniqueDef {
+    SabreTechniqueDef {
+        name: "Rising Slash".to_string(),
+        damage_mult: 1.25,
+        knockback_mult: 1.6,
+        radius: 4.2,
+        hit_offset: 0.5,
+        arc_cos: -0.35,
+        strikes: vec![0.6],
+        cooldown_mult: 1.1,
+        technique_time: 0.44,
+        hitstop: 0.05,
+        dash_speed: 0.0,
+        plunge_speed: 0.0,
+        iframes: 0.0,
+        rise_speed: 0.92,
+        throw_speed: 0.0,
+        throw_lifetime: 0.0,
+    }
+}
+
+/// Airborne corkscrew: a wide spinning cut that carries through the air.
+fn default_spiral_slash() -> SabreTechniqueDef {
+    SabreTechniqueDef {
+        name: "Spiral Slash".to_string(),
+        damage_mult: 1.55,
+        knockback_mult: 1.25,
+        radius: 5.0,
+        hit_offset: 0.0,
+        arc_cos: -1.0,
+        strikes: vec![0.0, 2.4],
+        cooldown_mult: 1.2,
+        technique_time: 0.52,
+        hitstop: 0.05,
+        dash_speed: 0.0,
+        plunge_speed: 0.0,
+        iframes: 0.0,
+        rise_speed: 0.0,
+        throw_speed: 0.0,
+        throw_lifetime: 0.0,
+    }
+}
+
+/// Thrown blade: leaves the hand as a returning projectile rather than
+/// resolving a melee arc (`throw_speed > 0` selects that path).
+fn default_sabre_throw() -> SabreTechniqueDef {
+    SabreTechniqueDef {
+        name: "Sabre Throw".to_string(),
+        damage_mult: 1.35,
+        knockback_mult: 1.1,
+        radius: 2.2,
+        hit_offset: 0.0,
+        arc_cos: -1.0,
+        strikes: vec![0.0],
+        cooldown_mult: 1.6,
+        technique_time: 0.60,
+        hitstop: 0.04,
+        dash_speed: 0.0,
+        plunge_speed: 0.0,
+        iframes: 0.0,
+        rise_speed: 0.0,
+        throw_speed: 46.0,
+        throw_lifetime: 1.15,
     }
 }
 

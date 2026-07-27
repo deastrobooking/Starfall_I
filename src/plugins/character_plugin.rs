@@ -20,6 +20,7 @@ use crate::components::player::{
     TraversalModeState,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
+use crate::combat_data::MeleePhase;
 use crate::state::AppState;
 use crate::tricks::{TrickCategory, TrickState};
 
@@ -174,6 +175,43 @@ struct PoseSample {
     board_trick: Option<TrickCategory>,
     /// Signed carve input (-1..1) for stance lean and counter-balance arms.
     board_carve: f32,
+    /// Signed sabre swing position (-1..1) driven by the real slash phase
+    /// machine; see [`sabre_swing_position`].
+    sabre_swing: f32,
+}
+
+/// Signed swing position of a Star Sabre slash, in `-1..=1`.
+///
+/// The old pose drove itself from a free-running sine, so the blade waved
+/// whether or not a strike was happening. Reading the real phase machine
+/// instead gives the slash an actual attack shape — wound back through
+/// startup, snapping across during the active window, settling through
+/// recovery — and alternating sides per slash so a chain reads as a combo.
+fn sabre_swing_position(phase: MeleePhase, remaining: f32, slash_index: u32) -> f32 {
+    // Nominal phase lengths from the shipped sabre MoveDef; only used to
+    // normalize a visual, so authored retunes stay close enough.
+    const STARTUP: f32 = 0.05;
+    const ACTIVE: f32 = 0.08;
+    const RECOVERY: f32 = 0.12;
+    let side = if slash_index.is_multiple_of(2) { 1.0 } else { -1.0 };
+    let magnitude = match phase {
+        // Wind back: -0.15 → -0.85 as the strike approaches.
+        MeleePhase::Startup => {
+            let t = 1.0 - (remaining / STARTUP).clamp(0.0, 1.0);
+            -0.15 - 0.70 * t
+        }
+        // Snap through the arc: -0.85 → +1.0 across the hit window.
+        MeleePhase::Active => {
+            let t = 1.0 - (remaining / ACTIVE).clamp(0.0, 1.0);
+            -0.85 + 1.85 * t
+        }
+        // Follow through and settle back toward neutral.
+        MeleePhase::Recovery => {
+            let t = 1.0 - (remaining / RECOVERY).clamp(0.0, 1.0);
+            1.0 - 0.85 * t
+        }
+    };
+    magnitude * side
 }
 
 /// Resolved hoverboard riding stance: the sideways skate posture plus
@@ -831,6 +869,10 @@ fn cartoon_animation_system(
             .unwrap_or(false);
         let melee_attacking = melee.map(|m| m.active.is_some()).unwrap_or(false);
         let board_trick = tricks.and_then(|t| t.active.as_ref().map(|a| a.category));
+        let sabre_swing = sabre
+            .filter(|s| s.is_slashing)
+            .map(|s| sabre_swing_position(s.slash_phase, s.slash_timer, s.slash_index))
+            .unwrap_or(0.0);
         let board_carve = player_input.map(|pi| pi.move_axis.x).unwrap_or(0.0);
         animator.pose = select_cartoon_pose(PoseInput {
             state: current_state,
@@ -963,6 +1005,7 @@ fn cartoon_animation_system(
                 wall_clasp_time,
                 board_trick,
                 board_carve,
+                sabre_swing,
             },
         );
     }
@@ -2660,13 +2703,26 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
 
         // ── Star Sabre slash ─────────────────────────────────────────────────
         CartoonPose::SabreSlash => {
-            let sweep = (sample.phase * 1.25).sin();
-            let snap = sweep.signum() * sweep.abs().sqrt();
+            // Driven by the real slash phase machine: wound back on startup,
+            // snapping across the active window, settling through recovery.
+            // Falls back to the old idle sway when no slash is live (e.g. the
+            // sabre is merely drawn).
+            let snap = if sample.sabre_swing.abs() > f32::EPSILON {
+                sample.sabre_swing
+            } else {
+                let sweep = (sample.phase * 1.25).sin();
+                sweep.signum() * sweep.abs().sqrt()
+            };
+            let sweep = snap.abs();
+            // Torso counter-rotates and drops slightly as the blade crosses,
+            // so the swing looks driven from the hips rather than the wrist.
+            let commit = (1.0 - (snap.abs() - 1.0).abs()).clamp(0.0, 1.0);
             match part.kind {
                 CartoonPartKind::Body => {
-                    transform.rotation *=
-                        Quat::from_rotation_y(0.42 * snap) * Quat::from_rotation_z(-0.08 * snap);
-                    transform.translation.y += sweep.abs() * 0.055;
+                    transform.rotation *= Quat::from_rotation_y(0.52 * snap)
+                        * Quat::from_rotation_z(-0.12 * snap)
+                        * Quat::from_rotation_x(-0.10 * commit);
+                    transform.translation.y += sweep * 0.055 - commit * 0.04;
                     transform.scale.x *= 1.02;
                 }
                 CartoonPartKind::Head
@@ -2677,27 +2733,31 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                         Quat::from_rotation_y(0.30 * snap) * Quat::from_rotation_x(-0.05);
                     transform.translation.y += sweep.abs() * 0.035;
                 }
+                // Off hand trails the swing for counter-balance.
                 CartoonPartKind::LeftArm | CartoonPartKind::LeftHand => {
-                    transform.rotation *= Quat::from_rotation_x(-0.78)
+                    transform.rotation *= Quat::from_rotation_x(-0.78 - commit * 0.25)
                         * Quat::from_rotation_y(-0.28)
                         * Quat::from_rotation_z(-0.72 * snap);
                 }
+                // Blade hand: reaches overhead on the wind-up and drives all
+                // the way across on the strike.
                 CartoonPartKind::RightArm | CartoonPartKind::RightHand => {
-                    transform.rotation *= Quat::from_rotation_x(-1.72)
-                        * Quat::from_rotation_y(0.34)
-                        * Quat::from_rotation_z(1.05 * snap);
+                    transform.rotation *= Quat::from_rotation_x(-1.72 + commit * 0.85)
+                        * Quat::from_rotation_y(0.34 + 0.30 * snap)
+                        * Quat::from_rotation_z(1.15 * snap);
                 }
+                // Legs brace into the swing: front foot plants, back leg drives.
                 CartoonPartKind::LeftLeg
                 | CartoonPartKind::LeftFoot
                 | CartoonPartKind::LeftBoot => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(-0.26) * Quat::from_rotation_z(0.10);
+                    transform.rotation *= Quat::from_rotation_x(-0.26 - commit * 0.20)
+                        * Quat::from_rotation_z(0.10);
                 }
                 CartoonPartKind::RightLeg
                 | CartoonPartKind::RightFoot
                 | CartoonPartKind::RightBoot => {
-                    transform.rotation *=
-                        Quat::from_rotation_x(0.28) * Quat::from_rotation_z(-0.12);
+                    transform.rotation *= Quat::from_rotation_x(0.28 + commit * 0.18)
+                        * Quat::from_rotation_z(-0.12);
                 }
                 CartoonPartKind::StarBadge | CartoonPartKind::Belt => {
                     transform.rotation *= Quat::from_rotation_y(0.42 * snap);
@@ -2982,6 +3042,40 @@ mod tests {
             wall_clasp_time: 0.0,
             board_trick: trick,
             board_carve: carve,
+            sabre_swing: 0.0,
+        }
+    }
+
+    #[test]
+    fn sabre_swing_follows_the_phase_machine_and_alternates_sides() {
+        // Wound back through startup, crossing during the active window,
+        // settling in recovery — the shape of an actual strike.
+        let wind_up = sabre_swing_position(MeleePhase::Startup, 0.0, 0);
+        let strike_start = sabre_swing_position(MeleePhase::Active, 0.08, 0);
+        let strike_end = sabre_swing_position(MeleePhase::Active, 0.0, 0);
+        let settled = sabre_swing_position(MeleePhase::Recovery, 0.0, 0);
+
+        assert!(wind_up < 0.0, "blade winds back before the hit");
+        assert!(strike_start < 0.0 && strike_end > 0.0, "swing crosses over");
+        assert!(strike_end > strike_start, "swing travels forward");
+        assert!(settled.abs() < strike_end.abs(), "follow-through settles");
+
+        // Consecutive slashes swing from opposite sides so a chain reads as
+        // a combo instead of the same cut repeated.
+        let even = sabre_swing_position(MeleePhase::Active, 0.0, 0);
+        let odd = sabre_swing_position(MeleePhase::Active, 0.0, 1);
+        assert!(even.signum() != odd.signum());
+        assert!((even.abs() - odd.abs()).abs() < 1e-6, "mirrored, not weaker");
+
+        // Every position stays in range, so the pose can never over-rotate.
+        for index in 0..4u32 {
+            for (phase, t) in [
+                (MeleePhase::Startup, 0.05),
+                (MeleePhase::Active, 0.04),
+                (MeleePhase::Recovery, 0.12),
+            ] {
+                assert!(sabre_swing_position(phase, t, index).abs() <= 1.0);
+            }
         }
     }
 
@@ -3084,6 +3178,7 @@ mod tests {
             wall_clasp_time: 0.0,
             board_trick: None,
             board_carve: 0.0,
+            sabre_swing: 0.0,
         };
         let mut transform = Transform::default();
 

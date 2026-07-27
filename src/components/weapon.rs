@@ -441,6 +441,12 @@ pub enum SabreTechnique {
     CycloneSlash,
     CometDash,
     MeteorPound,
+    /// Rising up-slash that launches the rider skyward (ground, hold up).
+    RisingSlash,
+    /// Airborne corkscrew that carries the blade through a full spiral.
+    SpiralSlash,
+    /// Hurls the blade as a returning projectile.
+    SabreThrow,
 }
 
 impl SabreTechnique {
@@ -450,6 +456,9 @@ impl SabreTechnique {
             Self::CycloneSlash => "CYCLONE",
             Self::CometDash => "COMET DASH",
             Self::MeteorPound => "METEOR POUND",
+            Self::RisingSlash => "RISING SLASH",
+            Self::SpiralSlash => "SPIRAL SLASH",
+            Self::SabreThrow => "SABRE THROW",
         }
     }
 }

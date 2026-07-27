@@ -572,6 +572,23 @@ fn apply_ranged_defs(library: &MoveLibrary, inv: &mut WeaponInventory) {
 }
 
 // ── Weapon Select ─────────────────────────────────────────────────────────────
+/// Number of special weapon slots the D-pad cycle walks through.
+const SPECIAL_SLOT_COUNT: u8 = 4;
+
+/// Cycle the equipped special: `None` (primary weapon) → 0 → 1 → 2 → 3 → `None`.
+/// Keeping "no special" inside the ring means the primary is always reachable
+/// by continuing to press the same direction — no separate unequip input.
+fn cycle_special_slot(current: Option<u8>, forward: bool) -> Option<u8> {
+    match (current, forward) {
+        (None, true) => Some(0),
+        (None, false) => Some(SPECIAL_SLOT_COUNT - 1),
+        (Some(slot), true) if slot + 1 >= SPECIAL_SLOT_COUNT => None,
+        (Some(slot), true) => Some(slot + 1),
+        (Some(0), false) => None,
+        (Some(slot), false) => Some(slot - 1),
+    }
+}
+
 fn weapon_select_system(
     mut player_q: Query<
         (
@@ -584,6 +601,19 @@ fn weapon_select_system(
     mut switched_ev: MessageWriter<WeaponSwitchedEvent>,
 ) {
     for (pi, mut inv, mut specials) in player_q.iter_mut() {
+        // ── Special cycle (D-pad up/down) ─────────────────────────────────
+        // Walks None → 0 → 1 → 2 → 3 → None, so the primary weapon is always
+        // reachable by continuing to cycle rather than a separate unequip.
+        if pi.special_next || pi.special_prev {
+            specials.active_slot = cycle_special_slot(specials.active_slot, pi.special_next);
+            let weapon_name = specials
+                .selected()
+                .map(|special| special.name.to_string())
+                .unwrap_or_else(|| inv.active().weapon_type.display_name().to_string());
+            switched_ev.write(WeaponSwitchedEvent { weapon_name });
+            continue;
+        }
+
         let prev = inv.active_slot;
         let count = inv.slots.len();
 
@@ -2382,6 +2412,80 @@ fn melee_combo_system(
 /// the cyclone verb — the fist Heavy chain must not also consume the press.
 /// This is deliberately independent of the cyclone's cooldown so the outcome
 /// does not depend on system ordering between the melee and sabre systems.
+/// Which Saber technique the current input and stance request, if any.
+///
+/// Pure so the whole control scheme is testable without a world. Priority is
+/// heavy → dodge → directional attack; a bare attack returns `None` and falls
+/// through to the always-available slash chain, which is what keeps the base
+/// moveset consistent while blueprints layer new verbs on top.
+fn resolve_sabre_technique(
+    upgrades: &UpgradeLedger,
+    heavy: bool,
+    dodge: bool,
+    attack: bool,
+    move_axis: Vec2,
+    is_grounded: bool,
+) -> Option<SabreTechnique> {
+    const DIRECTION_DEAD_ZONE: f32 = 0.55;
+
+    if heavy {
+        if is_grounded && upgrades.sabre_spin_unlocked() {
+            return Some(SabreTechnique::CycloneSlash);
+        }
+        if !is_grounded && upgrades.sabre_spiral_unlocked() {
+            return Some(SabreTechnique::SpiralSlash);
+        }
+    }
+    if dodge && upgrades.sabre_dodge_technique_applicable(is_grounded) {
+        return Some(if !is_grounded && upgrades.sabre_pound_unlocked() {
+            SabreTechnique::MeteorPound
+        } else {
+            SabreTechnique::CometDash
+        });
+    }
+    // Directional attacks: holding up or down converts the swing into a
+    // launcher or a throw. Both are grounded openers.
+    if attack && is_grounded {
+        if move_axis.y >= DIRECTION_DEAD_ZONE && upgrades.sabre_rising_unlocked() {
+            return Some(SabreTechnique::RisingSlash);
+        }
+        if move_axis.y <= -DIRECTION_DEAD_ZONE && upgrades.sabre_throw_unlocked() {
+            return Some(SabreTechnique::SabreThrow);
+        }
+    }
+    None
+}
+
+/// Authored data for a technique.
+fn sabre_technique_def(
+    defs: &crate::combat_data::SabreTechniqueDefs,
+    technique: SabreTechnique,
+) -> Option<&crate::combat_data::SabreTechniqueDef> {
+    Some(match technique {
+        SabreTechnique::CycloneSlash => &defs.cyclone_slash,
+        SabreTechnique::CometDash => &defs.comet_dash,
+        SabreTechnique::MeteorPound => &defs.meteor_pound,
+        SabreTechnique::RisingSlash => &defs.rising_slash,
+        SabreTechnique::SpiralSlash => &defs.spiral_slash,
+        SabreTechnique::SabreThrow => &defs.sabre_throw,
+        SabreTechnique::Ready => return None,
+    })
+}
+
+fn sabre_technique_sfx(technique: SabreTechnique) -> &'static str {
+    match technique {
+        SabreTechnique::CycloneSlash => "sabre.cyclone",
+        SabreTechnique::CometDash => "sabre.comet_dash",
+        SabreTechnique::MeteorPound => "sabre.meteor_pound",
+        // The new verbs reuse the closest shipped one-shot until they get
+        // dedicated samples.
+        SabreTechnique::RisingSlash => "sabre.cyclone",
+        SabreTechnique::SpiralSlash => "sabre.cyclone",
+        SabreTechnique::SabreThrow => "sabre.wave",
+        SabreTechnique::Ready => "sabre.cyclone",
+    }
+}
+
 fn sabre_claims_heavy_input(sabre: Option<&BeamSabre>, upgrades: &UpgradeLedger) -> bool {
     sabre.is_some_and(|s| s.active) && upgrades.sabre_spin_unlocked()
 }
@@ -2555,8 +2659,11 @@ fn sabre_wave_profile(
 ) -> Option<SabreWaveProfile> {
     let tier = (upgrades.sabre_wave_upgrade_tier() + sabre.level.saturating_sub(1)).min(6);
     let is_second_slash = completed_slashes == 2;
+    // Tempest Wave Core adds the third-slash burst; the fourth-slash wave
+    // still needs wave tier 3.
+    let is_third_slash = completed_slashes == 3 && upgrades.sabre_third_slash_wave();
     let is_upgraded_fourth_slash = completed_slashes == 4 && tier >= 3;
-    if !is_second_slash && !is_upgraded_fourth_slash {
+    if !is_second_slash && !is_third_slash && !is_upgraded_fourth_slash {
         return None;
     }
 
@@ -2727,6 +2834,71 @@ fn spawn_sabre_technique_vfx(
                 budget,
             );
         }
+        // Rising Slash: a vertical blade column climbing with the rider.
+        SabreTechnique::RisingSlash => {
+            try_spawn_sabre_vfx(
+                commands,
+                assets.sphere_lg.clone(),
+                material.clone(),
+                Transform::from_translation(origin + forward * 0.6)
+                    .with_scale(Vec3::new(0.9, 4.2, 0.9)),
+                0.42,
+                Vec3::Y * 6.5,
+                Vec3::new(0.0, 6.0, 0.0),
+                0.30,
+                active,
+                budget,
+            );
+            try_spawn_sabre_vfx(
+                commands,
+                assets.lock_ring.clone(),
+                material,
+                Transform::from_translation(origin - Vec3::Y * 0.4)
+                    .with_scale(Vec3::splat(2.4)),
+                0.34,
+                Vec3::Y * 2.2,
+                Vec3::new(0.0, 7.0, 0.0),
+                0.45,
+                active,
+                budget,
+            );
+        }
+        // Spiral Slash: stacked rings corkscrewing around the rider.
+        SabreTechnique::SpiralSlash => {
+            for (index, height) in [-0.5_f32, 0.15, 0.8].into_iter().enumerate() {
+                try_spawn_sabre_vfx(
+                    commands,
+                    assets.lock_ring.clone(),
+                    material.clone(),
+                    Transform::from_translation(origin + Vec3::Y * height)
+                        .with_rotation(Quat::from_rotation_y(index as f32 * 0.7))
+                        .with_scale(Vec3::splat(3.0 + index as f32 * 0.35)),
+                    0.46,
+                    Vec3::Y * 1.4,
+                    Vec3::new(0.0, 12.0, 0.0),
+                    0.40,
+                    active,
+                    budget,
+                );
+            }
+        }
+        // Sabre Throw: the blade streaking away from the hand.
+        SabreTechnique::SabreThrow => {
+            try_spawn_sabre_vfx(
+                commands,
+                assets.sphere_lg.clone(),
+                material,
+                Transform::from_translation(origin + forward * 1.2)
+                    .looking_to(forward, Vec3::Y)
+                    .with_scale(Vec3::new(0.5, 0.5, 3.0)),
+                0.36,
+                forward * 14.0,
+                Vec3::new(0.0, 0.0, 18.0),
+                0.20,
+                active,
+                budget,
+            );
+        }
         SabreTechnique::Ready => {}
     }
 
@@ -2792,7 +2964,49 @@ fn spawn_sabre_wave_vfx(
     }
 }
 
+/// Hurl the blade as a piercing projectile (Sabre Throw). It rides the same
+/// projectile pipeline as every other player shot, so world cover, sweeps, and
+/// damage resolution all behave; piercing lets it cut a line of enemies the
+/// way a thrown blade should.
 #[allow(clippy::too_many_arguments)]
+fn spawn_sabre_thrown_blade(
+    commands: &mut Commands,
+    assets: &ProjectileAssets,
+    upgrades: &UpgradeLedger,
+    origin: Vec3,
+    forward: Vec3,
+    owner: Entity,
+    damage: f32,
+    damage_type: DamageType,
+    tech: &crate::combat_data::SabreTechniqueDef,
+) {
+    let direction = forward.normalize_or(Vec3::NEG_Z);
+    commands.spawn((
+        EnergyPbrBundle {
+            mesh: Mesh3d(assets.sphere_md.clone()),
+            material: MeshMaterial3d(sabre_wave_material(upgrades, assets)),
+            transform: Transform::from_translation(origin)
+                .looking_to(direction, Vec3::Y)
+                .with_scale(Vec3::new(0.34, 0.34, 2.6)),
+            ..default()
+        },
+        Projectile {
+            damage,
+            damage_type,
+            speed: tech.throw_speed,
+            direction,
+            lifetime: tech.throw_lifetime,
+            is_explosive: false,
+            explosion_radius: 0.0,
+            weapon_type: ProjectileOwner::Player,
+            owner: Some(owner),
+            piercing: true,
+            gravity_affected: false,
+            vertical_velocity: 0.0,
+        },
+    ));
+}
+
 fn spawn_sabre_wave_attack(
     commands: &mut Commands,
     assets: &ProjectileAssets,
@@ -3117,105 +3331,81 @@ fn beam_sabre_update_system(
             continue;
         }
 
-        // Technique blueprints add new verbs to the starter Saber. Heavy input
-        // performs a 360-degree cyclone; B performs a double dash slash on the
-        // ground or a meteor pound while airborne.
-        // Riding the board rebinds heavy to the grab trick.
-        if pi.melee_heavy
-            && traversal.active != TraversalMode::Hoverboard
-            && upgrades.sabre_spin_unlocked()
-            && sabre.cooldown_timer <= 0.0
-        {
-            let Some(def) = library.sabre_slash(0) else {
-                continue;
-            };
-            let tech = &library.sabre_techniques.cyclone_slash;
-            for strike in &tech.strikes {
-                execute_melee_hit(
-                    &spatial_query,
-                    origin + fwd * *strike,
-                    fwd,
-                    tech.radius,
-                    tech.hit_offset,
-                    tech.arc_cos,
-                    def.damage * slash_scale * armor_damage_mult * tech.damage_mult,
-                    blade_damage_type,
-                    def.knockback * tech.knockback_mult,
-                    None,
-                    &mut enemy_q,
-                    &mut damaged_ev,
-                    &mut killed_ev,
-                );
-            }
-            sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
-            sabre.technique_timer = tech.technique_time;
-            sabre.technique = SabreTechnique::CycloneSlash;
-            grant_iframes(&mut player_damageable, tech.iframes);
-            sm.force(PlayerState::Attacking);
-            spawn_sabre_technique_vfx(
-                &mut commands,
-                &proj_assets,
+        // ── Technique verbs ──────────────────────────────────────────────────
+        // Blueprints layer new verbs onto the always-available slash chain:
+        // heavy spins (cyclone grounded / spiral airborne), dodge dashes or
+        // pounds, and holding up/down on the attack launches or throws.
+        // Riding the board rebinds these inputs to hoverboard tricks.
+        let requested_technique = if traversal.active == TraversalMode::Hoverboard {
+            None
+        } else {
+            resolve_sabre_technique(
                 upgrades,
-                SabreTechnique::CycloneSlash,
-                origin,
-                fwd,
-                &mut active_vfx,
-                vfx_budget.max_entities,
-            );
-            spawn_melee_flash(&mut commands, &proj_assets, origin);
-            hitstop.remaining = hitstop.remaining.max(tech.hitstop);
-            action_sfx.write(ModularActionSfxEvent::new("sabre.cyclone"));
-            continue;
-        }
-
-        if pi.dodge
-            && traversal.active != TraversalMode::Hoverboard
-            && sabre.cooldown_timer <= 0.0
-            && upgrades.sabre_dodge_technique_applicable(movement.is_grounded)
-        {
-            let Some(def) = library.sabre_slash(0) else {
+                pi.melee_heavy,
+                pi.dodge,
+                pi.sabre_attack,
+                pi.move_axis,
+                movement.is_grounded,
+            )
+        };
+        if let Some(technique) = requested_technique.filter(|_| sabre.cooldown_timer <= 0.0) {
+            let (Some(def), Some(tech)) = (
+                library.sabre_slash(0),
+                sabre_technique_def(&library.sabre_techniques, technique),
+            ) else {
                 continue;
             };
-            // The gate above guarantees one of these applies: Meteor Pound
-            // while airborne with its blueprint, otherwise Comet Dash.
-            let (technique, tech, sfx) = if !movement.is_grounded && upgrades.sabre_pound_unlocked()
-            {
-                (
-                    SabreTechnique::MeteorPound,
-                    &library.sabre_techniques.meteor_pound,
-                    "sabre.meteor_pound",
-                )
-            } else {
-                (
-                    SabreTechnique::CometDash,
-                    &library.sabre_techniques.comet_dash,
-                    "sabre.comet_dash",
-                )
-            };
+            // Movement impulses: plunge, dash, or launch.
             if tech.plunge_speed > 0.0 {
                 movement.velocity.y = -tech.plunge_speed;
             }
             if tech.dash_speed > 0.0 {
                 movement.ground_velocity = fwd * tech.dash_speed;
             }
-            for strike in &tech.strikes {
-                execute_melee_hit(
-                    &spatial_query,
-                    origin + fwd * *strike,
-                    fwd,
-                    tech.radius,
-                    tech.hit_offset,
-                    tech.arc_cos,
-                    def.damage * slash_scale * armor_damage_mult * tech.damage_mult,
-                    blade_damage_type,
-                    def.knockback * tech.knockback_mult,
-                    None,
-                    &mut enemy_q,
-                    &mut damaged_ev,
-                    &mut killed_ev,
-                );
+            if tech.rise_speed > 0.0 {
+                movement.velocity.y = tech.rise_speed;
+                movement.is_grounded = false;
             }
+
+            let damage = def.damage * slash_scale * armor_damage_mult * tech.damage_mult;
+            if tech.throw_speed > 0.0 {
+                // Thrown blade: a projectile carries the hit instead of an arc.
+                spawn_sabre_thrown_blade(
+                    &mut commands,
+                    &proj_assets,
+                    upgrades,
+                    origin + fwd * 1.1,
+                    fwd,
+                    entity,
+                    damage,
+                    blade_damage_type,
+                    tech,
+                );
+            } else {
+                for strike in &tech.strikes {
+                    execute_melee_hit(
+                        &spatial_query,
+                        origin + fwd * *strike,
+                        fwd,
+                        tech.radius,
+                        tech.hit_offset,
+                        tech.arc_cos,
+                        damage,
+                        blade_damage_type,
+                        def.knockback * tech.knockback_mult,
+                        None,
+                        &mut enemy_q,
+                        &mut damaged_ev,
+                        &mut killed_ev,
+                    );
+                }
+            }
+
             sabre.technique = technique;
+            sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
+            sabre.technique_timer = tech.technique_time;
+            grant_iframes(&mut player_damageable, tech.iframes);
+            sm.force(PlayerState::Attacking);
             spawn_sabre_technique_vfx(
                 &mut commands,
                 &proj_assets,
@@ -3226,13 +3416,9 @@ fn beam_sabre_update_system(
                 &mut active_vfx,
                 vfx_budget.max_entities,
             );
-            action_sfx.write(ModularActionSfxEvent::new(sfx));
-            sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
-            sabre.technique_timer = tech.technique_time;
-            grant_iframes(&mut player_damageable, tech.iframes);
-            sm.force(PlayerState::Attacking);
             spawn_melee_flash(&mut commands, &proj_assets, origin + fwd * 3.0);
             hitstop.remaining = hitstop.remaining.max(tech.hitstop);
+            action_sfx.write(ModularActionSfxEvent::new(sabre_technique_sfx(technique)));
             continue;
         }
 
@@ -3317,6 +3503,9 @@ fn sabre_blade_transform(
     let spin_time = match sabre.technique {
         SabreTechnique::CycloneSlash => library.sabre_techniques.cyclone_slash.technique_time,
         SabreTechnique::CometDash => library.sabre_techniques.comet_dash.technique_time,
+        // The new spinning verbs drive the same blade revolution.
+        SabreTechnique::SpiralSlash => library.sabre_techniques.spiral_slash.technique_time,
+        SabreTechnique::RisingSlash => library.sabre_techniques.rising_slash.technique_time,
         _ => 0.0,
     };
     let technique_spin = if sabre.technique_timer > 0.0 && spin_time > 0.0 {
@@ -3577,6 +3766,62 @@ mod tracking_missile_tests {
     }
 
     #[test]
+    fn special_cycle_wraps_through_none_so_primary_is_always_reachable() {
+        // Forward: none → 0 → 1 → 2 → 3 → none
+        let mut slot = None;
+        let forward: Vec<Option<u8>> = (0..5)
+            .map(|_| {
+                slot = cycle_special_slot(slot, true);
+                slot
+            })
+            .collect();
+        assert_eq!(
+            forward,
+            vec![Some(0), Some(1), Some(2), Some(3), None],
+            "forward cycle must return to the primary weapon"
+        );
+
+        // Backward is the exact mirror.
+        let mut slot = None;
+        let backward: Vec<Option<u8>> = (0..5)
+            .map(|_| {
+                slot = cycle_special_slot(slot, false);
+                slot
+            })
+            .collect();
+        assert_eq!(backward, vec![Some(3), Some(2), Some(1), Some(0), None]);
+
+        // Opposite directions undo each other.
+        assert_eq!(cycle_special_slot(cycle_special_slot(Some(2), true), false), Some(2));
+    }
+
+    #[test]
+    fn dpad_special_cycle_swaps_the_equipped_special_without_touching_primaries() {
+        let mut app = App::new();
+        app.add_message::<WeaponSwitchedEvent>();
+        app.add_systems(Update, weapon_select_system);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerInput {
+                    special_next: true,
+                    ..Default::default()
+                },
+                WeaponInventory::default(),
+                SpecialWeaponInventory::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let specials = app.world().get::<SpecialWeaponInventory>(entity).unwrap();
+        let primaries = app.world().get::<WeaponInventory>(entity).unwrap();
+        assert_eq!(specials.active_slot, Some(0), "D-pad up equips a special");
+        assert_eq!(primaries.active_slot, 0, "primary selection is untouched");
+    }
+
+    #[test]
     fn primary_weapon_cycle_exits_persistent_tracking_missile_selection() {
         let mut app = App::new();
         app.add_message::<WeaponSwitchedEvent>();
@@ -3609,6 +3854,103 @@ mod tracking_missile_tests {
 #[cfg(test)]
 mod move_def_wiring_tests {
     use super::*;
+
+    #[test]
+    fn sabre_technique_resolver_maps_stance_and_direction_to_verbs() {
+        let mut up = UpgradeLedger::default();
+        for id in crate::upgrades::STARTER_SABRE_RELIC_IDS {
+            up.unlock_relic(id);
+        }
+        let none = Vec2::ZERO;
+        let hold_up = Vec2::new(0.0, 1.0);
+        let hold_down = Vec2::new(0.0, -1.0);
+
+        // Heavy: cyclone on the ground, spiral in the air.
+        assert_eq!(
+            resolve_sabre_technique(&up, true, false, false, none, true),
+            Some(SabreTechnique::CycloneSlash)
+        );
+        assert_eq!(
+            resolve_sabre_technique(&up, true, false, false, none, false),
+            Some(SabreTechnique::SpiralSlash)
+        );
+        // Dodge: dash on the ground, pound in the air.
+        assert_eq!(
+            resolve_sabre_technique(&up, false, true, false, none, true),
+            Some(SabreTechnique::CometDash)
+        );
+        assert_eq!(
+            resolve_sabre_technique(&up, false, true, false, none, false),
+            Some(SabreTechnique::MeteorPound)
+        );
+        // Attack + up launches; a bare attack falls through to the chain.
+        assert_eq!(
+            resolve_sabre_technique(&up, false, false, true, hold_up, true),
+            Some(SabreTechnique::RisingSlash)
+        );
+        assert_eq!(
+            resolve_sabre_technique(&up, false, false, true, none, true),
+            None,
+            "a plain swing must always reach the base slash chain"
+        );
+        // Throw is not in the starter kit, so down+attack is still a swing…
+        assert_eq!(
+            resolve_sabre_technique(&up, false, false, true, hold_down, true),
+            None
+        );
+        // …until its blueprint is found.
+        up.unlock_relic("sabre_throw_blueprint");
+        assert_eq!(
+            resolve_sabre_technique(&up, false, false, true, hold_down, true),
+            Some(SabreTechnique::SabreThrow)
+        );
+        // Directional attacks are grounded openers only.
+        assert_eq!(
+            resolve_sabre_technique(&up, false, false, true, hold_up, false),
+            None
+        );
+    }
+
+    #[test]
+    fn locked_techniques_never_resolve() {
+        let empty = UpgradeLedger::default();
+        for (heavy, dodge, attack, axis, grounded) in [
+            (true, false, false, Vec2::ZERO, true),
+            (true, false, false, Vec2::ZERO, false),
+            (false, true, false, Vec2::ZERO, true),
+            (false, false, true, Vec2::new(0.0, 1.0), true),
+            (false, false, true, Vec2::new(0.0, -1.0), true),
+        ] {
+            assert_eq!(
+                resolve_sabre_technique(&empty, heavy, dodge, attack, axis, grounded),
+                None,
+                "no blueprints should mean no techniques"
+            );
+        }
+    }
+
+    #[test]
+    fn every_technique_has_authored_data_and_a_sound() {
+        let lib = MoveLibrary::defaults();
+        for technique in [
+            SabreTechnique::CycloneSlash,
+            SabreTechnique::CometDash,
+            SabreTechnique::MeteorPound,
+            SabreTechnique::RisingSlash,
+            SabreTechnique::SpiralSlash,
+            SabreTechnique::SabreThrow,
+        ] {
+            let def = sabre_technique_def(&lib.sabre_techniques, technique)
+                .unwrap_or_else(|| panic!("{technique:?} has no authored data"));
+            assert!(def.damage_mult > 0.0);
+            assert!(!sabre_technique_sfx(technique).is_empty());
+        }
+        assert!(sabre_technique_def(&lib.sabre_techniques, SabreTechnique::Ready).is_none());
+        // The throw is the only projectile verb; the rest resolve as arcs.
+        assert!(lib.sabre_techniques.sabre_throw.throw_speed > 0.0);
+        assert_eq!(lib.sabre_techniques.rising_slash.throw_speed, 0.0);
+        assert!(lib.sabre_techniques.rising_slash.rise_speed > 0.0);
+    }
 
     #[test]
     fn drawn_sabre_with_cyclone_relic_claims_heavy_input() {
