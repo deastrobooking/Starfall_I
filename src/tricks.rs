@@ -445,7 +445,10 @@ fn load_trick_library(mut commands: Commands) {
             }
             match serde_json::to_string_pretty(&defaults) {
                 Ok(json) => match std::fs::write(&path, json) {
-                    Ok(()) => info!("TrickLibrary: wrote editable defaults to {}", path.display()),
+                    Ok(()) => info!(
+                        "TrickLibrary: wrote editable defaults to {}",
+                        path.display()
+                    ),
                     Err(err) => warn!("TrickLibrary: could not write defaults ({err})"),
                 },
                 Err(err) => warn!("TrickLibrary: serialize failed ({err})"),

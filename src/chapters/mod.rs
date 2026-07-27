@@ -1392,10 +1392,10 @@ pub fn all_chapters() -> Vec<ChapterDef> {
 }
 
 pub fn get_chapter(id: ChapterId) -> Option<ChapterDef> {
-    chapter_catalog()
-        .iter()
-        .find(|chapter| chapter.id == id)
-        .cloned()
+    if !(ChapterId::FIRST.0..=ChapterId::LAST.0).contains(&id.0) {
+        return None;
+    }
+    chapter_catalog().get(id.index()).cloned()
 }
 
 #[cfg(test)]

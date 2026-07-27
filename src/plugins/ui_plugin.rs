@@ -3004,7 +3004,10 @@ fn spawn_fast_travel_map(
                 });
 
                 map.spawn((
-                    Text::new(format!("{} {}", location.id.0, chapter.title)),
+                    Text::new(format!(
+                        "{} {} — {}",
+                        location.id.0, chapter.title, location.landmark
+                    )),
                     TextFont {
                         font_size: FontSize::Px(10.0),
                         ..default()
@@ -3305,7 +3308,7 @@ fn spawn_fast_travel_map(
                 });
 
                 map.spawn((
-                    Text::new(settlement.name),
+                    Text::new(format!("{} — {}", settlement.name, settlement.region)),
                     TextFont {
                         font_size: FontSize::Px(8.2),
                         ..default()

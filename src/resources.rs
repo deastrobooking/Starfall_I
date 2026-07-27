@@ -937,7 +937,11 @@ impl ChapterProgress {
         if id == ChapterId::FIRST {
             return true;
         }
-        self.is_completed(ChapterId(id.0 - 1))
+        self.completed
+            .iter()
+            .copied()
+            .map(ChapterId)
+            .any(|completed| completed.next() == Some(id))
     }
     /// Exploration-first travel policy: every authored chapter destination is
     /// visible and usable from a new save, while story completion remains

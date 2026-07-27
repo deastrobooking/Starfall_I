@@ -64,6 +64,9 @@ impl CustomMissionDef {
 
 #[derive(Resource, Debug, Clone, Default)]
 pub struct CustomMissionState {
+    /// Deliberately session-local. Saving records first-clear completion keys,
+    /// while loading returns players to mission selection instead of restoring
+    /// a potentially stale world-space objective.
     pub active_id: Option<String>,
 }
 
@@ -372,6 +375,9 @@ fn custom_mission_progress_system(
     let first_clear = !progress.has_discoverable(&completion_key);
     progress.unlock(&completion_key);
     if first_clear {
+        // Couch co-op policy: a first-clear reward is not divided. Every
+        // currently active local player receives the full authored amount so
+        // joining the shared mission never penalizes individual progression.
         for mut stats in &mut player_stats {
             stats.credits = stats.credits.saturating_add(mission.reward.credits);
             stats.experience = stats.experience.saturating_add(mission.reward.experience);
@@ -468,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn castle_mission_rewards_the_party_only_once() {
+    fn first_clear_rewards_every_active_local_player_equally_and_only_once() {
         let mut app = App::new();
         app.init_resource::<ChapterProgress>();
         app.init_resource::<DungeonRoomState>();
@@ -484,23 +490,26 @@ mod tests {
             },
             Transform::default(),
         ));
-        let player = app
-            .world_mut()
-            .spawn((
-                Player,
-                Transform::from_xyz(3.0, 0.0, 0.0),
-                PlayerStats {
-                    armor: 0.0,
-                    ..default()
-                },
-            ))
-            .id();
+        let players = [3.0, 5.0].map(|x| {
+            app.world_mut()
+                .spawn((
+                    Player,
+                    Transform::from_xyz(x, 0.0, 0.0),
+                    PlayerStats {
+                        armor: 0.0,
+                        ..default()
+                    },
+                ))
+                .id()
+        });
 
         app.update();
-        let stats = app.world().get::<PlayerStats>(player).unwrap();
-        assert_eq!(stats.credits, 180);
-        assert_eq!(stats.experience, 150);
-        assert_eq!(stats.armor, 15.0);
+        for player in players {
+            let stats = app.world().get::<PlayerStats>(player).unwrap();
+            assert_eq!(stats.credits, 180);
+            assert_eq!(stats.experience, 150);
+            assert_eq!(stats.armor, 15.0);
+        }
         assert!(app
             .world()
             .resource::<ChapterProgress>()
@@ -510,8 +519,11 @@ mod tests {
             .resource_mut::<CustomMissionState>()
             .activate("castle_aurora");
         app.update();
-        let stats = app.world().get::<PlayerStats>(player).unwrap();
-        assert_eq!(stats.credits, 180);
-        assert_eq!(stats.experience, 150);
+        for player in players {
+            let stats = app.world().get::<PlayerStats>(player).unwrap();
+            assert_eq!(stats.credits, 180);
+            assert_eq!(stats.experience, 150);
+            assert_eq!(stats.armor, 15.0);
+        }
     }
 }

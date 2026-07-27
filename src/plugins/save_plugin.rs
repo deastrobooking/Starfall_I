@@ -1526,6 +1526,28 @@ mod tests {
     }
 
     #[test]
+    fn completed_custom_mission_survives_the_on_disk_schema_round_trip() {
+        let mission = crate::missions::mission_for_travel_anchor("dragon_dungeon_ch06")
+            .expect("dragon mission should exist");
+        let completion_key = mission.completion_key();
+        let data = SaveData {
+            discoverables: vec![completion_key.clone()],
+            ..SaveData::default()
+        };
+
+        let root = test_save_root("custom_mission");
+        write_save_data(&root, 0, &data).expect("mission save should write");
+        let loaded = read_save_slot(&root, 0).expect("mission save should load");
+        let hydrated_progress = ChapterProgress {
+            discoverables: loaded.discoverables,
+            ..ChapterProgress::default()
+        };
+
+        assert!(hydrated_progress.has_discoverable(&completion_key));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn current_saves_select_matching_player_index_not_record_order() {
         let data = SaveData {
             players: vec![

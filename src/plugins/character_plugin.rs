@@ -3026,7 +3026,10 @@ mod tests {
         assert!(grab.left_arm_pitch > 1.0, "leading hand reaches the deck");
         // Flip is the tightest tuck of them all.
         assert!(flip.front_knee > grab.front_knee);
-        assert!(flip.left_arm_out > ride.left_arm_out, "arms pull in to spin");
+        assert!(
+            flip.left_arm_out > ride.left_arm_out,
+            "arms pull in to spin"
+        );
         // Grind squats lowest with the widest arms.
         assert!(grind.crouch > ride.crouch);
         assert!(grind.left_arm_out < ride.left_arm_out);

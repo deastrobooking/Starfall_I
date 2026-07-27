@@ -2062,8 +2062,8 @@ fn melee_combo_system(
     ) in player_q.iter_mut()
     {
         // Riding the board rebinds the melee buttons to flip/grab tricks.
-        let board_claims_input = traversal
-            .is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active));
+        let board_claims_input =
+            traversal.is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active));
         let upgrades = &progression.upgrades;
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
