@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 /// Eye silhouette. The single biggest lever on how a character reads: the same
 /// proportions with a different style land as a different personality.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Reflect, Default)]
 pub enum EyeStyle {
     /// Tall and circular — youthful, earnest. The genre default.
     #[default]
@@ -124,7 +124,7 @@ impl EyeStyle {
 }
 
 /// Eyebrow silhouette, the second-biggest expression carrier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Reflect, Default)]
 pub enum BrowStyle {
     #[default]
     Soft,
@@ -177,7 +177,7 @@ impl BrowStyle {
 }
 
 /// A named emotional pose. Chosen by designers and drivable at runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Reflect, Default)]
 pub enum Expression {
     #[default]
     Neutral,
@@ -303,7 +303,7 @@ pub struct ExpressionPose {
 
 /// A complete authored face. Serializable so it saves with the character and
 /// `serde(default)`-friendly for older records.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Reflect)]
 pub struct FaceRecipe {
     pub eye_style: EyeStyle,
     pub brow_style: BrowStyle,
@@ -482,10 +482,9 @@ impl FaceRecipe {
         let open_fraction = 1.0 - closure;
         let half_height = BASE_EYE_HALF_HEIGHT * style_h * face.eye_size * open_fraction.max(0.02);
 
-        let iris_radius =
-            half_width.min(BASE_EYE_HALF_HEIGHT * style_h * face.eye_size)
-                * face.eye_style.iris_ratio()
-                * pose.iris_scale;
+        let iris_radius = half_width.min(BASE_EYE_HALF_HEIGHT * style_h * face.eye_size)
+            * face.eye_style.iris_ratio()
+            * pose.iris_scale;
 
         EyeLayout {
             offset_x: sign * BASE_EYE_SEPARATION * face.eye_spacing,
@@ -763,7 +762,11 @@ mod tests {
             seen.push(style);
         }
         assert_eq!(seen.len(), EyeStyle::ALL.len(), "a style is unreachable");
-        assert_eq!(next(&EyeStyle::ALL, style), EyeStyle::default(), "must wrap");
+        assert_eq!(
+            next(&EyeStyle::ALL, style),
+            EyeStyle::default(),
+            "must wrap"
+        );
 
         let mut expression = Expression::default();
         for _ in 0..Expression::ALL.len() {

@@ -6,18 +6,25 @@ use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
+use crate::audio::sfx::ModularActionSfxEvent;
 use crate::chapters::{chapter_map_location, EVEREST_RANGE_HALF_EXTENT};
 use crate::character::blueprint::{
     CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
+use crate::character::hero_roster::{
+    apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet,
+};
 use crate::character::parts::CharacterLoadout;
-use crate::character_studio::generators::build_character_patch;
-use crate::character_studio::human_mesh::{spawn_human, PlayableStudioHuman};
+use crate::character::player_mesh::attach_modular_player_mesh;
 use crate::character::presets::{
     accent_preset, attach_native_playable_character, attach_player_gameplay_rig,
     despawn_cartoon_character_parts, eye_preset, hair_preset, hero_config,
     hero_config_with_overrides, outfit_preset, skin_preset,
 };
+use crate::character_studio::generators::build_character_patch;
+use crate::character_studio::human_mesh::{spawn_human, PlayableStudioHuman};
+use crate::combat::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
+use crate::combat::hitstop::hitstop_inactive;
 use crate::components::armor::{ArmorRechargeState, ArmorSet};
 use crate::components::character::{CartoonPart, JointMarker};
 use crate::components::enemy::{BossEnemy, DeadEnemy, Enemy, EnemyType, FlyingDrone};
@@ -28,19 +35,18 @@ use crate::components::world::{
     BoatPassenger, Building, EnterableBuilding, RailGrindState, SpeedLoopGuide,
     SpeedRoadCheckpoint, WaterBody, WaterBodyKind, WorldAnchor, WorldRouteMarker,
 };
-use crate::combat::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
-use crate::events::*;
-use crate::engine::game_loop::{fixed_motor_off, fixed_motor_on, GameSet, PreviousTickPosition, SimConfig};
-use crate::character::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
-use crate::combat::hitstop::hitstop_inactive;
+use crate::engine::game_loop::{
+    fixed_motor_off, fixed_motor_on, GameSet, PreviousTickPosition, SimConfig,
+};
 use crate::engine::input_buffer::PlayerInputBuffers;
 use crate::engine::physics::prelude::*;
-use crate::character::player_mesh::attach_modular_player_mesh;
-use crate::plugins::world_plugin::terrain_surface_y;
 use crate::engine::rendering::{
     Camera3dBundle, PbrBundle, ShieldMaterial, ShieldMaterialUniform, ShieldPbrBundle,
     SpatialBundle,
 };
+use crate::engine::state::AppState;
+use crate::events::*;
+use crate::plugins::world_plugin::terrain_surface_y;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     ChapterProgress, CurrentChapter, DungeonCrawlState, GameSettings, LocalPlayerConfig,
@@ -48,8 +54,6 @@ use crate::resources::{
     WorldRouteRegistry, WorldRouteState,
 };
 use crate::world::robot_pets::RobotPetCollection;
-use crate::audio::sfx::ModularActionSfxEvent;
-use crate::engine::state::AppState;
 
 /// Route the player's visual through the new native modular humanoid
 /// ([`crate::character::player_mesh`]) instead of the legacy `character_parts` meshes.
@@ -667,7 +671,10 @@ fn upgraded_player_blueprint(name: &'static str, slot: &PlayerSlotConfig) -> Cha
         reference_appearance
     };
 
-    CharacterBlueprint::hero(name, body, palette, appearance)
+    CharacterBlueprint {
+        face: base.face.sanitized(),
+        ..CharacterBlueprint::hero(name, body, palette, appearance)
+    }
 }
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
@@ -4052,7 +4059,8 @@ fn player_parry_update(
     for (mut parry, state, pi, progression, traversal) in player_q.iter_mut() {
         parry.cooldown_timer = (parry.cooldown_timer - dt).max(0.0);
         // Riding the board rebinds parry to the manual trick.
-        if traversal.is_some_and(|t| crate::combat::tricks::hoverboard_claims_trick_input(t.active)) {
+        if traversal.is_some_and(|t| crate::combat::tricks::hoverboard_claims_trick_input(t.active))
+        {
             continue;
         }
 
@@ -4857,6 +4865,7 @@ mod tests {
         assert!(!blueprint.cartoon_appearance.has_cape);
         assert!(blueprint.cartoon_appearance.has_visor);
         assert!(blueprint.cartoon_appearance.has_shoulder_pads);
+        assert_eq!(blueprint.face, hero_config("Vincenzo").face);
     }
 
     #[test]

@@ -793,7 +793,11 @@ pub(super) fn spawn_speed_road_deck_between(
         WorldGeometry,
         WalkableSurface,
         crate::engine::physics::prelude::RigidBody::Fixed,
-        crate::engine::physics::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.5),
+        crate::engine::physics::prelude::Collider::cuboid(
+            width * 0.5,
+            deck_thickness * 0.5,
+            length * 0.5,
+        ),
         ProceduralMaterialBinding::new("road.speed_network", "deck"),
         world_space_collider_scale(),
     ));
@@ -851,7 +855,11 @@ pub(super) fn spawn_deck_guardrails(
             RoadSafetyBarrier::OuterRail,
             ProceduralMaterialBinding::new("road.speed_network", "barrier"),
             crate::engine::physics::prelude::RigidBody::Fixed,
-            crate::engine::physics::prelude::Collider::cuboid(rail_w * 0.5, rail_h * 0.5, length * 0.495),
+            crate::engine::physics::prelude::Collider::cuboid(
+                rail_w * 0.5,
+                rail_h * 0.5,
+                length * 0.495,
+            ),
             world_space_collider_scale(),
         ));
     }
@@ -931,7 +939,11 @@ pub(super) fn spawn_speed_road_support_columns(
             WorldGeometry,
             ProceduralMaterialBinding::new("road.speed_network", "support"),
             crate::engine::physics::prelude::RigidBody::Fixed,
-            crate::engine::physics::prelude::Collider::cuboid(road_width * 0.38, 0.7, column_width * 0.625),
+            crate::engine::physics::prelude::Collider::cuboid(
+                road_width * 0.38,
+                0.7,
+                column_width * 0.625,
+            ),
             world_space_collider_scale(),
         ));
     }
@@ -1320,7 +1332,11 @@ pub(super) fn spawn_banked_deck_segment(
         WorldGeometry,
         WalkableSurface,
         crate::engine::physics::prelude::RigidBody::Fixed,
-        crate::engine::physics::prelude::Collider::cuboid(width * 0.5, deck_thickness * 0.5, length * 0.52),
+        crate::engine::physics::prelude::Collider::cuboid(
+            width * 0.5,
+            deck_thickness * 0.5,
+            length * 0.52,
+        ),
         world_space_collider_scale(),
     ));
     if rails {
@@ -1986,7 +2002,11 @@ fn spawn_raceway_bowl(
             WorldGeometry,
             WalkableSurface,
             crate::engine::physics::prelude::RigidBody::Fixed,
-            crate::engine::physics::prelude::Collider::cuboid(strip_width * 0.58, 0.43, length * 0.5),
+            crate::engine::physics::prelude::Collider::cuboid(
+                strip_width * 0.58,
+                0.43,
+                length * 0.5,
+            ),
             world_space_collider_scale(),
         ));
     }
@@ -2444,7 +2464,11 @@ pub(super) fn spawn_speed_loop_gate(
                 WorldGeometry,
                 WalkableSurface,
                 crate::engine::physics::prelude::RigidBody::Fixed,
-                crate::engine::physics::prelude::Collider::cuboid(segment_width * 0.5, 0.31, arc_len * 0.5),
+                crate::engine::physics::prelude::Collider::cuboid(
+                    segment_width * 0.5,
+                    0.31,
+                    arc_len * 0.5,
+                ),
                 world_space_collider_scale(),
             ));
         } else {

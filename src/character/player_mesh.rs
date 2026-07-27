@@ -18,13 +18,13 @@
 
 use bevy::prelude::*;
 
+use crate::character::modular::{
+    spawn_character_under, Attachment, CharacterRecipe, PartPrefab, PartRegistry, Socket,
+};
 use crate::character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use crate::character::presets::{emissive_mat, CartoonCharacterConfig};
-use crate::character::modular::{
-    spawn_character_under, Attachment, CharacterRecipe, PartPrefab, PartRegistry, Socket,
-};
 use crate::character::procedural_meshes::superellipsoid_mesh;
 
 /// Torso centre height in normalized figure space (feet = 0, head top ≈ 1.0).

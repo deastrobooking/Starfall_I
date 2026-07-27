@@ -31,9 +31,9 @@ use crate::character::blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
 use crate::engine::game_rng::GameRng;
+use crate::engine::state::AppState;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{CharacterDesignData, CharacterDesignReturnTarget, PlayerSelectState};
-use crate::engine::state::AppState;
 use generators::build_character_patch;
 use rig_bridge::{ImportedHumanoidRig, ImportedRigStatus};
 use spec::{CharacterSpec, MorphField, StyleField};
@@ -1075,14 +1075,17 @@ fn apply_action(
             mark(state, "Reset to neutral model".into());
         }
         StudioAction::ModifierKind => {
-            state.armed_modifier =
-                (state.armed_modifier + 1) % crate::character::mesh_modifiers::MeshModifier::TEMPLATE_COUNT;
-            let label = crate::character::mesh_modifiers::MeshModifier::template(state.armed_modifier).label();
+            state.armed_modifier = (state.armed_modifier + 1)
+                % crate::character::mesh_modifiers::MeshModifier::TEMPLATE_COUNT;
+            let label =
+                crate::character::mesh_modifiers::MeshModifier::template(state.armed_modifier)
+                    .label();
             state.status = format!("Armed modifier: {label}");
             state.labels_dirty = true;
         }
         StudioAction::ModifierAdd => {
-            let armed = crate::character::mesh_modifiers::MeshModifier::template(state.armed_modifier);
+            let armed =
+                crate::character::mesh_modifiers::MeshModifier::template(state.armed_modifier);
             let Some(slot) = state.spec.modifiers.iter().position(|slot| slot.is_none()) else {
                 state.status = "All 4 modifier slots are full".into();
                 state.labels_dirty = true;

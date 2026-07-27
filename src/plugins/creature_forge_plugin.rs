@@ -9,16 +9,16 @@
 use bevy::prelude::*;
 
 use super::ui_plugin::MenuScrollPanel;
-use crate::engine_tools::creature_records;
-use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::character::mesh_modifiers::MeshModifier;
 use crate::engine::platform_paths;
+use crate::engine::state::AppState;
+use crate::engine_tools::creature_records;
+use crate::engine_tools::project_registry::ForgeProjectRegistry;
+use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::robots::creature::{
     CreatureFaction, CreatureKind, CreatureRole, CreatureSpec, CreatureSurface, CreatureTopology,
 };
 use crate::robots::factory::spawn_creature;
-use crate::engine::state::AppState;
-use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 
 pub struct CreatureForgePlugin;
 

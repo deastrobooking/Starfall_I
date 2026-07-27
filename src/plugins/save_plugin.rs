@@ -9,6 +9,9 @@ use std::sync::OnceLock;
 use crate::character::blueprint::CharacterBlueprint;
 use crate::character::parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
 use crate::character_studio::spec::CharacterSpec;
+use crate::combat::damage::Health;
+use crate::combat::perks::PerkTree;
+use crate::combat::upgrades::UpgradeLedger;
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::armor::{ArmorSet, ElementType};
 use crate::components::inventory::{Inventory, QuickItemSlot};
@@ -17,22 +20,19 @@ use crate::components::player::{
     TraversalModeState,
 };
 use crate::components::weapon::{SpecialWeaponInventory, WeaponInventory, WeaponRanks};
-use crate::combat::damage::Health;
+use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
-use crate::world::final_war::{FinalWarRegistry, FinalWarSaveRecord};
-use crate::world::hacking::HackingRegistry;
-use crate::combat::perks::PerkTree;
-use crate::world::raids::{RaidRecord, RaidRegistry};
 use crate::resources::{
     initial_world_routes, initial_world_sites, is_stale_reference_blueprint, ChapterProgress,
     GameSettings, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo,
     WorldRouteRegistry, WorldRouteSaveRecord, WorldSiteRegistry, WorldSiteSaveRecord,
 };
+use crate::world::final_war::{FinalWarRegistry, FinalWarSaveRecord};
+use crate::world::hacking::HackingRegistry;
+use crate::world::raids::{RaidRecord, RaidRegistry};
 use crate::world::robot_pets::RobotPetCollection;
 use crate::world::settlement_economy::SettlementEconomy;
 use crate::world::shop_transactions::ShopOwnership;
-use crate::engine::state::AppState;
-use crate::combat::upgrades::UpgradeLedger;
 
 const SAVE_FILE_LEGACY: &str = "starfall_i_save.json";
 const SAVE_FILE_A: &str = "starfall_i_save_a.json";
@@ -1192,11 +1192,15 @@ fn manual_save_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::character::blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe};
+    use crate::character::blueprint::{
+        BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe,
+    };
+    use crate::combat::upgrades::{TechUpgradeId, UpgradeLedger};
     use crate::world::raids::{RaidId, RaidPhase};
     use crate::world::robot_pets::{RobotPartKind, RobotPetBlueprint, RobotPetRole};
-    use crate::world::settlement_economy::{SettlementBuildKind, SettlementEconomy, SettlementResources};
-    use crate::combat::upgrades::{TechUpgradeId, UpgradeLedger};
+    use crate::world::settlement_economy::{
+        SettlementBuildKind, SettlementEconomy, SettlementResources,
+    };
 
     fn player_save(
         player_index: u8,

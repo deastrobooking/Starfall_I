@@ -2,32 +2,32 @@ use avian3d::prelude::{Collider as AvianCollider, RayHitData, SpatialQuery, Spat
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
+use crate::audio::sfx::ModularActionSfxEvent;
+use crate::combat::blades::{
+    apply_blade_to_stats, blade_for_id, BladeTrait, EquippedBlade, BLADE_COLOR_ORDER,
+};
+use crate::combat::damage::{
+    apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
+};
 use crate::combat::data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary, RangedMoveDef};
+use crate::combat::hitstop::HitstopState;
+use crate::combat::upgrades::UpgradeLedger;
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{CitySpyDrone, DeadEnemy, Enemy, EnemyType, FlyingDrone};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::NpcRoadVehicle;
-use crate::combat::damage::{
-    apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
-};
-use crate::events::*;
 use crate::engine::game_loop::GameSet;
 use crate::engine::game_rng::GameRng;
-use crate::world::hacking::HackedUnit;
-use crate::combat::hitstop::HitstopState;
 use crate::engine::physics::{
     prelude::{CollisionProfile, GameCollisionLayer},
     world_line_of_sight,
 };
 use crate::engine::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
-use crate::resources::DungeonCrawlState;
-use crate::audio::sfx::ModularActionSfxEvent;
 use crate::engine::state::AppState;
-use crate::combat::blades::{
-    apply_blade_to_stats, blade_for_id, BladeTrait, EquippedBlade, BLADE_COLOR_ORDER,
-};
-use crate::combat::upgrades::UpgradeLedger;
+use crate::events::*;
+use crate::resources::DungeonCrawlState;
+use crate::world::hacking::HackedUnit;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
 #[derive(Component)]
@@ -2269,8 +2269,8 @@ fn melee_combo_system(
     ) in player_q.iter_mut()
     {
         // Riding the board rebinds the melee buttons to flip/grab tricks.
-        let board_claims_input =
-            traversal.is_some_and(|t| crate::combat::tricks::hoverboard_claims_trick_input(t.active));
+        let board_claims_input = traversal
+            .is_some_and(|t| crate::combat::tricks::hoverboard_claims_trick_input(t.active));
         let upgrades = &progression.upgrades;
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
@@ -2747,7 +2747,9 @@ fn sabre_wave_profile(
         // Blade traits grant these outright, so a wave-tuned hilt behaves like
         // a high-tier sabre even on a fresh save.
         piercing: sabre.is_piercing() || tier >= 3 || blade.trait_ == BladeTrait::PiercingWaves,
-        explosive: sabre.has_aoe_splash() || tier >= 5 || blade.trait_ == BladeTrait::ExplosiveWaves,
+        explosive: sabre.has_aoe_splash()
+            || tier >= 5
+            || blade.trait_ == BladeTrait::ExplosiveWaves,
     })
 }
 
@@ -2926,8 +2928,7 @@ fn spawn_sabre_technique_vfx(
                 commands,
                 assets.lock_ring.clone(),
                 material,
-                Transform::from_translation(origin - Vec3::Y * 0.4)
-                    .with_scale(Vec3::splat(2.4)),
+                Transform::from_translation(origin - Vec3::Y * 0.4).with_scale(Vec3::splat(2.4)),
                 0.34,
                 Vec3::Y * 2.2,
                 Vec3::new(0.0, 7.0, 0.0),
@@ -3881,7 +3882,10 @@ mod tracking_missile_tests {
         assert_eq!(backward, vec![Some(3), Some(2), Some(1), Some(0), None]);
 
         // Opposite directions undo each other.
-        assert_eq!(cycle_special_slot(cycle_special_slot(Some(2), true), false), Some(2));
+        assert_eq!(
+            cycle_special_slot(cycle_special_slot(Some(2), true), false),
+            Some(2)
+        );
     }
 
     #[test]
@@ -4279,9 +4283,20 @@ mod move_def_wiring_tests {
     fn starter_and_upgraded_sabre_waves_follow_combo_progression() {
         let sabre = BeamSabre::default();
         let base_upgrades = UpgradeLedger::default();
-        assert!(sabre_wave_profile(&sabre, &base_upgrades, 1, &crate::combat::blades::STARTER_BLADE).is_none());
-        let base = sabre_wave_profile(&sabre, &base_upgrades, 2, &crate::combat::blades::STARTER_BLADE)
-            .expect("starter Saber earns a wave on its second slash");
+        assert!(sabre_wave_profile(
+            &sabre,
+            &base_upgrades,
+            1,
+            &crate::combat::blades::STARTER_BLADE
+        )
+        .is_none());
+        let base = sabre_wave_profile(
+            &sabre,
+            &base_upgrades,
+            2,
+            &crate::combat::blades::STARTER_BLADE,
+        )
+        .expect("starter Saber earns a wave on its second slash");
         assert_eq!(base.projectile_count, 2);
         assert!((base.damage_mult - 0.40).abs() < 1e-6);
         assert!(!base.explosive);
@@ -4291,14 +4306,22 @@ mod move_def_wiring_tests {
             relics: vec!["solar_sabre_glyph".into()],
             ..default()
         };
-        let strong = sabre_wave_profile(&sabre, &upgraded, 2, &crate::combat::blades::STARTER_BLADE).unwrap();
+        let strong =
+            sabre_wave_profile(&sabre, &upgraded, 2, &crate::combat::blades::STARTER_BLADE)
+                .unwrap();
         assert_eq!(strong.projectile_count, 4);
         assert!(strong.width > base.width);
         assert!(strong.length > base.length);
         assert!(strong.damage_mult > base.damage_mult);
         assert!(strong.explosive);
-        assert!(sabre_wave_profile(&sabre, &upgraded, 3, &crate::combat::blades::STARTER_BLADE).is_none());
-        assert!(sabre_wave_profile(&sabre, &upgraded, 4, &crate::combat::blades::STARTER_BLADE).is_some());
+        assert!(
+            sabre_wave_profile(&sabre, &upgraded, 3, &crate::combat::blades::STARTER_BLADE)
+                .is_none()
+        );
+        assert!(
+            sabre_wave_profile(&sabre, &upgraded, 4, &crate::combat::blades::STARTER_BLADE)
+                .is_some()
+        );
     }
 
     #[test]

@@ -19,13 +19,13 @@ use std::path::{Path, PathBuf};
 
 use crate::audio::player::AudioLibraryReloadEvent;
 use crate::audio::synth::{self, render_wav};
+use crate::engine::state::AppState;
 use crate::events::{
     ChestOpenedEvent, ComboHitEvent, EnemyDamagedEvent, EnemyKilledEvent, LootCollectedEvent,
     PlayerDamagedEvent, PlayerLevelUpEvent, PlayerParryEvent, WeaponFiredEvent,
     WeaponReloadedEvent,
 };
 use crate::resources::GameSettings;
-use crate::engine::state::AppState;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum SfxKind {
@@ -515,10 +515,7 @@ mod tests {
         let registry = ActionSfxRegistry::default();
         assert!(!registry.is_assigned("weapon.fire"));
         assert_eq!(registry.assigned_count(), 0);
-        assert_eq!(
-            synth::render_wav(&synth::preset_shoot())[0..4],
-            *b"RIFF"
-        );
+        assert_eq!(synth::render_wav(&synth::preset_shoot())[0..4], *b"RIFF");
     }
 
     #[test]

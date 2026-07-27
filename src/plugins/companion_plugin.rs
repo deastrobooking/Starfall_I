@@ -1,17 +1,17 @@
 use bevy::prelude::*;
 
+use crate::character::hero_roster::HeroPowerSet;
+use crate::combat::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::components::companion::*;
 use crate::components::enemy::Enemy;
 use crate::components::player::{Player, PlayerIndex};
-use crate::combat::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
+use crate::engine::rendering::PbrBundle;
+use crate::engine::state::AppState;
 use crate::events::{
     CompanionRecruitedEvent, EnemyDamagedEvent, EnemyKilledEvent, PlayerHealedEvent,
 };
-use crate::character::hero_roster::HeroPowerSet;
 use crate::plugins::weapon_plugin::ProjectileAssets;
-use crate::engine::rendering::PbrBundle;
 use crate::resources::PlaySessionTransition;
-use crate::engine::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct CompanionPlugin;

@@ -11,11 +11,11 @@
 use bevy::prelude::*;
 use std::sync::OnceLock;
 
+use crate::combat::upgrades::TechUpgradeId;
 use crate::components::discoverable::{DiscoverableKind, PuzzleArchetype};
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
 use crate::world::robot_pets::{RobotPartKind, RobotPetRole};
-use crate::combat::upgrades::TechUpgradeId;
 
 // ── Chapter ID ────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

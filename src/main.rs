@@ -30,32 +30,32 @@ mod robots;
 mod world;
 
 use character::blueprint::{BodyRecipe, CartoonAppearanceRecipe};
+use character::modular::ModularCharacterPlugin;
 use character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
+use combat::perks::PerkTree;
+use combat::upgrades::UpgradeLedger;
 use commands::{CommandOverlayState, CommandRegistry};
+use engine::state::AppState;
 use engine_tools::{EngineToolMode, EngineToolsPlugin};
 use events::EventsPlugin;
-use world::final_war::FinalWarRegistry;
-use world::hacking::HackingRegistry;
-use character::modular::ModularCharacterPlugin;
-use combat::perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
     CompanionPlugin, CraftingPlugin, CreatureForgePlugin, DiscoverablePlugin, EnemyPlugin,
     HackingPlugin, ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin,
     RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
-use world::raids::RaidRegistry;
 use resources::{
     CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData, CharacterDesignSnapshot,
     GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerPartLoadout, PlayerScore,
     PlayerSelectState, ShopCatalog, WaveInfo, WorldRouteRegistry, WorldSiteRegistry,
 };
+use world::final_war::FinalWarRegistry;
+use world::hacking::HackingRegistry;
+use world::raids::RaidRegistry;
 use world::robot_pets::RobotPetCollection;
 use world::settlement_economy::SettlementEconomy;
-use engine::state::AppState;
-use combat::upgrades::UpgradeLedger;
 
 fn main() {
     install_crash_logger();
@@ -350,7 +350,12 @@ mod app_smoke_tests {
         assert!(!world.resource::<Assets<StandardMaterial>>().is_empty());
         assert!(world.resource::<Assets<AudioSource>>().len() >= 10);
         assert!(world.resource::<Assets<AnimationClip>>().len() >= 8);
-        assert!(world.resource::<Assets<engine::rendering::ShieldMaterial>>().len() >= 4);
+        assert!(
+            world
+                .resource::<Assets<engine::rendering::ShieldMaterial>>()
+                .len()
+                >= 4
+        );
 
         let camera_count = world.query::<&Camera>().iter(world).count();
         let ui_node_count = world.query::<&Node>().iter(world).count();

@@ -3,13 +3,13 @@ use bevy::prelude::*;
 use crate::engine::game_rng::GameRng;
 use rand::Rng;
 
+use crate::combat::damage::Health;
 use crate::components::player::{Player, PlayerStats};
 use crate::components::world::{Chest, LootType};
-use crate::combat::damage::Health;
-use crate::events::{ChestOpenedEvent, LootCollectedEvent};
 use crate::engine::rendering::PbrBundle;
-use crate::resources::{PlaySessionTransition, PlayerScore};
 use crate::engine::state::AppState;
+use crate::events::{ChestOpenedEvent, LootCollectedEvent};
+use crate::resources::{PlaySessionTransition, PlayerScore};
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct ChestPlugin;

@@ -17,11 +17,11 @@ use crate::components::player::{
     JetpackState, Player, PlayerIndex, PlayerInput, PlayerMovement, PlayerStats,
 };
 use crate::components::world::{BoatPassenger, BoatVehicle};
-use crate::events::UiMessageEvent;
 use crate::engine::rendering::{PbrBundle, SpatialBundle};
+use crate::engine::state::AppState;
+use crate::events::UiMessageEvent;
 use crate::resources::PlaySessionTransition;
 use crate::world::robot_pets::{RobotAssemblyForm, RobotPetCollection};
-use crate::engine::state::AppState;
 
 pub struct VehiclePlugin;
 

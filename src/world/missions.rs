@@ -4,9 +4,9 @@ use std::sync::OnceLock;
 use crate::chapters::{all_chapters, ChapterId, SECRET_CAVE_LOCATIONS};
 use crate::components::player::{Player, PlayerStats};
 use crate::components::world::WorldAnchor;
+use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
 use crate::resources::{ChapterProgress, DungeonRoomState};
-use crate::engine::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomMissionArea {

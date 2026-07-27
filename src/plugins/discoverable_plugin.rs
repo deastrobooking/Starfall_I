@@ -3,6 +3,8 @@
 
 use bevy::prelude::*;
 
+use crate::combat::damage::Health;
+use crate::combat::upgrades::UpgradeLedger;
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
@@ -16,14 +18,12 @@ use crate::components::player::{
 use crate::components::weapon::{
     BeamSabre, BeamSabreLocked, MeleeCombo, SpecialWeaponInventory, WeaponInventory,
 };
-use crate::combat::damage::Health;
+use crate::engine::state::AppState;
 use crate::events::*;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::player_plugin::apply_ancient_flight_core;
 use crate::resources::{ChapterProgress, CurrentChapter};
 use crate::world::robot_pets::{RobotPetBlueprint, RobotPetCollection};
-use crate::engine::state::AppState;
-use crate::combat::upgrades::UpgradeLedger;
 
 pub struct DiscoverablePlugin;
 

@@ -17,9 +17,9 @@ use bevy::prelude::*;
 
 use crate::components::enemy::DeadEnemy;
 use crate::components::player::{Player, PlayerCamera, PlayerIndex};
+use crate::engine::state::AppState;
 use crate::events::{EnemyDamagedEvent, EnemyKilledEvent};
 use crate::plugins::input_plugin::trigger_player_rumble;
-use crate::engine::state::AppState;
 
 // ── Flinch ────────────────────────────────────────────────────────────────────
 

@@ -2,7 +2,10 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub const CHARACTER_BLUEPRINT_SCHEMA_VERSION: u32 = 1;
+/// Schema 2 adds the authored anime face. Schema-1 files deserialize the field
+/// through `serde(default)`, but consumers must retain the hero preset because
+/// that default cannot distinguish a legacy omission from an intentional face.
+pub const CHARACTER_BLUEPRINT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CharacterBlueprint {

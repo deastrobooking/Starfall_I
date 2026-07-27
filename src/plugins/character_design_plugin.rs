@@ -6,24 +6,25 @@ use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 
 use crate::character::blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
+    CHARACTER_BLUEPRINT_SCHEMA_VERSION,
 };
 use crate::character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
+use crate::character::player_mesh::spawn_modular_player_preview;
 use crate::character::presets::{
     accent_preset, accent_presets, eye_preset, eye_presets, hair_preset, hair_presets, hero_config,
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
     skin_preset, skin_presets,
 };
 use crate::components::player::PlayerCamera;
-use crate::character::player_mesh::spawn_modular_player_preview;
+use crate::engine::state::AppState;
 use crate::plugins::ui_plugin::MenuScrollPanel;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     CharacterBaseModel, CharacterDesignData, CharacterDesignReturnTarget, CharacterDesignSnapshot,
     PlayerPartLoadout, PlayerSelectState,
 };
-use crate::engine::state::AppState;
 use std::fs;
 use std::path::PathBuf;
 
@@ -295,6 +296,7 @@ fn setup_character_design(
     // hero's authored face — entering the designer must never flatten a
     // character back to the default.
     design_data.face = blueprint
+        .filter(|bp| bp.schema_version >= CHARACTER_BLUEPRINT_SCHEMA_VERSION)
         .map(|bp| bp.face)
         .unwrap_or(base.face)
         .sanitized();
@@ -630,7 +632,10 @@ fn update_face_ui_text(
         return;
     }
     for (marker, mut text) in value_q.iter_mut() {
-        *text = Text::new(format!("{:.2}", face_field_value(&design_data.face, marker.0)));
+        *text = Text::new(format!(
+            "{:.2}",
+            face_field_value(&design_data.face, marker.0)
+        ));
     }
     for (marker, mut text) in cycle_q.iter_mut() {
         *text = Text::new(face_choice_label(&design_data.face, marker.0).to_uppercase());

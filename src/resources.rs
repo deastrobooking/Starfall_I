@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::chapters::{Biome, ChapterId};
 use crate::character::blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint};
+use crate::character::hero_roster::HERO_NAMES;
 use crate::character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use crate::character_studio::spec::CharacterSpec;
 use crate::components::player::PlayerProgression;
-use crate::character::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
 // ── Wave State (legacy population counter) ────────────────────────────────────
@@ -1147,7 +1147,7 @@ impl Default for CharacterDesignData {
     }
 }
 
-pub const CHARACTER_DESIGN_SNAPSHOT_VERSION: u32 = 1;
+pub const CHARACTER_DESIGN_SNAPSHOT_VERSION: u32 = 2;
 
 /// Serializable, reflected editor payload for one character design.
 ///
@@ -1157,6 +1157,10 @@ pub const CHARACTER_DESIGN_SNAPSHOT_VERSION: u32 = 1;
 pub struct CharacterDesignSnapshot {
     pub schema_version: u32,
     pub player_index: usize,
+    /// Added in schema 2. Schema-1 imports leave the current authored face
+    /// untouched because a serde default cannot represent "field absent."
+    #[serde(default)]
+    pub face: crate::character::face::FaceRecipe,
     #[serde(default)]
     pub base_model: CharacterBaseModel,
     pub skin_idx: usize,
@@ -1174,6 +1178,7 @@ impl CharacterDesignSnapshot {
         Self {
             schema_version: CHARACTER_DESIGN_SNAPSHOT_VERSION,
             player_index: data.player_index,
+            face: data.face.sanitized(),
             base_model: data.base_model,
             skin_idx: data.skin_idx,
             outfit_idx: data.outfit_idx,
@@ -1201,6 +1206,9 @@ impl CharacterDesignSnapshot {
 
     pub fn apply_to_design_data(&self, data: &mut CharacterDesignData) {
         data.player_index = self.player_index;
+        if self.schema_version >= CHARACTER_DESIGN_SNAPSHOT_VERSION {
+            data.face = self.face.sanitized();
+        }
         data.base_model = self.base_model;
         data.skin_idx = self.skin_idx;
         data.outfit_idx = self.outfit_idx;
@@ -1837,7 +1845,12 @@ mod tests {
     #[test]
     fn character_design_snapshot_round_trips_editable_state() {
         let mut design = CharacterDesignData {
-            face: crate::character::face::FaceRecipe::DEFAULT,
+            face: crate::character::face::FaceRecipe {
+                eye_style: crate::character::face::EyeStyle::Sharp,
+                expression: crate::character::face::Expression::Determined,
+                eye_size: 1.34,
+                ..crate::character::face::FaceRecipe::DEFAULT
+            },
             player_index: 2,
             return_target: CharacterDesignReturnTarget::PlayerSelect,
             base_model: CharacterBaseModel::AntonioRift,
@@ -1883,10 +1896,40 @@ mod tests {
         assert_eq!(design.leg_preset, LegPreset::RiftBoots);
         assert_eq!(design.shoulder_preset, ShoulderPreset::RiftCloak);
         assert_eq!(design.head_preset, HeadPreset::RiftCowl);
+        assert_eq!(
+            design.face.eye_style,
+            crate::character::face::EyeStyle::Sharp
+        );
+        assert_eq!(
+            design.face.expression,
+            crate::character::face::Expression::Determined
+        );
+        assert!((design.face.eye_size - 1.34).abs() < f32::EPSILON);
         assert!((design.body.leg_length - 1.41).abs() < f32::EPSILON);
         assert!(design.has_hood);
         assert!(!design.has_gloves);
         assert!(design.dirty);
+    }
+
+    #[test]
+    fn legacy_character_snapshot_does_not_erase_the_current_authored_face() {
+        let mut current = CharacterDesignData {
+            face: crate::character::face::FaceRecipe {
+                eye_style: crate::character::face::EyeStyle::Gentle,
+                ..crate::character::face::FaceRecipe::DEFAULT
+            },
+            ..CharacterDesignData::default()
+        };
+        let mut legacy = CharacterDesignSnapshot::from_design_data(&current);
+        legacy.schema_version = 1;
+        legacy.face = crate::character::face::FaceRecipe::DEFAULT;
+
+        legacy.apply_to_design_data(&mut current);
+
+        assert_eq!(
+            current.face.eye_style,
+            crate::character::face::EyeStyle::Gentle
+        );
     }
 
     #[test]

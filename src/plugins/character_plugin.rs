@@ -9,6 +9,8 @@ use crate::character::parts::{
 use crate::character_studio::human_mesh::{
     PlayableStudioHuman, StudioBodyRegion, StudioFaceFeature, StudioHumanPart,
 };
+use crate::combat::data::MeleePhase;
+use crate::combat::tricks::{TrickCategory, TrickState};
 use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
     CartoonPose, CharacterIkPose, HandEngine, HandGrip, HandPoseState, HandSide, IkTarget,
@@ -20,9 +22,7 @@ use crate::components::player::{
     TraversalModeState,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
-use crate::combat::data::MeleePhase;
 use crate::engine::state::AppState;
-use crate::combat::tricks::{TrickCategory, TrickState};
 
 pub struct CharacterPlugin;
 
@@ -193,7 +193,11 @@ fn sabre_swing_position(phase: MeleePhase, remaining: f32, slash_index: u32) -> 
     const STARTUP: f32 = 0.05;
     const ACTIVE: f32 = 0.08;
     const RECOVERY: f32 = 0.12;
-    let side = if slash_index.is_multiple_of(2) { 1.0 } else { -1.0 };
+    let side = if slash_index.is_multiple_of(2) {
+        1.0
+    } else {
+        -1.0
+    };
     let magnitude = match phase {
         // Wind back: -0.15 → -0.85 as the strike approaches.
         MeleePhase::Startup => {
@@ -2750,14 +2754,14 @@ fn apply_part_pose(part: &CartoonPart, transform: &mut Transform, sample: PoseSa
                 CartoonPartKind::LeftLeg
                 | CartoonPartKind::LeftFoot
                 | CartoonPartKind::LeftBoot => {
-                    transform.rotation *= Quat::from_rotation_x(-0.26 - commit * 0.20)
-                        * Quat::from_rotation_z(0.10);
+                    transform.rotation *=
+                        Quat::from_rotation_x(-0.26 - commit * 0.20) * Quat::from_rotation_z(0.10);
                 }
                 CartoonPartKind::RightLeg
                 | CartoonPartKind::RightFoot
                 | CartoonPartKind::RightBoot => {
-                    transform.rotation *= Quat::from_rotation_x(0.28 + commit * 0.18)
-                        * Quat::from_rotation_z(-0.12);
+                    transform.rotation *=
+                        Quat::from_rotation_x(0.28 + commit * 0.18) * Quat::from_rotation_z(-0.12);
                 }
                 CartoonPartKind::StarBadge | CartoonPartKind::Belt => {
                     transform.rotation *= Quat::from_rotation_y(0.42 * snap);
@@ -3065,7 +3069,10 @@ mod tests {
         let even = sabre_swing_position(MeleePhase::Active, 0.0, 0);
         let odd = sabre_swing_position(MeleePhase::Active, 0.0, 1);
         assert!(even.signum() != odd.signum());
-        assert!((even.abs() - odd.abs()).abs() < 1e-6, "mirrored, not weaker");
+        assert!(
+            (even.abs() - odd.abs()).abs() < 1e-6,
+            "mirrored, not weaker"
+        );
 
         // Every position stays in range, so the pose can never over-rotate.
         for index in 0..4u32 {

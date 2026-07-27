@@ -4,8 +4,8 @@ use crate::components::armor::*;
 use crate::components::player::{
     DerivedPlayerCaps, Player, PlayerBaseStats, PlayerInput, PlayerProgression, PlayerStats,
 };
-use crate::events::PlayerDamagedEvent;
 use crate::engine::state::AppState;
+use crate::events::PlayerDamagedEvent;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct ArmorPlugin;

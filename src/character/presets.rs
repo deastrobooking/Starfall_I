@@ -3,7 +3,9 @@ use bevy::prelude::*;
 use crate::character::face::{BrowStyle, Expression, EyeStyle, FaceRecipe};
 use std::f32::consts::PI;
 
-use crate::character::blueprint::{BodyRecipe, CharacterBlueprint};
+use crate::character::blueprint::{
+    BodyRecipe, CharacterBlueprint, CHARACTER_BLUEPRINT_SCHEMA_VERSION,
+};
 use crate::character::parts::{
     spawn_arms, spawn_body, spawn_cartoon_glove, spawn_cartoon_shoe, spawn_head, spawn_legs,
     spawn_shoulders, CharacterLoadout, CharacterVisualConfig, PartSlotTag,
@@ -58,6 +60,11 @@ impl CartoonCharacterConfig {
 
     pub fn with_blueprint(mut self, blueprint: &CharacterBlueprint) -> Self {
         self.body = blueprint.body.validated();
+        // Schema 1 predates face authoring. Its serde default is only a
+        // compatibility placeholder, so preserve the hero's authored preset.
+        if blueprint.schema_version >= CHARACTER_BLUEPRINT_SCHEMA_VERSION {
+            self.face = blueprint.face.sanitized();
+        }
         if let Some(color) = blueprint.material_color("skin") {
             self.skin = color;
         }
@@ -401,7 +408,7 @@ pub fn hero_config(name: &'static str) -> CartoonCharacterConfig {
             emissive_eyes: false,
         },
         _ => CartoonCharacterConfig {
-        face: FaceRecipe::DEFAULT,
+            face: FaceRecipe::DEFAULT,
             name,
             role: CartoonRole::Hero,
             skin: Color::srgb(0.95, 0.68, 0.45),
@@ -2419,5 +2426,34 @@ mod tests {
         );
         assert_eq!(alien.body, BodyRecipe::default());
         assert_eq!(alien.role, CartoonRole::Alien);
+    }
+
+    #[test]
+    fn blueprint_face_reaches_runtime_config_without_flattening_legacy_heroes() {
+        let mut current = CharacterBlueprint::hero(
+            "Aurora",
+            BodyRecipe::default(),
+            crate::character::blueprint::CharacterPaletteRecipe {
+                skin: Color::WHITE,
+                outfit: Color::WHITE,
+                accent: Color::WHITE,
+                hair: Color::BLACK,
+                eye: Color::WHITE,
+            },
+            crate::character::blueprint::CartoonAppearanceRecipe::default(),
+        );
+        current.face = FaceRecipe {
+            eye_style: EyeStyle::Fierce,
+            expression: Expression::Angry,
+            eye_size: 1.35,
+            ..FaceRecipe::DEFAULT
+        };
+
+        let runtime = hero_config("Aurora").with_blueprint(&current);
+        assert_eq!(runtime.face, current.face.sanitized());
+
+        current.schema_version = 1;
+        let legacy_runtime = hero_config("Aurora").with_blueprint(&current);
+        assert_eq!(legacy_runtime.face, hero_config("Aurora").face);
     }
 }

@@ -5,10 +5,10 @@ use crate::character::face::FaceSide;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
+use crate::character::procedural_meshes::superellipsoid_mesh;
 use crate::components::character::{
     default_joint_for_part, CartoonPart, CartoonPartKind, JointKind,
 };
-use crate::character::procedural_meshes::superellipsoid_mesh;
 use crate::engine::rendering::PbrBundle;
 
 // ── Slot identification ───────────────────────────────────────────────────────
@@ -4150,8 +4150,7 @@ fn spawn_head_open_face(
                     0.014 * s,
                 )),
                 lash_mat.clone(),
-                Transform::from_xyz(ex, ey + eye.lash_drop * s, layer(0.042))
-                    .with_rotation(tilt),
+                Transform::from_xyz(ex, ey + eye.lash_drop * s, layer(0.042)).with_rotation(tilt),
                 PartSlotTag::Head,
             );
         }
@@ -4168,11 +4167,7 @@ fn spawn_head_open_face(
             meshes,
             root,
             kind,
-            Mesh::from(Cuboid::new(
-                brow.length * s,
-                brow.thickness * s,
-                0.020 * s,
-            )),
+            Mesh::from(Cuboid::new(brow.length * s, brow.thickness * s, 0.020 * s)),
             brow_mat.clone(),
             Transform::from_xyz(brow.offset_x * s, head_y + brow.offset_y * s, layer(0.025))
                 .with_rotation(Quat::from_rotation_z(brow.angle)),
@@ -4233,9 +4228,7 @@ fn spawn_head_open_face(
                 head_y + (-0.115 + mouth.corner_lift) * s,
                 -0.350 * s,
             )
-            .with_rotation(Quat::from_rotation_z(
-                -corner * mouth.corner_lift * 14.0,
-            )),
+            .with_rotation(Quat::from_rotation_z(-corner * mouth.corner_lift * 14.0)),
             PartSlotTag::Head,
         );
     }

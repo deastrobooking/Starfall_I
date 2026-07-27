@@ -1,9 +1,9 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use bevy::prelude::*;
 
-use crate::components::weapon::WeaponRanks;
 use crate::combat::perks::PerkTree;
 use crate::combat::upgrades::UpgradeLedger;
+use crate::components::weapon::WeaponRanks;
 
 // ── Marker ────────────────────────────────────────────────────────────────────
 /// Marks the player entity (the physics body).

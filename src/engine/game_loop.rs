@@ -21,14 +21,14 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::components::weapon::Projectile;
-use crate::plugins::weapon_plugin::{HitParticle, SabreTechniqueVfx, SABRE_VFX_ENTITY_BUDGET};
-use crate::plugins::world_plugin::{
-    BuildingClusterLodProxy, TerrainHighLodPatch, TerrainProxyLodPatch,
-};
 use crate::engine::rendering::{
     EnergyMaterial, IceMaterial, LavaMaterial, ShieldMaterial, ToonMaterial, WaterMaterial,
 };
 use crate::engine::spatial_lod::{ManagedSpatialLod, SpatialLod, SpatialLodProxy};
+use crate::plugins::weapon_plugin::{HitParticle, SabreTechniqueVfx, SABRE_VFX_ENTITY_BUDGET};
+use crate::plugins::world_plugin::{
+    BuildingClusterLodProxy, TerrainHighLodPatch, TerrainProxyLodPatch,
+};
 
 /// Canonical per-frame gameplay ordering. Systems opt in with `.in_set(GameSet::X)`.
 ///

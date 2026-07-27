@@ -15,8 +15,8 @@ use bevy::prelude::*;
 use crate::engine::spatial_lod::{SpatialLod, SpatialLodProxy};
 
 use super::{turtle::TurtleResult, LSystem};
-use crate::components::world::WorldGeometry;
 use crate::character::modular::bake_character_mesh as bake_meshes;
+use crate::components::world::WorldGeometry;
 use crate::engine::rendering::PbrBundle;
 
 // ── Tree species ──────────────────────────────────────────────────────────────

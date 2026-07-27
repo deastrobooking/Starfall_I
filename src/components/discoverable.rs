@@ -1,8 +1,8 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 use bevy::prelude::*;
 
-use crate::world::robot_pets::{RobotPartKind, RobotPetRole};
 use crate::combat::upgrades::TechUpgradeId;
+use crate::world::robot_pets::{RobotPartKind, RobotPetRole};
 
 /// Things that can be picked up to permanently unlock something for the player.
 /// Spawned by the chapter director at script-defined positions; collected on overlap.

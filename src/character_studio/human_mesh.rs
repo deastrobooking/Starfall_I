@@ -421,7 +421,8 @@ pub fn spawn_human(
         let mesh = if patch.modifiers.is_empty() {
             mesh
         } else {
-            crate::character::mesh_modifiers::apply_stack_to_mesh(&mesh, &patch.modifiers).unwrap_or(mesh)
+            crate::character::mesh_modifiers::apply_stack_to_mesh(&mesh, &patch.modifiers)
+                .unwrap_or(mesh)
         };
         let (region, pivot) = classify_studio_part(&p, transform.translation);
         let e = commands

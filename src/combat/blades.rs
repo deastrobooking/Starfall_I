@@ -73,7 +73,6 @@ impl BladeColor {
             BladeColor::Void => (0.42, 0.10, 0.62),
         }
     }
-
 }
 
 /// The one distinguishing behaviour a blade adds beyond its numbers. Kept as a

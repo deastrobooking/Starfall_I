@@ -4,7 +4,13 @@ use avian3d::prelude::{
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::character::presets::{decorate_reptilian_character, enemy_config, spawn_cartoon_character};
+use crate::character::presets::{
+    decorate_reptilian_character, enemy_config, spawn_cartoon_character,
+};
+use crate::combat::damage::{
+    apply_damage, area_damage_falloff, DamageInfo, DamageResistance, DamageType, Damageable, Health,
+};
+use crate::combat::hitstop::hitstop_inactive;
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
     boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, DragonCaste, Enemy, EnemyAIState,
@@ -15,21 +21,17 @@ use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
 use crate::components::player::{ParryState, Player, PlayerIndex, PlayerStats};
 use crate::components::world::{NpcRoadVehicle, WorldLoot};
-use crate::combat::damage::{
-    apply_damage, area_damage_falloff, DamageInfo, DamageResistance, DamageType, Damageable, Health,
-};
-use crate::events::*;
 use crate::engine::game_rng::GameRng;
-use crate::world::hacking::{Hackable, HackedUnit};
-use crate::combat::hitstop::hitstop_inactive;
 use crate::engine::physics::{
     prelude::{Collider, CollisionProfile, GameCollisionLayer, RigidBody},
     world_line_of_sight,
 };
 use crate::engine::rendering::PbrBundle;
-use crate::resources::{PlaySessionTransition, WaveInfo};
-use crate::world::robot_pets::{salvage_for_enemy, RobotPetCollection};
 use crate::engine::state::AppState;
+use crate::events::*;
+use crate::resources::{PlaySessionTransition, WaveInfo};
+use crate::world::hacking::{Hackable, HackedUnit};
+use crate::world::robot_pets::{salvage_for_enemy, RobotPetCollection};
 
 #[derive(Resource, Clone)]
 struct EnemyAttackAssets {

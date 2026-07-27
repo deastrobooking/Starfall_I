@@ -2,10 +2,12 @@
 
 use bevy::prelude::*;
 
-use crate::plugins::ui_plugin::MenuScrollPanel;
-use crate::world::robot_pets::{RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError};
-use crate::engine::state::AppState;
 use crate::combat::upgrades::UpgradeLedger;
+use crate::engine::state::AppState;
+use crate::plugins::ui_plugin::MenuScrollPanel;
+use crate::world::robot_pets::{
+    RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError,
+};
 
 pub struct RobotGaragePlugin;
 
