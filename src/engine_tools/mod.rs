@@ -204,6 +204,24 @@ struct PublishedProceduralRecipeEntry {
     seed: u64,
     revision: u64,
     material_slots: BTreeMap<String, String>,
+    map_points: Vec<PublishedMapPoint>,
+}
+
+/// A map annotation exported by a published World Kit recipe. Fast-travel
+/// nodes are interactive in the in-game map; landmarks remain visible context.
+/// Owned strings keep this interface safe for player-authored content.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublishedMapPoint {
+    pub id: String,
+    pub label: String,
+    pub position: Vec3,
+    pub kind: PublishedMapPointKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishedMapPointKind {
+    FastTravel,
+    Landmark,
 }
 
 /// Published Creature Forge recipes, keyed by stable content id. Enemy
@@ -270,6 +288,13 @@ impl PublishedProceduralRecipeCatalog {
         self.entries
             .get(recipe_id)
             .map(|entry| entry.source_hash.as_str())
+    }
+
+    /// All published map annotations in stable content/node order.
+    pub fn map_points(&self) -> impl Iterator<Item = &PublishedMapPoint> {
+        self.entries
+            .values()
+            .flat_map(|entry| entry.map_points.iter())
     }
 }
 
@@ -1850,6 +1875,30 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
                 .payloads
                 .get(&record.content_id)?
                 .procedural_recipe()?;
+            let origin = recipe.terrain_projection.world_origin;
+            let mut map_points = recipe
+                .topology_nodes
+                .iter()
+                .filter_map(|node| {
+                    let kind = match node.kind {
+                        WorldTopologyNodeKind::FastTravel => PublishedMapPointKind::FastTravel,
+                        WorldTopologyNodeKind::Landmark => PublishedMapPointKind::Landmark,
+                        _ => return None,
+                    };
+                    let readable_node = node.node_id.replace(['_', '-'], " ");
+                    Some(PublishedMapPoint {
+                        id: format!("{}:{}", record.content_id, node.node_id),
+                        label: format!("{} — {}", record.display_name, readable_node),
+                        position: Vec3::new(
+                            node.position[0] + origin[0],
+                            node.position[1],
+                            node.position[2] + origin[1],
+                        ),
+                        kind,
+                    })
+                })
+                .collect::<Vec<_>>();
+            map_points.sort_by(|left, right| left.id.cmp(&right.id));
             Some((
                 record.content_id.clone(),
                 PublishedProceduralRecipeEntry {
@@ -1858,6 +1907,7 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
                     seed: recipe.seed,
                     revision: recipe.revision,
                     material_slots: recipe.material_slots.clone(),
+                    map_points,
                 },
             ))
         })
@@ -8695,6 +8745,81 @@ mod tests {
             .expect("published creature is cataloged");
         assert_eq!(published.seed, 99);
         assert_eq!(catalog.len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn published_world_topology_extends_the_runtime_map_catalog() {
+        let (mut world, root) = persistence_test_world("published_map_points");
+        {
+            let mut session = world.resource_mut::<EditorProjectSession>();
+            let cave_id = session
+                .project
+                .create_content(persistence::ContentCategory::Cave, "Rainbow Grotto")
+                .unwrap();
+            let recipe = session
+                .project
+                .payloads
+                .get_mut(&cave_id)
+                .unwrap()
+                .procedural_recipe_mut()
+                .unwrap();
+            recipe.terrain_projection.world_origin = [120.0, -80.0];
+            recipe
+                .fields
+                .insert("fast_travel_points".into(), serde_json::json!(1));
+            recipe.topology_nodes = vec![
+                WorldTopologyNodeDraft {
+                    node_id: "entrance".into(),
+                    kind: WorldTopologyNodeKind::Entrance,
+                    position: [-10.0, 0.0, 0.0],
+                    size: [4.0, 4.0, 4.0],
+                },
+                WorldTopologyNodeDraft {
+                    node_id: "crystal_gate".into(),
+                    kind: WorldTopologyNodeKind::FastTravel,
+                    position: [10.0, 4.0, 20.0],
+                    size: [4.0, 4.0, 4.0],
+                },
+                WorldTopologyNodeDraft {
+                    node_id: "rainbow_falls".into(),
+                    kind: WorldTopologyNodeKind::Landmark,
+                    position: [30.0, 8.0, 40.0],
+                    size: [6.0, 8.0, 6.0],
+                },
+            ];
+            recipe.topology_edges = vec![
+                WorldTopologyEdgeDraft {
+                    from: "entrance".into(),
+                    to: "crystal_gate".into(),
+                    kind: WorldTopologyEdgeKind::Tunnel,
+                    from_socket: None,
+                    to_socket: None,
+                },
+                WorldTopologyEdgeDraft {
+                    from: "crystal_gate".into(),
+                    to: "rainbow_falls".into(),
+                    kind: WorldTopologyEdgeKind::Tunnel,
+                    from_socket: None,
+                    to_socket: None,
+                },
+            ];
+            session.project.refresh_hashes().unwrap();
+            session.project.publish_drafts().unwrap();
+        }
+
+        let project = world.resource::<EditorProjectSession>().project.clone();
+        rebuild_published_content_catalogs(&mut world, &project);
+        let points = world
+            .resource::<PublishedProceduralRecipeCatalog>()
+            .map_points()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].kind, PublishedMapPointKind::FastTravel);
+        assert_eq!(points[0].position, Vec3::new(130.0, 4.0, -60.0));
+        assert!(points[0].label.contains("Rainbow Grotto"));
+        assert_eq!(points[1].kind, PublishedMapPointKind::Landmark);
         let _ = std::fs::remove_dir_all(root);
     }
 

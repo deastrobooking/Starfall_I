@@ -345,17 +345,50 @@ impl MoveLibrary {
 /// knockback of 3.0. Hitstop ships at 0 to preserve the sabre's current feel;
 /// raise it in `moves.json` to give slashes melee-style freeze frames.
 fn default_sabre_chain() -> Vec<MoveDef> {
-    vec![MoveDef {
-        name: "Star Slash".to_string(),
-        damage: 25.0,
-        knockback: 3.0,
-        startup: 0.05,
-        active: 0.08,
-        recovery: 0.12,
-        cancel_after: 0.0,
-        hitstop: 0.0,
+    let slash = |name: &str,
+                 damage: f32,
+                 knockback: f32,
+                 startup: f32,
+                 active: f32,
+                 recovery: f32,
+                 cancel_after: f32,
+                 hitstop: f32| MoveDef {
+        name: name.to_string(),
+        damage,
+        knockback,
+        startup,
+        active,
+        recovery,
+        cancel_after,
+        hitstop,
         iframes: 0.0,
-    }]
+    };
+    vec![
+        slash("Star Slash", 25.0, 3.0, 0.05, 0.08, 0.12, 0.0, 0.025),
+        slash(
+            "Crescent Reversal",
+            28.0,
+            3.6,
+            0.055,
+            0.09,
+            0.13,
+            0.025,
+            0.030,
+        ),
+        slash(
+            "Comet Rising Cut",
+            34.0,
+            4.5,
+            0.07,
+            0.10,
+            0.15,
+            0.035,
+            0.038,
+        ),
+        slash("Nebula Cross", 39.0, 5.2, 0.075, 0.11, 0.17, 0.045, 0.042),
+        slash("Orbit Breaker", 47.0, 6.8, 0.10, 0.12, 0.20, 0.06, 0.052),
+        slash("Supernova Finale", 62.0, 9.0, 0.14, 0.15, 0.28, 0.08, 0.070),
+    ]
 }
 
 /// The shipping technique tuning — matches the numbers previously hardcoded
@@ -538,12 +571,18 @@ mod tests {
     #[test]
     fn sabre_defaults_match_legacy_hardcoded_values() {
         let lib = MoveLibrary::defaults();
+        assert_eq!(lib.sabre.len(), 6, "full sabre combo should be authored");
+        assert_eq!(lib.sabre[3].name, "Nebula Cross");
+        assert_eq!(lib.sabre[5].name, "Supernova Finale");
         // Legacy inter-slash cadence was a hardcoded 0.25 s.
         let slash = lib.sabre_slash(0).expect("sabre chain must exist");
         assert!((slash.total_duration() - 0.25).abs() < 1e-4);
         assert!((slash.damage - 25.0).abs() < 1e-6, "level-1 slash base");
         assert!((slash.knockback - 3.0).abs() < 1e-6, "legacy knockback");
-        assert_eq!(slash.hitstop, 0.0, "sabre shipped without hitstop");
+        assert!(
+            (slash.hitstop - 0.025).abs() < 1e-6,
+            "starter slash should have light impact feedback"
+        );
         // Clamping: high slash indices reuse the last authored entry.
         assert_eq!(
             lib.sabre_slash(7).unwrap().name,

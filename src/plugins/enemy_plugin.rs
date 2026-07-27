@@ -334,10 +334,17 @@ pub fn spawn_enemy_entity(
         damageable,
         faction.unwrap_or_default(),
         RigidBody::KinematicPositionBased,
-        Collider::capsule_y(
-            0.9 * difficulty_scale.clamp(0.85, 1.8),
-            difficulty_scale.clamp(0.85, 1.8),
-        ),
+        if matches!(enemy_type, EnemyType::Drone | EnemyType::SpyDrone) {
+            Collider::capsule_y(
+                1.45 * difficulty_scale.clamp(0.85, 1.8),
+                1.65 * difficulty_scale.clamp(0.85, 1.8),
+            )
+        } else {
+            Collider::capsule_y(
+                0.9 * difficulty_scale.clamp(0.85, 1.8),
+                difficulty_scale.clamp(0.85, 1.8),
+            )
+        },
         CollisionProfile::EnemyHurtbox,
         Sensor,
     ));

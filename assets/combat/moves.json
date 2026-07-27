@@ -67,7 +67,62 @@
       "active": 0.08,
       "recovery": 0.12,
       "cancel_after": 0.0,
-      "hitstop": 0.0,
+      "hitstop": 0.025,
+      "iframes": 0.0
+    },
+    {
+      "name": "Crescent Reversal",
+      "damage": 28.0,
+      "knockback": 3.6,
+      "startup": 0.055,
+      "active": 0.09,
+      "recovery": 0.13,
+      "cancel_after": 0.025,
+      "hitstop": 0.03,
+      "iframes": 0.0
+    },
+    {
+      "name": "Comet Rising Cut",
+      "damage": 34.0,
+      "knockback": 4.5,
+      "startup": 0.07,
+      "active": 0.1,
+      "recovery": 0.15,
+      "cancel_after": 0.035,
+      "hitstop": 0.038,
+      "iframes": 0.0
+    },
+    {
+      "name": "Nebula Cross",
+      "damage": 39.0,
+      "knockback": 5.2,
+      "startup": 0.075,
+      "active": 0.11,
+      "recovery": 0.17,
+      "cancel_after": 0.045,
+      "hitstop": 0.042,
+      "iframes": 0.0
+    },
+    {
+      "name": "Orbit Breaker",
+      "damage": 47.0,
+      "knockback": 6.8,
+      "startup": 0.1,
+      "active": 0.12,
+      "recovery": 0.2,
+      "cancel_after": 0.06,
+      "hitstop": 0.052,
+      "iframes": 0.0
+    },
+    {
+      "name": "Supernova Finale",
+      "damage": 62.0,
+      "knockback": 9.0,
+      "startup": 0.14,
+      "active": 0.15,
+      "recovery": 0.28,
+      "cancel_after": 0.08,
+      "hitstop": 0.07,
       "iframes": 0.0
     }
   ],

@@ -257,6 +257,12 @@ pub struct StuntRaceOpponent {
     pub course_id: &'static str,
 }
 
+/// Hostile hoverboard rival following a race spline. Kept separate from the
+/// ordinary combat AI so racing movement remains deterministic at extreme
+/// speeds and can later receive dedicated board-combat behavior.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyHoverboardSurfer;
+
 /// Civilian or patrol vehicle riding the generated speed-road network.
 #[derive(Component, Debug, Clone)]
 pub struct NpcRoadVehicle {

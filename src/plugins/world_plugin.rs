@@ -13225,7 +13225,9 @@ fn spawn_city_spy_drones(
                 Damageable::default(),
                 Faction::DimensionalAlien,
                 crate::physics::prelude::RigidBody::KinematicPositionBased,
-                crate::physics::prelude::Collider::cuboid(1.9, 0.78, 1.2),
+                // Intentionally generous around the wings and bobbing flight
+                // path so controller aim and fast projectiles register clearly.
+                crate::physics::prelude::Collider::cuboid(2.8, 1.35, 2.25),
                 crate::physics::prelude::CollisionProfile::EnemyHurtbox,
                 avian3d::prelude::Sensor,
                 CitySpyDrone {
@@ -14876,16 +14878,20 @@ fn spawn_boost_road_span(
     let forward = flat_rot * Vec3::Z;
     let road_forward = rot * Vec3::Z;
     let right = flat_rot * Vec3::X;
-    let lane_width = (width * 0.40).max(3.2);
+    // Boosts are a fast optional line, not the whole road. The broad clean
+    // shoulders remain available for carving, traffic, ramps, and rails.
+    let lane_width = (width * 0.16).max(6.0);
     let side_offset = width * 0.24;
     let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let light_mesh = meshes.add(Sphere::new(1.0));
 
     // A physical median prevents a player boosted in one direction from
     // drifting across the centerline and striking the opposite arrows. It is
-    // tall enough to contain hoverboards but low enough to jump deliberately.
-    let divider_height = 1.75;
-    let divider_width = 0.82;
+    // A continuous high center wall keeps opposite high-speed directions in
+    // their own skate-racing corridors. Dedicated transfers provide the safe
+    // route between sides instead of accidental boost-lane crossings.
+    let divider_height = SPEED_ROAD_CENTER_WALL_HEIGHT;
+    let divider_width = 2.4;
     commands.spawn((
         PbrBundle {
             mesh: Mesh3d(unit_cube.clone()),
@@ -14894,7 +14900,7 @@ fn spawn_boost_road_span(
                 center + rot * Vec3::new(0.0, divider_height * 0.5 + 0.12, 0.0),
             )
             .with_rotation(rot)
-            .with_scale(Vec3::new(divider_width, divider_height, length * 0.98)),
+            .with_scale(Vec3::new(divider_width, divider_height, length * 1.02)),
             ..default()
         },
         WorldGeometry,
@@ -14903,7 +14909,7 @@ fn spawn_boost_road_span(
         crate::physics::prelude::Collider::cuboid(
             divider_width * 0.5,
             divider_height * 0.5,
-            length * 0.49,
+            length * 0.51,
         ),
         world_space_collider_scale(),
     ));
@@ -21182,6 +21188,13 @@ mod tests {
     fn race_region_has_wide_connected_roads_and_two_travel_points() {
         assert_eq!(RACE_REGION_TRAVEL_POINTS.len(), 2);
         assert!(speed_road_width_for_route(RACE_CIRCUIT_ROUTE_INDEX) > SPEED_ROAD_WIDTH);
+        const {
+            assert!(SPEED_ROAD_WIDTH >= 256.0);
+            assert!(RACE_REGION_ROAD_WIDTH >= 384.0);
+            assert!(SPEED_ROAD_TRAFFIC_LANE_OFFSET >= 50.0);
+            assert!(SPEED_ROAD_OUTER_WALL_HEIGHT >= 12.0);
+            assert!(SPEED_ROAD_CENTER_WALL_HEIGHT >= 7.0);
+        }
         assert_eq!(
             ROUTE_RACE_CIRCUIT.first(),
             ROUTE_RACE_CIRCUIT.last(),
@@ -21603,12 +21616,13 @@ mod tests {
             aerial_support_stations >= 40,
             "the elevated network should produce frequent structural pylons"
         );
-        // A 64-unit freeway footprint must clear ridges that the old narrow
-        // deck could follow directly. Keep nearly half the network grounded
-        // while permitting the wider trunk to become a supported viaduct.
+        // Quadruple-width racing corridors span multiple terrain ridges at
+        // once, so the mountain network is intentionally a mostly elevated,
+        // supported Mario-Kart-style viaduct. Preserve periodic grade contact
+        // for approaches and transfers without forcing unsafe ridge clipping.
         assert!(
-            total_stations - aerial_support_stations >= total_stations * 45 / 100,
-            "roads should remain substantially terrain-following: {aerial_support_stations}/{total_stations} stations are aerial"
+            total_stations - aerial_support_stations >= total_stations * 4 / 100,
+            "roads still need periodic terrain approaches: {aerial_support_stations}/{total_stations} stations are aerial"
         );
     }
 

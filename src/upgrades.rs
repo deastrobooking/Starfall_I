@@ -17,6 +17,16 @@ pub const SABRE_RELIC_IDS: [&str; 9] = [
     "legendary_starheart_gem",
 ];
 
+/// The complete starter technique kit. Elemental and legendary gems remain
+/// exploration upgrades, but every player can use the wave, cyclone, dash, and
+/// aerial pound from their first minute.
+pub const STARTER_SABRE_RELIC_IDS: [&str; 4] = [
+    "solar_sabre_glyph",
+    "cyclone_slash_blueprint",
+    "comet_dash_blueprint",
+    "meteor_pound_blueprint",
+];
+
 pub fn is_sabre_relic(id: &str) -> bool {
     SABRE_RELIC_IDS.contains(&id)
 }

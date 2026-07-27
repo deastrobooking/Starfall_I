@@ -499,13 +499,13 @@ pub struct MagicBeamCaster;
 impl Default for BeamSabre {
     fn default() -> Self {
         Self {
-            active: false,
+            active: true,
             unlocked: true,
-            level: 1,
-            slash_damage: 25.0,
-            wave_damage: 40.0,
-            slash_count: 2,
-            cooldown: 0.8,
+            level: 2,
+            slash_damage: 35.0,
+            wave_damage: 60.0,
+            slash_count: 4,
+            cooldown: 0.7,
             cooldown_timer: 0.0,
             slash_timer: 0.0,
             slash_index: 0,
@@ -523,11 +523,11 @@ impl BeamSabre {
     pub fn set_level(&mut self, level: u32) {
         self.level = level;
         let (sd, wd, sc, cd) = match level {
-            1 => (25.0, 40.0, 2, 0.8),
-            2 => (35.0, 60.0, 2, 0.7),
-            3 => (50.0, 80.0, 3, 0.6),
-            4 => (65.0, 100.0, 4, 0.5),
-            _ => (85.0, 150.0, 5, 0.4),
+            1 => (25.0, 40.0, 4, 0.8),
+            2 => (35.0, 60.0, 4, 0.7),
+            3 => (50.0, 80.0, 5, 0.6),
+            4 => (65.0, 100.0, 6, 0.5),
+            _ => (85.0, 150.0, 6, 0.4),
         };
         self.slash_damage = sd;
         self.wave_damage = wd;

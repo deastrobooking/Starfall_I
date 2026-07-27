@@ -672,9 +672,13 @@ fn seed_discovered_sabre_relics(
     progress: &ChapterProgress,
     player_progression: &mut PlayerProgression,
 ) -> usize {
-    crate::upgrades::SABRE_RELIC_IDS
+    crate::upgrades::STARTER_SABRE_RELIC_IDS
         .into_iter()
-        .filter(|relic_id| progress.has_discoverable(relic_id))
+        .chain(
+            crate::upgrades::SABRE_RELIC_IDS
+                .into_iter()
+                .filter(|relic_id| progress.has_discoverable(relic_id)),
+        )
         .filter(|relic_id| player_progression.upgrades.unlock_relic(*relic_id))
         .count()
 }
@@ -1960,6 +1964,22 @@ fn hoverboard_landing_descent_cap(approach: f32) -> f32 {
     -(0.58 - approach.clamp(0.0, 1.0) * 0.46)
 }
 
+fn stabilized_hoverboard_grounded(
+    raw_grounded: bool,
+    grace: &mut f32,
+    dt: f32,
+    vertical_velocity: f32,
+    jump_requested: bool,
+) -> bool {
+    const CONTACT_GRACE: f32 = 0.11;
+    if raw_grounded {
+        *grace = CONTACT_GRACE;
+        return true;
+    }
+    *grace = (*grace - dt).max(0.0);
+    !jump_requested && vertical_velocity <= 0.025 && *grace > 0.0
+}
+
 fn sabre_claims_movement_dodge(
     sabre: &BeamSabre,
     progression: &PlayerProgression,
@@ -2277,7 +2297,25 @@ fn player_movement(
             board_boost.direction = Vec3::ZERO;
         }
 
-        movement.is_grounded = output.grounded;
+        movement.is_grounded = if traversal.active == TraversalMode::Hoverboard {
+            stabilized_hoverboard_grounded(
+                output.grounded,
+                &mut board_boost.ground_contact_grace,
+                dt,
+                movement.velocity.y,
+                pi.jump,
+            )
+        } else {
+            board_boost.ground_contact_grace = 0.0;
+            output.grounded
+        };
+        if traversal.active == TraversalMode::Hoverboard && movement.is_grounded {
+            // The fixed motor deliberately smooths horizontal carry, but stale
+            // downward carry must not survive a landing and pull the board back
+            // into the deck on subsequent render frames.
+            movement.motor_accum.y = 0.0;
+            movement.motor_carry.y = 0.0;
+        }
         let just_landed = movement.is_grounded && !platformer.was_grounded;
         if traversal.active == TraversalMode::Hoverboard {
             if movement.is_grounded {
@@ -4489,7 +4527,39 @@ mod tests {
     }
 
     #[test]
-    fn late_joining_player_inherits_only_discovered_sabre_relics() {
+    fn hoverboard_contact_grace_bridges_seams_but_never_swallows_airtime() {
+        let mut grace = 0.0;
+        assert!(stabilized_hoverboard_grounded(
+            true, &mut grace, 0.016, 0.0, false
+        ));
+        assert!(grace >= 0.10);
+        assert!(stabilized_hoverboard_grounded(
+            false, &mut grace, 0.032, 0.0, false
+        ));
+
+        let mut jump_grace = grace;
+        assert!(!stabilized_hoverboard_grounded(
+            false,
+            &mut jump_grace,
+            0.016,
+            0.0,
+            true,
+        ));
+        let mut rising_grace = grace;
+        assert!(!stabilized_hoverboard_grounded(
+            false,
+            &mut rising_grace,
+            0.016,
+            0.2,
+            false,
+        ));
+        assert!(!stabilized_hoverboard_grounded(
+            false, &mut grace, 0.20, 0.0, false,
+        ));
+    }
+
+    #[test]
+    fn player_starts_with_sabre_techniques_and_inherits_discovered_relics() {
         let mut chapter = ChapterProgress::default();
         chapter.unlock("solar_sabre_glyph");
         chapter.unlock("storm_gem");
@@ -4497,10 +4567,12 @@ mod tests {
         let mut player = PlayerProgression::default();
         player.upgrades.unlock_relic("cyclone_slash_blueprint");
 
-        assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 2);
+        assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 4);
         assert!(player.upgrades.has_relic("solar_sabre_glyph"));
         assert!(player.upgrades.has_relic("storm_gem"));
         assert!(player.upgrades.has_relic("cyclone_slash_blueprint"));
+        assert!(player.upgrades.has_relic("comet_dash_blueprint"));
+        assert!(player.upgrades.has_relic("meteor_pound_blueprint"));
         assert!(!player.upgrades.has_relic("unrelated_world_secret"));
         assert_eq!(seed_discovered_sabre_relics(&chapter, &mut player), 0);
     }

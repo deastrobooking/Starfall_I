@@ -19,7 +19,7 @@ use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot};
 use crate::components::player::{
     AimReticleState, AimSolution, BoardBoostState, ClimbState, JetpackState, Player, PlayerCamera,
-    PlayerCameraRef, PlayerIndex, PlayerInput, PlayerProgression, PlayerStats,
+    PlayerCameraRef, PlayerIndex, PlayerInput, PlayerMovement, PlayerProgression, PlayerStats,
     RooftopTrialProgress, StuntRunState, TraversalMode, TraversalModeState, WaterTraversalState,
 };
 use crate::components::weapon::{
@@ -27,12 +27,14 @@ use crate::components::weapon::{
     MAX_WEAPON_RANK,
 };
 use crate::components::world::{
-    BoatVehicle, DiscussionNpc, DungeonCrawlGate, DungeonExitPortal, WorldLoot,
+    BoatPassenger, BoatVehicle, DiscussionNpc, DungeonCrawlGate, DungeonExitPortal, WorldLoot,
 };
 use crate::damage::Health;
 use crate::discussion::DiscussionState;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
-use crate::engine_tools::EngineToolMode;
+use crate::engine_tools::{
+    EngineToolMode, PublishedMapPointKind, PublishedProceduralRecipeCatalog,
+};
 use crate::events::*;
 use crate::missions::{
     active_custom_mission, chapter_mission, mission_for_travel_anchor, CustomMissionState,
@@ -191,6 +193,10 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     pause_menu_action_system,
+                    chapter_select_fast_travel_buttons,
+                    cave_fast_travel_buttons,
+                    world_anchor_fast_travel_buttons,
+                    editor_fast_travel_buttons,
                     shop_action_system,
                     shop_panel_refresh_system.after(shop_action_system),
                     update_pause_menu_page_visibility,
@@ -325,6 +331,7 @@ struct PauseMenuButton(PauseAction);
 #[derive(Clone, Copy)]
 enum PauseAction {
     Resume,
+    Map,
     Save,
     Title,
     Controls,
@@ -337,6 +344,7 @@ struct PausePagePanel(PausePage);
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PausePage {
     Main,
+    Map,
     Controls,
     Shop,
     Settings,
@@ -346,6 +354,13 @@ struct PauseMenuState {
     page: PausePage,
     resume_lockout: f32,
     resume_armed: bool,
+}
+
+#[derive(Component, Debug, Clone)]
+struct EditorFastTravelButton {
+    point_id: String,
+    label: String,
+    position: Vec3,
 }
 impl Default for PauseMenuState {
     fn default() -> Self {
@@ -1463,10 +1478,21 @@ fn setup_pause_menu(
     mut commands: Commands,
     mut menu: ResMut<PauseMenuState>,
     settings: Res<GameSettings>,
+    progress: Res<ChapterProgress>,
+    world_site_registry: Res<WorldSiteRegistry>,
+    published_recipes: Res<PublishedProceduralRecipeCatalog>,
+    theme: Res<UiTheme>,
+    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
 ) {
     menu.page = PausePage::Main;
     menu.resume_lockout = 0.20;
     menu.resume_armed = false;
+    let chapters = all_chapters();
+    let mut player_positions = player_q
+        .iter()
+        .map(|(index, transform)| (index.0, transform.translation))
+        .collect::<Vec<_>>();
+    player_positions.sort_by_key(|(index, _)| *index);
     commands
         .spawn((
             Node {
@@ -1526,6 +1552,11 @@ fn setup_pause_menu(
             .with_children(|page| {
                 for (label, action, color) in [
                     ("RESUME", PauseAction::Resume, Color::srgb(0.0, 0.42, 0.74)),
+                    (
+                        "WORLD MAP / FAST TRAVEL",
+                        PauseAction::Map,
+                        Color::srgb(0.10, 0.38, 0.58),
+                    ),
                     ("SAVE GAME", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
                     ("MAIN MENU", PauseAction::Title, Color::srgb(0.48, 0.18, 0.18)),
                     (
@@ -1538,6 +1569,56 @@ fn setup_pause_menu(
                 ] {
                     spawn_pause_button(page, label, action, color);
                 }
+            });
+
+            root.spawn((
+                Node {
+                    width: Val::Px(760.0),
+                    height: Val::Px(430.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                },
+                Visibility::Hidden,
+                PausePagePanel(PausePage::Map),
+            ))
+            .with_children(|page| {
+                page.spawn((
+                    Text::new("WORLD MAP / FAST TRAVEL"),
+                    TextFont {
+                        font_size: FontSize::Px(28.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.9, 0.95, 1.0)),
+                ));
+                page.spawn((
+                    Text::new(
+                        "P1–P4 show the party. Select any travel marker; U markers come from published player levels.",
+                    ),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.70, 0.86, 1.0)),
+                ));
+                page.spawn(Node {
+                    width: Val::Px(700.0),
+                    height: Val::Px(330.0),
+                    ..default()
+                })
+                .with_children(|map_host| {
+                    spawn_fast_travel_map(
+                        map_host,
+                        &chapters,
+                        &progress,
+                        &world_site_registry,
+                        &published_recipes,
+                        &player_positions,
+                        &theme,
+                    );
+                });
+                spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
 
             root.spawn((
@@ -2233,6 +2314,9 @@ fn pause_menu_action_system(
             transition.resuming_from_pause = true;
             next_state.set(AppState::Playing);
         }
+        PauseAction::Map => {
+            menu.page = PausePage::Map;
+        }
         PauseAction::Save => {
             send_pause_save_result(save_current_session(&sp), &mut msg_ev);
         }
@@ -2353,6 +2437,8 @@ fn setup_chapter_select(
     mut owner: ResMut<ChapterProgressionOwner>,
     robot_pets: Res<RobotPetCollection>,
     world_site_registry: Res<WorldSiteRegistry>,
+    published_recipes: Res<PublishedProceduralRecipeCatalog>,
+    theme: Res<UiTheme>,
     economy: Res<SettlementEconomy>,
 ) {
     let chapters = all_chapters();
@@ -2434,7 +2520,15 @@ fn setup_chapter_select(
                 ..default()
             })
             .with_children(|row| {
-                spawn_fast_travel_map(row, &chapters, &progress, &world_site_registry);
+                spawn_fast_travel_map(
+                    row,
+                    &chapters,
+                    &progress,
+                    &world_site_registry,
+                    &published_recipes,
+                    &[],
+                    &theme,
+                );
                 row.spawn((
                     Node {
                         width: Val::Px(430.0),
@@ -2825,6 +2919,9 @@ fn spawn_fast_travel_map(
     chapters: &[crate::chapters::ChapterDef],
     progress: &ChapterProgress,
     world_site_registry: &WorldSiteRegistry,
+    published_recipes: &PublishedProceduralRecipeCatalog,
+    player_positions: &[(u8, Vec3)],
+    theme: &UiTheme,
 ) {
     parent
         .spawn((
@@ -3393,6 +3490,114 @@ fn spawn_fast_travel_map(
                     },
                 ));
             }
+
+            // Published World Kit recipes extend the map without requiring UI
+            // code changes. Fast-travel topology nodes are interactive during
+            // play; landmark nodes remain visible annotations.
+            for point in published_recipes.map_points() {
+                let travelable =
+                    point.kind == PublishedMapPointKind::FastTravel && !player_positions.is_empty();
+                let color = match point.kind {
+                    PublishedMapPointKind::FastTravel => Color::srgb(0.18, 0.82, 0.92),
+                    PublishedMapPointKind::Landmark => Color::srgb(0.92, 0.52, 0.94),
+                };
+                let mut marker = map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(point.position.x)),
+                        top: Val::Percent(world_to_map_top(point.position.z)),
+                        width: Val::Px(20.0),
+                        height: Val::Px(20.0),
+                        margin: UiRect {
+                            left: Val::Px(-10.0),
+                            top: Val::Px(-10.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(2.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(color),
+                    BorderColor::all(Color::srgb(0.78, 1.0, 1.0)),
+                ));
+                if travelable {
+                    marker.insert((
+                        Button,
+                        EditorFastTravelButton {
+                            point_id: point.id.clone(),
+                            label: point.label.clone(),
+                            position: point.position,
+                        },
+                    ));
+                }
+                marker.with_children(|badge| {
+                    badge.spawn((
+                        Text::new(match point.kind {
+                            PublishedMapPointKind::FastTravel => "U",
+                            PublishedMapPointKind::Landmark => "L",
+                        }),
+                        TextFont {
+                            font_size: FontSize::Px(9.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+                map.spawn((
+                    Text::new(point.label.clone()),
+                    TextFont {
+                        font_size: FontSize::Px(7.8),
+                        ..default()
+                    },
+                    TextColor(color),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent((world_to_map_left(point.position.x) + 1.4).min(90.0)),
+                        top: Val::Percent(
+                            (world_to_map_top(point.position.z) + 1.2).clamp(3.0, 94.0),
+                        ),
+                        ..default()
+                    },
+                ));
+            }
+
+            // Party markers render last so player position remains readable
+            // over regions, sites, missions, and player-authored content.
+            for (index, position) in player_positions {
+                let color = theme.player_accent(*index);
+                map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(position.x)),
+                        top: Val::Percent(world_to_map_top(position.z)),
+                        width: Val::Px(24.0),
+                        height: Val::Px(24.0),
+                        margin: UiRect {
+                            left: Val::Px(-12.0),
+                            top: Val::Px(-12.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(3.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.02, 0.03, 0.06, 0.94)),
+                    BorderColor::all(color),
+                    ZIndex(20),
+                ))
+                .with_children(|marker| {
+                    marker.spawn((
+                        Text::new(format!("P{}", index + 1)),
+                        TextFont {
+                            font_size: FontSize::Px(9.0),
+                            ..default()
+                        },
+                        TextColor(color),
+                    ));
+                });
+            }
         });
 }
 
@@ -3532,6 +3737,7 @@ fn chapter_select_progression_owner_buttons(
 fn chapter_select_fast_travel_buttons(
     mut current: ResMut<CurrentChapter>,
     mut mission_state: ResMut<CustomMissionState>,
+    mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
     interaction_q: Query<
         (&Interaction, &ChapterFastTravelButton),
@@ -3545,6 +3751,8 @@ fn chapter_select_fast_travel_buttons(
             }
             current.id = button.0;
             current.started = false;
+            transition.pausing = false;
+            transition.resuming_from_pause = false;
             next_state.set(AppState::Playing);
         }
     }
@@ -3554,6 +3762,7 @@ fn cave_fast_travel_buttons(
     mut current: ResMut<CurrentChapter>,
     mut mission_state: ResMut<CustomMissionState>,
     mut destination: ResMut<FastTravelDestination>,
+    mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
     interaction_q: Query<
         (&Interaction, &CaveFastTravelButton),
@@ -3572,6 +3781,8 @@ fn cave_fast_travel_buttons(
         current.id = button.chapter;
         current.started = false;
         destination.cave(button.anchor_id, button.label);
+        transition.pausing = false;
+        transition.resuming_from_pause = false;
         next_state.set(AppState::Playing);
     }
 }
@@ -3580,6 +3791,7 @@ fn world_anchor_fast_travel_buttons(
     mut current: ResMut<CurrentChapter>,
     mut mission_state: ResMut<CustomMissionState>,
     mut destination: ResMut<FastTravelDestination>,
+    mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
     interaction_q: Query<
         (&Interaction, &WorldAnchorFastTravelButton),
@@ -3602,8 +3814,51 @@ fn world_anchor_fast_travel_buttons(
         } else {
             destination.world_anchor(button.anchor_id, button.label);
         }
+        transition.pausing = false;
+        transition.resuming_from_pause = false;
         next_state.set(AppState::Playing);
     }
+}
+
+fn editor_fast_travel_buttons(
+    mut commands: Commands,
+    interaction_q: Query<
+        (&Interaction, &EditorFastTravelButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut player_q: Query<(Entity, &PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
+    mut transition: ResMut<PlaySessionTransition>,
+    mut next_state: ResMut<NextState<AppState>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    const OFFSETS: [Vec3; 4] = [
+        Vec3::new(-3.0, 1.3, -3.0),
+        Vec3::new(3.0, 1.3, -3.0),
+        Vec3::new(-3.0, 1.3, 3.0),
+        Vec3::new(3.0, 1.3, 3.0),
+    ];
+    let Some(button) = interaction_q
+        .iter()
+        .find_map(|(interaction, button)| (*interaction == Interaction::Pressed).then_some(button))
+    else {
+        return;
+    };
+
+    for (entity, index, mut transform, mut movement) in player_q.iter_mut() {
+        transform.translation = button.position + OFFSETS[index.0.min(3) as usize];
+        movement.velocity = Vec3::ZERO;
+        movement.ground_velocity = Vec3::ZERO;
+        movement.clear_motor_delivery();
+        movement.is_grounded = false;
+        commands.entity(entity).remove::<BoatPassenger>();
+    }
+    transition.pausing = false;
+    transition.resuming_from_pause = true;
+    next_state.set(AppState::Playing);
+    msg_ev.write(UiMessageEvent {
+        text: format!("FAST TRAVEL — {} [{}]", button.label, button.point_id),
+        duration: 3.0,
+    });
 }
 
 fn chapter_select_controller_scroll(
@@ -7529,6 +7784,14 @@ mod menu_navigation_tests {
     }
 
     #[test]
+    fn world_map_projection_places_origin_at_center_and_clamps_edges() {
+        assert!((world_to_map_left(0.0) - 50.0).abs() < 1e-4);
+        assert!((world_to_map_top(0.0) - 50.0).abs() < 1e-4);
+        assert_eq!(world_to_map_left(f32::MAX), 98.0);
+        assert_eq!(world_to_map_top(f32::MAX), 2.0);
+    }
+
+    #[test]
     fn directional_focus_follows_spatial_grid() {
         let (_world, buttons) = four_button_grid();
         assert_eq!(
@@ -7825,7 +8088,7 @@ mod menu_navigation_tests {
         let mut sabre = BeamSabre::default();
 
         let status = sabre_status_text(&sabre, &upgrades);
-        assert!(status.contains("WAVE 2/SPIN"));
+        assert!(status.contains("WAVE 3/SPIN"));
         assert!(status.contains("GEMS 1/4 + STARHEART"));
 
         sabre.technique = crate::components::weapon::SabreTechnique::CycloneSlash;

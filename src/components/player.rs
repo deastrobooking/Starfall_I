@@ -732,6 +732,9 @@ pub struct BoardBoostState {
     pub airborne_time: f32,
     /// 0–1 proximity used by the board pose while descent assist is active.
     pub landing_approach: f32,
+    /// Brief contact memory bridges road-deck seams at racing speed. It is
+    /// ignored while rising or jumping, so real airtime remains immediate.
+    pub ground_contact_grace: f32,
 }
 
 impl Default for BoardBoostState {
@@ -744,6 +747,7 @@ impl Default for BoardBoostState {
             landing_timer: 0.0,
             airborne_time: 0.0,
             landing_approach: 0.0,
+            ground_contact_grace: 0.0,
         }
     }
 }

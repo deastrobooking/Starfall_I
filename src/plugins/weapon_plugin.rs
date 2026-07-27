@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary, RangedMoveDef};
 use crate::components::armor::ArmorSet;
-use crate::components::enemy::{CitySpyDrone, DeadEnemy, Enemy, FlyingDrone};
+use crate::components::enemy::{CitySpyDrone, DeadEnemy, Enemy, EnemyType, FlyingDrone};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::NpcRoadVehicle;
@@ -1652,6 +1652,38 @@ fn sort_projectile_collisions(collisions: &mut [RayHitData]) {
     collisions.sort_by(|a, b| a.distance.total_cmp(&b.distance));
 }
 
+/// Continuous point-vs-sphere sweep used as a defensive damage proxy for
+/// small, fast-moving drones. Avian remains the canonical collision path; this
+/// closes the one-frame gap when a drone moves across a projectile ray between
+/// physics synchronization and combat resolution.
+fn segment_sphere_hit_fraction(start: Vec3, end: Vec3, center: Vec3, radius: f32) -> Option<f32> {
+    let displacement = end - start;
+    let from_center = start - center;
+    let a = displacement.length_squared();
+    if a <= 1e-8 {
+        return (from_center.length_squared() <= radius * radius).then_some(0.0);
+    }
+    let c = from_center.length_squared() - radius * radius;
+    if c <= 0.0 {
+        return Some(0.0);
+    }
+    let b = from_center.dot(displacement);
+    let discriminant = b * b - a * c;
+    if discriminant < 0.0 {
+        return None;
+    }
+    let fraction = (-b - discriminant.sqrt()) / a;
+    (0.0..=1.0).contains(&fraction).then_some(fraction)
+}
+
+fn drone_damage_proxy_radius(enemy_type: EnemyType) -> Option<f32> {
+    match enemy_type {
+        EnemyType::Drone => Some(2.8),
+        EnemyType::SpyDrone => Some(3.6),
+        _ => None,
+    }
+}
+
 // ── Projectile Update ─────────────────────────────────────────────────────────
 fn projectile_update_system(
     mut commands: Commands,
@@ -1781,8 +1813,83 @@ fn projectile_update_system(
 
         let mut hit = false;
         let mut explosion: Option<(Vec3, f32, f32, DamageType)> = None;
+        let nearest_physics_distance = collisions
+            .first()
+            .map(|collision| collision.distance)
+            .unwrap_or(f32::INFINITY);
+        let swept_drone = enemy_q
+            .iter_mut()
+            .filter(|(_, _, health, _, _)| health.is_alive())
+            .filter_map(|(entity, transform, _, _, enemy)| {
+                let radius = drone_damage_proxy_radius(enemy.enemy_type)?;
+                let fraction = segment_sphere_hit_fraction(
+                    previous_position,
+                    proj_transform.translation,
+                    transform.translation,
+                    radius,
+                )?;
+                let distance = displacement.length() * fraction;
+                (distance <= nearest_physics_distance + 0.001)
+                    .then_some((distance, fraction, entity))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let forced_drone_entity = swept_drone.map(|(_, _, entity)| entity);
+
+        if let Some((_, fraction, drone_entity)) = swept_drone {
+            let impact_position = previous_position + displacement * fraction;
+            if let Ok((e_entity, e_transform, mut e_health, mut e_damageable, enemy)) =
+                enemy_q.get_mut(drone_entity)
+            {
+                if proj.is_explosive {
+                    explosion = Some((
+                        impact_position,
+                        proj.explosion_radius,
+                        proj.damage,
+                        proj.damage_type,
+                    ));
+                } else {
+                    let push = (e_transform.translation - impact_position)
+                        .with_y(0.0)
+                        .normalize_or_zero()
+                        + Vec3::Y * 0.2;
+                    let mut info = DamageInfo::new(proj.damage, proj.damage_type)
+                        .with_knockback(2.2)
+                        .with_hit_direction(push);
+                    if is_critical {
+                        info = info.critical();
+                    }
+                    let result = apply_damage(&mut e_health, &mut e_damageable, &info);
+                    enemy_damaged_ev.write(EnemyDamagedEvent {
+                        entity: e_entity,
+                        damage: result.damage_amount,
+                        position: e_transform.translation,
+                    });
+                    impact_ev.write(CombatImpactEvent {
+                        position: impact_position,
+                        damage: result.damage_amount,
+                        damage_type: proj.damage_type,
+                        is_critical: result.was_critical,
+                    });
+                    if result.was_killed {
+                        enemy_killed_ev.write(EnemyKilledEvent {
+                            enemy_type: enemy.enemy_type.as_str().to_string(),
+                            credits: enemy.config.credits,
+                            experience: enemy.config.experience_value,
+                            position: e_transform.translation,
+                        });
+                    }
+                }
+                hit = proj.is_explosive || !proj.piercing;
+                if hit {
+                    proj_transform.translation = impact_position;
+                }
+            }
+        }
 
         for collision in collisions {
+            if hit || forced_drone_entity == Some(collision.entity) {
+                continue;
+            }
             let impact_position =
                 previous_position + displacement.normalize_or_zero() * collision.distance;
 
@@ -2427,11 +2534,7 @@ fn execute_melee_hit(
 /// carries the level-1 base numbers, so `(slash, wave)` scales stay 1.0 at
 /// level 1 and edits to `moves.json` retune every level proportionally.
 fn sabre_level_scale(sabre: &BeamSabre) -> (f32, f32) {
-    let base = BeamSabre::default();
-    (
-        sabre.slash_damage / base.slash_damage,
-        sabre.wave_damage / base.wave_damage,
-    )
+    (sabre.slash_damage / 25.0, sabre.wave_damage / 40.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3730,14 +3833,26 @@ mod move_def_wiring_tests {
     }
 
     #[test]
+    fn starter_sabre_is_drawn_upgraded_and_combo_ready() {
+        let sabre = BeamSabre::default();
+        let library = MoveLibrary::defaults();
+
+        assert!(sabre.unlocked);
+        assert!(sabre.active);
+        assert_eq!(sabre.level, 2);
+        assert_eq!(sabre.slash_count, 4);
+        assert!(library.sabre.len() >= 6);
+    }
+
+    #[test]
     fn starter_and_upgraded_sabre_waves_follow_combo_progression() {
         let sabre = BeamSabre::default();
         let base_upgrades = UpgradeLedger::default();
         assert!(sabre_wave_profile(&sabre, &base_upgrades, 1).is_none());
         let base = sabre_wave_profile(&sabre, &base_upgrades, 2)
             .expect("starter Saber earns a wave on its second slash");
-        assert_eq!(base.projectile_count, 1);
-        assert!((base.damage_mult - 0.30).abs() < 1e-6);
+        assert_eq!(base.projectile_count, 2);
+        assert!((base.damage_mult - 0.40).abs() < 1e-6);
         assert!(!base.explosive);
 
         let upgraded = UpgradeLedger {
@@ -3753,6 +3868,23 @@ mod move_def_wiring_tests {
         assert!(strong.explosive);
         assert!(sabre_wave_profile(&sabre, &upgraded, 3).is_none());
         assert!(sabre_wave_profile(&sabre, &upgraded, 4).is_some());
+    }
+
+    #[test]
+    fn swept_drone_proxy_catches_fast_projectiles_between_frames() {
+        let fraction = segment_sphere_hit_fraction(Vec3::ZERO, Vec3::X * 10.0, Vec3::X * 5.0, 1.0)
+            .expect("segment crosses the proxy");
+        assert!((fraction - 0.4).abs() < 1e-5);
+        assert!(segment_sphere_hit_fraction(
+            Vec3::ZERO,
+            Vec3::X * 10.0,
+            Vec3::new(5.0, 2.1, 0.0),
+            1.0,
+        )
+        .is_none());
+        assert_eq!(drone_damage_proxy_radius(EnemyType::Drone), Some(2.8));
+        assert_eq!(drone_damage_proxy_radius(EnemyType::SpyDrone), Some(3.6));
+        assert_eq!(drone_damage_proxy_radius(EnemyType::Soldier), None);
     }
 
     #[test]
