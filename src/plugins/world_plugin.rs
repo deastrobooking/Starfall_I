@@ -131,6 +131,11 @@ struct WaterfallSplashZone {
     occupied_players: u8,
 }
 
+#[derive(Component)]
+struct BuildingRewardBeacon {
+    reward_key: String,
+}
+
 #[derive(Component, Debug, Clone, Copy)]
 struct DebugColliderBox {
     size: Vec3,
@@ -287,6 +292,7 @@ impl Plugin for WorldPlugin {
                     animate_mountain_spider_legs,
                     city_spy_drone_patrol_system,
                     city_spy_drone_data_drop_system,
+                    city_pedestrian_system,
                     discussion_interaction_system,
                     dungeon_key_pickup_system,
                     dungeon_key_gate_system,
@@ -300,6 +306,11 @@ impl Plugin for WorldPlugin {
                     laser_beam_cleanup_system,
                     collider_debug_toggle_system,
                 )
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (building_reward_bob_system, building_reward_pickup_system)
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -2462,10 +2473,16 @@ fn road_boost_upgrade_mult(upgrades: &crate::upgrades::UpgradeLedger) -> f32 {
 fn npc_road_vehicle_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut vehicle_q: Query<(Entity, &mut Transform, &mut NpcRoadVehicle, &Health)>,
+    mut vehicle_q: Query<(
+        Entity,
+        &mut Transform,
+        &mut NpcRoadVehicle,
+        &Health,
+        Option<&mut CityStreetTraffic>,
+    )>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, mut vehicle, health) in vehicle_q.iter_mut() {
+    for (entity, mut transform, mut vehicle, health, city_traffic) in vehicle_q.iter_mut() {
         if vehicle.path.len() < 2 {
             continue;
         }
@@ -2480,6 +2497,9 @@ fn npc_road_vehicle_system(
             continue;
         }
 
+        if let Some(mut city_traffic) = city_traffic {
+            update_city_traffic_signal(&mut vehicle, &mut city_traffic, dt);
+        }
         advance_road_vehicle(&mut vehicle, dt);
         if let Some((position, yaw)) = road_vehicle_pose(&vehicle) {
             let route_dir = Quat::from_rotation_y(yaw) * Vec3::Z;
@@ -2488,6 +2508,185 @@ fn npc_road_vehicle_system(
             transform.translation = position + right * vehicle.lane_offset + Vec3::Y * bob;
             transform.rotation = Quat::from_rotation_y(yaw);
         }
+    }
+}
+
+fn update_city_traffic_signal(
+    vehicle: &mut NpcRoadVehicle,
+    traffic: &mut CityStreetTraffic,
+    dt: f32,
+) {
+    if traffic.stop_timer > 0.0 {
+        traffic.stop_timer = (traffic.stop_timer - dt).max(0.0);
+        vehicle.speed = 0.0;
+        return;
+    }
+
+    vehicle.speed = traffic.cruise_speed;
+    let len = vehicle.path.len();
+    if len < 2 {
+        return;
+    }
+    let start = vehicle.path[vehicle.segment % len];
+    let end = vehicle.path[(vehicle.segment + 1) % len];
+    let remaining = (start.distance(end) - vehicle.progress).max(0.0);
+    let should_stop = (vehicle.segment + traffic.signal_phase).is_multiple_of(3);
+    if should_stop && remaining <= 1.5 && traffic.last_stopped_segment != vehicle.segment {
+        traffic.last_stopped_segment = vehicle.segment;
+        traffic.stop_timer = 0.65 + traffic.signal_phase as f32 * 0.12;
+        vehicle.speed = 0.0;
+    }
+}
+
+fn city_pedestrian_system(
+    time: Res<Time>,
+    mut pedestrian_q: Query<(&mut Transform, &mut CityPedestrian)>,
+) {
+    let dt = time.delta_secs();
+    let elapsed = time.elapsed_secs();
+    for (mut transform, mut pedestrian) in pedestrian_q.iter_mut() {
+        if pedestrian.path.len() < 2 {
+            continue;
+        }
+        if pedestrian.pause_timer > 0.0 {
+            pedestrian.pause_timer = (pedestrian.pause_timer - dt).max(0.0);
+            continue;
+        }
+
+        let previous_segment = pedestrian.segment;
+        advance_city_pedestrian(&mut pedestrian, dt);
+        if pedestrian.segment != previous_segment
+            && (pedestrian.segment + pedestrian.phase as usize).is_multiple_of(4)
+        {
+            pedestrian.pause_timer = 0.35 + pedestrian.phase.fract() * 0.65;
+        }
+        if let Some((position, yaw)) = city_pedestrian_pose(&pedestrian) {
+            let bob = (elapsed * 7.0 + pedestrian.phase * TAU).sin().abs() * 0.055;
+            transform.translation = position + Vec3::Y * bob;
+            transform.rotation = Quat::from_rotation_y(yaw);
+        }
+    }
+}
+
+fn advance_city_pedestrian(pedestrian: &mut CityPedestrian, dt: f32) {
+    let mut remaining = pedestrian.speed.max(0.0) * dt;
+    let len = pedestrian.path.len();
+    while remaining > 0.0 && len >= 2 {
+        let start = pedestrian.path[pedestrian.segment % len];
+        let end = pedestrian.path[(pedestrian.segment + 1) % len];
+        let segment_len = start.distance(end).max(0.01);
+        let available = segment_len - pedestrian.progress;
+        if remaining <= available {
+            pedestrian.progress += remaining;
+            break;
+        }
+        remaining -= available;
+        pedestrian.segment = (pedestrian.segment + 1) % len;
+        pedestrian.progress = 0.0;
+    }
+}
+
+fn city_pedestrian_pose(pedestrian: &CityPedestrian) -> Option<(Vec3, f32)> {
+    let len = pedestrian.path.len();
+    if len < 2 {
+        return None;
+    }
+    let start = pedestrian.path[pedestrian.segment % len];
+    let end = pedestrian.path[(pedestrian.segment + 1) % len];
+    let delta = end - start;
+    let segment_len = delta.length().max(0.01);
+    let position = start.lerp(end, (pedestrian.progress / segment_len).clamp(0.0, 1.0));
+    Some((position, delta.x.atan2(delta.z)))
+}
+
+fn building_reward_bob_system(
+    time: Res<Time>,
+    mut reward_q: Query<(&mut Transform, &BuildingExplorationReward)>,
+) {
+    let elapsed = time.elapsed_secs();
+    for (mut transform, reward) in reward_q.iter_mut() {
+        transform.translation.y = reward.base_y + (elapsed * 2.4 + reward.bob_phase).sin() * 0.22;
+        transform.rotate_y(time.delta_secs() * 1.15);
+    }
+}
+
+fn apply_building_reward(
+    stats: &mut PlayerStats,
+    health: &mut Health,
+    credits: u32,
+    experience: u32,
+    armor: u32,
+) {
+    stats.credits = stats.credits.saturating_add(credits);
+    stats.experience = stats.experience.saturating_add(experience);
+    stats.armor = (stats.armor + armor as f32).min(stats.max_armor);
+    health.heal((armor as f32 * 0.25).max(1.0));
+}
+
+fn building_reward_pickup_system(
+    mut commands: Commands,
+    mut progress: ResMut<ChapterProgress>,
+    reward_q: Query<(Entity, &Transform, &BuildingExplorationReward)>,
+    beacon_q: Query<(Entity, &BuildingRewardBeacon)>,
+    mut player_q: Query<(&PlayerIndex, &Transform, &mut PlayerStats, &mut Health), With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (reward_entity, reward_transform, reward) in reward_q.iter() {
+        if progress.has_discoverable(&reward.reward_key) {
+            commands.entity(reward_entity).despawn();
+            for (beacon_entity, beacon) in beacon_q.iter() {
+                if beacon.reward_key == reward.reward_key {
+                    commands.entity(beacon_entity).despawn();
+                }
+            }
+            continue;
+        }
+
+        let mut collected = None;
+        for (player_index, player_transform, mut stats, mut health) in player_q.iter_mut() {
+            if player_transform
+                .translation
+                .distance(reward_transform.translation)
+                > reward.pickup_radius
+            {
+                continue;
+            }
+            apply_building_reward(
+                &mut stats,
+                &mut health,
+                reward.credits,
+                reward.experience,
+                reward.armor,
+            );
+            collected = Some(player_index.0);
+            break;
+        }
+
+        let Some(player_index) = collected else {
+            continue;
+        };
+        progress.unlock(&reward.reward_key);
+        for (beacon_entity, beacon) in beacon_q.iter() {
+            if beacon.reward_key == reward.reward_key {
+                commands.entity(beacon_entity).despawn();
+            }
+        }
+        let route = match reward.location {
+            BuildingRewardLocation::Interior => "interior cache",
+            BuildingRewardLocation::Rooftop => "rooftop star cache",
+        };
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "P{} found a {}: +{} credits, +{} XP, +{} armor",
+                player_index + 1,
+                route,
+                reward.credits,
+                reward.experience,
+                reward.armor
+            ),
+            duration: 4.0,
+        });
+        commands.entity(reward_entity).despawn();
     }
 }
 
@@ -2780,6 +2979,7 @@ fn generate_city(
     spawn_residential(&mut commands, &mut meshes, &pal, seed + 2, seed);
     spawn_highways(&mut commands, &mut meshes, &pal);
     spawn_city_streets(&mut commands, &mut meshes, &pal);
+    spawn_city_life(&mut commands, &mut meshes, &pal, seed + 23);
     spawn_city_hidden_rooms(&mut commands, &mut meshes, m, &pal);
     spawn_traversal_courses(&mut commands, &mut meshes, m, &pal);
     spawn_sky_platforms(&mut commands, &mut meshes, &pal, seed + 3);
@@ -13959,6 +14159,210 @@ fn spawn_city_streets(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &
     }
 }
 
+fn city_street_loop(ring: i32, y: f32) -> Vec<Vec3> {
+    let ring = ring.clamp(1, 4);
+    let spacing = 48.0;
+    let min = -ring;
+    let max = ring;
+    let mut path = Vec::with_capacity((ring * 8) as usize);
+    for x in min..max {
+        path.push(Vec3::new(x as f32 * spacing, y, min as f32 * spacing));
+    }
+    for z in min..max {
+        path.push(Vec3::new(max as f32 * spacing, y, z as f32 * spacing));
+    }
+    for x in (min + 1..=max).rev() {
+        path.push(Vec3::new(x as f32 * spacing, y, max as f32 * spacing));
+    }
+    for z in (min + 1..=max).rev() {
+        path.push(Vec3::new(min as f32 * spacing, y, z as f32 * spacing));
+    }
+    path
+}
+
+fn city_sidewalk_loop(block_x: i32, block_z: i32, y: f32) -> Vec<Vec3> {
+    let spacing = 48.0;
+    let inset = 8.8;
+    let x0 = block_x as f32 * spacing + inset;
+    let x1 = (block_x + 1) as f32 * spacing - inset;
+    let z0 = block_z as f32 * spacing + inset;
+    let z1 = (block_z + 1) as f32 * spacing - inset;
+    vec![
+        Vec3::new(x0, y, z0),
+        Vec3::new(x1, y, z0),
+        Vec3::new(x1, y, z1),
+        Vec3::new(x0, y, z1),
+    ]
+}
+
+fn spawn_city_life(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
+    let traffic_body = meshes.add(Cuboid::new(3.8, 1.1, 6.8));
+    let traffic_canopy = meshes.add(Cuboid::new(2.8, 0.75, 3.4));
+    let traffic_light = meshes.add(Cuboid::new(3.1, 0.18, 0.22));
+
+    for ring in 1..=4i32 {
+        let path = city_street_loop(ring, 0.92);
+        for car_index in 0..3usize {
+            let accent = city_accent_material(pal, seed + (ring * 11) as u64 + car_index as u64);
+            let segment = (car_index * path.len() / 3 + ring as usize) % path.len();
+            let cruise_speed =
+                11.5 + ring as f32 * 1.15 + seeded(seed + ring as u64, car_index as u64) * 2.2;
+            let lane_offset = if car_index.is_multiple_of(2) {
+                -3.25
+            } else {
+                3.25
+            };
+            let vehicle = NpcRoadVehicle {
+                path: path.clone(),
+                segment,
+                progress: seeded(seed, (ring * 7) as u64 + car_index as u64) * 24.0,
+                speed: cruise_speed,
+                lane_offset,
+                hit_radius: 3.6,
+                wreck_timer: 4.0,
+            };
+            let (position, yaw) = road_vehicle_pose(&vehicle).unwrap_or((path[0], 0.0));
+            let entity = commands
+                .spawn((
+                    Name::new(format!("City Hovercar R{ring}-{}", car_index + 1)),
+                    PbrBundle {
+                        mesh: Mesh3d(traffic_body.clone()),
+                        material: MeshMaterial3d(accent),
+                        transform: Transform::from_translation(position)
+                            .with_rotation(Quat::from_rotation_y(yaw)),
+                        ..default()
+                    },
+                    vehicle,
+                    CityStreetTraffic {
+                        cruise_speed,
+                        stop_timer: 0.0,
+                        last_stopped_segment: usize::MAX,
+                        signal_phase: (car_index + ring as usize) % 3,
+                    },
+                    WorldGeometry,
+                    Health::new(90.0),
+                    Damageable::default(),
+                    crate::physics::prelude::RigidBody::KinematicPositionBased,
+                    crate::physics::prelude::Collider::cuboid(1.9, 0.55, 3.4),
+                    crate::physics::prelude::CollisionProfile::VehicleHurtbox,
+                ))
+                .id();
+            commands.entity(entity).with_children(|car| {
+                car.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(traffic_canopy.clone()),
+                        material: MeshMaterial3d(pal.glass_panel.clone()),
+                        transform: Transform::from_xyz(0.0, 0.82, -0.25),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+                for z in [-3.46_f32, 3.46] {
+                    car.spawn((
+                        PbrBundle {
+                            mesh: Mesh3d(traffic_light.clone()),
+                            material: MeshMaterial3d(if z < 0.0 {
+                                pal.city_aqua.clone()
+                            } else {
+                                pal.city_coral.clone()
+                            }),
+                            transform: Transform::from_xyz(0.0, -0.12, z),
+                            ..default()
+                        },
+                        WorldGeometry,
+                    ));
+                }
+            });
+        }
+    }
+
+    // Parked hovercars make curb lanes feel inhabited without adding simulation.
+    for parked_index in 0..12u64 {
+        let horizontal = parked_index.is_multiple_of(2);
+        let road = (parked_index as i32 % 5) - 2;
+        let along = ((parked_index as i32 * 29) % 330) as f32 - 165.0;
+        let position = if horizontal {
+            Vec3::new(along, 0.82, road as f32 * 48.0 + 4.8)
+        } else {
+            Vec3::new(road as f32 * 48.0 - 4.8, 0.82, along)
+        };
+        commands.spawn((
+            Name::new("Parked City Hovercar"),
+            PbrBundle {
+                mesh: Mesh3d(traffic_body.clone()),
+                material: MeshMaterial3d(city_accent_material(pal, seed + parked_index * 5)),
+                transform: Transform::from_translation(position).with_rotation(if horizontal {
+                    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)
+                } else {
+                    Quat::IDENTITY
+                }),
+                ..default()
+            },
+            CityParkedVehicle,
+            WorldGeometry,
+        ));
+    }
+
+    let pedestrian_body = meshes.add(Capsule3d::new(0.38, 1.05));
+    let pedestrian_head = meshes.add(Sphere::new(0.38));
+    let pedestrian_blocks = [
+        (-3, -2),
+        (-3, 0),
+        (-2, -3),
+        (-2, 1),
+        (-1, 2),
+        (0, -3),
+        (0, 1),
+        (1, -2),
+        (1, 0),
+        (2, -1),
+        (2, 1),
+        (2, 2),
+    ];
+    for (block_index, (block_x, block_z)) in pedestrian_blocks.into_iter().enumerate() {
+        let path = city_sidewalk_loop(block_x, block_z, 1.12);
+        for walker_index in 0..2usize {
+            let phase = seeded(seed + block_index as u64, walker_index as u64) * 5.0;
+            let pedestrian = CityPedestrian {
+                path: path.clone(),
+                segment: (block_index + walker_index * 2) % path.len(),
+                progress: seeded(seed + 31, (block_index * 2 + walker_index) as u64) * 12.0,
+                speed: 1.7 + seeded(seed + 47, block_index as u64) * 0.8,
+                pause_timer: phase.fract() * 0.5,
+                phase,
+            };
+            let (position, yaw) = city_pedestrian_pose(&pedestrian).unwrap_or((path[0], 0.0));
+            let body_material =
+                city_accent_material(pal, seed + (block_index * 2 + walker_index) as u64);
+            let entity = commands
+                .spawn((
+                    Name::new("Friendly City Resident"),
+                    PbrBundle {
+                        mesh: Mesh3d(pedestrian_body.clone()),
+                        material: MeshMaterial3d(body_material),
+                        transform: Transform::from_translation(position)
+                            .with_rotation(Quat::from_rotation_y(yaw)),
+                        ..default()
+                    },
+                    pedestrian,
+                    WorldGeometry,
+                ))
+                .id();
+            commands.entity(entity).with_children(|resident| {
+                resident.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(pedestrian_head.clone()),
+                        material: MeshMaterial3d(pal.interior_wall.clone()),
+                        transform: Transform::from_xyz(0.0, 1.06, 0.0),
+                        ..default()
+                    },
+                    WorldGeometry,
+                ));
+            });
+        }
+    }
+}
+
 fn spawn_street_segment(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -16230,6 +16634,109 @@ fn city_access_plan(
     }
 }
 
+fn building_interior_kind(zone: WorldZone, seed: u64) -> BuildingInteriorKind {
+    match zone {
+        WorldZone::Downtown => {
+            if seed.is_multiple_of(3) {
+                BuildingInteriorKind::Market
+            } else {
+                BuildingInteriorKind::Lobby
+            }
+        }
+        WorldZone::Industrial => BuildingInteriorKind::Laboratory,
+        WorldZone::Residential => {
+            if seed.is_multiple_of(5) {
+                BuildingInteriorKind::Market
+            } else {
+                BuildingInteriorKind::Home
+            }
+        }
+        WorldZone::OuterDistrict => match seed % 3 {
+            0 => BuildingInteriorKind::Home,
+            1 => BuildingInteriorKind::Market,
+            _ => BuildingInteriorKind::Laboratory,
+        },
+        _ => BuildingInteriorKind::Lobby,
+    }
+}
+
+fn building_roof_hatch_size(depth: f32, opening_width: f32) -> Vec2 {
+    Vec2::new((opening_width - 0.35).max(2.7), 3.2_f32.min(depth - 2.0))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BuildingRewardPlan {
+    location: BuildingRewardLocation,
+    local_position: Vec3,
+    credits: u32,
+    experience: u32,
+    armor: u32,
+}
+
+fn building_reward_plan(
+    zone: WorldZone,
+    seed: u64,
+    width: f32,
+    height: f32,
+    depth: f32,
+    floor_count: usize,
+    story_height: f32,
+) -> BuildingRewardPlan {
+    let location = if seed.is_multiple_of(2) {
+        BuildingRewardLocation::Rooftop
+    } else {
+        BuildingRewardLocation::Interior
+    };
+    let zone_bonus = match zone {
+        WorldZone::Downtown => 18,
+        WorldZone::Industrial => 14,
+        WorldZone::OuterDistrict => 12,
+        _ => 8,
+    };
+    let local_position = match location {
+        BuildingRewardLocation::Rooftop => Vec3::new(
+            (seeded(seed, 251) - 0.5) * width * 0.35,
+            height + 1.1,
+            (seeded(seed, 252) - 0.5) * depth * 0.35,
+        ),
+        BuildingRewardLocation::Interior => {
+            let upper_floors = floor_count.saturating_sub(1).max(1);
+            let floor = 1 + (seed % upper_floors as u64) as usize;
+            Vec3::new(
+                (-width * 0.23).clamp(-5.5, -3.0),
+                floor.min(floor_count - 1) as f32 * story_height + 1.0,
+                (depth * 0.19).clamp(1.8, 4.2),
+            )
+        }
+    };
+    BuildingRewardPlan {
+        location,
+        local_position,
+        credits: 32 + zone_bonus + (seed % 17) as u32,
+        experience: 24 + zone_bonus + (seed % 13) as u32,
+        armor: 4 + (seed % 7) as u32,
+    }
+}
+
+fn building_reward_key(zone: WorldZone, base: Vec3) -> String {
+    let zone_id = match zone {
+        WorldZone::Downtown => "downtown",
+        WorldZone::Industrial => "industrial",
+        WorldZone::Residential => "residential",
+        WorldZone::OuterDistrict => "outer",
+        WorldZone::Highway => "highway",
+        WorldZone::Mountain => "mountain",
+        WorldZone::SkyPlatform => "sky",
+        WorldZone::Spaceport => "spaceport",
+        WorldZone::Ground => "ground",
+    };
+    format!(
+        "building_explore:{zone_id}:{}:{}",
+        (base.x * 10.0).round() as i64,
+        (base.z * 10.0).round() as i64
+    )
+}
+
 fn building_footprint_clears_speed_roads(x: f32, z: f32, width: f32, depth: f32) -> bool {
     let road_dist = distance_to_speed_road_network(x, z, road_network_seed());
     let half_diag = Vec2::new(width, depth).length() * 0.5;
@@ -16266,6 +16773,7 @@ fn spawn_enterable_building(
     let front_segment = ((width - door_width) * 0.5).max(1.0);
     let (floor_count, story_height) = enterable_floor_layout(height);
     let access = city_access_plan(width, height, floor_count, story_height);
+    let interior_kind = building_interior_kind(zone, seed);
 
     commands.spawn((
         Transform::from_translation(base).with_rotation(rotation),
@@ -16275,6 +16783,7 @@ fn spawn_enterable_building(
         EnterableBuilding {
             accessible_floors: floor_count as u8,
         },
+        interior_kind,
         Name::new(format!("Explorable {:?} Building", zone)),
     ));
 
@@ -16469,6 +16978,20 @@ fn spawn_enterable_building(
                 WorldGeometry,
             ));
         }
+        if floor == 0 || (floor as u64 + seed).is_multiple_of(3) {
+            spawn_building_interior_dressing(
+                commands,
+                meshes,
+                pal,
+                base,
+                rotation,
+                width,
+                depth,
+                y,
+                interior_kind,
+                seed + floor as u64 * 19,
+            );
+        }
 
         if floor.is_multiple_of(2) {
             commands.spawn((
@@ -16559,15 +17082,18 @@ fn spawn_enterable_building(
         }
     }
 
-    spawn_enterable_piece(
+    spawn_enterable_roof_with_hatch(
         commands,
         meshes,
         exterior.clone(),
+        pal,
         base,
         rotation,
-        Vec3::new(0.0, height, 0.0),
-        Vec3::new(width + 0.7, 0.46, depth + 0.7),
-        true,
+        width,
+        height,
+        depth,
+        opening_x,
+        opening_width,
     );
 
     // Exterior frame bands break up large cuboid silhouettes and visibly use
@@ -16632,8 +17158,379 @@ fn spawn_enterable_building(
     spawn_enterable_city_access(
         commands, meshes, pal, base, rotation, width, height, depth, access, seed,
     );
+    spawn_building_lift(
+        commands, meshes, pal, base, rotation, width, height, depth, seed,
+    );
+    spawn_building_exploration_reward(
+        commands,
+        meshes,
+        pal,
+        base,
+        rotation,
+        width,
+        height,
+        depth,
+        floor_count,
+        story_height,
+        zone,
+        seed,
+    );
 
     true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_building_interior_dressing(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    rotation: Quat,
+    width: f32,
+    depth: f32,
+    floor_y: f32,
+    kind: BuildingInteriorKind,
+    seed: u64,
+) {
+    let accent = city_accent_material(pal, seed);
+    let x = (-width * 0.27).clamp(-6.0, -3.2);
+    let z = (depth * 0.17).clamp(1.6, 4.2);
+    let mut spawn_prop =
+        |local: Vec3, size: Vec3, material: Handle<StandardMaterial>, name: &'static str| {
+            commands.spawn((
+                Name::new(name),
+                PbrBundle {
+                    mesh: Mesh3d(meshes.add(Cuboid::from_size(size))),
+                    material: MeshMaterial3d(material),
+                    transform: Transform::from_translation(base + rotation * local)
+                        .with_rotation(rotation),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+        };
+
+    match kind {
+        BuildingInteriorKind::Lobby => {
+            spawn_prop(
+                Vec3::new(x, floor_y + 0.68, z),
+                Vec3::new(3.4, 1.05, 1.15),
+                accent.clone(),
+                "Lobby Welcome Desk",
+            );
+            spawn_prop(
+                Vec3::new(x - 2.7, floor_y + 0.34, z + 1.8),
+                Vec3::new(1.5, 0.42, 2.8),
+                pal.city_mint.clone(),
+                "Lobby Lounge Seat",
+            );
+        }
+        BuildingInteriorKind::Market => {
+            for side in [-1.0_f32, 1.0] {
+                spawn_prop(
+                    Vec3::new(x + side * 2.0, floor_y + 0.72, z),
+                    Vec3::new(2.4, 1.15, 1.45),
+                    if side < 0.0 {
+                        pal.city_sun.clone()
+                    } else {
+                        pal.city_coral.clone()
+                    },
+                    "Market Display Stall",
+                );
+            }
+        }
+        BuildingInteriorKind::Home => {
+            spawn_prop(
+                Vec3::new(x, floor_y + 0.43, z),
+                Vec3::new(3.0, 0.52, 1.75),
+                pal.interior_trim.clone(),
+                "Apartment Daybed",
+            );
+            spawn_prop(
+                Vec3::new(x - 2.25, floor_y + 0.45, z - 1.4),
+                Vec3::new(1.15, 0.62, 1.15),
+                accent.clone(),
+                "Apartment Side Table",
+            );
+        }
+        BuildingInteriorKind::Laboratory => {
+            spawn_prop(
+                Vec3::new(x, floor_y + 0.74, z),
+                Vec3::new(3.2, 1.22, 1.0),
+                pal.city_aqua.clone(),
+                "Laboratory Console",
+            );
+            for side in [-1.0_f32, 1.0] {
+                spawn_prop(
+                    Vec3::new(x + side * 2.15, floor_y + 0.72, z + 1.55),
+                    Vec3::new(0.72, 1.12, 0.72),
+                    if side < 0.0 {
+                        pal.city_lilac.clone()
+                    } else {
+                        pal.city_mint.clone()
+                    },
+                    "Laboratory Sample Pod",
+                );
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_enterable_roof_with_hatch(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    exterior: Handle<StandardMaterial>,
+    pal: &Palette,
+    base: Vec3,
+    rotation: Quat,
+    width: f32,
+    height: f32,
+    depth: f32,
+    hatch_x: f32,
+    opening_width: f32,
+) {
+    let hatch_size = building_roof_hatch_size(depth, opening_width);
+    let hatch_width = hatch_size.x;
+    let hatch_depth = hatch_size.y;
+    let hatch_left = hatch_x - hatch_width * 0.5;
+    let hatch_right = hatch_x + hatch_width * 0.5;
+    let left_width = hatch_left + width * 0.5;
+    let right_width = width * 0.5 - hatch_right;
+    let end_depth = (depth - hatch_depth) * 0.5;
+    for (x, z, size) in [
+        (
+            -width * 0.5 + left_width * 0.5,
+            0.0,
+            Vec3::new(left_width, 0.46, depth),
+        ),
+        (
+            hatch_right + right_width * 0.5,
+            0.0,
+            Vec3::new(right_width, 0.46, depth),
+        ),
+        (
+            hatch_x,
+            -depth * 0.5 + end_depth * 0.5,
+            Vec3::new(hatch_width, 0.46, end_depth),
+        ),
+        (
+            hatch_x,
+            depth * 0.5 - end_depth * 0.5,
+            Vec3::new(hatch_width, 0.46, end_depth),
+        ),
+    ] {
+        if size.x > 0.2 && size.z > 0.2 {
+            spawn_enterable_piece(
+                commands,
+                meshes,
+                exterior.clone(),
+                base,
+                rotation,
+                Vec3::new(x, height, z),
+                size,
+                true,
+            );
+        }
+    }
+
+    for x in [hatch_x - hatch_width * 0.5, hatch_x + hatch_width * 0.5] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.18, 0.42, hatch_depth + 0.35))),
+                material: MeshMaterial3d(pal.city_sun.clone()),
+                transform: Transform::from_translation(
+                    base + rotation * Vec3::new(x, height + 0.34, 0.0),
+                )
+                .with_rotation(rotation),
+                ..default()
+            },
+            BuildingRoofHatch,
+            WorldGeometry,
+        ));
+    }
+    for z in [-hatch_depth * 0.5, hatch_depth * 0.5] {
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(hatch_width + 0.35, 0.42, 0.18))),
+                material: MeshMaterial3d(pal.city_aqua.clone()),
+                transform: Transform::from_translation(
+                    base + rotation * Vec3::new(hatch_x, height + 0.34, z),
+                )
+                .with_rotation(rotation),
+                ..default()
+            },
+            BuildingRoofHatch,
+            WorldGeometry,
+        ));
+    }
+    for rung in 0..5 {
+        let local = Vec3::new(
+            hatch_x,
+            height - 0.55 - rung as f32 * 0.72,
+            hatch_depth * 0.5 - 0.16,
+        );
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(hatch_width * 0.72, 0.11, 0.16))),
+                material: MeshMaterial3d(pal.city_coral.clone()),
+                transform: Transform::from_translation(base + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            BuildingRoofHatch,
+            WorldGeometry,
+        ));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_building_lift(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    rotation: Quat,
+    width: f32,
+    height: f32,
+    depth: f32,
+    seed: u64,
+) {
+    let local_x = -width * 0.5 - 2.15;
+    let local_z = (seeded(seed, 211) - 0.5) * depth * 0.28;
+    let platform_size = Vec3::new(3.2, 0.38, 3.4);
+    let start = base + rotation * Vec3::new(local_x, 0.48, local_z);
+    let end = base + rotation * Vec3::new(local_x, height + 0.48, local_z);
+    commands.spawn((
+        Name::new("Exterior Building Lift"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::from_size(platform_size))),
+            material: MeshMaterial3d(city_accent_material(pal, seed + 5)),
+            transform: Transform::from_translation(start).with_rotation(rotation),
+            ..default()
+        },
+        BuildingLift,
+        MovingPlatform {
+            start,
+            end,
+            speed: 4.4,
+            phase: seeded(seed, 223) * TAU,
+            size: platform_size,
+        },
+        WorldGeometry,
+        WalkableSurface,
+        crate::physics::prelude::RigidBody::KinematicPositionBased,
+        crate::physics::prelude::Collider::cuboid(
+            platform_size.x * 0.5,
+            platform_size.y * 0.5,
+            platform_size.z * 0.5,
+        ),
+    ));
+
+    for z_side in [-1.0_f32, 1.0] {
+        let local = Vec3::new(local_x, height * 0.5, local_z + z_side * 1.52);
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.16, height + 0.8, 0.16))),
+                material: MeshMaterial3d(pal.city_lilac.clone()),
+                transform: Transform::from_translation(base + rotation * local)
+                    .with_rotation(rotation),
+                ..default()
+            },
+            BuildingLift,
+            WorldGeometry,
+        ));
+    }
+    for landing_y in [0.12, height + 0.16] {
+        spawn_enterable_piece(
+            commands,
+            meshes,
+            pal.city_aqua.clone(),
+            base,
+            rotation,
+            Vec3::new(-width * 0.5 - 0.78, landing_y, local_z),
+            Vec3::new(2.7, 0.32, 3.4),
+            true,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_building_exploration_reward(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    base: Vec3,
+    rotation: Quat,
+    width: f32,
+    height: f32,
+    depth: f32,
+    floor_count: usize,
+    story_height: f32,
+    zone: WorldZone,
+    seed: u64,
+) {
+    let plan = building_reward_plan(zone, seed, width, height, depth, floor_count, story_height);
+    let reward_key = building_reward_key(zone, base);
+    let reward_position = base + rotation * plan.local_position;
+    let material = match plan.location {
+        BuildingRewardLocation::Interior => pal.city_mint.clone(),
+        BuildingRewardLocation::Rooftop => pal.city_sun.clone(),
+    };
+    let reward_entity = commands
+        .spawn((
+            Name::new(match plan.location {
+                BuildingRewardLocation::Interior => "Interior Exploration Cache",
+                BuildingRewardLocation::Rooftop => "Rooftop Star Cache",
+            }),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Sphere::new(0.72))),
+                material: MeshMaterial3d(material.clone()),
+                transform: Transform::from_translation(reward_position),
+                ..default()
+            },
+            BuildingExplorationReward {
+                reward_key: reward_key.clone(),
+                location: plan.location,
+                credits: plan.credits,
+                experience: plan.experience,
+                armor: plan.armor,
+                pickup_radius: 2.4,
+                base_y: reward_position.y,
+                bob_phase: seeded(seed, 271) * TAU,
+            },
+            WorldGeometry,
+        ))
+        .id();
+    let ring_mesh = meshes.add(Torus::new(0.82, 1.06));
+    commands.entity(reward_entity).with_children(|reward| {
+        reward.spawn((
+            PbrBundle {
+                mesh: Mesh3d(ring_mesh),
+                material: MeshMaterial3d(material.clone()),
+                transform: Transform::from_rotation(Quat::from_rotation_x(
+                    std::f32::consts::FRAC_PI_2,
+                )),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    });
+
+    // A slim route beacon above the ground entrance tells street-level players
+    // whether this explorable building still contains a cache.
+    let beacon_position = base + rotation * Vec3::new(0.0, 5.2, -depth * 0.5 - 0.5);
+    commands.spawn((
+        Name::new("Building Exploration Beacon"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Capsule3d::new(0.18, 1.4))),
+            material: MeshMaterial3d(material),
+            transform: Transform::from_translation(beacon_position),
+            ..default()
+        },
+        BuildingRewardBeacon { reward_key },
+        WorldGeometry,
+    ));
 }
 
 fn city_accent_material(pal: &Palette, seed: u64) -> Handle<StandardMaterial> {
@@ -19668,6 +20565,76 @@ mod tests {
     }
 
     #[test]
+    fn city_street_loops_follow_the_avenue_grid_and_scale_by_ring() {
+        for ring in 1..=4 {
+            let path = city_street_loop(ring, 0.92);
+            assert_eq!(path.len(), ring as usize * 8);
+            for pair in path
+                .iter()
+                .copied()
+                .zip(path.iter().copied().cycle().skip(1))
+                .take(path.len())
+            {
+                let delta = pair.1 - pair.0;
+                assert!(delta.x.abs() < 0.001 || delta.z.abs() < 0.001);
+                assert!((delta.length() - 48.0).abs() < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn city_traffic_signals_stop_once_then_release_each_segment() {
+        let mut vehicle = NpcRoadVehicle {
+            path: vec![Vec3::ZERO, Vec3::Z * 48.0],
+            segment: 0,
+            progress: 47.0,
+            speed: 14.0,
+            lane_offset: 0.0,
+            hit_radius: 2.0,
+            wreck_timer: 4.0,
+        };
+        let mut traffic = CityStreetTraffic {
+            cruise_speed: 14.0,
+            stop_timer: 0.0,
+            last_stopped_segment: usize::MAX,
+            signal_phase: 0,
+        };
+
+        update_city_traffic_signal(&mut vehicle, &mut traffic, 0.0);
+        assert_eq!(vehicle.speed, 0.0);
+        assert!(traffic.stop_timer > 0.0);
+        update_city_traffic_signal(&mut vehicle, &mut traffic, 2.0);
+        update_city_traffic_signal(&mut vehicle, &mut traffic, 0.0);
+        assert_eq!(vehicle.speed, traffic.cruise_speed);
+    }
+
+    #[test]
+    fn pedestrian_routes_wrap_without_leaving_the_sidewalk_loop() {
+        let path = city_sidewalk_loop(-2, 1, 1.12);
+        let mut pedestrian = CityPedestrian {
+            path: path.clone(),
+            segment: 3,
+            progress: path[3].distance(path[0]) - 0.1,
+            speed: 2.0,
+            pause_timer: 0.0,
+            phase: 0.0,
+        };
+
+        advance_city_pedestrian(&mut pedestrian, 0.2);
+        assert_eq!(pedestrian.segment, 0);
+        let (position, _) = city_pedestrian_pose(&pedestrian).expect("closed sidewalk pose");
+        let min_x = path
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::INFINITY, f32::min);
+        let max_x = path
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!((min_x..=max_x).contains(&position.x));
+    }
+
+    #[test]
     fn road_vehicle_paths_return_along_authored_routes() {
         let path = road_vehicle_route_path(ROUTE_CORE_AURORA, 42);
         assert!(path.len() > ROUTE_CORE_AURORA.len() * 2);
@@ -19880,6 +20847,87 @@ mod tests {
         assert!((6.5..=11.0).contains(&house.balcony_width));
         assert!((7.5..=13.0).contains(&house.stair_run));
         assert!(tower.ladder_rungs > house.ladder_rungs);
+    }
+
+    #[test]
+    fn building_interior_kinds_match_district_identity() {
+        assert_eq!(
+            building_interior_kind(WorldZone::Industrial, 11),
+            BuildingInteriorKind::Laboratory
+        );
+        assert_eq!(
+            building_interior_kind(WorldZone::Residential, 11),
+            BuildingInteriorKind::Home
+        );
+        assert_eq!(
+            building_interior_kind(WorldZone::Downtown, 12),
+            BuildingInteriorKind::Market
+        );
+        let outer_kinds = (0..3)
+            .map(|seed| building_interior_kind(WorldZone::OuterDistrict, seed))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            outer_kinds,
+            vec![
+                BuildingInteriorKind::Home,
+                BuildingInteriorKind::Market,
+                BuildingInteriorKind::Laboratory,
+            ]
+        );
+    }
+
+    #[test]
+    fn roof_hatches_stay_inside_qualifying_building_roofs() {
+        for (depth, opening_width) in [(11.5, 3.2), (18.0, 4.1), (30.0, 4.6)] {
+            let hatch = building_roof_hatch_size(depth, opening_width);
+            assert!(hatch.x >= 2.7 && hatch.x < opening_width);
+            assert!(hatch.y > 0.0 && hatch.y <= 3.2);
+            assert!(hatch.y < depth - 1.0);
+        }
+    }
+
+    #[test]
+    fn building_rewards_alternate_between_interiors_and_rooftops() {
+        let rooftop = building_reward_plan(WorldZone::Downtown, 12, 20.0, 48.0, 18.0, 8, 5.6);
+        let interior = building_reward_plan(WorldZone::Residential, 13, 16.0, 22.0, 14.0, 4, 5.3);
+
+        assert_eq!(rooftop.location, BuildingRewardLocation::Rooftop);
+        assert!(rooftop.local_position.y > 48.0);
+        assert_eq!(interior.location, BuildingRewardLocation::Interior);
+        assert!(interior.local_position.y > 5.3 && interior.local_position.y < 22.0);
+        assert!(rooftop.credits > interior.credits);
+        assert!((4..=10).contains(&interior.armor));
+    }
+
+    #[test]
+    fn building_reward_keys_are_stable_and_location_unique() {
+        let base = Vec3::new(12.25, 0.0, -83.75);
+        let first = building_reward_key(WorldZone::Downtown, base);
+        assert_eq!(first, building_reward_key(WorldZone::Downtown, base));
+        assert_ne!(
+            first,
+            building_reward_key(WorldZone::Downtown, base + Vec3::X)
+        );
+        assert_ne!(first, building_reward_key(WorldZone::Industrial, base));
+    }
+
+    #[test]
+    fn building_rewards_grant_stats_without_exceeding_caps() {
+        let mut stats = PlayerStats {
+            credits: u32::MAX - 2,
+            experience: 10,
+            armor: 98.0,
+            ..default()
+        };
+        let mut health = Health::new(100.0);
+        health.apply_damage(8.0);
+
+        apply_building_reward(&mut stats, &mut health, 20, 30, 9);
+
+        assert_eq!(stats.credits, u32::MAX);
+        assert_eq!(stats.experience, 40);
+        assert_eq!(stats.armor, stats.max_armor);
+        assert!(health.current > 92.0 && health.current <= health.max);
     }
 
     #[test]

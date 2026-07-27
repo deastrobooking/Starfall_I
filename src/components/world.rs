@@ -19,6 +19,42 @@ pub struct EnterableBuilding {
     pub accessible_floors: u8,
 }
 
+/// Deterministic room-dressing family used by an explorable city building.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildingInteriorKind {
+    Lobby,
+    Market,
+    Home,
+    Laboratory,
+}
+
+/// Marks an exterior lift serving an explorable building.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BuildingLift;
+
+/// Marks the real opening and readable trim of a building roof hatch.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BuildingRoofHatch;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildingRewardLocation {
+    Interior,
+    Rooftop,
+}
+
+/// One-time, save-backed reward for following an authored building route.
+#[derive(Component, Debug, Clone)]
+pub struct BuildingExplorationReward {
+    pub reward_key: String,
+    pub location: BuildingRewardLocation,
+    pub credits: u32,
+    pub experience: u32,
+    pub armor: u32,
+    pub pickup_radius: f32,
+    pub base_y: f32,
+    pub bob_phase: f32,
+}
+
 /// Identifies the readable traversal pieces attached to city buildings.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CityAccessKind {
@@ -216,6 +252,30 @@ pub struct NpcRoadVehicle {
     pub hit_radius: f32,
     pub wreck_timer: f32,
 }
+
+/// Optional local-traffic behavior layered over the shared road-path follower.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CityStreetTraffic {
+    pub cruise_speed: f32,
+    pub stop_timer: f32,
+    pub last_stopped_segment: usize,
+    pub signal_phase: usize,
+}
+
+/// A friendly city resident following a closed sidewalk route.
+#[derive(Component, Debug, Clone)]
+pub struct CityPedestrian {
+    pub path: Vec<Vec3>,
+    pub segment: usize,
+    pub progress: f32,
+    pub speed: f32,
+    pub pause_timer: f32,
+    pub phase: f32,
+}
+
+/// Decorative parked city vehicle excluded from combat and traffic simulation.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CityParkedVehicle;
 
 /// Defensive world turret that tracks players and fires a hitscan-style beam.
 #[derive(Component, Debug, Clone)]
