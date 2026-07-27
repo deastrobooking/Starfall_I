@@ -12,6 +12,36 @@ pub enum EnemyType {
     Hybrid,
 }
 
+/// Readable visual/combat castes used by the humanoid dragon factions.
+///
+/// These deliberately map onto the existing enemy statlines so authored
+/// encounters and save data remain compatible while the faction gets its own
+/// silhouettes.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DragonCaste {
+    LizardLegionary,
+    RaptorRunner,
+    HumanoidDragon,
+}
+
+impl DragonCaste {
+    pub fn for_enemy(enemy_type: EnemyType) -> Self {
+        match enemy_type {
+            EnemyType::Soldier | EnemyType::Drone | EnemyType::SpyDrone => Self::LizardLegionary,
+            EnemyType::SpikeAlien => Self::RaptorRunner,
+            EnemyType::Heavy | EnemyType::Hybrid => Self::HumanoidDragon,
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::LizardLegionary => "Lizard Legionary",
+            Self::RaptorRunner => "Raptor Runner",
+            Self::HumanoidDragon => "Humanoid Dragon",
+        }
+    }
+}
+
 impl EnemyType {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -481,5 +511,26 @@ mod tests {
         assert_eq!(boss_phase(0.0, 100.0), 3);
         // Degenerate max never divides by zero.
         assert_eq!(boss_phase(0.0, 0.0), 3);
+    }
+
+    #[test]
+    fn dragon_faction_castes_cover_each_existing_enemy_statline() {
+        for enemy_type in [EnemyType::Soldier, EnemyType::Drone, EnemyType::SpyDrone] {
+            assert_eq!(
+                DragonCaste::for_enemy(enemy_type),
+                DragonCaste::LizardLegionary
+            );
+        }
+        assert_eq!(
+            DragonCaste::for_enemy(EnemyType::SpikeAlien),
+            DragonCaste::RaptorRunner
+        );
+        for enemy_type in [EnemyType::Heavy, EnemyType::Hybrid] {
+            assert_eq!(
+                DragonCaste::for_enemy(enemy_type),
+                DragonCaste::HumanoidDragon
+            );
+        }
+        assert_eq!(DragonCaste::RaptorRunner.display_name(), "Raptor Runner");
     }
 }

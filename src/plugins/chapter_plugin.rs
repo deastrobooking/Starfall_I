@@ -6,9 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::chapters::{
-    chapter_map_location, get_chapter, secret_cave_location, ChapterId, EncounterStep,
-};
+use crate::chapters::{chapter_map_location, get_chapter, ChapterId, EncounterStep};
 use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
@@ -21,6 +19,7 @@ use crate::components::world::{
 };
 use crate::events::*;
 use crate::game_rng::GameRng;
+use crate::missions::dungeon_destination;
 use crate::physics::prelude::{Collider, RigidBody};
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
 use crate::rendering::PbrBundle;
@@ -135,27 +134,20 @@ fn apply_pending_chapter_travel(
         let Some(anchor) = resolve_anchor_position(&anchor_q, anchor_id) else {
             return;
         };
-        let cave = if pending_travel.enter_dungeon {
-            let Some(chapter) = crate::chapters::SECRET_CAVE_LOCATIONS
-                .iter()
-                .find(|cave| cave.anchor_id == anchor_id)
-                .map(|cave| cave.chapter)
-            else {
+        let dungeon_target = if pending_travel.enter_dungeon {
+            let Some((chapter, default_label)) = dungeon_destination(anchor_id) else {
                 return;
             };
-            let Some(cave) = secret_cave_location(chapter) else {
-                return;
-            };
-            Some(cave)
+            Some((chapter, default_label))
         } else {
             None
         };
         move_players_to_world_anchor(&mut commands, &mut player_q, anchor);
-        if let Some(cave) = cave {
+        if let Some((chapter, default_label)) = dungeon_target {
             dungeon.activate(
-                cave.anchor_id,
-                cave.chapter,
-                pending_travel.world_label.unwrap_or(cave.label),
+                anchor_id,
+                chapter,
+                pending_travel.world_label.unwrap_or(default_label),
                 anchor,
                 anchor,
                 64.0,

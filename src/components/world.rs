@@ -17,6 +17,22 @@ pub struct Building {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct EnterableBuilding {
     pub accessible_floors: u8,
+    pub footprint: Vec2,
+}
+
+/// Traversal connection generated between two explorable city rooftops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CityRooftopRouteKind {
+    Skybridge,
+    Zipline,
+}
+
+/// Marks the primary geometry for a generated rooftop traversal connection.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CityRooftopRoute {
+    pub kind: CityRooftopRouteKind,
+    pub start: Vec3,
+    pub end: Vec3,
 }
 
 /// Deterministic room-dressing family used by an explorable city building.
@@ -391,6 +407,12 @@ pub struct DungeonCrawlGate {
     pub opened: bool,
 }
 
+impl DungeonCrawlGate {
+    pub fn contains_interaction(&self, position: Vec3) -> bool {
+        position.distance(self.entry) <= self.interact_radius
+    }
+}
+
 /// Marks the monumental exterior structure surrounding a mountain-cave gate.
 /// Fast travel is optional; this world-space entrance remains the canonical
 /// way to discover and enter its linked dungeon.
@@ -592,6 +614,22 @@ pub struct WorldSiteEnemySentinel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dungeon_gate_interaction_boundary_is_shared_by_gate_and_npc_arbitration() {
+        let gate = DungeonCrawlGate {
+            gate_id: "test_gate",
+            chapter: 1,
+            label: "Test Gate",
+            entry: Vec3::new(10.0, 2.0, -4.0),
+            focus: Vec3::ZERO,
+            radius: 40.0,
+            interact_radius: 6.0,
+            opened: false,
+        };
+        assert!(gate.contains_interaction(gate.entry + Vec3::X * 6.0));
+        assert!(!gate.contains_interaction(gate.entry + Vec3::X * 6.01));
+    }
 
     #[test]
     fn rectangular_water_footprint_rejects_points_past_its_edges() {

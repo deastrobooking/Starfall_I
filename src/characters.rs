@@ -10,7 +10,7 @@ use crate::components::character::{
     default_joint_for_part, CartoonAnimator, CartoonCharacter, CartoonPart, CartoonPartKind,
     CartoonRole, CharacterIkPose, HandEngine, JointKind, JointMarker, SkeletonRig,
 };
-use crate::components::enemy::EnemyType;
+use crate::components::enemy::{DragonCaste, EnemyType};
 use crate::components::faction::Faction;
 use crate::rendering::PbrBundle;
 
@@ -496,7 +496,7 @@ pub fn enemy_config(
         _ => 1.0,
     };
 
-    CartoonCharacterConfig {
+    let mut config = CartoonCharacterConfig {
         name,
         role,
         skin,
@@ -525,7 +525,73 @@ pub fn enemy_config(
         has_mouth: false,
         eye_color,
         emissive_eyes,
+    };
+
+    if matches!(faction, Faction::DragonRoyalty | Faction::DragonExile) {
+        match DragonCaste::for_enemy(enemy_type) {
+            DragonCaste::LizardLegionary => {
+                config.body = BodyRecipe {
+                    height: 0.94,
+                    shoulder_width: 1.08,
+                    chest_size: 0.94,
+                    leg_length: 1.08,
+                    head_size: 0.94,
+                    foot_size: 1.12,
+                    spine_posture: 0.10,
+                    ..BodyRecipe::default()
+                };
+                config.body_width = 0.96;
+                config.has_horns = false;
+                config.extra_horns = false;
+                config.has_spine_ridges = false;
+                config.has_shoulder_pads = true;
+            }
+            DragonCaste::RaptorRunner => {
+                config.body = BodyRecipe {
+                    height: 0.96,
+                    shoulder_width: 0.82,
+                    chest_size: 0.82,
+                    arm_length: 0.86,
+                    leg_length: 1.30,
+                    hand_size: 0.88,
+                    foot_size: 1.28,
+                    head_size: 0.90,
+                    hip_width: 0.82,
+                    spine_posture: 0.24,
+                    ..BodyRecipe::default()
+                };
+                config.body_width = 0.82;
+                config.has_horns = false;
+                config.extra_horns = false;
+                config.has_spine_ridges = true;
+                config.has_shoulder_pads = false;
+            }
+            DragonCaste::HumanoidDragon => {
+                config.body = BodyRecipe {
+                    height: 1.12,
+                    shoulder_width: 1.24,
+                    chest_size: 1.20,
+                    arm_length: 1.12,
+                    leg_length: 1.08,
+                    hand_size: 1.18,
+                    foot_size: 1.14,
+                    head_size: 1.08,
+                    neck_length: 1.12,
+                    muscle: 1.30,
+                    ..BodyRecipe::default()
+                };
+                config.body_width = type_width * 1.08;
+                config.has_horns = true;
+                config.extra_horns = enemy_type == EnemyType::Hybrid;
+                config.has_spine_ridges = true;
+                config.has_shoulder_pads = true;
+            }
+        }
+        config.has_tail = true;
+        config.has_mouth = true;
     }
+
+    config
 }
 
 // ── Spawning ──────────────────────────────────────────────────────────────────
@@ -1830,6 +1896,242 @@ pub fn hero_config_with_overrides(
     cfg
 }
 
+/// Adds faction-specific reptilian anatomy and retro-future regalia to the
+/// shared cartoon humanoid rig. Parts use the normal character part bindings,
+/// so heads, feet, and tails continue to follow the existing animation system.
+pub fn decorate_reptilian_character(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    caste: DragonCaste,
+    faction: Faction,
+    scale: f32,
+) {
+    let royal = faction == Faction::DragonRoyalty;
+    let scale_color = if royal {
+        Color::srgb(0.82, 0.18, 0.08)
+    } else {
+        Color::srgb(0.28, 0.42, 0.78)
+    };
+    let armor_color = if royal {
+        Color::srgb(1.0, 0.76, 0.16)
+    } else {
+        Color::srgb(0.72, 0.90, 1.0)
+    };
+    let glow_color = if royal {
+        Color::srgb(1.0, 0.20, 0.62)
+    } else {
+        Color::srgb(0.12, 0.92, 1.0)
+    };
+    let scales = char_mat(materials, scale_color);
+    let armor = char_mat(materials, armor_color);
+    let shadow = char_mat(materials, darken(scale_color, 0.48));
+    let glow = emissive_mat(materials, glow_color, 4.8);
+    let s = scale;
+
+    // Every caste gets a recognizable reptile muzzle and contrasting jaw.
+    let (muzzle_width, muzzle_length, muzzle_y) = match caste {
+        DragonCaste::LizardLegionary => (0.25, 0.30, 0.48),
+        DragonCaste::RaptorRunner => (0.22, 0.42, 0.49),
+        DragonCaste::HumanoidDragon => (0.31, 0.36, 0.50),
+    };
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Nose,
+        Mesh::from(Sphere::new(0.5)),
+        scales.clone(),
+        Transform::from_xyz(0.0, muzzle_y * s, -0.43 * s).with_scale(Vec3::new(
+            muzzle_width * s,
+            0.13 * s,
+            muzzle_length * s,
+        )),
+    );
+    spawn_part(
+        commands,
+        meshes,
+        root,
+        CartoonPartKind::Mouth,
+        Mesh::from(Sphere::new(0.5)),
+        shadow.clone(),
+        Transform::from_xyz(0.0, (muzzle_y - 0.10) * s, -0.44 * s).with_scale(Vec3::new(
+            muzzle_width * 0.92 * s,
+            0.075 * s,
+            muzzle_length * 0.92 * s,
+        )),
+    );
+    for x in [-0.11_f32, 0.11] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Nose,
+            Mesh::from(Sphere::new(0.018 * s)),
+            glow.clone(),
+            Transform::from_xyz(x * s, (muzzle_y + 0.035) * s, -0.60 * s),
+        );
+    }
+
+    match caste {
+        DragonCaste::LizardLegionary => {
+            // Broad cheek scales and a glowing bubble-helmet collar evoke a
+            // friendly 1970s space-opera uniform without hiding the anime face.
+            for side in [-1.0_f32, 1.0] {
+                spawn_part(
+                    commands,
+                    meshes,
+                    root,
+                    CartoonPartKind::Head,
+                    Mesh::from(Sphere::new(0.5)),
+                    armor.clone(),
+                    Transform::from_xyz(side * 0.30 * s, 0.50 * s, -0.08 * s)
+                        .with_scale(Vec3::new(0.10 * s, 0.20 * s, 0.22 * s)),
+                );
+                spawn_part(
+                    commands,
+                    meshes,
+                    root,
+                    if side < 0.0 {
+                        CartoonPartKind::ShoulderPadLeft
+                    } else {
+                        CartoonPartKind::ShoulderPadRight
+                    },
+                    Mesh::from(Cone {
+                        radius: 0.13 * s,
+                        height: 0.34 * s,
+                    }),
+                    armor.clone(),
+                    Transform::from_xyz(side * 0.43 * s, 0.22 * s, 0.02 * s)
+                        .with_rotation(Quat::from_rotation_z(-side * 1.15)),
+                );
+            }
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                CartoonPartKind::Belt,
+                Mesh::from(Torus::new(0.26 * s, 0.31 * s)),
+                glow.clone(),
+                Transform::from_xyz(0.0, 0.34 * s, 0.0)
+                    .with_rotation(Quat::from_rotation_x(PI / 2.0)),
+            );
+        }
+        DragonCaste::RaptorRunner => {
+            // Swept-back crest, extended counterbalance tail, and exaggerated
+            // sickle talons make the fast minion readable at gameplay distance.
+            for (i, x) in [-0.14_f32, 0.0, 0.14].into_iter().enumerate() {
+                spawn_part(
+                    commands,
+                    meshes,
+                    root,
+                    CartoonPartKind::SpineRidge,
+                    Mesh::from(Cone {
+                        radius: (0.075 - i as f32 * 0.008) * s,
+                        height: (0.38 - i as f32 * 0.04) * s,
+                    }),
+                    if i == 1 { glow.clone() } else { armor.clone() },
+                    Transform::from_xyz(x * s, 0.83 * s, 0.04 * s)
+                        .with_rotation(Quat::from_rotation_x(0.95)),
+                );
+            }
+            for (z, width) in [(0.82_f32, 0.14_f32), (1.16, 0.095), (1.44, 0.045)] {
+                spawn_part(
+                    commands,
+                    meshes,
+                    root,
+                    CartoonPartKind::Tail,
+                    Mesh::from(Capsule3d::new(width * s, 0.32 * s)),
+                    scales.clone(),
+                    Transform::from_xyz(0.0, -0.44 * s + z * 0.10 * s, z * s)
+                        .with_rotation(Quat::from_rotation_x(PI / 2.0)),
+                );
+            }
+            for (kind, x) in [
+                (CartoonPartKind::LeftFoot, -0.16_f32),
+                (CartoonPartKind::RightFoot, 0.16_f32),
+            ] {
+                for toe in [-0.055_f32, 0.055] {
+                    spawn_part(
+                        commands,
+                        meshes,
+                        root,
+                        kind,
+                        Mesh::from(Cone {
+                            radius: 0.035 * s,
+                            height: 0.25 * s,
+                        }),
+                        armor.clone(),
+                        Transform::from_xyz((x + toe) * s, -1.28 * s, -0.30 * s)
+                            .with_rotation(Quat::from_rotation_x(-PI / 2.0)),
+                    );
+                }
+            }
+        }
+        DragonCaste::HumanoidDragon => {
+            // Crown fins, wing-like pauldrons, and a radiant chest medallion
+            // give bosses the high-fantasy Moebius-space-royalty silhouette.
+            for (i, x) in [-0.24_f32, 0.0, 0.24].into_iter().enumerate() {
+                spawn_part(
+                    commands,
+                    meshes,
+                    root,
+                    CartoonPartKind::SpineRidge,
+                    Mesh::from(Cone {
+                        radius: 0.11 * s,
+                        height: (0.44 + (i == 1) as u8 as f32 * 0.18) * s,
+                    }),
+                    armor.clone(),
+                    Transform::from_xyz(x * s, 0.92 * s, 0.02 * s)
+                        .with_rotation(Quat::from_rotation_z(-x * 1.8)),
+                );
+            }
+            for side in [-1.0_f32, 1.0] {
+                for tier in 0..3 {
+                    spawn_part(
+                        commands,
+                        meshes,
+                        root,
+                        if side < 0.0 {
+                            CartoonPartKind::ShoulderPadLeft
+                        } else {
+                            CartoonPartKind::ShoulderPadRight
+                        },
+                        Mesh::from(Cone {
+                            radius: (0.17 - tier as f32 * 0.025) * s,
+                            height: (0.55 - tier as f32 * 0.08) * s,
+                        }),
+                        if tier == 1 {
+                            glow.clone()
+                        } else {
+                            armor.clone()
+                        },
+                        Transform::from_xyz(
+                            side * (0.48 + tier as f32 * 0.10) * s,
+                            (0.25 - tier as f32 * 0.05) * s,
+                            (0.04 + tier as f32 * 0.05) * s,
+                        )
+                        .with_rotation(
+                            Quat::from_rotation_z(-side * 1.18) * Quat::from_rotation_x(0.20),
+                        ),
+                    );
+                }
+            }
+            spawn_part(
+                commands,
+                meshes,
+                root,
+                CartoonPartKind::StarBadge,
+                Mesh::from(Cylinder::new(0.16 * s, 0.045 * s)),
+                glow,
+                Transform::from_xyz(0.0, 0.08 * s, -0.36 * s)
+                    .with_rotation(Quat::from_rotation_x(PI / 2.0)),
+            );
+        }
+    }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn spawn_part(
@@ -1999,4 +2301,51 @@ pub fn emissive_mat(
 fn darken(color: Color, factor: f32) -> Color {
     let lin = color.to_linear();
     Color::linear_rgb(lin.red * factor, lin.green * factor, lin.blue * factor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dragon_castes_receive_distinct_humanoid_proportions() {
+        let lizard = enemy_config(
+            EnemyType::Soldier,
+            Some(Faction::DragonRoyalty),
+            "Lizard",
+            1.0,
+        );
+        let raptor = enemy_config(
+            EnemyType::SpikeAlien,
+            Some(Faction::DragonRoyalty),
+            "Raptor",
+            1.0,
+        );
+        let dragon = enemy_config(
+            EnemyType::Hybrid,
+            Some(Faction::DragonRoyalty),
+            "Dragon",
+            1.0,
+        );
+
+        assert!(lizard.has_tail && lizard.has_shoulder_pads);
+        assert!(!lizard.has_horns);
+        assert!(raptor.body.leg_length > lizard.body.leg_length);
+        assert!(raptor.body_width < lizard.body_width);
+        assert!(dragon.has_horns && dragon.extra_horns);
+        assert!(dragon.body.shoulder_width > lizard.body.shoulder_width);
+        assert!(dragon.body_width > lizard.body_width);
+    }
+
+    #[test]
+    fn non_dragon_enemy_visuals_keep_their_existing_recipe() {
+        let alien = enemy_config(
+            EnemyType::SpikeAlien,
+            Some(Faction::DimensionalAlien),
+            "Alien",
+            1.0,
+        );
+        assert_eq!(alien.body, BodyRecipe::default());
+        assert_eq!(alien.role, CartoonRole::Alien);
+    }
 }

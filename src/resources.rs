@@ -939,6 +939,12 @@ impl ChapterProgress {
         }
         self.is_completed(ChapterId(id.0 - 1))
     }
+    /// Exploration-first travel policy: every authored chapter destination is
+    /// visible and usable from a new save, while story completion remains
+    /// independently tracked by [`Self::is_unlocked`].
+    pub fn is_fast_travel_unlocked(&self, id: ChapterId) -> bool {
+        (ChapterId::FIRST.0..=ChapterId::LAST.0).contains(&id.0)
+    }
     pub fn mark_completed(&mut self, id: ChapterId) {
         if !self.completed.contains(&id.0) {
             self.completed.push(id.0);
@@ -1952,5 +1958,16 @@ mod tests {
         assert!(destination.anchor_id.is_none());
         assert!(destination.label.is_none());
         assert!(!destination.enter_dungeon);
+    }
+
+    #[test]
+    fn every_authored_chapter_fast_travel_point_is_open_on_a_new_save() {
+        let progress = ChapterProgress::default();
+        for chapter in ChapterId::FIRST.0..=ChapterId::LAST.0 {
+            assert!(progress.is_fast_travel_unlocked(ChapterId(chapter)));
+        }
+        assert!(!progress.is_fast_travel_unlocked(ChapterId(0)));
+        assert!(!progress.is_fast_travel_unlocked(ChapterId(15)));
+        assert!(!progress.is_unlocked(ChapterId::LAST));
     }
 }

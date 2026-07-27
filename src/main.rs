@@ -35,6 +35,7 @@ mod hitstop;
 mod input_buffer;
 mod lsystem;
 mod mesh_modifiers;
+mod missions;
 mod modular_character;
 mod perks;
 mod physics;
@@ -271,6 +272,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         CompanionPlugin,
         ArmorPlugin,
         CraftingPlugin,
+        missions::MissionPlugin,
         SavePlugin,
     ))
     .add_plugins((

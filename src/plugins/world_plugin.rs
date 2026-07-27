@@ -32,9 +32,10 @@ use crate::components::enemy::{
 };
 use crate::components::faction::Faction;
 use crate::components::player::{
-    BoardBoostState, ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement,
-    PlayerProgression, PlayerStateMachine, PlayerStats, StuntRaceProgress, StuntRunState,
-    TraversalMode, TraversalModeState, WaterTraversalState,
+    BoardBoostState, GrappleSocket, GrappleTargetKind, ParryState, Player, PlayerIndex,
+    PlayerInput, PlayerMovement, PlayerProgression, PlayerStateMachine, PlayerStats,
+    RooftopTrialProgress, StuntRaceProgress, StuntRunState, TraversalMode, TraversalModeState,
+    WaterTraversalState,
 };
 use crate::components::world::*;
 use crate::damage::{DamageInfo, DamageType, Damageable, Health};
@@ -67,8 +68,8 @@ use crate::resources::{
 use crate::robot_pets::RobotPetCollection;
 use crate::settlement_economy::{settlement_build_def, SettlementBuildKind, SettlementEconomy};
 use crate::sfx::ModularActionSfxEvent;
-use crate::tricks::{ActiveTrick, TrickCategory, TrickDir, TrickLibrary, TrickState};
 use crate::state::AppState;
+use crate::tricks::{ActiveTrick, TrickCategory, TrickDir, TrickLibrary, TrickState};
 
 mod roads;
 use roads::*;
@@ -88,6 +89,22 @@ struct ColliderDebugVisual;
 struct WaterWakeAssets {
     mesh: Handle<Mesh>,
     material: Handle<StandardMaterial>,
+}
+
+#[derive(Resource, Clone)]
+struct CityRooftopRouteAssets {
+    bridge: Handle<StandardMaterial>,
+    guard: Handle<StandardMaterial>,
+    zipline: Handle<StandardMaterial>,
+    playground: Handle<StandardMaterial>,
+    greenery: Handle<StandardMaterial>,
+    bridge_marker: Handle<Mesh>,
+    zipline_marker: Handle<Mesh>,
+    planter_mesh: Handle<Mesh>,
+    flower_mesh: Handle<Mesh>,
+    spring_mesh: Handle<Mesh>,
+    spring_arrow_mesh: Handle<Mesh>,
+    trial_gate_mesh: Handle<Mesh>,
 }
 
 #[derive(Component)]
@@ -134,6 +151,38 @@ struct WaterfallSplashZone {
 #[derive(Component)]
 struct BuildingRewardBeacon {
     reward_key: String,
+}
+
+#[derive(Component, Debug, Clone)]
+struct CityRooftopRouteChallenge {
+    reward_key: String,
+    approach: [i8; 4],
+    credits: u32,
+    experience: u32,
+    armor: u32,
+}
+
+#[derive(Component, Debug, Clone)]
+struct CityRooftopRouteMarker {
+    reward_key: String,
+    kind: CityRooftopRouteKind,
+    base_scale: Vec3,
+    phase: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct CitySkyPlayground;
+
+#[derive(Component, Debug, Clone)]
+struct CityRooftopTrialGate {
+    course_key: String,
+    course_label: String,
+    checkpoint_index: u8,
+    checkpoint_count: u8,
+    radius: f32,
+    gold_time: f32,
+    silver_time: f32,
+    bronze_time: f32,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -279,7 +328,12 @@ impl Plugin for WorldPlugin {
             .add_plugins(MaterialPlugin::<TerrainMaterial>::default())
             .add_systems(
                 OnEnter(AppState::Playing),
-                (generate_city, build_building_cluster_lods).chain(),
+                (
+                    generate_city,
+                    build_city_rooftop_routes,
+                    build_building_cluster_lods,
+                )
+                    .chain(),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
             .add_systems(
@@ -310,7 +364,13 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
-                (building_reward_bob_system, building_reward_pickup_system)
+                (
+                    building_reward_bob_system,
+                    building_reward_pickup_system,
+                    city_rooftop_route_marker_system,
+                    city_rooftop_route_challenge_system,
+                    city_rooftop_time_trial_system,
+                )
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -758,6 +818,7 @@ fn discussion_interaction_system(
     mut discussion: ResMut<DiscussionState>,
     player_q: Query<(&PlayerIndex, &Transform, &PlayerInput), With<Player>>,
     npc_q: Query<(&Transform, &DiscussionNpc)>,
+    gate_q: Query<&DungeonCrawlGate>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     if discussion.active {
@@ -766,6 +827,15 @@ fn discussion_interaction_system(
 
     for (player_index, player_transform, input) in player_q.iter() {
         if !input.interact {
+            continue;
+        }
+        // Dungeon entrances own the shared interact button inside their
+        // authored radius. This prevents one press from opening a gate and
+        // starting nearby NPC dialogue on the same frame.
+        if gate_q
+            .iter()
+            .any(|gate| gate.contains_interaction(player_transform.translation))
+        {
             continue;
         }
 
@@ -818,12 +888,12 @@ fn dungeon_crawl_gate_system(
     let mut opened_gates = Vec::new();
 
     for mut gate in gate_q.iter_mut() {
-        let party_near_gate = player_q.iter().any(|(transform, _)| {
-            transform.translation.distance(gate.entry) <= gate.interact_radius
-        });
+        let party_near_gate = player_q
+            .iter()
+            .any(|(transform, _)| gate.contains_interaction(transform.translation));
         let should_open = party_near_gate
             && player_q.iter().any(|(transform, input)| {
-                input.interact && transform.translation.distance(gate.entry) <= gate.interact_radius
+                input.interact && gate.contains_interaction(transform.translation)
             });
 
         if should_open {
@@ -1057,6 +1127,16 @@ fn dungeon_enemy_spawner_system(
     if !dungeon.active {
         return;
     }
+    let dungeon_faction = dungeon.gate_id.and_then(|gate_id| {
+        if !gate_id.starts_with("dragon_dungeon_") {
+            return None;
+        }
+        Some(if dungeon.chapter.is_some_and(|chapter| chapter.0 >= 10) {
+            Faction::DragonExile
+        } else {
+            Faction::DragonRoyalty
+        })
+    });
     for (spawner_xf, mut spawner, creature_override) in spawner_q.iter_mut() {
         if spawner.spawned {
             continue;
@@ -1096,7 +1176,7 @@ fn dungeon_enemy_spawner_system(
                     spawner.enemy_type,
                     spawner_xf.translation + offset,
                     spawner.difficulty,
-                    None,
+                    dungeon_faction,
                 ),
             };
             if let Some((gate_id, room_index)) = spawner.encounter {
@@ -2078,11 +2158,7 @@ fn requested_trick_category(input: &PlayerInput) -> Option<TrickCategory> {
 
 /// Can this category start given the rider's current situation?
 /// Air tricks need airtime, grinds need a rail, manuals need ground.
-fn trick_category_available(
-    category: TrickCategory,
-    is_grounded: bool,
-    is_grinding: bool,
-) -> bool {
+fn trick_category_available(category: TrickCategory, is_grounded: bool, is_grinding: bool) -> bool {
     match category {
         TrickCategory::Grab | TrickCategory::Flip | TrickCategory::Special => {
             !is_grounded && !is_grinding
@@ -2095,7 +2171,8 @@ fn trick_category_available(
 
 /// Score a landed trick: base × spin bonus ÷ repeat decay.
 fn landed_trick_score(base_score: f32, spin_degrees: f32, times_already_used: u32) -> f32 {
-    base_score * TrickLibrary::spin_bonus(spin_degrees) / TrickLibrary::repeat_divisor(times_already_used)
+    base_score * TrickLibrary::spin_bonus(spin_degrees)
+        / TrickLibrary::repeat_divisor(times_already_used)
 }
 
 /// Hoverboard trick execution: turn button+direction into a named trick,
@@ -2150,7 +2227,8 @@ fn hoverboard_trick_system(
                 let score = landed_trick_score(active.base_score, run.spin_degrees, times_used);
                 run.active = true;
                 run.pending_score += score;
-                run.multiplier = (run.multiplier + active.multiplier_bonus).min(library.max_multiplier);
+                run.multiplier =
+                    (run.multiplier + active.multiplier_bonus).min(library.max_multiplier);
                 run.trick_count = run.trick_count.saturating_add(1);
                 tricks.record_use(active.index);
                 tricks.last_trick = Some(active.name.clone());
@@ -2186,7 +2264,8 @@ fn hoverboard_trick_system(
                     text: format!("P{}  BAIL — combo lost", index.0 + 1),
                     duration: 1.6,
                 });
-            } else if !air_trick && !trick_category_available(active.category, grounded, is_grinding)
+            } else if !air_trick
+                && !trick_category_available(active.category, grounded, is_grinding)
             {
                 // Surface trick ended because its surface did (left the rail
                 // or the ground): score it, no bail.
@@ -2690,6 +2769,280 @@ fn building_reward_pickup_system(
     }
 }
 
+fn city_rooftop_route_marker_system(
+    time: Res<Time>,
+    mut markers: Query<(&mut Transform, &CityRooftopRouteMarker)>,
+) {
+    let elapsed = time.elapsed_secs();
+    for (mut transform, marker) in &mut markers {
+        let pulse = 1.0 + (elapsed * 2.8 + marker.phase).sin() * 0.08;
+        transform.scale = marker.base_scale * pulse;
+        match marker.kind {
+            CityRooftopRouteKind::Skybridge => {
+                transform.rotate_local_y(time.delta_secs() * 0.65);
+            }
+            CityRooftopRouteKind::Zipline => {
+                transform.rotate_local_z(time.delta_secs() * 0.9);
+            }
+        }
+    }
+}
+
+fn rooftop_route_endpoint_crossed(approach: &mut i8, near_start: bool, near_end: bool) -> bool {
+    match *approach {
+        0 if near_end => {
+            *approach = -1;
+            true
+        }
+        1 if near_start => {
+            *approach = -1;
+            true
+        }
+        -1 if near_start && !near_end => {
+            *approach = 0;
+            false
+        }
+        -1 if near_end && !near_start => {
+            *approach = 1;
+            false
+        }
+        _ => false,
+    }
+}
+
+fn city_rooftop_route_challenge_system(
+    mut commands: Commands,
+    mut progress: ResMut<ChapterProgress>,
+    mut routes: Query<(&CityRooftopRoute, &mut CityRooftopRouteChallenge)>,
+    markers: Query<(Entity, &CityRooftopRouteMarker)>,
+    mut players: Query<(&PlayerIndex, &Transform, &mut PlayerStats, &mut Health), With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    for (route, mut challenge) in &mut routes {
+        if progress.has_discoverable(&challenge.reward_key) {
+            for (entity, marker) in &markers {
+                if marker.reward_key == challenge.reward_key {
+                    commands.entity(entity).despawn();
+                }
+            }
+            continue;
+        }
+
+        let mut completed_by = None;
+        for (player_index, transform, mut stats, mut health) in &mut players {
+            let slot = player_index.0 as usize;
+            let Some(approach) = challenge.approach.get_mut(slot) else {
+                continue;
+            };
+            let position = transform.translation;
+            let near_start = position.distance(route.start) <= 3.4;
+            let near_end = position.distance(route.end) <= 3.4;
+            if !rooftop_route_endpoint_crossed(approach, near_start, near_end) {
+                continue;
+            }
+            apply_building_reward(
+                &mut stats,
+                &mut health,
+                challenge.credits,
+                challenge.experience,
+                challenge.armor,
+            );
+            completed_by = Some(player_index.0);
+            break;
+        }
+
+        let Some(player_index) = completed_by else {
+            continue;
+        };
+        progress.unlock(&challenge.reward_key);
+        for (entity, marker) in &markers {
+            if marker.reward_key == challenge.reward_key {
+                commands.entity(entity).despawn();
+            }
+        }
+        let route_name = match route.kind {
+            CityRooftopRouteKind::Skybridge => "skybridge",
+            CityRooftopRouteKind::Zipline => "zipline",
+        };
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "P{} completed a rooftop {}: +{} credits, +{} XP, +{} armor",
+                player_index + 1,
+                route_name,
+                challenge.credits,
+                challenge.experience,
+                challenge.armor
+            ),
+            duration: 4.0,
+        });
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CityRooftopTrialMedal {
+    Gold,
+    Silver,
+    Bronze,
+    Finish,
+}
+
+impl CityRooftopTrialMedal {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Gold => "GOLD",
+            Self::Silver => "SILVER",
+            Self::Bronze => "BRONZE",
+            Self::Finish => "FINISH",
+        }
+    }
+}
+
+fn city_rooftop_trial_medal(
+    elapsed: f32,
+    gold_time: f32,
+    silver_time: f32,
+    bronze_time: f32,
+) -> CityRooftopTrialMedal {
+    if elapsed <= gold_time {
+        CityRooftopTrialMedal::Gold
+    } else if elapsed <= silver_time {
+        CityRooftopTrialMedal::Silver
+    } else if elapsed <= bronze_time {
+        CityRooftopTrialMedal::Bronze
+    } else {
+        CityRooftopTrialMedal::Finish
+    }
+}
+
+fn unlock_city_rooftop_trial_medal(
+    progress: &mut ChapterProgress,
+    course_key: &str,
+    medal: CityRooftopTrialMedal,
+) {
+    let tiers: &[&str] = match medal {
+        CityRooftopTrialMedal::Gold => &["bronze", "silver", "gold"],
+        CityRooftopTrialMedal::Silver => &["bronze", "silver"],
+        CityRooftopTrialMedal::Bronze => &["bronze"],
+        CityRooftopTrialMedal::Finish => &[],
+    };
+    for tier in tiers {
+        progress.unlock(&format!("{course_key}:medal:{tier}"));
+    }
+}
+
+fn city_rooftop_time_trial_system(
+    time: Res<Time>,
+    mut chapter_progress: ResMut<ChapterProgress>,
+    gates: Query<(&Transform, &CityRooftopTrialGate), Without<Player>>,
+    mut players: Query<
+        (
+            &Transform,
+            &PlayerIndex,
+            &mut RooftopTrialProgress,
+            &mut PlayerStats,
+            &mut Health,
+        ),
+        With<Player>,
+    >,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let dt = time.delta_secs();
+    for (transform, player_index, mut trial, mut stats, mut health) in &mut players {
+        trial.gate_cooldown = (trial.gate_cooldown - dt).max(0.0);
+        if trial.active_course.is_some() {
+            trial.elapsed += dt;
+        }
+        if trial.gate_cooldown > 0.0 {
+            continue;
+        }
+
+        let gate = gates
+            .iter()
+            .find(|(gate_transform, gate)| {
+                let expected_course = trial
+                    .active_course
+                    .as_ref()
+                    .is_some_and(|course| course == &gate.course_key);
+                let can_start = trial.active_course.is_none() && gate.checkpoint_index == 0;
+                (expected_course || can_start)
+                    && gate.checkpoint_index == trial.next_checkpoint
+                    && transform.translation.distance(gate_transform.translation) <= gate.radius
+            })
+            .map(|(_, gate)| gate);
+        let Some(gate) = gate else {
+            continue;
+        };
+
+        trial.gate_cooldown = 0.48;
+        if trial.active_course.is_none() {
+            trial.active_course = Some(gate.course_key.clone());
+            trial.active_label = Some(gate.course_label.clone());
+            trial.next_checkpoint = 1;
+            trial.checkpoint_count = gate.checkpoint_count;
+            trial.elapsed = 0.0;
+            msg_ev.write(UiMessageEvent {
+                text: format!(
+                    "P{} {} — GO! Gold {:.1}s  Silver {:.1}s  Bronze {:.1}s",
+                    player_index.0 + 1,
+                    gate.course_label,
+                    gate.gold_time,
+                    gate.silver_time,
+                    gate.bronze_time
+                ),
+                duration: 3.4,
+            });
+            continue;
+        }
+
+        if gate.checkpoint_index + 1 < gate.checkpoint_count {
+            trial.next_checkpoint += 1;
+            msg_ev.write(UiMessageEvent {
+                text: format!(
+                    "P{} {} — checkpoint {}/{}  {:.1}s",
+                    player_index.0 + 1,
+                    gate.course_label,
+                    gate.checkpoint_index + 1,
+                    gate.checkpoint_count - 1,
+                    trial.elapsed
+                ),
+                duration: 1.35,
+            });
+            continue;
+        }
+
+        let elapsed = trial.elapsed;
+        let course_key = gate.course_key.clone();
+        let medal =
+            city_rooftop_trial_medal(elapsed, gate.gold_time, gate.silver_time, gate.bronze_time);
+        let new_best = trial.record_time(&course_key, elapsed);
+        let completion_key = format!("{course_key}:complete");
+        let first_clear = !chapter_progress.has_discoverable(&completion_key);
+        chapter_progress.unlock(&completion_key);
+        unlock_city_rooftop_trial_medal(&mut chapter_progress, &course_key, medal);
+        if first_clear {
+            apply_building_reward(&mut stats, &mut health, 120, 90, 12);
+        }
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "P{} {} — {} {:.2}s{}{}",
+                player_index.0 + 1,
+                gate.course_label,
+                medal.label(),
+                elapsed,
+                if new_best { "  NEW BEST" } else { "" },
+                if first_clear {
+                    "  +120 credits +90 XP +12 armor"
+                } else {
+                    ""
+                }
+            ),
+            duration: 5.0,
+        });
+        trial.reset_active();
+        trial.gate_cooldown = 1.4;
+    }
+}
+
 fn advance_road_vehicle(vehicle: &mut NpcRoadVehicle, dt: f32) {
     let mut remaining = vehicle.speed.max(0.0) * dt;
     let len = vehicle.path.len();
@@ -2936,6 +3289,20 @@ fn generate_city(
     let m = &mut *mats;
 
     let pal = Palette::build(m, &asset_server);
+    commands.insert_resource(CityRooftopRouteAssets {
+        bridge: pal.city_aqua.clone(),
+        guard: pal.city_sun.clone(),
+        zipline: pal.city_coral.clone(),
+        playground: pal.city_lilac.clone(),
+        greenery: pal.city_mint.clone(),
+        bridge_marker: meshes.add(Torus::new(0.86, 1.08)),
+        zipline_marker: meshes.add(Cuboid::new(1.5, 1.5, 0.18)),
+        planter_mesh: meshes.add(Cylinder::new(0.82, 0.62)),
+        flower_mesh: meshes.add(Sphere::new(0.34)),
+        spring_mesh: meshes.add(Cylinder::new(1.65, 0.58)),
+        spring_arrow_mesh: meshes.add(Cuboid::new(0.52, 0.16, 2.35)),
+        trial_gate_mesh: meshes.add(Torus::new(1.62, 2.0)),
+    });
     let terrain_material = terrain_mats.add(TerrainMaterial {
         settings: TerrainMaterialUniform::default(),
         grass_texture: Some(repeating_texture(&asset_server, "Materials/grass (1).png")),
@@ -4211,6 +4578,721 @@ fn building_material_is_clusterable(material: Option<&StandardMaterial>) -> bool
     material.is_some_and(|material| matches!(material.alpha_mode, AlphaMode::Opaque))
 }
 
+const CITY_ROOFTOP_ROUTE_LIMIT: usize = 28;
+const CITY_ROOFTOP_MAX_DEGREE: usize = 2;
+const CITY_SKY_PLAYGROUND_LIMIT: usize = 8;
+const CITY_ROOFTOP_TRIAL_LIMIT: usize = 4;
+const CITY_ROOFTOP_TRIAL_MAX_CHECKPOINTS: usize = 8;
+
+#[derive(Debug, Clone, Copy)]
+struct CityRoofAnchor {
+    center: Vec3,
+    footprint: Vec2,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CityRooftopRoutePlan {
+    start: Vec3,
+    end: Vec3,
+    kind: CityRooftopRouteKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CityRooftopRouteCandidate {
+    first: usize,
+    second: usize,
+    score: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CitySkyPlaygroundPlan {
+    center: Vec3,
+    radius: f32,
+    launch_position: Vec3,
+    launch_velocity: Vec3,
+    launch_target: Vec3,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CityRooftopTrialPlan {
+    course_key: String,
+    course_label: String,
+    checkpoints: Vec<Vec3>,
+    gold_time: f32,
+    silver_time: f32,
+    bronze_time: f32,
+}
+
+fn city_rooftop_route_plans(anchors: &[CityRoofAnchor]) -> Vec<CityRooftopRoutePlan> {
+    let mut candidates = Vec::new();
+    for first in 0..anchors.len() {
+        for second in (first + 1)..anchors.len() {
+            let delta = anchors[second].center - anchors[first].center;
+            let horizontal = Vec2::new(delta.x, delta.z).length();
+            let vertical = delta.y.abs();
+            if !(18.0..=115.0).contains(&horizontal) || vertical > 42.0 {
+                continue;
+            }
+            candidates.push(CityRooftopRouteCandidate {
+                first,
+                second,
+                score: horizontal + vertical * 1.8,
+            });
+        }
+    }
+    candidates.sort_by(|a, b| {
+        a.score
+            .total_cmp(&b.score)
+            .then(a.first.cmp(&b.first))
+            .then(a.second.cmp(&b.second))
+    });
+
+    let mut parent = (0..anchors.len()).collect::<Vec<_>>();
+    let mut degree = vec![0usize; anchors.len()];
+    let mut plans = Vec::new();
+    for candidate in candidates {
+        if plans.len() >= CITY_ROOFTOP_ROUTE_LIMIT
+            || degree[candidate.first] >= CITY_ROOFTOP_MAX_DEGREE
+            || degree[candidate.second] >= CITY_ROOFTOP_MAX_DEGREE
+        {
+            continue;
+        }
+        let first_root = rooftop_route_component_root(&mut parent, candidate.first);
+        let second_root = rooftop_route_component_root(&mut parent, candidate.second);
+        if first_root == second_root {
+            continue;
+        }
+        parent[second_root] = first_root;
+        degree[candidate.first] += 1;
+        degree[candidate.second] += 1;
+
+        let first = anchors[candidate.first];
+        let second = anchors[candidate.second];
+        let horizontal_delta = Vec2::new(
+            second.center.x - first.center.x,
+            second.center.z - first.center.z,
+        );
+        let direction = horizontal_delta.normalize_or_zero();
+        let max_inset = horizontal_delta.length() * 0.28;
+        let first_inset = (first.footprint.min_element() * 0.34).min(max_inset);
+        let second_inset = (second.footprint.min_element() * 0.34).min(max_inset);
+        let mut start =
+            first.center + Vec3::new(direction.x * first_inset, 0.0, direction.y * first_inset);
+        let mut end =
+            second.center - Vec3::new(direction.x * second_inset, 0.0, direction.y * second_inset);
+        let kind = if (start.y - end.y).abs() <= 7.5 {
+            start.y += 0.45;
+            end.y += 0.45;
+            CityRooftopRouteKind::Skybridge
+        } else {
+            start.y += 2.4;
+            end.y += 2.4;
+            if start.y < end.y {
+                std::mem::swap(&mut start, &mut end);
+            }
+            CityRooftopRouteKind::Zipline
+        };
+        plans.push(CityRooftopRoutePlan { start, end, kind });
+    }
+    plans
+}
+
+fn city_sky_playground_plans(
+    anchors: &[CityRoofAnchor],
+    routes: &[CityRooftopRoutePlan],
+) -> Vec<CitySkyPlaygroundPlan> {
+    let mut connections = vec![Vec::<Vec3>::new(); anchors.len()];
+    for route in routes {
+        let Some(first) = nearest_city_roof_anchor(anchors, route.start) else {
+            continue;
+        };
+        let Some(second) = nearest_city_roof_anchor(anchors, route.end) else {
+            continue;
+        };
+        if first == second {
+            continue;
+        }
+        connections[first].push(anchors[second].center);
+        connections[second].push(anchors[first].center);
+    }
+
+    anchors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, anchor)| {
+            if connections[index].len() < 2 {
+                return None;
+            }
+            let target = connections[index]
+                .iter()
+                .copied()
+                .filter(|target| {
+                    let horizontal =
+                        Vec2::new(target.x - anchor.center.x, target.z - anchor.center.z).length();
+                    target.y - anchor.center.y <= 14.0 && horizontal <= 82.0
+                })
+                .min_by(|a, b| {
+                    a.distance_squared(anchor.center)
+                        .total_cmp(&b.distance_squared(anchor.center))
+                })?;
+            let horizontal_delta =
+                Vec2::new(target.x - anchor.center.x, target.z - anchor.center.z);
+            let horizontal_distance = horizontal_delta.length();
+            let direction = horizontal_delta.normalize_or_zero();
+            let direction_3d = Vec3::new(direction.x, 0.0, direction.y);
+            let roof_radius = anchor.footprint.min_element() * 0.5;
+            let radius = (roof_radius * 0.5).clamp(3.8, 6.2);
+            let launch_position =
+                anchor.center + direction_3d * (roof_radius * 0.62) + Vec3::Y * 0.48;
+            let launch_speed = (horizontal_distance * 0.48).clamp(23.0, 42.0);
+            let launch_lift = (14.0 + (target.y - anchor.center.y).max(0.0) * 0.55).min(22.0);
+            Some(CitySkyPlaygroundPlan {
+                center: anchor.center,
+                radius,
+                launch_position,
+                launch_velocity: direction_3d * launch_speed + Vec3::Y * launch_lift,
+                launch_target: target,
+            })
+        })
+        .take(CITY_SKY_PLAYGROUND_LIMIT)
+        .collect()
+}
+
+fn nearest_city_roof_anchor(anchors: &[CityRoofAnchor], point: Vec3) -> Option<usize> {
+    anchors
+        .iter()
+        .enumerate()
+        .min_by(|(_, first), (_, second)| {
+            first
+                .center
+                .distance_squared(point)
+                .total_cmp(&second.center.distance_squared(point))
+        })
+        .map(|(index, _)| index)
+}
+
+fn city_rooftop_trial_plans(
+    anchors: &[CityRoofAnchor],
+    routes: &[CityRooftopRoutePlan],
+) -> Vec<CityRooftopTrialPlan> {
+    let mut adjacency = vec![Vec::<usize>::new(); anchors.len()];
+    for route in routes {
+        let Some(first) = nearest_city_roof_anchor(anchors, route.start) else {
+            continue;
+        };
+        let Some(second) = nearest_city_roof_anchor(anchors, route.end) else {
+            continue;
+        };
+        if first == second || adjacency[first].contains(&second) {
+            continue;
+        }
+        adjacency[first].push(second);
+        adjacency[second].push(first);
+    }
+    for connections in &mut adjacency {
+        connections.sort_unstable();
+    }
+
+    let mut visited = vec![false; anchors.len()];
+    let mut plans = Vec::new();
+    for start in 0..anchors.len() {
+        if visited[start] || adjacency[start].len() != 1 {
+            continue;
+        }
+        let mut chain = Vec::new();
+        let mut previous = None;
+        let mut current = start;
+        loop {
+            chain.push(current);
+            visited[current] = true;
+            let next = adjacency[current]
+                .iter()
+                .copied()
+                .find(|candidate| Some(*candidate) != previous && !visited[*candidate]);
+            let Some(next) = next else {
+                break;
+            };
+            previous = Some(current);
+            current = next;
+        }
+        if chain.len() < 4 {
+            continue;
+        }
+        chain.truncate(CITY_ROOFTOP_TRIAL_MAX_CHECKPOINTS);
+        let checkpoints = chain
+            .iter()
+            .map(|index| anchors[*index].center + Vec3::Y * 1.6)
+            .collect::<Vec<_>>();
+        let distance = checkpoints
+            .windows(2)
+            .map(|pair| pair[0].distance(pair[1]))
+            .sum::<f32>();
+        let gold_time = (distance / 18.0 + checkpoints.len() as f32 * 1.5).max(14.0);
+        let first = checkpoints[0];
+        let last = checkpoints[checkpoints.len() - 1];
+        let course_key = format!(
+            "city_rooftop_trial:{}:{}:{}:{}:{}:{}",
+            (first.x * 10.0).round() as i64,
+            (first.y * 10.0).round() as i64,
+            (first.z * 10.0).round() as i64,
+            (last.x * 10.0).round() as i64,
+            (last.y * 10.0).round() as i64,
+            (last.z * 10.0).round() as i64,
+        );
+        plans.push(CityRooftopTrialPlan {
+            course_key,
+            course_label: format!("Skyline Sprint {}", plans.len() + 1),
+            checkpoints,
+            gold_time,
+            silver_time: gold_time * 1.28,
+            bronze_time: gold_time * 1.62,
+        });
+        if plans.len() >= CITY_ROOFTOP_TRIAL_LIMIT {
+            break;
+        }
+    }
+    plans
+}
+
+fn rooftop_route_component_root(parent: &mut [usize], index: usize) -> usize {
+    if parent[index] != index {
+        parent[index] = rooftop_route_component_root(parent, parent[index]);
+    }
+    parent[index]
+}
+
+fn city_rooftop_route_reward_key(plan: CityRooftopRoutePlan) -> String {
+    fn quantized(point: Vec3) -> (i64, i64, i64) {
+        (
+            (point.x * 10.0).round() as i64,
+            (point.y * 10.0).round() as i64,
+            (point.z * 10.0).round() as i64,
+        )
+    }
+
+    let mut first = quantized(plan.start);
+    let mut second = quantized(plan.end);
+    if first > second {
+        std::mem::swap(&mut first, &mut second);
+    }
+    let kind = match plan.kind {
+        CityRooftopRouteKind::Skybridge => "bridge",
+        CityRooftopRouteKind::Zipline => "zipline",
+    };
+    format!(
+        "city_rooftop:{kind}:{}:{}:{}:{}:{}:{}",
+        first.0, first.1, first.2, second.0, second.1, second.2
+    )
+}
+
+fn build_city_rooftop_routes(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    assets: Res<CityRooftopRouteAssets>,
+    buildings: Query<(&Transform, &Building, &EnterableBuilding)>,
+    existing_routes: Query<(), With<CityRooftopRoute>>,
+) {
+    if !existing_routes.is_empty() {
+        return;
+    }
+
+    let mut anchors = buildings
+        .iter()
+        .map(|(transform, building, enterable)| CityRoofAnchor {
+            center: transform.translation + Vec3::Y * building.height,
+            footprint: enterable.footprint,
+        })
+        .collect::<Vec<_>>();
+    anchors.sort_by(|a, b| {
+        a.center
+            .x
+            .total_cmp(&b.center.x)
+            .then(a.center.z.total_cmp(&b.center.z))
+            .then(a.center.y.total_cmp(&b.center.y))
+    });
+
+    let route_plans = city_rooftop_route_plans(&anchors);
+    for plan in route_plans.iter().copied() {
+        let reward_key = city_rooftop_route_reward_key(plan);
+        match plan.kind {
+            CityRooftopRouteKind::Skybridge => {
+                spawn_city_rooftop_skybridge(&mut commands, &mut meshes, &assets, plan, &reward_key)
+            }
+            CityRooftopRouteKind::Zipline => {
+                spawn_city_rooftop_zipline(&mut commands, &mut meshes, &assets, plan, &reward_key)
+            }
+        }
+        spawn_city_rooftop_route_markers(&mut commands, &assets, plan, reward_key.as_str());
+    }
+    for playground in city_sky_playground_plans(&anchors, &route_plans) {
+        spawn_city_sky_playground(&mut commands, &mut meshes, &assets, playground);
+    }
+    for trial in city_rooftop_trial_plans(&anchors, &route_plans) {
+        spawn_city_rooftop_trial(&mut commands, &assets, trial);
+    }
+}
+
+fn spawn_city_rooftop_skybridge(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    assets: &CityRooftopRouteAssets,
+    plan: CityRooftopRoutePlan,
+    reward_key: &str,
+) {
+    let delta = plan.end - plan.start;
+    let length = delta.length();
+    if length < 6.0 {
+        return;
+    }
+    let center = plan.start.lerp(plan.end, 0.5);
+    let rotation = Quat::from_rotation_arc(Vec3::Z, delta / length);
+    let deck_size = Vec3::new(3.6, 0.34, length);
+    commands.spawn((
+        Name::new("Technicolor Rooftop Skybridge"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::from_size(deck_size))),
+            material: MeshMaterial3d(assets.bridge.clone()),
+            transform: Transform::from_translation(center).with_rotation(rotation),
+            ..default()
+        },
+        CityRooftopRoute {
+            kind: plan.kind,
+            start: plan.start,
+            end: plan.end,
+        },
+        CityRooftopRouteChallenge {
+            reward_key: reward_key.to_string(),
+            approach: [-1; 4],
+            credits: 38,
+            experience: 30,
+            armor: 5,
+        },
+        WorldGeometry,
+        WalkableSurface,
+        DebugColliderBox { size: deck_size },
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cuboid(
+            deck_size.x * 0.5,
+            deck_size.y * 0.5,
+            deck_size.z * 0.5,
+        ),
+    ));
+
+    let horizontal = Vec3::new(delta.x, 0.0, delta.z).normalize_or_zero();
+    let right = Vec3::new(horizontal.z, 0.0, -horizontal.x);
+    for side in [-1.0_f32, 1.0] {
+        commands.spawn((
+            Name::new("Skybridge Guardrail"),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.18, 0.9, length))),
+                material: MeshMaterial3d(assets.guard.clone()),
+                transform: Transform::from_translation(
+                    center + right * side * 1.68 + Vec3::Y * 0.58,
+                )
+                .with_rotation(rotation),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_city_rooftop_zipline(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    assets: &CityRooftopRouteAssets,
+    plan: CityRooftopRoutePlan,
+    reward_key: &str,
+) {
+    let delta = plan.end - plan.start;
+    let length = delta.length();
+    if length < 8.0 {
+        return;
+    }
+    commands.spawn((
+        Name::new("Technicolor Rooftop Zipline"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(0.3, length))),
+            material: MeshMaterial3d(assets.zipline.clone()),
+            transform: Transform::from_translation(plan.start.lerp(plan.end, 0.5))
+                .with_rotation(Quat::from_rotation_arc(Vec3::Y, delta / length)),
+            ..default()
+        },
+        CityRooftopRoute {
+            kind: plan.kind,
+            start: plan.start,
+            end: plan.end,
+        },
+        CityRooftopRouteChallenge {
+            reward_key: reward_key.to_string(),
+            approach: [-1; 4],
+            credits: 56,
+            experience: 44,
+            armor: 8,
+        },
+        StuntGrindRail {
+            start: plan.start,
+            end: plan.end,
+            speed: 52.0,
+            snap_radius: 3.0,
+            exit_lift: 9.0,
+        },
+        GrappleSocket::new(GrappleTargetKind::SwingPoint)
+            .with_radius(4.5)
+            .with_priority(1.3),
+        WorldGeometry,
+    ));
+
+    for endpoint in [plan.start, plan.end] {
+        let pad_size = Vec3::new(4.4, 0.3, 4.4);
+        commands.spawn((
+            Name::new("Zipline Rooftop Landing"),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::from_size(pad_size))),
+                material: MeshMaterial3d(assets.guard.clone()),
+                transform: Transform::from_translation(endpoint - Vec3::Y * 2.25),
+                ..default()
+            },
+            WorldGeometry,
+            WalkableSurface,
+            DebugColliderBox { size: pad_size },
+            crate::physics::prelude::RigidBody::Fixed,
+            crate::physics::prelude::Collider::cuboid(
+                pad_size.x * 0.5,
+                pad_size.y * 0.5,
+                pad_size.z * 0.5,
+            ),
+        ));
+    }
+}
+
+fn spawn_city_rooftop_route_markers(
+    commands: &mut Commands,
+    assets: &CityRooftopRouteAssets,
+    plan: CityRooftopRoutePlan,
+    reward_key: &str,
+) {
+    let horizontal =
+        Vec3::new(plan.end.x - plan.start.x, 0.0, plan.end.z - plan.start.z).normalize_or_zero();
+    for (endpoint_index, endpoint) in [plan.start, plan.end].into_iter().enumerate() {
+        let inward = if endpoint_index == 0 {
+            horizontal
+        } else {
+            -horizontal
+        };
+        let (mesh, material, position, rotation, name) = match plan.kind {
+            CityRooftopRouteKind::Skybridge => (
+                assets.bridge_marker.clone(),
+                assets.guard.clone(),
+                endpoint + Vec3::Y * 1.45,
+                Quat::from_rotation_arc(Vec3::Y, inward),
+                "Skybridge Route Beacon",
+            ),
+            CityRooftopRouteKind::Zipline => (
+                assets.zipline_marker.clone(),
+                assets.zipline.clone(),
+                endpoint,
+                Quat::from_rotation_arc(Vec3::Z, inward)
+                    * Quat::from_rotation_z(std::f32::consts::FRAC_PI_4),
+                "Zipline Route Beacon",
+            ),
+        };
+        let base_scale = Vec3::splat(1.0);
+        commands.spawn((
+            Name::new(name),
+            PbrBundle {
+                mesh: Mesh3d(mesh),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(position)
+                    .with_rotation(rotation)
+                    .with_scale(base_scale),
+                ..default()
+            },
+            CityRooftopRouteMarker {
+                reward_key: reward_key.to_string(),
+                kind: plan.kind,
+                base_scale,
+                phase: endpoint_index as f32 * std::f32::consts::PI,
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
+fn spawn_city_sky_playground(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    assets: &CityRooftopRouteAssets,
+    plan: CitySkyPlaygroundPlan,
+) {
+    let direction = plan.launch_velocity.with_y(0.0).normalize_or_zero();
+    let right = Vec3::new(direction.z, 0.0, -direction.x);
+    let plaza_size = Vec3::new(plan.radius * 2.0, 0.3, plan.radius * 2.0);
+    commands.spawn((
+        Name::new("Rooftop Sky Playground"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cylinder::new(plan.radius, plaza_size.y))),
+            material: MeshMaterial3d(assets.playground.clone()),
+            transform: Transform::from_translation(plan.center + Vec3::Y * (plaza_size.y * 0.5)),
+            ..default()
+        },
+        CitySkyPlayground,
+        WorldGeometry,
+        WalkableSurface,
+        DebugColliderBox { size: plaza_size },
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(plaza_size.y * 0.5, plan.radius),
+    ));
+    commands.spawn((
+        Name::new("Playground Safety Halo"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Torus::new(plan.radius - 0.22, plan.radius))),
+            material: MeshMaterial3d(assets.guard.clone()),
+            transform: Transform::from_translation(plan.center + Vec3::Y * 0.36),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    let shade_center = plan.center - direction * plan.radius * 0.34;
+    let shade_height = 2.8;
+    for side in [-1.0_f32, 1.0] {
+        let position = shade_center + right * side * plan.radius * 0.43;
+        commands.spawn((
+            Name::new("Playground Shade Post"),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(0.28, shade_height, 0.28))),
+                material: MeshMaterial3d(assets.guard.clone()),
+                transform: Transform::from_translation(position + Vec3::Y * (shade_height * 0.5)),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+    commands.spawn((
+        Name::new("Playground Shade Arch"),
+        PbrBundle {
+            mesh: Mesh3d(meshes.add(Cuboid::new(0.34, 0.34, plan.radius * 0.94))),
+            material: MeshMaterial3d(assets.guard.clone()),
+            transform: Transform::from_translation(shade_center + Vec3::Y * shade_height)
+                .with_rotation(Quat::from_rotation_arc(Vec3::Z, right)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+
+    for side in [-1.0_f32, 1.0] {
+        let planter_position =
+            plan.center + right * side * plan.radius * 0.62 - direction * plan.radius * 0.05;
+        commands.spawn((
+            Name::new("Sky Playground Planter"),
+            PbrBundle {
+                mesh: Mesh3d(assets.planter_mesh.clone()),
+                material: MeshMaterial3d(assets.bridge.clone()),
+                transform: Transform::from_translation(planter_position + Vec3::Y * 0.46),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+        commands.spawn((
+            Name::new("Sky Playground Flower"),
+            PbrBundle {
+                mesh: Mesh3d(assets.flower_mesh.clone()),
+                material: MeshMaterial3d(assets.greenery.clone()),
+                transform: Transform::from_translation(planter_position + Vec3::Y * 0.98),
+                ..default()
+            },
+            WorldGeometry,
+        ));
+    }
+
+    let spring_yaw = direction.x.atan2(direction.z);
+    commands.spawn((
+        Name::new("Sky Playground Spring"),
+        PbrBundle {
+            mesh: Mesh3d(assets.spring_mesh.clone()),
+            material: MeshMaterial3d(assets.zipline.clone()),
+            transform: Transform::from_translation(plan.launch_position)
+                .with_rotation(Quat::from_rotation_y(spring_yaw)),
+            ..default()
+        },
+        SpringJumpPad {
+            launch_velocity: plan.launch_velocity,
+            radius: 1.9,
+            cooldown: 0.22,
+            cooldown_timer: 0.0,
+            force_hoverboard: false,
+        },
+        GrappleSocket::new(GrappleTargetKind::ZipPoint)
+            .with_radius(3.0)
+            .with_priority(1.2),
+        WorldGeometry,
+        WalkableSurface,
+        crate::physics::prelude::RigidBody::Fixed,
+        crate::physics::prelude::Collider::cylinder(0.29, 1.65),
+    ));
+    commands.spawn((
+        Name::new("Sky Playground Launch Arrow"),
+        PbrBundle {
+            mesh: Mesh3d(assets.spring_arrow_mesh.clone()),
+            material: MeshMaterial3d(assets.guard.clone()),
+            transform: Transform::from_translation(plan.launch_position + Vec3::Y * 0.38)
+                .with_rotation(Quat::from_rotation_y(spring_yaw)),
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
+fn spawn_city_rooftop_trial(
+    commands: &mut Commands,
+    assets: &CityRooftopRouteAssets,
+    plan: CityRooftopTrialPlan,
+) {
+    let checkpoint_count = plan.checkpoints.len() as u8;
+    for (checkpoint_index, checkpoint) in plan.checkpoints.iter().copied().enumerate() {
+        let direction = if let Some(next) = plan.checkpoints.get(checkpoint_index + 1) {
+            (*next - checkpoint).with_y(0.0).normalize_or_zero()
+        } else {
+            (checkpoint - plan.checkpoints[checkpoint_index - 1])
+                .with_y(0.0)
+                .normalize_or_zero()
+        };
+        let material = if checkpoint_index == 0 {
+            assets.greenery.clone()
+        } else if checkpoint_index + 1 == plan.checkpoints.len() {
+            assets.guard.clone()
+        } else {
+            assets.bridge.clone()
+        };
+        commands.spawn((
+            Name::new(format!(
+                "{} Checkpoint {}",
+                plan.course_label,
+                checkpoint_index + 1
+            )),
+            PbrBundle {
+                mesh: Mesh3d(assets.trial_gate_mesh.clone()),
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(checkpoint)
+                    .with_rotation(Quat::from_rotation_arc(Vec3::Y, direction)),
+                ..default()
+            },
+            CityRooftopTrialGate {
+                course_key: plan.course_key.clone(),
+                course_label: plan.course_label.clone(),
+                checkpoint_index: checkpoint_index as u8,
+                checkpoint_count,
+                radius: 4.2,
+                gold_time: plan.gold_time,
+                silver_time: plan.silver_time,
+                bronze_time: plan.bronze_time,
+            },
+            WorldGeometry,
+        ));
+    }
+}
+
 fn build_building_cluster_lods(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -5398,7 +6480,11 @@ enum ScientistTempleTheme {
 
 #[derive(Clone, Copy, Debug)]
 struct ScientistTempleSpec {
+    /// Stable mechanism/temple identity; deliberately separate from campaign
+    /// chapter semantics.
     gate_id: u8,
+    /// Narrative chapter for dungeon scaling, HUD context, and persistence.
+    story_chapter: u8,
     anchor_id: &'static str,
     gate_label: &'static str,
     reward_id: &'static str,
@@ -5420,6 +6506,7 @@ fn great_scientist_temple_specs() -> &'static [ScientistTempleSpec] {
     &[
         ScientistTempleSpec {
             gate_id: 101,
+            story_chapter: 5,
             anchor_id: "great_scientist_temple_flight",
             gate_label: "Temple of the Sky Equation",
             reward_id: "ancient_flight_core",
@@ -5437,6 +6524,7 @@ fn great_scientist_temple_specs() -> &'static [ScientistTempleSpec] {
         },
         ScientistTempleSpec {
             gate_id: 102,
+            story_chapter: 8,
             anchor_id: "great_scientist_temple_solar",
             gate_label: "Solar Sabre Observatory",
             reward_id: "solar_sabre_glyph",
@@ -5454,6 +6542,7 @@ fn great_scientist_temple_specs() -> &'static [ScientistTempleSpec] {
         },
         ScientistTempleSpec {
             gate_id: 103,
+            story_chapter: 12,
             anchor_id: "great_scientist_temple_nova",
             gate_label: "Nova Missile Foundry",
             reward_id: "nova_missile_matrix",
@@ -5471,6 +6560,7 @@ fn great_scientist_temple_specs() -> &'static [ScientistTempleSpec] {
         },
         ScientistTempleSpec {
             gate_id: 104,
+            story_chapter: 14,
             anchor_id: "great_scientist_temple_aegis",
             gate_label: "Aegis Frame Archive",
             reward_id: "aegis_armor_frame",
@@ -5760,7 +6850,7 @@ fn spawn_scientist_temple_gate(
         WorldGeometry,
         DungeonCrawlGate {
             gate_id: spec.gate_label,
-            chapter: spec.gate_id,
+            chapter: spec.story_chapter,
             label: spec.gate_label,
             entry,
             focus,
@@ -5792,7 +6882,7 @@ fn spawn_scientist_temple_gate(
             WorldGeometry,
             DungeonGateDoor {
                 gate_id: spec.gate_label,
-                chapter: spec.gate_id,
+                chapter: spec.story_chapter,
                 closed,
                 open,
             },
@@ -16782,6 +17872,7 @@ fn spawn_enterable_building(
         Building { zone, height },
         EnterableBuilding {
             accessible_floors: floor_count as u8,
+            footprint: Vec2::new(width, depth),
         },
         interior_kind,
         Name::new(format!("Explorable {:?} Building", zone)),
@@ -18604,6 +19695,11 @@ fn spawn_aurora_castle(
     let floor = ground + 8.0; // castle floor sits atop the mesa
     let hw = 38.0_f32; // half-width of the curtain wall square
     let wt = 4.0_f32; // wall thickness
+    spawn_world_anchor(
+        commands,
+        "aurora_castle_gate",
+        Vec3::new(cx, floor + 0.5, cz + hw + 11.0),
+    );
 
     // ── Mesa / Foundation platform ─────────────────────────────────────────
     commands.spawn((
@@ -18907,6 +20003,11 @@ fn spawn_collosar_castle(
     let floor = ground + 6.0;
     let hw = 42.0_f32;
     let wt = 6.0_f32;
+    spawn_world_anchor(
+        commands,
+        "collosar_castle_gate",
+        Vec3::new(cx, floor + 0.5, cz + hw + 13.0),
+    );
 
     // ── Castle platform / base ─────────────────────────────────────────────
     commands.spawn((
@@ -19372,6 +20473,286 @@ fn spawn_magic_crystals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rooftop_routes_are_deterministic_bounded_and_limit_roof_degree() {
+        let anchors = (0..48)
+            .map(|index| CityRoofAnchor {
+                center: Vec3::new(
+                    (index % 8) as f32 * 32.0,
+                    20.0 + (index % 3) as f32 * 2.0,
+                    (index / 8) as f32 * 32.0,
+                ),
+                footprint: Vec2::splat(18.0),
+            })
+            .collect::<Vec<_>>();
+
+        let first = city_rooftop_route_plans(&anchors);
+        let second = city_rooftop_route_plans(&anchors);
+        assert_eq!(first.len(), second.len());
+        assert!(first.len() <= CITY_ROOFTOP_ROUTE_LIMIT);
+        for (left, right) in first.iter().zip(second.iter()) {
+            assert_eq!(left.kind, right.kind);
+            assert!(left.start.distance(right.start) < 0.001);
+            assert!(left.end.distance(right.end) < 0.001);
+        }
+
+        let mut degree = vec![0usize; anchors.len()];
+        for route in &first {
+            for endpoint in [route.start, route.end] {
+                let nearest = anchors
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, a), (_, b)| {
+                        let a_distance =
+                            Vec2::new(endpoint.x - a.center.x, endpoint.z - a.center.z).length();
+                        let b_distance =
+                            Vec2::new(endpoint.x - b.center.x, endpoint.z - b.center.z).length();
+                        a_distance.total_cmp(&b_distance)
+                    })
+                    .map(|(index, _)| index)
+                    .unwrap();
+                degree[nearest] += 1;
+            }
+        }
+        assert!(degree
+            .into_iter()
+            .all(|connections| { connections <= CITY_ROOFTOP_MAX_DEGREE }));
+    }
+
+    #[test]
+    fn rooftop_routes_use_bridges_for_gentle_links_and_ziplines_for_drops() {
+        let anchors = [
+            CityRoofAnchor {
+                center: Vec3::new(0.0, 20.0, 0.0),
+                footprint: Vec2::splat(18.0),
+            },
+            CityRoofAnchor {
+                center: Vec3::new(50.0, 23.0, 0.0),
+                footprint: Vec2::splat(18.0),
+            },
+            CityRoofAnchor {
+                center: Vec3::new(100.0, 45.0, 0.0),
+                footprint: Vec2::splat(18.0),
+            },
+        ];
+
+        let plans = city_rooftop_route_plans(&anchors);
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].kind, CityRooftopRouteKind::Skybridge);
+        assert_eq!(plans[1].kind, CityRooftopRouteKind::Zipline);
+        assert!(plans[1].start.y > plans[1].end.y);
+    }
+
+    #[test]
+    fn rooftop_route_reward_keys_are_stable_in_either_travel_direction() {
+        let forward = CityRooftopRoutePlan {
+            start: Vec3::new(12.34, 40.0, -8.0),
+            end: Vec3::new(55.0, 28.0, 91.2),
+            kind: CityRooftopRouteKind::Zipline,
+        };
+        let reverse = CityRooftopRoutePlan {
+            start: forward.end,
+            end: forward.start,
+            kind: forward.kind,
+        };
+
+        assert_eq!(
+            city_rooftop_route_reward_key(forward),
+            city_rooftop_route_reward_key(reverse)
+        );
+    }
+
+    #[test]
+    fn rooftop_route_completion_requires_opposite_endpoints() {
+        let mut approach = -1;
+        assert!(!rooftop_route_endpoint_crossed(&mut approach, true, false));
+        assert_eq!(approach, 0);
+        assert!(!rooftop_route_endpoint_crossed(&mut approach, true, false));
+        assert!(rooftop_route_endpoint_crossed(&mut approach, false, true));
+        assert_eq!(approach, -1);
+
+        assert!(!rooftop_route_endpoint_crossed(&mut approach, false, true));
+        assert_eq!(approach, 1);
+        assert!(rooftop_route_endpoint_crossed(&mut approach, true, false));
+    }
+
+    #[test]
+    fn connected_rooftop_junctions_create_bounded_directional_playgrounds() {
+        let anchors = (0..20)
+            .map(|index| CityRoofAnchor {
+                center: Vec3::new(index as f32 * 34.0, 24.0, 0.0),
+                footprint: Vec2::splat(20.0),
+            })
+            .collect::<Vec<_>>();
+        let routes = city_rooftop_route_plans(&anchors);
+
+        let playgrounds = city_sky_playground_plans(&anchors, &routes);
+        assert_eq!(playgrounds.len(), CITY_SKY_PLAYGROUND_LIMIT);
+        for playground in playgrounds {
+            let launch_direction = playground.launch_velocity.with_y(0.0).normalize_or_zero();
+            let target_direction = (playground.launch_target - playground.center)
+                .with_y(0.0)
+                .normalize_or_zero();
+            assert!(launch_direction.dot(target_direction) > 0.999);
+            assert!(playground.launch_velocity.y >= 14.0);
+            assert!(playground.radius <= 6.2);
+            assert!(
+                playground
+                    .launch_position
+                    .with_y(0.0)
+                    .distance(playground.center.with_y(0.0))
+                    < 7.0
+            );
+        }
+    }
+
+    #[test]
+    fn rooftop_trial_courses_are_deterministic_bounded_and_medal_timed() {
+        let anchors = (0..18)
+            .map(|index| CityRoofAnchor {
+                center: Vec3::new(index as f32 * 34.0, 24.0, 0.0),
+                footprint: Vec2::splat(20.0),
+            })
+            .collect::<Vec<_>>();
+        let routes = city_rooftop_route_plans(&anchors);
+
+        let first = city_rooftop_trial_plans(&anchors, &routes);
+        let second = city_rooftop_trial_plans(&anchors, &routes);
+        assert_eq!(first, second);
+        assert!(first.len() <= CITY_ROOFTOP_TRIAL_LIMIT);
+        assert!(!first.is_empty());
+        for course in first {
+            assert!((4..=CITY_ROOFTOP_TRIAL_MAX_CHECKPOINTS).contains(&course.checkpoints.len()));
+            assert!(course.gold_time < course.silver_time);
+            assert!(course.silver_time < course.bronze_time);
+            assert!(course
+                .checkpoints
+                .windows(2)
+                .all(|pair| pair[0].distance(pair[1]) >= 18.0));
+        }
+    }
+
+    #[test]
+    fn rooftop_trial_medals_unlock_lower_tiers() {
+        assert_eq!(
+            city_rooftop_trial_medal(19.9, 20.0, 25.0, 32.0),
+            CityRooftopTrialMedal::Gold
+        );
+        assert_eq!(
+            city_rooftop_trial_medal(24.0, 20.0, 25.0, 32.0),
+            CityRooftopTrialMedal::Silver
+        );
+        assert_eq!(
+            city_rooftop_trial_medal(30.0, 20.0, 25.0, 32.0),
+            CityRooftopTrialMedal::Bronze
+        );
+        assert_eq!(
+            city_rooftop_trial_medal(40.0, 20.0, 25.0, 32.0),
+            CityRooftopTrialMedal::Finish
+        );
+
+        let mut progress = ChapterProgress::default();
+        unlock_city_rooftop_trial_medal(&mut progress, "trial:test", CityRooftopTrialMedal::Gold);
+        for tier in ["bronze", "silver", "gold"] {
+            assert!(progress.has_discoverable(&format!("trial:test:medal:{tier}")));
+        }
+    }
+
+    #[test]
+    fn rooftop_trial_enforces_checkpoints_and_rewards_only_first_clear() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.init_resource::<ChapterProgress>();
+        app.add_message::<UiMessageEvent>();
+        app.add_systems(Update, city_rooftop_time_trial_system);
+        for checkpoint_index in 0..4u8 {
+            app.world_mut().spawn((
+                Transform::from_xyz(checkpoint_index as f32 * 20.0, 0.0, 0.0),
+                CityRooftopTrialGate {
+                    course_key: "trial:test".to_string(),
+                    course_label: "Test Skyline".to_string(),
+                    checkpoint_index,
+                    checkpoint_count: 4,
+                    radius: 4.0,
+                    gold_time: 20.0,
+                    silver_time: 25.0,
+                    bronze_time: 32.0,
+                },
+            ));
+        }
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(0),
+                Transform::default(),
+                RooftopTrialProgress::default(),
+                PlayerStats {
+                    armor: 0.0,
+                    ..default()
+                },
+                Health::new(100.0),
+            ))
+            .id();
+
+        let cross = |app: &mut App, checkpoint_index: u8| {
+            app.world_mut()
+                .get_mut::<Transform>(player)
+                .unwrap()
+                .translation = Vec3::X * (checkpoint_index as f32 * 20.0);
+            app.world_mut()
+                .get_mut::<RooftopTrialProgress>(player)
+                .unwrap()
+                .gate_cooldown = 0.0;
+            app.update();
+        };
+
+        cross(&mut app, 0);
+        cross(&mut app, 2);
+        assert_eq!(
+            app.world()
+                .get::<RooftopTrialProgress>(player)
+                .unwrap()
+                .next_checkpoint,
+            1
+        );
+        cross(&mut app, 1);
+        cross(&mut app, 2);
+        app.world_mut()
+            .get_mut::<RooftopTrialProgress>(player)
+            .unwrap()
+            .elapsed = 19.0;
+        cross(&mut app, 3);
+
+        let stats = app.world().get::<PlayerStats>(player).unwrap();
+        assert_eq!(stats.credits, 120);
+        assert_eq!(stats.experience, 90);
+        assert_eq!(stats.armor, 12.0);
+        let progress = app.world().resource::<ChapterProgress>();
+        assert!(progress.has_discoverable("trial:test:complete"));
+        assert!(progress.has_discoverable("trial:test:medal:gold"));
+
+        for checkpoint in 0..3u8 {
+            cross(&mut app, checkpoint);
+        }
+        app.world_mut()
+            .get_mut::<RooftopTrialProgress>(player)
+            .unwrap()
+            .elapsed = 24.0;
+        cross(&mut app, 3);
+        let stats = app.world().get::<PlayerStats>(player).unwrap();
+        assert_eq!(stats.credits, 120);
+        assert_eq!(stats.experience, 90);
+        assert_eq!(
+            app.world()
+                .get::<RooftopTrialProgress>(player)
+                .unwrap()
+                .best_times[0]
+                .1,
+            19.0
+        );
+    }
 
     #[test]
     fn boost_ramp_pose_inherits_road_grade_and_entrance_height() {
@@ -20379,7 +21760,10 @@ mod tests {
         assert_eq!(requested_trick_category(&input), Some(TrickCategory::Grind));
         input.dodge = false;
         input.parry = true;
-        assert_eq!(requested_trick_category(&input), Some(TrickCategory::Manual));
+        assert_eq!(
+            requested_trick_category(&input),
+            Some(TrickCategory::Manual)
+        );
     }
 
     #[test]
@@ -20390,10 +21774,18 @@ mod tests {
         assert!(!trick_category_available(TrickCategory::Flip, false, true));
         // Grinds need a rail.
         assert!(trick_category_available(TrickCategory::Grind, false, true));
-        assert!(!trick_category_available(TrickCategory::Grind, false, false));
+        assert!(!trick_category_available(
+            TrickCategory::Grind,
+            false,
+            false
+        ));
         // Manuals need ground, not a rail.
         assert!(trick_category_available(TrickCategory::Manual, true, false));
-        assert!(!trick_category_available(TrickCategory::Manual, false, false));
+        assert!(!trick_category_available(
+            TrickCategory::Manual,
+            false,
+            false
+        ));
         assert!(!trick_category_available(TrickCategory::Manual, true, true));
     }
 
@@ -20738,6 +22130,22 @@ mod tests {
         gate_ids.dedup();
 
         assert_eq!(gate_ids.len(), great_scientist_temple_specs().len());
+    }
+
+    #[test]
+    fn great_scientist_temples_use_valid_story_chapters_not_mechanism_ids() {
+        let specs = great_scientist_temple_specs();
+        assert_eq!(
+            specs
+                .iter()
+                .map(|spec| spec.story_chapter)
+                .collect::<Vec<_>>(),
+            vec![5, 8, 12, 14]
+        );
+        for spec in specs {
+            assert!((1..=14).contains(&spec.story_chapter));
+            assert_ne!(spec.story_chapter, spec.gate_id);
+        }
     }
 
     #[test]

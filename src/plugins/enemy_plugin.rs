@@ -4,10 +4,10 @@ use avian3d::prelude::{
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::characters::{enemy_config, spawn_cartoon_character};
+use crate::characters::{decorate_reptilian_character, enemy_config, spawn_cartoon_character};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
-    boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, Enemy, EnemyAIState,
+    boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, DragonCaste, Enemy, EnemyAIState,
     EnemyAttackVfx, EnemyProjectile, EnemyProjectileKind, EnemyStateMachine, EnemyType,
     FlyingDrone, MechBoss, MountainSpiderMech, RiftBoss,
 };
@@ -200,11 +200,18 @@ fn preset_for_type(enemy_type: EnemyType, faction: Option<Faction>) -> &'static 
             (Faction::DimensionalAlien, EnemyType::SpyDrone) => return "JetWarden",
             (Faction::DimensionalAlien, EnemyType::SpikeAlien) => return "InsectoidStalker",
             (Faction::DimensionalAlien, _) => return "HybridOmega",
-            (Faction::DragonRoyalty, EnemyType::Drone) => return "WolfAnimaton",
-            (Faction::DragonRoyalty, EnemyType::Heavy) => return "BruteForge",
-            (Faction::DragonRoyalty, _) => return "TankTitan",
-            (Faction::DragonExile, EnemyType::Heavy) => return "BruteForge",
-            (Faction::DragonExile, _) => return "CharredCaptain",
+            (Faction::DragonRoyalty, EnemyType::Soldier) => return "Sunscale Lizard Legionary",
+            (Faction::DragonRoyalty, EnemyType::SpikeAlien) => return "Cometclaw Raptor",
+            (Faction::DragonRoyalty, EnemyType::Heavy | EnemyType::Hybrid) => {
+                return "Crown Dragon Knight";
+            }
+            (Faction::DragonRoyalty, _) => return "Sunscale Lizard Scout",
+            (Faction::DragonExile, EnemyType::Soldier) => return "Frostscale Lizard Legionary",
+            (Faction::DragonExile, EnemyType::SpikeAlien) => return "Voidclaw Raptor",
+            (Faction::DragonExile, EnemyType::Heavy | EnemyType::Hybrid) => {
+                return "Exile Dragon Knight";
+            }
+            (Faction::DragonExile, _) => return "Frostscale Lizard Scout",
             (Faction::CorruptedHuman, EnemyType::Drone) => return "Nero",
             (Faction::CorruptedHuman, _) => return "ScoutPrime",
             (Faction::HeroBrother, _) => return "ScoutPrime",
@@ -297,6 +304,28 @@ pub fn spawn_enemy_entity(
         ),
         position,
     );
+    let dragon_caste = faction
+        .filter(|f| matches!(f, Faction::DragonRoyalty | Faction::DragonExile))
+        .map(|_| DragonCaste::for_enemy(enemy_type));
+    if let (Some(caste), Some(dragon_faction)) = (dragon_caste, faction) {
+        decorate_reptilian_character(
+            commands,
+            meshes,
+            materials,
+            root,
+            caste,
+            dragon_faction,
+            difficulty_scale.clamp(0.85, 1.8)
+                * match enemy_type {
+                    EnemyType::Drone => 0.82,
+                    EnemyType::SpyDrone => 0.64,
+                    EnemyType::Soldier => 1.0,
+                    EnemyType::Heavy => 1.22,
+                    EnemyType::SpikeAlien => 1.05,
+                    EnemyType::Hybrid => 1.35,
+                },
+        );
+    }
     let damageable = enemy_damageable(&enemy_data, faction);
     commands.entity(root).insert((
         enemy_data,
@@ -316,6 +345,9 @@ pub fn spawn_enemy_entity(
         commands
             .entity(root)
             .insert((FlyingDrone::new(position), Hackable::scallarian_drone()));
+    }
+    if let Some(caste) = dragon_caste {
+        commands.entity(root).insert(caste);
     }
     root
 }
@@ -422,6 +454,19 @@ pub fn spawn_named_enemy(
         enemy_config(enemy_type, Some(faction), name, visual_scale),
         position,
     );
+    if matches!(faction, Faction::DragonRoyalty | Faction::DragonExile) {
+        let caste = DragonCaste::HumanoidDragon;
+        decorate_reptilian_character(
+            commands,
+            meshes,
+            materials,
+            root,
+            caste,
+            faction,
+            visual_scale,
+        );
+        commands.entity(root).insert(caste);
+    }
     let damageable = enemy_damageable(&enemy_data, Some(faction));
     let mut e = commands.entity(root);
     e.insert((

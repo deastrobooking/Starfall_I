@@ -1089,8 +1089,9 @@ fn build_chapters() -> Vec<ChapterDef> {
             script: vec![
                 dialogue("Collosar", DragonRoyalty, "Tiny star children. Tibet is under my wing.", 3.0),
                 secret_cave(6, "secret_cave_ch06", "Crownroot Ice Cave"),
-                spawn(DragonRoyalty, Drone, 6, 1.6),
-                spawn(DragonRoyalty, Heavy, 4, 1.6),
+                spawn(DragonRoyalty, Soldier, 4, 1.6),
+                spawn(DragonRoyalty, EnemyType::SpikeAlien, 3, 1.65),
+                spawn(DragonRoyalty, Heavy, 2, 1.6),
                 place(DiscoverableKind::ArmorMod("coolant_weave"), "Dragon Chill Weave", Vec3::new(6.0, 0.5, 6.0)),
                 tech_cache(
                     "tech_cache_ch06_chill_armor",
@@ -1112,7 +1113,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                     "Collosar's Crown Airship",
                     "COLLOSAR: The castle falls. My crownship does not.",
                 ),
-                airship_raid(DragonRoyalty, Drone, 7, 1.7),
+                airship_raid(DragonRoyalty, EnemyType::SpikeAlien, 7, 1.7),
                 boss("BruteForge", "Collosar - Crown Airship", DragonRoyalty,
                      "COLLOSAR: Now fight where the sky can judge us.", 2.1),
                 outro("Vincenzo: The king is not our enemy. The invasion is."),
@@ -1128,7 +1129,8 @@ fn build_chapters() -> Vec<ChapterDef> {
             script: vec![
                 dialogue("Tarack", DragonRoyalty, "A family that fights together must also think together.", 3.0),
                 secret_cave(7, "secret_cave_ch07", "Ember Breathing Hollow"),
-                spawn(DragonRoyalty, Drone, 8, 1.8),
+                spawn(DragonRoyalty, Soldier, 5, 1.75),
+                spawn(DragonRoyalty, EnemyType::SpikeAlien, 4, 1.8),
                 spawn(DimensionalAlien, Soldier, 6, 1.8),
                 mid_boss("WolfAnimaton", "Ember Warden", DragonRoyalty, 1.65),
                 place(DiscoverableKind::WeaponMod("piercing_rounds"), "Royal Star Pierce", Vec3::new(0.0, 0.5, 10.0)),
@@ -1140,7 +1142,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                     "Tarack's Ember Airship",
                     "TARACK: Good. Now climb aboard and prove you can keep balance.",
                 ),
-                airship_raid(DragonRoyalty, Drone, 8, 1.8),
+                airship_raid(DragonRoyalty, EnemyType::SpikeAlien, 8, 1.8),
                 boss("HarvesterMech", "Tarack - Ember Airship", DragonRoyalty,
                      "TARACK: A true family fights even when the floor is moving.", 2.0),
                 outro("Aurora: A test disguised as a battle. I like her."),
@@ -1156,7 +1158,8 @@ fn build_chapters() -> Vec<ChapterDef> {
             script: vec![
                 dialogue("Spikey", DragonRoyalty, "I am the youngest and the fastest and nobody can prove otherwise.", 3.0),
                 secret_cave(8, "secret_cave_ch08", "Fangroot Scrap Tunnel"),
-                spawn(DragonRoyalty, Drone, 8, 1.8),
+                spawn(DragonRoyalty, Soldier, 4, 1.8),
+                spawn(DragonRoyalty, EnemyType::SpikeAlien, 5, 1.85),
                 mid_boss("Nero", "Spikey - Youngest Son", DragonRoyalty, 1.7),
                 dialogue("Shread", DragonRoyalty, "Little brother, stop chasing portals with your face.", 2.5),
                 spawn(DimensionalAlien, EnemyType::SpikeAlien, 7, 1.9),
@@ -1235,7 +1238,8 @@ fn build_chapters() -> Vec<ChapterDef> {
             script: vec![
                 dialogue("Ragar", DragonExile, "Colorado rock remembers every claw mark.", 3.0),
                 secret_cave(10, "secret_cave_ch10", "Granite Echo Cave"),
-                spawn(DragonExile, Drone, 8, 1.9),
+                spawn(DragonExile, Soldier, 5, 1.9),
+                spawn(DragonExile, EnemyType::SpikeAlien, 4, 1.95),
                 spawn(CorruptedHuman, Soldier, 5, 1.8),
                 mid_boss("CharredCaptain", "Fang", CorruptedHuman, 1.7),
                 relic_fragment_puzzle(
@@ -1253,7 +1257,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                     "Ragar's Granite Airship",
                     "RAGAR: My castle is only the first stone. The sky fortress is next.",
                 ),
-                airship_raid(DragonExile, Drone, 8, 2.0),
+                airship_raid(DragonExile, EnemyType::SpikeAlien, 8, 2.0),
                 boss("BruteForge", "Ragar - Granite Airship", DragonExile,
                      "RAGAR: Up here, every fall teaches respect.", 2.1),
                 outro("Angelo: Ragar is angry. The aliens are using it."),
@@ -1270,6 +1274,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                 dialogue("Blackskull", DragonExile, "Antarctica is quiet because I demand quiet.", 3.0),
                 secret_cave(11, "secret_cave_ch11", "Icebreaker Under-Cave"),
                 spawn(DragonExile, Soldier, 8, 2.0),
+                spawn(DragonExile, EnemyType::SpikeAlien, 4, 2.05),
                 mid_boss("ScoutPrime", "Sharp", CorruptedHuman, 1.9),
                 spawn(DimensionalAlien, Heavy, 4, 2.0),
                 robot_pet(

@@ -433,6 +433,43 @@ impl Default for StuntRaceProgress {
     }
 }
 
+#[derive(Component, Debug, Clone, Default)]
+pub struct RooftopTrialProgress {
+    pub active_course: Option<String>,
+    pub active_label: Option<String>,
+    pub next_checkpoint: u8,
+    pub checkpoint_count: u8,
+    pub elapsed: f32,
+    pub gate_cooldown: f32,
+    pub best_times: Vec<(String, f32)>,
+}
+
+impl RooftopTrialProgress {
+    pub fn record_time(&mut self, course_key: &str, elapsed: f32) -> bool {
+        if let Some((_, best)) = self
+            .best_times
+            .iter_mut()
+            .find(|(key, _)| key == course_key)
+        {
+            if elapsed >= *best {
+                return false;
+            }
+            *best = elapsed;
+            return true;
+        }
+        self.best_times.push((course_key.to_string(), elapsed));
+        true
+    }
+
+    pub fn reset_active(&mut self) {
+        self.active_course = None;
+        self.active_label = None;
+        self.next_checkpoint = 0;
+        self.checkpoint_count = 0;
+        self.elapsed = 0.0;
+    }
+}
+
 // ── Edge Grab / Wall Jump ────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
 pub struct EdgeGrabState {

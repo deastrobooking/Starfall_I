@@ -858,6 +858,7 @@ fn spawn_players(
                 TerrainRecoveryState::new(spawn_pos),
                 StuntRunState::default(),
                 StuntRaceProgress::default(),
+                RooftopTrialProgress::default(),
                 crate::tricks::TrickState::default(),
                 ArmorSet::default(),
                 ArmorRechargeState::default(),
@@ -1085,11 +1086,7 @@ fn update_rocket_hoverboard_visuals(
         With<Player>,
     >,
     mut boards: Query<
-        (
-            &mut RocketHoverboardVisual,
-            &mut Visibility,
-            &mut Transform,
-        ),
+        (&mut RocketHoverboardVisual, &mut Visibility, &mut Transform),
         Without<Player>,
     >,
 ) {
@@ -3925,9 +3922,7 @@ fn player_parry_update(
     for (mut parry, state, pi, progression, traversal) in player_q.iter_mut() {
         parry.cooldown_timer = (parry.cooldown_timer - dt).max(0.0);
         // Riding the board rebinds parry to the manual trick.
-        if traversal
-            .is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active))
-        {
+        if traversal.is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active)) {
             continue;
         }
 

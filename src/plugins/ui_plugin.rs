@@ -19,10 +19,9 @@ use crate::components::enemy::CitySpyDrone;
 use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot};
 use crate::components::player::{
     AimReticleState, AimSolution, BoardBoostState, ClimbState, JetpackState, Player, PlayerCamera,
-    PlayerCameraRef, PlayerIndex, PlayerInput, PlayerProgression, PlayerStats, StuntRunState,
-    TraversalMode, TraversalModeState, WaterTraversalState,
+    PlayerCameraRef, PlayerIndex, PlayerInput, PlayerProgression, PlayerStats,
+    RooftopTrialProgress, StuntRunState, TraversalMode, TraversalModeState, WaterTraversalState,
 };
-use crate::tricks::TrickState;
 use crate::components::weapon::{
     BeamSabre, SpecialWeaponInventory, TrackingMissile, WeaponInventory, WeaponRanks, WeaponType,
     MAX_WEAPON_RANK,
@@ -35,6 +34,10 @@ use crate::discussion::DiscussionState;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::EngineToolMode;
 use crate::events::*;
+use crate::missions::{
+    active_custom_mission, chapter_mission, mission_for_travel_anchor, CustomMissionState,
+    SPECIAL_MISSION_TRAVEL_POINTS,
+};
 use crate::perks::{all_perks, PerkTree};
 use crate::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
@@ -43,15 +46,15 @@ use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParam
 use crate::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
-    DungeonCrawlState, FastTravelDestination, GameSettings, LocalPlayerConfig,
-    ImportedForgeReturnTarget, PlaySessionTransition, PlayerGuidance, PlayerSelectState,
-    ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry,
-    HERO_ROSTER,
+    DungeonCrawlState, FastTravelDestination, GameSettings, ImportedForgeReturnTarget,
+    LocalPlayerConfig, PlaySessionTransition, PlayerGuidance, PlayerSelectState, ShopCatalog,
+    ShopCategory, UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::settlement_economy::SettlementEconomy;
 use crate::shop_transactions;
 use crate::state::AppState;
+use crate::tricks::TrickState;
 use crate::upgrades::{
     all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger, SABRE_RELIC_CATALOG,
 };
@@ -120,6 +123,7 @@ impl Plugin for UiPlugin {
             .init_resource::<PauseMenuState>()
             .init_resource::<MenuFocus>()
             .init_resource::<ChapterProgressionOwner>()
+            .init_resource::<CustomMissionState>()
             .add_systems(Startup, spawn_menu_camera)
             .add_systems(
                 Update,
@@ -2293,6 +2297,7 @@ struct WorldAnchorFastTravelButton {
     chapter: ChapterId,
     anchor_id: &'static str,
     label: &'static str,
+    enter_dungeon: bool,
 }
 #[derive(Component, Clone, Copy)]
 struct ChapterSelectActionButton(ChapterSelectAction);
@@ -2448,7 +2453,7 @@ fn setup_chapter_select(
                         let location = chapter_map_locations()
                             .iter()
                             .find(|location| location.id == ch.id);
-                        let unlocked = progress.is_unlocked(ch.id);
+                        let unlocked = progress.is_fast_travel_unlocked(ch.id);
                         let done = progress.completed.contains(&ch.id.0);
                         let prefix = if done {
                             "[✓]"
@@ -2494,10 +2499,13 @@ fn setup_chapter_select(
                             start_button.insert(MenuButtonDisabled);
                         }
                         start_button.with_children(|button| {
+                            let mission_title = chapter_mission(ch.id)
+                                .map(|mission| mission.title.as_str())
+                                .unwrap_or(ch.title);
                             button.spawn((
                                 Text::new(format!(
-                                    "{} START CH.{:02} - {} / {}",
-                                    prefix, ch.id.0, ch.title, region
+                                    "{} CH.{:02} {} / {} — MISSION: {}",
+                                    prefix, ch.id.0, ch.title, region, mission_title
                                 )),
                                 TextFont {
                                     font_size: FontSize::Px(12.4),
@@ -2938,7 +2946,7 @@ fn spawn_fast_travel_map(
                 else {
                     continue;
                 };
-                let unlocked = progress.is_unlocked(location.id);
+                let unlocked = progress.is_fast_travel_unlocked(location.id);
                 let done = progress.completed.contains(&location.id.0);
                 let marker_color = if done {
                     Color::srgb(0.22, 0.85, 0.34)
@@ -3015,10 +3023,11 @@ fn spawn_fast_travel_map(
                 ));
             }
 
-            // Discovered caves become direct checkpoints. Locked silhouettes
-            // still advertise that each mountain region contains a dungeon.
+            // Every authored cave is visible and usable from a new save so
+            // players can explore the complete world in any order.
             for cave in SECRET_CAVE_LOCATIONS {
-                let discovered = progress.has_discoverable(cave.anchor_id);
+                let completed = mission_for_travel_anchor(cave.anchor_id)
+                    .is_some_and(|mission| progress.has_discoverable(&mission.completion_key()));
                 let mut cave_button = map.spawn((
                     Button,
                     Node {
@@ -3037,15 +3046,15 @@ fn spawn_fast_travel_map(
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    BackgroundColor(if discovered {
+                    BackgroundColor(if completed {
+                        Color::srgb(0.24, 0.72, 0.42)
+                    } else {
                         Color::srgb(0.42, 0.18, 0.62)
-                    } else {
-                        Color::srgb(0.10, 0.10, 0.14)
                     }),
-                    BorderColor::all(if discovered {
-                        Color::srgb(0.82, 0.52, 1.0)
+                    BorderColor::all(if completed {
+                        Color::srgb(0.66, 1.0, 0.76)
                     } else {
-                        Color::srgb(0.28, 0.28, 0.34)
+                        Color::srgb(0.82, 0.52, 1.0)
                     }),
                     CaveFastTravelButton {
                         chapter: cave.chapter,
@@ -3053,12 +3062,9 @@ fn spawn_fast_travel_map(
                         label: cave.label,
                     },
                 ));
-                if !discovered {
-                    cave_button.insert(MenuButtonDisabled);
-                }
                 cave_button.with_children(|marker| {
                     marker.spawn((
-                        Text::new(if discovered { "C" } else { "?" }),
+                        Text::new(if completed { "✓" } else { "C" }),
                         TextFont {
                             font_size: FontSize::Px(10.0),
                             ..default()
@@ -3072,7 +3078,7 @@ fn spawn_fast_travel_map(
             // chapter. Its two entrances reuse the selected chapter session
             // and move the whole party to authored world anchors.
             for point in RACE_REGION_TRAVEL_POINTS {
-                let unlocked = progress.is_unlocked(point.chapter);
+                let unlocked = progress.is_fast_travel_unlocked(point.chapter);
                 let mut travel_button = map.spawn((
                     Button,
                     Node {
@@ -3105,6 +3111,7 @@ fn spawn_fast_travel_map(
                         chapter: point.chapter,
                         anchor_id: point.anchor_id,
                         label: point.label,
+                        enter_dungeon: false,
                     },
                 ));
                 if !unlocked {
@@ -3113,6 +3120,62 @@ fn spawn_fast_travel_map(
                 travel_button.with_children(|marker| {
                     marker.spawn((
                         Text::new("R"),
+                        TextFont {
+                            font_size: FontSize::Px(10.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+            }
+
+            // Dragon strongholds and both castles are explicit mission travel
+            // points rather than hidden scenery.
+            for point in SPECIAL_MISSION_TRAVEL_POINTS {
+                let completed = mission_for_travel_anchor(point.anchor_id)
+                    .is_some_and(|mission| progress.has_discoverable(&mission.completion_key()));
+                map.spawn((
+                    Button,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(world_to_map_left(point.x)),
+                        top: Val::Percent(world_to_map_top(point.z)),
+                        width: Val::Px(24.0),
+                        height: Val::Px(24.0),
+                        margin: UiRect {
+                            left: Val::Px(-12.0),
+                            top: Val::Px(12.0),
+                            ..default()
+                        },
+                        border: UiRect::all(Val::Px(2.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(if completed {
+                        Color::srgb(0.24, 0.78, 0.44)
+                    } else if point.enter_dungeon {
+                        Color::srgb(0.88, 0.20, 0.12)
+                    } else {
+                        Color::srgb(0.92, 0.72, 0.18)
+                    }),
+                    BorderColor::all(Color::srgb(1.0, 0.88, 0.58)),
+                    WorldAnchorFastTravelButton {
+                        chapter: point.chapter,
+                        anchor_id: point.anchor_id,
+                        label: point.label,
+                        enter_dungeon: point.enter_dungeon,
+                    },
+                ))
+                .with_children(|marker| {
+                    marker.spawn((
+                        Text::new(if completed {
+                            "✓"
+                        } else if point.enter_dungeon {
+                            "D"
+                        } else {
+                            "K"
+                        }),
                         TextFont {
                             font_size: FontSize::Px(10.0),
                             ..default()
@@ -3464,8 +3527,8 @@ fn chapter_select_progression_owner_buttons(
 }
 
 fn chapter_select_fast_travel_buttons(
-    progress: Res<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
+    mut mission_state: ResMut<CustomMissionState>,
     mut next_state: ResMut<NextState<AppState>>,
     interaction_q: Query<
         (&Interaction, &ChapterFastTravelButton),
@@ -3473,7 +3536,10 @@ fn chapter_select_fast_travel_buttons(
     >,
 ) {
     for (interaction, button) in interaction_q.iter() {
-        if *interaction == Interaction::Pressed && progress.is_unlocked(button.0) {
+        if *interaction == Interaction::Pressed {
+            if let Some(mission) = chapter_mission(button.0) {
+                mission_state.activate(&mission.id);
+            }
             current.id = button.0;
             current.started = false;
             next_state.set(AppState::Playing);
@@ -3482,8 +3548,8 @@ fn chapter_select_fast_travel_buttons(
 }
 
 fn cave_fast_travel_buttons(
-    progress: Res<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
+    mut mission_state: ResMut<CustomMissionState>,
     mut destination: ResMut<FastTravelDestination>,
     mut next_state: ResMut<NextState<AppState>>,
     interaction_q: Query<
@@ -3492,8 +3558,13 @@ fn cave_fast_travel_buttons(
     >,
 ) {
     for (interaction, button) in interaction_q.iter() {
-        if *interaction != Interaction::Pressed || !progress.has_discoverable(button.anchor_id) {
+        if *interaction != Interaction::Pressed {
             continue;
+        }
+        if let Some(mission) = mission_for_travel_anchor(button.anchor_id) {
+            mission_state.activate(&mission.id);
+        } else {
+            mission_state.clear();
         }
         current.id = button.chapter;
         current.started = false;
@@ -3503,8 +3574,8 @@ fn cave_fast_travel_buttons(
 }
 
 fn world_anchor_fast_travel_buttons(
-    progress: Res<ChapterProgress>,
     mut current: ResMut<CurrentChapter>,
+    mut mission_state: ResMut<CustomMissionState>,
     mut destination: ResMut<FastTravelDestination>,
     mut next_state: ResMut<NextState<AppState>>,
     interaction_q: Query<
@@ -3513,12 +3584,21 @@ fn world_anchor_fast_travel_buttons(
     >,
 ) {
     for (interaction, button) in interaction_q.iter() {
-        if *interaction != Interaction::Pressed || !progress.is_unlocked(button.chapter) {
+        if *interaction != Interaction::Pressed {
             continue;
+        }
+        if let Some(mission) = mission_for_travel_anchor(button.anchor_id) {
+            mission_state.activate(&mission.id);
+        } else {
+            mission_state.clear();
         }
         current.id = button.chapter;
         current.started = false;
-        destination.world_anchor(button.anchor_id, button.label);
+        if button.enter_dungeon {
+            destination.cave(button.anchor_id, button.label);
+        } else {
+            destination.world_anchor(button.anchor_id, button.label);
+        }
         next_state.set(AppState::Playing);
     }
 }
@@ -5299,6 +5379,7 @@ fn hud_update_system(
                 &PlayerProgression,
                 Option<&TrickState>,
                 Option<&StuntRunState>,
+                Option<&RooftopTrialProgress>,
                 &WaterTraversalState,
             ),
         ),
@@ -5328,7 +5409,7 @@ fn hud_update_system(
         special,
         armor,
         sabre,
-        (traversal, board_boost, progression, tricks, stunt_run, water),
+        (traversal, board_boost, progression, tricks, stunt_run, rooftop_trial, water),
     ) in player_q.iter()
     {
         for (mut node, mut color, bar) in hud_visuals
@@ -5413,7 +5494,7 @@ fn hud_update_system(
                 PlayerHudTextKind::Ammo => "∞ AMMO".to_string(),
                 PlayerHudTextKind::SpecialAmmo => format!("SPECIALS ∞{}", lock_label),
                 PlayerHudTextKind::TraversalStatus => {
-                    traversal_status_text(traversal, board_boost, tricks, stunt_run)
+                    traversal_status_text(traversal, board_boost, tricks, stunt_run, rooftop_trial)
                 }
                 PlayerHudTextKind::SabreStatus => sabre_status_text(sabre, &progression.upgrades),
             });
@@ -5477,7 +5558,16 @@ fn traversal_status_text(
     boost: &BoardBoostState,
     tricks: Option<&TrickState>,
     run: Option<&StuntRunState>,
+    rooftop_trial: Option<&RooftopTrialProgress>,
 ) -> String {
+    if let Some(trial) = rooftop_trial.filter(|trial| trial.active_course.is_some()) {
+        return format!(
+            "ROOFTOP: {:.1}s  CP {}/{}",
+            trial.elapsed,
+            trial.next_checkpoint.saturating_add(1),
+            trial.checkpoint_count
+        );
+    }
     if traversal.active != TraversalMode::Hoverboard {
         return format!("TRAVERSAL: {}", traversal.active.label().to_uppercase());
     }
@@ -5641,6 +5731,7 @@ fn player_guidance_system(
     mut guidance: ResMut<PlayerGuidance>,
     discussion: Res<DiscussionState>,
     dungeon: Res<DungeonCrawlState>,
+    mission_state: Res<CustomMissionState>,
     player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
     npc_q: Query<(&Transform, &DiscussionNpc)>,
     gate_q: Query<&DungeonCrawlGate>,
@@ -5698,20 +5789,23 @@ fn player_guidance_system(
             }
         }
 
-        for gate in gate_q.iter().filter(|gate| !gate.opened) {
-            if let Some((player_index, distance)) = nearest_player_to(&player_q, gate.entry) {
-                if distance <= gate.interact_radius + 4.0 {
-                    offer_guidance(
-                        &mut best,
-                        1.0,
-                        distance,
-                        format!("Open {}", gate.label),
-                        format!(
-                            "P{} can gather the party for a top-down dungeon.",
-                            player_index + 1
-                        ),
-                        "E / D-pad Down: Open gate",
-                    );
+        if !dungeon.active {
+            for gate in gate_q.iter() {
+                if let Some((player_index, distance)) = nearest_player_to(&player_q, gate.entry) {
+                    if distance <= gate.interact_radius + 4.0 {
+                        let verb = dungeon_gate_guidance_verb(gate.opened);
+                        offer_guidance(
+                            &mut best,
+                            -1.0,
+                            distance,
+                            format!("{verb} {}", gate.label),
+                            format!(
+                                "P{} can gather the party for a top-down dungeon.",
+                                player_index + 1
+                            ),
+                            format!("E / D-pad Down: {verb} dungeon"),
+                        );
+                    }
                 }
             }
         }
@@ -5798,6 +5892,17 @@ fn player_guidance_system(
         }
     }
 
+    if best.is_none() {
+        if let Some(mission) = active_custom_mission(&mission_state) {
+            best = Some(GuidanceCandidate {
+                score: f32::MAX,
+                title: format!("MISSION: {}", mission.title),
+                body: mission.briefing.clone(),
+                action: mission.objective_text(),
+            });
+        }
+    }
+
     if let Some(candidate) = best {
         guidance.set(candidate.title, candidate.body, candidate.action);
     } else {
@@ -5830,6 +5935,14 @@ fn nearest_player_to(
         .iter()
         .map(|(index, transform)| (index.0, transform.translation.distance(position)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+fn dungeon_gate_guidance_verb(opened: bool) -> &'static str {
+    if opened {
+        "Enter"
+    } else {
+        "Open"
+    }
 }
 
 fn offer_guidance(
@@ -7385,6 +7498,12 @@ fn update_command_overlay(
 mod menu_navigation_tests {
     use super::*;
 
+    #[test]
+    fn dungeon_guidance_switches_from_open_to_repeat_entry() {
+        assert_eq!(dungeon_gate_guidance_verb(false), "Open");
+        assert_eq!(dungeon_gate_guidance_verb(true), "Enter");
+    }
+
     fn four_button_grid() -> (World, Vec<(Entity, Vec2)>) {
         let mut world = World::new();
         let top_left = world.spawn_empty().id();
@@ -7613,14 +7732,14 @@ mod menu_navigation_tests {
         };
         let mut boost = BoardBoostState::default();
         assert_eq!(
-            traversal_status_text(&traversal, &boost, None, None),
+            traversal_status_text(&traversal, &boost, None, None, None),
             "BOARD: B/EAST BOOST READY"
         );
 
         boost.timer = 0.4;
         boost.manual_cooldown = 0.8;
         assert_eq!(
-            traversal_status_text(&traversal, &boost, None, None),
+            traversal_status_text(&traversal, &boost, None, None, None),
             "BOARD: OVERDRIVE"
         );
     }
@@ -7648,7 +7767,7 @@ mod menu_navigation_tests {
         };
         // …but an in-progress combo outranks it.
         assert_eq!(
-            traversal_status_text(&traversal, &boost, Some(&tricks), Some(&run)),
+            traversal_status_text(&traversal, &boost, Some(&tricks), Some(&run), None),
             "BOARD: KICKFLIP  1250  x2.50"
         );
 
@@ -7658,7 +7777,7 @@ mod menu_navigation_tests {
             ..default()
         };
         assert_eq!(
-            traversal_status_text(&traversal, &boost, Some(&bailed), Some(&run)),
+            traversal_status_text(&traversal, &boost, Some(&bailed), Some(&run), None),
             "BOARD: BAIL!"
         );
 
@@ -7668,9 +7787,28 @@ mod menu_navigation_tests {
                 &traversal,
                 &boost,
                 Some(&TrickState::default()),
-                Some(&StuntRunState::default())
+                Some(&StuntRunState::default()),
+                None,
             ),
             "BOARD: OVERDRIVE"
+        );
+    }
+
+    #[test]
+    fn rooftop_trial_timer_owns_the_traversal_hud_line() {
+        let traversal = TraversalModeState::default();
+        let boost = BoardBoostState::default();
+        let trial = RooftopTrialProgress {
+            active_course: Some("trial:test".into()),
+            next_checkpoint: 2,
+            checkpoint_count: 6,
+            elapsed: 12.34,
+            ..default()
+        };
+
+        assert_eq!(
+            traversal_status_text(&traversal, &boost, None, None, Some(&trial)),
+            "ROOFTOP: 12.3s  CP 3/6"
         );
     }
 
