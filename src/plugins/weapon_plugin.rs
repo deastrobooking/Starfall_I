@@ -24,6 +24,9 @@ use crate::engine::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrB
 use crate::resources::DungeonCrawlState;
 use crate::audio::sfx::ModularActionSfxEvent;
 use crate::engine::state::AppState;
+use crate::combat::blades::{
+    apply_blade_to_stats, blade_for_id, BladeTrait, EquippedBlade, BLADE_COLOR_ORDER,
+};
 use crate::combat::upgrades::UpgradeLedger;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
@@ -129,6 +132,10 @@ pub struct ProjectileAssets {
     pub energy_magic: Handle<EnergyMaterial>,
     pub energy_sabre: Handle<EnergyMaterial>,
     pub energy_sabre_core: Handle<EnergyMaterial>,
+    /// One aura material per [`BladeColor`], built once at startup and indexed
+    /// by `BladeColor as usize`, so equipping a blade recolours the sabre
+    /// without allocating a material per swing.
+    pub energy_sabre_blades: Vec<Handle<EnergyMaterial>>,
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -151,6 +158,7 @@ impl Plugin for WeaponPlugin {
                 Update,
                 (
                     apply_ranged_move_defs_system.before(weapon_fire_system),
+                    apply_sabre_blade_system.before(beam_sabre_update_system),
                     apply_weapon_ranks_system,
                     weapon_select_system,
                     weapon_fire_system,
@@ -420,6 +428,20 @@ fn setup_weapon_assets(
             Vec4::new(0.55, 2.8, 5.2, 1.0),
             Vec4::new(8.0, 10.0, 10.5, 1.0),
         ),
+        // The aura carries each blade's identity; the core stays hot and
+        // near-white so the weapon reads clearly at speed in 4-player co-op.
+        energy_sabre_blades: BLADE_COLOR_ORDER
+            .iter()
+            .map(|color| {
+                let (r, g, b) = color.aura_rgb();
+                mk_energy_mat(
+                    &mut energy_materials,
+                    Vec4::new(1.8 * r + 0.6, 1.8 * g + 0.6, 1.8 * b + 0.6, 1.0),
+                    Vec4::new(r * 3.6, g * 3.6, b * 3.6, 1.0),
+                    Vec4::new(6.4, 7.0, 8.5, 0.78),
+                )
+            })
+            .collect(),
     });
 }
 
@@ -532,6 +554,54 @@ fn apply_weapon_ranks_system(
     for (progression, mut inv) in player_q.iter_mut() {
         for (i, weapon) in inv.slots.iter_mut().enumerate() {
             weapon.rank = progression.weapon_ranks.ranks[i];
+        }
+    }
+}
+
+// ── Apply the equipped Star Sabre blade ───────────────────────────────────────
+/// Stamp the blade bought in the shop onto the player's sabre.
+///
+/// This is the link that makes `ShopOwnership::equipped_weapon` mean something:
+/// before it existed the field was saved but never read, so buying a blade
+/// changed nothing. Blade multipliers compose *on top of* `BeamSabre::set_level`
+/// rather than replacing it, so progression and loadout both keep working.
+///
+/// Idempotent by `EquippedBlade`: the restat only happens when the choice
+/// actually changes (or the sabre levels up), never every frame.
+fn apply_sabre_blade_system(
+    mut commands: Commands,
+    mut player_q: Query<
+        (
+            Entity,
+            &PlayerProgression,
+            &mut BeamSabre,
+            Option<&EquippedBlade>,
+        ),
+        With<Player>,
+    >,
+) {
+    for (entity, progression, mut sabre, current) in player_q.iter_mut() {
+        let blade = blade_for_id(progression.shop.equipped_weapon.as_deref());
+        let changed = current.map(|c| c.0) != Some(blade.id);
+        if !changed && !sabre.is_changed() {
+            continue;
+        }
+        // Recompute the level baseline first so blade swaps never compound.
+        let level = sabre.level;
+        sabre.set_level(level);
+        let (slash, wave, count, cooldown) = apply_blade_to_stats(
+            blade,
+            sabre.slash_damage,
+            sabre.wave_damage,
+            sabre.slash_count,
+            sabre.cooldown,
+        );
+        sabre.slash_damage = slash;
+        sabre.wave_damage = wave;
+        sabre.slash_count = count;
+        sabre.cooldown = cooldown;
+        if changed {
+            commands.entity(entity).insert(EquippedBlade(blade.id));
         }
     }
 }
@@ -2656,6 +2726,7 @@ fn sabre_wave_profile(
     sabre: &BeamSabre,
     upgrades: &UpgradeLedger,
     completed_slashes: u32,
+    blade: &crate::combat::blades::BladeProfile,
 ) -> Option<SabreWaveProfile> {
     let tier = (upgrades.sabre_wave_upgrade_tier() + sabre.level.saturating_sub(1)).min(6);
     let is_second_slash = completed_slashes == 2;
@@ -2673,8 +2744,10 @@ fn sabre_wave_profile(
         length: 1.80 + tier as f32 * 0.28,
         damage_mult: 0.30 + tier as f32 * 0.10,
         speed_mult: 0.90 + tier as f32 * 0.04,
-        piercing: sabre.is_piercing() || tier >= 3,
-        explosive: sabre.has_aoe_splash() || tier >= 5,
+        // Blade traits grant these outright, so a wave-tuned hilt behaves like
+        // a high-tier sabre even on a fresh save.
+        piercing: sabre.is_piercing() || tier >= 3 || blade.trait_ == BladeTrait::PiercingWaves,
+        explosive: sabre.has_aoe_splash() || tier >= 5 || blade.trait_ == BladeTrait::ExplosiveWaves,
     })
 }
 
@@ -3105,7 +3178,7 @@ fn beam_sabre_update_system(
             &mut PlayerMovement,
             &TraversalModeState,
             Option<&BeamSabreLocked>,
-            &mut Damageable,
+            (&mut Damageable, &mut Health),
         ),
         (With<Player>, Without<Enemy>),
     >,
@@ -3133,10 +3206,12 @@ fn beam_sabre_update_system(
         mut movement,
         traversal,
         locked_marker,
-        mut player_damageable,
+        (mut player_damageable, mut player_health),
     ) in player_q.iter_mut()
     {
         let upgrades = &progression.upgrades;
+        // The blade bought in the shop; falls back to the neutral starter.
+        let equipped_blade = blade_for_id(progression.shop.equipped_weapon.as_deref());
         let perk_damage_mult = progression.perks.damage_mult()
             * upgrades.beam_damage_mult()
             * upgrades.gauntlet_energy_damage_mult()
@@ -3245,9 +3320,16 @@ fn beam_sabre_update_system(
                             &mut damaged_ev,
                             &mut killed_ev,
                         );
+                        // Lifesteal blades return a slice of the strike as
+                        // health, capped by the player's own maximum.
+                        let steal = equipped_blade.trait_.lifesteal_fraction();
+                        if steal > 0.0 {
+                            player_health.current =
+                                (player_health.current + damage * steal).min(player_health.max);
+                        }
                         let completed_slashes = sabre.slash_index + 1;
                         if let Some(profile) =
-                            sabre_wave_profile(&sabre, upgrades, completed_slashes)
+                            sabre_wave_profile(&sabre, upgrades, completed_slashes, equipped_blade)
                         {
                             action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
                             spawn_sabre_wave_attack(
@@ -3402,7 +3484,9 @@ fn beam_sabre_update_system(
             }
 
             sabre.technique = technique;
-            sabre.cooldown_timer = sabre.cooldown * tech.cooldown_mult;
+            sabre.cooldown_timer = sabre.cooldown
+                * tech.cooldown_mult
+                * equipped_blade.trait_.technique_cooldown_mult();
             sabre.technique_timer = tech.technique_time;
             grant_iframes(&mut player_damageable, tech.iframes);
             sm.force(PlayerState::Attacking);
@@ -3445,12 +3529,12 @@ fn sync_sabre_blade_visual(
     mut commands: Commands,
     assets: Res<ProjectileAssets>,
     library: Res<MoveLibrary>,
-    player_q: Query<(Entity, &GlobalTransform, &BeamSabre), With<Player>>,
+    player_q: Query<(Entity, &GlobalTransform, &BeamSabre, &PlayerProgression), With<Player>>,
     mut visual_q: Query<(Entity, &SabreBladeVisual, &mut Transform), Without<Player>>,
 ) {
     let mut represented = Vec::new();
     for (visual_entity, visual, mut transform) in visual_q.iter_mut() {
-        let Ok((_, player_transform, sabre)) = player_q.get(visual.owner) else {
+        let Ok((_, player_transform, sabre, _)) = player_q.get(visual.owner) else {
             commands.entity(visual_entity).despawn();
             continue;
         };
@@ -3462,16 +3546,21 @@ fn sync_sabre_blade_visual(
         *transform = sabre_blade_transform(player_transform, sabre, &library, visual.layer);
     }
 
-    for (player_entity, player_transform, sabre) in player_q.iter() {
+    for (player_entity, player_transform, sabre, progression) in player_q.iter() {
         if !sabre.active || !sabre.unlocked {
             continue;
         }
+        let blade = blade_for_id(progression.shop.equipped_weapon.as_deref());
         for layer in [SabreBladeLayer::Aura, SabreBladeLayer::Core] {
             if represented.contains(&(player_entity, layer)) {
                 continue;
             }
             let material = match layer {
-                SabreBladeLayer::Aura => assets.energy_sabre.clone(),
+                SabreBladeLayer::Aura => assets
+                    .energy_sabre_blades
+                    .get(blade.color.index())
+                    .cloned()
+                    .unwrap_or_else(|| assets.energy_sabre.clone()),
                 SabreBladeLayer::Core => assets.energy_sabre_core.clone(),
             };
             commands.spawn((
@@ -4190,8 +4279,8 @@ mod move_def_wiring_tests {
     fn starter_and_upgraded_sabre_waves_follow_combo_progression() {
         let sabre = BeamSabre::default();
         let base_upgrades = UpgradeLedger::default();
-        assert!(sabre_wave_profile(&sabre, &base_upgrades, 1).is_none());
-        let base = sabre_wave_profile(&sabre, &base_upgrades, 2)
+        assert!(sabre_wave_profile(&sabre, &base_upgrades, 1, &crate::combat::blades::STARTER_BLADE).is_none());
+        let base = sabre_wave_profile(&sabre, &base_upgrades, 2, &crate::combat::blades::STARTER_BLADE)
             .expect("starter Saber earns a wave on its second slash");
         assert_eq!(base.projectile_count, 2);
         assert!((base.damage_mult - 0.40).abs() < 1e-6);
@@ -4202,14 +4291,14 @@ mod move_def_wiring_tests {
             relics: vec!["solar_sabre_glyph".into()],
             ..default()
         };
-        let strong = sabre_wave_profile(&sabre, &upgraded, 2).unwrap();
+        let strong = sabre_wave_profile(&sabre, &upgraded, 2, &crate::combat::blades::STARTER_BLADE).unwrap();
         assert_eq!(strong.projectile_count, 4);
         assert!(strong.width > base.width);
         assert!(strong.length > base.length);
         assert!(strong.damage_mult > base.damage_mult);
         assert!(strong.explosive);
-        assert!(sabre_wave_profile(&sabre, &upgraded, 3).is_none());
-        assert!(sabre_wave_profile(&sabre, &upgraded, 4).is_some());
+        assert!(sabre_wave_profile(&sabre, &upgraded, 3, &crate::combat::blades::STARTER_BLADE).is_none());
+        assert!(sabre_wave_profile(&sabre, &upgraded, 4, &crate::combat::blades::STARTER_BLADE).is_some());
     }
 
     #[test]

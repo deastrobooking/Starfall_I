@@ -900,6 +900,23 @@ interact, right = open map). The old Select + D-pad direct special-slot chord
 was retired since it would double-fire with the utilities; keyboard 7–0 still
 selects specials directly.
 
+**Star Sabre blades (2026-07-27):** the shop's Weapons category now sells
+*blades*, and equipping one actually restats and recolours the sabre —
+previously `equipped_weapon` was saved but never read, so buying a weapon
+changed nothing. Eight profiles live in `src/combat/blades.rs`: the never-sold
+**Standard Issue** (exactly neutral, so "nothing equipped" plays as before)
+plus seven purchasable hilts — Solar Sabre, Crimson Edge (huge hits, short
+chain, slow swing), Emerald Lash (longer faster chain, lifesteal), Violet
+Tempest (piercing waves at 1.55x), Gold Regent (light relentless swings,
+techniques recover 32% faster), Frost Vigil (every wave detonates), and Void
+Requiem (devastating and hungry, slow to recover). Blades are **sidegrades,
+not a ladder**: a test fails the build if any blade is a strict upgrade over
+the starter. Multipliers compose on top of `BeamSabre::set_level`, so blade
+choice and sabre progression both keep working, and the chain can never drop
+below one slash. Each blade carries its own aura colour (built once at startup,
+indexed by colour) while the core stays hot and near-white for readability, and
+the HUD leads with the blade name and its special behaviour.
+
 **Star Sabre moveset (2026-07-27):** techniques resolve through one pure
 `resolve_sabre_technique` predicate (stance + input → verb), so the control
 scheme is unit-testable and a bare swing always falls through to the base

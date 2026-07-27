@@ -7,6 +7,7 @@
 //! | Module | Responsibility |
 //! |---|---|
 //! | [`data`] | `MoveDef`/`MoveLibrary` — authored frame data (`assets/combat/moves.json`) |
+//! | [`blades`] | Star Sabre blade catalog — the shop's weapons, and what they change |
 //! | [`damage`] | The single `apply_damage` path: resistances, crits, knockback |
 //! | [`hitstop`] | Bounded freeze-frames shared by every impact |
 //! | [`feedback`] | Flinch, hit flashes, damage numbers, death dissolve |
@@ -17,6 +18,7 @@
 //! Progression lives here rather than in `world/` because upgrades and perks
 //! almost exclusively modify combat numbers and unlock combat verbs.
 
+pub mod blades;
 pub mod damage;
 pub mod data;
 pub mod feedback;

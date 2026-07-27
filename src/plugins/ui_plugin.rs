@@ -5758,7 +5758,13 @@ fn hud_update_system(
                 PlayerHudTextKind::TraversalStatus => {
                     traversal_status_text(traversal, board_boost, tricks, stunt_run, rooftop_trial)
                 }
-                PlayerHudTextKind::SabreStatus => sabre_status_text(sabre, &progression.upgrades),
+                PlayerHudTextKind::SabreStatus => sabre_status_text(
+                    sabre,
+                    &progression.upgrades,
+                    crate::combat::blades::blade_for_id(
+                        progression.shop.equipped_weapon.as_deref(),
+                    ),
+                ),
             });
         }
     }
@@ -5849,7 +5855,11 @@ fn traversal_status_text(
     format!("BOARD: BOOST {:02}%", (ready * 100.0).round() as u32)
 }
 
-fn sabre_status_text(sabre: &BeamSabre, upgrades: &UpgradeLedger) -> String {
+fn sabre_status_text(
+    sabre: &BeamSabre,
+    upgrades: &UpgradeLedger,
+    blade: &crate::combat::blades::BladeProfile,
+) -> String {
     if sabre.technique_timer > 0.0 {
         return format!("SABER: {}", sabre.technique.label());
     }
@@ -5873,8 +5883,15 @@ fn sabre_status_text(sabre: &BeamSabre, upgrades: &UpgradeLedger) -> String {
     } else {
         ""
     };
+    // Surface the blade's special behaviour: without it a player has no way
+    // to tell a lifesteal hilt from a wave hilt in the middle of a fight.
+    let trait_note = match blade.trait_ {
+        crate::combat::blades::BladeTrait::None => String::new(),
+        other => format!(" • {}", other.label()),
+    };
     format!(
-        "SABER: {} • GEMS {gem_count}/4{legendary}",
+        "{}: {}{trait_note} • GEMS {gem_count}/4{legendary}",
+        blade.name.to_uppercase(),
         techniques.join("/")
     )
 }
@@ -8116,13 +8133,16 @@ mod menu_navigation_tests {
         upgrades.unlock_relic("legendary_starheart_gem");
         let mut sabre = BeamSabre::default();
 
-        let status = sabre_status_text(&sabre, &upgrades);
+        let status = sabre_status_text(&sabre, &upgrades, &crate::combat::blades::STARTER_BLADE);
         assert!(status.contains("WAVE 3/SPIN"));
         assert!(status.contains("GEMS 1/4 + STARHEART"));
 
         sabre.technique = crate::components::weapon::SabreTechnique::CycloneSlash;
         sabre.technique_timer = 0.3;
-        assert_eq!(sabre_status_text(&sabre, &upgrades), "SABER: CYCLONE");
+        assert_eq!(
+            sabre_status_text(&sabre, &upgrades, &crate::combat::blades::STARTER_BLADE),
+            "SABER: CYCLONE"
+        );
     }
 
     #[test]

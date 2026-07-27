@@ -288,6 +288,67 @@ mod tests {
     }
 
     #[test]
+    fn every_shop_blade_id_resolves_to_a_real_blade() {
+        use crate::combat::blades::{blade_for_id, BLADE_CATALOG, STARTER_BLADE};
+        let catalog = crate::resources::ShopCatalog::default();
+
+        // Every sellable blade must appear in the shop, or it is unbuyable.
+        for blade in BLADE_CATALOG.iter().filter(|b| b.id != STARTER_BLADE.id) {
+            assert!(
+                catalog.items.iter().any(|item| item.id == blade.id),
+                "{} is in the blade catalog but not for sale",
+                blade.name
+            );
+        }
+
+        // And every shop weapon that names a blade must resolve to it — a
+        // typo would silently sell the starter blade at full price.
+        for item in catalog
+            .items
+            .iter()
+            .filter(|i| i.category == crate::resources::ShopCategory::Weapons)
+        {
+            if let Some(blade) = BLADE_CATALOG.iter().find(|b| b.id == item.id) {
+                assert_eq!(blade_for_id(Some(item.id)).id, item.id);
+                assert_eq!(
+                    blade.price_credits, item.price_credits,
+                    "{} price differs between the shop and the blade catalog",
+                    item.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn buying_and_equipping_a_blade_changes_what_the_sabre_resolves_to() {
+        use crate::combat::blades::blade_for_id;
+        let catalog = crate::resources::ShopCatalog::default();
+        let item = catalog
+            .items
+            .iter()
+            .find(|i| i.id == "weapon_crimson_edge")
+            .expect("crimson edge is sold");
+
+        let mut owned = ShopOwnership::default();
+        // Nothing equipped resolves to the neutral, never-sold starter blade.
+        assert_eq!(
+            blade_for_id(owned.equipped_weapon.as_deref()).id,
+            "blade_standard_issue"
+        );
+
+        let mut credits = item.price_credits + 100;
+        buy(&mut owned, &mut credits, item).expect("purchase succeeds");
+        equip(&mut owned, item).expect("equip succeeds");
+
+        assert_eq!(
+            blade_for_id(owned.equipped_weapon.as_deref()).id,
+            "weapon_crimson_edge",
+            "equipping must change the blade the sabre resolves"
+        );
+        assert_eq!(credits, 100, "exactly the listed price was charged");
+    }
+
+    #[test]
     fn default_catalog_ids_are_unique_and_lists_are_deterministic() {
         let catalog = ShopCatalog::default();
         let mut ids: Vec<_> = catalog.items.iter().map(|i| i.id).collect();

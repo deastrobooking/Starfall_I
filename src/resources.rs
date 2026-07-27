@@ -752,6 +752,58 @@ impl Default for ShopCatalog {
                     1150,
                     None,
                 ),
+                // Star Sabre blades. Ids and prices are the join key into
+                // `crate::combat::blades::BLADE_CATALOG`, which owns what each
+                // one actually does; `every_shop_blade_id_resolves` guards the
+                // pairing. Equipping one restats and recolours the sabre.
+                ShopItem::new(
+                    "weapon_crimson_edge",
+                    "Crimson Edge",
+                    ShopCategory::Weapons,
+                    "Heavy war blade. Huge hits, short chain, deliberate swing.",
+                    1400,
+                    None,
+                ),
+                ShopItem::new(
+                    "weapon_emerald_lash",
+                    "Emerald Lash",
+                    ShopCategory::Weapons,
+                    "Living blade. Longer, faster chain that feeds health back on every hit.",
+                    1600,
+                    None,
+                ),
+                ShopItem::new(
+                    "weapon_violet_tempest",
+                    "Violet Tempest",
+                    ShopCategory::Weapons,
+                    "Wave-tuned hilt. Energy waves pierce ranks and hit far harder.",
+                    1750,
+                    None,
+                ),
+                ShopItem::new(
+                    "weapon_gold_regent",
+                    "Gold Regent",
+                    ShopCategory::Weapons,
+                    "Duelist's hilt. Light, relentless swings and techniques that barely rest.",
+                    1900,
+                    None,
+                ),
+                ShopItem::new(
+                    "weapon_frost_vigil",
+                    "Frost Vigil",
+                    ShopCategory::Weapons,
+                    "Siege hilt. Every energy wave detonates on impact.",
+                    2000,
+                    None,
+                ),
+                ShopItem::new(
+                    "weapon_void_requiem",
+                    "Void Requiem",
+                    ShopCategory::Weapons,
+                    "Unstable rift blade. Devastating and hungry, but slow to recover.",
+                    2400,
+                    None,
+                ),
                 ShopItem::new(
                     "vehicle_hoverboard_race",
                     "Hoverboard Race Deck",
