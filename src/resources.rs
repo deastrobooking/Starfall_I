@@ -3,13 +3,13 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::chapters::{Biome, ChapterId};
-use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint};
-use crate::character_parts::{
+use crate::character::blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint};
+use crate::character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use crate::character_studio::spec::CharacterSpec;
 use crate::components::player::PlayerProgression;
-use crate::hero_roster::HERO_NAMES;
+use crate::character::hero_roster::HERO_NAMES;
 use crate::robots::designer::RobotStyle;
 
 // ── Wave State (legacy population counter) ────────────────────────────────────

@@ -3,9 +3,9 @@
 use bevy::prelude::*;
 
 use crate::plugins::ui_plugin::MenuScrollPanel;
-use crate::robot_pets::{RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError};
-use crate::state::AppState;
-use crate::upgrades::UpgradeLedger;
+use crate::world::robot_pets::{RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError};
+use crate::engine::state::AppState;
+use crate::combat::upgrades::UpgradeLedger;
 
 pub struct RobotGaragePlugin;
 
@@ -457,8 +457,8 @@ fn format_pet_roster(robot_pets: &RobotPetCollection) -> String {
         .map(|(i, pet)| {
             let role = format!("{:?}", pet.role);
             let source = match pet.source {
-                crate::robot_pets::RobotPetSource::Rescued => "rescued",
-                crate::robot_pets::RobotPetSource::StoreBuilt => "built",
+                crate::world::robot_pets::RobotPetSource::Rescued => "rescued",
+                crate::world::robot_pets::RobotPetSource::StoreBuilt => "built",
             };
             let forms: Vec<&str> = pet.unlocked_forms.iter().map(|f| f.label()).collect();
             let forms_str = if forms.is_empty() {
@@ -498,7 +498,7 @@ fn format_form_browser(
         .count();
 
     // MechCommandLink gates advanced forms
-    let mech_link_rank = upgrades.rank(crate::upgrades::TechUpgradeId::MechCommandLink);
+    let mech_link_rank = upgrades.rank(crate::combat::upgrades::TechUpgradeId::MechCommandLink);
     let advanced = matches!(
         form,
         RobotAssemblyForm::GiantMech | RobotAssemblyForm::SpaceShip | RobotAssemblyForm::MegaShip

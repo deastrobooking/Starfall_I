@@ -2,7 +2,7 @@
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
-use crate::combat_data::{ActiveMelee, MeleePhase};
+use crate::combat::data::{ActiveMelee, MeleePhase};
 use serde::{Deserialize, Serialize};
 
 // ── Weapon Type ───────────────────────────────────────────────────────────────
@@ -559,7 +559,7 @@ impl BeamSabre {
 #[derive(Component, Debug, Clone)]
 pub struct Projectile {
     pub damage: f32,
-    pub damage_type: crate::damage::DamageType,
+    pub damage_type: crate::combat::damage::DamageType,
     pub speed: f32,
     pub direction: Vec3,
     pub lifetime: f32,

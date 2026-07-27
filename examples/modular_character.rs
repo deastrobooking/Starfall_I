@@ -14,7 +14,7 @@
 // demo exercises; silence dead-code noise like the main binary does.
 #![allow(dead_code)]
 
-#[path = "../src/modular_character.rs"]
+#[path = "../src/character/modular.rs"]
 mod modular_character;
 
 use bevy::prelude::*;

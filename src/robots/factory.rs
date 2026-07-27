@@ -6,7 +6,7 @@ use super::creature::{
 use super::designer::{HeadShape, LegStyle, RobotStyle, VisorStyle};
 use bevy::prelude::*;
 
-use crate::rendering::{PbrBundle, SpatialBundle};
+use crate::engine::rendering::{PbrBundle, SpatialBundle};
 
 /// Procedurally generate a robot mesh hierarchy at the given world position.
 /// Returns the root `Entity`. All sub-parts are children of the root.
@@ -76,14 +76,14 @@ pub fn spawn_creature(
 /// contract as World Kit and Character Studio).
 fn add_part(
     meshes: &mut Assets<Mesh>,
-    stack: &[crate::mesh_modifiers::MeshModifier],
+    stack: &[crate::character::mesh_modifiers::MeshModifier],
     mesh: impl Into<Mesh>,
 ) -> Handle<Mesh> {
     let mesh = mesh.into();
     let derived = if stack.is_empty() {
         mesh
     } else {
-        crate::mesh_modifiers::apply_stack_to_mesh(&mesh, stack).unwrap_or(mesh)
+        crate::character::mesh_modifiers::apply_stack_to_mesh(&mesh, stack).unwrap_or(mesh)
     };
     meshes.add(derived)
 }
@@ -644,7 +644,7 @@ fn spawn_robot_with_material_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mesh_modifiers::MeshModifier;
+    use crate::character::mesh_modifiers::MeshModifier;
 
     #[test]
     fn add_part_applies_the_style_modifier_stack() {
@@ -664,7 +664,7 @@ mod tests {
     fn creature_spec_style_round_trips_modifiers_through_serde() {
         let mut spec = CreatureSpec::default();
         spec.style.modifiers.push(MeshModifier::Twist {
-            axis: crate::mesh_modifiers::ModifierAxis::Y,
+            axis: crate::character::mesh_modifiers::ModifierAxis::Y,
             degrees: 30.0,
         });
         let json = serde_json::to_string(&spec.style).unwrap();

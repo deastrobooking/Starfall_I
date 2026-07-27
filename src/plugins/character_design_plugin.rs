@@ -2,26 +2,26 @@ use bevy::prelude::*;
 
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 
-use crate::character_blueprint::{
+use crate::character::blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
-use crate::character_parts::{
+use crate::character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
-use crate::characters::{
+use crate::character::presets::{
     accent_preset, accent_presets, eye_preset, eye_presets, hair_preset, hair_presets, hero_config,
     hero_config_with_overrides, normalize_color_preset_index, outfit_preset, outfit_presets,
     skin_preset, skin_presets,
 };
 use crate::components::player::PlayerCamera;
-use crate::player_mesh::spawn_modular_player_preview;
+use crate::character::player_mesh::spawn_modular_player_preview;
 use crate::plugins::ui_plugin::MenuScrollPanel;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     CharacterBaseModel, CharacterDesignData, CharacterDesignReturnTarget, CharacterDesignSnapshot,
     PlayerPartLoadout, PlayerSelectState,
 };
-use crate::state::AppState;
+use crate::engine::state::AppState;
 use std::fs;
 use std::path::PathBuf;
 

@@ -12,12 +12,12 @@
 /// Call `spawn_tree()` to instantiate a species at an arbitrary world position.
 use bevy::prelude::*;
 
-use crate::spatial_lod::{SpatialLod, SpatialLodProxy};
+use crate::engine::spatial_lod::{SpatialLod, SpatialLodProxy};
 
 use super::{turtle::TurtleResult, LSystem};
 use crate::components::world::WorldGeometry;
-use crate::modular_character::bake_character_mesh as bake_meshes;
-use crate::rendering::PbrBundle;
+use crate::character::modular::bake_character_mesh as bake_meshes;
+use crate::engine::rendering::PbrBundle;
 
 // ── Tree species ──────────────────────────────────────────────────────────────
 

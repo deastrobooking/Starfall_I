@@ -2,8 +2,8 @@
 use bevy::prelude::*;
 
 use crate::components::weapon::WeaponRanks;
-use crate::perks::PerkTree;
-use crate::upgrades::UpgradeLedger;
+use crate::combat::perks::PerkTree;
+use crate::combat::upgrades::UpgradeLedger;
 
 // ── Marker ────────────────────────────────────────────────────────────────────
 /// Marks the player entity (the physics body).
@@ -130,7 +130,7 @@ pub struct PlayerProgression {
     pub upgrades: UpgradeLedger,
     pub weapon_ranks: WeaponRanks,
     /// Per-player shop purchases and equipped choices (PX3).
-    pub shop: crate::shop_transactions::ShopOwnership,
+    pub shop: crate::world::shop_transactions::ShopOwnership,
 }
 
 impl PlayerStats {

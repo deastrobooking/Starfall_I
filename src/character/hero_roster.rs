@@ -5,7 +5,7 @@ use crate::components::player::{DodgeState, JetpackState, PlayerMovement, Player
 use crate::components::weapon::{
     MeleeCombo, SpecialSlot, SpecialWeapon, SpecialWeaponInventory, WeaponInventory, WeaponType,
 };
-use crate::robot_pets::{RobotAssemblyForm, RobotPetCollection, RobotPetRole};
+use crate::world::robot_pets::{RobotAssemblyForm, RobotPetCollection, RobotPetRole};
 
 pub const HERO_NAMES: [&str; 8] = [
     "Vincenzo",
@@ -330,7 +330,7 @@ fn robot_pet_power_bonus(robots: &RobotPetCollection) -> HeroPowerSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robot_pets::{RobotPetBlueprint, RobotPetRole};
+    use crate::world::robot_pets::{RobotPetBlueprint, RobotPetRole};
 
     #[test]
     fn all_humans_have_unique_signature_names() {

@@ -25,10 +25,10 @@ use crate::plugins::weapon_plugin::{HitParticle, SabreTechniqueVfx, SABRE_VFX_EN
 use crate::plugins::world_plugin::{
     BuildingClusterLodProxy, TerrainHighLodPatch, TerrainProxyLodPatch,
 };
-use crate::rendering::{
+use crate::engine::rendering::{
     EnergyMaterial, IceMaterial, LavaMaterial, ShieldMaterial, ToonMaterial, WaterMaterial,
 };
-use crate::spatial_lod::{ManagedSpatialLod, SpatialLod, SpatialLodProxy};
+use crate::engine::spatial_lod::{ManagedSpatialLod, SpatialLod, SpatialLodProxy};
 
 /// Canonical per-frame gameplay ordering. Systems opt in with `.in_set(GameSet::X)`.
 ///

@@ -10,9 +10,9 @@
 
 #![allow(dead_code)]
 
-#[path = "../src/modular_character.rs"]
+#[path = "../src/character/modular.rs"]
 mod modular_character;
-#[path = "../src/procedural_meshes.rs"]
+#[path = "../src/character/procedural_meshes.rs"]
 mod procedural_meshes;
 
 use bevy::prelude::*;

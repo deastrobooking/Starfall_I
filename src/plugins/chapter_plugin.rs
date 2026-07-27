@@ -18,16 +18,16 @@ use crate::components::world::{
     BoatPassenger, LaserTurret, MovingPlatform, WalkableSurface, WorldAnchor, WorldGeometry,
 };
 use crate::events::*;
-use crate::game_rng::GameRng;
-use crate::missions::dungeon_destination;
-use crate::physics::prelude::{Collider, RigidBody};
+use crate::engine::game_rng::GameRng;
+use crate::world::missions::dungeon_destination;
+use crate::engine::physics::prelude::{Collider, RigidBody};
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
-use crate::rendering::PbrBundle;
+use crate::engine::rendering::PbrBundle;
 use crate::resources::{
     BiomePalette, ChapterProgress, CurrentChapter, DungeonCrawlState, FastTravelDestination,
     PlaySessionTransition, WaveInfo,
 };
-use crate::state::AppState;
+use crate::engine::state::AppState;
 
 pub struct ChapterPlugin;
 

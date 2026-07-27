@@ -7,13 +7,13 @@ use bevy::transform::TransformSystems;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use crate::chapters::{chapter_map_location, EVEREST_RANGE_HALF_EXTENT};
-use crate::character_blueprint::{
+use crate::character::blueprint::{
     CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
-use crate::character_parts::CharacterLoadout;
+use crate::character::parts::CharacterLoadout;
 use crate::character_studio::generators::build_character_patch;
 use crate::character_studio::human_mesh::{spawn_human, PlayableStudioHuman};
-use crate::characters::{
+use crate::character::presets::{
     accent_preset, attach_native_playable_character, attach_player_gameplay_rig,
     despawn_cartoon_character_parts, eye_preset, hair_preset, hero_config,
     hero_config_with_overrides, outfit_preset, skin_preset,
@@ -28,16 +28,16 @@ use crate::components::world::{
     BoatPassenger, Building, EnterableBuilding, RailGrindState, SpeedLoopGuide,
     SpeedRoadCheckpoint, WaterBody, WaterBodyKind, WorldAnchor, WorldRouteMarker,
 };
-use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
+use crate::combat::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::*;
-use crate::game_loop::{fixed_motor_off, fixed_motor_on, GameSet, PreviousTickPosition, SimConfig};
-use crate::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
-use crate::hitstop::hitstop_inactive;
-use crate::input_buffer::PlayerInputBuffers;
-use crate::physics::prelude::*;
-use crate::player_mesh::attach_modular_player_mesh;
+use crate::engine::game_loop::{fixed_motor_off, fixed_motor_on, GameSet, PreviousTickPosition, SimConfig};
+use crate::character::hero_roster::{apply_hero_runtime, hero_power_profile, HeroPowerProfile, HeroPowerSet};
+use crate::combat::hitstop::hitstop_inactive;
+use crate::engine::input_buffer::PlayerInputBuffers;
+use crate::engine::physics::prelude::*;
+use crate::character::player_mesh::attach_modular_player_mesh;
 use crate::plugins::world_plugin::terrain_surface_y;
-use crate::rendering::{
+use crate::engine::rendering::{
     Camera3dBundle, PbrBundle, ShieldMaterial, ShieldMaterialUniform, ShieldPbrBundle,
     SpatialBundle,
 };
@@ -47,12 +47,12 @@ use crate::resources::{
     PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
     WorldRouteRegistry, WorldRouteState,
 };
-use crate::robot_pets::RobotPetCollection;
-use crate::sfx::ModularActionSfxEvent;
-use crate::state::AppState;
+use crate::world::robot_pets::RobotPetCollection;
+use crate::audio::sfx::ModularActionSfxEvent;
+use crate::engine::state::AppState;
 
 /// Route the player's visual through the new native modular humanoid
-/// ([`crate::player_mesh`]) instead of the legacy `character_parts` meshes.
+/// ([`crate::character::player_mesh`]) instead of the legacy `character_parts` meshes.
 /// Flip to `false` to fall back to the original system.
 const USE_MODULAR_PLAYER_MESH: bool = true;
 
@@ -675,10 +675,10 @@ fn seed_discovered_sabre_relics(
     progress: &ChapterProgress,
     player_progression: &mut PlayerProgression,
 ) -> usize {
-    crate::upgrades::STARTER_SABRE_RELIC_IDS
+    crate::combat::upgrades::STARTER_SABRE_RELIC_IDS
         .into_iter()
         .chain(
-            crate::upgrades::SABRE_RELIC_IDS
+            crate::combat::upgrades::SABRE_RELIC_IDS
                 .into_iter()
                 .filter(|relic_id| progress.has_discoverable(relic_id)),
         )
@@ -866,7 +866,7 @@ fn spawn_players(
                 StuntRunState::default(),
                 StuntRaceProgress::default(),
                 RooftopTrialProgress::default(),
-                crate::tricks::TrickState::default(),
+                crate::combat::tricks::TrickState::default(),
                 ArmorSet::default(),
                 ArmorRechargeState::default(),
                 starter_inventory,
@@ -909,7 +909,7 @@ fn spawn_players(
         let visual_loadout =
             PlayerPartLoadout::resolve_for_hero(character_name, slot.part_loadout, *part_loadout);
         if CharacterLoadout::from(visual_loadout).arms
-            == crate::character_parts::ArmPreset::DariaCannon
+            == crate::character::parts::ArmPreset::DariaCannon
         {
             commands.entity(player).insert(ArmCannonUser);
         }
@@ -3995,7 +3995,7 @@ fn player_dodge_update(
         });
         // Riding the board rebinds dodge to the grind trick.
         let board_claims_dodge = sabre_ctx.is_some_and(|(_, _, traversal)| {
-            crate::tricks::hoverboard_claims_trick_input(traversal.active)
+            crate::combat::tricks::hoverboard_claims_trick_input(traversal.active)
         });
 
         if pi.dodge
@@ -4052,7 +4052,7 @@ fn player_parry_update(
     for (mut parry, state, pi, progression, traversal) in player_q.iter_mut() {
         parry.cooldown_timer = (parry.cooldown_timer - dt).max(0.0);
         // Riding the board rebinds parry to the manual trick.
-        if traversal.is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active)) {
+        if traversal.is_some_and(|t| crate::combat::tricks::hoverboard_claims_trick_input(t.active)) {
             continue;
         }
 
@@ -4680,11 +4680,11 @@ mod tests {
 
     #[test]
     fn blueprint_caps_become_stable_authored_bases() {
-        let body = crate::character_blueprint::BodyRecipe::default();
+        let body = crate::character::blueprint::BodyRecipe::default();
         let mut blueprint = CharacterBlueprint::hero(
             "Cap Contract",
             body,
-            crate::character_blueprint::CharacterPaletteRecipe {
+            crate::character::blueprint::CharacterPaletteRecipe {
                 skin: Color::WHITE,
                 outfit: Color::WHITE,
                 accent: Color::WHITE,

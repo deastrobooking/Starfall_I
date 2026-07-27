@@ -2,29 +2,29 @@ use avian3d::prelude::{Collider as AvianCollider, RayHitData, SpatialQuery, Spat
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
-use crate::combat_data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary, RangedMoveDef};
+use crate::combat::data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary, RangedMoveDef};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{CitySpyDrone, DeadEnemy, Enemy, EnemyType, FlyingDrone};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::NpcRoadVehicle;
-use crate::damage::{
+use crate::combat::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageType, Damageable, Health,
 };
 use crate::events::*;
-use crate::game_loop::GameSet;
-use crate::game_rng::GameRng;
-use crate::hacking::HackedUnit;
-use crate::hitstop::HitstopState;
-use crate::physics::{
+use crate::engine::game_loop::GameSet;
+use crate::engine::game_rng::GameRng;
+use crate::world::hacking::HackedUnit;
+use crate::combat::hitstop::HitstopState;
+use crate::engine::physics::{
     prelude::{CollisionProfile, GameCollisionLayer},
     world_line_of_sight,
 };
-use crate::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
+use crate::engine::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::resources::DungeonCrawlState;
-use crate::sfx::ModularActionSfxEvent;
-use crate::state::AppState;
-use crate::upgrades::UpgradeLedger;
+use crate::audio::sfx::ModularActionSfxEvent;
+use crate::engine::state::AppState;
+use crate::combat::upgrades::UpgradeLedger;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
 #[derive(Component)]
@@ -2200,7 +2200,7 @@ fn melee_combo_system(
     {
         // Riding the board rebinds the melee buttons to flip/grab tricks.
         let board_claims_input =
-            traversal.is_some_and(|t| crate::tricks::hoverboard_claims_trick_input(t.active));
+            traversal.is_some_and(|t| crate::combat::tricks::hoverboard_claims_trick_input(t.active));
         let upgrades = &progression.upgrades;
         let Ok(cam) = cam_q.get(cam_ref.0) else {
             continue;
@@ -2458,9 +2458,9 @@ fn resolve_sabre_technique(
 
 /// Authored data for a technique.
 fn sabre_technique_def(
-    defs: &crate::combat_data::SabreTechniqueDefs,
+    defs: &crate::combat::data::SabreTechniqueDefs,
     technique: SabreTechnique,
-) -> Option<&crate::combat_data::SabreTechniqueDef> {
+) -> Option<&crate::combat::data::SabreTechniqueDef> {
     Some(match technique {
         SabreTechnique::CycloneSlash => &defs.cyclone_slash,
         SabreTechnique::CometDash => &defs.comet_dash,
@@ -2978,7 +2978,7 @@ fn spawn_sabre_thrown_blade(
     owner: Entity,
     damage: f32,
     damage_type: DamageType,
-    tech: &crate::combat_data::SabreTechniqueDef,
+    tech: &crate::combat::data::SabreTechniqueDef,
 ) {
     let direction = forward.normalize_or(Vec3::NEG_Z);
     commands.spawn((
@@ -3858,7 +3858,7 @@ mod move_def_wiring_tests {
     #[test]
     fn sabre_technique_resolver_maps_stance_and_direction_to_verbs() {
         let mut up = UpgradeLedger::default();
-        for id in crate::upgrades::STARTER_SABRE_RELIC_IDS {
+        for id in crate::combat::upgrades::STARTER_SABRE_RELIC_IDS {
             up.unlock_relic(id);
         }
         let none = Vec2::ZERO;
@@ -4198,7 +4198,7 @@ mod move_def_wiring_tests {
         assert!(!base.explosive);
 
         let upgraded = UpgradeLedger {
-            ranks: vec![(crate::upgrades::TechUpgradeId::BeamCapacitors, 5)],
+            ranks: vec![(crate::combat::upgrades::TechUpgradeId::BeamCapacitors, 5)],
             relics: vec!["solar_sabre_glyph".into()],
             ..default()
         };

@@ -1205,7 +1205,7 @@ pub struct SceneObjectDraft {
     pub material_id: Option<String>,
     /// Non-destructive modifier stack applied to the primitive's base mesh.
     #[serde(default)]
-    pub modifiers: Vec<crate::mesh_modifiers::MeshModifier>,
+    pub modifiers: Vec<crate::character::mesh_modifiers::MeshModifier>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

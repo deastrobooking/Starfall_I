@@ -536,14 +536,14 @@ impl Material for LavaMaterial {
 mod shader_contract_tests {
     use super::*;
 
-    const TOON_SHADER: &str = include_str!("../assets/shaders/toon.wgsl");
-    const TERRAIN_SHADER: &str = include_str!("../assets/shaders/terrain.wgsl");
-    const GRASS_SHADER: &str = include_str!("../assets/shaders/grass.wgsl");
-    const WATER_SHADER: &str = include_str!("../assets/shaders/water.wgsl");
-    const ENERGY_SHADER: &str = include_str!("../assets/shaders/energy.wgsl");
-    const SHIELD_SHADER: &str = include_str!("../assets/shaders/shield.wgsl");
-    const ICE_SHADER: &str = include_str!("../assets/shaders/ice.wgsl");
-    const LAVA_SHADER: &str = include_str!("../assets/shaders/lava.wgsl");
+    const TOON_SHADER: &str = include_str!("../../assets/shaders/toon.wgsl");
+    const TERRAIN_SHADER: &str = include_str!("../../assets/shaders/terrain.wgsl");
+    const GRASS_SHADER: &str = include_str!("../../assets/shaders/grass.wgsl");
+    const WATER_SHADER: &str = include_str!("../../assets/shaders/water.wgsl");
+    const ENERGY_SHADER: &str = include_str!("../../assets/shaders/energy.wgsl");
+    const SHIELD_SHADER: &str = include_str!("../../assets/shaders/shield.wgsl");
+    const ICE_SHADER: &str = include_str!("../../assets/shaders/ice.wgsl");
+    const LAVA_SHADER: &str = include_str!("../../assets/shaders/lava.wgsl");
 
     #[test]
     fn custom_shaders_use_bevy_material_bind_group_contract() {

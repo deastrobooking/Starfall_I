@@ -39,7 +39,7 @@ pub struct CharacterPatch {
     pub hair: HairStyle,
     pub flair: FlairStyle,
     /// Non-destructive modifier stack applied to every generated part mesh.
-    pub modifiers: Vec<crate::mesh_modifiers::MeshModifier>,
+    pub modifiers: Vec<crate::character::mesh_modifiers::MeshModifier>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

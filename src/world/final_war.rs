@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::faction::Faction;
 use crate::events::UiMessageEvent;
-use crate::raids::{RaidConsequence, RaidKind, RaidRegistry};
+use crate::world::raids::{RaidConsequence, RaidKind, RaidRegistry};
 use crate::resources::{ChapterProgress, WorldSiteOwner, WorldSiteRegistry, WorldSiteState};
-use crate::state::AppState;
+use crate::engine::state::AppState;
 
 const PRESSURE_TICK_INTERVAL: f32 = 10.0;
 const ESCALATING_THRESHOLD: u32 = 50;

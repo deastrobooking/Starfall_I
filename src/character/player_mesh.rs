@@ -1,7 +1,7 @@
 //! Native math-modeled character builder.
 //!
 //! A component-based, fully-procedural (pure-Rust) hero builder layered on the
-//! socket-assembly system in [`crate::modular_character`]. Each hero is assembled
+//! socket-assembly system in [`crate::character::modular`]. Each hero is assembled
 //! from math primitives ([`superellipsoid_mesh`]) snapped together at named
 //! sockets: base limbs in an under-suit, then armor *components* (chest plate,
 //! pauldrons, helmet, visor, gauntlets, greaves, cape, belt) added on top.
@@ -18,14 +18,14 @@
 
 use bevy::prelude::*;
 
-use crate::character_parts::{
+use crate::character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
-use crate::characters::{emissive_mat, CartoonCharacterConfig};
-use crate::modular_character::{
+use crate::character::presets::{emissive_mat, CartoonCharacterConfig};
+use crate::character::modular::{
     spawn_character_under, Attachment, CharacterRecipe, PartPrefab, PartRegistry, Socket,
 };
-use crate::procedural_meshes::superellipsoid_mesh;
+use crate::character::procedural_meshes::superellipsoid_mesh;
 
 /// Torso centre height in normalized figure space (feet = 0, head top ≈ 1.0).
 /// Raised alongside the Mœbius leg elongation so longer legs still land the feet
@@ -1251,7 +1251,7 @@ fn build_recipe(d: &HeroDesign) -> CharacterRecipe {
 
 /// Attach a fully math-modeled, component-based hero as the visual for `root`
 /// (the player entity), sized to fill its physics capsule. Call
-/// [`crate::characters::attach_player_gameplay_rig`] alongside this to keep the
+/// [`crate::character::presets::attach_player_gameplay_rig`] alongside this to keep the
 /// skeleton / weapon-attach points alive.
 pub fn attach_modular_player_mesh(
     commands: &mut Commands,
@@ -1310,7 +1310,7 @@ pub fn spawn_modular_player_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::characters::hero_config;
+    use crate::character::presets::hero_config;
 
     #[test]
     fn modular_design_responds_to_part_loadout() {

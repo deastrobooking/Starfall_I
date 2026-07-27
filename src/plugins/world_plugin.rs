@@ -38,25 +38,25 @@ use crate::components::player::{
     WaterTraversalState,
 };
 use crate::components::world::*;
-use crate::damage::{DamageInfo, DamageType, Damageable, Health};
-use crate::discussion::{
+use crate::combat::damage::{DamageInfo, DamageType, Damageable, Health};
+use crate::world::discussion::{
     discussion_script, settlement_discussion_id, settlement_guardian_role, DiscussionState,
 };
 use crate::engine_tools::ProceduralMaterialBinding;
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
-use crate::final_war::{
+use crate::world::final_war::{
     coordinated_raid_trigger_system, final_war_phase_announce_system, pressure_accumulation_system,
     win_condition_system,
 };
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
-use crate::modular_character::bake_character_mesh;
+use crate::character::modular::bake_character_mesh;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
-use crate::raids::{
+use crate::world::raids::{
     static_defense_score_for_site, RaidId, RaidKind, RaidRegistry, RaidStartResult,
     RaidThreatMarker, RaidTickEvent, RaidUfoMarker, CLOUDRAIL_TUTORIAL_RAID_SITE,
 };
-use crate::rendering::{
+use crate::engine::rendering::{
     DirectionalLightBundle, PbrBundle, PointLightBundle, SpatialBundle, TerrainMaterial,
     TerrainMaterialUniform, TerrainPbrBundle, WaterMaterial, WaterMaterialUniform,
 };
@@ -65,11 +65,11 @@ use crate::resources::{
     DungeonRoomState, GameSettings, PlaySessionTransition, WorldRouteRegistry, WorldRouteState,
     WorldSiteRegistry, WorldSiteState,
 };
-use crate::robot_pets::RobotPetCollection;
-use crate::settlement_economy::{settlement_build_def, SettlementBuildKind, SettlementEconomy};
-use crate::sfx::ModularActionSfxEvent;
-use crate::state::AppState;
-use crate::tricks::{ActiveTrick, TrickCategory, TrickDir, TrickLibrary, TrickState};
+use crate::world::robot_pets::RobotPetCollection;
+use crate::world::settlement_economy::{settlement_build_def, SettlementBuildKind, SettlementEconomy};
+use crate::audio::sfx::ModularActionSfxEvent;
+use crate::engine::state::AppState;
+use crate::combat::tricks::{ActiveTrick, TrickCategory, TrickDir, TrickLibrary, TrickState};
 
 mod roads;
 use roads::*;
@@ -205,8 +205,8 @@ pub(crate) struct TerrainProxyLodPatch;
 /// Physics backends normally multiply collider shapes by `GlobalTransform` scale.
 /// Scaled unit-cube roads/bridges below already specify collider half-extents
 /// in world units, so this prevents invisible oversized blockers.
-fn world_space_collider_scale() -> crate::physics::prelude::ColliderScale {
-    crate::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
+fn world_space_collider_scale() -> crate::engine::physics::prelude::ColliderScale {
+    crate::engine::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
 }
 
 // ── Grass wind material ───────────────────────────────────────────────────────
@@ -1585,7 +1585,7 @@ fn raid_spawn_system(
         .raids
         .iter()
         .filter(|raid| {
-            raid.phase == crate::raids::RaidPhase::Active
+            raid.phase == crate::world::raids::RaidPhase::Active
                 && (!raid.spawned || !existing_threats.contains(&raid.id))
         })
         .map(|raid| (raid.id, raid.target_site, raid.kind, raid.wave_size))
@@ -1748,7 +1748,7 @@ fn collider_debug_toggle_system(
     mesh_collider_q: Query<
         (Entity, &Mesh3d),
         (
-            With<crate::physics::prelude::Collider>,
+            With<crate::engine::physics::prelude::Collider>,
             With<WorldGeometry>,
             Without<ColliderDebugSource>,
             Without<ColliderDebugVisual>,
@@ -1757,7 +1757,7 @@ fn collider_debug_toggle_system(
     box_collider_q: Query<
         (Entity, &DebugColliderBox),
         (
-            With<crate::physics::prelude::Collider>,
+            With<crate::engine::physics::prelude::Collider>,
             With<WorldGeometry>,
             Without<Mesh3d>,
             Without<ColliderDebugSource>,
@@ -2545,7 +2545,7 @@ fn board_boost_pad_system(
     }
 }
 
-fn road_boost_upgrade_mult(upgrades: &crate::upgrades::UpgradeLedger) -> f32 {
+fn road_boost_upgrade_mult(upgrades: &crate::combat::upgrades::UpgradeLedger) -> f32 {
     (upgrades.boot_ground_speed_mult() * upgrades.armor_speed_mult()).clamp(1.0, 1.40)
 }
 
@@ -3318,7 +3318,7 @@ fn generate_city(
         droplet_mesh: meshes.add(Sphere::new(0.34)),
         mist_material: pal.waterfall_mist.clone(),
         audio: audio_sources.add(AudioSource {
-            bytes: crate::audio_synth::render_wav(&crate::audio_synth::preset_waterfall_ambience())
+            bytes: crate::audio::synth::render_wav(&crate::audio::synth::preset_waterfall_ambience())
                 .into(),
         }),
         volume: settings.sfx_volume.clamp(0.0, 1.0) * 0.24,
@@ -4970,8 +4970,8 @@ fn spawn_city_rooftop_skybridge(
         WorldGeometry,
         WalkableSurface,
         DebugColliderBox { size: deck_size },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             deck_size.x * 0.5,
             deck_size.y * 0.5,
             deck_size.z * 0.5,
@@ -5056,8 +5056,8 @@ fn spawn_city_rooftop_zipline(
             WorldGeometry,
             WalkableSurface,
             DebugColliderBox { size: pad_size },
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(
                 pad_size.x * 0.5,
                 pad_size.y * 0.5,
                 pad_size.z * 0.5,
@@ -5140,8 +5140,8 @@ fn spawn_city_sky_playground(
         WorldGeometry,
         WalkableSurface,
         DebugColliderBox { size: plaza_size },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(plaza_size.y * 0.5, plan.radius),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(plaza_size.y * 0.5, plan.radius),
     ));
     commands.spawn((
         Name::new("Playground Safety Halo"),
@@ -5228,8 +5228,8 @@ fn spawn_city_sky_playground(
             .with_priority(1.2),
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(0.29, 1.65),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(0.29, 1.65),
     ));
     commands.spawn((
         Name::new("Sky Playground Launch Arrow"),
@@ -5309,7 +5309,7 @@ fn build_building_cluster_lods(
             Without<ChildOf>,
             Without<EnterableBuilding>,
             Without<BuildingLodClustered>,
-            Without<crate::spatial_lod::SpatialLodProxy>,
+            Without<crate::engine::spatial_lod::SpatialLodProxy>,
         ),
     >,
 ) {
@@ -5390,7 +5390,7 @@ fn build_building_cluster_lods(
         for part in &cluster.parts {
             commands.entity(part.entity).insert((
                 BuildingLodClustered,
-                crate::spatial_lod::SpatialLod::building_high(max_height),
+                crate::engine::spatial_lod::SpatialLod::building_high(max_height),
             ));
         }
         commands.spawn((
@@ -5401,8 +5401,8 @@ fn build_building_cluster_lods(
                 ..default()
             },
             WorldGeometry,
-            crate::spatial_lod::SpatialLod::building_proxy(max_height),
-            crate::spatial_lod::SpatialLodProxy,
+            crate::engine::spatial_lod::SpatialLod::building_proxy(max_height),
+            crate::engine::spatial_lod::SpatialLodProxy,
             BuildingClusterLodProxy,
         ));
     }
@@ -5420,8 +5420,8 @@ fn spawn_ground_plane(commands: &mut Commands) {
         WorldGeometry,
         WalkableSurface,
         DebugColliderBox { size },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
     ));
 }
 
@@ -5762,8 +5762,8 @@ fn spawn_secret_cave_solid(
         },
         WorldGeometry,
         ProceduralMaterialBinding::new("cave.secret_network", material_slot),
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
     ));
     if walkable {
         entity.insert(WalkableSurface);
@@ -6081,8 +6081,8 @@ fn spawn_secret_cave_system(
             closed: encounter_closed,
             open: encounter_open,
         },
-        crate::physics::prelude::RigidBody::KinematicPositionBased,
-        crate::physics::prelude::Collider::cuboid((width + 0.8) * 0.5, 2.8, 0.35),
+        crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+        crate::engine::physics::prelude::Collider::cuboid((width + 0.8) * 0.5, 2.8, 0.35),
         WorldGeometry,
     ));
 
@@ -6217,12 +6217,12 @@ fn spawn_secret_cave_system(
                 transform: Transform::from_translation(base).with_rotation(rotation),
                 ..default()
             },
-            crate::physics::prelude::Collider::cuboid(
+            crate::engine::physics::prelude::Collider::cuboid(
                 platform_size.x * 0.5,
                 platform_size.y * 0.5,
                 platform_size.z * 0.5,
             ),
-            crate::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
             WorldGeometry,
             WalkableSurface,
             MovingPlatform {
@@ -6306,8 +6306,8 @@ fn spawn_secret_cave_system(
                 closed,
                 open,
             },
-            crate::physics::prelude::RigidBody::KinematicPositionBased,
-            crate::physics::prelude::Collider::cuboid(door_width * 0.5, door_height * 0.5, 0.4),
+            crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::engine::physics::prelude::Collider::cuboid(door_width * 0.5, door_height * 0.5, 0.4),
             WorldGeometry,
         ));
     }
@@ -6886,8 +6886,8 @@ fn spawn_scientist_temple_gate(
                 closed,
                 open,
             },
-            crate::physics::prelude::RigidBody::KinematicPositionBased,
-            crate::physics::prelude::Collider::cuboid(2.9, 4.2, 0.55),
+            crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::engine::physics::prelude::Collider::cuboid(2.9, 4.2, 0.55),
         ));
     }
 
@@ -7791,8 +7791,8 @@ fn spawn_dungeon_crawl_gate(
                 closed,
                 open,
             },
-            crate::physics::prelude::RigidBody::KinematicPositionBased,
-            crate::physics::prelude::Collider::cuboid(2.55, 3.7, 0.5),
+            crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::engine::physics::prelude::Collider::cuboid(2.55, 3.7, 0.5),
         ));
     }
 
@@ -7847,8 +7847,8 @@ fn spawn_dungeon_pillar(
             ..default()
         },
         WorldGeometry,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(2.4, 1.4),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(2.4, 1.4),
     ));
 }
 
@@ -7898,8 +7898,8 @@ fn spawn_dungeon_moving_bridge(
                 transform: Transform::from_translation(start).with_rotation(rot),
                 ..default()
             },
-            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
-            crate::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
             WorldGeometry,
             WalkableSurface,
             MovingPlatform {
@@ -7945,8 +7945,8 @@ fn spawn_dungeon_turrets(
                     damage: 7.0 + chapter as f32 * 0.35,
                     beam_material: beam_mat.clone(),
                 },
-                crate::physics::prelude::RigidBody::Fixed,
-                crate::physics::prelude::Collider::cylinder(0.7, 0.8),
+                crate::engine::physics::prelude::RigidBody::Fixed,
+                crate::engine::physics::prelude::Collider::cylinder(0.7, 0.8),
             ))
             .id();
         commands.entity(turret).with_children(|parent| {
@@ -8964,7 +8964,7 @@ fn spawn_terrain(
     let vert_count = collider_vertices.len();
     let tri_count = collider_triangles.len();
     let terrain_collider =
-        crate::physics::prelude::Collider::trimesh(collider_vertices, collider_triangles);
+        crate::engine::physics::prelude::Collider::trimesh(collider_vertices, collider_triangles);
     let terrain_root = commands
         .spawn((
             Transform::IDENTITY,
@@ -8977,7 +8977,7 @@ fn spawn_terrain(
         Ok(collider) => {
             commands
                 .entity(terrain_root)
-                .insert((crate::physics::prelude::RigidBody::Fixed, collider));
+                .insert((crate::engine::physics::prelude::RigidBody::Fixed, collider));
         }
         Err(err) => {
             warn!(
@@ -9010,7 +9010,7 @@ fn spawn_terrain(
                         ..default()
                     },
                     ProceduralMaterialBinding::new("biome.main_world", "terrain"),
-                    crate::spatial_lod::SpatialLod::terrain_high(),
+                    crate::engine::spatial_lod::SpatialLod::terrain_high(),
                     TerrainHighLodPatch,
                 ));
                 parent.spawn((
@@ -9021,8 +9021,8 @@ fn spawn_terrain(
                         ..default()
                     },
                     ProceduralMaterialBinding::new("biome.main_world", "terrain"),
-                    crate::spatial_lod::SpatialLod::terrain_proxy(),
-                    crate::spatial_lod::SpatialLodProxy,
+                    crate::engine::spatial_lod::SpatialLod::terrain_proxy(),
+                    crate::engine::spatial_lod::SpatialLodProxy,
                     TerrainProxyLodPatch,
                 ));
             }
@@ -9123,9 +9123,9 @@ fn spawn_mountain_spider_mechs(
                     body_clearance,
                     gait_phase: index as f32 * 0.73,
                 },
-                crate::physics::prelude::RigidBody::KinematicPositionBased,
-                crate::physics::prelude::Collider::cuboid(6.0, 3.4, 7.2),
-                crate::physics::prelude::CollisionProfile::EnemyHurtbox,
+                crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+                crate::engine::physics::prelude::Collider::cuboid(6.0, 3.4, 7.2),
+                crate::engine::physics::prelude::CollisionProfile::EnemyHurtbox,
                 avian3d::prelude::Sensor,
             ))
             .id();
@@ -10399,8 +10399,8 @@ fn spawn_tamborn_platform(
         WorldGeometry,
         WalkableSurface,
         Name::new(name),
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(thickness * 0.5, radius),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(thickness * 0.5, radius),
     ));
 }
 
@@ -10469,8 +10469,8 @@ fn spawn_rope_bridge_between(
         WorldGeometry,
         WalkableSurface,
         Name::new("Tamborn Rope Bridge"),
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             width * 0.5,
             deck_thickness * 0.5,
             horizontal_len * 0.5,
@@ -10974,8 +10974,8 @@ fn spawn_mountain_path_network(
                     },
                     WorldGeometry,
                     WalkableSurface,
-                    crate::physics::prelude::RigidBody::Fixed,
-                    crate::physics::prelude::Collider::cuboid(
+                    crate::engine::physics::prelude::RigidBody::Fixed,
+                    crate::engine::physics::prelude::Collider::cuboid(
                         slab_width * 0.5,
                         0.24,
                         slab_len * 0.5,
@@ -11126,8 +11126,8 @@ fn spawn_mountain_route_bridges(
                 },
                 WorldGeometry,
                 WalkableSurface,
-                crate::physics::prelude::RigidBody::Fixed,
-                crate::physics::prelude::Collider::cuboid(width * 0.5, 0.55, horizontal_len * 0.5),
+                crate::engine::physics::prelude::RigidBody::Fixed,
+                crate::engine::physics::prelude::Collider::cuboid(width * 0.5, 0.55, horizontal_len * 0.5),
                 world_space_collider_scale(),
             ));
 
@@ -11210,8 +11210,8 @@ fn spawn_mountain_route_bridges(
                         ..default()
                     },
                     WorldGeometry,
-                    crate::physics::prelude::RigidBody::Fixed,
-                    crate::physics::prelude::Collider::cuboid(width * 0.36, tower_h * 0.5, 2.4),
+                    crate::engine::physics::prelude::RigidBody::Fixed,
+                    crate::engine::physics::prelude::Collider::cuboid(width * 0.36, tower_h * 0.5, 2.4),
                     world_space_collider_scale(),
                 ));
                 commands.spawn((
@@ -11298,8 +11298,8 @@ fn spawn_range_outpost(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(width * 0.5, 1.0, depth * 0.5),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(width * 0.5, 1.0, depth * 0.5),
     ));
 
     for side in [-1.0_f32, 1.0] {
@@ -11525,8 +11525,8 @@ fn spawn_exploration_settlement(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(0.28, plaza_radius),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(0.28, plaza_radius),
     ));
 
     spawn_settlement_roads(commands, meshes, pal, seed, settlement, origin, rot, layout);
@@ -11574,8 +11574,8 @@ fn spawn_settlement_sky_foundation(
             zone: WorldZone::SkyPlatform,
             height: platform_height,
         },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(platform_height * 0.5, layout.platform_radius),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(platform_height * 0.5, layout.platform_radius),
     ));
 
     commands.spawn((
@@ -11675,8 +11675,8 @@ fn spawn_settlement_ramp_span(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(width * 0.5, thickness * 0.5, length * 0.5),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(width * 0.5, thickness * 0.5, length * 0.5),
     ));
 
     for side in [-1.0_f32, 1.0] {
@@ -12043,8 +12043,8 @@ fn spawn_settlement_building_pad(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             (width + pad_extra) * 0.5,
             pad_height * 0.5,
             (depth + pad_extra) * 0.5,
@@ -12387,8 +12387,8 @@ fn spawn_settlement_build_terminal(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(0.17, 3.4),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(0.17, 3.4),
     ));
 
     commands.spawn((
@@ -12537,8 +12537,8 @@ fn spawn_settlement_build_module(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             pad_size.x * 0.5,
             pad_size.y * 0.5,
             pad_size.z * 0.5,
@@ -13012,8 +13012,8 @@ fn spawn_mountain_inset_piece(
 
     if collider {
         commands.entity(entity).insert((
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
 }
@@ -13224,11 +13224,11 @@ fn spawn_city_spy_drones(
                 Health::new(max_hp),
                 Damageable::default(),
                 Faction::DimensionalAlien,
-                crate::physics::prelude::RigidBody::KinematicPositionBased,
+                crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
                 // Intentionally generous around the wings and bobbing flight
                 // path so controller aim and fast projectiles register clearly.
-                crate::physics::prelude::Collider::cuboid(2.8, 1.35, 2.25),
-                crate::physics::prelude::CollisionProfile::EnemyHurtbox,
+                crate::engine::physics::prelude::Collider::cuboid(2.8, 1.35, 2.25),
+                crate::engine::physics::prelude::CollisionProfile::EnemyHurtbox,
                 avian3d::prelude::Sensor,
                 CitySpyDrone {
                     id: spec.id,
@@ -13759,8 +13759,8 @@ fn spawn_hidden_room_piece(
 
     if collider {
         commands.entity(entity).insert((
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
     if walkable {
@@ -14093,8 +14093,8 @@ fn spawn_moving_brick(
             transform: Transform::from_translation(start),
             ..default()
         },
-        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
-        crate::physics::prelude::RigidBody::KinematicPositionBased,
+        crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
         WorldGeometry,
         WalkableSurface,
         MovingPlatform {
@@ -14125,8 +14125,8 @@ fn spawn_rotating_elevator(
             transform: Transform::from_translation(center + Vec3::X * radius),
             ..default()
         },
-        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
-        crate::physics::prelude::RigidBody::KinematicPositionBased,
+        crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
         WorldGeometry,
         WalkableSurface,
         RotatingElevator {
@@ -14156,8 +14156,8 @@ fn spawn_sling_pad(
             transform: Transform::from_translation(position),
             ..default()
         },
-        crate::physics::prelude::Collider::cylinder(0.11, radius),
-        crate::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(0.11, radius),
+        crate::engine::physics::prelude::RigidBody::Fixed,
         WorldGeometry,
         WalkableSurface,
         SlingShotPad {
@@ -14193,8 +14193,8 @@ fn spawn_course_block(
 
     if collider {
         commands.entity(entity).insert((
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
     if walkable {
@@ -14905,8 +14905,8 @@ fn spawn_boost_road_span(
         },
         WorldGeometry,
         RoadSafetyBarrier::DirectionDivider,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             divider_width * 0.5,
             divider_height * 0.5,
             length * 0.51,
@@ -15101,8 +15101,8 @@ fn spawn_board_boost_ramp(
             cooldown_timer: 0.0,
             force_hoverboard: true,
         },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(width * 0.5, 0.36, surface_length * 0.5),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(width * 0.5, 0.36, surface_length * 0.5),
     ));
 }
 
@@ -15154,8 +15154,8 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             zone: WorldZone::Highway,
             height: 0.8,
         },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(road_half, 0.4, 9.0),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(road_half, 0.4, 9.0),
     ));
 
     // North-south cross
@@ -15172,8 +15172,8 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             zone: WorldZone::Highway,
             height: 0.8,
         },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(9.0, 0.4, road_half),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(9.0, 0.4, road_half),
     ));
 
     spawn_boost_road_span(
@@ -15213,8 +15213,8 @@ fn spawn_highways(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
                 ..default()
             },
             WorldGeometry,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(1.25, 4.0, 1.25),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(1.25, 4.0, 1.25),
         ));
     }
 }
@@ -15338,9 +15338,9 @@ fn spawn_city_life(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
                     WorldGeometry,
                     Health::new(90.0),
                     Damageable::default(),
-                    crate::physics::prelude::RigidBody::KinematicPositionBased,
-                    crate::physics::prelude::Collider::cuboid(1.9, 0.55, 3.4),
-                    crate::physics::prelude::CollisionProfile::VehicleHurtbox,
+                    crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+                    crate::engine::physics::prelude::Collider::cuboid(1.9, 0.55, 3.4),
+                    crate::engine::physics::prelude::CollisionProfile::VehicleHurtbox,
                 ))
                 .id();
             commands.entity(entity).with_children(|car| {
@@ -15535,8 +15535,8 @@ fn spawn_sky_platforms(
                 zone: WorldZone::SkyPlatform,
                 height: 3.0,
             },
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cylinder(1.5, size),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cylinder(1.5, size),
         ));
     }
 }
@@ -15597,8 +15597,8 @@ fn spawn_sky_bridges(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &P
                 zone: WorldZone::SkyPlatform,
                 height: 1.5,
             },
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(width * 0.5, 0.75, len * 0.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(width * 0.5, 0.75, len * 0.5),
             world_space_collider_scale(),
         ));
 
@@ -15812,8 +15812,8 @@ fn spawn_moving_platforms(
                 phase,
                 size,
             },
-            crate::physics::prelude::RigidBody::KinematicPositionBased,
-            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+            crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
 
         for point in [start, end] {
@@ -15872,8 +15872,8 @@ fn spawn_laser_turrets(
                     damage: 7.0 + seeded(seed, i as u64 + 90) * 5.0,
                     beam_material: pal.window_cool.clone(),
                 },
-                crate::physics::prelude::RigidBody::Fixed,
-                crate::physics::prelude::Collider::cylinder(0.6, 0.9),
+                crate::engine::physics::prelude::RigidBody::Fixed,
+                crate::engine::physics::prelude::Collider::cylinder(0.6, 0.9),
             ))
             .id();
 
@@ -15923,8 +15923,8 @@ fn spawn_spaceports(
                 zone: WorldZone::Spaceport,
                 height: 2.0,
             },
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cylinder(1.0, 50.0),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cylinder(1.0, 50.0),
         ));
     }
 }
@@ -16477,8 +16477,8 @@ fn spawn_travel_island(
             label: spec.label,
             dock_position: island_dock,
         },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(1.8, spec.radius),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(1.8, spec.radius),
     ));
 
     commands.spawn((
@@ -16565,8 +16565,8 @@ fn spawn_ferry_route(
             },
             WorldGeometry,
             WalkableSurface,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(17.0, 0.35, 23.0),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(17.0, 0.35, 23.0),
         ));
     }
 
@@ -16877,8 +16877,8 @@ fn spawn_river_bridge(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             deck_len * 0.5,
             deck_height * 0.5,
             deck_width * 0.5,
@@ -16969,8 +16969,8 @@ fn spawn_chapter_one_ocean_island(
             label: "North-Coast Island",
             dock_position: Vec3::new(0.0, 0.52, 826.0),
         },
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(15.0, 0.07, 157.0),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(15.0, 0.07, 157.0),
     ));
 
     for (z, label_offset) in [(574.0_f32, -18.0_f32), (826.0, 18.0)] {
@@ -16983,8 +16983,8 @@ fn spawn_chapter_one_ocean_island(
             },
             WorldGeometry,
             WalkableSurface,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(12.0, 0.21, 19.0),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(12.0, 0.21, 19.0),
         ));
         commands.spawn((
             PbrBundle {
@@ -17007,8 +17007,8 @@ fn spawn_chapter_one_ocean_island(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(0.36, 74.0),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(0.36, 74.0),
     ));
     commands.spawn((
         PbrBundle {
@@ -17690,8 +17690,8 @@ fn spawn_enterable_piece(
             ..default()
         },
         WorldGeometry,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
     ));
     if walkable {
         piece.insert(WalkableSurface);
@@ -18147,8 +18147,8 @@ fn spawn_enterable_building(
             },
             WorldGeometry,
             WalkableSurface,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(
                 (opening_width - 0.45) * 0.5,
                 0.17,
                 stair_length * 0.5,
@@ -18516,8 +18516,8 @@ fn spawn_building_lift(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::KinematicPositionBased,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::KinematicPositionBased,
+        crate::engine::physics::prelude::Collider::cuboid(
             platform_size.x * 0.5,
             platform_size.y * 0.5,
             platform_size.z * 0.5,
@@ -18706,8 +18706,8 @@ fn spawn_enterable_city_access(
         WorldGeometry,
         WalkableSurface,
         CityAccessKind::Balcony,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             balcony_size.x * 0.5,
             balcony_size.y * 0.5,
             balcony_size.z * 0.5,
@@ -18755,8 +18755,8 @@ fn spawn_enterable_city_access(
             WorldGeometry,
             WalkableSurface,
             CityAccessKind::ExteriorStair,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(
                 ((access.balcony_width - 1.2).min(5.4)) * 0.5,
                 0.17,
                 stair_length * 0.5,
@@ -18862,8 +18862,8 @@ fn spawn_city_roof_route_and_crown(
         WorldGeometry,
         WalkableSurface,
         CityAccessKind::RoofLanding,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(
             landing_size.x * 0.5,
             landing_size.y * 0.5,
             landing_size.z * 0.5,
@@ -18953,10 +18953,10 @@ fn spawn_building(
                 WorldGeometry,
                 WalkableSurface,
                 Building { zone, height },
-                crate::spatial_lod::SpatialLod::landmark(height),
+                crate::engine::spatial_lod::SpatialLod::landmark(height),
                 ProceduralMaterialBinding::new("building.world", "exterior"),
-                crate::physics::prelude::RigidBody::Fixed,
-                crate::physics::prelude::Collider::cuboid(flank_w * 0.5, height * 0.5, along * 0.5),
+                crate::engine::physics::prelude::RigidBody::Fixed,
+                crate::engine::physics::prelude::Collider::cuboid(flank_w * 0.5, height * 0.5, along * 0.5),
             ));
         }
 
@@ -18980,10 +18980,10 @@ fn spawn_building(
                     zone,
                     height: header_h,
                 },
-                crate::spatial_lod::SpatialLod::landmark(height),
+                crate::engine::spatial_lod::SpatialLod::landmark(height),
                 ProceduralMaterialBinding::new("building.world", "exterior"),
-                crate::physics::prelude::RigidBody::Fixed,
-                crate::physics::prelude::Collider::cuboid(
+                crate::engine::physics::prelude::RigidBody::Fixed,
+                crate::engine::physics::prelude::Collider::cuboid(
                     header_w * 0.5,
                     header_h * 0.5,
                     along * 0.5,
@@ -19003,10 +19003,10 @@ fn spawn_building(
         WorldGeometry,
         WalkableSurface,
         Building { zone, height },
-        crate::spatial_lod::SpatialLod::landmark(height),
+        crate::engine::spatial_lod::SpatialLod::landmark(height),
         ProceduralMaterialBinding::new("building.world", "exterior"),
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(width * 0.5, height * 0.5, depth * 0.5),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(width * 0.5, height * 0.5, depth * 0.5),
     ));
 }
 
@@ -19215,8 +19215,8 @@ fn spawn_tower(
             ..default()
         },
         WorldGeometry,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(body_h * 0.5, radius),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(body_h * 0.5, radius),
     ));
     commands.spawn((
         PbrBundle {
@@ -19257,8 +19257,8 @@ fn spawn_castle_block(
 
     if collider {
         commands.entity(entity).insert((
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5),
         ));
     }
     if walkable {
@@ -19717,8 +19717,8 @@ fn spawn_aurora_castle(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(4.0, 92.0),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(4.0, 92.0),
     ));
     // Mesa trim ring
     commands.spawn((
@@ -19750,8 +19750,8 @@ fn spawn_aurora_castle(
             },
             WorldGeometry,
             WalkableSurface,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
         ));
         // Gold parapet atop each wall
         commands.spawn((
@@ -20025,8 +20025,8 @@ fn spawn_collosar_castle(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(3.0, 82.0),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(3.0, 82.0),
     ));
     // Rocky outcrop ring around platform (jagged stone spires)
     for i in 0..10u32 {
@@ -20048,8 +20048,8 @@ fn spawn_collosar_castle(
                 ..default()
             },
             WorldGeometry,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cylinder(rh * 0.5, rh * 0.1),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cylinder(rh * 0.5, rh * 0.1),
         ));
     }
 
@@ -20071,8 +20071,8 @@ fn spawn_collosar_castle(
             },
             WorldGeometry,
             WalkableSurface,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(ww * 0.5, wall_h * 0.5, wd * 0.5),
         ));
     }
     // Battlements (notched crenellations along north/south walls)
@@ -20107,8 +20107,8 @@ fn spawn_collosar_castle(
                 ..default()
             },
             WorldGeometry,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cylinder(46.0, 11.0),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cylinder(46.0, 11.0),
         ));
         // Fang-like spire cap
         commands.spawn((
@@ -20167,8 +20167,8 @@ fn spawn_collosar_castle(
         },
         WorldGeometry,
         WalkableSurface,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cuboid(29.0, keep_h * 0.5, 24.0),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cuboid(29.0, keep_h * 0.5, 24.0),
     ));
 
     // ── Collosar's Sanctum Spire ───────────────────────────────────────────
@@ -20181,8 +20181,8 @@ fn spawn_collosar_castle(
             ..default()
         },
         WorldGeometry,
-        crate::physics::prelude::RigidBody::Fixed,
-        crate::physics::prelude::Collider::cylinder(67.5, 16.0),
+        crate::engine::physics::prelude::RigidBody::Fixed,
+        crate::engine::physics::prelude::Collider::cylinder(67.5, 16.0),
     ));
     commands.spawn((
         PbrBundle {
@@ -20230,8 +20230,8 @@ fn spawn_collosar_castle(
             },
             WorldGeometry,
             WalkableSurface,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(20.0, 1.75, 3.5),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(20.0, 1.75, 3.5),
         ));
     }
 
@@ -20264,8 +20264,8 @@ fn spawn_collosar_castle(
                 ..default()
             },
             WorldGeometry,
-            crate::physics::prelude::RigidBody::Fixed,
-            crate::physics::prelude::Collider::cuboid(3.0, 11.0, 3.0),
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(3.0, 11.0, 3.0),
         ));
     }
     commands.spawn((
@@ -21213,11 +21213,11 @@ mod tests {
 
     #[test]
     fn road_boosts_scale_with_motion_and_armor_logic_upgrades() {
-        let base = crate::upgrades::UpgradeLedger::default();
-        let upgraded = crate::upgrades::UpgradeLedger {
+        let base = crate::combat::upgrades::UpgradeLedger::default();
+        let upgraded = crate::combat::upgrades::UpgradeLedger {
             ranks: vec![
-                (crate::upgrades::TechUpgradeId::MotionBootSuite, 5),
-                (crate::upgrades::TechUpgradeId::AegisArmorSuite, 5),
+                (crate::combat::upgrades::TechUpgradeId::MotionBootSuite, 5),
+                (crate::combat::upgrades::TechUpgradeId::AegisArmorSuite, 5),
             ],
             ..default()
         };
@@ -21630,7 +21630,7 @@ mod tests {
     fn scaled_travel_colliders_keep_world_space_extents() {
         assert_eq!(
             world_space_collider_scale(),
-            crate::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
+            crate::engine::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
         );
     }
 

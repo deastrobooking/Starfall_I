@@ -3,11 +3,11 @@ use bevy::prelude::*;
 use crate::commands::CommandRegistry;
 use crate::components::enemy::{Enemy, EnemyAIState, EnemyStateMachine};
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
-use crate::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
+use crate::combat::damage::{apply_damage, DamageInfo, DamageType, Damageable, Health};
 use crate::events::{EnemyDamagedEvent, EnemyKilledEvent, UiMessageEvent};
-use crate::hacking::{complete_small_drone_hack, Hackable, HackedUnit, HackingRegistry};
-use crate::hero_roster::HeroPowerSet;
-use crate::state::AppState;
+use crate::world::hacking::{complete_small_drone_hack, Hackable, HackedUnit, HackingRegistry};
+use crate::character::hero_roster::HeroPowerSet;
+use crate::engine::state::AppState;
 
 pub struct HackingPlugin;
 
@@ -85,7 +85,7 @@ fn hack_interaction_system(
         // High-magic heroes (Sisters) hack faster; low-magic heroes take longer.
         let magic_divisor = powers.magic.clamp(0.85, 1.40);
         let remaining = hackable.hack_seconds() / magic_divisor;
-        hackable.progress = Some(crate::hacking::HackProgress {
+        hackable.progress = Some(crate::world::hacking::HackProgress {
             player_index: *index,
             remaining,
         });
@@ -160,7 +160,7 @@ fn hack_progress_system(
             .entity(entity)
             .insert(hacked)
             .remove::<Hackable>()
-            .remove::<crate::raids::RaidThreatMarker>();
+            .remove::<crate::world::raids::RaidThreatMarker>();
         msg_ev.write(UiMessageEvent {
             text: format!(
                 "P{} hacked {}: blueprint saved and drone linked.",

@@ -14,8 +14,8 @@ use std::sync::OnceLock;
 use crate::components::discoverable::{DiscoverableKind, PuzzleArchetype};
 use crate::components::enemy::EnemyType;
 use crate::components::faction::Faction;
-use crate::robot_pets::{RobotPartKind, RobotPetRole};
-use crate::upgrades::TechUpgradeId;
+use crate::world::robot_pets::{RobotPartKind, RobotPetRole};
+use crate::combat::upgrades::TechUpgradeId;
 
 // ── Chapter ID ────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

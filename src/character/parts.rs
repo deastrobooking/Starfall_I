@@ -6,8 +6,8 @@ use std::f32::consts::PI;
 use crate::components::character::{
     default_joint_for_part, CartoonPart, CartoonPartKind, JointKind,
 };
-use crate::procedural_meshes::superellipsoid_mesh;
-use crate::rendering::PbrBundle;
+use crate::character::procedural_meshes::superellipsoid_mesh;
+use crate::engine::rendering::PbrBundle;
 
 // ── Slot identification ───────────────────────────────────────────────────────
 

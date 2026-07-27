@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use std::f32::consts::PI;
 
-use crate::character_blueprint::{BodyRecipe, CharacterBlueprint};
-use crate::character_parts::{
+use crate::character::blueprint::{BodyRecipe, CharacterBlueprint};
+use crate::character::parts::{
     spawn_arms, spawn_body, spawn_cartoon_glove, spawn_cartoon_shoe, spawn_head, spawn_legs,
     spawn_shoulders, CharacterLoadout, CharacterVisualConfig, PartSlotTag,
 };
@@ -12,7 +12,7 @@ use crate::components::character::{
 };
 use crate::components::enemy::{DragonCaste, EnemyType};
 use crate::components::faction::Faction;
-use crate::rendering::PbrBundle;
+use crate::engine::rendering::PbrBundle;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 

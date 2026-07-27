@@ -5,7 +5,7 @@ use crate::components::player::{
     DerivedPlayerCaps, Player, PlayerBaseStats, PlayerInput, PlayerProgression, PlayerStats,
 };
 use crate::events::PlayerDamagedEvent;
-use crate::state::AppState;
+use crate::engine::state::AppState;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct ArmorPlugin;
@@ -105,7 +105,7 @@ pub(crate) fn current_derived_caps(
 /// sole ordinary-frame writer for maximum health and armor durability.
 pub(crate) fn apply_derived_caps(
     stats: &mut PlayerStats,
-    health: &mut crate::damage::Health,
+    health: &mut crate::combat::damage::Health,
     caps: DerivedPlayerCaps,
 ) {
     if (stats.max_health - caps.max_health).abs() > 0.1 {
@@ -137,7 +137,7 @@ fn sync_derived_player_caps(
             &ArmorSet,
             &PlayerBaseStats,
             &mut PlayerStats,
-            &mut crate::damage::Health,
+            &mut crate::combat::damage::Health,
             &PlayerProgression,
         ),
         With<Player>,
@@ -202,8 +202,8 @@ fn cycle_element_prev(e: ElementType) -> ElementType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::Health;
-    use crate::upgrades::TechUpgradeId;
+    use crate::combat::damage::Health;
+    use crate::combat::upgrades::TechUpgradeId;
 
     #[test]
     fn element_cycle_honors_each_direction_and_idle_input() {

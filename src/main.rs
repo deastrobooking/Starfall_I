@@ -2,7 +2,7 @@
 // for correctness-oriented lints while allowing those ECS-heavy shapes.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-use crate::physics::prelude::*;
+use crate::engine::physics::prelude::*;
 use bevy::asset::AssetApp;
 use bevy::audio::AudioSource;
 use bevy::prelude::*;
@@ -10,80 +10,52 @@ use bevy::state::app::StatesPlugin;
 use bevy::window::WindowResolution;
 use bevy::world_serialization::WorldSerializationPlugin;
 
-mod animation_mvp;
-mod audio_player;
-mod audio_synth;
-mod chapters;
-mod character_blueprint;
-mod character_parts;
-mod character_studio;
-mod characters;
-mod combat_data;
-mod combat_feedback;
+// ── Cross-cutting shared vocabulary (used by every layer) ───────────────
 mod commands;
 mod components;
-mod damage;
-mod discussion;
-mod engine_tools;
 mod events;
-mod final_war;
-mod game_loop;
-mod game_rng;
-mod hacking;
-mod hero_roster;
-mod hitstop;
-mod input_buffer;
-mod lsystem;
-mod mesh_modifiers;
-mod missions;
-mod modular_character;
-mod perks;
-mod physics;
-mod platform_paths;
-mod player_mesh;
-mod plugins;
-mod procedural_meshes;
-mod raids;
-mod rendering;
 mod resources;
-mod robot_pets;
-mod robots;
-mod settlement_economy;
-mod sfx;
-mod shop_transactions;
-mod spatial_lod;
-mod state;
-mod tool_windows;
-mod tricks;
-mod upgrades;
 
-use character_blueprint::{BodyRecipe, CartoonAppearanceRecipe};
-use character_parts::{
+// ── Domain folders (see each mod.rs for what belongs where) ─────────────
+mod audio;
+mod chapters;
+mod character;
+mod character_studio;
+mod combat;
+mod engine;
+mod engine_tools;
+mod lsystem;
+mod plugins;
+mod robots;
+mod world;
+
+use character::blueprint::{BodyRecipe, CartoonAppearanceRecipe};
+use character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
 use commands::{CommandOverlayState, CommandRegistry};
 use engine_tools::{EngineToolMode, EngineToolsPlugin};
 use events::EventsPlugin;
-use final_war::FinalWarRegistry;
-use hacking::HackingRegistry;
-use modular_character::ModularCharacterPlugin;
-use perks::PerkTree;
+use world::final_war::FinalWarRegistry;
+use world::hacking::HackingRegistry;
+use character::modular::ModularCharacterPlugin;
+use combat::perks::PerkTree;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
     CompanionPlugin, CraftingPlugin, CreatureForgePlugin, DiscoverablePlugin, EnemyPlugin,
     HackingPlugin, ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin,
     RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
-use raids::RaidRegistry;
+use world::raids::RaidRegistry;
 use resources::{
     CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData, CharacterDesignSnapshot,
     GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerPartLoadout, PlayerScore,
     PlayerSelectState, ShopCatalog, WaveInfo, WorldRouteRegistry, WorldSiteRegistry,
 };
-use robot_pets::RobotPetCollection;
-use settlement_economy::SettlementEconomy;
-use state::AppState;
-use upgrades::UpgradeLedger;
+use world::robot_pets::RobotPetCollection;
+use world::settlement_economy::SettlementEconomy;
+use engine::state::AppState;
+use combat::upgrades::UpgradeLedger;
 
 fn main() {
     install_crash_logger();
@@ -175,12 +147,12 @@ fn register_headless_asset_stores(app: &mut App) {
         .init_asset::<AudioSource>()
         .init_asset::<AnimationClip>()
         .init_asset::<AnimationGraph>()
-        .init_asset::<rendering::ToonMaterial>()
-        .init_asset::<rendering::WaterMaterial>()
-        .init_asset::<rendering::EnergyMaterial>()
-        .init_asset::<rendering::ShieldMaterial>()
-        .init_asset::<rendering::IceMaterial>()
-        .init_asset::<rendering::LavaMaterial>();
+        .init_asset::<engine::rendering::ToonMaterial>()
+        .init_asset::<engine::rendering::WaterMaterial>()
+        .init_asset::<engine::rendering::EnergyMaterial>()
+        .init_asset::<engine::rendering::ShieldMaterial>()
+        .init_asset::<engine::rendering::IceMaterial>()
+        .init_asset::<engine::rendering::LavaMaterial>();
 }
 
 /// Registers Starfall's state, resources, and game plugins independently from
@@ -211,7 +183,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         .init_resource::<CommandOverlayState>()
         .init_resource::<HackingRegistry>()
         .init_resource::<FinalWarRegistry>()
-        .init_resource::<game_rng::GameRng>()
+        .init_resource::<engine::game_rng::GameRng>()
         .register_type::<BodyRecipe>()
         .register_type::<CartoonAppearanceRecipe>()
         .register_type::<BodyPreset>()
@@ -229,33 +201,33 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         // and transactional undo/redo. Player-facing workspace UI lands ET2.
         .add_plugins(EngineToolsPlugin)
         // N11a: camera-aware hierarchical distance culling for world assets.
-        .add_plugins(spatial_lod::SpatialLodPlugin)
+        .add_plugins(engine::spatial_lod::SpatialLodPlugin)
         // Movable/minimizable tool windows shared by creator screens.
-        .add_plugins(tool_windows::ToolWindowsPlugin)
+        .add_plugins(engine_tools::tool_windows::ToolWindowsPlugin)
         // EC0: engine-core loop scaffolding (GameSet ordering + profiling overlay).
-        .add_plugins(game_loop::GameLoopPlugin)
+        .add_plugins(engine::game_loop::GameLoopPlugin)
         // EC2: bounded hitstop + hit-reaction feedback (flinch, flashes,
         // death dissolve, damage numbers, outgoing shake/rumble).
-        .add_plugins(hitstop::HitstopPlugin)
-        .add_plugins(combat_data::CombatDataPlugin)
+        .add_plugins(combat::hitstop::HitstopPlugin)
+        .add_plugins(combat::data::CombatDataPlugin)
         // Hoverboard trick roster (data-driven, assets/combat/tricks.json).
-        .add_plugins(tricks::TrickDataPlugin)
-        .add_plugins(combat_feedback::CombatFeedbackPlugin)
+        .add_plugins(combat::tricks::TrickDataPlugin)
+        .add_plugins(combat::feedback::CombatFeedbackPlugin)
         // S3: procedural retro SFX bus (zero external assets).
-        .add_plugins(sfx::SfxPlugin)
+        .add_plugins(audio::sfx::SfxPlugin)
         // Separate user music deck + MP3 import/reload tool. Arcade SFX remain
         // active through SfxPlugin and can be overridden action by action.
-        .add_plugins(audio_player::MusicPlayerPlugin)
+        .add_plugins(audio::player::MusicPlayerPlugin)
         // EC1: deterministic per-player input buffer (additive; consumed by motor in EC1b).
-        .add_plugins(input_buffer::InputBufferPlugin);
+        .add_plugins(engine::input_buffer::InputBufferPlugin);
 
     if add_render_materials {
-        app.add_plugins(MaterialPlugin::<rendering::ToonMaterial>::default())
-            .add_plugins(MaterialPlugin::<rendering::WaterMaterial>::default())
-            .add_plugins(MaterialPlugin::<rendering::EnergyMaterial>::default())
-            .add_plugins(MaterialPlugin::<rendering::ShieldMaterial>::default())
-            .add_plugins(MaterialPlugin::<rendering::IceMaterial>::default())
-            .add_plugins(MaterialPlugin::<rendering::LavaMaterial>::default());
+        app.add_plugins(MaterialPlugin::<engine::rendering::ToonMaterial>::default())
+            .add_plugins(MaterialPlugin::<engine::rendering::WaterMaterial>::default())
+            .add_plugins(MaterialPlugin::<engine::rendering::EnergyMaterial>::default())
+            .add_plugins(MaterialPlugin::<engine::rendering::ShieldMaterial>::default())
+            .add_plugins(MaterialPlugin::<engine::rendering::IceMaterial>::default())
+            .add_plugins(MaterialPlugin::<engine::rendering::LavaMaterial>::default());
     }
 
     app.add_plugins((
@@ -272,7 +244,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         CompanionPlugin,
         ArmorPlugin,
         CraftingPlugin,
-        missions::MissionPlugin,
+        world::missions::MissionPlugin,
         SavePlugin,
     ))
     .add_plugins((
@@ -309,7 +281,7 @@ fn install_crash_logger() {
     std::panic::set_hook(Box::new(move |panic_info| {
         let backtrace = std::backtrace::Backtrace::force_capture();
         let log = format!("Starfall I crash\n\n{panic_info}\n\nBacktrace:\n{backtrace}\n");
-        let _ = platform_paths::write_crash_report(&log);
+        let _ = engine::platform_paths::write_crash_report(&log);
         default_hook(panic_info);
     }));
 }
@@ -334,7 +306,7 @@ mod app_smoke_tests {
         assert!(world.contains_resource::<Messages<events::UiMessageEvent>>());
         assert!(world.contains_resource::<Messages<events::PlayerDamagedEvent>>());
 
-        assert!(app.is_plugin_added::<game_loop::GameLoopPlugin>());
+        assert!(app.is_plugin_added::<engine::game_loop::GameLoopPlugin>());
         assert!(app.is_plugin_added::<EventsPlugin>());
         assert!(app.is_plugin_added::<InputPlugin>());
         assert!(app.is_plugin_added::<UiPlugin>());
@@ -378,7 +350,7 @@ mod app_smoke_tests {
         assert!(!world.resource::<Assets<StandardMaterial>>().is_empty());
         assert!(world.resource::<Assets<AudioSource>>().len() >= 10);
         assert!(world.resource::<Assets<AnimationClip>>().len() >= 8);
-        assert!(world.resource::<Assets<rendering::ShieldMaterial>>().len() >= 4);
+        assert!(world.resource::<Assets<engine::rendering::ShieldMaterial>>().len() >= 4);
 
         let camera_count = world.query::<&Camera>().iter(world).count();
         let ui_node_count = world.query::<&Node>().iter(world).count();

@@ -6,8 +6,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::character_blueprint::CharacterBlueprint;
-use crate::character_parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
+use crate::character::blueprint::CharacterBlueprint;
+use crate::character::parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
 use crate::character_studio::spec::CharacterSpec;
 use crate::commands::{initial_command_assets, CommandAssetSaveRecord, CommandRegistry};
 use crate::components::armor::{ArmorSet, ElementType};
@@ -17,22 +17,22 @@ use crate::components::player::{
     TraversalModeState,
 };
 use crate::components::weapon::{SpecialWeaponInventory, WeaponInventory, WeaponRanks};
-use crate::damage::Health;
+use crate::combat::damage::Health;
 use crate::events::UiMessageEvent;
-use crate::final_war::{FinalWarRegistry, FinalWarSaveRecord};
-use crate::hacking::HackingRegistry;
-use crate::perks::PerkTree;
-use crate::raids::{RaidRecord, RaidRegistry};
+use crate::world::final_war::{FinalWarRegistry, FinalWarSaveRecord};
+use crate::world::hacking::HackingRegistry;
+use crate::combat::perks::PerkTree;
+use crate::world::raids::{RaidRecord, RaidRegistry};
 use crate::resources::{
     initial_world_routes, initial_world_sites, is_stale_reference_blueprint, ChapterProgress,
     GameSettings, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo,
     WorldRouteRegistry, WorldRouteSaveRecord, WorldSiteRegistry, WorldSiteSaveRecord,
 };
-use crate::robot_pets::RobotPetCollection;
-use crate::settlement_economy::SettlementEconomy;
-use crate::shop_transactions::ShopOwnership;
-use crate::state::AppState;
-use crate::upgrades::UpgradeLedger;
+use crate::world::robot_pets::RobotPetCollection;
+use crate::world::settlement_economy::SettlementEconomy;
+use crate::world::shop_transactions::ShopOwnership;
+use crate::engine::state::AppState;
+use crate::combat::upgrades::UpgradeLedger;
 
 const SAVE_FILE_LEGACY: &str = "starfall_i_save.json";
 const SAVE_FILE_A: &str = "starfall_i_save_a.json";
@@ -75,7 +75,7 @@ fn next_save_slot(current: u8) -> u8 {
 fn save_root() -> &'static Path {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
-        let root = crate::platform_paths::data_root();
+        let root = crate::engine::platform_paths::data_root();
         migrate_legacy_files(&root);
         root
     })
@@ -1192,11 +1192,11 @@ fn manual_save_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::character_blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe};
-    use crate::raids::{RaidId, RaidPhase};
-    use crate::robot_pets::{RobotPartKind, RobotPetBlueprint, RobotPetRole};
-    use crate::settlement_economy::{SettlementBuildKind, SettlementEconomy, SettlementResources};
-    use crate::upgrades::{TechUpgradeId, UpgradeLedger};
+    use crate::character::blueprint::{BodyRecipe, CartoonAppearanceRecipe, CharacterPaletteRecipe};
+    use crate::world::raids::{RaidId, RaidPhase};
+    use crate::world::robot_pets::{RobotPartKind, RobotPetBlueprint, RobotPetRole};
+    use crate::world::settlement_economy::{SettlementBuildKind, SettlementEconomy, SettlementResources};
+    use crate::combat::upgrades::{TechUpgradeId, UpgradeLedger};
 
     fn player_save(
         player_index: u8,
@@ -1453,7 +1453,7 @@ mod tests {
                 let mut hacking = HackingRegistry::default();
                 hacking.learn_blueprint(
                     "blueprint_scallarian_drone_core",
-                    crate::hacking::HackTargetClass::SmallDrone,
+                    crate::world::hacking::HackTargetClass::SmallDrone,
                     PlayerIndex(0),
                 );
                 hacking
@@ -1527,7 +1527,7 @@ mod tests {
 
     #[test]
     fn completed_custom_mission_survives_the_on_disk_schema_round_trip() {
-        let mission = crate::missions::mission_for_travel_anchor("dragon_dungeon_ch06")
+        let mission = crate::world::missions::mission_for_travel_anchor("dragon_dungeon_ch06")
             .expect("dragon mission should exist");
         let completion_key = mission.completion_key();
         let data = SaveData {

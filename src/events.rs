@@ -91,7 +91,7 @@ pub struct ComboFinishedEvent {
 pub struct CombatImpactEvent {
     pub position: Vec3,
     pub damage: f32,
-    pub damage_type: crate::damage::DamageType,
+    pub damage_type: crate::combat::damage::DamageType,
     pub is_critical: bool,
 }
 

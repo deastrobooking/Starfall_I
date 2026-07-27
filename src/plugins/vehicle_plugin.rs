@@ -18,10 +18,10 @@ use crate::components::player::{
 };
 use crate::components::world::{BoatPassenger, BoatVehicle};
 use crate::events::UiMessageEvent;
-use crate::rendering::{PbrBundle, SpatialBundle};
+use crate::engine::rendering::{PbrBundle, SpatialBundle};
 use crate::resources::PlaySessionTransition;
-use crate::robot_pets::{RobotAssemblyForm, RobotPetCollection};
-use crate::state::AppState;
+use crate::world::robot_pets::{RobotAssemblyForm, RobotPetCollection};
+use crate::engine::state::AppState;
 
 pub struct VehiclePlugin;
 
@@ -1018,7 +1018,7 @@ fn replacement_boat_driver(riders: &[(u8, bool)], current_owner: Option<u8>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::robot_pets::RobotAssembly;
+    use crate::world::robot_pets::RobotAssembly;
 
     fn robot_pets_with_assembly(form: RobotAssemblyForm) -> RobotPetCollection {
         RobotPetCollection {

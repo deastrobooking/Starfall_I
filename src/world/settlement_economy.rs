@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::chapters::MapSettlementKind;
-use crate::robot_pets::{PartCost, RobotPartKind, RobotPetCollection};
+use crate::world::robot_pets::{PartCost, RobotPartKind, RobotPetCollection};
 
 pub const MAX_SETTLEMENT_BUILD_TIER: u32 = 3;
 pub const SETTLEMENT_ECONOMY_TICK_SECONDS: f32 = 8.0;

@@ -16,14 +16,14 @@ use crate::components::player::{
 use crate::components::weapon::{
     BeamSabre, BeamSabreLocked, MeleeCombo, SpecialWeaponInventory, WeaponInventory,
 };
-use crate::damage::Health;
+use crate::combat::damage::Health;
 use crate::events::*;
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::player_plugin::apply_ancient_flight_core;
 use crate::resources::{ChapterProgress, CurrentChapter};
-use crate::robot_pets::{RobotPetBlueprint, RobotPetCollection};
-use crate::state::AppState;
-use crate::upgrades::UpgradeLedger;
+use crate::world::robot_pets::{RobotPetBlueprint, RobotPetCollection};
+use crate::engine::state::AppState;
+use crate::combat::upgrades::UpgradeLedger;
 
 pub struct DiscoverablePlugin;
 
@@ -931,7 +931,7 @@ fn discoverable_pickup_system(
                     }
                     if let Some(ability_id) = special_ability {
                         progress.unlock(ability_id);
-                        if crate::upgrades::is_sabre_relic(ability_id) {
+                        if crate::combat::upgrades::is_sabre_relic(ability_id) {
                             // World relics are campaign discoveries. Mirror the
                             // unlock into every active player's owned ledger so
                             // local co-op never races for a one-use pickup.

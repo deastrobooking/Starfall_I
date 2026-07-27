@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::components::inventory::Inventory;
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::events::InventoryChangedEvent;
-use crate::state::AppState;
+use crate::engine::state::AppState;
 
 // ── Crafting Recipe ───────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]

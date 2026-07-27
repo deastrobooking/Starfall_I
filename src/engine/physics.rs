@@ -12,7 +12,7 @@ use core::time::Duration;
 pub mod prelude {
     pub use avian3d::prelude::{Physics, PhysicsPlugins, PhysicsTime};
 
-    pub use crate::physics::{
+    pub use crate::engine::physics::{
         CharacterAutostep, CharacterLength, Collider, ColliderScale, CollisionProfile,
         GameCollisionLayer, KinematicCharacterController, KinematicCharacterControllerOutput,
         PhysicsCompatPlugin, PhysicsCompatSet, RigidBody,

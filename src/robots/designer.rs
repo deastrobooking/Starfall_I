@@ -132,7 +132,7 @@ pub struct RobotStyle {
 
     /// Blender-style non-destructive modifier stack applied to every generated
     /// robot part mesh at spawn time.
-    pub modifiers: Vec<crate::mesh_modifiers::MeshModifier>,
+    pub modifiers: Vec<crate::character::mesh_modifiers::MeshModifier>,
 }
 
 mod color_serde {

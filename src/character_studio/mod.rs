@@ -27,13 +27,13 @@ use bevy::ui::RelativeCursorPosition;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use std::path::PathBuf;
 
-use crate::character_blueprint::{
+use crate::character::blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
-use crate::game_rng::GameRng;
+use crate::engine::game_rng::GameRng;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
 use crate::resources::{CharacterDesignData, CharacterDesignReturnTarget, PlayerSelectState};
-use crate::state::AppState;
+use crate::engine::state::AppState;
 use generators::build_character_patch;
 use rig_bridge::{ImportedHumanoidRig, ImportedRigStatus};
 use spec::{CharacterSpec, MorphField, StyleField};
@@ -1076,13 +1076,13 @@ fn apply_action(
         }
         StudioAction::ModifierKind => {
             state.armed_modifier =
-                (state.armed_modifier + 1) % crate::mesh_modifiers::MeshModifier::TEMPLATE_COUNT;
-            let label = crate::mesh_modifiers::MeshModifier::template(state.armed_modifier).label();
+                (state.armed_modifier + 1) % crate::character::mesh_modifiers::MeshModifier::TEMPLATE_COUNT;
+            let label = crate::character::mesh_modifiers::MeshModifier::template(state.armed_modifier).label();
             state.status = format!("Armed modifier: {label}");
             state.labels_dirty = true;
         }
         StudioAction::ModifierAdd => {
-            let armed = crate::mesh_modifiers::MeshModifier::template(state.armed_modifier);
+            let armed = crate::character::mesh_modifiers::MeshModifier::template(state.armed_modifier);
             let Some(slot) = state.spec.modifiers.iter().position(|slot| slot.is_none()) else {
                 state.status = "All 4 modifier slots are full".into();
                 state.labels_dirty = true;

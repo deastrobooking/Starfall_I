@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::persistence::{ContentCategory, ContentPayload, GenericRecipeDraft, ProjectStore};
 use super::project_registry::ForgeProjectRegistry;
-use crate::mesh_modifiers::MeshModifier;
+use crate::character::mesh_modifiers::MeshModifier;
 
 const SPEC_FIELD: &str = "imported_character_spec";
 const RECOVERY_LIMIT: usize = 3;

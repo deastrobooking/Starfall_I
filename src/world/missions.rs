@@ -6,7 +6,7 @@ use crate::components::player::{Player, PlayerStats};
 use crate::components::world::WorldAnchor;
 use crate::events::UiMessageEvent;
 use crate::resources::{ChapterProgress, DungeonRoomState};
-use crate::state::AppState;
+use crate::engine::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomMissionArea {

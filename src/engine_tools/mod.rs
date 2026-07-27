@@ -11,6 +11,8 @@ pub mod creature_records;
 mod persistence;
 mod presets;
 pub mod project_registry;
+/// Draggable, minimizable in-game tool windows shared by every editor.
+pub mod tool_windows;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,14 +30,14 @@ use crate::components::world::{
     DungeonCrawlGate, EnterableBuilding, SettlementBuildTerminal, SpeedLoopGuide, WorldAnchor,
     WorldRouteMarker,
 };
-use crate::physics::prelude::{Physics, PhysicsTime};
+use crate::engine::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
-use crate::rendering::{
+use crate::engine::rendering::{
     EnergyMaterial, EnergyMaterialUniform, IceMaterial, IceMaterialUniform, LavaMaterial,
     LavaMaterialUniform, ShieldMaterial, ShieldMaterialUniform, ToonMaterial, ToonMaterialUniform,
     WaterMaterial, WaterMaterialUniform,
 };
-use crate::state::AppState;
+use crate::engine::state::AppState;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
     GenericRecipeDraft, LevelTemplate, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore,
@@ -1449,7 +1451,7 @@ struct EditorPresetLibrary {
 /// The base primitive mesh is regenerated and the stack re-applied whenever
 /// the stack changes, so the source data stays destructive-edit free.
 #[derive(Component, Debug, Clone, Default)]
-struct EditorModifierStack(Vec<crate::mesh_modifiers::MeshModifier>);
+struct EditorModifierStack(Vec<crate::character::mesh_modifiers::MeshModifier>);
 
 /// Which modifier kind the ADD MODIFIER button is armed with (cycled by
 /// MODIFIER KIND).
@@ -1471,8 +1473,8 @@ struct EditorArmedLevelTemplate(usize);
 struct EditorLevelDeleteArm(Option<String>);
 
 /// Default instances for each armable modifier kind, in cycle order.
-fn armed_modifier_template(index: usize) -> crate::mesh_modifiers::MeshModifier {
-    crate::mesh_modifiers::MeshModifier::template(index)
+fn armed_modifier_template(index: usize) -> crate::character::mesh_modifiers::MeshModifier {
+    crate::character::mesh_modifiers::MeshModifier::template(index)
 }
 
 impl Default for EditorProjectSession {
@@ -2543,8 +2545,8 @@ fn sync_world_kit_sandbox(world: &mut World) {
                 Mesh3d(cube.clone()),
                 MeshMaterial3d(fallback.clone()),
                 transform,
-                crate::physics::prelude::RigidBody::Fixed,
-                crate::physics::prelude::Collider::cuboid(0.5, 0.5, 0.5),
+                crate::engine::physics::prelude::RigidBody::Fixed,
+                crate::engine::physics::prelude::Collider::cuboid(0.5, 0.5, 0.5),
             ))
             .id();
         if let Some(material_id) = recipe.material_slots.get(part.material_slot) {
@@ -3367,11 +3369,11 @@ fn spawn_editor_panel(
         EditorPanelKind::Inspector => Vec2::new(497.0, 96.0),
         EditorPanelKind::Registry => Vec2::new(982.0, 96.0),
     };
-    crate::tool_windows::spawn_tool_window(
+    crate::engine_tools::tool_windows::spawn_tool_window(
         parent,
         title,
         position,
-        crate::tool_windows::ToolWindowStyle::default(),
+        crate::engine_tools::tool_windows::ToolWindowStyle::default(),
         (kind, ScrollPosition::default()),
         content,
     );
@@ -7246,7 +7248,7 @@ fn remesh_modified_object(world: &mut World, entity: Entity) -> bool {
     let derived = if stack.is_empty() {
         base
     } else {
-        match crate::mesh_modifiers::apply_stack_to_mesh(&base, &stack) {
+        match crate::character::mesh_modifiers::apply_stack_to_mesh(&base, &stack) {
             Some(mesh) => mesh,
             None => return false,
         }

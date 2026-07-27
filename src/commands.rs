@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::raids::RaidId;
+use crate::world::raids::RaidId;
 use crate::resources::{WorldRouteId, WorldSiteId};
 
 // ── Asset Kinds ───────────────────────────────────────────────────────────────

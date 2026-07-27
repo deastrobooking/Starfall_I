@@ -29,35 +29,35 @@ use crate::components::weapon::{
 use crate::components::world::{
     BoatPassenger, BoatVehicle, DiscussionNpc, DungeonCrawlGate, DungeonExitPortal, WorldLoot,
 };
-use crate::damage::Health;
-use crate::discussion::DiscussionState;
+use crate::combat::damage::Health;
+use crate::world::discussion::DiscussionState;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::{
     EngineToolMode, PublishedMapPointKind, PublishedProceduralRecipeCatalog,
 };
 use crate::events::*;
-use crate::missions::{
+use crate::world::missions::{
     active_custom_mission, chapter_mission, mission_for_travel_anchor, CustomMissionState,
     SPECIAL_MISSION_TRAVEL_POINTS,
 };
-use crate::perks::{all_perks, PerkTree};
-use crate::physics::prelude::{Physics, PhysicsTime};
+use crate::combat::perks::{all_perks, PerkTree};
+use crate::engine::physics::prelude::{Physics, PhysicsTime};
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
 use crate::plugins::input_plugin::{GamepadAssignments, NativeButton, NativeControllerState};
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
-use crate::rendering::Camera3dBundle;
+use crate::engine::rendering::Camera3dBundle;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
     DungeonCrawlState, FastTravelDestination, GameSettings, ImportedForgeReturnTarget,
     LocalPlayerConfig, PlaySessionTransition, PlayerGuidance, PlayerSelectState, ShopCatalog,
     ShopCategory, UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
-use crate::robot_pets::{RobotPartKind, RobotPetCollection};
-use crate::settlement_economy::SettlementEconomy;
-use crate::shop_transactions;
-use crate::state::AppState;
-use crate::tricks::TrickState;
-use crate::upgrades::{
+use crate::world::robot_pets::{RobotPartKind, RobotPetCollection};
+use crate::world::settlement_economy::SettlementEconomy;
+use crate::world::shop_transactions;
+use crate::engine::state::AppState;
+use crate::combat::tricks::TrickState;
+use crate::combat::upgrades::{
     all_tech_upgrades, format_part_costs, TechUpgradeId, UpgradeLedger, SABRE_RELIC_CATALOG,
 };
 
@@ -4032,7 +4032,7 @@ fn purchase_weapon_rank(
         return;
     }
     let cost = WeaponRanks::upgrade_cost(*rank);
-    let recipe = [crate::robot_pets::PartCost::new(
+    let recipe = [crate::world::robot_pets::PartCost::new(
         RobotPartKind::CircuitBoard,
         cost,
     )];
@@ -4141,7 +4141,7 @@ fn format_perk_header(perks: &PerkTree) -> String {
     format!("PERK TRAINING   unspent points: {}", perks.points_unspent)
 }
 
-fn format_perk_row(def: &crate::perks::PerkDef, perks: &PerkTree) -> String {
+fn format_perk_row(def: &crate::combat::perks::PerkDef, perks: &PerkTree) -> String {
     let rank = perks.rank(def.id);
     let bar = rank_bar(rank, def.max_rank);
     let status = if rank >= def.max_rank {
@@ -4159,11 +4159,11 @@ fn format_perk_row(def: &crate::perks::PerkDef, perks: &PerkTree) -> String {
     )
 }
 
-fn branch_color(branch: crate::perks::PerkBranch) -> Color {
+fn branch_color(branch: crate::combat::perks::PerkBranch) -> Color {
     match branch {
-        crate::perks::PerkBranch::Heart => Color::srgb(1.0, 0.55, 0.60),
-        crate::perks::PerkBranch::Star => Color::srgb(1.0, 0.92, 0.42),
-        crate::perks::PerkBranch::Acrobat => Color::srgb(0.42, 0.88, 1.0),
+        crate::combat::perks::PerkBranch::Heart => Color::srgb(1.0, 0.55, 0.60),
+        crate::combat::perks::PerkBranch::Star => Color::srgb(1.0, 0.92, 0.42),
+        crate::combat::perks::PerkBranch::Acrobat => Color::srgb(0.42, 0.88, 1.0),
     }
 }
 
@@ -4175,7 +4175,7 @@ fn format_upgrade_header(upgrades: &UpgradeLedger) -> String {
 }
 
 fn format_upgrade_row(
-    def: &crate::upgrades::TechUpgradeDef,
+    def: &crate::combat::upgrades::TechUpgradeDef,
     upgrades: &UpgradeLedger,
     robot_pets: &RobotPetCollection,
 ) -> String {
@@ -4199,16 +4199,16 @@ fn format_upgrade_row(
     )
 }
 
-fn track_color(track: crate::upgrades::TechUpgradeTrack) -> Color {
+fn track_color(track: crate::combat::upgrades::TechUpgradeTrack) -> Color {
     match track {
-        crate::upgrades::TechUpgradeTrack::Weapons => Color::srgb(1.0, 0.65, 0.35),
-        crate::upgrades::TechUpgradeTrack::Missiles => Color::srgb(1.0, 0.45, 0.45),
-        crate::upgrades::TechUpgradeTrack::Turrets => Color::srgb(0.80, 0.55, 1.0),
-        crate::upgrades::TechUpgradeTrack::Health => Color::srgb(0.42, 1.0, 0.55),
-        crate::upgrades::TechUpgradeTrack::Mechs => Color::srgb(0.42, 0.88, 1.0),
-        crate::upgrades::TechUpgradeTrack::Mobility => Color::srgb(0.55, 1.0, 0.75),
-        crate::upgrades::TechUpgradeTrack::Armor => Color::srgb(0.70, 0.70, 0.85),
-        crate::upgrades::TechUpgradeTrack::Gauntlets => Color::srgb(1.0, 0.75, 0.45),
+        crate::combat::upgrades::TechUpgradeTrack::Weapons => Color::srgb(1.0, 0.65, 0.35),
+        crate::combat::upgrades::TechUpgradeTrack::Missiles => Color::srgb(1.0, 0.45, 0.45),
+        crate::combat::upgrades::TechUpgradeTrack::Turrets => Color::srgb(0.80, 0.55, 1.0),
+        crate::combat::upgrades::TechUpgradeTrack::Health => Color::srgb(0.42, 1.0, 0.55),
+        crate::combat::upgrades::TechUpgradeTrack::Mechs => Color::srgb(0.42, 0.88, 1.0),
+        crate::combat::upgrades::TechUpgradeTrack::Mobility => Color::srgb(0.55, 1.0, 0.75),
+        crate::combat::upgrades::TechUpgradeTrack::Armor => Color::srgb(0.70, 0.70, 0.85),
+        crate::combat::upgrades::TechUpgradeTrack::Gauntlets => Color::srgb(1.0, 0.75, 0.45),
     }
 }
 
@@ -4249,7 +4249,7 @@ fn format_weapon_rank_row(
         "MAX".to_string()
     } else {
         let cost = WeaponRanks::upgrade_cost(rank);
-        let recipe = [crate::robot_pets::PartCost::new(
+        let recipe = [crate::world::robot_pets::PartCost::new(
             RobotPartKind::CircuitBoard,
             cost,
         )];
@@ -7463,7 +7463,7 @@ fn volume_text(settings: &GameSettings) -> String {
 
 fn final_push_unlock_system(
     mut commands: Commands,
-    final_war: Res<crate::final_war::FinalWarRegistry>,
+    final_war: Res<crate::world::final_war::FinalWarRegistry>,
     site_registry: Res<WorldSiteRegistry>,
     existing_q: Query<Entity, With<FinalPushText>>,
     chapter_select_root_q: Query<Entity, With<ChapterSelectRoot>>,
@@ -7476,7 +7476,7 @@ fn final_push_unlock_system(
         .iter()
         .filter(|s| s.is_liberated())
         .count();
-    let show = final_war.phase == crate::final_war::FinalWarPhase::Climax && liberated >= 6;
+    let show = final_war.phase == crate::world::final_war::FinalWarPhase::Climax && liberated >= 6;
     let already_shown = !existing_q.is_empty();
     if show && !already_shown {
         if let Ok(root) = chapter_select_root_q.single() {

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 
-use crate::character_parts::{
+use crate::character::parts::{
     spawn_arms, spawn_body, spawn_head, spawn_legs, spawn_shoulders, CharacterLoadout,
     CharacterVisualConfig, PartSlotTag,
 };
@@ -20,15 +20,15 @@ use crate::components::player::{
     TraversalModeState,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
-use crate::combat_data::MeleePhase;
-use crate::state::AppState;
-use crate::tricks::{TrickCategory, TrickState};
+use crate::combat::data::MeleePhase;
+use crate::engine::state::AppState;
+use crate::combat::tricks::{TrickCategory, TrickState};
 
 pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::animation_mvp::CharacterAnimationMvpPlugin)
+        app.add_plugins(crate::character::animation_mvp::CharacterAnimationMvpPlugin)
             .add_systems(
                 Update,
                 (
@@ -36,7 +36,7 @@ impl Plugin for CharacterPlugin {
                     cartoon_animation_system.run_if(
                         in_state(AppState::Playing).or_else(in_state(AppState::CharacterDesign)),
                     ),
-                    crate::animation_mvp::drive_graph_animation,
+                    crate::character::animation_mvp::drive_graph_animation,
                     studio_human_animation_system.run_if(in_state(AppState::Playing)),
                     swap_character_parts,
                 )

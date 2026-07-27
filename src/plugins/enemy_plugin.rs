@@ -4,7 +4,7 @@ use avian3d::prelude::{
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::characters::{decorate_reptilian_character, enemy_config, spawn_cartoon_character};
+use crate::character::presets::{decorate_reptilian_character, enemy_config, spawn_cartoon_character};
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
     boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, DragonCaste, Enemy, EnemyAIState,
@@ -15,21 +15,21 @@ use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
 use crate::components::player::{ParryState, Player, PlayerIndex, PlayerStats};
 use crate::components::world::{NpcRoadVehicle, WorldLoot};
-use crate::damage::{
+use crate::combat::damage::{
     apply_damage, area_damage_falloff, DamageInfo, DamageResistance, DamageType, Damageable, Health,
 };
 use crate::events::*;
-use crate::game_rng::GameRng;
-use crate::hacking::{Hackable, HackedUnit};
-use crate::hitstop::hitstop_inactive;
-use crate::physics::{
+use crate::engine::game_rng::GameRng;
+use crate::world::hacking::{Hackable, HackedUnit};
+use crate::combat::hitstop::hitstop_inactive;
+use crate::engine::physics::{
     prelude::{Collider, CollisionProfile, GameCollisionLayer, RigidBody},
     world_line_of_sight,
 };
-use crate::rendering::PbrBundle;
+use crate::engine::rendering::PbrBundle;
 use crate::resources::{PlaySessionTransition, WaveInfo};
-use crate::robot_pets::{salvage_for_enemy, RobotPetCollection};
-use crate::state::AppState;
+use crate::world::robot_pets::{salvage_for_enemy, RobotPetCollection};
+use crate::engine::state::AppState;
 
 #[derive(Resource, Clone)]
 struct EnemyAttackAssets {
@@ -531,7 +531,7 @@ fn enemy_ai_system(
             Without<Player>,
             Without<HackedUnit>,
             Without<MountainSpiderMech>,
-            Without<crate::combat_feedback::Flinch>,
+            Without<crate::combat::feedback::Flinch>,
         ),
     >,
 ) {
@@ -1698,12 +1698,12 @@ fn enemy_attack_system(
         (
             Without<Player>,
             Without<HackedUnit>,
-            Without<crate::combat_feedback::Flinch>,
+            Without<crate::combat::feedback::Flinch>,
         ),
     >,
     mut player_damage_q: Query<
         (
-            &mut crate::damage::Health,
+            &mut crate::combat::damage::Health,
             &mut Damageable,
             &mut PlayerStats,
             &mut crate::components::player::ParryState,

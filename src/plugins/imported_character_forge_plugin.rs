@@ -11,11 +11,11 @@ use bevy::window::FileDragAndDrop;
 use super::ui_plugin::MenuScrollPanel;
 use crate::engine_tools::character_records::{self, ImportedCharacterSpec, ImportedMeshEdit};
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
-use crate::mesh_modifiers::{apply_stack_to_mesh, MeshModifier};
-use crate::rendering::{Camera3dBundle, DirectionalLightBundle, PbrBundle};
+use crate::character::mesh_modifiers::{apply_stack_to_mesh, MeshModifier};
+use crate::engine::rendering::{Camera3dBundle, DirectionalLightBundle, PbrBundle};
 use crate::resources::ImportedForgeReturnTarget;
-use crate::state::AppState;
-use crate::tool_windows::{spawn_tool_window, ToolWindowStyle};
+use crate::engine::state::AppState;
+use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 
 pub struct ImportedCharacterForgePlugin;
 

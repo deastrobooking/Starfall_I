@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::chapters::map_settlements;
 use crate::components::faction::Faction;
 use crate::resources::{WorldRouteId, WorldSiteId, WorldSiteRegistry, WorldSiteState};
-use crate::settlement_economy::{SettlementBuildKind, SettlementEconomy};
+use crate::world::settlement_economy::{SettlementBuildKind, SettlementEconomy};
 
 pub const CLOUDRAIL_TUTORIAL_RAID_SITE: WorldSiteId = WorldSiteId(4);
 pub const CLOUDRAIL_TUTORIAL_RAID_REQUIRED_DEFENSE: u32 = 10;

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
 use crate::resources::{GameSettings, UiGameplayCapture};
-use crate::sfx::{action_sfx_directory, ActionSfxRegistry};
+use crate::audio::sfx::{action_sfx_directory, ActionSfxRegistry};
 
 pub const DEFAULT_USER_MUSIC_DIR: &str = "assets/user_music";
 

@@ -16,7 +16,7 @@ use std::f32::consts::TAU;
 
 use super::generators::{CharacterPatch, CharacterSlot, SlotContent};
 use super::spec::{ArmorStyle, BottomStyle, FlairStyle, FootStyle, HairStyle, Sex, TopStyle};
-use crate::procedural_meshes::{anime_eye_mesh, superellipsoid_mesh};
+use crate::character::procedural_meshes::{anime_eye_mesh, superellipsoid_mesh};
 
 // ── Lofted column primitive ───────────────────────────────────────────────────
 
@@ -421,7 +421,7 @@ pub fn spawn_human(
         let mesh = if patch.modifiers.is_empty() {
             mesh
         } else {
-            crate::mesh_modifiers::apply_stack_to_mesh(&mesh, &patch.modifiers).unwrap_or(mesh)
+            crate::character::mesh_modifiers::apply_stack_to_mesh(&mesh, &patch.modifiers).unwrap_or(mesh)
         };
         let (region, pivot) = classify_studio_part(&p, transform.translation);
         let e = commands

@@ -17,15 +17,15 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::audio_player::AudioLibraryReloadEvent;
-use crate::audio_synth::{self, render_wav};
+use crate::audio::player::AudioLibraryReloadEvent;
+use crate::audio::synth::{self, render_wav};
 use crate::events::{
     ChestOpenedEvent, ComboHitEvent, EnemyDamagedEvent, EnemyKilledEvent, LootCollectedEvent,
     PlayerDamagedEvent, PlayerLevelUpEvent, PlayerParryEvent, WeaponFiredEvent,
     WeaponReloadedEvent,
 };
 use crate::resources::GameSettings;
-use crate::state::AppState;
+use crate::engine::state::AppState;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum SfxKind {
@@ -108,23 +108,23 @@ impl SfxLibrary {
 fn bake_sfx_library(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
     let mut handles = HashMap::new();
     let mut mix = HashMap::new();
-    let mut bake = |kind: SfxKind, params: audio_synth::SfxParams, level: f32| {
+    let mut bake = |kind: SfxKind, params: synth::SfxParams, level: f32| {
         let source = AudioSource {
             bytes: render_wav(&params).into(),
         };
         handles.insert(kind, sources.add(source));
         mix.insert(kind, level);
     };
-    bake(SfxKind::Shoot, audio_synth::preset_shoot(), 0.34);
-    bake(SfxKind::Slash, audio_synth::preset_slash(), 0.5);
-    bake(SfxKind::Hit, audio_synth::preset_hit(), 0.5);
-    bake(SfxKind::Parry, audio_synth::preset_parry(), 0.65);
-    bake(SfxKind::Kill, audio_synth::preset_kill(), 0.6);
-    bake(SfxKind::Hurt, audio_synth::preset_hurt(), 0.6);
-    bake(SfxKind::Loot, audio_synth::preset_loot(), 0.45);
-    bake(SfxKind::Chest, audio_synth::preset_chest(), 0.55);
-    bake(SfxKind::LevelUp, audio_synth::preset_level_up(), 0.6);
-    bake(SfxKind::Reload, audio_synth::preset_reload(), 0.35);
+    bake(SfxKind::Shoot, synth::preset_shoot(), 0.34);
+    bake(SfxKind::Slash, synth::preset_slash(), 0.5);
+    bake(SfxKind::Hit, synth::preset_hit(), 0.5);
+    bake(SfxKind::Parry, synth::preset_parry(), 0.65);
+    bake(SfxKind::Kill, synth::preset_kill(), 0.6);
+    bake(SfxKind::Hurt, synth::preset_hurt(), 0.6);
+    bake(SfxKind::Loot, synth::preset_loot(), 0.45);
+    bake(SfxKind::Chest, synth::preset_chest(), 0.55);
+    bake(SfxKind::LevelUp, synth::preset_level_up(), 0.6);
+    bake(SfxKind::Reload, synth::preset_reload(), 0.35);
 
     commands.insert_resource(SfxLibrary {
         handles,
@@ -185,7 +185,7 @@ fn load_action_sfx_registry(sources: &mut Assets<AudioSource>) -> ActionSfxRegis
         let Ok(bytes) = std::fs::read(&source_path) else {
             continue;
         };
-        if !crate::audio_player::valid_music_bytes(&bytes) {
+        if !crate::audio::player::valid_music_bytes(&bytes) {
             warn!(
                 "Skipping action SFX {} for '{action_id}' — not a playable MP3",
                 source_path.display()
@@ -516,7 +516,7 @@ mod tests {
         assert!(!registry.is_assigned("weapon.fire"));
         assert_eq!(registry.assigned_count(), 0);
         assert_eq!(
-            audio_synth::render_wav(&audio_synth::preset_shoot())[0..4],
+            synth::render_wav(&synth::preset_shoot())[0..4],
             *b"RIFF"
         );
     }

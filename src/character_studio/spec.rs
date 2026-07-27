@@ -592,7 +592,7 @@ pub struct CharacterSpec {
     /// body-part mesh (fixed size keeps the spec `Copy`; `None` slots are
     /// skipped).
     #[serde(default)]
-    pub modifiers: [Option<crate::mesh_modifiers::MeshModifier>; 4],
+    pub modifiers: [Option<crate::character::mesh_modifiers::MeshModifier>; 4],
 }
 
 /// Every editable scalar morph, in UI order. The editor cursor walks this
