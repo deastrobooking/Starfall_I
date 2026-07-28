@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use bevy::asset::AssetId;
-use bevy::gltf::{Gltf, GltfMesh, GltfNode};
+use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfNode};
 use bevy::prelude::*;
 use bevy::window::{FileDragAndDrop, PrimaryWindow};
 
@@ -13,8 +13,8 @@ use crate::character::mesh_modifiers::{apply_stack_to_mesh, MeshModifier};
 use crate::engine::rendering::{Camera3dBundle, DirectionalLightBundle, PbrBundle};
 use crate::engine::state::AppState;
 use crate::engine_tools::character_records::{
-    self, ImportedAnimationJoint, ImportedCharacterSpec, ImportedGameplayRole, ImportedMeshEdit,
-    ImportedPartAssignment, ImportedPartSlot,
+    self, ImportedAnimationJoint, ImportedCharacterSpec, ImportedGameplayRole,
+    ImportedMaterialEdit, ImportedMeshEdit, ImportedPartAssignment, ImportedPartSlot,
 };
 use crate::engine_tools::mesh_selection::{pick_face, selected_face_mesh, MeshTopology};
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
@@ -64,13 +64,13 @@ struct ImportedForgeState {
     selected_faces: BTreeSet<u32>,
     part_preset: usize,
     selected_assignment: usize,
+    material_param: usize,
+    texture_channel: usize,
     preview_dirty: bool,
     labels_dirty: bool,
     status: String,
     spin: f32,
-    selected_material: Option<Handle<StandardMaterial>>,
     face_material: Option<Handle<StandardMaterial>>,
-    normal_material: Option<Handle<StandardMaterial>>,
 }
 
 impl Default for ImportedForgeState {
@@ -91,13 +91,13 @@ impl Default for ImportedForgeState {
             selected_faces: BTreeSet::new(),
             part_preset: 0,
             selected_assignment: 0,
+            material_param: 0,
+            texture_channel: 0,
             preview_dirty: false,
             labels_dirty: true,
             status: "Drop a .glb anywhere, or load the AMP sample.".into(),
             spin: 0.0,
-            selected_material: None,
             face_material: None,
-            normal_material: None,
         }
     }
 }
@@ -132,6 +132,48 @@ impl ImportedForgeState {
             .map(|edit| edit.modifiers.as_slice())
             .unwrap_or_default()
     }
+
+    fn selected_material_edit(&self) -> Option<&ImportedMaterialEdit> {
+        self.spec.material_edits.iter().find(|edit| {
+            edit.source_asset == self.spec.source_asset
+                && edit.mesh_index == self.spec.selected_mesh
+                && edit.primitive_index == self.selected_primitive
+        })
+    }
+
+    fn selected_material_edit_mut(&mut self) -> &mut ImportedMaterialEdit {
+        let source_asset = self.spec.source_asset.clone();
+        let mesh_index = self.spec.selected_mesh;
+        let primitive_index = self.selected_primitive;
+        let index = self
+            .spec
+            .material_edits
+            .iter()
+            .position(|edit| {
+                edit.source_asset == source_asset
+                    && edit.mesh_index == mesh_index
+                    && edit.primitive_index == primitive_index
+            })
+            .unwrap_or_else(|| {
+                self.spec.material_edits.push(ImportedMaterialEdit {
+                    source_asset,
+                    mesh_index,
+                    primitive_index,
+                    base_color: [1.0; 4],
+                    metallic: 0.0,
+                    perceptual_roughness: 0.5,
+                    emissive: [1.0; 3],
+                    emissive_strength: 0.0,
+                    base_color_texture: None,
+                    normal_texture: None,
+                    metallic_roughness_texture: None,
+                    emissive_texture: None,
+                    cleared_texture_channels: [false; 4],
+                });
+                self.spec.material_edits.len() - 1
+            });
+        &mut self.spec.material_edits[index]
+    }
 }
 
 #[derive(Component)]
@@ -161,6 +203,8 @@ struct ImportedScaleText;
 struct ImportedSelectionText;
 #[derive(Component)]
 struct ImportedAssignmentText;
+#[derive(Component)]
+struct ImportedMaterialText;
 
 #[derive(Component, Clone, Copy)]
 struct ImportedForgeButton(ImportedForgeAction);
@@ -193,11 +237,60 @@ enum ImportedForgeAction {
     RemoveAssignment,
     SavePart,
     LoadPart,
+    MaterialColorNext,
+    MaterialParamNext,
+    AdjustMaterial(i32),
+    TextureChannelNext,
+    ClearTexture,
+    ResetMaterial,
     Save,
     LoadNextSaved,
     Reset,
     Back,
 }
+
+#[derive(Debug, Clone, Copy)]
+enum ImportedTextureChannel {
+    BaseColor,
+    Normal,
+    MetallicRoughness,
+    Emissive,
+}
+
+impl ImportedTextureChannel {
+    const ALL: [Self; 4] = [
+        Self::BaseColor,
+        Self::Normal,
+        Self::MetallicRoughness,
+        Self::Emissive,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::BaseColor => "BASE COLOR",
+            Self::Normal => "NORMAL",
+            Self::MetallicRoughness => "METAL/ROUGH",
+            Self::Emissive => "EMISSIVE",
+        }
+    }
+}
+
+const IMPORTED_COLOR_PALETTE: [[f32; 4]; 14] = [
+    [1.0, 1.0, 1.0, 1.0],
+    [0.03, 0.04, 0.06, 1.0],
+    [0.72, 0.02, 0.04, 1.0],
+    [1.0, 0.18, 0.02, 1.0],
+    [1.0, 0.72, 0.02, 1.0],
+    [1.0, 0.08, 0.42, 1.0],
+    [0.64, 0.12, 0.95, 1.0],
+    [0.06, 0.3, 1.0, 1.0],
+    [0.02, 0.86, 1.0, 1.0],
+    [0.02, 0.76, 0.36, 1.0],
+    [0.36, 0.82, 0.1, 1.0],
+    [0.45, 0.18, 0.06, 1.0],
+    [0.48, 0.5, 0.56, 1.0],
+    [0.82, 0.68, 0.28, 1.0],
+];
 
 #[derive(Debug, Clone, Copy)]
 struct ImportedPartPreset {
@@ -627,6 +720,55 @@ fn setup_forge(
                     });
                 },
             );
+
+            spawn_tool_window(
+                root,
+                "COLOR + TEXTURE",
+                Vec2::new(756.0, 430.0),
+                ToolWindowStyle {
+                    accent: Color::srgb(0.05, 0.78, 0.62),
+                    width: 350.0,
+                    content_height: Val::Px(290.0),
+                    ..default()
+                },
+                (MenuScrollPanel, ScrollPosition::default()),
+                |panel| {
+                    panel.spawn((
+                        Text::new(""),
+                        ImportedMaterialText,
+                        TextFont {
+                            font_size: FontSize::Px(13.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.75, 1.0, 0.92)),
+                    ));
+                    forge_row(panel, |row| {
+                        forge_button(row, "NEXT COLOR", ImportedForgeAction::MaterialColorNext);
+                        forge_button(row, "PARAM", ImportedForgeAction::MaterialParamNext);
+                        forge_button(row, "−", ImportedForgeAction::AdjustMaterial(-1));
+                        forge_button(row, "+", ImportedForgeAction::AdjustMaterial(1));
+                    });
+                    forge_row(panel, |row| {
+                        forge_button(
+                            row,
+                            "TEXTURE CHANNEL",
+                            ImportedForgeAction::TextureChannelNext,
+                        );
+                        forge_button(row, "CLEAR MAP", ImportedForgeAction::ClearTexture);
+                    });
+                    forge_row(panel, |row| {
+                        forge_button(row, "RESTORE AUTHORED", ImportedForgeAction::ResetMaterial);
+                    });
+                    panel.spawn((
+                        Text::new("Drop PNG/JPG to assign the armed texture channel."),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.68, 0.78, 0.74)),
+                    ));
+                },
+            );
         });
 }
 
@@ -708,6 +850,50 @@ fn import_glb_into_assets(source: &Path) -> Result<String, String> {
         .replace('\\', "/"))
 }
 
+fn import_texture_into_assets(source: &Path) -> Result<String, String> {
+    if !source.is_file() {
+        return Err(format!("{} is not a file", source.display()));
+    }
+    let extension = source
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|ext| matches!(ext.as_str(), "png" | "jpg" | "jpeg"))
+        .ok_or_else(|| "Texture maps must be PNG or JPG files".to_string())?;
+    let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let source = source
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve texture: {error}"))?;
+    if let Ok(relative) = source.strip_prefix(
+        assets
+            .canonicalize()
+            .map_err(|error| format!("Could not resolve assets folder: {error}"))?,
+    ) {
+        return Ok(relative.to_string_lossy().replace('\\', "/"));
+    }
+    let import_dir = assets.join("imported_textures");
+    std::fs::create_dir_all(&import_dir)
+        .map_err(|error| format!("Could not create texture import folder: {error}"))?;
+    let stem = sanitize_file_stem(&source);
+    let target = (1_u32..)
+        .map(|suffix| {
+            if suffix == 1 {
+                import_dir.join(format!("{stem}.{extension}"))
+            } else {
+                import_dir.join(format!("{stem}_{suffix}.{extension}"))
+            }
+        })
+        .find(|candidate| !candidate.exists())
+        .ok_or_else(|| "Could not allocate an imported texture filename".to_string())?;
+    std::fs::copy(&source, &target)
+        .map_err(|error| format!("Could not copy texture into assets: {error}"))?;
+    Ok(target
+        .strip_prefix(&assets)
+        .unwrap_or(&target)
+        .to_string_lossy()
+        .replace('\\', "/"))
+}
+
 fn begin_import(
     asset_path: String,
     asset_server: &AssetServer,
@@ -718,6 +904,7 @@ fn begin_import(
     if clear_edits {
         state.spec.selected_mesh = 0;
         state.spec.mesh_edits.clear();
+        state.spec.material_edits.clear();
         state.spec.part_assignments.clear();
     }
     state.selected_primitive = 0;
@@ -785,13 +972,48 @@ fn import_dropped_glb(
         let FileDragAndDrop::DroppedFile { path_buf, .. } = event else {
             continue;
         };
-        match import_glb_into_assets(path_buf) {
-            Ok(asset_path) => begin_import(asset_path, &asset_server, &mut state, true),
-            Err(error) => {
-                state.status = error;
-                state.labels_dirty = true;
+        let is_glb = path_buf
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("glb"));
+        if is_glb {
+            match import_glb_into_assets(path_buf) {
+                Ok(asset_path) => begin_import(asset_path, &asset_server, &mut state, true),
+                Err(error) => state.status = error,
+            }
+        } else {
+            match import_texture_into_assets(path_buf) {
+                Ok(texture_path) => {
+                    let channel = ImportedTextureChannel::ALL[state.texture_channel];
+                    let edit = state.selected_material_edit_mut();
+                    match channel {
+                        ImportedTextureChannel::BaseColor => {
+                            edit.base_color_texture = Some(texture_path.clone());
+                            edit.cleared_texture_channels[0] = false;
+                        }
+                        ImportedTextureChannel::Normal => {
+                            edit.normal_texture = Some(texture_path.clone());
+                            edit.cleared_texture_channels[1] = false;
+                        }
+                        ImportedTextureChannel::MetallicRoughness => {
+                            edit.metallic_roughness_texture = Some(texture_path.clone());
+                            edit.cleared_texture_channels[2] = false;
+                            edit.metallic = 1.0;
+                            edit.perceptual_roughness = 1.0;
+                        }
+                        ImportedTextureChannel::Emissive => {
+                            edit.emissive_texture = Some(texture_path.clone());
+                            edit.cleared_texture_channels[3] = false;
+                            edit.emissive_strength = edit.emissive_strength.max(1.0);
+                        }
+                    }
+                    state.status = format!("Assigned {texture_path} to {}", channel.label());
+                    state.preview_dirty = true;
+                }
+                Err(error) => state.status = error,
             }
         }
+        state.labels_dirty = true;
     }
 }
 
@@ -1039,8 +1261,19 @@ fn imported_forge_actions(
                 }
             }
             ImportedForgeAction::SavePart => {
-                if let Some(part) = state.spec.part_assignments.get(state.selected_assignment) {
-                    match character_records::save_part_to_active_project(&registry, part) {
+                if let Some(part) = state
+                    .spec
+                    .part_assignments
+                    .get(state.selected_assignment)
+                    .cloned()
+                {
+                    let material = state.spec.material_edits.iter().find(|material| {
+                        material.source_asset == part.source_asset
+                            && material.mesh_index == part.mesh_index
+                            && material.primitive_index == part.primitive_index
+                    });
+                    match character_records::save_part_to_active_project(&registry, &part, material)
+                    {
                         Ok(content_id) => {
                             state.status = format!("Saved reusable part {content_id}");
                             state.part_library = character_records::list_part_library(&registry);
@@ -1077,6 +1310,14 @@ fn imported_forge_actions(
                                 state.status =
                                     "Library part overlaps an existing assignment".into();
                             } else {
+                                if let Some(material) = part.material {
+                                    state.spec.material_edits.retain(|existing| {
+                                        existing.source_asset != material.source_asset
+                                            || existing.mesh_index != material.mesh_index
+                                            || existing.primitive_index != material.primitive_index
+                                    });
+                                    state.spec.material_edits.push(material);
+                                }
                                 state.spec.part_assignments.push(assignment);
                                 state.selected_assignment = state.spec.part_assignments.len() - 1;
                                 state.status = format!("Added reusable part {content_id}");
@@ -1085,6 +1326,83 @@ fn imported_forge_actions(
                         Err(error) => state.status = error,
                     }
                 }
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::MaterialColorNext => {
+                let next = state
+                    .selected_material_edit()
+                    .and_then(|edit| {
+                        IMPORTED_COLOR_PALETTE
+                            .iter()
+                            .position(|color| *color == edit.base_color)
+                    })
+                    .map_or(0, |index| (index + 1) % IMPORTED_COLOR_PALETTE.len());
+                state.selected_material_edit_mut().base_color = IMPORTED_COLOR_PALETTE[next];
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::MaterialParamNext => {
+                state.material_param = (state.material_param + 1) % 3;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::AdjustMaterial(direction) => {
+                let param = state.material_param;
+                let edit = state.selected_material_edit_mut();
+                match param {
+                    0 => edit.metallic = (edit.metallic + direction as f32 * 0.05).clamp(0.0, 1.0),
+                    1 => {
+                        edit.perceptual_roughness =
+                            (edit.perceptual_roughness + direction as f32 * 0.05).clamp(0.089, 1.0)
+                    }
+                    _ => {
+                        edit.emissive_strength =
+                            (edit.emissive_strength + direction as f32 * 0.5).clamp(0.0, 100.0)
+                    }
+                }
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::TextureChannelNext => {
+                state.texture_channel =
+                    (state.texture_channel + 1) % ImportedTextureChannel::ALL.len();
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::ClearTexture => {
+                let channel = ImportedTextureChannel::ALL[state.texture_channel];
+                let edit = state.selected_material_edit_mut();
+                match channel {
+                    ImportedTextureChannel::BaseColor => {
+                        edit.base_color_texture = None;
+                        edit.cleared_texture_channels[0] = true;
+                    }
+                    ImportedTextureChannel::Normal => {
+                        edit.normal_texture = None;
+                        edit.cleared_texture_channels[1] = true;
+                    }
+                    ImportedTextureChannel::MetallicRoughness => {
+                        edit.metallic_roughness_texture = None;
+                        edit.cleared_texture_channels[2] = true;
+                    }
+                    ImportedTextureChannel::Emissive => {
+                        edit.emissive_texture = None;
+                        edit.cleared_texture_channels[3] = true;
+                    }
+                }
+                state.status = format!("Cleared {} texture", channel.label());
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::ResetMaterial => {
+                let source_asset = state.spec.source_asset.clone();
+                let mesh_index = state.spec.selected_mesh;
+                let primitive_index = state.selected_primitive;
+                state.spec.material_edits.retain(|edit| {
+                    edit.source_asset != source_asset
+                        || edit.mesh_index != mesh_index
+                        || edit.primitive_index != primitive_index
+                });
+                state.status = "Restored the primitive's authored GLB material".into();
+                state.preview_dirty = true;
                 state.labels_dirty = true;
             }
             ImportedForgeAction::Save => {
@@ -1119,6 +1437,7 @@ fn imported_forge_actions(
                 state.spec.root_scale = [1.0; 3];
                 state.spec.mesh_edits.clear();
                 state.spec.part_assignments.clear();
+                state.spec.material_edits.clear();
                 state.selected_faces.clear();
                 state.selected_modifier = 0;
                 state.selected_param = 0;
@@ -1348,10 +1667,79 @@ fn pick_imported_face(
     state.labels_dirty = true;
 }
 
+fn standard_material_from_gltf(source: Option<&GltfMaterial>) -> StandardMaterial {
+    let Some(source) = source else {
+        return StandardMaterial::default();
+    };
+    StandardMaterial {
+        base_color: source.base_color,
+        base_color_channel: source.base_color_channel.clone(),
+        base_color_texture: source.base_color_texture.clone(),
+        emissive: source.emissive,
+        emissive_channel: source.emissive_channel.clone(),
+        emissive_texture: source.emissive_texture.clone(),
+        perceptual_roughness: source.perceptual_roughness,
+        metallic: source.metallic,
+        metallic_roughness_channel: source.metallic_roughness_channel.clone(),
+        metallic_roughness_texture: source.metallic_roughness_texture.clone(),
+        reflectance: source.reflectance,
+        specular_tint: source.specular_tint,
+        normal_map_channel: source.normal_map_channel.clone(),
+        normal_map_texture: source.normal_map_texture.clone(),
+        double_sided: source.double_sided,
+        cull_mode: source.cull_mode,
+        alpha_mode: source.alpha_mode,
+        ..default()
+    }
+}
+
+fn apply_material_edit(
+    material: &mut StandardMaterial,
+    edit: &ImportedMaterialEdit,
+    asset_server: &AssetServer,
+) {
+    material.base_color = Color::srgba(
+        edit.base_color[0],
+        edit.base_color[1],
+        edit.base_color[2],
+        edit.base_color[3],
+    );
+    material.metallic = edit.metallic;
+    material.perceptual_roughness = edit.perceptual_roughness;
+    material.emissive = LinearRgba::rgb(
+        edit.emissive[0] * edit.emissive_strength,
+        edit.emissive[1] * edit.emissive_strength,
+        edit.emissive[2] * edit.emissive_strength,
+    );
+    if edit.cleared_texture_channels[0] {
+        material.base_color_texture = None;
+    } else if let Some(path) = &edit.base_color_texture {
+        material.base_color_texture = Some(asset_server.load(path.clone()));
+    }
+    if edit.cleared_texture_channels[1] {
+        material.normal_map_texture = None;
+    } else if let Some(path) = &edit.normal_texture {
+        material.normal_map_texture = Some(asset_server.load(path.clone()));
+    }
+    if edit.cleared_texture_channels[2] {
+        material.metallic_roughness_texture = None;
+    } else if let Some(path) = &edit.metallic_roughness_texture {
+        material.metallic_roughness_texture = Some(asset_server.load(path.clone()));
+    }
+    if edit.cleared_texture_channels[3] {
+        material.emissive_texture = None;
+    } else if let Some(path) = &edit.emissive_texture {
+        material.emissive_texture = Some(asset_server.load(path.clone()));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn rebuild_imported_preview(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
     gltf_meshes: Res<Assets<GltfMesh>>,
+    gltf_materials: Res<Assets<GltfMaterial>>,
     gltf_nodes: Res<Assets<GltfNode>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -1389,6 +1777,19 @@ fn rebuild_imported_preview(
             };
             let selected = mesh_index == state.spec.selected_mesh;
             let active_primitive = selected && primitive_index == state.selected_primitive;
+            let mut preview_material = standard_material_from_gltf(
+                primitive
+                    .material
+                    .as_ref()
+                    .and_then(|handle| gltf_materials.get(handle)),
+            );
+            if let Some(edit) = state.spec.material_edits.iter().find(|edit| {
+                edit.source_asset == state.spec.source_asset
+                    && edit.mesh_index == mesh_index
+                    && edit.primitive_index == primitive_index
+            }) {
+                apply_material_edit(&mut preview_material, edit, &asset_server);
+            }
             let skinned = source.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some();
             let deformable = skinned || source.has_morph_targets();
             if active_primitive && !state.selected_faces.is_empty() {
@@ -1406,6 +1807,7 @@ fn rebuild_imported_preview(
                         transform,
                         mesh_index,
                         primitive_index,
+                        preview_material.clone(),
                     ));
                 }
                 if let Some(overlay) = overlay {
@@ -1415,6 +1817,7 @@ fn rebuild_imported_preview(
                         transform,
                         mesh_index,
                         primitive_index,
+                        preview_material,
                     ));
                 }
                 continue;
@@ -1444,6 +1847,7 @@ fn rebuild_imported_preview(
                 transform,
                 mesh_index,
                 primitive_index,
+                preview_material,
             ));
         }
     }
@@ -1451,26 +1855,6 @@ fn rebuild_imported_preview(
     for entity in &old_previews {
         commands.entity(entity).despawn();
     }
-    let selected_material = state.selected_material.clone().unwrap_or_else(|| {
-        let handle = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.20, 0.72, 1.0),
-            metallic: 0.15,
-            perceptual_roughness: 0.42,
-            ..default()
-        });
-        state.selected_material = Some(handle.clone());
-        handle
-    });
-    let normal_material = state.normal_material.clone().unwrap_or_else(|| {
-        let handle = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.56, 0.62, 0.74),
-            metallic: 0.08,
-            perceptual_roughness: 0.55,
-            ..default()
-        });
-        state.normal_material = Some(handle.clone());
-        handle
-    });
     let face_material = state.face_material.clone().unwrap_or_else(|| {
         let handle = materials.add(StandardMaterial {
             base_color: Color::srgb(1.0, 0.22, 0.04),
@@ -1491,7 +1875,11 @@ fn rebuild_imported_preview(
             InheritedVisibility::default(),
         ))
         .id();
-    for (mesh, tint, transform, mesh_index, primitive_index) in parts {
+    for (mesh, tint, transform, mesh_index, primitive_index, material) in parts {
+        let material = match tint {
+            PreviewTint::SelectedFaces => face_material.clone(),
+            PreviewTint::Normal | PreviewTint::ActiveMesh => materials.add(material),
+        };
         let child = commands
             .spawn((
                 ImportedPreviewPart,
@@ -1501,11 +1889,7 @@ fn rebuild_imported_preview(
                 },
                 PbrBundle {
                     mesh: Mesh3d(mesh),
-                    material: MeshMaterial3d(match tint {
-                        PreviewTint::Normal => normal_material.clone(),
-                        PreviewTint::ActiveMesh => selected_material.clone(),
-                        PreviewTint::SelectedFaces => face_material.clone(),
-                    }),
+                    material: MeshMaterial3d(material),
                     transform,
                     ..default()
                 },
@@ -1532,6 +1916,7 @@ fn refresh_imported_labels(
         Option<&ImportedScaleText>,
         Option<&ImportedSelectionText>,
         Option<&ImportedAssignmentText>,
+        Option<&ImportedMaterialText>,
     )>,
 ) {
     if !state.labels_dirty {
@@ -1607,7 +1992,39 @@ fn refresh_imported_labels(
         state.part_library.len(),
         selected_part
     );
-    for (mut text, status, asset, mesh, modifier, scale, selection, assignment) in &mut labels {
+    let texture_channel = ImportedTextureChannel::ALL[state.texture_channel];
+    let material_label = state
+        .selected_material_edit()
+        .map(|edit| {
+            let param = match state.material_param {
+                0 => format!("Metallic {:.2}", edit.metallic),
+                1 => format!("Roughness {:.2}", edit.perceptual_roughness),
+                _ => format!("Emission {:.1}", edit.emissive_strength),
+            };
+            let texture = match texture_channel {
+                ImportedTextureChannel::BaseColor => &edit.base_color_texture,
+                ImportedTextureChannel::Normal => &edit.normal_texture,
+                ImportedTextureChannel::MetallicRoughness => &edit.metallic_roughness_texture,
+                ImportedTextureChannel::Emissive => &edit.emissive_texture,
+            };
+            format!(
+                "Override active • {param}\nColor {:.2} {:.2} {:.2}\nChannel: {} • Map: {}",
+                edit.base_color[0],
+                edit.base_color[1],
+                edit.base_color[2],
+                texture_channel.label(),
+                texture.as_deref().unwrap_or("authored / none")
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "Using authored GLB material\nChannel: {}\nNEXT COLOR or +/- creates an override",
+                texture_channel.label()
+            )
+        });
+    for (mut text, status, asset, mesh, modifier, scale, selection, assignment, material) in
+        &mut labels
+    {
         let value = if status.is_some() {
             &state.status
         } else if asset.is_some() {
@@ -1622,6 +2039,8 @@ fn refresh_imported_labels(
             &selection_label
         } else if assignment.is_some() {
             &assignment_label
+        } else if material.is_some() {
+            &material_label
         } else {
             continue;
         };

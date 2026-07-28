@@ -2040,17 +2040,29 @@ Selections can be turned into modular parts with quick body/head/limb/hand/foot,
 hair, cape, shoulder, accessory, weapon, and hurtbox presets. Each assignment
 stores a stable ID, source GLB, mesh and primitive indices, sorted face IDs,
 slot, canonical animation joint, local centroid pivot, and gameplay role.
-Assignments save in imported Character schema v2. **SAVE TO LIBRARY** creates a
+Assignments save in imported Character schema v3 (first introduced in v2).
+**SAVE TO LIBRARY** creates a
 separately tagged reusable project record; **ADD LIBRARY PART** references its
 source-backed assignment in the current character, enabling cross-character
 mix-and-match without duplicating geometry.
+
+The Color + Texture window preserves each primitive's authored GLB material
+until an override is created. Authors can cycle a curated color palette and
+tune metallic, perceptual roughness, and emissive strength. PNG/JPG drops target
+an armed base-color, normal, packed metallic/roughness, or emissive channel;
+maps can be cleared independently or the whole primitive can return to its
+authored material. External images are copied into
+`assets/imported_textures/`, while in-project images keep their existing
+project-relative path. Character schema v3 persists these overrides.
+Saving a modular part includes its matching material override, and loading the
+part replaces the same source-primitive material binding deterministically.
 
 Meshes carrying joint weights or morph targets remain preview-safe and retain
 authored deformation data; topology modifiers are recorded but not baked onto
 those meshes yet. Region assignments are metadata consumed by future runtime
 assembly/bake systems—the current editor does not physically detach faces or
 rewrite weights. Next work is box/circle/lasso selection, brush
-displacement/masking, material preservation, thumbnails, socket
+displacement/masking, UV transform/seam tools, texture painting, thumbnails, socket
 orientation editing, runtime part assembly, and a skin/morph-aware GLB
 bake/export path. See
 [`docs/guides/imported-mesh-editor.md`](guides/imported-mesh-editor.md).

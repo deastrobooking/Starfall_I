@@ -19,6 +19,77 @@ pub struct ImportedMeshEdit {
     pub modifiers: Vec<MeshModifier>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImportedMaterialEdit {
+    pub source_asset: String,
+    pub mesh_index: usize,
+    pub primitive_index: usize,
+    pub base_color: [f32; 4],
+    pub metallic: f32,
+    pub perceptual_roughness: f32,
+    pub emissive: [f32; 3],
+    pub emissive_strength: f32,
+    pub base_color_texture: Option<String>,
+    pub normal_texture: Option<String>,
+    pub metallic_roughness_texture: Option<String>,
+    pub emissive_texture: Option<String>,
+    #[serde(default)]
+    pub cleared_texture_channels: [bool; 4],
+}
+
+impl ImportedMaterialEdit {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.source_asset.to_ascii_lowercase().ends_with(".glb") {
+            return Err("Material override source must be a GLB".into());
+        }
+        if self
+            .base_color
+            .iter()
+            .chain(self.emissive.iter())
+            .chain([
+                &self.metallic,
+                &self.perceptual_roughness,
+                &self.emissive_strength,
+            ])
+            .any(|value| !value.is_finite())
+        {
+            return Err("Material controls must be finite".into());
+        }
+        if self
+            .base_color
+            .iter()
+            .any(|value| !(0.0..=1.0).contains(value))
+            || self
+                .emissive
+                .iter()
+                .any(|value| !(0.0..=1.0).contains(value))
+            || !(0.0..=1.0).contains(&self.metallic)
+            || !(0.089..=1.0).contains(&self.perceptual_roughness)
+            || !(0.0..=100.0).contains(&self.emissive_strength)
+        {
+            return Err("Material controls are outside their supported ranges".into());
+        }
+        for path in [
+            &self.base_color_texture,
+            &self.normal_texture,
+            &self.metallic_roughness_texture,
+            &self.emissive_texture,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let lower = path.to_ascii_lowercase();
+            if path.starts_with('/')
+                || path.contains("..")
+                || !(lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg"))
+            {
+                return Err(format!("Invalid imported texture path: {path}"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportedPartSlot {
@@ -93,6 +164,8 @@ pub struct ImportedPartAsset {
     pub schema_version: u32,
     pub content_id: String,
     pub assignment: ImportedPartAssignment,
+    #[serde(default)]
+    pub material: Option<ImportedMaterialEdit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -107,19 +180,22 @@ pub struct ImportedCharacterSpec {
     #[serde(default)]
     pub mesh_edits: Vec<ImportedMeshEdit>,
     #[serde(default)]
+    pub material_edits: Vec<ImportedMaterialEdit>,
+    #[serde(default)]
     pub part_assignments: Vec<ImportedPartAssignment>,
 }
 
 impl Default for ImportedCharacterSpec {
     fn default() -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             content_id: "character.imported".into(),
             display_name: "Imported Character".into(),
             source_asset: String::new(),
             selected_mesh: 0,
             root_scale: [1.0; 3],
             mesh_edits: Vec::new(),
+            material_edits: Vec::new(),
             part_assignments: Vec::new(),
         }
     }
@@ -145,6 +221,17 @@ impl ImportedCharacterSpec {
         }
         if self.mesh_edits.iter().any(|edit| edit.modifiers.len() > 16) {
             return Err("Each mesh modifier stack is limited to 16 operations".into());
+        }
+        let mut material_keys = std::collections::BTreeSet::new();
+        for material in &self.material_edits {
+            material.validate()?;
+            if !material_keys.insert((
+                material.source_asset.as_str(),
+                material.mesh_index,
+                material.primitive_index,
+            )) {
+                return Err("Only one material override is allowed per source primitive".into());
+            }
         }
         let mut part_ids = std::collections::BTreeSet::new();
         let mut claimed_faces = std::collections::BTreeSet::new();
@@ -273,6 +360,7 @@ pub fn list_active_project(registry: &ForgeProjectRegistry) -> Vec<(String, Stri
 pub fn save_part_to_active_project(
     registry: &ForgeProjectRegistry,
     assignment: &ImportedPartAssignment,
+    material: Option<&ImportedMaterialEdit>,
 ) -> Result<String, String> {
     if assignment.face_indices.is_empty() {
         return Err("Select at least one face before saving a part".into());
@@ -292,9 +380,10 @@ pub fn save_part_to_active_project(
         "animation_ready".into(),
     ];
     let part = ImportedPartAsset {
-        schema_version: 1,
+        schema_version: 2,
         content_id: content_id.clone(),
         assignment: assignment.clone(),
+        material: material.cloned(),
     };
     let mut recipe = GenericRecipeDraft::default();
     recipe.fields.insert(
@@ -401,6 +490,55 @@ mod tests {
         let json = serde_json::to_string(&spec).unwrap();
         let decoded: ImportedCharacterSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, spec);
+    }
+
+    #[test]
+    fn material_overrides_validate_texture_paths_and_round_trip() {
+        let material = ImportedMaterialEdit {
+            source_asset: "imported_characters/hero.glb".into(),
+            mesh_index: 0,
+            primitive_index: 1,
+            base_color: [0.1, 0.2, 0.3, 1.0],
+            metallic: 0.8,
+            perceptual_roughness: 0.3,
+            emissive: [1.0, 0.2, 0.4],
+            emissive_strength: 3.0,
+            base_color_texture: Some("imported_textures/armor.png".into()),
+            normal_texture: None,
+            metallic_roughness_texture: None,
+            emissive_texture: None,
+            cleared_texture_channels: [false; 4],
+        };
+        assert!(material.validate().is_ok());
+        let mut spec = ImportedCharacterSpec {
+            source_asset: material.source_asset.clone(),
+            material_edits: vec![material],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ImportedCharacterSpec>(&json).unwrap(),
+            spec
+        );
+        spec.material_edits[0].base_color_texture = Some("../escape.png".into());
+        assert!(spec.validate().is_err());
+    }
+
+    #[test]
+    fn schema_two_character_defaults_to_no_material_overrides() {
+        let json = r#"{
+            "schema_version": 2,
+            "content_id": "character.legacy",
+            "display_name": "Legacy",
+            "source_asset": "imported_characters/legacy.glb",
+            "selected_mesh": 0,
+            "root_scale": [1.0, 1.0, 1.0],
+            "mesh_edits": [],
+            "part_assignments": []
+        }"#;
+        let spec: ImportedCharacterSpec = serde_json::from_str(json).unwrap();
+        assert!(spec.material_edits.is_empty());
+        assert!(spec.validate().is_ok());
     }
 
     #[test]

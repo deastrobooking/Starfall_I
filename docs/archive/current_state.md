@@ -125,9 +125,12 @@
   canonical animation joints, pivots, and gameplay roles. Character payload
   schema v2 persists those assignments, while separately tagged modular-part
   records provide a project library that can be mixed into other character
-  specs. Skinning and morph data remain intact: selections reference authored
-  face IDs and the static editor overlay strips deformation metadata without
-  mutating the source asset.
+  specs. Per-source primitive material overrides preserve authored GLB
+  materials by default and add palette tint, metallic, roughness, emission,
+  and imported base-color/normal/metallic-roughness/emissive maps. Reusable
+  part records carry their matching override. Skinning and morph data remain
+  intact: selections reference authored face IDs and the static editor overlay
+  strips deformation metadata without mutating the source asset.
 - App construction now has one authoritative
   `build_starfall_app(StarfallAppMode)` boundary. Production keeps the full
   window/render/audio stack; the headless profile keeps state, assets, physics,
