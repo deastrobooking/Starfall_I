@@ -21,7 +21,7 @@ use bevy::prelude::*;
 
 /// Visual identity of a blade. Maps to a shared energy material at render time
 /// rather than allocating a material per blade.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BladeColor {
     /// The issued blade every player starts with: pale blue-white.
     Azure,

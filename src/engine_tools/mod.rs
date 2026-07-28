@@ -15,6 +15,8 @@ mod presets;
 pub mod project_registry;
 /// Draggable, minimizable in-game tool windows shared by every editor.
 pub mod tool_windows;
+/// Weapon Forge saves, routed through the versioned project contract.
+pub mod weapon_records;
 
 use std::collections::{BTreeMap, BTreeSet};
 

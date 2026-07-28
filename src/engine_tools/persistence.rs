@@ -576,6 +576,7 @@ pub enum ContentPayload {
     City(ProceduralRecipeDraft),
     Material(GenericRecipeDraft),
     Ui(GenericRecipeDraft),
+    Weapon(GenericRecipeDraft),
 }
 
 impl ContentPayload {
@@ -585,6 +586,7 @@ impl ContentPayload {
             ContentCategory::Scene => Self::Scene(EditorSceneDraft::default()),
             ContentCategory::Character => Self::Character(recipe),
             ContentCategory::Creature => Self::Creature(recipe),
+            ContentCategory::Weapon => Self::Weapon(recipe),
             ContentCategory::Biome => Self::Biome(ProceduralRecipeDraft::default()),
             ContentCategory::Road => Self::Road(ProceduralRecipeDraft::default()),
             ContentCategory::Building => Self::Building(ProceduralRecipeDraft::default()),
@@ -639,6 +641,7 @@ impl ContentPayload {
             Self::City(_) => ContentCategory::City,
             Self::Material(_) => ContentCategory::Material,
             Self::Ui(_) => ContentCategory::Ui,
+            Self::Weapon(_) => ContentCategory::Weapon,
         }
     }
 
@@ -1029,6 +1032,8 @@ pub enum ContentCategory {
     City,
     Material,
     Ui,
+    /// Designs from the modular Weapon Forge.
+    Weapon,
 }
 
 impl ContentCategory {
@@ -1044,6 +1049,7 @@ impl ContentCategory {
             Self::City => "city",
             Self::Material => "material",
             Self::Ui => "ui",
+            Self::Weapon => "weapon",
         }
     }
 
@@ -1059,6 +1065,7 @@ impl ContentCategory {
             Self::City => "cities",
             Self::Material => "materials",
             Self::Ui => "ui",
+            Self::Weapon => "weapons",
         }
     }
 }

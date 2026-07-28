@@ -938,6 +938,28 @@ interact, right = open map). The old Select + D-pad direct special-slot chord
 was retired since it would double-fire with the utilities; keyboard 7–0 still
 selects specials directly.
 
+**Weapon Forge (2026-07-28, foundation):** a modular weapon designer whose
+governing rule is that **stats are derived, not typed in**. A design is a
+physical description — grip style, guard, emitter, pommel, blade length and
+width, colour — and damage, wave output, swing speed, and chain length fall
+out of it (`src/combat/weapon_forge.rs`). A longer blade hits harder and swings
+slower; a heavier pommel pulls the balance point back toward the hand and buys
+that speed back; the emitter decides the wave behaviour (focused / piercing /
+explosive / siphon); a reactor pommel grants fast technique recovery only when
+the emitter has not already claimed the trait slot. The output is a
+`BladeProfile` — the same type the shop sells — so a forged weapon equips
+exactly like a purchased one and inherits the hilt mount and HUD readout for
+free. Designs cannot cheat the shop's sidegrade rule: any build that comes out
+better in every respect pays for it in swing speed, and a test sweeps all 3,072
+part combinations to prove no design is a strict upgrade over the issued blade.
+Validation separates blocking errors (no name) from advisory warnings (an
+extended grip on a short blade), so odd experiments still save. Saves route
+through the versioned project contract as `ContentCategory::Weapon` records
+(`engine_tools::weapon_records`), inheriting the same atomic writes and
+recovery snapshots as every other content type. **The in-game designer panel is
+not built yet** — the model, derivation, validation, presets, and save/load
+bridge are complete and tested behind it.
+
 **Star Sabre hilt (2026-07-28):** the sabre is now a physical weapon held in
 the character's hand. Previously the blade was positioned by guessing where the
 hand was — `player.translation()` plus fixed offsets — so it ignored the animated
@@ -948,8 +970,13 @@ a skeleton, otherwise the cartoon `RightHand` part. Because it is a child in the
 transform hierarchy, the weapon inherits every arm pose, swing, and
 designer-edited body proportion for free. The energy blade is in turn a child of
 the hilt, so its transform is purely local — it projects out of the emitter and
-ignites by extending along that axis instead of appearing at full length. Drawing
-mounts the hilt, sheathing removes it, and mounting is idempotent across frames.
+ignites by extending along that axis instead of appearing at full length.
+Sheathing does not delete the weapon — the hilt moves to the pelvis joint (or
+belt mesh) and hangs on the hip, so a sabre is visible equipment whether drawn
+or stowed; only a drawn hilt ignites a blade. Heavy committed techniques
+(cyclone, spiral, meteor pound) bring the off hand onto the hilt for a
+two-handed grip, while the mobile verbs stay one-handed and a thrown blade
+naturally gets no second hand.
 
 **Star Sabre blades (2026-07-27):** the shop's Weapons category now sells
 *blades*, and equipping one actually restats and recolours the sabre —

@@ -8,6 +8,7 @@
 //! |---|---|
 //! | [`data`] | `MoveDef`/`MoveLibrary` — authored frame data (`assets/combat/moves.json`) |
 //! | [`blades`] | Star Sabre blade catalog — the shop's weapons, and what they change |
+//! | [`weapon_forge`] | Modular weapon designer: parts in, playable stats out |
 //! | [`damage`] | The single `apply_damage` path: resistances, crits, knockback |
 //! | [`hitstop`] | Bounded freeze-frames shared by every impact |
 //! | [`feedback`] | Flinch, hit flashes, damage numbers, death dissolve |
@@ -26,3 +27,4 @@ pub mod hitstop;
 pub mod perks;
 pub mod tricks;
 pub mod upgrades;
+pub mod weapon_forge;
