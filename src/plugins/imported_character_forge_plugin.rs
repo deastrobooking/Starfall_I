@@ -751,6 +751,31 @@ fn gltf_mesh_instances(gltf: &Gltf, nodes: &Assets<GltfNode>) -> Option<Vec<(usi
     Some(instances)
 }
 
+/// Build a display-only copy that can be rendered by a plain `PbrBundle`.
+///
+/// Imported skinned and morphed meshes require companion ECS components that
+/// belong to the source GLTF scene. The Forge preview intentionally rebuilds
+/// that scene as independently selectable mesh parts, so reusing a deformable
+/// source mesh would make Bevy select a skinned/morphed pipeline while binding
+/// only the model transform. Keep the authored asset intact and omit deformation
+/// data from this static bind-pose preview.
+fn static_import_preview_mesh(source: &Mesh) -> Mesh {
+    let mut preview = Mesh::new(source.primitive_topology(), source.asset_usage);
+    preview.enable_raytracing = false;
+    for (attribute, values) in source.attributes() {
+        if attribute.id == Mesh::ATTRIBUTE_JOINT_INDEX.id
+            || attribute.id == Mesh::ATTRIBUTE_JOINT_WEIGHT.id
+        {
+            continue;
+        }
+        preview.insert_attribute(*attribute, values.clone());
+    }
+    if let Some(indices) = source.indices() {
+        preview.insert_indices(indices.clone());
+    }
+    preview
+}
+
 fn rebuild_imported_preview(
     mut commands: Commands,
     gltfs: Res<Assets<Gltf>>,
@@ -787,16 +812,19 @@ fn rebuild_imported_preview(
             let selected = mesh_index == state.spec.selected_mesh;
             let skinned = source.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some();
             let deformable = skinned || source.has_morph_targets();
-            let handle = if selected && !state.selected_stack().is_empty() && !deformable {
+            let handle = if deformable {
+                if selected && !state.selected_stack().is_empty() {
+                    selected_is_deformable = true;
+                }
+                let preview = static_import_preview_mesh(source);
+                meshes.add(preview)
+            } else if selected && !state.selected_stack().is_empty() {
                 let Some(derived) = apply_stack_to_mesh(source, state.selected_stack()) else {
                     state.status = format!("{} is not an editable triangle mesh", gltf_mesh.name);
                     return;
                 };
                 meshes.add(derived)
             } else {
-                if selected && deformable && !state.selected_stack().is_empty() {
-                    selected_is_deformable = true;
-                }
                 primitive.mesh.clone()
             };
             parts.push((handle, selected, transform));
@@ -986,5 +1014,31 @@ mod tests {
         assert!(state.selected_stack().is_empty());
         state.spec.selected_mesh = 2;
         assert_eq!(state.selected_stack().len(), 1);
+    }
+
+    #[test]
+    fn static_import_preview_strips_deformation_data_without_touching_geometry() {
+        let mut source = Mesh::from(Cuboid::new(1.0, 2.0, 3.0));
+        let vertex_count = source.count_vertices();
+        source.insert_attribute(
+            Mesh::ATTRIBUTE_JOINT_INDEX,
+            bevy::mesh::VertexAttributeValues::Uint16x4(vec![[0_u16, 1, 0, 0]; vertex_count]),
+        );
+        source.insert_attribute(
+            Mesh::ATTRIBUTE_JOINT_WEIGHT,
+            vec![[0.75_f32, 0.25, 0.0, 0.0]; vertex_count],
+        );
+        source.set_morph_targets(vec![default(); vertex_count]);
+
+        let preview = static_import_preview_mesh(&source);
+
+        assert!(source.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some());
+        assert!(source.has_morph_targets());
+        assert!(preview.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert_eq!(preview.count_vertices(), vertex_count);
+        assert_eq!(preview.indices(), source.indices());
+        assert!(preview.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_none());
+        assert!(preview.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT).is_none());
+        assert!(!preview.has_morph_targets());
     }
 }
