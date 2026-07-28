@@ -69,6 +69,25 @@ pub struct RangedMoveDef {
     pub projectile_lifetime: f32,
     /// Splash radius on impact (0 = no splash).
     pub explosion_radius: f32,
+    /// How hard this weapon's shots steer toward a target, 0 (dumb-fire) to 1
+    /// (locked on). Every primary tracks a little: the game is built around
+    /// moving fast, so shots that need you to stop and line them up fight the
+    /// movement instead of rewarding it. Turn rate scales from this.
+    #[serde(default = "default_tracking")]
+    pub tracking_strength: f32,
+    /// Visual size multiplier for the bolt. Scales the mesh only — reach and
+    /// damage come from the fields above, so bigger never silently means
+    /// stronger.
+    #[serde(default = "default_blast_scale")]
+    pub blast_scale: f32,
+}
+
+fn default_tracking() -> f32 {
+    0.45
+}
+
+fn default_blast_scale() -> f32 {
+    1.0
 }
 
 /// One authored Star Sabre technique (a relic-unlocked verb). A technique
@@ -566,6 +585,9 @@ fn default_sabre_wave() -> RangedMoveDef {
         pellets: 1,
         projectile_lifetime: 1.5,
         explosion_radius: 4.0,
+        // Sabre waves are aimed by the swing, not steered.
+        tracking_strength: 0.0,
+        blast_scale: 1.0,
     }
 }
 
@@ -573,13 +595,16 @@ fn default_sabre_wave() -> RangedMoveDef {
 /// `Weapon::new` tuning, now authored as data (3.0 s was the hardcoded
 /// projectile lifetime shared by every primary shot).
 fn default_ranged_slots() -> Vec<RangedMoveDef> {
+    #[allow(clippy::too_many_arguments)]
     let r = |name: &str,
              damage: f32,
              fire_rate: f32,
              projectile_speed: f32,
              spread: f32,
              pellets: u32,
-             explosion_radius: f32| RangedMoveDef {
+             explosion_radius: f32,
+             tracking_strength: f32,
+             blast_scale: f32| RangedMoveDef {
         name: name.to_string(),
         damage,
         fire_rate,
@@ -588,14 +613,20 @@ fn default_ranged_slots() -> Vec<RangedMoveDef> {
         pellets,
         projectile_lifetime: 3.0,
         explosion_radius,
+        tracking_strength,
+        blast_scale,
     };
+    // Tracking is tuned against how easy each weapon already is to land while
+    // moving: the fast precise beams need the least help, the slow arcing
+    // ordnance the most, and shotgun pellets stay loose so the spread still
+    // reads as a spread rather than a cone that converges on one enemy.
     vec![
-        r("Starlight Popper", 16.0, 0.26, 68.0, 0.02, 1, 0.0),
-        r("Comet Stream", 18.0, 0.075, 105.0, 0.025, 1, 0.0),
-        r("Sparkle Fan", 7.0, 0.7, 80.0, 0.18, 10, 0.0),
-        r("Nova Orb", 90.0, 1.2, 34.0, 0.0, 1, 6.5),
-        r("Rainbow Ray", 26.0, 0.045, 320.0, 0.0, 1, 0.0),
-        r("Star Bubble Bombs", 75.0, 0.95, 16.0, 0.0, 1, 8.5),
+        r("Starlight Popper", 16.0, 0.26, 68.0, 0.02, 1, 0.0, 0.50, 1.35),
+        r("Comet Stream", 18.0, 0.075, 105.0, 0.025, 1, 0.0, 0.38, 1.25),
+        r("Sparkle Fan", 7.0, 0.7, 80.0, 0.18, 10, 0.0, 0.22, 1.30),
+        r("Nova Orb", 90.0, 1.2, 34.0, 0.0, 1, 6.5, 0.62, 1.45),
+        r("Rainbow Ray", 26.0, 0.045, 320.0, 0.0, 1, 0.0, 0.30, 1.20),
+        r("Star Bubble Bombs", 75.0, 0.95, 16.0, 0.0, 1, 8.5, 0.55, 1.40),
     ]
 }
 
@@ -788,6 +819,41 @@ mod tests {
             assert!((def.projectile_lifetime - 3.0).abs() < 1e-6);
         }
         assert!(lib.ranged_slot(6).is_none());
+    }
+
+    #[test]
+    fn every_primary_tracks_so_the_game_can_be_played_on_the_move() {
+        let lib = MoveLibrary::defaults();
+        for def in &lib.ranged {
+            assert!(
+                def.tracking_strength > 0.0,
+                "{} does not track — it would demand stopping to aim",
+                def.name
+            );
+            assert!(def.tracking_strength <= 1.0);
+            // Bolts are all a touch bigger than the legacy 1.0 baseline.
+            assert!(def.blast_scale > 1.0, "{} bolt was not enlarged", def.name);
+        }
+
+        // Shotgun pellets track least, so a spread stays a spread instead of
+        // converging into a single point.
+        let shotgun = lib.ranged_slot(2).unwrap();
+        for (index, def) in lib.ranged.iter().enumerate() {
+            if index != 2 {
+                assert!(
+                    def.tracking_strength > shotgun.tracking_strength,
+                    "{} should steer harder than shotgun pellets",
+                    def.name
+                );
+            }
+        }
+        // Slow ordnance gets the most help; the hitscan-fast beam the least.
+        let rocket = lib.ranged_slot(3).unwrap();
+        let laser = lib.ranged_slot(4).unwrap();
+        assert!(rocket.tracking_strength > laser.tracking_strength);
+
+        // Sabre waves are aimed by the swing, not steered.
+        assert_eq!(lib.sabre_wave.tracking_strength, 0.0);
     }
 
     #[test]

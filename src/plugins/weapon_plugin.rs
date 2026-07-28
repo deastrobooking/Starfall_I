@@ -278,7 +278,11 @@ impl Plugin for WeaponPlugin {
                     tracking_missile_system.before(projectile_update_system),
                     sync_target_lock_visual.after(tracking_missile_system),
                     assign_projectile_collision_profiles.before(projectile_update_system),
-                    projectile_update_system,
+                    // Grouped: Bevy caps a system tuple at 20 entries.
+                    (
+                        projectile_pulse_system.before(projectile_update_system),
+                        projectile_update_system,
+                    ),
                     melee_combo_system,
                     beam_sabre_update_system,
                     mount_sabre_hilt_system.after(beam_sabre_update_system),
@@ -827,6 +831,11 @@ fn weapon_select_system(
 }
 
 // ── Primary Weapon Fire ───────────────────────────────────────────────────────
+/// Arm-cannon characters charge this much faster — a perk, not a gate.
+const ARM_CANNON_CHARGE_RATE: f32 = 1.6;
+/// How fast an unreleased charge bleeds away once the trigger is let go.
+const CHARGE_DECAY_RATE: f32 = 1.5;
+
 fn weapon_fire_system(
     mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
@@ -881,20 +890,30 @@ fn weapon_fire_system(
             continue;
         };
 
+        let active_slot = inv.active_slot;
         // EC2: per-slot projectile lifetime from the move library (legacy
         // hardcoded value was a shared 3.0 s).
         let projectile_lifetime = library
-            .ranged_slot(inv.active_slot)
+            .ranged_slot(active_slot)
             .map_or(3.0, |def| def.projectile_lifetime);
         let weapon = inv.active_mut();
         weapon.fire_timer = (weapon.fire_timer - dt).max(0.0);
 
         // ── Charge tracking ──────────────────────────────────────────────────
-        let can_charge = arm_cannon.is_some();
-        let charge_released = can_charge && weapon.charge_held && !pi.fire;
-        if can_charge && pi.fire {
-            weapon.charge_progress =
-                (weapon.charge_progress + dt / weapon.min_charge_time()).min(1.0);
+        // Every blaster charges. Arm-cannon characters simply wind up faster,
+        // so the hardware is an advantage rather than a gate: charging used to
+        // require a DariaCannon arm, which hid the mechanic from most of the
+        // roster entirely.
+        let charge_rate = if arm_cannon.is_some() {
+            ARM_CANNON_CHARGE_RATE
+        } else {
+            1.0
+        };
+        let charge_released = weapon.charge_held && !pi.fire;
+        if pi.fire {
+            weapon.charge_progress = (weapon.charge_progress
+                + dt * charge_rate / weapon.min_charge_time())
+            .min(1.0);
             weapon.charge_held = true;
         } else if charge_released {
             weapon.charge_held = false;
@@ -952,8 +971,11 @@ fn weapon_fire_system(
                 continue;
             }
             weapon.charge_progress = 0.0;
-        } else if !can_charge {
-            weapon.charge_progress = 0.0;
+        } else {
+            // Trigger up and nothing released: bleed any partial charge away
+            // rather than banking it between bursts.
+            weapon.charge_progress =
+                (weapon.charge_progress - dt * CHARGE_DECAY_RATE).max(0.0);
             weapon.charge_held = false;
         }
 
@@ -1010,13 +1032,17 @@ fn weapon_fire_system(
             primary_fallback_damage_type(weapon.weapon_type, explosive_weapon),
         );
 
+        // Authored steering and bolt size for this slot.
+        let (tracking_strength, blast_scale) = library
+            .ranged_slot(active_slot)
+            .map_or((0.45, 1.0), |def| (def.tracking_strength, def.blast_scale));
         let (mesh_h, base_mat_h) = base_proj_handles(weapon.weapon_type, &proj_assets);
         let magic_tracking = magic_caster.is_some() && !explosive_weapon;
         let projectile_stretch = if magic_tracking {
             Vec3::new(stretch.x.max(0.8), stretch.y.max(0.8), stretch.z.max(5.0))
         } else {
             stretch
-        };
+        } * blast_scale;
 
         weapon.fire_timer = effective_fire_rate;
 
@@ -1075,7 +1101,15 @@ fn weapon_fire_system(
             };
             if magic_tracking {
                 projectile_entity.insert(TrackingMissile::magic_beam(player_index.0));
+            } else if let Some(tracking) =
+                TrackingMissile::primary(player_index.0, tracking_strength)
+            {
+                // Every primary steers a little; strength is authored per
+                // weapon in moves.json.
+                projectile_entity.insert(tracking);
             }
+            // Bolts breathe as they fly so energy reads as energy.
+            projectile_entity.insert(ProjectilePulse::new(projectile_stretch));
         }
 
         spawn_muzzle_flash_scaled(
@@ -1292,6 +1326,11 @@ fn spawn_charge_blast(
 }
 
 // ── Charge build VFX ─────────────────────────────────────────────────────────
+/// Muzzle build-up while a shot charges.
+///
+/// The sparks now converge *inward* instead of spraying outward, and a bright
+/// core swells with the charge: energy gathering reads as gathering, and the
+/// moment it tops out is unmistakable without watching the HUD.
 fn charge_spark_system(
     mut game_rng: ResMut<GameRng>,
     mut commands: Commands,
@@ -1303,36 +1342,79 @@ fn charge_spark_system(
 
     for (inv, aim) in player_q.iter() {
         let weapon = inv.active();
-        if weapon.charge_progress < 0.1 {
+        let charge = weapon.charge_progress;
+        if charge < 0.1 {
             continue;
         }
         let pos = aim.muzzle_origin;
+        let ready = charge >= 1.0;
 
-        let count = (weapon.charge_progress * 3.5) as u32 + 1;
+        // Gathering motes: spawned out on a shell and pulled toward the muzzle.
+        let count = (charge * 4.5) as u32 + 1;
         for _ in 0..count {
-            let vel = Vec3::new(
-                rng.gen_range(-4.0f32..4.0),
-                rng.gen_range(1.5f32..6.0),
-                rng.gen_range(-4.0f32..4.0),
-            );
+            let radius = 0.55 + charge * 0.55;
+            let offset = Vec3::new(
+                rng.gen_range(-1.0f32..1.0),
+                rng.gen_range(-1.0f32..1.0),
+                rng.gen_range(-1.0f32..1.0),
+            )
+            .normalize_or(Vec3::Y)
+                * radius;
+            // Velocity points back at the muzzle, so the mote falls inward
+            // over its short life.
+            let inward = -offset * (2.6 + charge * 3.4);
             commands.spawn((
                 PbrBundle {
                     mesh: Mesh3d(proj_assets.sphere_sm.clone()),
                     material: MeshMaterial3d(proj_assets.mat_charge_spark.clone()),
-                    transform: Transform::from_translation(
-                        pos + Vec3::new(
-                            rng.gen_range(-0.3f32..0.3),
-                            rng.gen_range(-0.2f32..0.2),
-                            rng.gen_range(-0.3f32..0.3),
-                        ),
-                    )
-                    .with_scale(Vec3::splat(0.3 + weapon.charge_progress * 0.5)),
+                    transform: Transform::from_translation(pos + offset)
+                        .with_scale(Vec3::splat(0.22 + charge * 0.40)),
                     ..default()
                 },
                 HitParticle {
-                    lifetime: 0.22,
-                    max_lifetime: 0.22,
-                    velocity: vel,
+                    lifetime: 0.20,
+                    max_lifetime: 0.20,
+                    velocity: inward,
+                },
+            ));
+        }
+
+        // Core swell at the muzzle, brightest and largest at full charge.
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(proj_assets.flash_sphere.clone()),
+                material: MeshMaterial3d(if ready {
+                    proj_assets.mat_critical_hit.clone()
+                } else {
+                    proj_assets.mat_charge_spark.clone()
+                }),
+                transform: Transform::from_translation(pos)
+                    .with_scale(Vec3::splat(0.30 + charge * 0.95)),
+                ..default()
+            },
+            HitParticle {
+                lifetime: 0.09,
+                max_lifetime: 0.09,
+                velocity: Vec3::ZERO,
+            },
+        ));
+
+        // At full charge a ring snaps out once per frame as an unmistakable
+        // "release me" tell.
+        if ready {
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(proj_assets.lock_ring.clone()),
+                    material: MeshMaterial3d(proj_assets.mat_critical_hit.clone()),
+                    transform: Transform::from_translation(pos)
+                        .looking_to(aim.direction, Vec3::Y)
+                        .with_scale(Vec3::splat(0.85)),
+                    ..default()
+                },
+                HitParticle {
+                    lifetime: 0.16,
+                    max_lifetime: 0.16,
+                    velocity: Vec3::ZERO,
                 },
             ));
         }
@@ -1665,6 +1747,58 @@ fn special_weapon_system(
 }
 
 // ── Tracking Missile ──────────────────────────────────────────────────────────
+/// Makes an energy bolt breathe: a small scale pulse plus a brightness swell,
+/// so shots read as contained plasma rather than moving props.
+///
+/// The base scale is captured at spawn because the per-weapon stretch already
+/// encodes the bolt's shape — pulsing a *multiplier* keeps a long thin laser
+/// long and thin while a fat orb stays fat.
+#[derive(Component, Debug, Clone, Copy)]
+struct ProjectilePulse {
+    base_scale: Vec3,
+    elapsed: f32,
+    /// Radians/sec of the pulse. Deliberately fast: at projectile speeds a
+    /// slow pulse never completes a cycle before impact.
+    rate: f32,
+    amplitude: f32,
+}
+
+impl ProjectilePulse {
+    fn new(base_scale: Vec3) -> Self {
+        Self {
+            base_scale,
+            elapsed: 0.0,
+            rate: 17.0,
+            amplitude: 0.16,
+        }
+    }
+
+    /// Scale multiplier at the current phase, in 1±amplitude.
+    fn scale_factor(&self) -> f32 {
+        1.0 + (self.elapsed * self.rate).sin() * self.amplitude
+    }
+}
+
+/// Drive the pulse. Runs before the projectile moves so a bolt is never drawn
+/// at a stale size after its final step.
+fn projectile_pulse_system(
+    time: Res<Time>,
+    mut pulses: Query<(&mut Transform, &mut ProjectilePulse)>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut pulse) in pulses.iter_mut() {
+        pulse.elapsed += dt;
+        let factor = pulse.scale_factor();
+        // Swell mostly across the bolt, barely along it, so a laser pulses
+        // thicker without visibly growing longer.
+        transform.scale = Vec3::new(
+            pulse.base_scale.x * factor,
+            pulse.base_scale.y * factor,
+            pulse.base_scale.z * (1.0 + (factor - 1.0) * 0.25),
+        );
+    }
+}
+
 fn tracking_missile_system(
     mut commands: Commands,
     time: Res<Time>,

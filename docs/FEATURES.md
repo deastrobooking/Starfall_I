@@ -968,6 +968,32 @@ interact, right = open map). The old Select + D-pad direct special-slot chord
 was retired since it would double-fire with the utilities; keyboard 7–0 still
 selects specials directly.
 
+**Blaster feel pass (2026-07-28):** the primaries were built around stopping to
+line up a shot, which fought the fast-movement game around them. Every primary
+now steers toward a target, with per-weapon `tracking_strength` authored in
+`assets/combat/moves.json` (0 = dumb-fire, 1 = locked on) and turn rate,
+acquisition range, and acquisition cone all scaling from it — a strong tracker
+finds targets more readily as well as turning harder. Strength is tuned against
+how hard each weapon already is to land while moving: slow ordnance (Nova Orb,
+Star Bubble Bombs) gets the most help, the hitscan-fast Rainbow Ray the least,
+and Sparkle Fan pellets stay loose so a spread still reads as a spread rather
+than a cone converging on one enemy. Bolts are 20–45% larger via an authored
+`blast_scale` that touches the mesh only, so bigger never silently means
+stronger. Shots also pulse as they fly — a scale-and-brightness swell applied
+as a *multiplier* on the per-weapon stretch, so a long thin laser pulses
+thicker without growing longer.
+
+**Charging is no longer a gate.** It previously required a DariaCannon arm,
+which hid the mechanic from most of the roster; now every blaster charges while
+the trigger is held, and arm-cannon characters simply wind up 1.6x faster —
+hardware as an advantage rather than a prerequisite. An unreleased charge bleeds
+away instead of banking between bursts. The wind-up reads clearly: motes gather
+*inward* toward the muzzle instead of spraying out, a core swells with the
+charge, and at full charge a ring snaps out each frame as a "release me" tell.
+The HUD's ammo line becomes a six-segment charge bar with a percentage while
+winding up (ammo is unlimited and never urgent) and an unmistakable
+`CHARGED — RELEASE` at the top.
+
 **Weapon Forge (2026-07-28):** a modular weapon designer whose
 governing rule is that **stats are derived, not typed in**. A design is a
 physical description — grip style, guard, emitter, pommel, blade length and

@@ -615,6 +615,27 @@ impl TrackingMissile {
         }
     }
 
+    /// Steering for an ordinary primary shot, scaled by the weapon's authored
+    /// `tracking_strength`. Every blaster gets some so the game can be played
+    /// on the move: a shot that demands you stop and line it up fights the
+    /// movement the rest of the design rewards. Strength 0 returns `None`, so
+    /// a weapon can still opt out entirely in data.
+    pub fn primary(owner_player: u8, strength: f32) -> Option<Self> {
+        let strength = strength.clamp(0.0, 1.0);
+        if strength <= f32::EPSILON {
+            return None;
+        }
+        Some(Self {
+            // A wider cone and longer reach at higher strength, so strong
+            // trackers also *find* targets more readily rather than only
+            // turning harder toward one already dead ahead.
+            acquisition_range: 70.0 + 70.0 * strength,
+            acquisition_cone_cos: 0.55 - 0.45 * strength,
+            turn_rate_radians: 1.4 + 6.0 * strength,
+            ..Self::new(owner_player)
+        })
+    }
+
     pub fn magic_beam(owner_player: u8) -> Self {
         Self {
             acquisition_range: 140.0,

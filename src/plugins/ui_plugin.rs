@@ -6160,7 +6160,10 @@ fn hud_update_system(
                         .unwrap_or_else(|| weapon.weapon_type.display_name());
                     format!("{}{}", selected_name, sabre_str)
                 }
-                PlayerHudTextKind::Ammo => "∞ AMMO".to_string(),
+                // Charge is the thing a player is actively waiting on, so it
+                // takes the ammo line's space while winding up (ammo is
+                // unlimited and therefore never urgent).
+                PlayerHudTextKind::Ammo => charge_status_text(weapon),
                 PlayerHudTextKind::SpecialAmmo => format!("SPECIALS ∞{}", lock_label),
                 PlayerHudTextKind::TraversalStatus => {
                     traversal_status_text(traversal, board_boost, tricks, stunt_run, rooftop_trial)
@@ -6260,6 +6263,27 @@ fn traversal_status_text(
     let total = traversal.hoverboard_manual_boost_duration + 0.28;
     let ready = (1.0 - boost.manual_cooldown / total).clamp(0.0, 1.0);
     format!("BOARD: BOOST {:02}%", (ready * 100.0).round() as u32)
+}
+
+/// Charge readout: a filling bar while winding up, and a clear "READY" once
+/// the blast can be released. Without this the only feedback for a mechanic
+/// that takes over a second is the muzzle sparks.
+fn charge_status_text(weapon: &crate::components::weapon::Weapon) -> String {
+    let charge = weapon.charge_progress;
+    if charge <= 0.02 {
+        return "∞ AMMO".to_string();
+    }
+    if charge >= 1.0 {
+        return "◆◆◆◆◆◆ CHARGED — RELEASE".to_string();
+    }
+    const SEGMENTS: usize = 6;
+    let filled = ((charge * SEGMENTS as f32).round() as usize).min(SEGMENTS);
+    format!(
+        "{}{} CHARGING {:.0}%",
+        "◆".repeat(filled),
+        "◇".repeat(SEGMENTS - filled),
+        charge * 100.0
+    )
 }
 
 fn sabre_status_text(
@@ -8564,6 +8588,33 @@ mod menu_navigation_tests {
             traversal_status_text(&traversal, &boost, None, None, None),
             "BOARD: OVERDRIVE"
         );
+    }
+
+    #[test]
+    fn charge_readout_fills_and_calls_out_the_release() {
+        use crate::components::weapon::{Weapon, WeaponType};
+        let mut weapon = Weapon::new(WeaponType::Pistol);
+
+        // Idle: the line falls back to the ammo readout.
+        weapon.charge_progress = 0.0;
+        assert_eq!(charge_status_text(&weapon), "∞ AMMO");
+
+        // Winding up: a filling bar with a percentage.
+        weapon.charge_progress = 0.5;
+        let mid = charge_status_text(&weapon);
+        assert!(mid.contains("CHARGING"), "{mid}");
+        assert!(mid.contains("50%"), "{mid}");
+        assert_eq!(mid.matches('◆').count(), 3, "half of six segments");
+
+        // Fuller charge shows more filled segments.
+        weapon.charge_progress = 0.85;
+        assert!(charge_status_text(&weapon).matches('◆').count() > 3);
+
+        // Ready: an unmistakable prompt rather than "100%".
+        weapon.charge_progress = 1.0;
+        let ready = charge_status_text(&weapon);
+        assert!(ready.contains("RELEASE"), "{ready}");
+        assert!(!ready.contains('◇'), "a full bar has no empty segments");
     }
 
     #[test]
