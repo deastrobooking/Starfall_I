@@ -430,9 +430,7 @@ impl WeaponSpec {
         }
         let balance = spec.balance();
         if balance < 0.28 {
-            issues.push(warn(
-                "Very blade-heavy: it will hit hard but swing slowly.",
-            ));
+            issues.push(warn("Very blade-heavy: it will hit hard but swing slowly."));
         }
         if balance > 0.78 {
             issues.push(warn("Very hand-heavy: quick, but the hits land light."));
@@ -609,10 +607,7 @@ mod tests {
             .derived_profile()
         };
         assert_eq!(with(EmitterStyle::Focused).trait_, BladeTrait::None);
-        assert_eq!(
-            with(EmitterStyle::Prism).trait_,
-            BladeTrait::PiercingWaves
-        );
+        assert_eq!(with(EmitterStyle::Prism).trait_, BladeTrait::PiercingWaves);
         assert_eq!(
             with(EmitterStyle::Volatile).trait_,
             BladeTrait::ExplosiveWaves
@@ -674,8 +669,7 @@ mod tests {
                                 let strictly_better = profile.slash_damage_mult
                                     >= STARTER_BLADE.slash_damage_mult
                                     && profile.wave_damage_mult >= STARTER_BLADE.wave_damage_mult
-                                    && profile.slash_count_delta
-                                        >= STARTER_BLADE.slash_count_delta
+                                    && profile.slash_count_delta >= STARTER_BLADE.slash_count_delta
                                     && profile.cooldown_mult <= STARTER_BLADE.cooldown_mult;
                                 assert!(
                                     !strictly_better,

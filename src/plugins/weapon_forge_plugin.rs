@@ -17,8 +17,8 @@ use super::ui_plugin::MenuScrollPanel;
 
 use crate::combat::blades::BladeColor;
 use crate::combat::weapon_forge::{
-    compare_to_starter, forge_presets, EmitterStyle, GripStyle, GuardStyle, PommelStyle, WeaponSpec,
-    BLADE_LENGTH_RANGE, BLADE_WIDTH_RANGE,
+    compare_to_starter, forge_presets, EmitterStyle, GripStyle, GuardStyle, PommelStyle,
+    WeaponSpec, BLADE_LENGTH_RANGE, BLADE_WIDTH_RANGE,
 };
 use crate::engine::state::AppState;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
@@ -274,17 +274,17 @@ fn weapon_forge_preview_rebuild_system(
         ));
         // Brighter core so the blade reads as energy rather than a plastic rod.
         weapon.spawn((
-            Mesh3d(meshes.add(Cylinder::new(
-                0.013 * spec.blade_width,
-                blade_len * 0.98,
-            ))),
+            Mesh3d(meshes.add(Cylinder::new(0.013 * spec.blade_width, blade_len * 0.98))),
             MeshMaterial3d(accent),
             Transform::from_xyz(0.0, grip_len + 0.04 + blade_len * 0.5, 0.0),
         ));
     });
 }
 
-fn weapon_forge_spin_system(time: Res<Time>, mut previews: Query<&mut Transform, With<WeaponPreviewRoot>>) {
+fn weapon_forge_spin_system(
+    time: Res<Time>,
+    mut previews: Query<&mut Transform, With<WeaponPreviewRoot>>,
+) {
     for mut transform in previews.iter_mut() {
         transform.rotate_y(time.delta_secs() * 0.6);
     }
@@ -458,7 +458,11 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
                 |panel| {
                     button_row(panel, |row| {
                         for (index, preset) in forge_presets().into_iter().enumerate() {
-                            forge_button(row, preset.name.to_uppercase(), ForgeAction::Preset(index));
+                            forge_button(
+                                row,
+                                preset.name.to_uppercase(),
+                                ForgeAction::Preset(index),
+                            );
                         }
                     });
                     button_row(panel, |row| {

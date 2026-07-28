@@ -11,8 +11,8 @@ use crate::character::mesh_modifiers::MeshModifier;
 const SPEC_FIELD: &str = "imported_character_spec";
 const PART_FIELD: &str = "imported_modular_part";
 const RECOVERY_LIMIT: usize = 3;
-const CURRENT_IMPORTED_CHARACTER_SCHEMA: u32 = 4;
-const CURRENT_IMPORTED_PART_SCHEMA: u32 = 3;
+const CURRENT_IMPORTED_CHARACTER_SCHEMA: u32 = 5;
+const CURRENT_IMPORTED_PART_SCHEMA: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ImportedMeshEdit {
@@ -48,6 +48,7 @@ pub enum ImportedUvProjection {
     PlanarYz,
     CylindricalY,
     BoxSeams,
+    SeamUnwrap,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,7 +67,11 @@ pub struct ImportedUvEdit {
     pub offset: [f32; 2],
     pub rotation_radians: f32,
     #[serde(default)]
+    pub seam_edges: Vec<[u32; 2]>,
+    #[serde(default)]
     pub face_paints: Vec<ImportedFacePaint>,
+    #[serde(default)]
+    pub baked_paint_texture: Option<String>,
 }
 
 impl ImportedUvEdit {
@@ -94,6 +99,21 @@ impl ImportedUvEdit {
         }
         if self.face_paints.len() > 64 {
             return Err("A primitive is limited to 64 non-destructive paint strokes".into());
+        }
+        if self.seam_edges.len() > 250_000
+            || self
+                .seam_edges
+                .iter()
+                .any(|edge| edge[0] >= edge[1])
+        {
+            return Err("UV seam edges must be sorted, distinct vertex pairs".into());
+        }
+        if self.baked_paint_texture.as_ref().is_some_and(|path| {
+            path.starts_with('/')
+                || path.contains("..")
+                || !path.to_ascii_lowercase().ends_with(".png")
+        }) {
+            return Err("Baked paint texture must be a project-relative PNG".into());
         }
         for paint in &self.face_paints {
             if paint.face_indices.is_empty()
@@ -645,10 +665,12 @@ mod tests {
             scale: [1.5, 0.75],
             offset: [0.1, -0.2],
             rotation_radians: 0.25,
+            seam_edges: vec![[0, 1]],
             face_paints: vec![ImportedFacePaint {
                 face_indices: vec![1, 2, 3],
                 color: [0.8, 0.1, 0.3, 1.0],
             }],
+            baked_paint_texture: None,
         };
         assert!(edit.validate().is_ok());
         let spec = ImportedCharacterSpec {

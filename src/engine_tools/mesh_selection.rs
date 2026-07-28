@@ -182,6 +182,25 @@ pub fn selected_face_mesh(source: &Mesh, selected: &BTreeSet<u32>) -> Option<Mes
     Some(result)
 }
 
+/// Filters faces while retaining morph deltas when vertex buffers remain
+/// one-to-one with the authored source.
+pub fn selected_face_mesh_preserving_morphs(
+    source: &Mesh,
+    selected: &BTreeSet<u32>,
+) -> Option<Mesh> {
+    let mut result = selected_face_mesh(source, selected)?;
+    if result.count_vertices() != source.count_vertices() {
+        return Some(result);
+    }
+    if let Some(targets) = source.morph_targets() {
+        result.set_morph_targets(targets.clone());
+    }
+    if let Some(names) = source.morph_target_names() {
+        result.set_morph_target_names(names.to_vec());
+    }
+    Some(result)
+}
+
 /// Returns the nearest source triangle hit by a world-space ray.
 pub fn pick_face(
     source: &Mesh,
@@ -267,5 +286,16 @@ mod tests {
         );
         assert!(hit.is_some());
         assert!((hit.unwrap().1 - 4.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn face_filter_can_preserve_morph_targets() {
+        let mut source = Mesh::from(Cuboid::new(1.0, 1.0, 1.0));
+        let vertex_count = source.count_vertices();
+        source.set_morph_targets(vec![default(); vertex_count * 2]);
+        source.set_morph_target_names(vec!["Wide".into(), "Narrow".into()]);
+        let filtered = selected_face_mesh_preserving_morphs(&source, &BTreeSet::from([0])).unwrap();
+        assert_eq!(filtered.morph_targets().unwrap().len(), vertex_count * 2);
+        assert_eq!(filtered.morph_target_names().unwrap(), ["Wide", "Narrow"]);
     }
 }

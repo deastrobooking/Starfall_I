@@ -993,10 +993,7 @@ fn cartoon_animation_system(
             sabre_active: sabre.map(|s| s.unlocked && s.active).unwrap_or(false),
             sabre_two_handed: sabre
                 .map(|s| {
-                    s.unlocked
-                        && s.active
-                        && s.technique_timer > 0.0
-                        && s.technique.is_two_handed()
+                    s.unlocked && s.active && s.technique_timer > 0.0 && s.technique.is_two_handed()
                 })
                 .unwrap_or(false),
             sabre_slashing,
@@ -3202,7 +3199,10 @@ mod tests {
             SabreTechnique::SpiralSlash,
             SabreTechnique::MeteorPound,
         ] {
-            assert!(technique.is_two_handed(), "{technique:?} should be two-handed");
+            assert!(
+                technique.is_two_handed(),
+                "{technique:?} should be two-handed"
+            );
         }
         // Mobile verbs stay one-handed, and a thrown blade leaves the hand.
         for technique in [
@@ -3211,7 +3211,10 @@ mod tests {
             SabreTechnique::SabreThrow,
             SabreTechnique::Ready,
         ] {
-            assert!(!technique.is_two_handed(), "{technique:?} should be one-handed");
+            assert!(
+                !technique.is_two_handed(),
+                "{technique:?} should be one-handed"
+            );
         }
     }
 

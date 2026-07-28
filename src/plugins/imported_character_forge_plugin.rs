@@ -19,7 +19,9 @@ use crate::engine_tools::character_records::{
     ImportedUvEdit, ImportedUvProjection,
 };
 use crate::engine_tools::mesh_selection::{pick_face, selected_face_mesh, MeshTopology};
-use crate::engine_tools::mesh_uv::{apply_uv_edit, static_mesh_copy};
+use crate::engine_tools::mesh_uv::{
+    apply_uv_edit, rasterize_face_paint, selection_boundary_edges, static_mesh_copy,
+};
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::resources::ImportedForgeReturnTarget;
@@ -212,7 +214,9 @@ impl ImportedForgeState {
                     scale: [1.0; 2],
                     offset: [0.0; 2],
                     rotation_radians: 0.0,
+                    seam_edges: Vec::new(),
                     face_paints: Vec::new(),
+                    baked_paint_texture: None,
                 });
                 self.spec.uv_edits.len() - 1
             });
@@ -297,6 +301,9 @@ enum ImportedForgeAction {
     AdjustUv(i32),
     PaintColorNext,
     PaintSelection,
+    MarkSeams,
+    ClearSeams,
+    BakePaintTexture,
     ClearPaint,
     ResetUv,
     Save,
@@ -348,13 +355,14 @@ const IMPORTED_COLOR_PALETTE: [[f32; 4]; 14] = [
     [0.82, 0.68, 0.28, 1.0],
 ];
 
-const IMPORTED_UV_PROJECTIONS: [ImportedUvProjection; 6] = [
+const IMPORTED_UV_PROJECTIONS: [ImportedUvProjection; 7] = [
     ImportedUvProjection::Authored,
     ImportedUvProjection::PlanarXy,
     ImportedUvProjection::PlanarXz,
     ImportedUvProjection::PlanarYz,
     ImportedUvProjection::CylindricalY,
     ImportedUvProjection::BoxSeams,
+    ImportedUvProjection::SeamUnwrap,
 ];
 
 fn uv_projection_label(projection: ImportedUvProjection) -> &'static str {
@@ -365,6 +373,7 @@ fn uv_projection_label(projection: ImportedUvProjection) -> &'static str {
         ImportedUvProjection::PlanarYz => "PLANAR YZ",
         ImportedUvProjection::CylindricalY => "CYLINDER Y",
         ImportedUvProjection::BoxSeams => "BOX + AUTO SEAMS",
+        ImportedUvProjection::SeamUnwrap => "MANUAL SEAMS + PACK",
     }
 }
 
@@ -897,6 +906,17 @@ fn setup_forge(
                         );
                     });
                     forge_row(panel, |row| {
+                        forge_button(row, "MARK BOUNDARY SEAM", ImportedForgeAction::MarkSeams);
+                        forge_button(row, "CLEAR SEAMS", ImportedForgeAction::ClearSeams);
+                    });
+                    forge_row(panel, |row| {
+                        forge_button(
+                            row,
+                            "BAKE PAINT PNG",
+                            ImportedForgeAction::BakePaintTexture,
+                        );
+                    });
+                    forge_row(panel, |row| {
                         forge_button(row, "CLEAR PAINT", ImportedForgeAction::ClearPaint);
                         forge_button(row, "RESTORE UV", ImportedForgeAction::ResetUv);
                     });
@@ -1071,6 +1091,55 @@ fn selected_topology(
     let gltf_mesh = gltf_meshes.get(gltf.meshes.get(state.spec.selected_mesh)?)?;
     let primitive = gltf_mesh.primitives.get(state.selected_primitive)?;
     MeshTopology::from_mesh(meshes.get(&primitive.mesh)?)
+}
+
+fn selected_source_mesh_handle(
+    state: &ImportedForgeState,
+    gltfs: &Assets<Gltf>,
+    gltf_meshes: &Assets<GltfMesh>,
+) -> Option<Handle<Mesh>> {
+    let gltf = gltfs.get(state.gltf.as_ref()?)?;
+    let gltf_mesh = gltf_meshes.get(gltf.meshes.get(state.spec.selected_mesh)?)?;
+    Some(
+        gltf_mesh
+            .primitives
+            .get(state.selected_primitive)?
+            .mesh
+            .clone(),
+    )
+}
+
+fn write_paint_texture(
+    source_asset: &str,
+    mesh_index: usize,
+    primitive_index: usize,
+    pixels: &[u8],
+    size: u32,
+) -> Result<String, String> {
+    let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let output_dir = assets.join("imported_textures");
+    std::fs::create_dir_all(&output_dir)
+        .map_err(|error| format!("Could not create texture output folder: {error}"))?;
+    let stem = sanitize_file_stem(Path::new(source_asset));
+    let base = format!("{stem}_m{mesh_index}_p{primitive_index}_paint");
+    let target = (1_u32..)
+        .map(|version| output_dir.join(format!("{base}_v{version:03}.png")))
+        .find(|candidate| !candidate.exists())
+        .ok_or_else(|| "Could not allocate a paint texture version".to_string())?;
+    image::save_buffer_with_format(
+        &target,
+        pixels,
+        size,
+        size,
+        image::ColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .map_err(|error| format!("Could not encode paint texture: {error}"))?;
+    Ok(target
+        .strip_prefix(&assets)
+        .unwrap_or(&target)
+        .to_string_lossy()
+        .replace('\\', "/"))
 }
 
 fn primitive_count(
@@ -1646,17 +1715,98 @@ fn imported_forge_actions(
                     if edit.face_paints.len() >= 64 {
                         edit.face_paints.remove(0);
                     }
+                    let previous_bake = edit.baked_paint_texture.take();
                     edit.face_paints.push(ImportedFacePaint {
                         face_indices: faces,
                         color,
                     });
+                    if let Some(previous_bake) = previous_bake {
+                        let material = state.selected_material_edit_mut();
+                        if material.base_color_texture.as_ref() == Some(&previous_bake) {
+                            material.base_color_texture = None;
+                        }
+                    }
                     state.status = "Painted the selected source faces".into();
                     state.preview_dirty = true;
                 }
                 state.labels_dirty = true;
             }
+            ImportedForgeAction::MarkSeams => {
+                if state.selected_faces.is_empty() {
+                    state.status = "Select a face region before marking its boundary seam".into();
+                } else if let Some(topology) =
+                    selected_topology(&state, &gltfs, &gltf_meshes, &meshes)
+                {
+                    let boundary = selection_boundary_edges(&topology, &state.selected_faces);
+                    let edit = state.selected_uv_edit_mut();
+                    edit.seam_edges.extend(boundary);
+                    edit.seam_edges.sort_unstable();
+                    edit.seam_edges.dedup();
+                    edit.projection = ImportedUvProjection::SeamUnwrap;
+                    state.status =
+                        "Marked selection boundary and packed seam-separated UV islands".into();
+                    state.preview_dirty = true;
+                }
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::ClearSeams => {
+                let edit = state.selected_uv_edit_mut();
+                edit.seam_edges.clear();
+                if edit.projection == ImportedUvProjection::SeamUnwrap {
+                    edit.projection = ImportedUvProjection::Authored;
+                }
+                state.status = "Cleared manual UV seams".into();
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::BakePaintTexture => {
+                let uv_edit = state.selected_uv_edit().cloned();
+                let source_handle = selected_source_mesh_handle(&state, &gltfs, &gltf_meshes);
+                match (uv_edit, source_handle) {
+                    (Some(edit), Some(handle)) if !edit.face_paints.is_empty() => {
+                        let result = meshes
+                            .get(&handle)
+                            .and_then(|source| rasterize_face_paint(source, &edit, 256))
+                            .ok_or_else(|| "Could not rasterize face paint".to_string())
+                            .and_then(|pixels| {
+                                write_paint_texture(
+                                    &state.spec.source_asset,
+                                    state.spec.selected_mesh,
+                                    state.selected_primitive,
+                                    &pixels,
+                                    256,
+                                )
+                            });
+                        match result {
+                            Ok(path) => {
+                                state.selected_uv_edit_mut().baked_paint_texture =
+                                    Some(path.clone());
+                                let material = state.selected_material_edit_mut();
+                                material.base_color = [1.0; 4];
+                                material.base_color_texture = Some(path.clone());
+                                material.cleared_texture_channels[0] = false;
+                                state.status = format!("Baked face paint to {path}");
+                                state.preview_dirty = true;
+                            }
+                            Err(error) => state.status = error,
+                        }
+                    }
+                    _ => state.status = "Add face paint before baking a PNG texture".into(),
+                }
+                state.labels_dirty = true;
+            }
             ImportedForgeAction::ClearPaint => {
-                state.selected_uv_edit_mut().face_paints.clear();
+                let previous_bake = {
+                    let edit = state.selected_uv_edit_mut();
+                    edit.face_paints.clear();
+                    edit.baked_paint_texture.take()
+                };
+                if let Some(previous_bake) = previous_bake {
+                    let material = state.selected_material_edit_mut();
+                    if material.base_color_texture.as_ref() == Some(&previous_bake) {
+                        material.base_color_texture = None;
+                    }
+                }
                 state.status = "Cleared face paint on the active primitive".into();
                 state.preview_dirty = true;
                 state.labels_dirty = true;
@@ -1665,11 +1815,25 @@ fn imported_forge_actions(
                 let source_asset = state.spec.source_asset.clone();
                 let mesh_index = state.spec.selected_mesh;
                 let primitive_index = state.selected_primitive;
+                let baked = state
+                    .selected_uv_edit()
+                    .and_then(|edit| edit.baked_paint_texture.clone());
                 state.spec.uv_edits.retain(|edit| {
                     edit.source_asset != source_asset
                         || edit.mesh_index != mesh_index
                         || edit.primitive_index != primitive_index
                 });
+                if let Some(baked) = baked {
+                    if let Some(material) = state.spec.material_edits.iter_mut().find(|material| {
+                        material.source_asset == source_asset
+                            && material.mesh_index == mesh_index
+                            && material.primitive_index == primitive_index
+                    }) {
+                        if material.base_color_texture.as_ref() == Some(&baked) {
+                            material.base_color_texture = None;
+                        }
+                    }
+                }
                 state.status = "Restored authored UVs and cleared face paint".into();
                 state.preview_dirty = true;
                 state.labels_dirty = true;
@@ -2307,10 +2471,12 @@ fn refresh_imported_labels(
                 _ => format!("Rotation {:.0}°", edit.rotation_radians.to_degrees()),
             };
             format!(
-                "{} • {param}\nPaint strokes: {} • Selected faces: {}\nPaint RGB {:.2} {:.2} {:.2}",
+                "{} • {param}\nSeams: {} • Paint strokes: {}\nSelected faces: {} • PNG: {}\nPaint RGB {:.2} {:.2} {:.2}",
                 uv_projection_label(edit.projection),
+                edit.seam_edges.len(),
                 edit.face_paints.len(),
                 state.selected_faces.len(),
+                edit.baked_paint_texture.as_deref().unwrap_or("not baked"),
                 IMPORTED_COLOR_PALETTE[state.paint_color][0],
                 IMPORTED_COLOR_PALETTE[state.paint_color][1],
                 IMPORTED_COLOR_PALETTE[state.paint_color][2],

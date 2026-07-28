@@ -5475,6 +5475,7 @@ dependencies = [
  "avian3d",
  "bevy",
  "dirs",
+ "image",
  "noise",
  "objc2 0.6.4",
  "rand 0.8.6",

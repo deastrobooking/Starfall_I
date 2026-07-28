@@ -42,9 +42,10 @@ use engine_tools::{EngineToolMode, EngineToolsPlugin};
 use events::EventsPlugin;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
-    CompanionPlugin, CraftingPlugin, CreatureForgePlugin, WeaponForgePlugin, DiscoverablePlugin, EnemyPlugin,
+    CompanionPlugin, CraftingPlugin, CreatureForgePlugin, DiscoverablePlugin, EnemyPlugin,
     HackingPlugin, ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin,
-    RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
+    RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponForgePlugin, WeaponPlugin,
+    WorldPlugin,
 };
 use resources::{
     CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData, CharacterDesignSnapshot,

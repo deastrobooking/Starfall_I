@@ -2077,7 +2077,7 @@ Selections can be turned into modular parts with quick body/head/limb/hand/foot,
 hair, cape, shoulder, accessory, weapon, and hurtbox presets. Each assignment
 stores a stable ID, source GLB, mesh and primitive indices, sorted face IDs,
 slot, canonical animation joint, local centroid pivot, and gameplay role.
-Assignments save in imported Character schema v3 (first introduced in v2).
+Assignments save in imported Character schema v5 (first introduced in v2).
 **SAVE TO LIBRARY** creates a
 separately tagged reusable project record; **ADD LIBRARY PART** references its
 source-backed assignment in the current character, enabling cross-character
@@ -2091,7 +2091,7 @@ an armed base-color, normal, packed metallic/roughness, or emissive channel;
 maps can be cleared independently or the whole primitive can return to its
 authored material. External images are copied into
 `assets/imported_textures/`, while in-project images keep their existing
-project-relative path. Character schema v4 persists these overrides.
+project-relative path. Character schema v5 persists these overrides.
 Saving a modular part includes its matching material override, and loading the
 part replaces the same source-primitive material binding deterministically.
 
@@ -2100,7 +2100,11 @@ projection, Y-axis cylindrical projection, and split-vertex box projection
 with automatic hard seams. U/V scale and offset plus rotation remain
 non-destructive. **PAINT SELECTION** records bounded source-face color strokes;
 later strokes override earlier strokes, and runtime meshes receive matching
-vertex colors. UV edits and paint travel with reusable part records.
+vertex colors. **MARK BOUNDARY SEAM** turns the selected region outline into
+manual cut edges; seam unwrap separates connected islands and grid-packs them
+with padding. **BAKE PAINT PNG** rasterizes the strokes through the current UVs
+into a versioned 256×256 texture under `assets/imported_textures/`. UV edits,
+seams, paint, and the baked texture travel with reusable part records.
 
 `ImportedModularRuntimePlugin` is registered with the character runtime.
 `request_imported_character(commands, root, spec)` asynchronously loads every
@@ -2110,14 +2114,18 @@ applies UV and PBR overrides, and spawns renderable regions.
 `ImportedGameplayRegion` exposes visual, hurtbox, weapon, shield, traversal,
 interaction, or cosmetic ownership. Rigid regions bind to a root's
 `SkeletonRig` joint when available.
+Morph-only parts retain source morph targets when the UV edit preserves vertex
+correspondence and receive `MeshMorphWeights` plus named
+`ImportedMorphRegion` metadata. `ImportedDeformationStatus` reports this count
+and marks skinned sources that currently use rigid joint fallback.
 
 Meshes carrying joint weights or morph targets remain preview-safe and retain
 authored deformation data; topology modifiers are recorded but not baked onto
 those meshes yet. Runtime extraction is rigid and does not rewrite skin
 weights, so continuously deforming torso/cloth regions remain on their authored
 skinned source until deform-aware rebinding lands. Next work is
-box/circle/lasso selection, brush displacement/masking, pixel texture painting,
-manual seam marking, thumbnails, socket orientation editing, and a
+box/circle/lasso selection, brush displacement/masking, pressure-aware pixel
+brushes, freeform island transforms, thumbnails, socket orientation editing, and a
 skin/morph-aware GLB
 bake/export path. See
 [`docs/guides/imported-mesh-editor.md`](guides/imported-mesh-editor.md).

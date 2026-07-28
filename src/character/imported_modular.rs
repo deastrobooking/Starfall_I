@@ -6,6 +6,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use bevy::asset::AssetId;
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfNode};
+use bevy::mesh::morph::MeshMorphWeights;
 use bevy::prelude::*;
 
 use crate::components::character::{JointKind, JointMarker, SkeletonRig};
@@ -14,8 +15,10 @@ use crate::engine_tools::character_records::{
     ImportedAnimationJoint, ImportedCharacterSpec, ImportedGameplayRole, ImportedMaterialEdit,
     ImportedPartSlot,
 };
-use crate::engine_tools::mesh_selection::selected_face_mesh;
-use crate::engine_tools::mesh_uv::{apply_uv_edit, static_mesh_copy};
+use crate::engine_tools::mesh_selection::{
+    selected_face_mesh, selected_face_mesh_preserving_morphs,
+};
+use crate::engine_tools::mesh_uv::apply_uv_edit;
 
 pub struct ImportedModularRuntimePlugin;
 
@@ -73,6 +76,18 @@ pub struct ImportedGameplayRegion {
     pub root: Entity,
     pub part_id: String,
     pub role: ImportedGameplayRole,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct ImportedDeformationStatus {
+    pub source_was_skinned: bool,
+    pub morph_targets_preserved: usize,
+    pub rigid_joint_fallback: bool,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct ImportedMorphRegion {
+    pub target_names: Vec<String>,
 }
 
 pub fn request_imported_character(
@@ -180,7 +195,8 @@ fn finish_imported_assembly(
                 let gltf_mesh = gltf_meshes.get(gltf.meshes.get(assignment.mesh_index)?)?;
                 let primitive = gltf_mesh.primitives.get(assignment.primitive_index)?;
                 let source = meshes.get(&primitive.mesh)?;
-                let uv_mesh = request
+                let source_was_skinned = source.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some();
+                let mut uv_mesh = request
                     .spec
                     .uv_edits
                     .iter()
@@ -190,15 +206,37 @@ fn finish_imported_assembly(
                             && edit.primitive_index == assignment.primitive_index
                     })
                     .and_then(|edit| apply_uv_edit(source, edit));
-                let display_source;
-                let source = if let Some(uv_mesh) = uv_mesh.as_ref() {
-                    uv_mesh
-                } else {
-                    display_source = static_mesh_copy(source);
-                    &display_source
-                };
+                if !source_was_skinned {
+                    if let Some(uv_mesh) = uv_mesh.as_mut() {
+                        if uv_mesh.count_vertices() == source.count_vertices() {
+                            if let Some(targets) = source.morph_targets() {
+                                uv_mesh.set_morph_targets(targets.clone());
+                            }
+                            if let Some(names) = source.morph_target_names() {
+                                uv_mesh.set_morph_target_names(names.to_vec());
+                            }
+                        }
+                    }
+                }
+                let source = uv_mesh.as_ref().unwrap_or(source);
                 let selected: BTreeSet<u32> = assignment.face_indices.iter().copied().collect();
-                let mesh = selected_face_mesh(source, &selected)?;
+                let mesh = if !source_was_skinned && source.has_morph_targets() {
+                    selected_face_mesh_preserving_morphs(source, &selected)?
+                } else {
+                    selected_face_mesh(source, &selected)?
+                };
+                let morph_target_count = mesh
+                    .morph_targets()
+                    .map(|targets| targets.len() / mesh.count_vertices().max(1))
+                    .unwrap_or(0);
+                let morph_target_names = mesh
+                    .morph_target_names()
+                    .map(<[String]>::to_vec)
+                    .unwrap_or_else(|| {
+                        (0..morph_target_count)
+                            .map(|index| format!("Morph {index}"))
+                            .collect()
+                    });
                 let mut material = standard_material_from_gltf(
                     primitive
                         .material
@@ -214,7 +252,14 @@ fn finish_imported_assembly(
                 }
                 let transform = mesh_instance_transform(gltf, &gltf_nodes, assignment.mesh_index)
                     .unwrap_or(Transform::IDENTITY);
-                Some((assignment.clone(), mesh, material, transform))
+                Some((
+                    assignment.clone(),
+                    mesh,
+                    material,
+                    transform,
+                    source_was_skinned,
+                    morph_target_names,
+                ))
             })();
             match result {
                 Some(part) => prepared.push(part),
@@ -239,7 +284,9 @@ fn finish_imported_assembly(
         }
 
         let part_count = prepared.len();
-        for (assignment, mesh, material, mut transform) in prepared {
+        for (assignment, mesh, material, mut transform, source_was_skinned, morph_target_names) in
+            prepared
+        {
             transform.translation *= Vec3::from_array(request.spec.root_scale);
             transform.scale *= Vec3::from_array(request.spec.root_scale);
             let rest_transform = transform;
@@ -256,23 +303,39 @@ fn finish_imported_assembly(
             let parent =
                 bind_parent_and_transform(root, rig, &joints, assignment.joint, &mut transform);
             runtime_part.bound = parent != root;
-            let entity = commands
-                .spawn((
-                    Name::new(format!("Imported part {}", assignment.part_id)),
-                    runtime_part,
-                    ImportedGameplayRegion {
-                        root,
-                        part_id: assignment.part_id,
-                        role: assignment.gameplay_role,
+            let morph_target_count = morph_target_names.len();
+            let mesh_handle = meshes.add(mesh);
+            let mut entity_commands = commands.spawn((
+                Name::new(format!("Imported part {}", assignment.part_id)),
+                runtime_part,
+                ImportedGameplayRegion {
+                    root,
+                    part_id: assignment.part_id,
+                    role: assignment.gameplay_role,
+                },
+                ImportedDeformationStatus {
+                    source_was_skinned,
+                    morph_targets_preserved: morph_target_count,
+                    rigid_joint_fallback: source_was_skinned,
+                },
+                PbrBundle {
+                    mesh: Mesh3d(mesh_handle),
+                    material: MeshMaterial3d(materials.add(material)),
+                    transform,
+                    ..default()
+                },
+            ));
+            if morph_target_count > 0 {
+                entity_commands.insert((
+                    MeshMorphWeights::Value {
+                        weights: vec![0.0; morph_target_count],
                     },
-                    PbrBundle {
-                        mesh: Mesh3d(meshes.add(mesh)),
-                        material: MeshMaterial3d(materials.add(material)),
-                        transform,
-                        ..default()
+                    ImportedMorphRegion {
+                        target_names: morph_target_names,
                     },
-                ))
-                .id();
+                ));
+            }
+            let entity = entity_commands.id();
             commands.entity(parent).add_child(entity);
         }
         commands

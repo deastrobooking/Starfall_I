@@ -101,7 +101,7 @@ modular slot, canonical animation joint, local pivot, and gameplay role.
 Reusable assignments are separate tagged Character records, so library parts
 from different source GLBs can be referenced by one imported-character spec
 without copying or destructively splitting the authored mesh. Character schema
-v4 keys non-destructive material and UV overrides by source/mesh/primitive.
+v5 keys non-destructive material and UV overrides by source/mesh/primitive.
 Overrides store PBR scalar/color controls and project-relative texture paths;
 standalone part records carry the matching override so appearance travels with
 the reusable component. `ImportedModularRuntimePlugin` accepts an
@@ -109,6 +109,9 @@ the reusable component. `ImportedModularRuntimePlugin` accepts an
 GLB, extracts assigned source-face meshes, applies UV/material edits, and
 attaches regions to `SkeletonRig` joints when present. Gameplay systems query
 `ImportedGameplayRegion` for stable part IDs and authored roles.
+Morph-only regions retain source morph deltas when projection has not split the
+vertex stream. `ImportedDeformationStatus` reports preserved target count and
+whether a skinned source is using the rigid-joint fallback.
 
 ## Core Data Flow
 

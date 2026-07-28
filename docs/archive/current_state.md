@@ -128,12 +128,15 @@
   specs. Per-source primitive material overrides preserve authored GLB
   materials by default and add palette tint, metallic, roughness, emission,
   and imported base-color/normal/metallic-roughness/emissive maps. Reusable
-  part records carry their matching override. UV schema v4 adds authored,
+  part records carry their matching override. UV schema v5 adds authored,
   planar, cylindrical, and split box projection; scale/offset/rotation; and
-  source-face color painting. A globally registered runtime assembler resolves
+  source-face color painting plus selected-boundary seam marking, island
+  packing, and versioned PNG paint baking. A globally registered runtime assembler resolves
   multi-GLB part specs asynchronously, extracts assigned regions, applies their
   UV/material edits, exposes gameplay-region metadata, and binds rigid regions
-  to canonical skeleton joints. Skinning and morph data remain intact:
+  to canonical skeleton joints. Morph-only extracted regions preserve their
+  targets when vertex correspondence survives; skinned regions expose an
+  explicit rigid-fallback diagnostic. Skinning and morph source data remain intact:
   selections reference authored face IDs and derived runtime parts strip
   deformation metadata without mutating the source asset.
 - App construction now has one authoritative

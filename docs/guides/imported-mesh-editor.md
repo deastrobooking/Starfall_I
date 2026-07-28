@@ -45,7 +45,7 @@ adds the next reusable record to the current imported-character spec. Library
 assignments retain their own source GLB, so a character spec can mix parts
 authored from different characters without copying mesh buffers.
 
-Saving the character writes `imported_character_spec` schema v4. Older v1-v3
+Saving the character writes `imported_character_spec` schema v5. Older v1-v4
 records still load because assignment, material, and UV lists default to empty.
 Imported character browsing excludes standalone part-library records.
 
@@ -83,6 +83,13 @@ triangle can own seam-safe coordinates. Face paint uses vertex colors and
 stable source face IDs; deselect the orange topology overlay to inspect it.
 **RESTORE UV** removes projection, transforms, and paint.
 
+**MARK BOUNDARY SEAM** records the outer edges of the selected face region,
+switches to manual seam unwrap, separates connectivity at those edges, chooses
+a projection per island, and packs islands into padded grid cells.
+**CLEAR SEAMS** returns to authored UVs. **BAKE PAINT PNG** rasterizes all
+ordered strokes through the current UVs into a new versioned 256×256 PNG and
+assigns it as the primitive's base-color map.
+
 ## Assemble for runtime
 
 **ASSEMBLE RUNTIME PREVIEW** loads every GLB referenced by the current spec and
@@ -97,9 +104,11 @@ later binds rigid pieces to their assigned joints.
 
 ## Current boundary
 
-Runtime assembly extracts static face regions but does not rewrite skin weights
-or morph deltas. Joint-bound accessories, armor, weapons, hands, feet, and
+Runtime assembly does not rewrite skin weights. Morph-only regions retain
+source targets when their vertex stream stays one-to-one and expose named
+runtime weights. Joint-bound accessories, armor, weapons, hands, feet, and
 rigid limb regions are supported; continuously deforming torso/cloth regions
-still need deform-aware rebinding. Face paint is vertex-color painting rather
-than direct pixel painting into PNG/JPG maps. Box projection creates automatic
-hard seams; manual edge seam marking and island packing remain future work.
+still need deform-aware rebinding. Paint has both a vertex-color preview and a
+PNG bake; freehand pressure brushes and direct per-pixel editing remain future
+work. Manual seam unwrap packs islands automatically but does not yet provide
+per-island grab/rotate/scale controls.
