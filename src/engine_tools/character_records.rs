@@ -9,6 +9,7 @@ use super::project_registry::ForgeProjectRegistry;
 use crate::character::mesh_modifiers::MeshModifier;
 
 const SPEC_FIELD: &str = "imported_character_spec";
+const PART_FIELD: &str = "imported_modular_part";
 const RECOVERY_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -16,6 +17,82 @@ pub struct ImportedMeshEdit {
     pub mesh_index: usize,
     #[serde(default)]
     pub modifiers: Vec<MeshModifier>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportedPartSlot {
+    Body,
+    Head,
+    Hair,
+    LeftArm,
+    RightArm,
+    LeftHand,
+    RightHand,
+    LeftLeg,
+    RightLeg,
+    LeftFoot,
+    RightFoot,
+    Shoulders,
+    Cape,
+    Accessory,
+    Weapon,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportedAnimationJoint {
+    Pelvis,
+    Spine,
+    Chest,
+    Neck,
+    Head,
+    LeftShoulder,
+    LeftElbow,
+    LeftWrist,
+    RightShoulder,
+    RightElbow,
+    RightWrist,
+    LeftHip,
+    LeftKnee,
+    LeftAnkle,
+    RightHip,
+    RightKnee,
+    RightAnkle,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportedGameplayRole {
+    Visual,
+    Hurtbox,
+    Weapon,
+    Shield,
+    Traversal,
+    Interact,
+    Cosmetic,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImportedPartAssignment {
+    pub part_id: String,
+    pub display_name: String,
+    pub source_asset: String,
+    pub mesh_index: usize,
+    pub primitive_index: usize,
+    pub face_indices: Vec<u32>,
+    pub slot: ImportedPartSlot,
+    pub joint: ImportedAnimationJoint,
+    pub gameplay_role: ImportedGameplayRole,
+    pub pivot: [f32; 3],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImportedPartAsset {
+    pub schema_version: u32,
+    pub content_id: String,
+    pub assignment: ImportedPartAssignment,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -29,18 +106,21 @@ pub struct ImportedCharacterSpec {
     pub root_scale: [f32; 3],
     #[serde(default)]
     pub mesh_edits: Vec<ImportedMeshEdit>,
+    #[serde(default)]
+    pub part_assignments: Vec<ImportedPartAssignment>,
 }
 
 impl Default for ImportedCharacterSpec {
     fn default() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             content_id: "character.imported".into(),
             display_name: "Imported Character".into(),
             source_asset: String::new(),
             selected_mesh: 0,
             root_scale: [1.0; 3],
             mesh_edits: Vec::new(),
+            part_assignments: Vec::new(),
         }
     }
 }
@@ -65,6 +145,46 @@ impl ImportedCharacterSpec {
         }
         if self.mesh_edits.iter().any(|edit| edit.modifiers.len() > 16) {
             return Err("Each mesh modifier stack is limited to 16 operations".into());
+        }
+        let mut part_ids = std::collections::BTreeSet::new();
+        let mut claimed_faces = std::collections::BTreeSet::new();
+        for assignment in &self.part_assignments {
+            if assignment.part_id.is_empty()
+                || !assignment
+                    .part_id
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+            {
+                return Err("Part IDs may only use letters, numbers, '.', '_' and '-'".into());
+            }
+            if !part_ids.insert(assignment.part_id.as_str()) {
+                return Err(format!("Duplicate modular part ID: {}", assignment.part_id));
+            }
+            if assignment.face_indices.is_empty() {
+                return Err(format!("{} has no selected faces", assignment.display_name));
+            }
+            if !assignment
+                .source_asset
+                .to_ascii_lowercase()
+                .ends_with(".glb")
+            {
+                return Err(format!(
+                    "{} has an invalid source GLB",
+                    assignment.display_name
+                ));
+            }
+            for face in &assignment.face_indices {
+                if !claimed_faces.insert((
+                    assignment.source_asset.as_str(),
+                    assignment.mesh_index,
+                    assignment.primitive_index,
+                    *face,
+                )) {
+                    return Err(format!(
+                        "Face {face} is assigned to more than one modular part"
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -133,11 +253,98 @@ pub fn list_active_project(registry: &ForgeProjectRegistry) -> Vec<(String, Stri
             project
                 .records
                 .iter()
-                .filter(|record| record.category == ContentCategory::Character)
+                .filter(|record| {
+                    record.category == ContentCategory::Character
+                        && project
+                            .payloads
+                            .get(&record.content_id)
+                            .and_then(|payload| match payload {
+                                ContentPayload::Character(recipe) => recipe.fields.get(SPEC_FIELD),
+                                _ => None,
+                            })
+                            .is_some()
+                })
                 .map(|record| (record.content_id.clone(), record.display_name.clone()))
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn save_part_to_active_project(
+    registry: &ForgeProjectRegistry,
+    assignment: &ImportedPartAssignment,
+) -> Result<String, String> {
+    if assignment.face_indices.is_empty() {
+        return Err("Select at least one face before saving a part".into());
+    }
+    let (store, mut project) = open_active(registry)?;
+    let content_id = project
+        .create_content(ContentCategory::Character, &assignment.display_name)
+        .map_err(|error| error.to_string())?;
+    let record = project
+        .records
+        .iter_mut()
+        .find(|record| record.content_id == content_id)
+        .ok_or_else(|| "Part record disappeared during save".to_string())?;
+    record.tags = vec![
+        "character_part".into(),
+        "modular".into(),
+        "animation_ready".into(),
+    ];
+    let part = ImportedPartAsset {
+        schema_version: 1,
+        content_id: content_id.clone(),
+        assignment: assignment.clone(),
+    };
+    let mut recipe = GenericRecipeDraft::default();
+    recipe.fields.insert(
+        PART_FIELD.into(),
+        serde_json::to_value(part).map_err(|error| error.to_string())?,
+    );
+    project
+        .payloads
+        .insert(content_id.clone(), ContentPayload::Character(recipe));
+    store
+        .save(&mut project)
+        .map_err(|error| format!("Project save failed: {error}"))?;
+    Ok(content_id)
+}
+
+pub fn list_part_library(registry: &ForgeProjectRegistry) -> Vec<(String, String)> {
+    open_active(registry)
+        .map(|(_, project)| {
+            project
+                .records
+                .iter()
+                .filter(|record| {
+                    project
+                        .payloads
+                        .get(&record.content_id)
+                        .and_then(|payload| match payload {
+                            ContentPayload::Character(recipe) => recipe.fields.get(PART_FIELD),
+                            _ => None,
+                        })
+                        .is_some()
+                })
+                .map(|record| (record.content_id.clone(), record.display_name.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn load_part_from_active_project(
+    registry: &ForgeProjectRegistry,
+    content_id: &str,
+) -> Result<ImportedPartAsset, String> {
+    let (_, project) = open_active(registry)?;
+    let Some(ContentPayload::Character(recipe)) = project.payloads.get(content_id) else {
+        return Err(format!("{content_id} has no character payload"));
+    };
+    let value = recipe
+        .fields
+        .get(PART_FIELD)
+        .ok_or_else(|| format!("{content_id} is not a modular-part record"))?;
+    serde_json::from_value(value.clone()).map_err(|error| error.to_string())
 }
 
 pub fn load_from_active_project(
@@ -194,5 +401,35 @@ mod tests {
         let json = serde_json::to_string(&spec).unwrap();
         let decoded: ImportedCharacterSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, spec);
+    }
+
+    #[test]
+    fn imported_character_rejects_overlapping_part_regions() {
+        let part = ImportedPartAssignment {
+            part_id: "arm.left".into(),
+            display_name: "Left Arm".into(),
+            source_asset: "imported_characters/hero.glb".into(),
+            mesh_index: 0,
+            primitive_index: 0,
+            face_indices: vec![2],
+            slot: ImportedPartSlot::LeftArm,
+            joint: ImportedAnimationJoint::LeftShoulder,
+            gameplay_role: ImportedGameplayRole::Visual,
+            pivot: [0.0; 3],
+        };
+        let mut spec = ImportedCharacterSpec {
+            source_asset: part.source_asset.clone(),
+            part_assignments: vec![
+                part.clone(),
+                ImportedPartAssignment {
+                    part_id: "arm.left.second".into(),
+                    ..part
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(spec.validate().is_err());
+        spec.part_assignments[1].face_indices = vec![3];
+        assert!(spec.validate().is_ok());
     }
 }

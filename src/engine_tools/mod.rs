@@ -8,6 +8,7 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 pub mod character_records;
 pub mod creature_records;
+pub mod mesh_selection;
 mod persistence;
 mod presets;
 pub mod project_registry;

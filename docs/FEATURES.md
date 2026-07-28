@@ -2006,7 +2006,7 @@ authored role, and fall back to their built-in enemy safely. Remaining GM2 work
 is topology-specific animation rigs, thumbnail publishing, window-layout
 persistence, and Level Composer authoring for creature spawn overrides.
 
-#### GM1b — Imported Character Forge (first vertical slice active)
+#### GM1b — Imported Character Forge (mesh selection + modular parts active)
 
 Project Hub also opens `AppState::ImportedCharacterForge`. Authors can drop an
 external binary glTF file, after which Forge copies it to
@@ -2016,13 +2016,31 @@ independent non-destructive stack using the shared Mirror, Array, Twist,
 Subdivide, Smooth, and Noise Displace tools. Root width, height, and depth are
 editable independently.
 
-The imported source path, selected mesh, root proportions, and modifier stacks
-save as a versioned Character payload in the active Forge project and reload
-without altering the source GLB. Meshes carrying joint weights or morph targets
-remain preview-safe and retain authored deformation data; topology modifiers
-are recorded but not baked onto those meshes yet. Next work is viewport picking,
-brush-based displacement/masking, material preservation, thumbnail publishing,
-and a skin/morph-aware GLB bake/export path.
+The Mesh-Aware Selection window works per GLB primitive and offers direct
+Alt-click face picking (Shift+Alt-click selects its linked island), face
+stepping and toggle, all/none/invert, connected-island selection, grow/shrink,
+similar-facing selection, and X-axis mirror. The preview splits the display-only
+mesh by source face index and highlights selected triangles in orange. These
+operations never rewrite the imported vertex, skin, or morph buffers.
+
+Selections can be turned into modular parts with quick body/head/limb/hand/foot,
+hair, cape, shoulder, accessory, weapon, and hurtbox presets. Each assignment
+stores a stable ID, source GLB, mesh and primitive indices, sorted face IDs,
+slot, canonical animation joint, local centroid pivot, and gameplay role.
+Assignments save in imported Character schema v2. **SAVE TO LIBRARY** creates a
+separately tagged reusable project record; **ADD LIBRARY PART** references its
+source-backed assignment in the current character, enabling cross-character
+mix-and-match without duplicating geometry.
+
+Meshes carrying joint weights or morph targets remain preview-safe and retain
+authored deformation data; topology modifiers are recorded but not baked onto
+those meshes yet. Region assignments are metadata consumed by future runtime
+assembly/bake systems—the current editor does not physically detach faces or
+rewrite weights. Next work is box/circle/lasso selection, brush
+displacement/masking, material preservation, thumbnails, socket
+orientation editing, runtime part assembly, and a skin/morph-aware GLB
+bake/export path. See
+[`docs/guides/imported-mesh-editor.md`](guides/imported-mesh-editor.md).
 
 #### GM3 — World Kit Forge
 

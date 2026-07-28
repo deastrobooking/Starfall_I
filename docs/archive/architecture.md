@@ -94,8 +94,13 @@ ChapterSelect ──► CharacterDesign / RobotGarage ──► ChapterSelect
 `EngineToolMode::Editing` rather than creating a second editor-only gameplay
 state. Imported Character Forge copies external `.glb` files under
 `assets/imported_characters/`, preserves their node transforms for preview, and
-stores root proportions plus per-mesh modifier stacks as Character payloads in
-the active Forge project.
+stores root proportions, per-mesh modifier stacks, and source-topology modular
+part assignments as Character payloads in the active Forge project. A part
+assignment binds a GLB source/mesh/primitive/face set to a stable part ID,
+modular slot, canonical animation joint, local pivot, and gameplay role.
+Reusable assignments are separate tagged Character records, so library parts
+from different source GLBs can be referenced by one imported-character spec
+without copying or destructively splitting the authored mesh.
 
 ## Core Data Flow
 

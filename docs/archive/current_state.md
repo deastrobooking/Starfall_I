@@ -119,10 +119,15 @@
   `.glb` drag-and-drop, safely copies imports into the asset tree, inspects and
   selects named meshes, preserves node hierarchy transforms in its rotating
   preview, applies the shared Mirror/Array/Twist/Subdivide/Smooth/Noise stack
-  per rigid mesh, and saves root proportions plus non-destructive edit stacks
-  into Character payloads in the active Forge project. Skinning and morph data
-  remain intact: topology-changing preview operations are deliberately bypassed
-  for deformable meshes until a weight/morph-aware bake path is implemented.
+  per rigid mesh, and adds source-topology triangle selection by primitive:
+  all/none/invert, linked island, grow/shrink, similar normal, and X mirror.
+  Selected regions can be assigned stable modular part IDs, character slots,
+  canonical animation joints, pivots, and gameplay roles. Character payload
+  schema v2 persists those assignments, while separately tagged modular-part
+  records provide a project library that can be mixed into other character
+  specs. Skinning and morph data remain intact: selections reference authored
+  face IDs and the static editor overlay strips deformation metadata without
+  mutating the source asset.
 - App construction now has one authoritative
   `build_starfall_app(StarfallAppMode)` boundary. Production keeps the full
   window/render/audio stack; the headless profile keeps state, assets, physics,
