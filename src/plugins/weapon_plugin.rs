@@ -3,6 +3,7 @@ use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
 use crate::audio::sfx::ModularActionSfxEvent;
+use crate::components::character::{CartoonPart, CartoonPartKind, JointKind, JointMarker};
 use crate::combat::blades::{
     apply_blade_to_stats, blade_for_id, BladeTrait, EquippedBlade, BLADE_COLOR_ORDER,
 };
@@ -23,7 +24,7 @@ use crate::engine::physics::{
     prelude::{CollisionProfile, GameCollisionLayer},
     world_line_of_sight,
 };
-use crate::engine::rendering::{EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
+use crate::engine::rendering::{SpatialBundle, EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
 use crate::engine::state::AppState;
 use crate::events::*;
 use crate::resources::DungeonCrawlState;
@@ -76,6 +77,61 @@ enum SabreBladeLayer {
 struct SabreBladeVisual {
     owner: Entity,
     layer: SabreBladeLayer,
+    /// 0→1 ignition progress. The blade extends out of the emitter on draw
+    /// instead of appearing at full length.
+    ignition: f32,
+}
+
+/// The physical Star Sabre handle, parented to the character's actual hand.
+///
+/// Before this existed the blade was placed by guessing where the hand was
+/// (`player.translation() + fixed offsets`), so it ignored the animated arm
+/// entirely and there was no object being gripped — the hand posed as if
+/// holding something invisible. The hilt is a real child of the hand entity,
+/// so it inherits every pose, swing, and body-proportion change for free, and
+/// the blade hangs off the hilt's emitter rather than off the player root.
+#[derive(Component)]
+struct SabreHilt {
+    /// The player entity that owns this hilt (not the hand it is parented to).
+    owner: Entity,
+}
+
+/// Where a hilt can be mounted, best first. The modular character can be built
+/// from cartoon parts or an imported joint rig, so the sabre resolves whichever
+/// this character actually has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandMount {
+    /// A rigged skeleton's wrist joint — the most accurate mount.
+    Wrist,
+    /// The cartoon-part hand mesh.
+    HandPart,
+}
+
+/// Choose the mount for a character, preferring the rigged wrist when both
+/// exist. Pure so the fallback order is testable without spawning a rig.
+fn resolve_hand_mount(has_wrist_joint: bool, has_hand_part: bool) -> Option<HandMount> {
+    if has_wrist_joint {
+        Some(HandMount::Wrist)
+    } else if has_hand_part {
+        Some(HandMount::HandPart)
+    } else {
+        None
+    }
+}
+
+/// Local offset and orientation of the hilt inside its mount. A wrist joint
+/// sits at the forearm end, so the grip needs pushing further into the palm
+/// than it does on a hand mesh whose origin is already the palm.
+fn hilt_local_transform(mount: HandMount) -> Transform {
+    let (offset, scale) = match mount {
+        HandMount::Wrist => (Vec3::new(0.0, -0.06, -0.05), 1.0),
+        HandMount::HandPart => (Vec3::new(0.0, -0.02, -0.02), 1.0),
+    };
+    Transform::from_translation(offset)
+        // Lie the grip along the hand's forward axis so the blade projects out
+        // of the fist rather than through the wrist.
+        .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+        .with_scale(Vec3::splat(scale))
 }
 
 /// World-space confirmation that a homing projectile has acquired a target.
@@ -97,6 +153,10 @@ pub struct ProjectileAssets {
     pub sphere_xl: Handle<Mesh>,
     pub flash_sphere: Handle<Mesh>,
     pub lock_ring: Handle<Mesh>,
+    // Star Sabre hilt: a real handle the character's hand actually holds.
+    pub hilt_grip: Handle<Mesh>,
+    pub hilt_ring: Handle<Mesh>,
+    pub hilt_pommel: Handle<Mesh>,
     // Base projectile materials
     pub mat_pistol: Handle<StandardMaterial>,
     pub mat_rifle: Handle<StandardMaterial>,
@@ -171,7 +231,8 @@ impl Plugin for WeaponPlugin {
                     projectile_update_system,
                     melee_combo_system,
                     beam_sabre_update_system,
-                    sync_sabre_blade_visual.after(beam_sabre_update_system),
+                    mount_sabre_hilt_system.after(beam_sabre_update_system),
+                    sync_sabre_blade_visual.after(mount_sabre_hilt_system),
                     sabre_technique_vfx_system.after(beam_sabre_update_system),
                     hit_particle_spawn_system,
                     critical_impact_spawn_system.after(hit_particle_spawn_system),
@@ -365,6 +426,10 @@ fn setup_weapon_assets(
         sphere_xl: meshes.add(Sphere::new(0.72)),
         flash_sphere: meshes.add(Sphere::new(0.9)),
         lock_ring: meshes.add(Torus::new(0.82, 1.0)),
+        // Grip runs along local Y; the mount rotates it into the palm.
+        hilt_grip: meshes.add(Cylinder::new(0.030, 0.26)),
+        hilt_ring: meshes.add(Cylinder::new(0.042, 0.030)),
+        hilt_pommel: meshes.add(Sphere::new(0.038)),
         // Base materials — emissive tuned for bloom
         mat_pistol: mk_proj_mat(m, 1.0, 0.95, 0.25, 4.0, 3.0, 0.4),
         mat_rifle: mk_proj_mat(m, 0.15, 0.9, 1.0, 0.4, 3.5, 5.0),
@@ -3526,16 +3591,123 @@ fn beam_sabre_update_system(
     }
 }
 
-fn sync_sabre_blade_visual(
+/// Attach or remove the physical hilt on each player's sword hand.
+///
+/// The hilt is parented to the character's real hand entity — the rigged
+/// `RightWrist` joint when the character has a skeleton, otherwise the
+/// cartoon `RightHand` part — so it follows the animated arm exactly instead
+/// of being placed by guesswork from the player root. That also means body
+/// proportions edited in the designer move the weapon correctly for free.
+#[allow(clippy::too_many_arguments)]
+fn mount_sabre_hilt_system(
     mut commands: Commands,
     assets: Res<ProjectileAssets>,
-    library: Res<MoveLibrary>,
-    player_q: Query<(Entity, &GlobalTransform, &BeamSabre, &PlayerProgression), With<Player>>,
-    mut visual_q: Query<(Entity, &SabreBladeVisual, &mut Transform), Without<Player>>,
+    player_q: Query<(Entity, &BeamSabre, &PlayerProgression), With<Player>>,
+    joint_q: Query<(Entity, &JointMarker)>,
+    part_q: Query<(Entity, &CartoonPart)>,
+    hilt_q: Query<(Entity, &SabreHilt)>,
 ) {
+    // Drop hilts whose owner sheathed the sabre or stopped existing.
+    let mut mounted: Vec<Entity> = Vec::new();
+    for (hilt_entity, hilt) in hilt_q.iter() {
+        let drawn = player_q
+            .get(hilt.owner)
+            .map(|(_, sabre, _)| sabre.active && sabre.unlocked)
+            .unwrap_or(false);
+        if drawn {
+            mounted.push(hilt.owner);
+        } else {
+            commands.entity(hilt_entity).despawn();
+        }
+    }
+
+    for (player_entity, sabre, progression) in player_q.iter() {
+        if !sabre.active || !sabre.unlocked || mounted.contains(&player_entity) {
+            continue;
+        }
+        // Find this character's hand. Rigs win over cartoon parts.
+        let wrist = joint_q.iter().find(|(_, marker)| {
+            marker.root == player_entity && marker.kind == JointKind::RightWrist
+        });
+        let hand_part = part_q.iter().find(|(_, part)| {
+            part.root == player_entity && part.kind == CartoonPartKind::RightHand
+        });
+        let Some(mount) = resolve_hand_mount(wrist.is_some(), hand_part.is_some()) else {
+            // No hand yet (mesh still assembling) — try again next frame.
+            continue;
+        };
+        let parent = match mount {
+            HandMount::Wrist => wrist.map(|(entity, _)| entity),
+            HandMount::HandPart => hand_part.map(|(entity, _)| entity),
+        };
+        let Some(parent) = parent else { continue };
+
+        let blade = blade_for_id(progression.shop.equipped_weapon.as_deref());
+        let accent = assets
+            .energy_sabre_blades
+            .get(blade.color.index())
+            .cloned()
+            .unwrap_or_else(|| assets.energy_sabre.clone());
+
+        commands.entity(parent).with_children(|hand| {
+            hand.spawn((
+                SpatialBundle {
+                    transform: hilt_local_transform(mount),
+                    ..default()
+                },
+                SabreHilt {
+                    owner: player_entity,
+                },
+                Name::new("Star Sabre Hilt"),
+            ))
+            .with_children(|hilt| {
+                // Grip — the part inside the fist.
+                hilt.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.hilt_grip.clone()),
+                    material: MeshMaterial3d(assets.mat_missile_lock.clone()),
+                    transform: Transform::default(),
+                    ..default()
+                });
+                // Emitter ring at the blade end, tinted to the equipped blade
+                // so the handle reads as part of the same weapon.
+                hilt.spawn(EnergyPbrBundle {
+                    mesh: Mesh3d(assets.hilt_ring.clone()),
+                    material: MeshMaterial3d(accent),
+                    transform: Transform::from_xyz(0.0, 0.145, 0.0),
+                    ..default()
+                });
+                // Pommel counterweight at the base.
+                hilt.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.hilt_pommel.clone()),
+                    material: MeshMaterial3d(assets.mat_missile_lock.clone()),
+                    transform: Transform::from_xyz(0.0, -0.142, 0.0),
+                    ..default()
+                });
+            });
+        });
+    }
+}
+
+/// Keep the energy blade attached to the hilt's emitter.
+///
+/// The blade is a child of the hilt, which is a child of the hand, so its
+/// transform is purely local: it projects straight out of the emitter and
+/// inherits the entire arm animation. Ignition/retraction is a length
+/// animation along that local axis, which is what makes the blade look like
+/// it is being *extended from* the handle rather than swapped in.
+fn sync_sabre_blade_visual(
+    mut commands: Commands,
+    time: Res<Time>,
+    assets: Res<ProjectileAssets>,
+    player_q: Query<(&BeamSabre, &PlayerProgression), With<Player>>,
+    hilt_q: Query<(Entity, &SabreHilt)>,
+    mut visual_q: Query<(Entity, &mut SabreBladeVisual, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
     let mut represented = Vec::new();
-    for (visual_entity, visual, mut transform) in visual_q.iter_mut() {
-        let Ok((_, player_transform, sabre, _)) = player_q.get(visual.owner) else {
+
+    for (visual_entity, mut visual, mut transform) in visual_q.iter_mut() {
+        let Ok((sabre, _)) = player_q.get(visual.owner) else {
             commands.entity(visual_entity).despawn();
             continue;
         };
@@ -3544,16 +3716,21 @@ fn sync_sabre_blade_visual(
             continue;
         }
         represented.push((visual.owner, visual.layer));
-        *transform = sabre_blade_transform(player_transform, sabre, &library, visual.layer);
+        // Ignite quickly on draw; the blade grows out of the emitter.
+        visual.ignition = (visual.ignition + dt * 6.0).min(1.0);
+        *transform = sabre_blade_local_transform(visual.layer, visual.ignition);
     }
 
-    for (player_entity, player_transform, sabre, progression) in player_q.iter() {
+    for (hilt_entity, hilt) in hilt_q.iter() {
+        let Ok((sabre, progression)) = player_q.get(hilt.owner) else {
+            continue;
+        };
         if !sabre.active || !sabre.unlocked {
             continue;
         }
         let blade = blade_for_id(progression.shop.equipped_weapon.as_deref());
         for layer in [SabreBladeLayer::Aura, SabreBladeLayer::Core] {
-            if represented.contains(&(player_entity, layer)) {
+            if represented.contains(&(hilt.owner, layer)) {
                 continue;
             }
             let material = match layer {
@@ -3564,64 +3741,43 @@ fn sync_sabre_blade_visual(
                     .unwrap_or_else(|| assets.energy_sabre.clone()),
                 SabreBladeLayer::Core => assets.energy_sabre_core.clone(),
             };
-            commands.spawn((
-                EnergyPbrBundle {
-                    mesh: Mesh3d(assets.sphere_sm.clone()),
-                    material: MeshMaterial3d(material),
-                    transform: sabre_blade_transform(player_transform, sabre, &library, layer),
-                    ..default()
-                },
-                SabreBladeVisual {
-                    owner: player_entity,
-                    layer,
-                },
-            ));
+            commands.entity(hilt_entity).with_children(|hilt_root| {
+                hilt_root.spawn((
+                    EnergyPbrBundle {
+                        mesh: Mesh3d(assets.sphere_sm.clone()),
+                        material: MeshMaterial3d(material),
+                        transform: sabre_blade_local_transform(layer, 0.0),
+                        ..default()
+                    },
+                    SabreBladeVisual {
+                        owner: hilt.owner,
+                        layer,
+                        ignition: 0.0,
+                    },
+                ));
+            });
         }
     }
 }
 
-fn sabre_blade_transform(
-    player: &GlobalTransform,
-    sabre: &BeamSabre,
-    library: &MoveLibrary,
-    layer: SabreBladeLayer,
-) -> Transform {
-    let forward = player.forward().as_vec3().with_y(0.0).normalize_or_zero();
-    let right = player.right().as_vec3().with_y(0.0).normalize_or_zero();
-    // Normalize the spin by the firing technique's authored duration so the
-    // blade completes exactly one revolution over the technique window.
-    let spin_time = match sabre.technique {
-        SabreTechnique::CycloneSlash => library.sabre_techniques.cyclone_slash.technique_time,
-        SabreTechnique::CometDash => library.sabre_techniques.comet_dash.technique_time,
-        // The new spinning verbs drive the same blade revolution.
-        SabreTechnique::SpiralSlash => library.sabre_techniques.spiral_slash.technique_time,
-        SabreTechnique::RisingSlash => library.sabre_techniques.rising_slash.technique_time,
-        _ => 0.0,
+/// Blade geometry in **hilt-local** space.
+///
+/// The old version computed a world transform from the player root plus fixed
+/// offsets, which is why the blade never followed the animated arm. Now the
+/// hilt provides position and orientation through the transform hierarchy, so
+/// this only has to describe the beam itself: a thin column projecting along
+/// the grip's axis, scaled by how far it has ignited.
+fn sabre_blade_local_transform(layer: SabreBladeLayer, ignition: f32) -> Transform {
+    let extend = ignition.clamp(0.0, 1.0);
+    // Base mesh is a 0.08-radius sphere, so these scales read as blade
+    // thickness in metres.
+    let (thickness, length) = match layer {
+        SabreBladeLayer::Aura => (0.55, 15.0),
+        SabreBladeLayer::Core => (0.30, 14.4),
     };
-    let technique_spin = if sabre.technique_timer > 0.0 && spin_time > 0.0 {
-        (1.0 - sabre.technique_timer / spin_time).clamp(0.0, 1.0) * std::f32::consts::TAU
-    } else {
-        0.0
-    };
-    let swing = if sabre.is_slashing {
-        if sabre.slash_index.is_multiple_of(2) {
-            0.72
-        } else {
-            -0.72
-        }
-    } else {
-        0.22
-    };
-    let spin_direction = Quat::from_rotation_y(technique_spin) * forward;
-    let blade_direction = (spin_direction + right * swing + Vec3::Y * 0.12).normalize_or_zero();
-    let hand = player.translation() + Vec3::Y * 1.15 + forward * 0.55 + right * 0.48;
-    let scale = match layer {
-        SabreBladeLayer::Aura => Vec3::new(4.6, 4.6, 40.0),
-        SabreBladeLayer::Core => Vec3::new(2.5, 2.5, 38.0),
-    };
-    Transform::from_translation(hand + blade_direction * 3.0)
-        .looking_to(blade_direction, Vec3::Y)
-        .with_scale(scale)
+    let length = length * extend;
+    Transform::from_translation(Vec3::new(0.0, 0.145 + length * 0.08, 0.0))
+        .with_scale(Vec3::new(thickness, length.max(0.001), thickness))
 }
 
 fn sabre_technique_vfx_system(
@@ -3947,6 +4103,165 @@ mod tracking_missile_tests {
 #[cfg(test)]
 mod move_def_wiring_tests {
     use super::*;
+
+    /// Minimal app with just the asset stores the weapon setup needs.
+    fn hilt_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<EnergyMaterial>()
+            .add_systems(Startup, setup_weapon_assets)
+            .add_systems(Update, mount_sabre_hilt_system);
+        app
+    }
+
+    fn spawn_sabre_player(app: &mut App, active: bool) -> (Entity, Entity) {
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                BeamSabre {
+                    active,
+                    unlocked: true,
+                    ..Default::default()
+                },
+                PlayerProgression::default(),
+            ))
+            .id();
+        // The character's hand mesh, as the modular assembler would spawn it.
+        let hand = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                CartoonPart::new(
+                    player,
+                    CartoonPartKind::RightHand,
+                    &Transform::default(),
+                ),
+            ))
+            .id();
+        (player, hand)
+    }
+
+    #[test]
+    fn drawing_the_sabre_puts_a_hilt_in_the_characters_actual_hand() {
+        let mut app = hilt_test_app();
+        let (player, hand) = spawn_sabre_player(&mut app, true);
+        app.update();
+
+        // A hilt exists, owned by the player…
+        let mut hilts = app.world_mut().query::<(Entity, &SabreHilt)>();
+        let found: Vec<(Entity, Entity)> = hilts
+            .iter(app.world())
+            .map(|(entity, hilt)| (entity, hilt.owner))
+            .collect();
+        assert_eq!(found.len(), 1, "expected exactly one hilt");
+        assert_eq!(found[0].1, player);
+
+        // …and it is parented to the hand, not the player root. This is the
+        // whole point: the weapon inherits the animated arm.
+        let parent = app.world().get::<ChildOf>(found[0].0).map(|c| c.parent());
+        assert_eq!(parent, Some(hand), "hilt must hang off the hand entity");
+    }
+
+    #[test]
+    fn a_sheathed_sabre_leaves_no_hilt_and_re_mounts_on_redraw() {
+        let mut app = hilt_test_app();
+        let (player, _) = spawn_sabre_player(&mut app, false);
+        app.update();
+
+        let mut hilts = app.world_mut().query::<&SabreHilt>();
+        assert_eq!(hilts.iter(app.world()).count(), 0, "sheathed: no hilt");
+
+        // Draw it.
+        app.world_mut().get_mut::<BeamSabre>(player).unwrap().active = true;
+        app.update();
+        let mut hilts = app.world_mut().query::<&SabreHilt>();
+        assert_eq!(hilts.iter(app.world()).count(), 1, "drawing mounts a hilt");
+
+        // Sheathe again — the handle goes away with the blade.
+        app.world_mut().get_mut::<BeamSabre>(player).unwrap().active = false;
+        app.update();
+        let mut hilts = app.world_mut().query::<&SabreHilt>();
+        assert_eq!(hilts.iter(app.world()).count(), 0, "sheathing removes it");
+    }
+
+    #[test]
+    fn only_one_hilt_is_ever_mounted_no_matter_how_many_frames_run() {
+        let mut app = hilt_test_app();
+        spawn_sabre_player(&mut app, true);
+        for _ in 0..8 {
+            app.update();
+        }
+        let mut hilts = app.world_mut().query::<&SabreHilt>();
+        assert_eq!(
+            hilts.iter(app.world()).count(),
+            1,
+            "mounting must be idempotent across frames"
+        );
+    }
+
+    #[test]
+    fn hilt_mounts_to_a_rig_wrist_when_there_is_one() {
+        // Rigged skeletons give the most accurate mount; cartoon parts are
+        // the fallback; a half-built character mounts nothing yet.
+        assert_eq!(resolve_hand_mount(true, true), Some(HandMount::Wrist));
+        assert_eq!(resolve_hand_mount(true, false), Some(HandMount::Wrist));
+        assert_eq!(resolve_hand_mount(false, true), Some(HandMount::HandPart));
+        assert_eq!(resolve_hand_mount(false, false), None);
+    }
+
+    #[test]
+    fn hilt_sits_in_the_palm_and_points_the_blade_out_of_the_fist() {
+        for mount in [HandMount::Wrist, HandMount::HandPart] {
+            let transform = hilt_local_transform(mount);
+            // The grip is modelled along local Y, so the mount must rotate it
+            // to project forward out of the hand rather than through the wrist.
+            let blade_axis = transform.rotation * Vec3::Y;
+            assert!(
+                blade_axis.z < -0.9,
+                "{mount:?} blade should point out of the fist, got {blade_axis:?}"
+            );
+            assert!(transform.scale.x > 0.0);
+        }
+        // A wrist joint sits further up the forearm than a palm mesh, so the
+        // grip is pushed deeper to land in the hand.
+        let wrist = hilt_local_transform(HandMount::Wrist).translation;
+        let hand = hilt_local_transform(HandMount::HandPart).translation;
+        assert!(wrist.y < hand.y);
+    }
+
+    #[test]
+    fn blade_extends_from_the_emitter_as_it_ignites() {
+        let off = sabre_blade_local_transform(SabreBladeLayer::Aura, 0.0);
+        let half = sabre_blade_local_transform(SabreBladeLayer::Aura, 0.5);
+        let lit = sabre_blade_local_transform(SabreBladeLayer::Aura, 1.0);
+
+        // Length grows with ignition, and the blade's centre travels outward
+        // with it — that is what makes it look extended rather than swapped in.
+        assert!(half.scale.y > off.scale.y);
+        assert!(lit.scale.y > half.scale.y);
+        assert!(lit.translation.y > half.translation.y);
+        assert!(half.translation.y > off.translation.y);
+
+        // Thickness is constant; only length animates.
+        assert!((lit.scale.x - off.scale.x).abs() < 1e-6);
+
+        // The core is thinner and slightly shorter than the aura, so the
+        // bright centre always sits inside the glow.
+        let aura = sabre_blade_local_transform(SabreBladeLayer::Aura, 1.0);
+        let core = sabre_blade_local_transform(SabreBladeLayer::Core, 1.0);
+        assert!(core.scale.x < aura.scale.x);
+        assert!(core.scale.y < aura.scale.y);
+
+        // Ignition is clamped, so an overshooting timer cannot stretch it.
+        let over = sabre_blade_local_transform(SabreBladeLayer::Aura, 4.0);
+        assert!((over.scale.y - lit.scale.y).abs() < 1e-6);
+        // And a fully retracted blade still has positive scale (zero scale
+        // makes Bevy transforms non-invertible).
+        assert!(off.scale.y > 0.0);
+    }
 
     #[test]
     fn sabre_technique_resolver_maps_stance_and_direction_to_verbs() {

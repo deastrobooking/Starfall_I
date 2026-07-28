@@ -938,6 +938,19 @@ interact, right = open map). The old Select + D-pad direct special-slot chord
 was retired since it would double-fire with the utilities; keyboard 7–0 still
 selects specials directly.
 
+**Star Sabre hilt (2026-07-28):** the sabre is now a physical weapon held in
+the character's hand. Previously the blade was positioned by guessing where the
+hand was — `player.translation()` plus fixed offsets — so it ignored the animated
+arm entirely, and the hand posed as if gripping something invisible. A `SabreHilt`
+(grip, blade-tinted emitter ring, pommel counterweight) is parented to the
+character's real hand entity: the rigged `RightWrist` joint when the character has
+a skeleton, otherwise the cartoon `RightHand` part. Because it is a child in the
+transform hierarchy, the weapon inherits every arm pose, swing, and
+designer-edited body proportion for free. The energy blade is in turn a child of
+the hilt, so its transform is purely local — it projects out of the emitter and
+ignites by extending along that axis instead of appearing at full length. Drawing
+mounts the hilt, sheathing removes it, and mounting is idempotent across frames.
+
 **Star Sabre blades (2026-07-27):** the shop's Weapons category now sells
 *blades*, and equipping one actually restats and recolours the sabre —
 previously `equipped_weapon` was saved but never read, so buying a weapon
