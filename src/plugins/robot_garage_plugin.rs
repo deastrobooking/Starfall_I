@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::combat::upgrades::UpgradeLedger;
 use crate::engine::state::AppState;
-use crate::plugins::ui_plugin::MenuScrollPanel;
+use crate::plugins::ui_plugin::{MenuScrollPanel, UiPromptKind, UiPromptText};
 use crate::world::robot_pets::{
     RobotAssemblyForm, RobotPartKind, RobotPetCollection, RobotPetError,
 };
@@ -127,6 +127,7 @@ fn setup_garage(
                     ..default()
                 },
                 TextColor(dim_color),
+                UiPromptText(UiPromptKind::MenuNavigation),
             ));
 
             // Parts inventory panel

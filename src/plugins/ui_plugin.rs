@@ -1,9 +1,11 @@
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
 use bevy::input::ButtonState;
+use bevy::ui::InteractionDisabled;
 
 use crate::chapters::{
     all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
@@ -123,10 +125,20 @@ impl Plugin for UiPlugin {
             .init_resource::<LoadoutPanelState>()
             .init_resource::<DiscussionState>()
             .init_resource::<PauseMenuState>()
+            .init_resource::<MainMenuUiState>()
+            .init_resource::<UiPromptDevice>()
             .init_resource::<MenuFocus>()
             .init_resource::<ChapterProgressionOwner>()
             .init_resource::<CustomMissionState>()
             .add_systems(Startup, spawn_menu_camera)
+            .add_systems(
+                Update,
+                (
+                    sync_ui_scale_from_settings,
+                    track_ui_prompt_device,
+                    refresh_ui_prompt_text,
+                ),
+            )
             .add_systems(
                 Update,
                 (
@@ -182,7 +194,8 @@ impl Plugin for UiPlugin {
             .add_systems(Update, victory_input.run_if(in_state(AppState::Victory)))
             .add_systems(
                 Update,
-                settings_panel_input_system.run_if(in_state(AppState::Paused)),
+                settings_panel_input_system
+                    .run_if(in_state(AppState::Paused).or_else(in_state(AppState::MainMenu))),
             )
             .add_systems(
                 Update,
@@ -219,7 +232,11 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                (hud_update_system, aim_reticle_system)
+                (
+                    responsive_hud_layout_system,
+                    hud_update_system,
+                    aim_reticle_system,
+                )
                     .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
             .add_systems(
@@ -280,7 +297,9 @@ impl Plugin for UiPlugin {
             .add_systems(Update, game_over_input.run_if(in_state(AppState::GameOver)))
             .add_systems(
                 Update,
-                menu_start_button.run_if(in_state(AppState::MainMenu)),
+                (menu_start_button, update_main_menu_page_visibility)
+                    .chain()
+                    .run_if(in_state(AppState::MainMenu)),
             )
             .add_systems(
                 Update,
@@ -288,7 +307,11 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                (player_select_controller_join, player_select_update)
+                (
+                    player_select_controller_join,
+                    sync_player_select_button_availability,
+                    player_select_update,
+                )
                     .chain()
                     .run_if(in_state(AppState::PlayerSelect)),
             )
@@ -320,6 +343,24 @@ impl Plugin for UiPlugin {
 struct MenuCamera;
 #[derive(Component)]
 struct MainMenuRoot;
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct MainMenuPagePanel(MainMenuPage);
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MainMenuPage {
+    Home,
+    Settings,
+}
+#[derive(Resource)]
+struct MainMenuUiState {
+    page: MainMenuPage,
+}
+impl Default for MainMenuUiState {
+    fn default() -> Self {
+        Self {
+            page: MainMenuPage::Home,
+        }
+    }
+}
 #[derive(Component)]
 struct ProjectHubRoot;
 #[derive(Component)]
@@ -425,11 +466,19 @@ struct DifficultyText;
 #[derive(Component)]
 struct VolumeText;
 #[derive(Component)]
+struct InterfaceLayoutText;
+#[derive(Component)]
+struct AccessibilitySettingsText;
+#[derive(Component)]
 struct FinalPushText;
 #[derive(Component)]
 struct StartButton;
 #[derive(Component)]
 struct EditorStartButton;
+#[derive(Component)]
+struct MainMenuSettingsButton;
+#[derive(Component)]
+struct MainMenuSettingsBackButton;
 #[derive(Component, Clone, Copy)]
 struct ProjectHubButton(ProjectHubAction);
 #[derive(Clone, Copy)]
@@ -462,6 +511,7 @@ struct MenuFocusable;
 pub(crate) struct MenuScrollPanel;
 
 #[derive(Component)]
+#[require(InteractionDisabled)]
 pub(crate) struct MenuButtonDisabled;
 
 #[derive(Component, Clone)]
@@ -477,6 +527,21 @@ struct MenuFocus {
     repeat_direction: Option<MenuDirection>,
     repeat_timer: f32,
 }
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum UiPromptDevice {
+    KeyboardMouse,
+    #[default]
+    Gamepad,
+}
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct UiPromptText(pub(crate) UiPromptKind);
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum UiPromptKind {
+    MenuNavigation,
+    PauseNavigation,
+    Loadout,
+    Crafting,
+}
 #[derive(Component, Clone, Copy)]
 struct SettingsButton(SettingsAction);
 #[derive(Clone, Copy)]
@@ -487,6 +552,14 @@ enum SettingsAction {
     SfxDown,
     SfxUp,
     ToggleRumble,
+    UiScaleDown,
+    UiScaleUp,
+    SafeAreaDown,
+    SafeAreaUp,
+    ToggleDamageNumbers,
+    ToggleHighContrast,
+    ToggleReducedMotion,
+    ToggleSubtitles,
 }
 #[derive(Clone, Copy)]
 enum DifficultyChoice {
@@ -507,6 +580,11 @@ enum VictoryAction {
 struct PlayerHudBar {
     player_index: u8,
     kind: PlayerHudBarKind,
+}
+
+#[derive(Component)]
+struct PlayerHudPanel {
+    player_index: u8,
 }
 
 #[derive(Component)]
@@ -933,6 +1011,62 @@ fn repeated_menu_direction(
     }
 }
 
+fn track_ui_prompt_device(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    mut device: ResMut<UiPromptDevice>,
+) {
+    let keyboard_used = keyboard.get_just_pressed().next().is_some();
+    let gamepad_used = gamepads
+        .iter()
+        .any(|gamepad| gamepad.get_just_pressed().next().is_some());
+    if gamepad_used {
+        *device = UiPromptDevice::Gamepad;
+    } else if keyboard_used {
+        *device = UiPromptDevice::KeyboardMouse;
+    }
+}
+
+fn refresh_ui_prompt_text(
+    device: Res<UiPromptDevice>,
+    mut prompts: Query<(Ref<UiPromptText>, &mut Text)>,
+) {
+    for (prompt, mut text) in prompts.iter_mut() {
+        if device.is_changed() || prompt.is_added() {
+            *text = Text::new(ui_prompt_text(prompt.0, *device));
+        }
+    }
+}
+
+fn ui_prompt_text(kind: UiPromptKind, device: UiPromptDevice) -> &'static str {
+    match (kind, device) {
+        (UiPromptKind::MenuNavigation, UiPromptDevice::Gamepad) => {
+            "D-PAD / LEFT STICK: navigate and scroll   A: select   B: back"
+        }
+        (UiPromptKind::MenuNavigation, UiPromptDevice::KeyboardMouse) => {
+            "ARROWS / WASD: navigate and scroll   ENTER: select   ESC: back"
+        }
+        (UiPromptKind::PauseNavigation, UiPromptDevice::Gamepad) => {
+            "D-PAD / LEFT STICK: navigate   A: select   B: back / resume"
+        }
+        (UiPromptKind::PauseNavigation, UiPromptDevice::KeyboardMouse) => {
+            "ARROWS / WASD: navigate   ENTER: select   ESC: back / resume"
+        }
+        (UiPromptKind::Loadout, UiPromptDevice::Gamepad) => {
+            "D-PAD/STICK: navigate   A: equip   B or LB+SELECT: close"
+        }
+        (UiPromptKind::Loadout, UiPromptDevice::KeyboardMouse) => {
+            "ARROWS/WASD: navigate   ENTER: equip   ESC or I: close"
+        }
+        (UiPromptKind::Crafting, UiPromptDevice::Gamepad) => {
+            "CRAFTING — D-PAD / STICK: choose   A: craft   B or SELECT: close"
+        }
+        (UiPromptKind::Crafting, UiPromptDevice::KeyboardMouse) => {
+            "CRAFTING — ARROWS / WASD: choose   ENTER: craft   ESC or C: close"
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn menu_back_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -941,6 +1075,7 @@ fn menu_back_navigation(
     state: Res<State<AppState>>,
     design_data: Res<CharacterDesignData>,
     imported_forge_return: Res<ImportedForgeReturnTarget>,
+    mut main_menu: ResMut<MainMenuUiState>,
     mut pause_menu: ResMut<PauseMenuState>,
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -957,6 +1092,9 @@ fn menu_back_navigation(
     }
 
     match state.get() {
+        AppState::MainMenu if main_menu.page == MainMenuPage::Settings => {
+            main_menu.page = MainMenuPage::Home;
+        }
         AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
         AppState::ProjectHub => next_state.set(AppState::MainMenu),
         AppState::CreatureForge => next_state.set(AppState::ProjectHub),
@@ -1026,6 +1164,7 @@ fn directional_menu_focus(
 
 fn menu_focus_style(
     focus: Res<MenuFocus>,
+    settings: Res<GameSettings>,
     mut buttons: Query<
         (
             Entity,
@@ -1046,8 +1185,16 @@ fn menu_focus_style(
             *background = BackgroundColor(Color::srgb(0.98, 0.62, 0.14));
             *border = BorderColor::all(Color::WHITE);
         } else if focus.entity == Some(entity) || *interaction == Interaction::Hovered {
-            *background = BackgroundColor(Color::srgb(0.12, 0.48, 0.82));
-            *border = BorderColor::all(Color::srgb(1.0, 0.9, 0.34));
+            *background = BackgroundColor(if settings.high_contrast_ui {
+                Color::BLACK
+            } else {
+                Color::srgb(0.12, 0.48, 0.82)
+            });
+            *border = BorderColor::all(if settings.high_contrast_ui {
+                Color::WHITE
+            } else {
+                Color::srgb(1.0, 0.9, 0.34)
+            });
         } else {
             *background = palette.background;
             *border = palette.border;
@@ -1162,7 +1309,13 @@ fn cleanup_play_ui_for_menu(
     }
 }
 
-fn setup_main_menu(mut commands: Commands, theme: Res<UiTheme>) {
+fn setup_main_menu(
+    mut commands: Commands,
+    theme: Res<UiTheme>,
+    settings: Res<GameSettings>,
+    mut menu: ResMut<MainMenuUiState>,
+) {
+    menu.page = MainMenuPage::Home;
     commands
         .spawn((
             Node {
@@ -1178,92 +1331,129 @@ fn setup_main_menu(mut commands: Commands, theme: Res<UiTheme>) {
             BackgroundColor(theme.canvas),
             MainMenuRoot,
         ))
-        .with_children(|p| {
-            p.spawn((
-                Text::new("STARFALL I"),
-                TextFont {
-                    font_size: FontSize::Px(72.0),
-                    ..default()
-                },
-                TextColor(theme.objective),
-            ));
-            p.spawn((
-                Text::new("Everest Range"),
-                TextFont {
-                    font_size: FontSize::Px(24.0),
-                    ..default()
-                },
-                TextColor(theme.text_muted),
-            ));
-            p.spawn(Node {
-                height: Val::Px(24.0),
-                ..default()
-            });
-            p.spawn((
-                Text::new("PLAY"),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-                TextColor(theme.player_accent(0)),
-            ));
-            p.spawn((
-                Button,
+        .with_children(|root| {
+            root.spawn((
                 Node {
-                    width: Val::Px(260.0),
-                    height: Val::Px(62.0),
+                    flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    border: UiRect::all(Val::Px(2.0)),
+                    row_gap: Val::Px(18.0),
                     ..default()
                 },
-                BackgroundColor(theme.play),
-                BorderColor::all(theme.player_accent(0)),
-                StartButton,
+                Visibility::Visible,
+                MainMenuPagePanel(MainMenuPage::Home),
             ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("START GAME"),
+            .with_children(|page| {
+                page.spawn((
+                    Text::new("STARFALL I"),
+                    TextFont {
+                        font_size: FontSize::Px(72.0),
+                        ..default()
+                    },
+                    TextColor(theme.objective),
+                ));
+                page.spawn((
+                    Text::new("Everest Range"),
                     TextFont {
                         font_size: FontSize::Px(24.0),
                         ..default()
                     },
-                    TextColor(theme.text_primary),
+                    TextColor(theme.text_muted),
                 ));
+                page.spawn(Node {
+                    height: Val::Px(24.0),
+                    ..default()
+                });
+                spawn_main_menu_button(
+                    page,
+                    "START GAME",
+                    theme.play,
+                    theme.player_accent(0),
+                    StartButton,
+                );
+                spawn_main_menu_button(
+                    page,
+                    "START EDITOR",
+                    theme.create,
+                    theme.player_accent(1),
+                    EditorStartButton,
+                );
+                spawn_main_menu_button(
+                    page,
+                    "SETTINGS",
+                    Color::srgb(0.18, 0.28, 0.48),
+                    theme.energy,
+                    MainMenuSettingsButton,
+                );
             });
-            p.spawn((
-                Text::new("CREATE"),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-                TextColor(theme.player_accent(1)),
-            ));
-            p.spawn((
-                Button,
+
+            root.spawn((
                 Node {
-                    width: Val::Px(260.0),
-                    height: Val::Px(62.0),
+                    max_width: Val::Px(620.0),
+                    max_height: Val::Percent(90.0),
+                    flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    border: UiRect::all(Val::Px(2.0)),
+                    row_gap: Val::Px(12.0),
+                    padding: UiRect::all(Val::Px(24.0)),
+                    overflow: Overflow::scroll_y(),
                     ..default()
                 },
-                BackgroundColor(theme.create),
-                BorderColor::all(theme.player_accent(1)),
-                EditorStartButton,
+                BackgroundColor(theme.panel),
+                Visibility::Hidden,
+                ScrollPosition::default(),
+                MenuScrollPanel,
+                MainMenuPagePanel(MainMenuPage::Settings),
             ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("START EDITOR"),
+            .with_children(|page| {
+                page.spawn((
+                    Text::new("SETTINGS & ACCESSIBILITY"),
                     TextFont {
-                        font_size: FontSize::Px(24.0),
+                        font_size: FontSize::Px(32.0),
                         ..default()
                     },
-                    TextColor(theme.text_primary),
+                    TextColor(theme.objective),
                 ));
+                spawn_settings_controls(page, &settings, &theme);
+                spawn_main_menu_button(
+                    page,
+                    "BACK",
+                    Color::srgb(0.20, 0.24, 0.36),
+                    theme.energy,
+                    MainMenuSettingsBackButton,
+                );
             });
         });
+}
+
+fn spawn_main_menu_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    background: Color,
+    border: Color,
+    marker: impl Component,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(260.0),
+                height: Val::Px(58.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(background),
+            BorderColor::all(border),
+            marker,
+        ))
+        .with_child((
+            Text::new(label),
+            TextFont {
+                font_size: FontSize::Px(22.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
 }
 
 fn menu_start_button(
@@ -1276,6 +1466,26 @@ fn menu_start_button(
             Without<StartButton>,
         ),
     >,
+    settings_q: Query<
+        &Interaction,
+        (
+            Changed<Interaction>,
+            With<MainMenuSettingsButton>,
+            Without<StartButton>,
+            Without<EditorStartButton>,
+        ),
+    >,
+    settings_back_q: Query<
+        &Interaction,
+        (
+            Changed<Interaction>,
+            With<MainMenuSettingsBackButton>,
+            Without<StartButton>,
+            Without<EditorStartButton>,
+            Without<MainMenuSettingsButton>,
+        ),
+    >,
+    mut menu: ResMut<MainMenuUiState>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     for interaction in interaction_q.iter() {
@@ -1287,6 +1497,32 @@ fn menu_start_button(
         if *interaction == Interaction::Pressed {
             next_state.set(AppState::ProjectHub);
         }
+    }
+    for interaction in settings_q.iter() {
+        if *interaction == Interaction::Pressed {
+            menu.page = MainMenuPage::Settings;
+        }
+    }
+    for interaction in settings_back_q.iter() {
+        if *interaction == Interaction::Pressed {
+            menu.page = MainMenuPage::Home;
+        }
+    }
+}
+
+fn update_main_menu_page_visibility(
+    menu: Res<MainMenuUiState>,
+    mut panels: Query<(&MainMenuPagePanel, &mut Visibility)>,
+) {
+    if !menu.is_changed() {
+        return;
+    }
+    for (panel, mut visibility) in panels.iter_mut() {
+        *visibility = if panel.0 == menu.page {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -1545,6 +1781,7 @@ fn setup_pause_menu(
                     ..default()
                 },
                 TextColor(Color::srgb(0.68, 0.78, 0.92)),
+                UiPromptText(UiPromptKind::PauseNavigation),
             ));
             root.spawn(Node {
                 height: Val::Px(8.0),
@@ -1763,9 +2000,14 @@ fn setup_pause_menu(
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
                     row_gap: Val::Px(10.0),
+                    max_height: Val::Percent(82.0),
+                    padding: UiRect::horizontal(Val::Px(12.0)),
+                    overflow: Overflow::scroll_y(),
                     ..default()
                 },
                 Visibility::Hidden,
+                ScrollPosition::default(),
+                MenuScrollPanel,
                 PausePagePanel(PausePage::Settings),
             ))
             .with_children(|page| {
@@ -1823,6 +2065,57 @@ fn setup_pause_menu(
                     spawn_settings_button(row, "SFX -", SettingsAction::SfxDown);
                     spawn_settings_button(row, "SFX +", SettingsAction::SfxUp);
                     spawn_settings_button(row, "RUMBLE", SettingsAction::ToggleRumble);
+                });
+                page.spawn((
+                    Text::new(interface_layout_text(&settings)),
+                    TextFont {
+                        font_size: FontSize::Px(16.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                    InterfaceLayoutText,
+                ));
+                page.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(8.0),
+                    row_gap: Val::Px(8.0),
+                    justify_content: JustifyContent::Center,
+                    max_width: Val::Px(520.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    spawn_settings_button(row, "UI SCALE -", SettingsAction::UiScaleDown);
+                    spawn_settings_button(row, "UI SCALE +", SettingsAction::UiScaleUp);
+                    spawn_settings_button(row, "SAFE AREA -", SettingsAction::SafeAreaDown);
+                    spawn_settings_button(row, "SAFE AREA +", SettingsAction::SafeAreaUp);
+                });
+                page.spawn((
+                    Text::new(accessibility_settings_text(&settings)),
+                    TextFont {
+                        font_size: FontSize::Px(15.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.72, 0.82, 1.0)),
+                    AccessibilitySettingsText,
+                ));
+                spawn_settings_button_grid(page, |row| {
+                    spawn_settings_button(
+                        row,
+                        "DAMAGE NUMBERS",
+                        SettingsAction::ToggleDamageNumbers,
+                    );
+                    spawn_settings_button(
+                        row,
+                        "HIGH CONTRAST",
+                        SettingsAction::ToggleHighContrast,
+                    );
+                    spawn_settings_button(
+                        row,
+                        "REDUCED MOTION",
+                        SettingsAction::ToggleReducedMotion,
+                    );
+                    spawn_settings_button(row, "SUBTITLES", SettingsAction::ToggleSubtitles);
                 });
                 spawn_pause_button(page, "BACK", PauseAction::Back, Color::srgb(0.0, 0.42, 0.74));
             });
@@ -1891,6 +2184,108 @@ fn spawn_settings_button(
                 TextColor(Color::WHITE),
             ));
         });
+}
+
+fn spawn_settings_controls(
+    parent: &mut ChildSpawnerCommands,
+    settings: &GameSettings,
+    theme: &UiTheme,
+) {
+    parent.spawn((
+        Text::new(difficulty_text(settings)),
+        TextFont {
+            font_size: FontSize::Px(16.0),
+            ..default()
+        },
+        TextColor(theme.text_primary),
+        DifficultyText,
+    ));
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|row| {
+            spawn_settings_button(
+                row,
+                "EASY",
+                SettingsAction::Difficulty(DifficultyChoice::Easy),
+            );
+            spawn_settings_button(
+                row,
+                "NORMAL",
+                SettingsAction::Difficulty(DifficultyChoice::Normal),
+            );
+            spawn_settings_button(
+                row,
+                "HARD",
+                SettingsAction::Difficulty(DifficultyChoice::Hard),
+            );
+        });
+    parent.spawn((
+        Text::new(volume_text(settings)),
+        TextFont {
+            font_size: FontSize::Px(16.0),
+            ..default()
+        },
+        TextColor(theme.text_primary),
+        VolumeText,
+    ));
+    spawn_settings_button_grid(parent, |row| {
+        spawn_settings_button(row, "MUSIC -", SettingsAction::MusicDown);
+        spawn_settings_button(row, "MUSIC +", SettingsAction::MusicUp);
+        spawn_settings_button(row, "SFX -", SettingsAction::SfxDown);
+        spawn_settings_button(row, "SFX +", SettingsAction::SfxUp);
+        spawn_settings_button(row, "RUMBLE", SettingsAction::ToggleRumble);
+    });
+    parent.spawn((
+        Text::new(interface_layout_text(settings)),
+        TextFont {
+            font_size: FontSize::Px(16.0),
+            ..default()
+        },
+        TextColor(theme.text_primary),
+        InterfaceLayoutText,
+    ));
+    spawn_settings_button_grid(parent, |row| {
+        spawn_settings_button(row, "UI SCALE -", SettingsAction::UiScaleDown);
+        spawn_settings_button(row, "UI SCALE +", SettingsAction::UiScaleUp);
+        spawn_settings_button(row, "SAFE AREA -", SettingsAction::SafeAreaDown);
+        spawn_settings_button(row, "SAFE AREA +", SettingsAction::SafeAreaUp);
+    });
+    parent.spawn((
+        Text::new(accessibility_settings_text(settings)),
+        TextFont {
+            font_size: FontSize::Px(16.0),
+            ..default()
+        },
+        TextColor(theme.text_primary),
+        AccessibilitySettingsText,
+    ));
+    spawn_settings_button_grid(parent, |row| {
+        spawn_settings_button(row, "DAMAGE NUMBERS", SettingsAction::ToggleDamageNumbers);
+        spawn_settings_button(row, "HIGH CONTRAST", SettingsAction::ToggleHighContrast);
+        spawn_settings_button(row, "REDUCED MOTION", SettingsAction::ToggleReducedMotion);
+        spawn_settings_button(row, "SUBTITLES", SettingsAction::ToggleSubtitles);
+    });
+}
+
+fn spawn_settings_button_grid(
+    parent: &mut ChildSpawnerCommands,
+    build: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(8.0),
+            row_gap: Val::Px(8.0),
+            justify_content: JustifyContent::Center,
+            max_width: Val::Px(540.0),
+            ..default()
+        })
+        .with_children(build);
 }
 
 fn spawn_shop_button(
@@ -2508,6 +2903,7 @@ fn setup_chapter_select(
                     ..default()
                 },
                 TextColor(Color::srgb(0.68, 0.78, 0.92)),
+                UiPromptText(UiPromptKind::MenuNavigation),
             ));
             p.spawn(Node {
                 flex_direction: FlexDirection::Row,
@@ -4591,8 +4987,33 @@ fn spawn_player_select_button(
         });
 }
 
+fn sync_player_select_button_availability(
+    mut commands: Commands,
+    select: Res<PlayerSelectState>,
+    buttons: Query<(Entity, &PlayerSelectButton, Has<MenuButtonDisabled>)>,
+) {
+    for (entity, button, disabled) in buttons.iter() {
+        let should_disable =
+            matches!(button.action, PlayerSelectAction::Begin) && !select.all_ready();
+        if should_disable && !disabled {
+            commands.entity(entity).insert(MenuButtonDisabled);
+        } else if !should_disable && disabled {
+            commands
+                .entity(entity)
+                .remove::<(MenuButtonDisabled, InteractionDisabled)>();
+        }
+    }
+}
+
 fn player_select_update(
-    interaction_q: Query<(&Interaction, &PlayerSelectButton), (Changed<Interaction>, With<Button>)>,
+    interaction_q: Query<
+        (
+            &Interaction,
+            &PlayerSelectButton,
+            Option<&MenuButtonDisabled>,
+        ),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut select: ResMut<PlayerSelectState>,
     assignments: Res<GamepadAssignments>,
     mut config: ResMut<LocalPlayerConfig>,
@@ -4638,8 +5059,8 @@ fn player_select_update(
     let roster_len = HERO_ROSTER.len();
     select.slots[0].joined = true;
 
-    for (interaction, button) in interaction_q.iter() {
-        if *interaction != Interaction::Pressed {
+    for (interaction, button, disabled) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed || disabled.is_some() {
             continue;
         }
 
@@ -4862,7 +5283,7 @@ fn setup_hud(
                     BackgroundColor(Color::srgba(0.0, 0.42, 0.58, 0.0)),
                     UnderwaterOverlay { player_index },
                 ));
-                spawn_player_hud_panel(root, player_index, &theme);
+                spawn_player_hud_panel(root, player_index, active, &theme);
             }
 
             // ── Top-right wave/enemy ──────────────────────────────────────────────
@@ -5187,6 +5608,7 @@ fn setup_hud(
                         ..default()
                     },
                     TextColor(theme.text_muted),
+                    UiPromptText(UiPromptKind::Loadout),
                 ));
                 panel
                     .spawn(Node {
@@ -5311,6 +5733,7 @@ fn setup_hud(
                         ..default()
                     },
                     TextColor(Color::srgb(0.0, 0.9, 1.0)),
+                    UiPromptText(UiPromptKind::Crafting),
                 ));
                 panel.spawn((
                     Text::new(""),
@@ -5380,22 +5803,110 @@ fn damage_vignette_node(player_index: u8, active: u8) -> Node {
     node
 }
 
-fn spawn_player_hud_panel(parent: &mut ChildSpawnerCommands, player_index: u8, theme: &UiTheme) {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HudPanelPlacement {
+    left: Option<f32>,
+    right: Option<f32>,
+    top: Option<f32>,
+    bottom: Option<f32>,
+    width: f32,
+}
+
+fn hud_panel_placement(
+    player_index: u8,
+    active_players: u8,
+    window_size: Vec2,
+    safe_area_fraction: f32,
+) -> HudPanelPlacement {
+    let active = active_players.clamp(1, 4);
+    let margin = (window_size.min_element() * safe_area_fraction.clamp(0.0, 0.08)).clamp(8.0, 48.0);
+    let (left, right, top, bottom) = match (player_index, active) {
+        (_, 1) | (0, 2) | (0, 3 | 4) => (Some(margin), None, Some(margin), None),
+        (1, 2) => (Some(margin), None, None, Some(margin)),
+        (1, 3 | 4) => (None, Some(margin), Some(margin), None),
+        (2, 3 | 4) => (Some(margin), None, None, Some(margin)),
+        (3, 4) => (None, Some(margin), None, Some(margin)),
+        _ => (Some(margin), None, Some(margin), None),
+    };
+    HudPanelPlacement {
+        left,
+        right,
+        top,
+        bottom,
+        width: if active >= 3 { 232.0 } else { 246.0 },
+    }
+}
+
+fn apply_hud_panel_placement(node: &mut Node, placement: HudPanelPlacement) {
+    node.left = placement.left.map_or(Val::Auto, Val::Px);
+    node.right = placement.right.map_or(Val::Auto, Val::Px);
+    node.top = placement.top.map_or(Val::Auto, Val::Px);
+    node.bottom = placement.bottom.map_or(Val::Auto, Val::Px);
+    node.width = Val::Px(placement.width);
+}
+
+fn responsive_hud_layout_system(
+    settings: Res<GameSettings>,
+    config: Res<LocalPlayerConfig>,
+    theme: Res<UiTheme>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut panels: Query<(
+        &PlayerHudPanel,
+        &mut Node,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let size = Vec2::new(window.width(), window.height());
+    for (panel, mut node, mut background, mut border) in panels.iter_mut() {
+        apply_hud_panel_placement(
+            &mut node,
+            hud_panel_placement(
+                panel.player_index,
+                config.active,
+                size,
+                settings.safe_area_fraction,
+            ),
+        );
+        background.0 = if settings.high_contrast_ui {
+            Color::srgba(0.0, 0.0, 0.0, 0.97)
+        } else {
+            theme.panel
+        };
+        *border = BorderColor::all(theme.player_accent(panel.player_index));
+    }
+}
+
+fn spawn_player_hud_panel(
+    parent: &mut ChildSpawnerCommands,
+    player_index: u8,
+    active_players: u8,
+    theme: &UiTheme,
+) {
+    let placement = hud_panel_placement(
+        player_index,
+        active_players,
+        Vec2::new(1280.0, 720.0),
+        0.025,
+    );
+    let mut panel_node = Node {
+        position_type: PositionType::Absolute,
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(5.0),
+        padding: UiRect::all(Val::Px(8.0)),
+        border: UiRect::left(Val::Px(3.0)),
+        ..default()
+    };
+    apply_hud_panel_placement(&mut panel_node, placement);
     parent
         .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
-                top: Val::Px(16.0 + f32::from(player_index) * 166.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(5.0),
-                width: Val::Px(246.0),
-                padding: UiRect::all(Val::Px(8.0)),
-                border: UiRect::left(Val::Px(3.0)),
-                ..default()
-            },
+            panel_node,
             BackgroundColor(theme.panel),
             BorderColor::all(theme.player_accent(player_index)),
+            PlayerHudPanel { player_index },
         ))
         .with_children(|panel| {
             panel.spawn((
@@ -6281,6 +6792,7 @@ fn discussion_panel_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     asset_server: Res<AssetServer>,
+    settings: Res<GameSettings>,
     mut commands: Commands,
     mut discussion: ResMut<DiscussionState>,
     mut input_capture: ResMut<UiGameplayCapture>,
@@ -6342,7 +6854,8 @@ fn discussion_panel_system(
         ));
     }
     if let Ok(mut text) = text_sets.p2().single_mut() {
-        *text = Text::new(line.text);
+        let show_text = settings.subtitles_enabled || line.voice_mp3.is_none();
+        *text = Text::new(if show_text { line.text } else { "" });
     }
     if let Ok(mut text) = text_sets.p3().single_mut() {
         *text = Text::new(format!(
@@ -7414,17 +7927,15 @@ fn victory_input(
 // ── Settings Panel Input ──────────────────────────────────────────────────────
 
 fn settings_panel_input_system(
-    menu: Res<PauseMenuState>,
     mut settings: ResMut<GameSettings>,
     interaction_q: Query<(&Interaction, &SettingsButton), (Changed<Interaction>, With<Button>)>,
     mut text_q: ParamSet<(
         Query<&mut Text, With<DifficultyText>>,
         Query<&mut Text, With<VolumeText>>,
+        Query<&mut Text, With<InterfaceLayoutText>>,
+        Query<&mut Text, With<AccessibilitySettingsText>>,
     )>,
 ) {
-    if menu.page != PausePage::Settings {
-        return;
-    }
     let mut changed = false;
     for (interaction, button) in interaction_q.iter() {
         if *interaction != Interaction::Pressed {
@@ -7447,6 +7958,32 @@ fn settings_panel_input_system(
                 settings.sfx_volume = (settings.sfx_volume + 0.1).clamp(0.0, 1.0);
             }
             SettingsAction::ToggleRumble => settings.rumble_on_hit = !settings.rumble_on_hit,
+            SettingsAction::UiScaleDown => {
+                settings.ui_scale = (settings.ui_scale - 0.1).clamp(0.8, 1.4);
+            }
+            SettingsAction::UiScaleUp => {
+                settings.ui_scale = (settings.ui_scale + 0.1).clamp(0.8, 1.4);
+            }
+            SettingsAction::SafeAreaDown => {
+                settings.safe_area_fraction =
+                    (settings.safe_area_fraction - 0.005).clamp(0.0, 0.08);
+            }
+            SettingsAction::SafeAreaUp => {
+                settings.safe_area_fraction =
+                    (settings.safe_area_fraction + 0.005).clamp(0.0, 0.08);
+            }
+            SettingsAction::ToggleDamageNumbers => {
+                settings.show_damage_numbers = !settings.show_damage_numbers;
+            }
+            SettingsAction::ToggleHighContrast => {
+                settings.high_contrast_ui = !settings.high_contrast_ui;
+            }
+            SettingsAction::ToggleReducedMotion => {
+                settings.reduced_ui_motion = !settings.reduced_ui_motion;
+            }
+            SettingsAction::ToggleSubtitles => {
+                settings.subtitles_enabled = !settings.subtitles_enabled;
+            }
         }
         changed = true;
     }
@@ -7463,6 +8000,14 @@ fn settings_panel_input_system(
     let vol_str = volume_text(&settings);
     for mut text in text_q.p1().iter_mut() {
         *text = Text::new(vol_str.clone());
+    }
+    let interface_str = interface_layout_text(&settings);
+    for mut text in text_q.p2().iter_mut() {
+        *text = Text::new(interface_str.clone());
+    }
+    let accessibility_str = accessibility_settings_text(&settings);
+    for mut text in text_q.p3().iter_mut() {
+        *text = Text::new(accessibility_str.clone());
     }
 }
 
@@ -7484,6 +8029,42 @@ fn volume_text(settings: &GameSettings) -> String {
         settings.sfx_volume * 100.0,
         if settings.rumble_on_hit { "ON" } else { "OFF" },
     )
+}
+
+fn interface_layout_text(settings: &GameSettings) -> String {
+    format!(
+        "UI scale: {:.0}%  Safe area: {:.1}%",
+        settings.ui_scale * 100.0,
+        settings.safe_area_fraction * 100.0,
+    )
+}
+
+fn accessibility_settings_text(settings: &GameSettings) -> String {
+    format!(
+        "Damage numbers: {}  High contrast: {}  Reduced motion: {}  Subtitles: {}",
+        on_off(settings.show_damage_numbers),
+        on_off(settings.high_contrast_ui),
+        on_off(settings.reduced_ui_motion),
+        on_off(settings.subtitles_enabled),
+    )
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "ON"
+    } else {
+        "OFF"
+    }
+}
+
+fn sync_ui_scale_from_settings(settings: Res<GameSettings>, ui_scale: Option<ResMut<UiScale>>) {
+    let Some(mut ui_scale) = ui_scale else {
+        return;
+    };
+    let requested = settings.ui_scale.clamp(0.8, 1.4);
+    if (ui_scale.0 - requested).abs() > f32::EPSILON {
+        ui_scale.0 = requested;
+    }
 }
 
 // ── Final Push Unlock ─────────────────────────────────────────────────────────
@@ -7840,6 +8421,35 @@ mod menu_navigation_tests {
     }
 
     #[test]
+    fn prompt_copy_tracks_the_active_input_family() {
+        assert!(
+            ui_prompt_text(UiPromptKind::MenuNavigation, UiPromptDevice::Gamepad).contains("D-PAD")
+        );
+        assert!(
+            ui_prompt_text(UiPromptKind::MenuNavigation, UiPromptDevice::KeyboardMouse)
+                .contains("WASD")
+        );
+        assert!(ui_prompt_text(UiPromptKind::Loadout, UiPromptDevice::Gamepad).contains("LB"));
+        assert!(ui_prompt_text(UiPromptKind::Loadout, UiPromptDevice::KeyboardMouse).contains("I"));
+    }
+
+    #[test]
+    fn accessibility_summary_reports_every_toggle_without_color_dependency() {
+        let settings = GameSettings {
+            show_damage_numbers: false,
+            high_contrast_ui: true,
+            reduced_ui_motion: true,
+            subtitles_enabled: false,
+            ..default()
+        };
+        let summary = accessibility_settings_text(&settings);
+        assert!(summary.contains("Damage numbers: OFF"));
+        assert!(summary.contains("High contrast: ON"));
+        assert!(summary.contains("Reduced motion: ON"));
+        assert!(summary.contains("Subtitles: OFF"));
+    }
+
+    #[test]
     fn world_map_projection_places_origin_at_center_and_clamps_edges() {
         assert!((world_to_map_left(0.0) - 50.0).abs() < 1e-4);
         assert!((world_to_map_top(0.0) - 50.0).abs() < 1e-4);
@@ -8044,6 +8654,29 @@ mod menu_navigation_tests {
         assert_eq!(reticle_center_percent(1, 2), (50.0, 75.0));
         assert_eq!(reticle_center_percent(0, 4), (25.0, 25.0));
         assert_eq!(reticle_center_percent(3, 4), (75.0, 75.0));
+    }
+
+    #[test]
+    fn four_player_hud_panels_anchor_inside_their_own_quadrants() {
+        let size = Vec2::new(1280.0, 720.0);
+        let p1 = hud_panel_placement(0, 4, size, 0.025);
+        let p2 = hud_panel_placement(1, 4, size, 0.025);
+        let p3 = hud_panel_placement(2, 4, size, 0.025);
+        let p4 = hud_panel_placement(3, 4, size, 0.025);
+
+        assert!(p1.left.is_some() && p1.top.is_some());
+        assert!(p2.right.is_some() && p2.top.is_some());
+        assert!(p3.left.is_some() && p3.bottom.is_some());
+        assert!(p4.right.is_some() && p4.bottom.is_some());
+        assert_eq!(p1.width, 232.0);
+    }
+
+    #[test]
+    fn hud_safe_area_scales_and_stays_bounded() {
+        let compact = hud_panel_placement(0, 1, Vec2::new(640.0, 360.0), 0.025);
+        let television = hud_panel_placement(0, 1, Vec2::new(3840.0, 2160.0), 0.08);
+        assert_eq!(compact.left, Some(9.0));
+        assert_eq!(television.left, Some(48.0));
     }
 
     #[test]

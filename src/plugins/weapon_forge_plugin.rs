@@ -299,7 +299,7 @@ fn forge_button(parent: &mut ChildSpawnerCommands, label: impl Into<String>, act
             WeaponForgeButton(action),
             Node {
                 min_width: Val::Px(104.0),
-                min_height: Val::Px(24.0),
+                min_height: Val::Px(36.0),
                 padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,

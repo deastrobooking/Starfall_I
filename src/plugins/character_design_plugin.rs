@@ -1806,8 +1806,8 @@ fn spawn_face_step_button(
         .spawn((
             Button,
             Node {
-                width: Val::Px(24.0),
-                height: Val::Px(22.0),
+                width: Val::Px(34.0),
+                height: Val::Px(34.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border: UiRect::all(Val::Px(1.0)),
@@ -1862,7 +1862,7 @@ fn spawn_face_cycle_row(
                 Button,
                 Node {
                     width: Val::Px(84.0),
-                    height: Val::Px(22.0),
+                    height: Val::Px(34.0),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     border: UiRect::all(Val::Px(1.0)),
@@ -1891,8 +1891,8 @@ fn spawn_step_button(parent: &mut ChildSpawnerCommands, field: BodyField, delta:
         .spawn((
             Button,
             Node {
-                width: Val::Px(24.0),
-                height: Val::Px(22.0),
+                width: Val::Px(34.0),
+                height: Val::Px(34.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border: UiRect::all(Val::Px(1.0)),

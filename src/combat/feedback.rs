@@ -20,6 +20,7 @@ use crate::components::player::{Player, PlayerCamera, PlayerIndex};
 use crate::engine::state::AppState;
 use crate::events::{EnemyDamagedEvent, EnemyKilledEvent};
 use crate::plugins::input_plugin::trigger_player_rumble;
+use crate::resources::GameSettings;
 
 // ── Flinch ────────────────────────────────────────────────────────────────────
 
@@ -180,10 +181,15 @@ const DAMAGE_NUMBER_CAP: usize = 32;
 fn spawn_damage_numbers(
     mut commands: Commands,
     mut damaged: MessageReader<EnemyDamagedEvent>,
+    settings: Res<GameSettings>,
     cameras: Query<(&Camera, &GlobalTransform), With<PlayerCamera>>,
     windows: Query<&Window>,
     existing: Query<(), With<DamageNumber>>,
 ) {
+    if !settings.show_damage_numbers {
+        damaged.clear();
+        return;
+    }
     let scale_factor = windows
         .iter()
         .next()
@@ -240,6 +246,7 @@ fn spawn_damage_numbers(
 
 fn tick_damage_numbers(
     time: Res<Time>,
+    settings: Res<GameSettings>,
     mut commands: Commands,
     mut numbers: Query<(Entity, &mut DamageNumber, &mut Node, &mut TextColor)>,
 ) {
@@ -251,7 +258,12 @@ fn tick_damage_numbers(
             continue;
         }
         let t = 1.0 - number.timer / DAMAGE_NUMBER_LIFETIME;
-        node.top = Val::Px(number.base_pos.y - number.rise * t);
+        let rise = if settings.reduced_ui_motion {
+            0.0
+        } else {
+            number.rise
+        };
+        node.top = Val::Px(number.base_pos.y - rise * t);
         color.0 = color.0.with_alpha((1.0 - t * t).clamp(0.0, 1.0));
     }
 }

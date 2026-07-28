@@ -155,7 +155,17 @@
   `UiTheme` now drives the Main Menu, Player Select accents, and per-player HUD;
   the Star Loadout shell now follows it and includes a controller-owned,
   shape-coded relic catalog with save-backed discovery, effects, inputs, and
-  source hints. Remaining screens migrate incrementally.
+  source hints. Persisted UI scale (80–140%) and safe-area controls now drive
+  Bevy's fixed-unit scaling and viewport-local multiplayer HUD margins. Player
+  HUD panels anchor independently inside the four split-screen quadrants, and
+  creator tool windows clamp their complete initial bounds after spawn, resize,
+  or scale changes. Core Studio/Forge controls now use larger interaction
+  targets. Title and Pause expose the same persisted accessibility controls for
+  damage numbers, high-contrast focus/HUD presentation, reduced floating-text
+  motion, and voiced-dialogue subtitles. Shared help copy follows the last-used
+  keyboard or gamepad across menus and common in-game panels. Remaining screens
+  still migrate incrementally to the semantic theme; full remapping glyphs and
+  localization remain.
 
 ## Current production order
 

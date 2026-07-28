@@ -15,6 +15,7 @@ use bevy::window::PrimaryWindow;
 pub struct ToolWindow {
     pub minimized: bool,
     drag: Option<DragState>,
+    requested_size: Vec2,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,7 +58,12 @@ impl Plugin for ToolWindowsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ToolWindowRaiseOrder>().add_systems(
             Update,
-            (tool_window_drag_system, tool_window_minimize_system),
+            (
+                tool_window_drag_system,
+                tool_window_fit_system,
+                tool_window_minimize_system,
+            )
+                .chain(),
         );
     }
 }
@@ -127,6 +133,34 @@ fn tool_window_drag_system(
     }
 }
 
+fn tool_window_fit_system(
+    primary: Query<&Window, With<PrimaryWindow>>,
+    ui_scale: Option<Res<UiScale>>,
+    mut windows: Query<(&ToolWindow, &mut Node)>,
+) {
+    let Ok(primary) = primary.single() else {
+        return;
+    };
+    let scale = ui_scale.as_deref().map_or(1.0, |scale| scale.0).max(0.01);
+    let logical_bounds = Vec2::new(primary.width(), primary.height()) / scale;
+    for (window, mut node) in windows.iter_mut() {
+        if window.requested_size == Vec2::ZERO {
+            continue;
+        }
+        let current = Vec2::new(px_or_zero(node.left), px_or_zero(node.top));
+        let fitted = fit_window_origin(current, window.requested_size, logical_bounds);
+        node.left = Val::Px(fitted.x);
+        node.top = Val::Px(fitted.y);
+    }
+}
+
+fn fit_window_origin(origin: Vec2, size: Vec2, bounds: Vec2) -> Vec2 {
+    Vec2::new(
+        origin.x.clamp(0.0, (bounds.x - size.x).max(0.0)),
+        origin.y.clamp(0.0, (bounds.y - size.y).max(0.0)),
+    )
+}
+
 fn tool_window_minimize_system(
     buttons: Query<(&Interaction, &ToolWindowMinimizeButton), (Changed<Interaction>, With<Button>)>,
     mut windows: Query<&mut ToolWindow>,
@@ -192,9 +226,16 @@ pub fn spawn_tool_window(
 ) -> Entity {
     let mut window_entity = Entity::PLACEHOLDER;
     let title = title.to_string();
+    let content_height = match style.content_height {
+        Val::Px(height) => height,
+        _ => 540.0,
+    };
     parent
         .spawn((
-            ToolWindow::default(),
+            ToolWindow {
+                requested_size: Vec2::new(style.width, content_height + 36.0),
+                ..default()
+            },
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(position.x),
@@ -217,7 +258,7 @@ pub fn spawn_tool_window(
                     },
                     Node {
                         width: Val::Percent(100.0),
-                        min_height: Val::Px(30.0),
+                        min_height: Val::Px(36.0),
                         padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::SpaceBetween,
@@ -241,8 +282,8 @@ pub fn spawn_tool_window(
                             window: window_entity,
                         },
                         Node {
-                            min_width: Val::Px(26.0),
-                            min_height: Val::Px(22.0),
+                            min_width: Val::Px(34.0),
+                            min_height: Val::Px(34.0),
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::Center,
                             ..default()
@@ -301,6 +342,19 @@ mod tests {
 
         let clamped_high = drag_target(start, pointer_start, Vec2::new(5_000.0, 5_000.0), bounds);
         assert_eq!(clamped_high, Vec2::new(1_160.0, 680.0));
+    }
+
+    #[test]
+    fn initial_window_fit_keeps_the_entire_panel_inside_720p() {
+        let bounds = Vec2::new(1280.0, 720.0);
+        assert_eq!(
+            fit_window_origin(Vec2::new(1120.0, 430.0), Vec2::new(330.0, 320.0), bounds,),
+            Vec2::new(950.0, 400.0),
+        );
+        assert_eq!(
+            fit_window_origin(Vec2::new(-20.0, -5.0), Vec2::new(300.0, 200.0), bounds),
+            Vec2::ZERO,
+        );
     }
 
     #[test]

@@ -78,6 +78,21 @@ pub struct GameSettings {
     /// Whether to trigger controller rumble on hit events
     #[serde(default = "default_true")]
     pub rumble_on_hit: bool,
+    /// Global multiplier for fixed-size UI values.
+    #[serde(default = "default_one_f32")]
+    pub ui_scale: f32,
+    /// Fraction of the shortest window edge reserved around critical HUD UI.
+    #[serde(default = "default_safe_area_fraction")]
+    pub safe_area_fraction: f32,
+    /// Use stronger text, panel, and focus contrast in the game UI.
+    #[serde(default)]
+    pub high_contrast_ui: bool,
+    /// Suppress non-essential UI movement such as floating damage text.
+    #[serde(default)]
+    pub reduced_ui_motion: bool,
+    /// Show written dialogue while voiced conversations play.
+    #[serde(default = "default_true")]
+    pub subtitles_enabled: bool,
 }
 
 fn default_one_f32() -> f32 {
@@ -86,6 +101,10 @@ fn default_one_f32() -> f32 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_safe_area_fraction() -> f32 {
+    0.025
 }
 
 impl Default for GameSettings {
@@ -99,6 +118,11 @@ impl Default for GameSettings {
             music_volume: 1.0,
             sfx_volume: 1.0,
             rumble_on_hit: true,
+            ui_scale: 1.0,
+            safe_area_fraction: default_safe_area_fraction(),
+            high_contrast_ui: false,
+            reduced_ui_motion: false,
+            subtitles_enabled: true,
         }
     }
 }
@@ -1733,6 +1757,28 @@ pub fn initial_world_routes() -> Vec<WorldRoute> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_settings_receive_responsive_ui_defaults() {
+        let settings: GameSettings = serde_json::from_str(
+            r#"{
+                "mouse_sensitivity": 0.0008,
+                "master_volume": 1.0,
+                "show_damage_numbers": true,
+                "world_seed": 42195,
+                "difficulty_scale": 1.0,
+                "music_volume": 1.0,
+                "sfx_volume": 1.0,
+                "rumble_on_hit": true
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(settings.ui_scale, 1.0);
+        assert_eq!(settings.safe_area_fraction, 0.025);
+        assert!(!settings.high_contrast_ui);
+        assert!(!settings.reduced_ui_motion);
+        assert!(settings.subtitles_enabled);
+    }
 
     #[test]
     fn dungeon_crawl_state_activates_and_clears() {

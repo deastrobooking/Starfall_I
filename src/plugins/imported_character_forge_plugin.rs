@@ -487,7 +487,7 @@ fn forge_button(
             Button,
             ImportedForgeButton(action),
             Node {
-                min_height: Val::Px(30.0),
+                min_height: Val::Px(36.0),
                 padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
                 margin: UiRect::all(Val::Px(2.0)),
                 border: UiRect::all(Val::Px(1.0)),

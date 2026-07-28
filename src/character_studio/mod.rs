@@ -498,6 +498,7 @@ fn spawn_action_button(
             Button,
             ActionButton { action, row, col },
             Node {
+                min_height: Val::Px(36.0),
                 padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
                 margin: UiRect::all(Val::Px(2.0)),
                 justify_content: JustifyContent::Center,
@@ -526,8 +527,8 @@ fn spawn_small_button(
             Button,
             ActionButton { action, row, col },
             Node {
-                width: Val::Px(22.0),
-                height: Val::Px(20.0),
+                width: Val::Px(34.0),
+                height: Val::Px(34.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 margin: UiRect::horizontal(Val::Px(2.0)),
@@ -555,7 +556,7 @@ fn spawn_morph_slider(
             RelativeCursorPosition::default(),
             Node {
                 width: Val::Px(92.0),
-                height: Val::Px(20.0),
+                height: Val::Px(34.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::FlexStart,
                 margin: UiRect::horizontal(Val::Px(4.0)),
