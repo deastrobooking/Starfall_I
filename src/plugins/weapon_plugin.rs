@@ -92,8 +92,10 @@ struct SabreBladeVisual {
 /// the blade hangs off the hilt's emitter rather than off the player root.
 #[derive(Component)]
 struct SabreHilt {
-    /// The player entity that owns this hilt (not the hand it is parented to).
+    /// The player entity that owns this hilt (not the anchor it is parented to).
     owner: Entity,
+    /// Whether this hilt is currently in hand or stowed on the body.
+    carry: HiltCarry,
 }
 
 /// Where a hilt can be mounted, best first. The modular character can be built
@@ -105,17 +107,49 @@ enum HandMount {
     Wrist,
     /// The cartoon-part hand mesh.
     HandPart,
+    /// Sheathed: clipped to the hip via the pelvis joint.
+    HipJoint,
+    /// Sheathed: clipped to the belt mesh.
+    BeltPart,
 }
 
-/// Choose the mount for a character, preferring the rigged wrist when both
-/// exist. Pure so the fallback order is testable without spawning a rig.
-fn resolve_hand_mount(has_wrist_joint: bool, has_hand_part: bool) -> Option<HandMount> {
-    if has_wrist_joint {
-        Some(HandMount::Wrist)
-    } else if has_hand_part {
-        Some(HandMount::HandPart)
-    } else {
-        None
+/// Whether the sabre is in hand or stowed. A sheathed sabre still exists as a
+/// physical object on the character — a weapon that vanishes when put away
+/// reads as a magic trick rather than equipment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HiltCarry {
+    Drawn,
+    Holstered,
+}
+
+/// Choose the mount for a character, preferring rigged joints over cartoon
+/// meshes. Pure so the fallback order is testable without spawning a rig.
+fn resolve_hand_mount(
+    carry: HiltCarry,
+    has_wrist_joint: bool,
+    has_hand_part: bool,
+    has_pelvis_joint: bool,
+    has_belt_part: bool,
+) -> Option<HandMount> {
+    match carry {
+        HiltCarry::Drawn => {
+            if has_wrist_joint {
+                Some(HandMount::Wrist)
+            } else if has_hand_part {
+                Some(HandMount::HandPart)
+            } else {
+                None
+            }
+        }
+        HiltCarry::Holstered => {
+            if has_pelvis_joint {
+                Some(HandMount::HipJoint)
+            } else if has_belt_part {
+                Some(HandMount::BeltPart)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -123,15 +157,31 @@ fn resolve_hand_mount(has_wrist_joint: bool, has_hand_part: bool) -> Option<Hand
 /// sits at the forearm end, so the grip needs pushing further into the palm
 /// than it does on a hand mesh whose origin is already the palm.
 fn hilt_local_transform(mount: HandMount) -> Transform {
-    let (offset, scale) = match mount {
-        HandMount::Wrist => (Vec3::new(0.0, -0.06, -0.05), 1.0),
-        HandMount::HandPart => (Vec3::new(0.0, -0.02, -0.02), 1.0),
-    };
-    Transform::from_translation(offset)
-        // Lie the grip along the hand's forward axis so the blade projects out
-        // of the fist rather than through the wrist.
-        .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
-        .with_scale(Vec3::splat(scale))
+    match mount {
+        // In hand: grip lies along the hand's forward axis so the blade
+        // projects out of the fist rather than through the wrist.
+        HandMount::Wrist => Transform::from_translation(Vec3::new(0.0, -0.06, -0.05))
+            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        HandMount::HandPart => Transform::from_translation(Vec3::new(0.0, -0.02, -0.02))
+            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        // Holstered: clipped vertically against the right hip, tilted back a
+        // little so it reads as hanging rather than welded on.
+        HandMount::HipJoint => Transform::from_translation(Vec3::new(0.19, -0.06, 0.04))
+            .with_rotation(Quat::from_rotation_z(-0.22)),
+        HandMount::BeltPart => Transform::from_translation(Vec3::new(0.20, -0.04, 0.05))
+            .with_rotation(Quat::from_rotation_z(-0.22)),
+    }
+}
+
+impl HandMount {
+    /// Holstered mounts hang the hilt on the body; drawn mounts put it in the
+    /// hand. Only a drawn hilt ignites a blade.
+    fn carry(self) -> HiltCarry {
+        match self {
+            HandMount::Wrist | HandMount::HandPart => HiltCarry::Drawn,
+            HandMount::HipJoint | HandMount::BeltPart => HiltCarry::Holstered,
+        }
+    }
 }
 
 /// World-space confirmation that a homing projectile has acquired a target.
@@ -3607,14 +3657,22 @@ fn mount_sabre_hilt_system(
     part_q: Query<(Entity, &CartoonPart)>,
     hilt_q: Query<(Entity, &SabreHilt)>,
 ) {
-    // Drop hilts whose owner sheathed the sabre or stopped existing.
+    // A hilt whose carry state no longer matches (drawn <-> holstered) is
+    // dropped so it can be re-mounted on the correct anchor this frame.
     let mut mounted: Vec<Entity> = Vec::new();
     for (hilt_entity, hilt) in hilt_q.iter() {
-        let drawn = player_q
+        let wanted = player_q
             .get(hilt.owner)
-            .map(|(_, sabre, _)| sabre.active && sabre.unlocked)
-            .unwrap_or(false);
-        if drawn {
+            .ok()
+            .filter(|(_, sabre, _)| sabre.unlocked)
+            .map(|(_, sabre, _)| {
+                if sabre.active {
+                    HiltCarry::Drawn
+                } else {
+                    HiltCarry::Holstered
+                }
+            });
+        if wanted == Some(hilt.carry) {
             mounted.push(hilt.owner);
         } else {
             commands.entity(hilt_entity).despawn();
@@ -3622,9 +3680,14 @@ fn mount_sabre_hilt_system(
     }
 
     for (player_entity, sabre, progression) in player_q.iter() {
-        if !sabre.active || !sabre.unlocked || mounted.contains(&player_entity) {
+        if !sabre.unlocked || mounted.contains(&player_entity) {
             continue;
         }
+        let carry = if sabre.active {
+            HiltCarry::Drawn
+        } else {
+            HiltCarry::Holstered
+        };
         // Find this character's hand. Rigs win over cartoon parts.
         let wrist = joint_q.iter().find(|(_, marker)| {
             marker.root == player_entity && marker.kind == JointKind::RightWrist
@@ -3632,13 +3695,27 @@ fn mount_sabre_hilt_system(
         let hand_part = part_q.iter().find(|(_, part)| {
             part.root == player_entity && part.kind == CartoonPartKind::RightHand
         });
-        let Some(mount) = resolve_hand_mount(wrist.is_some(), hand_part.is_some()) else {
-            // No hand yet (mesh still assembling) — try again next frame.
+        let pelvis = joint_q
+            .iter()
+            .find(|(_, marker)| marker.root == player_entity && marker.kind == JointKind::Pelvis);
+        let belt = part_q
+            .iter()
+            .find(|(_, part)| part.root == player_entity && part.kind == CartoonPartKind::Belt);
+        let Some(mount) = resolve_hand_mount(
+            carry,
+            wrist.is_some(),
+            hand_part.is_some(),
+            pelvis.is_some(),
+            belt.is_some(),
+        ) else {
+            // Anchor not spawned yet (mesh still assembling) — retry next frame.
             continue;
         };
         let parent = match mount {
             HandMount::Wrist => wrist.map(|(entity, _)| entity),
             HandMount::HandPart => hand_part.map(|(entity, _)| entity),
+            HandMount::HipJoint => pelvis.map(|(entity, _)| entity),
+            HandMount::BeltPart => belt.map(|(entity, _)| entity),
         };
         let Some(parent) = parent else { continue };
 
@@ -3657,6 +3734,9 @@ fn mount_sabre_hilt_system(
                 },
                 SabreHilt {
                     owner: player_entity,
+                    // Derived from the resolved mount rather than the request,
+                    // so a hip anchor can never be recorded as "in hand".
+                    carry: mount.carry(),
                 },
                 Name::new("Star Sabre Hilt"),
             ))
@@ -3725,7 +3805,8 @@ fn sync_sabre_blade_visual(
         let Ok((sabre, progression)) = player_q.get(hilt.owner) else {
             continue;
         };
-        if !sabre.active || !sabre.unlocked {
+        // A holstered hilt is just the handle — no beam.
+        if !sabre.active || !sabre.unlocked || hilt.carry != HiltCarry::Drawn {
             continue;
         }
         let blade = blade_for_id(progression.shop.equipped_weapon.as_deref());
@@ -4116,6 +4197,20 @@ mod move_def_wiring_tests {
         app
     }
 
+    /// Spawns a player plus the hand *and* belt anchors, so both the drawn
+    /// and holstered mounts have somewhere to go.
+    fn spawn_sabre_player_with_belt(app: &mut App, active: bool) -> (Entity, Entity, Entity) {
+        let (player, hand) = spawn_sabre_player(app, active);
+        let belt = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                CartoonPart::new(player, CartoonPartKind::Belt, &Transform::default()),
+            ))
+            .id();
+        (player, hand, belt)
+    }
+
     fn spawn_sabre_player(app: &mut App, active: bool) -> (Entity, Entity) {
         let player = app
             .world_mut()
@@ -4166,25 +4261,61 @@ mod move_def_wiring_tests {
     }
 
     #[test]
-    fn a_sheathed_sabre_leaves_no_hilt_and_re_mounts_on_redraw() {
+    fn sheathing_moves_the_hilt_to_the_belt_and_drawing_returns_it_to_the_hand() {
         let mut app = hilt_test_app();
-        let (player, _) = spawn_sabre_player(&mut app, false);
+        let (player, hand, belt) = spawn_sabre_player_with_belt(&mut app, false);
+
+        // Sheathed: the handle still exists as equipment, worn on the belt.
         app.update();
+        let stowed = single_hilt(&mut app);
+        assert_eq!(stowed.1, HiltCarry::Holstered);
+        assert_eq!(
+            app.world().get::<ChildOf>(stowed.0).map(|c| c.parent()),
+            Some(belt),
+            "a sheathed sabre hangs on the body, it does not vanish"
+        );
 
-        let mut hilts = app.world_mut().query::<&SabreHilt>();
-        assert_eq!(hilts.iter(app.world()).count(), 0, "sheathed: no hilt");
-
-        // Draw it.
+        // Drawing moves the same equipment into the hand.
         app.world_mut().get_mut::<BeamSabre>(player).unwrap().active = true;
         app.update();
-        let mut hilts = app.world_mut().query::<&SabreHilt>();
-        assert_eq!(hilts.iter(app.world()).count(), 1, "drawing mounts a hilt");
+        let drawn = single_hilt(&mut app);
+        assert_eq!(drawn.1, HiltCarry::Drawn);
+        assert_eq!(
+            app.world().get::<ChildOf>(drawn.0).map(|c| c.parent()),
+            Some(hand)
+        );
 
-        // Sheathe again — the handle goes away with the blade.
+        // And sheathing again puts it back on the belt.
         app.world_mut().get_mut::<BeamSabre>(player).unwrap().active = false;
         app.update();
+        let restowed = single_hilt(&mut app);
+        assert_eq!(restowed.1, HiltCarry::Holstered);
+        assert_eq!(
+            app.world().get::<ChildOf>(restowed.0).map(|c| c.parent()),
+            Some(belt)
+        );
+    }
+
+    #[test]
+    fn a_character_with_nowhere_to_holster_simply_carries_nothing() {
+        // No belt and no pelvis: sheathing has no anchor, which must be
+        // handled gracefully rather than leaving a hilt floating at the origin.
+        let mut app = hilt_test_app();
+        spawn_sabre_player(&mut app, false);
+        app.update();
         let mut hilts = app.world_mut().query::<&SabreHilt>();
-        assert_eq!(hilts.iter(app.world()).count(), 0, "sheathing removes it");
+        assert_eq!(hilts.iter(app.world()).count(), 0);
+    }
+
+    /// The one hilt in the world, with its carry state.
+    fn single_hilt(app: &mut App) -> (Entity, HiltCarry) {
+        let mut query = app.world_mut().query::<(Entity, &SabreHilt)>();
+        let found: Vec<(Entity, HiltCarry)> = query
+            .iter(app.world())
+            .map(|(entity, hilt)| (entity, hilt.carry))
+            .collect();
+        assert_eq!(found.len(), 1, "expected exactly one hilt");
+        found[0]
     }
 
     #[test]
@@ -4206,10 +4337,27 @@ mod move_def_wiring_tests {
     fn hilt_mounts_to_a_rig_wrist_when_there_is_one() {
         // Rigged skeletons give the most accurate mount; cartoon parts are
         // the fallback; a half-built character mounts nothing yet.
-        assert_eq!(resolve_hand_mount(true, true), Some(HandMount::Wrist));
-        assert_eq!(resolve_hand_mount(true, false), Some(HandMount::Wrist));
-        assert_eq!(resolve_hand_mount(false, true), Some(HandMount::HandPart));
-        assert_eq!(resolve_hand_mount(false, false), None);
+        let drawn = |wrist, hand| resolve_hand_mount(HiltCarry::Drawn, wrist, hand, true, true);
+        assert_eq!(drawn(true, true), Some(HandMount::Wrist));
+        assert_eq!(drawn(true, false), Some(HandMount::Wrist));
+        assert_eq!(drawn(false, true), Some(HandMount::HandPart));
+        assert_eq!(drawn(false, false), None, "no hand yet: mount nothing");
+
+        // Holstering anchors on the body, preferring the rigged pelvis, and
+        // never falls back to a hand.
+        let stowed =
+            |pelvis, belt| resolve_hand_mount(HiltCarry::Holstered, true, true, pelvis, belt);
+        assert_eq!(stowed(true, true), Some(HandMount::HipJoint));
+        assert_eq!(stowed(false, true), Some(HandMount::BeltPart));
+        assert_eq!(stowed(false, false), None);
+
+        // Carry state round-trips through the mount.
+        for mount in [HandMount::Wrist, HandMount::HandPart] {
+            assert_eq!(mount.carry(), HiltCarry::Drawn);
+        }
+        for mount in [HandMount::HipJoint, HandMount::BeltPart] {
+            assert_eq!(mount.carry(), HiltCarry::Holstered);
+        }
     }
 
     #[test]

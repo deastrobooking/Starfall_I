@@ -461,6 +461,19 @@ impl SabreTechnique {
             Self::SabreThrow => "SABRE THROW",
         }
     }
+
+    /// Whether this technique is swung with both hands on the hilt.
+    ///
+    /// The heavy committed swings (cyclone, spiral, pound) read as full-body
+    /// effort and look wrong driven from one wrist; the mobile verbs (dash,
+    /// rising) stay one-handed, and a thrown blade obviously leaves the hand
+    /// entirely.
+    pub fn is_two_handed(self) -> bool {
+        matches!(
+            self,
+            Self::CycloneSlash | Self::SpiralSlash | Self::MeteorPound
+        )
+    }
 }
 
 #[derive(Component, Debug, Clone)]

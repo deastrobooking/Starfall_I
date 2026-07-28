@@ -493,6 +493,8 @@ struct HandEngineInput {
     melee_heavy: bool,
     sabre_active: bool,
     sabre_slashing: bool,
+    /// Both hands are on the hilt for a heavy committed technique.
+    sabre_two_handed: bool,
     parrying: bool,
     hanging: bool,
     wall_sliding: bool,
@@ -706,12 +708,29 @@ fn build_hand_engine(input: HandEngineInput) -> HandEngine {
     if input.sabre_active || input.sabre_slashing || input.pose == CartoonPose::SabreSlash {
         let slash = (input.phase * 1.25).sin();
         return HandEngine {
-            left: HandPoseState::new(HandGrip::Brace, 0.44, 0.32)
-                .with_target(
-                    Vec3::new(-0.22 * scale, 0.02 * scale + lift, -0.26 * scale),
-                    0.42,
-                )
-                .with_twist(-0.12),
+            // Two-handed swings bring the off hand onto the hilt, just below
+            // the sword hand, and close its grip; otherwise it braces wide for
+            // counter-balance.
+            left: if input.sabre_two_handed {
+                HandPoseState::new(HandGrip::Sabre, 0.84, 0.10)
+                    .with_target(
+                        Vec3::new(
+                            0.26 * scale + slash * 0.07 * scale,
+                            0.02 * scale + lift,
+                            -0.42 * scale,
+                        ),
+                        0.78,
+                    )
+                    .with_twist(0.48)
+                    .with_recoil(slash.abs() * 0.30)
+            } else {
+                HandPoseState::new(HandGrip::Brace, 0.44, 0.32)
+                    .with_target(
+                        Vec3::new(-0.22 * scale, 0.02 * scale + lift, -0.26 * scale),
+                        0.42,
+                    )
+                    .with_twist(-0.12)
+            },
             right: HandPoseState::new(HandGrip::Sabre, 0.88, 0.08)
                 .with_target(
                     Vec3::new(
@@ -972,6 +991,14 @@ fn cartoon_animation_system(
             melee_light: player_input.map(|input| input.melee_light).unwrap_or(false),
             melee_heavy: player_input.map(|input| input.melee_heavy).unwrap_or(false),
             sabre_active: sabre.map(|s| s.unlocked && s.active).unwrap_or(false),
+            sabre_two_handed: sabre
+                .map(|s| {
+                    s.unlocked
+                        && s.active
+                        && s.technique_timer > 0.0
+                        && s.technique.is_two_handed()
+                })
+                .unwrap_or(false),
             sabre_slashing,
             parrying: parry.map(|p| p.is_parrying).unwrap_or(false),
             hanging,
@@ -2945,6 +2972,7 @@ mod tests {
             melee_light: false,
             melee_heavy: false,
             sabre_active: false,
+            sabre_two_handed: false,
             sabre_slashing: false,
             parrying: false,
             hanging: false,
@@ -3140,6 +3168,51 @@ mod tests {
         // Manual leans back over the tail — the only pose pitching backward.
         assert!(manual.torso_pitch > 0.0);
         assert!(manual.back_knee > manual.front_knee);
+    }
+
+    #[test]
+    fn heavy_techniques_put_the_off_hand_on_the_hilt() {
+        let mut one_handed = hand_input();
+        one_handed.sabre_active = true;
+        let one = build_hand_engine(one_handed);
+
+        let mut two_handed = hand_input();
+        two_handed.sabre_active = true;
+        two_handed.sabre_two_handed = true;
+        let two = build_hand_engine(two_handed);
+
+        // Sword hand is unchanged; only the off hand commits.
+        assert_eq!(one.right.grip, HandGrip::Sabre);
+        assert_eq!(two.right.grip, HandGrip::Sabre);
+
+        // One-handed: the off hand braces wide and stays open.
+        assert_eq!(one.left.grip, HandGrip::Brace);
+        // Two-handed: it closes on the hilt beside the sword hand.
+        assert_eq!(two.left.grip, HandGrip::Sabre);
+        assert!(two.left.curl > one.left.curl, "off hand must close");
+        assert!(two.left.weight > one.left.weight, "and commit to the grip");
+    }
+
+    #[test]
+    fn only_the_heavy_committed_techniques_are_two_handed() {
+        use crate::components::weapon::SabreTechnique;
+        // Full-body swings use both hands.
+        for technique in [
+            SabreTechnique::CycloneSlash,
+            SabreTechnique::SpiralSlash,
+            SabreTechnique::MeteorPound,
+        ] {
+            assert!(technique.is_two_handed(), "{technique:?} should be two-handed");
+        }
+        // Mobile verbs stay one-handed, and a thrown blade leaves the hand.
+        for technique in [
+            SabreTechnique::CometDash,
+            SabreTechnique::RisingSlash,
+            SabreTechnique::SabreThrow,
+            SabreTechnique::Ready,
+        ] {
+            assert!(!technique.is_two_handed(), "{technique:?} should be one-handed");
+        }
     }
 
     #[test]
