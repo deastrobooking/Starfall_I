@@ -11,6 +11,8 @@ use crate::character::mesh_modifiers::MeshModifier;
 const SPEC_FIELD: &str = "imported_character_spec";
 const PART_FIELD: &str = "imported_modular_part";
 const RECOVERY_LIMIT: usize = 3;
+const CURRENT_IMPORTED_CHARACTER_SCHEMA: u32 = 4;
+const CURRENT_IMPORTED_PART_SCHEMA: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ImportedMeshEdit {
@@ -35,6 +37,79 @@ pub struct ImportedMaterialEdit {
     pub emissive_texture: Option<String>,
     #[serde(default)]
     pub cleared_texture_channels: [bool; 4],
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportedUvProjection {
+    Authored,
+    PlanarXy,
+    PlanarXz,
+    PlanarYz,
+    CylindricalY,
+    BoxSeams,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImportedFacePaint {
+    pub face_indices: Vec<u32>,
+    pub color: [f32; 4],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImportedUvEdit {
+    pub source_asset: String,
+    pub mesh_index: usize,
+    pub primitive_index: usize,
+    pub projection: ImportedUvProjection,
+    pub scale: [f32; 2],
+    pub offset: [f32; 2],
+    pub rotation_radians: f32,
+    #[serde(default)]
+    pub face_paints: Vec<ImportedFacePaint>,
+}
+
+impl ImportedUvEdit {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.source_asset.to_ascii_lowercase().ends_with(".glb") {
+            return Err("UV edit source must be a GLB".into());
+        }
+        if self
+            .scale
+            .iter()
+            .chain(self.offset.iter())
+            .chain(std::iter::once(&self.rotation_radians))
+            .any(|value| !value.is_finite())
+            || self
+                .scale
+                .iter()
+                .any(|value| !(0.01..=100.0).contains(value))
+            || self
+                .offset
+                .iter()
+                .any(|value| !(-100.0..=100.0).contains(value))
+            || !(-std::f32::consts::TAU..=std::f32::consts::TAU).contains(&self.rotation_radians)
+        {
+            return Err("UV transform is outside its supported range".into());
+        }
+        if self.face_paints.len() > 64 {
+            return Err("A primitive is limited to 64 non-destructive paint strokes".into());
+        }
+        for paint in &self.face_paints {
+            if paint.face_indices.is_empty()
+                || paint.face_indices.len() > 250_000
+                || paint
+                    .color
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            {
+                return Err(
+                    "Face paint stroke is empty, too large, or has an invalid color".into(),
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ImportedMaterialEdit {
@@ -166,6 +241,8 @@ pub struct ImportedPartAsset {
     pub assignment: ImportedPartAssignment,
     #[serde(default)]
     pub material: Option<ImportedMaterialEdit>,
+    #[serde(default)]
+    pub uv_edit: Option<ImportedUvEdit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -182,13 +259,15 @@ pub struct ImportedCharacterSpec {
     #[serde(default)]
     pub material_edits: Vec<ImportedMaterialEdit>,
     #[serde(default)]
+    pub uv_edits: Vec<ImportedUvEdit>,
+    #[serde(default)]
     pub part_assignments: Vec<ImportedPartAssignment>,
 }
 
 impl Default for ImportedCharacterSpec {
     fn default() -> Self {
         Self {
-            schema_version: 3,
+            schema_version: CURRENT_IMPORTED_CHARACTER_SCHEMA,
             content_id: "character.imported".into(),
             display_name: "Imported Character".into(),
             source_asset: String::new(),
@@ -196,6 +275,7 @@ impl Default for ImportedCharacterSpec {
             root_scale: [1.0; 3],
             mesh_edits: Vec::new(),
             material_edits: Vec::new(),
+            uv_edits: Vec::new(),
             part_assignments: Vec::new(),
         }
     }
@@ -231,6 +311,17 @@ impl ImportedCharacterSpec {
                 material.primitive_index,
             )) {
                 return Err("Only one material override is allowed per source primitive".into());
+            }
+        }
+        let mut uv_keys = std::collections::BTreeSet::new();
+        for edit in &self.uv_edits {
+            edit.validate()?;
+            if !uv_keys.insert((
+                edit.source_asset.as_str(),
+                edit.mesh_index,
+                edit.primitive_index,
+            )) {
+                return Err("Only one UV edit is allowed per source primitive".into());
             }
         }
         let mut part_ids = std::collections::BTreeSet::new();
@@ -295,6 +386,7 @@ pub fn save_to_active_project(
     registry: &ForgeProjectRegistry,
     spec: &mut ImportedCharacterSpec,
 ) -> Result<String, String> {
+    spec.schema_version = CURRENT_IMPORTED_CHARACTER_SCHEMA;
     spec.validate()?;
     let (store, mut project) = open_active(registry)?;
     let existing = project
@@ -361,6 +453,7 @@ pub fn save_part_to_active_project(
     registry: &ForgeProjectRegistry,
     assignment: &ImportedPartAssignment,
     material: Option<&ImportedMaterialEdit>,
+    uv_edit: Option<&ImportedUvEdit>,
 ) -> Result<String, String> {
     if assignment.face_indices.is_empty() {
         return Err("Select at least one face before saving a part".into());
@@ -380,10 +473,11 @@ pub fn save_part_to_active_project(
         "animation_ready".into(),
     ];
     let part = ImportedPartAsset {
-        schema_version: 2,
+        schema_version: CURRENT_IMPORTED_PART_SCHEMA,
         content_id: content_id.clone(),
         assignment: assignment.clone(),
         material: material.cloned(),
+        uv_edit: uv_edit.cloned(),
     };
     let mut recipe = GenericRecipeDraft::default();
     recipe.fields.insert(
@@ -539,6 +633,33 @@ mod tests {
         let spec: ImportedCharacterSpec = serde_json::from_str(json).unwrap();
         assert!(spec.material_edits.is_empty());
         assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn uv_projection_and_face_paint_round_trip_in_schema_four() {
+        let edit = ImportedUvEdit {
+            source_asset: "imported_characters/hero.glb".into(),
+            mesh_index: 2,
+            primitive_index: 0,
+            projection: ImportedUvProjection::BoxSeams,
+            scale: [1.5, 0.75],
+            offset: [0.1, -0.2],
+            rotation_radians: 0.25,
+            face_paints: vec![ImportedFacePaint {
+                face_indices: vec![1, 2, 3],
+                color: [0.8, 0.1, 0.3, 1.0],
+            }],
+        };
+        assert!(edit.validate().is_ok());
+        let spec = ImportedCharacterSpec {
+            source_asset: edit.source_asset.clone(),
+            uv_edits: vec![edit],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        let decoded: ImportedCharacterSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, spec);
+        assert!(decoded.validate().is_ok());
     }
 
     #[test]

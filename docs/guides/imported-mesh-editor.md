@@ -45,8 +45,8 @@ adds the next reusable record to the current imported-character spec. Library
 assignments retain their own source GLB, so a character spec can mix parts
 authored from different characters without copying mesh buffers.
 
-Saving the character writes `imported_character_spec` schema v3. Older v1/v2
-records still load because assignment and material lists default to empty.
+Saving the character writes `imported_character_spec` schema v4. Older v1-v3
+records still load because assignment, material, and UV lists default to empty.
 Imported character browsing excludes standalone part-library records.
 
 ## Color and texture a primitive
@@ -71,12 +71,35 @@ Material overrides use the same source GLB, mesh, and primitive key as region
 assignments. Saving a reusable part includes its matching override, so adding
 that library part to another character also carries its authored appearance.
 
+## Project UVs and paint selected faces
+
+The **UV + FACE PAINT** window provides authored UV preservation, planar XY/XZ/
+YZ projection, cylindrical-Y projection, box projection with split hard seams,
+U/V scale and offset, rotation, and bounded color strokes over the current face
+selection.
+
+Box projection duplicates indexed vertices only in the derived mesh so each
+triangle can own seam-safe coordinates. Face paint uses vertex colors and
+stable source face IDs; deselect the orange topology overlay to inspect it.
+**RESTORE UV** removes projection, transforms, and paint.
+
+## Assemble for runtime
+
+**ASSEMBLE RUNTIME PREVIEW** loads every GLB referenced by the current spec and
+spawns extracted components beside the regular preview using the production
+runtime assembler.
+
+Gameplay code calls
+`request_imported_character(commands, character_root, spec)`. The root receives
+an `ImportedAssemblyStatus`; completed children expose `ImportedRuntimePart`
+and `ImportedGameplayRegion`. A canonical `SkeletonRig` present now or added
+later binds rigid pieces to their assigned joints.
+
 ## Current boundary
 
-This slice authors and validates selection/part metadata. It does not yet split
-the source GLB, rewrite skin weights, or spawn a multi-source runtime character.
-Skinned and morphed assets remain intact, and the editor uses static
-display-only copies for safe highlighting. The editor assigns existing UV maps
-but does not yet paint pixels or edit UV seams/transforms. Runtime assembly and deform-aware
-export should consume the saved source references, joints, pivots, and face
-sets rather than changing this persistence contract.
+Runtime assembly extracts static face regions but does not rewrite skin weights
+or morph deltas. Joint-bound accessories, armor, weapons, hands, feet, and
+rigid limb regions are supported; continuously deforming torso/cloth regions
+still need deform-aware rebinding. Face paint is vertex-color painting rather
+than direct pixel painting into PNG/JPG maps. Box projection creates automatic
+hard seams; manual edge seam marking and island packing remain future work.

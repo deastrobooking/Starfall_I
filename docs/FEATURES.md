@@ -2044,7 +2044,8 @@ Assignments save in imported Character schema v3 (first introduced in v2).
 **SAVE TO LIBRARY** creates a
 separately tagged reusable project record; **ADD LIBRARY PART** references its
 source-backed assignment in the current character, enabling cross-character
-mix-and-match without duplicating geometry.
+mix-and-match without duplicating geometry. **ASSEMBLE RUNTIME PREVIEW** runs
+the actual asynchronous multi-source assembler beside the editor preview.
 
 The Color + Texture window preserves each primitive's authored GLB material
 until an override is created. Authors can cycle a curated color palette and
@@ -2053,17 +2054,34 @@ an armed base-color, normal, packed metallic/roughness, or emissive channel;
 maps can be cleared independently or the whole primitive can return to its
 authored material. External images are copied into
 `assets/imported_textures/`, while in-project images keep their existing
-project-relative path. Character schema v3 persists these overrides.
+project-relative path. Character schema v4 persists these overrides.
 Saving a modular part includes its matching material override, and loading the
 part replaces the same source-primitive material binding deterministically.
 
+The UV + Face Paint window supports authored UV preservation, XY/XZ/YZ planar
+projection, Y-axis cylindrical projection, and split-vertex box projection
+with automatic hard seams. U/V scale and offset plus rotation remain
+non-destructive. **PAINT SELECTION** records bounded source-face color strokes;
+later strokes override earlier strokes, and runtime meshes receive matching
+vertex colors. UV edits and paint travel with reusable part records.
+
+`ImportedModularRuntimePlugin` is registered with the character runtime.
+`request_imported_character(commands, root, spec)` asynchronously loads every
+referenced source GLB, preserves node transforms, extracts assigned faces,
+applies UV and PBR overrides, and spawns renderable regions.
+`ImportedRuntimePart` exposes slot/joint/pivot data and
+`ImportedGameplayRegion` exposes visual, hurtbox, weapon, shield, traversal,
+interaction, or cosmetic ownership. Rigid regions bind to a root's
+`SkeletonRig` joint when available.
+
 Meshes carrying joint weights or morph targets remain preview-safe and retain
 authored deformation data; topology modifiers are recorded but not baked onto
-those meshes yet. Region assignments are metadata consumed by future runtime
-assembly/bake systems—the current editor does not physically detach faces or
-rewrite weights. Next work is box/circle/lasso selection, brush
-displacement/masking, UV transform/seam tools, texture painting, thumbnails, socket
-orientation editing, runtime part assembly, and a skin/morph-aware GLB
+those meshes yet. Runtime extraction is rigid and does not rewrite skin
+weights, so continuously deforming torso/cloth regions remain on their authored
+skinned source until deform-aware rebinding lands. Next work is
+box/circle/lasso selection, brush displacement/masking, pixel texture painting,
+manual seam marking, thumbnails, socket orientation editing, and a
+skin/morph-aware GLB
 bake/export path. See
 [`docs/guides/imported-mesh-editor.md`](guides/imported-mesh-editor.md).
 

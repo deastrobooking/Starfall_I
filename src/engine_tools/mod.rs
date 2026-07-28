@@ -9,6 +9,7 @@
 pub mod character_records;
 pub mod creature_records;
 pub mod mesh_selection;
+pub mod mesh_uv;
 mod persistence;
 mod presets;
 pub mod project_registry;

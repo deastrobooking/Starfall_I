@@ -128,9 +128,14 @@
   specs. Per-source primitive material overrides preserve authored GLB
   materials by default and add palette tint, metallic, roughness, emission,
   and imported base-color/normal/metallic-roughness/emissive maps. Reusable
-  part records carry their matching override. Skinning and morph data remain
-  intact: selections reference authored face IDs and the static editor overlay
-  strips deformation metadata without mutating the source asset.
+  part records carry their matching override. UV schema v4 adds authored,
+  planar, cylindrical, and split box projection; scale/offset/rotation; and
+  source-face color painting. A globally registered runtime assembler resolves
+  multi-GLB part specs asynchronously, extracts assigned regions, applies their
+  UV/material edits, exposes gameplay-region metadata, and binds rigid regions
+  to canonical skeleton joints. Skinning and morph data remain intact:
+  selections reference authored face IDs and derived runtime parts strip
+  deformation metadata without mutating the source asset.
 - App construction now has one authoritative
   `build_starfall_app(StarfallAppMode)` boundary. Production keeps the full
   window/render/audio stack; the headless profile keeps state, assets, physics,

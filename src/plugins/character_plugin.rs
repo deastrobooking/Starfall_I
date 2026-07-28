@@ -28,20 +28,23 @@ pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::character::animation_mvp::CharacterAnimationMvpPlugin)
-            .add_systems(
-                Update,
-                (
-                    bind_parts_to_skeleton,
-                    cartoon_animation_system.run_if(
-                        in_state(AppState::Playing).or_else(in_state(AppState::CharacterDesign)),
-                    ),
-                    crate::character::animation_mvp::drive_graph_animation,
-                    studio_human_animation_system.run_if(in_state(AppState::Playing)),
-                    swap_character_parts,
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            crate::character::animation_mvp::CharacterAnimationMvpPlugin,
+            crate::character::imported_modular::ImportedModularRuntimePlugin,
+        ))
+        .add_systems(
+            Update,
+            (
+                bind_parts_to_skeleton,
+                cartoon_animation_system.run_if(
+                    in_state(AppState::Playing).or_else(in_state(AppState::CharacterDesign)),
+                ),
+                crate::character::animation_mvp::drive_graph_animation,
+                studio_human_animation_system.run_if(in_state(AppState::Playing)),
+                swap_character_parts,
+            )
+                .chain(),
+        );
     }
 }
 

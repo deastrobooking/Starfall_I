@@ -23,6 +23,7 @@ pub mod animation_mvp;
 pub mod blueprint;
 pub mod face;
 pub mod hero_roster;
+pub mod imported_modular;
 pub mod mesh_modifiers;
 pub mod modular;
 pub mod parts;

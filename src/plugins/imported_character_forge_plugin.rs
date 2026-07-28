@@ -9,14 +9,17 @@ use bevy::prelude::*;
 use bevy::window::{FileDragAndDrop, PrimaryWindow};
 
 use super::ui_plugin::MenuScrollPanel;
+use crate::character::imported_modular::request_imported_character;
 use crate::character::mesh_modifiers::{apply_stack_to_mesh, MeshModifier};
 use crate::engine::rendering::{Camera3dBundle, DirectionalLightBundle, PbrBundle};
 use crate::engine::state::AppState;
 use crate::engine_tools::character_records::{
-    self, ImportedAnimationJoint, ImportedCharacterSpec, ImportedGameplayRole,
+    self, ImportedAnimationJoint, ImportedCharacterSpec, ImportedFacePaint, ImportedGameplayRole,
     ImportedMaterialEdit, ImportedMeshEdit, ImportedPartAssignment, ImportedPartSlot,
+    ImportedUvEdit, ImportedUvProjection,
 };
 use crate::engine_tools::mesh_selection::{pick_face, selected_face_mesh, MeshTopology};
+use crate::engine_tools::mesh_uv::{apply_uv_edit, static_mesh_copy};
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::resources::ImportedForgeReturnTarget;
@@ -66,6 +69,8 @@ struct ImportedForgeState {
     selected_assignment: usize,
     material_param: usize,
     texture_channel: usize,
+    uv_param: usize,
+    paint_color: usize,
     preview_dirty: bool,
     labels_dirty: bool,
     status: String,
@@ -93,6 +98,8 @@ impl Default for ImportedForgeState {
             selected_assignment: 0,
             material_param: 0,
             texture_channel: 0,
+            uv_param: 0,
+            paint_color: 0,
             preview_dirty: false,
             labels_dirty: true,
             status: "Drop a .glb anywhere, or load the AMP sample.".into(),
@@ -174,6 +181,43 @@ impl ImportedForgeState {
             });
         &mut self.spec.material_edits[index]
     }
+
+    fn selected_uv_edit(&self) -> Option<&ImportedUvEdit> {
+        self.spec.uv_edits.iter().find(|edit| {
+            edit.source_asset == self.spec.source_asset
+                && edit.mesh_index == self.spec.selected_mesh
+                && edit.primitive_index == self.selected_primitive
+        })
+    }
+
+    fn selected_uv_edit_mut(&mut self) -> &mut ImportedUvEdit {
+        let source_asset = self.spec.source_asset.clone();
+        let mesh_index = self.spec.selected_mesh;
+        let primitive_index = self.selected_primitive;
+        let index = self
+            .spec
+            .uv_edits
+            .iter()
+            .position(|edit| {
+                edit.source_asset == source_asset
+                    && edit.mesh_index == mesh_index
+                    && edit.primitive_index == primitive_index
+            })
+            .unwrap_or_else(|| {
+                self.spec.uv_edits.push(ImportedUvEdit {
+                    source_asset,
+                    mesh_index,
+                    primitive_index,
+                    projection: ImportedUvProjection::Authored,
+                    scale: [1.0; 2],
+                    offset: [0.0; 2],
+                    rotation_radians: 0.0,
+                    face_paints: Vec::new(),
+                });
+                self.spec.uv_edits.len() - 1
+            });
+        &mut self.spec.uv_edits[index]
+    }
 }
 
 #[derive(Component)]
@@ -182,6 +226,8 @@ struct ImportedForgeRoot;
 struct ImportedPreviewRoot;
 #[derive(Component)]
 struct ImportedPreviewPart;
+#[derive(Component)]
+struct ImportedRuntimeTestRoot;
 #[derive(Component, Clone, Copy)]
 struct ImportedPreviewSource {
     mesh_index: usize,
@@ -205,6 +251,8 @@ struct ImportedSelectionText;
 struct ImportedAssignmentText;
 #[derive(Component)]
 struct ImportedMaterialText;
+#[derive(Component)]
+struct ImportedUvText;
 
 #[derive(Component, Clone, Copy)]
 struct ImportedForgeButton(ImportedForgeAction);
@@ -237,12 +285,20 @@ enum ImportedForgeAction {
     RemoveAssignment,
     SavePart,
     LoadPart,
+    PreviewAssembly,
     MaterialColorNext,
     MaterialParamNext,
     AdjustMaterial(i32),
     TextureChannelNext,
     ClearTexture,
     ResetMaterial,
+    UvProjectionNext,
+    UvParamNext,
+    AdjustUv(i32),
+    PaintColorNext,
+    PaintSelection,
+    ClearPaint,
+    ResetUv,
     Save,
     LoadNextSaved,
     Reset,
@@ -291,6 +347,26 @@ const IMPORTED_COLOR_PALETTE: [[f32; 4]; 14] = [
     [0.48, 0.5, 0.56, 1.0],
     [0.82, 0.68, 0.28, 1.0],
 ];
+
+const IMPORTED_UV_PROJECTIONS: [ImportedUvProjection; 6] = [
+    ImportedUvProjection::Authored,
+    ImportedUvProjection::PlanarXy,
+    ImportedUvProjection::PlanarXz,
+    ImportedUvProjection::PlanarYz,
+    ImportedUvProjection::CylindricalY,
+    ImportedUvProjection::BoxSeams,
+];
+
+fn uv_projection_label(projection: ImportedUvProjection) -> &'static str {
+    match projection {
+        ImportedUvProjection::Authored => "AUTHORED",
+        ImportedUvProjection::PlanarXy => "PLANAR XY",
+        ImportedUvProjection::PlanarXz => "PLANAR XZ",
+        ImportedUvProjection::PlanarYz => "PLANAR YZ",
+        ImportedUvProjection::CylindricalY => "CYLINDER Y",
+        ImportedUvProjection::BoxSeams => "BOX + AUTO SEAMS",
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct ImportedPartPreset {
@@ -718,6 +794,13 @@ fn setup_forge(
                         forge_button(row, "SAVE TO LIBRARY", ImportedForgeAction::SavePart);
                         forge_button(row, "ADD LIBRARY PART", ImportedForgeAction::LoadPart);
                     });
+                    forge_row(panel, |row| {
+                        forge_button(
+                            row,
+                            "ASSEMBLE RUNTIME PREVIEW",
+                            ImportedForgeAction::PreviewAssembly,
+                        );
+                    });
                 },
             );
 
@@ -766,6 +849,66 @@ fn setup_forge(
                             ..default()
                         },
                         TextColor(Color::srgb(0.68, 0.78, 0.74)),
+                    ));
+                },
+            );
+
+            spawn_tool_window(
+                root,
+                "UV + FACE PAINT",
+                Vec2::new(1120.0, 86.0),
+                ToolWindowStyle {
+                    accent: Color::srgb(0.72, 0.36, 0.95),
+                    width: 330.0,
+                    content_height: Val::Px(310.0),
+                    ..default()
+                },
+                (MenuScrollPanel, ScrollPosition::default()),
+                |panel| {
+                    panel.spawn((
+                        Text::new(""),
+                        ImportedUvText,
+                        TextFont {
+                            font_size: FontSize::Px(13.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.94, 0.82, 1.0)),
+                    ));
+                    forge_row(panel, |row| {
+                        forge_button(
+                            row,
+                            "PROJECTION",
+                            ImportedForgeAction::UvProjectionNext,
+                        );
+                        forge_button(row, "UV PARAM", ImportedForgeAction::UvParamNext);
+                        forge_button(row, "−", ImportedForgeAction::AdjustUv(-1));
+                        forge_button(row, "+", ImportedForgeAction::AdjustUv(1));
+                    });
+                    forge_row(panel, |row| {
+                        forge_button(
+                            row,
+                            "PAINT COLOR",
+                            ImportedForgeAction::PaintColorNext,
+                        );
+                        forge_button(
+                            row,
+                            "PAINT SELECTION",
+                            ImportedForgeAction::PaintSelection,
+                        );
+                    });
+                    forge_row(panel, |row| {
+                        forge_button(row, "CLEAR PAINT", ImportedForgeAction::ClearPaint);
+                        forge_button(row, "RESTORE UV", ImportedForgeAction::ResetUv);
+                    });
+                    panel.spawn((
+                        Text::new(
+                            "BOX projection creates hard seams. Face paint uses the active mesh selection.",
+                        ),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.75, 0.68, 0.8)),
                     ));
                 },
             );
@@ -905,6 +1048,7 @@ fn begin_import(
         state.spec.selected_mesh = 0;
         state.spec.mesh_edits.clear();
         state.spec.material_edits.clear();
+        state.spec.uv_edits.clear();
         state.spec.part_assignments.clear();
     }
     state.selected_primitive = 0;
@@ -1019,6 +1163,7 @@ fn import_dropped_glb(
 
 #[allow(clippy::too_many_arguments)]
 fn imported_forge_actions(
+    mut commands: Commands,
     buttons: Query<(&Interaction, &ImportedForgeButton), (Changed<Interaction>, With<Button>)>,
     asset_server: Res<AssetServer>,
     registry: Res<ForgeProjectRegistry>,
@@ -1026,6 +1171,7 @@ fn imported_forge_actions(
     gltfs: Res<Assets<Gltf>>,
     gltf_meshes: Res<Assets<GltfMesh>>,
     meshes: Res<Assets<Mesh>>,
+    runtime_previews: Query<Entity, With<ImportedRuntimeTestRoot>>,
     mut state: ResMut<ImportedForgeState>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
@@ -1272,8 +1418,14 @@ fn imported_forge_actions(
                             && material.mesh_index == part.mesh_index
                             && material.primitive_index == part.primitive_index
                     });
-                    match character_records::save_part_to_active_project(&registry, &part, material)
-                    {
+                    let uv_edit = state.spec.uv_edits.iter().find(|edit| {
+                        edit.source_asset == part.source_asset
+                            && edit.mesh_index == part.mesh_index
+                            && edit.primitive_index == part.primitive_index
+                    });
+                    match character_records::save_part_to_active_project(
+                        &registry, &part, material, uv_edit,
+                    ) {
                         Ok(content_id) => {
                             state.status = format!("Saved reusable part {content_id}");
                             state.part_library = character_records::list_part_library(&registry);
@@ -1318,6 +1470,14 @@ fn imported_forge_actions(
                                     });
                                     state.spec.material_edits.push(material);
                                 }
+                                if let Some(uv_edit) = part.uv_edit {
+                                    state.spec.uv_edits.retain(|existing| {
+                                        existing.source_asset != uv_edit.source_asset
+                                            || existing.mesh_index != uv_edit.mesh_index
+                                            || existing.primitive_index != uv_edit.primitive_index
+                                    });
+                                    state.spec.uv_edits.push(uv_edit);
+                                }
                                 state.spec.part_assignments.push(assignment);
                                 state.selected_assignment = state.spec.part_assignments.len() - 1;
                                 state.status = format!("Added reusable part {content_id}");
@@ -1325,6 +1485,29 @@ fn imported_forge_actions(
                         }
                         Err(error) => state.status = error,
                     }
+                }
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::PreviewAssembly => {
+                for entity in &runtime_previews {
+                    commands.entity(entity).try_despawn();
+                }
+                if state.spec.part_assignments.is_empty() {
+                    state.status = "Assign or add modular parts before runtime assembly".into();
+                } else {
+                    let root = commands
+                        .spawn((
+                            ImportedForgeRoot,
+                            ImportedRuntimeTestRoot,
+                            Transform::from_xyz(2.6, 0.0, 0.0),
+                            GlobalTransform::default(),
+                            Visibility::default(),
+                            InheritedVisibility::default(),
+                        ))
+                        .id();
+                    request_imported_character(&mut commands, root, state.spec.clone());
+                    state.status =
+                        "Runtime assembly requested at the right side of the preview".into();
                 }
                 state.labels_dirty = true;
             }
@@ -1405,6 +1588,92 @@ fn imported_forge_actions(
                 state.preview_dirty = true;
                 state.labels_dirty = true;
             }
+            ImportedForgeAction::UvProjectionNext => {
+                let current = state
+                    .selected_uv_edit()
+                    .map(|edit| edit.projection)
+                    .unwrap_or(ImportedUvProjection::Authored);
+                let next = IMPORTED_UV_PROJECTIONS
+                    .iter()
+                    .position(|projection| *projection == current)
+                    .map_or(0, |index| (index + 1) % IMPORTED_UV_PROJECTIONS.len());
+                state.selected_uv_edit_mut().projection = IMPORTED_UV_PROJECTIONS[next];
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::UvParamNext => {
+                state.uv_param = (state.uv_param + 1) % 5;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::AdjustUv(direction) => {
+                let param = state.uv_param;
+                let edit = state.selected_uv_edit_mut();
+                match param {
+                    0 => {
+                        edit.scale[0] = (edit.scale[0] + direction as f32 * 0.05).clamp(0.01, 100.0)
+                    }
+                    1 => {
+                        edit.scale[1] = (edit.scale[1] + direction as f32 * 0.05).clamp(0.01, 100.0)
+                    }
+                    2 => {
+                        edit.offset[0] =
+                            (edit.offset[0] + direction as f32 * 0.05).clamp(-100.0, 100.0)
+                    }
+                    3 => {
+                        edit.offset[1] =
+                            (edit.offset[1] + direction as f32 * 0.05).clamp(-100.0, 100.0)
+                    }
+                    _ => {
+                        edit.rotation_radians = (edit.rotation_radians
+                            + direction as f32 * 5.0_f32.to_radians())
+                        .clamp(-std::f32::consts::TAU, std::f32::consts::TAU)
+                    }
+                }
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::PaintColorNext => {
+                state.paint_color = (state.paint_color + 1) % IMPORTED_COLOR_PALETTE.len();
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::PaintSelection => {
+                if state.selected_faces.is_empty() {
+                    state.status = "Select faces before applying face paint".into();
+                } else {
+                    let color = IMPORTED_COLOR_PALETTE[state.paint_color];
+                    let faces = state.selected_faces.iter().copied().collect();
+                    let edit = state.selected_uv_edit_mut();
+                    if edit.face_paints.len() >= 64 {
+                        edit.face_paints.remove(0);
+                    }
+                    edit.face_paints.push(ImportedFacePaint {
+                        face_indices: faces,
+                        color,
+                    });
+                    state.status = "Painted the selected source faces".into();
+                    state.preview_dirty = true;
+                }
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::ClearPaint => {
+                state.selected_uv_edit_mut().face_paints.clear();
+                state.status = "Cleared face paint on the active primitive".into();
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
+            ImportedForgeAction::ResetUv => {
+                let source_asset = state.spec.source_asset.clone();
+                let mesh_index = state.spec.selected_mesh;
+                let primitive_index = state.selected_primitive;
+                state.spec.uv_edits.retain(|edit| {
+                    edit.source_asset != source_asset
+                        || edit.mesh_index != mesh_index
+                        || edit.primitive_index != primitive_index
+                });
+                state.status = "Restored authored UVs and cleared face paint".into();
+                state.preview_dirty = true;
+                state.labels_dirty = true;
+            }
             ImportedForgeAction::Save => {
                 match character_records::save_to_active_project(&registry, &mut state.spec) {
                     Ok(content_id) => {
@@ -1438,6 +1707,7 @@ fn imported_forge_actions(
                 state.spec.mesh_edits.clear();
                 state.spec.part_assignments.clear();
                 state.spec.material_edits.clear();
+                state.spec.uv_edits.clear();
                 state.selected_faces.clear();
                 state.selected_modifier = 0;
                 state.selected_param = 0;
@@ -1571,20 +1841,7 @@ fn gltf_mesh_instances(gltf: &Gltf, nodes: &Assets<GltfNode>) -> Option<Vec<(usi
 /// only the model transform. Keep the authored asset intact and omit deformation
 /// data from this static bind-pose preview.
 fn static_import_preview_mesh(source: &Mesh) -> Mesh {
-    let mut preview = Mesh::new(source.primitive_topology(), source.asset_usage);
-    preview.enable_raytracing = false;
-    for (attribute, values) in source.attributes() {
-        if attribute.id == Mesh::ATTRIBUTE_JOINT_INDEX.id
-            || attribute.id == Mesh::ATTRIBUTE_JOINT_WEIGHT.id
-        {
-            continue;
-        }
-        preview.insert_attribute(*attribute, values.clone());
-    }
-    if let Some(indices) = source.indices() {
-        preview.insert_indices(indices.clone());
-    }
-    preview
+    static_mesh_copy(source)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1772,7 +2029,7 @@ fn rebuild_imported_preview(
             return;
         };
         for (primitive_index, primitive) in gltf_mesh.primitives.iter().enumerate() {
-            let Some(source) = meshes.get(&primitive.mesh) else {
+            let Some(authored_source) = meshes.get(&primitive.mesh) else {
                 return;
             };
             let selected = mesh_index == state.spec.selected_mesh;
@@ -1790,8 +2047,21 @@ fn rebuild_imported_preview(
             }) {
                 apply_material_edit(&mut preview_material, edit, &asset_server);
             }
-            let skinned = source.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some();
-            let deformable = skinned || source.has_morph_targets();
+            let uv_mesh = state
+                .spec
+                .uv_edits
+                .iter()
+                .find(|edit| {
+                    edit.source_asset == state.spec.source_asset
+                        && edit.mesh_index == mesh_index
+                        && edit.primitive_index == primitive_index
+                })
+                .and_then(|edit| apply_uv_edit(authored_source, edit));
+            let source = uv_mesh.as_ref().unwrap_or(authored_source);
+            let skinned = authored_source
+                .attribute(Mesh::ATTRIBUTE_JOINT_INDEX)
+                .is_some();
+            let deformable = skinned || authored_source.has_morph_targets();
             if active_primitive && !state.selected_faces.is_empty() {
                 let Some(topology) = MeshTopology::from_mesh(source) else {
                     state.status = format!("{} is not an editable triangle mesh", gltf_mesh.name);
@@ -1826,7 +2096,8 @@ fn rebuild_imported_preview(
                 if selected && !state.selected_stack().is_empty() {
                     selected_is_deformable = true;
                 }
-                let preview = static_import_preview_mesh(source);
+                let preview =
+                    uv_mesh.unwrap_or_else(|| static_import_preview_mesh(authored_source));
                 meshes.add(preview)
             } else if selected && !state.selected_stack().is_empty() {
                 let Some(derived) = apply_stack_to_mesh(source, state.selected_stack()) else {
@@ -1834,6 +2105,8 @@ fn rebuild_imported_preview(
                     return;
                 };
                 meshes.add(derived)
+            } else if let Some(uv_mesh) = uv_mesh {
+                meshes.add(uv_mesh)
             } else {
                 primitive.mesh.clone()
             };
@@ -1917,6 +2190,7 @@ fn refresh_imported_labels(
         Option<&ImportedSelectionText>,
         Option<&ImportedAssignmentText>,
         Option<&ImportedMaterialText>,
+        Option<&ImportedUvText>,
     )>,
 ) {
     if !state.labels_dirty {
@@ -2022,7 +2296,35 @@ fn refresh_imported_labels(
                 texture_channel.label()
             )
         });
-    for (mut text, status, asset, mesh, modifier, scale, selection, assignment, material) in
+    let uv_label = state
+        .selected_uv_edit()
+        .map(|edit| {
+            let param = match state.uv_param {
+                0 => format!("Scale U {:.2}", edit.scale[0]),
+                1 => format!("Scale V {:.2}", edit.scale[1]),
+                2 => format!("Offset U {:.2}", edit.offset[0]),
+                3 => format!("Offset V {:.2}", edit.offset[1]),
+                _ => format!("Rotation {:.0}°", edit.rotation_radians.to_degrees()),
+            };
+            format!(
+                "{} • {param}\nPaint strokes: {} • Selected faces: {}\nPaint RGB {:.2} {:.2} {:.2}",
+                uv_projection_label(edit.projection),
+                edit.face_paints.len(),
+                state.selected_faces.len(),
+                IMPORTED_COLOR_PALETTE[state.paint_color][0],
+                IMPORTED_COLOR_PALETTE[state.paint_color][1],
+                IMPORTED_COLOR_PALETTE[state.paint_color][2],
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "Authored UVs • no paint\nPaint color RGB {:.2} {:.2} {:.2}",
+                IMPORTED_COLOR_PALETTE[state.paint_color][0],
+                IMPORTED_COLOR_PALETTE[state.paint_color][1],
+                IMPORTED_COLOR_PALETTE[state.paint_color][2],
+            )
+        });
+    for (mut text, status, asset, mesh, modifier, scale, selection, assignment, material, uv) in
         &mut labels
     {
         let value = if status.is_some() {
@@ -2041,6 +2343,8 @@ fn refresh_imported_labels(
             &assignment_label
         } else if material.is_some() {
             &material_label
+        } else if uv.is_some() {
+            &uv_label
         } else {
             continue;
         };
