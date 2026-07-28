@@ -60,6 +60,36 @@ pub struct UiGameplayCapture {
 }
 
 // ── Game Settings ─────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ControllerGlyphStyle {
+    #[default]
+    Auto,
+    Xbox,
+    PlayStation,
+    Nintendo,
+}
+
+impl ControllerGlyphStyle {
+    pub const ALL: [Self; 4] = [Self::Auto, Self::Xbox, Self::PlayStation, Self::Nintendo];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "AUTO",
+            Self::Xbox => "XBOX",
+            Self::PlayStation => "PLAYSTATION",
+            Self::Nintendo => "NINTENDO",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|style| *style == self)
+            .unwrap_or(0);
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+}
+
 #[derive(Resource, Debug, Serialize, Deserialize)]
 pub struct GameSettings {
     pub mouse_sensitivity: f32,
@@ -93,6 +123,9 @@ pub struct GameSettings {
     /// Show written dialogue while voiced conversations play.
     #[serde(default = "default_true")]
     pub subtitles_enabled: bool,
+    /// Controller button-label family. Auto follows the active USB vendor.
+    #[serde(default)]
+    pub controller_glyph_style: ControllerGlyphStyle,
 }
 
 fn default_one_f32() -> f32 {
@@ -123,6 +156,7 @@ impl Default for GameSettings {
             high_contrast_ui: false,
             reduced_ui_motion: false,
             subtitles_enabled: true,
+            controller_glyph_style: ControllerGlyphStyle::Auto,
         }
     }
 }
@@ -1778,6 +1812,21 @@ mod tests {
         assert!(!settings.high_contrast_ui);
         assert!(!settings.reduced_ui_motion);
         assert!(settings.subtitles_enabled);
+        assert_eq!(settings.controller_glyph_style, ControllerGlyphStyle::Auto);
+    }
+
+    #[test]
+    fn controller_glyph_styles_cycle_through_every_supported_family() {
+        let mut style = ControllerGlyphStyle::Auto;
+        for expected in [
+            ControllerGlyphStyle::Xbox,
+            ControllerGlyphStyle::PlayStation,
+            ControllerGlyphStyle::Nintendo,
+            ControllerGlyphStyle::Auto,
+        ] {
+            style = style.next();
+            assert_eq!(style, expected);
+        }
     }
 
     #[test]

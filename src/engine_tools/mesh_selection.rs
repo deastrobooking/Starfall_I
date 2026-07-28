@@ -3,12 +3,16 @@
 use std::collections::{BTreeSet, HashMap};
 
 use bevy::math::Affine3A;
-use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
+
+use super::editable_mesh::{EditableMeshDocument, FaceId, VertexId};
 
 #[derive(Debug, Clone)]
 pub struct MeshTopology {
     pub faces: Vec<[u32; 3]>,
+    /// Dense render-triangle index to stable canonical face identity.
+    pub face_ids: Vec<FaceId>,
     pub centers: Vec<Vec3>,
     pub normals: Vec<Vec3>,
     neighbors: Vec<BTreeSet<u32>>,
@@ -16,41 +20,27 @@ pub struct MeshTopology {
 
 impl MeshTopology {
     pub fn from_mesh(mesh: &Mesh) -> Option<Self> {
-        if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
-            return None;
-        }
-        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION)? {
-            VertexAttributeValues::Float32x3(values) => values,
-            _ => return None,
-        };
-        let indices: Vec<u32> = match mesh.indices() {
-            Some(Indices::U16(values)) => values.iter().map(|value| u32::from(*value)).collect(),
-            Some(Indices::U32(values)) => values.clone(),
-            None => (0..positions.len() as u32).collect(),
-        };
-        let faces = indices
+        let document = EditableMeshDocument::from_bevy_mesh(mesh).ok()?;
+        let baked = document.bake_geometry().ok()?;
+        let faces = baked
+            .indices
             .chunks_exact(3)
             .map(|face| [face[0], face[1], face[2]])
             .collect::<Vec<_>>();
-        if faces.is_empty()
-            || faces
-                .iter()
-                .flatten()
-                .any(|index| *index as usize >= positions.len())
-        {
-            return None;
-        }
 
         let mut centers = Vec::with_capacity(faces.len());
         let mut normals = Vec::with_capacity(faces.len());
-        let mut vertex_faces: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut vertex_faces: HashMap<VertexId, Vec<u32>> = HashMap::new();
         for (face_index, face) in faces.iter().enumerate() {
-            let [a, b, c] = face.map(|index| Vec3::from_array(positions[index as usize]));
+            let [a, b, c] = face.map(|index| Vec3::from_array(baked.positions[index as usize]));
             centers.push((a + b + c) / 3.0);
             normals.push((b - a).cross(c - a).normalize_or_zero());
-            for vertex in face {
+            for vertex in document
+                .face_vertices(baked.triangle_faces[face_index])
+                .ok()?
+            {
                 vertex_faces
-                    .entry(*vertex)
+                    .entry(vertex)
                     .or_default()
                     .push(face_index as u32);
             }
@@ -68,6 +58,7 @@ impl MeshTopology {
         }
         Some(Self {
             faces,
+            face_ids: baked.triangle_faces,
             centers,
             normals,
             neighbors,
@@ -259,6 +250,15 @@ mod tests {
         let mesh = Mesh::from(Cuboid::new(1.0, 1.0, 1.0));
         let topology = MeshTopology::from_mesh(&mesh).unwrap();
         assert_eq!(topology.face_count(), 12);
+        assert_eq!(
+            topology
+                .face_ids
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>()
+                .len(),
+            topology.face_count()
+        );
         let one = BTreeSet::from([0]);
         assert!(topology.grow(&one).len() > 1);
         assert_eq!(topology.invert(&one).len(), 11);

@@ -121,6 +121,16 @@
   preview, applies the shared Mirror/Array/Twist/Subdivide/Smooth/Noise stack
   per rigid mesh, and adds source-topology triangle selection by primitive:
   all/none/invert, linked island, grow/shrink, similar normal, and X mirror.
+  Selection topology is now compiled through an engine-owned
+  `EditableMeshDocument`: generational element IDs, triangle half-edges,
+  `f64` modeling positions, validation, independent revisions, transactional
+  position edits, and render-triangle-to-`FaceId` bake mappings keep Bevy
+  vertex-buffer offsets from becoming the long-term editing identity. Its
+  command layer now supports validated edge split, flip, and link-condition
+  collapse with face-inversion checks, explicit semantic/crease transfer,
+  unaffected-ID preservation, generational invalidation, and fingerprinted
+  bounded undo/redo snapshots. UV, paint, and skin attributes remain on the
+  render/import side until their corner/vertex-domain stores are implemented.
   Selected regions can be assigned stable modular part IDs, character slots,
   canonical animation joints, pivots, and gameplay roles. Character payload
   schema v2 persists those assignments, while separately tagged modular-part
@@ -162,10 +172,14 @@
   or scale changes. Core Studio/Forge controls now use larger interaction
   targets. Title and Pause expose the same persisted accessibility controls for
   damage numbers, high-contrast focus/HUD presentation, reduced floating-text
-  motion, and voiced-dialogue subtitles. Shared help copy follows the last-used
-  keyboard or gamepad across menus and common in-game panels. Remaining screens
-  still migrate incrementally to the semantic theme; full remapping glyphs and
-  localization remain.
+  motion, and voiced-dialogue subtitles. The extracted `ui_foundation` module
+  owns the semantic theme, global UI scale, stable text-catalog keys, and
+  device-aware prompt rendering. Shared help copy follows the last-used
+  keyboard or gamepad across menus and common in-game panels, with persisted
+  Auto/Xbox/PlayStation/Nintendo controller glyph selection and vendor-aware
+  Auto detection. Remaining screens still migrate incrementally to the
+  semantic theme and text catalog; complete input remapping and translated
+  locale assets remain.
 
 ## Current production order
 

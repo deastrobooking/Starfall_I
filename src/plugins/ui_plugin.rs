@@ -63,61 +63,15 @@ use crate::world::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::world::settlement_economy::SettlementEconomy;
 use crate::world::shop_transactions;
 
+use super::ui_foundation::UiFoundationPlugin;
+pub(crate) use super::ui_foundation::{UiPromptKind, UiPromptText};
+pub use super::ui_foundation::{UiTextCatalog, UiTextKey, UiTheme};
+
 pub struct UiPlugin;
-
-/// Semantic star-tech UI palette. Screens consume roles from this resource so
-/// art-direction changes do not require hunting through hundreds of widgets.
-#[derive(Resource, Debug, Clone)]
-pub struct UiTheme {
-    pub canvas: Color,
-    pub panel: Color,
-    pub text_primary: Color,
-    pub text_muted: Color,
-    pub play: Color,
-    pub create: Color,
-    pub objective: Color,
-    pub health: Color,
-    pub armor: Color,
-    pub stamina: Color,
-    pub energy: Color,
-    pub climb: Color,
-    pub players: [Color; 4],
-}
-
-impl UiTheme {
-    pub fn player_accent(&self, player_index: u8) -> Color {
-        self.players[player_index.min(3) as usize]
-    }
-}
-
-impl Default for UiTheme {
-    fn default() -> Self {
-        Self {
-            canvas: Color::srgba(0.008, 0.012, 0.030, 1.0),
-            panel: Color::srgba(0.035, 0.050, 0.105, 0.82),
-            text_primary: Color::srgb(0.90, 0.95, 1.0),
-            text_muted: Color::srgb(0.58, 0.70, 0.84),
-            play: Color::srgb(0.00, 0.42, 0.78),
-            create: Color::srgb(0.46, 0.20, 0.68),
-            objective: Color::srgb(1.00, 0.82, 0.22),
-            health: Color::srgb(0.22, 0.86, 0.42),
-            armor: Color::srgb(0.20, 0.55, 1.00),
-            stamina: Color::srgb(0.98, 0.72, 0.10),
-            energy: Color::srgb(0.05, 0.90, 0.95),
-            climb: Color::srgb(0.98, 0.50, 0.16),
-            players: [
-                Color::srgb(0.25, 0.82, 1.00),
-                Color::srgb(0.88, 0.34, 1.00),
-                Color::srgb(0.30, 1.00, 0.55),
-                Color::srgb(1.00, 0.66, 0.18),
-            ],
-        }
-    }
-}
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<UiTheme>()
+        app.add_plugins(UiFoundationPlugin)
             .init_resource::<UiMessage>()
             .init_resource::<ShopUiState>()
             .init_resource::<PlayerGuidance>()
@@ -126,19 +80,10 @@ impl Plugin for UiPlugin {
             .init_resource::<DiscussionState>()
             .init_resource::<PauseMenuState>()
             .init_resource::<MainMenuUiState>()
-            .init_resource::<UiPromptDevice>()
             .init_resource::<MenuFocus>()
             .init_resource::<ChapterProgressionOwner>()
             .init_resource::<CustomMissionState>()
             .add_systems(Startup, spawn_menu_camera)
-            .add_systems(
-                Update,
-                (
-                    sync_ui_scale_from_settings,
-                    track_ui_prompt_device,
-                    refresh_ui_prompt_text,
-                ),
-            )
             .add_systems(
                 Update,
                 (
@@ -527,21 +472,6 @@ struct MenuFocus {
     repeat_direction: Option<MenuDirection>,
     repeat_timer: f32,
 }
-#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum UiPromptDevice {
-    KeyboardMouse,
-    #[default]
-    Gamepad,
-}
-#[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct UiPromptText(pub(crate) UiPromptKind);
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum UiPromptKind {
-    MenuNavigation,
-    PauseNavigation,
-    Loadout,
-    Crafting,
-}
 #[derive(Component, Clone, Copy)]
 struct SettingsButton(SettingsAction);
 #[derive(Clone, Copy)]
@@ -556,6 +486,7 @@ enum SettingsAction {
     UiScaleUp,
     SafeAreaDown,
     SafeAreaUp,
+    ControllerGlyphStyleNext,
     ToggleDamageNumbers,
     ToggleHighContrast,
     ToggleReducedMotion,
@@ -1011,62 +942,6 @@ fn repeated_menu_direction(
     }
 }
 
-fn track_ui_prompt_device(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    mut device: ResMut<UiPromptDevice>,
-) {
-    let keyboard_used = keyboard.get_just_pressed().next().is_some();
-    let gamepad_used = gamepads
-        .iter()
-        .any(|gamepad| gamepad.get_just_pressed().next().is_some());
-    if gamepad_used {
-        *device = UiPromptDevice::Gamepad;
-    } else if keyboard_used {
-        *device = UiPromptDevice::KeyboardMouse;
-    }
-}
-
-fn refresh_ui_prompt_text(
-    device: Res<UiPromptDevice>,
-    mut prompts: Query<(Ref<UiPromptText>, &mut Text)>,
-) {
-    for (prompt, mut text) in prompts.iter_mut() {
-        if device.is_changed() || prompt.is_added() {
-            *text = Text::new(ui_prompt_text(prompt.0, *device));
-        }
-    }
-}
-
-fn ui_prompt_text(kind: UiPromptKind, device: UiPromptDevice) -> &'static str {
-    match (kind, device) {
-        (UiPromptKind::MenuNavigation, UiPromptDevice::Gamepad) => {
-            "D-PAD / LEFT STICK: navigate and scroll   A: select   B: back"
-        }
-        (UiPromptKind::MenuNavigation, UiPromptDevice::KeyboardMouse) => {
-            "ARROWS / WASD: navigate and scroll   ENTER: select   ESC: back"
-        }
-        (UiPromptKind::PauseNavigation, UiPromptDevice::Gamepad) => {
-            "D-PAD / LEFT STICK: navigate   A: select   B: back / resume"
-        }
-        (UiPromptKind::PauseNavigation, UiPromptDevice::KeyboardMouse) => {
-            "ARROWS / WASD: navigate   ENTER: select   ESC: back / resume"
-        }
-        (UiPromptKind::Loadout, UiPromptDevice::Gamepad) => {
-            "D-PAD/STICK: navigate   A: equip   B or LB+SELECT: close"
-        }
-        (UiPromptKind::Loadout, UiPromptDevice::KeyboardMouse) => {
-            "ARROWS/WASD: navigate   ENTER: equip   ESC or I: close"
-        }
-        (UiPromptKind::Crafting, UiPromptDevice::Gamepad) => {
-            "CRAFTING — D-PAD / STICK: choose   A: craft   B or SELECT: close"
-        }
-        (UiPromptKind::Crafting, UiPromptDevice::KeyboardMouse) => {
-            "CRAFTING — ARROWS / WASD: choose   ENTER: craft   ESC or C: close"
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn menu_back_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -1312,6 +1187,7 @@ fn cleanup_play_ui_for_menu(
 fn setup_main_menu(
     mut commands: Commands,
     theme: Res<UiTheme>,
+    catalog: Res<UiTextCatalog>,
     settings: Res<GameSettings>,
     mut menu: ResMut<MainMenuUiState>,
 ) {
@@ -1344,7 +1220,7 @@ fn setup_main_menu(
             ))
             .with_children(|page| {
                 page.spawn((
-                    Text::new("STARFALL I"),
+                    Text::new(catalog.text(UiTextKey::GameTitle)),
                     TextFont {
                         font_size: FontSize::Px(72.0),
                         ..default()
@@ -1352,7 +1228,7 @@ fn setup_main_menu(
                     TextColor(theme.objective),
                 ));
                 page.spawn((
-                    Text::new("Everest Range"),
+                    Text::new(catalog.text(UiTextKey::GameSubtitle)),
                     TextFont {
                         font_size: FontSize::Px(24.0),
                         ..default()
@@ -1365,21 +1241,21 @@ fn setup_main_menu(
                 });
                 spawn_main_menu_button(
                     page,
-                    "START GAME",
+                    catalog.text(UiTextKey::StartGame),
                     theme.play,
                     theme.player_accent(0),
                     StartButton,
                 );
                 spawn_main_menu_button(
                     page,
-                    "START EDITOR",
+                    catalog.text(UiTextKey::StartEditor),
                     theme.create,
                     theme.player_accent(1),
                     EditorStartButton,
                 );
                 spawn_main_menu_button(
                     page,
-                    "SETTINGS",
+                    catalog.text(UiTextKey::Settings),
                     Color::srgb(0.18, 0.28, 0.48),
                     theme.energy,
                     MainMenuSettingsButton,
@@ -1405,7 +1281,7 @@ fn setup_main_menu(
             ))
             .with_children(|page| {
                 page.spawn((
-                    Text::new("SETTINGS & ACCESSIBILITY"),
+                    Text::new(catalog.text(UiTextKey::SettingsAccessibility)),
                     TextFont {
                         font_size: FontSize::Px(32.0),
                         ..default()
@@ -1415,7 +1291,7 @@ fn setup_main_menu(
                 spawn_settings_controls(page, &settings, &theme);
                 spawn_main_menu_button(
                     page,
-                    "BACK",
+                    catalog.text(UiTextKey::Back),
                     Color::srgb(0.20, 0.24, 0.36),
                     theme.energy,
                     MainMenuSettingsBackButton,
@@ -1426,7 +1302,7 @@ fn setup_main_menu(
 
 fn spawn_main_menu_button(
     parent: &mut ChildSpawnerCommands,
-    label: &'static str,
+    label: &str,
     background: Color,
     border: Color,
     marker: impl Component,
@@ -1447,7 +1323,7 @@ fn spawn_main_menu_button(
             marker,
         ))
         .with_child((
-            Text::new(label),
+            Text::new(label.to_string()),
             TextFont {
                 font_size: FontSize::Px(22.0),
                 ..default()
@@ -2089,6 +1965,11 @@ fn setup_pause_menu(
                     spawn_settings_button(row, "UI SCALE +", SettingsAction::UiScaleUp);
                     spawn_settings_button(row, "SAFE AREA -", SettingsAction::SafeAreaDown);
                     spawn_settings_button(row, "SAFE AREA +", SettingsAction::SafeAreaUp);
+                    spawn_settings_button(
+                        row,
+                        "CONTROLLER GLYPHS",
+                        SettingsAction::ControllerGlyphStyleNext,
+                    );
                 });
                 page.spawn((
                     Text::new(accessibility_settings_text(&settings)),
@@ -2253,6 +2134,11 @@ fn spawn_settings_controls(
         spawn_settings_button(row, "UI SCALE +", SettingsAction::UiScaleUp);
         spawn_settings_button(row, "SAFE AREA -", SettingsAction::SafeAreaDown);
         spawn_settings_button(row, "SAFE AREA +", SettingsAction::SafeAreaUp);
+        spawn_settings_button(
+            row,
+            "CONTROLLER GLYPHS",
+            SettingsAction::ControllerGlyphStyleNext,
+        );
     });
     parent.spawn((
         Text::new(accessibility_settings_text(settings)),
@@ -7972,6 +7858,9 @@ fn settings_panel_input_system(
                 settings.safe_area_fraction =
                     (settings.safe_area_fraction + 0.005).clamp(0.0, 0.08);
             }
+            SettingsAction::ControllerGlyphStyleNext => {
+                settings.controller_glyph_style = settings.controller_glyph_style.next();
+            }
             SettingsAction::ToggleDamageNumbers => {
                 settings.show_damage_numbers = !settings.show_damage_numbers;
             }
@@ -8033,9 +7922,10 @@ fn volume_text(settings: &GameSettings) -> String {
 
 fn interface_layout_text(settings: &GameSettings) -> String {
     format!(
-        "UI scale: {:.0}%  Safe area: {:.1}%",
+        "UI scale: {:.0}%  Safe area: {:.1}%  Controller glyphs: {}",
         settings.ui_scale * 100.0,
         settings.safe_area_fraction * 100.0,
+        settings.controller_glyph_style.label(),
     )
 }
 
@@ -8054,16 +7944,6 @@ fn on_off(value: bool) -> &'static str {
         "ON"
     } else {
         "OFF"
-    }
-}
-
-fn sync_ui_scale_from_settings(settings: Res<GameSettings>, ui_scale: Option<ResMut<UiScale>>) {
-    let Some(mut ui_scale) = ui_scale else {
-        return;
-    };
-    let requested = settings.ui_scale.clamp(0.8, 1.4);
-    if (ui_scale.0 - requested).abs() > f32::EPSILON {
-        ui_scale.0 = requested;
     }
 }
 
@@ -8418,19 +8298,6 @@ mod menu_navigation_tests {
     fn default_focus_starts_at_top_left() {
         let (_world, buttons) = four_button_grid();
         assert_eq!(default_menu_focus(&buttons), Some(buttons[0].0));
-    }
-
-    #[test]
-    fn prompt_copy_tracks_the_active_input_family() {
-        assert!(
-            ui_prompt_text(UiPromptKind::MenuNavigation, UiPromptDevice::Gamepad).contains("D-PAD")
-        );
-        assert!(
-            ui_prompt_text(UiPromptKind::MenuNavigation, UiPromptDevice::KeyboardMouse)
-                .contains("WASD")
-        );
-        assert!(ui_prompt_text(UiPromptKind::Loadout, UiPromptDevice::Gamepad).contains("LB"));
-        assert!(ui_prompt_text(UiPromptKind::Loadout, UiPromptDevice::KeyboardMouse).contains("I"));
     }
 
     #[test]

@@ -68,6 +68,8 @@ src/
     imported_character_forge_plugin.rs GLB ingestion, per-mesh non-destructive sculpt stacks, and project records
   lsystem/                  L-system string rewriting + 3-D turtle for procedural trees
   engine_tools/             Forge project/level persistence, validation, editor runtime and panels
+    editable_mesh.rs        Renderer-independent generational half-edge topology, validation, revisions, and deterministic geometry bake mapping
+    mesh_selection.rs       Dense compatibility selection view compiled from EditableMeshDocument
   mesh_modifiers/           Reusable procedural mesh modifier pipeline
   robots/                   Creature recipes, procedural robot factory, designer, and presets
 ```
@@ -112,6 +114,23 @@ attaches regions to `SkeletonRig` joints when present. Gameplay systems query
 Morph-only regions retain source morph deltas when projection has not split the
 vertex stream. `ImportedDeformationStatus` reports preserved target count and
 whether a skinned source is using the rigid-joint fallback.
+
+`EditableMeshDocument` is the authoritative local-topology boundary for mesh
+editing. It imports triangle-list `Mesh` data, rejects malformed, degenerate,
+duplicate-directed-edge, and non-manifold surfaces, then exposes stable
+generational IDs and explicit half-edge adjacency. Its deterministic bake view
+retains a triangle-to-canonical-face map for picking and selection. Bevy
+`Mesh` remains derived render/import data; persisted procedural recipes and
+source-face assignments remain the authored content contract while topology
+commands migrate incrementally onto the document. `MeshCommand::{Split, Flip,
+Collapse}` evaluates on a cloned candidate, preserves unaffected vertex/face/
+edge IDs during connectivity rebuilds, applies `AttributeTransferPolicy`,
+checks collapse links and surviving-face orientation, validates, then commits a
+`MeshDelta`. `MeshCommandHistory` bounds exact snapshot undo/redo to 128 entries
+and fingerprints canonical state so a delta cannot be replayed into a different
+same-revision document. Full corner-domain UV/color and vertex-domain skin
+attribute transfer is the next prerequisite before runtime UI exposes these
+topology mutations on imported production meshes.
 
 ## Core Data Flow
 
@@ -182,6 +201,11 @@ Party-shared exceptions:
   coverage executes Startup and a steady frame without a window or renderer.
   Terrain, settlements, dungeons, UI screens/HUD, and player subsystems can now
   move behind that guardrail in small behavior-preserving slices.
+- **Shared UI foundation, screen-owned behavior**: `ui_foundation` owns the
+  semantic palette, fixed-unit UI scaling, stable display-text keys, and
+  last-used-device/controller-family prompt rendering. Individual menus and
+  gameplay panels retain their actions and layout, so further extraction does
+  not centralize unrelated screen state.
 
 - **Editable character recipes, not baked meshes**: `CharacterBlueprint` stores body sliders, procedural part recipes, materials, sockets, rig metadata, animation profiles, movement profiles, and gameplay stats. The current cartoon renderer consumes the body/material portions, while the data model leaves room for fuller mesh, rig, and editor tooling.
 - **Forge content is payload-driven, not ECS-serialized**: stable `ContentRecord`

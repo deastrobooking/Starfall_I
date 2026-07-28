@@ -84,12 +84,14 @@ eight siblings.
 
 **Game over:** triggers only when ALL players are dead simultaneously.
 
-**Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause menu keeps the current HUD/world entities alive, pauses the Avian `Time<Physics>` clock, offers party-wide save and save-and-title actions, and includes controls/tips and settings pages. The same Settings & Accessibility page is available before play from the title screen. Settings persist UI scale from 80–140%, a 0–8% safe-area inset, difficulty, music, SFX, rumble, damage-number visibility, stronger UI contrast, reduced UI motion, and subtitles. Reduced UI motion stops floating damage-text travel, subtitles remain visible automatically when a dialogue line has no voice asset, and high contrast strengthens menu focus and HUD panels. Returning to title from pause cleans up preserved play-session entities.
+**Pause:** `Esc` / controller Start toggles between `Playing` and `Paused`. The pause menu keeps the current HUD/world entities alive, pauses the Avian `Time<Physics>` clock, offers party-wide save and save-and-title actions, and includes controls/tips and settings pages. The same Settings & Accessibility page is available before play from the title screen. Settings persist UI scale from 80–140%, a 0–8% safe-area inset, controller glyph style, difficulty, music, SFX, rumble, damage-number visibility, stronger UI contrast, reduced UI motion, and subtitles. Reduced UI motion stops floating damage-text travel, subtitles remain visible automatically when a dialogue line has no voice asset, and high contrast strengthens menu focus and HUD panels. Returning to title from pause cleans up preserved play-session entities.
 
 **Input prompts:** shared navigation, pause, loadout, crafting, and Robot Garage
 help text tracks the most recently used keyboard or gamepad. Keyboard prompts
 show Arrow/WASD, Enter, and Escape bindings; controller prompts show D-pad/stick
-and face-button bindings.
+and face-button bindings. Controller glyphs can be pinned to Xbox, PlayStation,
+or Nintendo conventions, or left on Auto to use the active controller's USB
+vendor family.
 
 **Shared boss camera:** when 2-4 players are active, `PlayerPlugin` switches from split-screen to one full-screen party camera during boss-tier enemies or nearby flying-drone wings. P1's camera becomes the shared view, the other cameras are temporarily disabled, and viewports are restored when the threat clears. Distant players are softly pulled toward the encounter anchor, with a hard catch-up if they are far outside the battle space.
 
@@ -415,6 +417,24 @@ Modifiers, View Angle, Framing, Expression Preview, Preview Backend, and
 Project headings. Soft/Heroic/Chibi/Rival seeds modify only facial parameters;
 Neutral/Joy/Determined/Surprised preview semantic facial parts without changing
 the serialized neutral recipe.
+
+**Editable mesh kernel (2026-07):** imported render meshes now cross an
+explicit compiler boundary into `EditableMeshDocument` before topology-aware
+selection. The document owns `f64` positions, generational vertex/edge/
+half-edge/face IDs, triangle half-edge adjacency, independent topology and
+position revisions, validation, transactional vertex moves, and a deterministic
+bake map from each render triangle back to its canonical `FaceId`. Bevy `Mesh`
+remains the import/render representation rather than the authoritative editing
+model. Canonical edge split, flip, and link-condition-checked collapse commands
+now run as validated candidate transactions. They preserve unaffected element
+IDs, invalidate removed IDs generationally, reject face inversion, apply
+explicit semantic-region and crease transfer policies, advance granular dirty
+revisions, and produce exact bounded undo/redo deltas guarded by document
+fingerprints. Existing selection indices remain as a compatibility-facing
+dense view; editor controls can adopt these commands incrementally without
+changing saved GLB face assignments in one disruptive migration. Corner UV,
+paint, and skin-weight stores still need to migrate into the document before
+topology buttons are exposed for production assets.
 
 **Wardrobe (2026-07):** independent slots, mix-and-match — Top (None/T-Shirt/
 Long Shirt/Tunic/Jacket/Robe/Tank Top/Bomber/Moto/Blazer/Arcane Coat/Star

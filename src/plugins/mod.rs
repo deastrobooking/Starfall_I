@@ -15,6 +15,7 @@ pub mod player_plugin;
 pub mod radio_plugin;
 pub mod robot_garage_plugin;
 pub mod save_plugin;
+pub mod ui_foundation;
 pub mod ui_plugin;
 pub mod vehicle_plugin;
 pub mod weapon_forge_plugin;
