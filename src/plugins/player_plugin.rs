@@ -726,21 +726,35 @@ fn spawn_players(
     let board_thruster_mesh = meshes.add(Cuboid::new(0.34, 0.22, 0.28));
     let board_flame_mesh = meshes.add(Cuboid::new(0.18, 0.14, 0.48));
     let board_shell = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.055, 0.075, 0.13),
-        metallic: 0.88,
-        perceptual_roughness: 0.24,
+        base_color: Color::srgb(0.012, 0.009, 0.014),
+        metallic: 0.94,
+        perceptual_roughness: 0.18,
         ..default()
     });
-    let board_trim = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.12, 0.72, 1.0),
-        emissive: LinearRgba::new(0.08, 1.4, 3.4, 1.0),
+    let board_red = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.72, 0.012, 0.018),
+        emissive: LinearRgba::new(1.8, 0.015, 0.01, 1.0),
+        metallic: 0.74,
+        perceptual_roughness: 0.16,
+        ..default()
+    });
+    let board_orange = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.16, 0.008),
+        emissive: LinearRgba::new(3.8, 0.34, 0.008, 1.0),
         metallic: 0.62,
-        perceptual_roughness: 0.20,
+        perceptual_roughness: 0.18,
+        ..default()
+    });
+    let board_yellow = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.78, 0.025),
+        emissive: LinearRgba::new(3.6, 1.65, 0.025, 1.0),
+        metallic: 0.52,
+        perceptual_roughness: 0.16,
         ..default()
     });
     let board_flame = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.36, 0.05),
-        emissive: LinearRgba::new(4.8, 0.72, 0.04, 1.0),
+        base_color: Color::srgb(1.0, 0.025, 0.46),
+        emissive: LinearRgba::new(6.8, 0.04, 2.8, 1.0),
         unlit: true,
         ..default()
     });
@@ -894,7 +908,9 @@ fn spawn_players(
             &board_thruster_mesh,
             &board_flame_mesh,
             &board_shell,
-            &board_trim,
+            &board_red,
+            &board_orange,
+            &board_yellow,
             &board_flame,
         );
 
@@ -1036,7 +1052,9 @@ fn attach_rocket_hoverboard(
     thruster_mesh: &Handle<Mesh>,
     flame_mesh: &Handle<Mesh>,
     shell: &Handle<StandardMaterial>,
-    trim: &Handle<StandardMaterial>,
+    red: &Handle<StandardMaterial>,
+    orange: &Handle<StandardMaterial>,
+    yellow: &Handle<StandardMaterial>,
     flame: &Handle<StandardMaterial>,
 ) {
     commands.entity(player).with_children(|player_root| {
@@ -1063,13 +1081,13 @@ fn attach_rocket_hoverboard(
                 for side in [-1.0_f32, 1.0] {
                     board.spawn(PbrBundle {
                         mesh: Mesh3d(rail_mesh.clone()),
-                        material: MeshMaterial3d(trim.clone()),
+                        material: MeshMaterial3d(red.clone()),
                         transform: Transform::from_xyz(side * 0.40, 0.09, 0.0),
                         ..default()
                     });
                     board.spawn(PbrBundle {
                         mesh: Mesh3d(thruster_mesh.clone()),
-                        material: MeshMaterial3d(shell.clone()),
+                        material: MeshMaterial3d(orange.clone()),
                         transform: Transform::from_xyz(side * 0.31, -0.08, 0.84),
                         ..default()
                     });
@@ -1080,6 +1098,15 @@ fn attach_rocket_hoverboard(
                         ..default()
                     });
                 }
+                // Bright centerline completes the black/red/orange/yellow
+                // super-robot palette without obscuring the dark deck.
+                board.spawn(PbrBundle {
+                    mesh: Mesh3d(rail_mesh.clone()),
+                    material: MeshMaterial3d(yellow.clone()),
+                    transform: Transform::from_xyz(0.0, 0.078, -0.08)
+                        .with_scale(Vec3::new(0.62, 0.42, 0.84)),
+                    ..default()
+                });
             });
     });
 }
@@ -2056,11 +2083,63 @@ fn flush_motor_translation(
 }
 
 fn hoverboard_landing_approach(ground_distance: f32) -> f32 {
-    (1.0 - ground_distance.max(0.0) / 4.8).clamp(0.0, 1.0)
+    (1.0 - ground_distance.max(0.0) / 6.4).clamp(0.0, 1.0)
 }
 
 fn hoverboard_landing_descent_cap(approach: f32) -> f32 {
-    -(0.58 - approach.clamp(0.0, 1.0) * 0.46)
+    -(0.52 - approach.clamp(0.0, 1.0) * 0.43)
+}
+
+/// The requested 15% reduction applies to the board's excess-speed and
+/// heading retention, not to its top speed. That keeps the board fast while
+/// making release/turn inputs shed the old trajectory instead of carrying it
+/// indefinitely.
+const HOVERBOARD_INERTIA_RETENTION: f32 = 0.85;
+
+fn hoverboard_retained_speed(current_speed: f32, requested_speed: f32) -> f32 {
+    requested_speed + (current_speed - requested_speed).max(0.0) * HOVERBOARD_INERTIA_RETENTION
+}
+
+fn hoverboard_air_steer_direction(current: Vec3, requested: Vec3) -> Vec3 {
+    let current_weight = 0.74 * HOVERBOARD_INERTIA_RETENTION;
+    (current.normalize_or_zero() * current_weight
+        + requested.normalize_or_zero() * (1.0 - current_weight))
+        .normalize_or_zero()
+}
+
+fn hoverboard_turn_accel_multiplier(current: Vec3, requested: Vec3) -> f32 {
+    let alignment = current
+        .normalize_or_zero()
+        .dot(requested.normalize_or_zero())
+        .clamp(0.0, 1.0);
+    1.15 + (1.0 - alignment) * 1.65
+}
+
+fn hoverboard_landing_speed_scale(approach: f32) -> f32 {
+    1.0 - approach.clamp(0.0, 1.0) * 0.38
+}
+
+fn hoverboard_landing_probe_direction(horizontal_velocity: Vec3) -> Vec3 {
+    (horizontal_velocity.normalize_or_zero() * 0.58 + Vec3::NEG_Y).normalize_or(Vec3::NEG_Y)
+}
+
+fn hoverboard_uphill_lift(
+    ground_normal: Vec3,
+    input: Vec3,
+    horizontal_speed: f32,
+    uphill_intent: f32,
+) -> f32 {
+    if uphill_intent <= 0.0 || horizontal_speed <= 0.0 {
+        return 0.0;
+    }
+    let normal = ground_normal.normalize_or(Vec3::Y);
+    let tangent = (input - normal * input.dot(normal)).normalize_or_zero();
+    let horizontal = tangent.with_y(0.0).length();
+    if tangent.y <= 0.0 || horizontal <= 1.0e-4 {
+        return 0.0;
+    }
+    let grade = tangent.y / horizontal;
+    (horizontal_speed * grade * uphill_intent).clamp(0.0, 1.18)
 }
 
 fn stabilized_hoverboard_grounded(
@@ -2504,7 +2583,14 @@ fn player_movement(
             input = board_boost.direction.normalize_or_zero();
             input_strength = 1.0;
         } else if board_boost_active {
-            input = (input + board_boost.direction.normalize_or_zero() * 0.35).normalize_or_zero();
+            // Overdrive supplies thrust, not a locked rail. Bend its stored
+            // heading toward live input so broad mountain and road curves stay
+            // surfable at speed.
+            board_boost.direction = board_boost
+                .direction
+                .lerp(input, damp_factor(10.0, dt))
+                .normalize_or_zero();
+            input = (input + board_boost.direction * 0.20).normalize_or_zero();
             input_strength = input_strength.max(0.85);
         }
         if movement.is_grounded
@@ -2589,15 +2675,22 @@ fn player_movement(
                 if traversal.active == TraversalMode::Hoverboard {
                     let uphill = -downhill;
                     let uphill_intent = input.dot(uphill).max(0.0);
-                    // Preserve the downhill surf, but add enough uphill drive and
-                    // crest lift to make steep terrain read as a rideable wave.
-                    movement.ground_velocity += downhill * slope * dt * 1.35;
+                    // Retain a little downhill surf, but give deliberate uphill
+                    // input rocket authority and follow the slope tangent in Y.
+                    // This lets the board climb terrain instead of pushing
+                    // horizontally into it until all momentum is gone.
+                    movement.ground_velocity +=
+                        downhill * slope * dt * 1.35 * HOVERBOARD_INERTIA_RETENTION;
                     movement.ground_velocity +=
                         uphill * slope * uphill_intent * traversal.hoverboard_uphill_assist * dt;
                     if slope > 0.06 && uphill_intent > 0.18 {
-                        let wave_lift =
-                            slope * uphill_intent * movement.ground_velocity.length() * 0.16;
-                        movement.velocity.y = movement.velocity.y.max(wave_lift.min(0.30));
+                        let slope_lift = hoverboard_uphill_lift(
+                            ground_normal,
+                            input,
+                            movement.ground_velocity.length(),
+                            uphill_intent,
+                        );
+                        movement.velocity.y = movement.velocity.y.max(slope_lift);
                     }
                 } else {
                     movement.ground_velocity += downhill * slope * dt * 2.4;
@@ -2971,15 +3064,18 @@ fn player_movement(
                 gravity *= traversal.hoverboard_gravity_mult;
                 if movement.velocity.y < 0.0 {
                     let filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World);
-                    let ground_distance = spatial_query
-                        .cast_ray(
-                            transform.translation + Vec3::Y * 0.15,
-                            Dir3::NEG_Y,
-                            4.8,
-                            true,
-                            &filter,
-                        )
-                        .map(|hit| hit.distance);
+                    let probe_direction =
+                        Dir3::new(hoverboard_landing_probe_direction(movement.ground_velocity))
+                            .unwrap_or(Dir3::NEG_Y);
+                    let origin = transform.translation + Vec3::Y * 0.15;
+                    let ground_distance = [
+                        spatial_query.cast_ray(origin, Dir3::NEG_Y, 6.4, true, &filter),
+                        spatial_query.cast_ray(origin, probe_direction, 6.4, true, &filter),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .map(|hit| hit.distance)
+                    .min_by(f32::total_cmp);
                     board_boost.landing_approach = ground_distance
                         .map(hoverboard_landing_approach)
                         .unwrap_or(0.0);
@@ -3027,7 +3123,8 @@ fn player_movement(
                 * 1.62;
             let cruise_cap = boosted_cap.max(movement.sprint_speed * 2.35);
             if current_speed > target_speed {
-                target_h_vel = input * current_speed.min(cruise_cap);
+                let retained_speed = hoverboard_retained_speed(current_speed, target_speed);
+                target_h_vel = input * retained_speed.min(cruise_cap);
             } else if sprinting {
                 target_h_vel += input * 0.16;
             }
@@ -3035,17 +3132,22 @@ fn player_movement(
         if traversal.active == TraversalMode::Hoverboard && !movement.is_grounded {
             let current_speed = movement.ground_velocity.length();
             if input_strength <= 0.05 {
-                target_h_vel = movement.ground_velocity * 0.998;
+                target_h_vel = movement.ground_velocity * HOVERBOARD_INERTIA_RETENTION;
             } else if current_speed > 0.05 {
-                let current_direction = movement.ground_velocity.normalize_or_zero();
-                let surf_direction = (current_direction * 0.74 + input * 0.26).normalize_or_zero();
+                let surf_direction =
+                    hoverboard_air_steer_direction(movement.ground_velocity, input);
                 target_h_vel = surf_direction * current_speed.max(target_h_vel.length());
+            }
+            if movement.velocity.y < 0.0 && board_boost.landing_approach > 0.0 {
+                target_h_vel *= hoverboard_landing_speed_scale(board_boost.landing_approach);
             }
         }
         let mut h_vel = if movement.is_grounded {
             let accel = if input.length_squared() > 0.01 {
                 if traversal.active == TraversalMode::Hoverboard {
-                    movement.ground_accel * 0.82
+                    movement.ground_accel
+                        * 0.82
+                        * hoverboard_turn_accel_multiplier(movement.ground_velocity, input)
                 } else {
                     movement.ground_accel
                 }
@@ -3065,7 +3167,8 @@ fn player_movement(
             let has_air_input = input_strength > 0.05;
             let air_accel = if !has_air_input {
                 if traversal.active == TraversalMode::Hoverboard {
-                    movement.air_decel * 0.08
+                    movement.air_decel * 0.08 / HOVERBOARD_INERTIA_RETENTION
+                        * (1.0 + board_boost.landing_approach * 9.0)
                 } else {
                     movement.air_decel
                 }
@@ -3074,7 +3177,9 @@ fn player_movement(
             } else if movement.wall_jump_lock_timer > 0.0 {
                 movement.air_accel * 0.22
             } else if traversal.active == TraversalMode::Hoverboard {
-                movement.air_accel * traversal.hoverboard_air_control_mult
+                movement.air_accel
+                    * traversal.hoverboard_air_control_mult
+                    * (1.0 + board_boost.landing_approach * 3.0)
             } else {
                 movement.air_accel
             };
@@ -4617,13 +4722,44 @@ mod tests {
 
     #[test]
     fn hoverboard_landing_assist_eases_descent_near_the_surface() {
-        let far = hoverboard_landing_approach(4.8);
+        let far = hoverboard_landing_approach(6.4);
         let near = hoverboard_landing_approach(0.25);
 
         assert_eq!(far, 0.0);
         assert!(near > 0.9);
-        assert!(hoverboard_landing_descent_cap(near) > -0.2);
+        assert!(hoverboard_landing_descent_cap(near) > -0.15);
         assert!(hoverboard_landing_descent_cap(far) < -0.5);
+        assert!(hoverboard_landing_speed_scale(near) < 0.65);
+        assert_eq!(hoverboard_landing_speed_scale(far), 1.0);
+
+        let probe = hoverboard_landing_probe_direction(Vec3::X);
+        assert!(probe.x > 0.45);
+        assert!(probe.y < -0.80);
+    }
+
+    #[test]
+    fn hoverboard_reduces_inertia_fifteen_percent_without_reducing_top_speed() {
+        assert!((HOVERBOARD_INERTIA_RETENTION - 0.85).abs() < f32::EPSILON);
+        assert!((hoverboard_retained_speed(10.0, 4.0) - 9.1).abs() < 1e-5);
+        assert_eq!(hoverboard_retained_speed(3.0, 4.0), 4.0);
+
+        let steered = hoverboard_air_steer_direction(Vec3::X, Vec3::Z);
+        assert!(steered.z > 0.45, "air steering still over-retains heading");
+        assert!(
+            hoverboard_turn_accel_multiplier(Vec3::X, Vec3::Z)
+                > hoverboard_turn_accel_multiplier(Vec3::X, Vec3::X)
+        );
+    }
+
+    #[test]
+    fn hoverboard_uphill_lift_follows_steep_terrain_tangent() {
+        let forty_five_degree_slope = Vec3::new(0.0, 1.0, -1.0).normalize();
+        let lift = hoverboard_uphill_lift(forty_five_degree_slope, Vec3::Z, 0.9, 1.0);
+        assert!(lift > 0.85, "mountain lift is too weak: {lift}");
+        assert_eq!(
+            hoverboard_uphill_lift(forty_five_degree_slope, Vec3::NEG_Z, 0.9, 1.0),
+            0.0
+        );
     }
 
     #[test]

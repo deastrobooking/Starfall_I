@@ -714,7 +714,7 @@ impl Default for TraversalModeState {
             hoverboard_rocket_fuel_mult: 0.68,
             hoverboard_jump_mult: 1.32,
             hoverboard_gravity_mult: 0.42,
-            hoverboard_uphill_assist: 8.5,
+            hoverboard_uphill_assist: 18.0,
             hoverboard_manual_boost_mult: 2.35,
             hoverboard_manual_boost_duration: 0.72,
         }

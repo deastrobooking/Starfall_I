@@ -53,14 +53,16 @@
 - The Rocket Hoverboard now has reduced airborne gravity, a stronger board
   jump/rocket profile, B/East overdrive, uphill wave assistance, contact-normal
   banking, forward-momentum retention in the air and during coast, a short
-  ground-approach descent assist, a compressed landing pose, and a 10% larger
-  sole-height visual. Rail-bound B/East belongs exclusively to Grind instead
-  of also firing overdrive. Fixed-motor carry is cleared at hard traversal
-  constraints, so rail/loop snaps, recovery, ledge hangs, grapple arrivals, and
-  teleports cannot leak delayed movement. Edge grabs validate a wall, head
-  clearance, and walkable top before anchoring; Grapple-mode surface latches
-  raycast real geometry and hand off into a mantle or stable hang. Stunt rails,
-  springs, and loop apexes expose authored grapple sockets. The Star Saber is starter equipment
+  forward-looking ground-approach descent/braking assist, slope-tangent rocket
+  lift, turn-sensitive steering, and 15% less excess-speed/heading inertia.
+  Its black, red, orange, and yellow 1980s-anime deck uses pink rear
+  afterburners. Rail-bound B/East belongs exclusively to Grind instead of also
+  firing overdrive. Fixed-motor carry is cleared at hard traversal constraints,
+  so rail/loop snaps, recovery, ledge hangs, grapple arrivals, and teleports
+  cannot leak delayed movement. Edge grabs validate a wall, head clearance,
+  and walkable top before anchoring; Grapple-mode surface latches raycast real
+  geometry and hand off into a mantle or stable hang. Stunt rails, springs, and
+  loop apexes expose authored grapple sockets. The Star Saber is starter equipment
   with a small second-slash wave; the Solar Glyph and Beam Capacitors add wider,
   larger, stronger waves while save-backed world blueprints/gems unlock cyclone,
   double-dash/pound, elemental, and legendary upgrades per player.
