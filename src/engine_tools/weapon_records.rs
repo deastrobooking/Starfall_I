@@ -7,12 +7,64 @@
 //! gates as every other content type rather than inventing its own save path.
 
 use super::persistence::{
-    ContentCategory, ContentPayload, ContentRecord, ForgeProject, GenericRecipeDraft,
+    ContentCategory, ContentPayload, ContentRecord, ForgeProject, GenericRecipeDraft, ProjectStore,
     CURRENT_PROJECT_SCHEMA,
 };
+use super::project_registry::ForgeProjectRegistry;
 use crate::combat::weapon_forge::WeaponSpec;
 
 const SPEC_FIELD: &str = "weapon_spec";
+const RECOVERY_LIMIT: usize = 3;
+
+/// Open the active project's store. Keeps the persistence layer private to
+/// `engine_tools` — tool plugins go through these helpers rather than reaching
+/// into the store themselves.
+fn open_active_store(
+    registry: &ForgeProjectRegistry,
+) -> Result<(ProjectStore, ForgeProject), String> {
+    let Some(active) = registry.active.as_deref() else {
+        return Err("No active project — open one in the Project Hub first".to_string());
+    };
+    let store = ProjectStore::new(active, RECOVERY_LIMIT);
+    let (project, _) = store
+        .load_with_recovery()
+        .map_err(|e| format!("Could not load active project: {e}"))?;
+    Ok((store, project))
+}
+
+/// Save `spec` into the active project through the full store contract,
+/// returning the content id it landed under.
+pub fn save_to_active_project(
+    registry: &ForgeProjectRegistry,
+    spec: &WeaponSpec,
+) -> Result<String, String> {
+    let issues = blocking_issues(spec);
+    if !issues.is_empty() {
+        return Err(format!("Fix before saving: {}", issues.join(" • ")));
+    }
+    let (store, mut project) = open_active_store(registry)?;
+    let id = upsert_weapon(&mut project, spec)?;
+    store
+        .save(&mut project)
+        .map_err(|e| format!("Project save failed: {e}"))?;
+    Ok(id)
+}
+
+/// List the active project's weapon records.
+pub fn list_active_project(registry: &ForgeProjectRegistry) -> Vec<(String, String)> {
+    open_active_store(registry)
+        .map(|(_, project)| weapon_entries(&project))
+        .unwrap_or_default()
+}
+
+/// Load one weapon design from the active project.
+pub fn load_from_active_project(
+    registry: &ForgeProjectRegistry,
+    content_id: &str,
+) -> Result<WeaponSpec, String> {
+    let (_, project) = open_active_store(registry)?;
+    load_weapon(&project, content_id)
+}
 
 /// Stable content id for a weapon name. Ids are the join key for records and
 /// payloads, so they must be derived deterministically rather than generated.

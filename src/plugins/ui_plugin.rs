@@ -442,6 +442,8 @@ enum ProjectHubAction {
     NewProject,
     /// Open the Creature Forge authoring screen.
     CreatureForge,
+    /// Open the modular Weapon Forge authoring screen.
+    WeaponForge,
     /// Open the GLB-based imported character editor.
     ImportedCharacterForge,
     Back,
@@ -958,6 +960,7 @@ fn menu_back_navigation(
         AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
         AppState::ProjectHub => next_state.set(AppState::MainMenu),
         AppState::CreatureForge => next_state.set(AppState::ProjectHub),
+        AppState::WeaponForge => next_state.set(AppState::ProjectHub),
         AppState::ImportedCharacterForge => next_state.set(match *imported_forge_return {
             ImportedForgeReturnTarget::ProjectHub => AppState::ProjectHub,
             ImportedForgeReturnTarget::PlayerSelect => AppState::PlayerSelect,
@@ -1370,6 +1373,12 @@ fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>
             );
             spawn_project_hub_button(
                 root,
+                "WEAPON FORGE".to_string(),
+                ProjectHubAction::WeaponForge,
+                Color::srgb(0.16, 0.28, 0.52),
+            );
+            spawn_project_hub_button(
+                root,
                 "IMPORTED CHARACTER FORGE".to_string(),
                 ProjectHubAction::ImportedCharacterForge,
                 Color::srgb(0.12, 0.32, 0.46),
@@ -1461,6 +1470,7 @@ fn project_hub_action_system(
                 Err(error) => warn!("Could not create a new project: {error}"),
             },
             ProjectHubAction::CreatureForge => next_state.set(AppState::CreatureForge),
+            ProjectHubAction::WeaponForge => next_state.set(AppState::WeaponForge),
             ProjectHubAction::ImportedCharacterForge => {
                 *imported_forge_return = ImportedForgeReturnTarget::ProjectHub;
                 next_state.set(AppState::ImportedCharacterForge)

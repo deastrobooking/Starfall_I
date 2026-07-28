@@ -17,6 +17,7 @@ pub mod robot_garage_plugin;
 pub mod save_plugin;
 pub mod ui_plugin;
 pub mod vehicle_plugin;
+pub mod weapon_forge_plugin;
 pub mod weapon_plugin;
 pub mod world_plugin;
 
@@ -39,5 +40,6 @@ pub use robot_garage_plugin::RobotGaragePlugin;
 pub use save_plugin::SavePlugin;
 pub use ui_plugin::UiPlugin;
 pub use vehicle_plugin::VehiclePlugin;
+pub use weapon_forge_plugin::WeaponForgePlugin;
 pub use weapon_plugin::WeaponPlugin;
 pub use world_plugin::WorldPlugin;

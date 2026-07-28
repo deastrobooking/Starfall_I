@@ -938,7 +938,7 @@ interact, right = open map). The old Select + D-pad direct special-slot chord
 was retired since it would double-fire with the utilities; keyboard 7–0 still
 selects specials directly.
 
-**Weapon Forge (2026-07-28, foundation):** a modular weapon designer whose
+**Weapon Forge (2026-07-28):** a modular weapon designer whose
 governing rule is that **stats are derived, not typed in**. A design is a
 physical description — grip style, guard, emitter, pommel, blade length and
 width, colour — and damage, wave output, swing speed, and chain length fall
@@ -956,9 +956,19 @@ Validation separates blocking errors (no name) from advisory warnings (an
 extended grip on a short blade), so odd experiments still save. Saves route
 through the versioned project contract as `ContentCategory::Weapon` records
 (`engine_tools::weapon_records`), inheriting the same atomic writes and
-recovery snapshots as every other content type. **The in-game designer panel is
-not built yet** — the model, derivation, validation, presets, and save/load
-bridge are complete and tested behind it.
+recovery snapshots as every other content type.
+
+The authoring screen (`AppState::WeaponForge`, reached from the Project Hub or
+`STARFALL_WEAPON_FORGE=1`) puts a live 3D preview beside the numbers. The
+preview is assembled from the *same* measurements the derivation reads — grip
+length, blade length and width — rather than separate display constants, so the
+picture can never drift from the maths: lengthen the blade and you watch it grow
+and watch the swing speed drop in the same frame. Tool windows cover PARTS
+(cycle grip / guard / emitter / pommel / colour, step blade length and width),
+PERFORMANCE (damage, wave, swing speed as percentages of the issued blade, plus
+chain delta, balance point, physical length, trait, and estimated value, with
+blocking problems called out before you try to save), and PRESETS & SAVE (four
+starting points — Duelist, Warblade, Wavecaster, Leech).
 
 **Star Sabre hilt (2026-07-28):** the sabre is now a physical weapon held in
 the character's hand. Previously the blade was positioned by guessing where the

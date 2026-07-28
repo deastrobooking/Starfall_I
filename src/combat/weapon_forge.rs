@@ -18,12 +18,7 @@
 //! design cannot be strictly better than the issued blade — the same
 //! sidegrade rule the shop catalog lives under.
 //!
-//! **Status:** the model, derivation, validation, presets, and save bridge
-//! (`engine_tools::weapon_records`) are complete and tested. The in-game
-//! designer *panel* is not built yet, so nothing calls this at runtime — hence
-//! the module-wide allow below. Remove it as the panel lands rather than
-//! leaving it to rot.
-#![allow(dead_code)] // Consumed by the Weapon Forge panel, which is not built yet.
+//! Consumed by `plugins::weapon_forge_plugin`, the in-game authoring screen.
 
 use serde::{Deserialize, Serialize};
 

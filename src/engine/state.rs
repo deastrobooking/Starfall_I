@@ -17,6 +17,9 @@ pub enum AppState {
     CharacterStudio,
     /// GLB-based character import, inspection, and non-destructive sculpting.
     ImportedCharacterForge,
+    /// Modular weapon designer — build a sabre from parts and watch the stats
+    /// fall out of the physical design.
+    WeaponForge,
     ChapterSelect,
     RobotGarage,
     Playing,

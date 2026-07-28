@@ -42,7 +42,7 @@ use engine_tools::{EngineToolMode, EngineToolsPlugin};
 use events::EventsPlugin;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
-    CompanionPlugin, CraftingPlugin, CreatureForgePlugin, DiscoverablePlugin, EnemyPlugin,
+    CompanionPlugin, CraftingPlugin, CreatureForgePlugin, WeaponForgePlugin, DiscoverablePlugin, EnemyPlugin,
     HackingPlugin, ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin,
     RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
@@ -256,6 +256,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         ModularCharacterPlugin,
         character_studio::CharacterStudioPlugin,
         CreatureForgePlugin,
+        WeaponForgePlugin,
         ImportedCharacterForgePlugin,
     ));
 }
@@ -267,6 +268,10 @@ fn apply_boot_overrides(app: &mut App) {
     // Boot straight into the Character Studio for design-tool iteration.
     if std::env::var_os("STARFALL_STUDIO").is_some() {
         app.insert_state(AppState::CharacterStudio);
+    }
+    // Boot straight into the modular Weapon Forge for tool iteration.
+    if std::env::var_os("STARFALL_WEAPON_FORGE").is_some() {
+        app.insert_state(AppState::WeaponForge);
     }
     // Boot directly into a live chapter with Starfall Forge open for editor
     // smoke tests and rapid tool iteration.
