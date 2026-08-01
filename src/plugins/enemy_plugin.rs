@@ -13,9 +13,9 @@ use crate::combat::damage::{
 use crate::combat::hitstop::hitstop_inactive;
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
-    boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, DragonCaste, Enemy, EnemyAIState,
-    EnemyAttackVfx, EnemyProjectile, EnemyProjectileKind, EnemyStateMachine, EnemyType,
-    FlyingDrone, MechBoss, MountainSpiderMech, RiftBoss,
+    boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, DragonCaste, DroneVariant, Enemy,
+    EnemyAIState, EnemyAttackVfx, EnemyProjectile, EnemyProjectileKind, EnemyStateMachine,
+    EnemyType, FlyingDrone, MechBoss, MountainSpiderMech, RiftBoss,
 };
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
@@ -290,23 +290,78 @@ pub fn spawn_enemy_entity(
     difficulty_scale: f32,
     faction: Option<Faction>,
 ) -> Entity {
-    let preset_name = preset_for_type(enemy_type, faction);
-    let enemy_data = Enemy::new(enemy_type, position, difficulty_scale);
-    let max_hp = enemy_data.scaled_health();
-
-    let root = spawn_cartoon_character(
+    spawn_enemy_entity_with_drone_variant(
         commands,
         meshes,
         materials,
-        enemy_config(
-            enemy_type,
-            faction,
-            preset_name,
-            difficulty_scale.clamp(0.85, 1.8),
-        ),
+        enemy_type,
         position,
-    );
-    let dragon_caste = faction
+        difficulty_scale,
+        faction,
+        DroneVariant::Scout,
+    )
+}
+
+/// Spawn one of the deliberately remote flying-craft classes. The underlying
+/// enemy type remains `Drone`, preserving rewards, saves, and damage handling.
+pub fn spawn_drone_variant_entity(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    variant: DroneVariant,
+    position: Vec3,
+    difficulty_scale: f32,
+    faction: Option<Faction>,
+) -> Entity {
+    spawn_enemy_entity_with_drone_variant(
+        commands,
+        meshes,
+        materials,
+        EnemyType::Drone,
+        position,
+        difficulty_scale,
+        faction,
+        variant,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_enemy_entity_with_drone_variant(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    enemy_type: EnemyType,
+    position: Vec3,
+    difficulty_scale: f32,
+    faction: Option<Faction>,
+    drone_variant: DroneVariant,
+) -> Entity {
+    let preset_name = preset_for_type(enemy_type, faction);
+    let mut enemy_data = Enemy::new(enemy_type, position, difficulty_scale);
+    if enemy_type == EnemyType::Drone {
+        tune_drone_variant(&mut enemy_data, drone_variant);
+    }
+    let max_hp = enemy_data.scaled_health();
+
+    let root = if enemy_type == EnemyType::Drone {
+        spawn_drone_craft(commands, meshes, materials, drone_variant, position)
+    } else {
+        spawn_cartoon_character(
+            commands,
+            meshes,
+            materials,
+            enemy_config(
+                enemy_type,
+                faction,
+                preset_name,
+                difficulty_scale.clamp(0.85, 1.8),
+            ),
+            position,
+        )
+    };
+    let dragon_caste = (enemy_type != EnemyType::Drone)
+        .then_some(faction)
+        .flatten()
         .filter(|f| matches!(f, Faction::DragonRoyalty | Faction::DragonExile))
         .map(|_| DragonCaste::for_enemy(enemy_type));
     if let (Some(caste), Some(dragon_faction)) = (dragon_caste, faction) {
@@ -329,6 +384,11 @@ pub fn spawn_enemy_entity(
         );
     }
     let damageable = enemy_damageable(&enemy_data, faction);
+    let drone_body_scale = match drone_variant {
+        DroneVariant::Scout => 1.0,
+        DroneVariant::HeavyFighter => 1.55,
+        DroneVariant::SiegeGunship => 2.25,
+    };
     commands.entity(root).insert((
         enemy_data,
         EnemyStateMachine::default(),
@@ -338,8 +398,8 @@ pub fn spawn_enemy_entity(
         RigidBody::KinematicPositionBased,
         if matches!(enemy_type, EnemyType::Drone | EnemyType::SpyDrone) {
             Collider::capsule_y(
-                1.45 * difficulty_scale.clamp(0.85, 1.8),
-                1.65 * difficulty_scale.clamp(0.85, 1.8),
+                1.45 * difficulty_scale.clamp(0.85, 1.8) * drone_body_scale,
+                1.65 * difficulty_scale.clamp(0.85, 1.8) * drone_body_scale,
             )
         } else {
             Collider::capsule_y(
@@ -351,13 +411,126 @@ pub fn spawn_enemy_entity(
         Sensor,
     ));
     if enemy_type == EnemyType::Drone {
-        commands
-            .entity(root)
-            .insert((FlyingDrone::new(position), Hackable::scallarian_drone()));
+        commands.entity(root).insert((
+            FlyingDrone::for_variant(position, drone_variant),
+            drone_variant,
+            Hackable::scallarian_drone(),
+        ));
     }
     if let Some(caste) = dragon_caste {
         commands.entity(root).insert(caste);
     }
+    root
+}
+
+fn tune_drone_variant(enemy: &mut Enemy, variant: DroneVariant) {
+    match variant {
+        DroneVariant::Scout => {}
+        DroneVariant::HeavyFighter => {
+            enemy.config.max_health *= 2.4;
+            enemy.config.attack_damage *= 1.55;
+            enemy.config.defense += 7.0;
+            enemy.config.attack_cooldown *= 1.25;
+            enemy.config.experience_value = 45;
+            enemy.config.credits = 35;
+        }
+        DroneVariant::SiegeGunship => {
+            enemy.config.max_health *= 4.5;
+            enemy.config.attack_damage *= 2.15;
+            enemy.config.defense += 13.0;
+            enemy.config.attack_cooldown *= 1.6;
+            enemy.config.detection_range += 12.0;
+            enemy.config.chase_range += 14.0;
+            enemy.config.experience_value = 90;
+            enemy.config.credits = 75;
+        }
+    }
+}
+
+fn spawn_drone_craft(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    variant: DroneVariant,
+    position: Vec3,
+) -> Entity {
+    let (name, scale, hull_color, glow_color) = match variant {
+        DroneVariant::Scout => (
+            "Scallarian Scout Drone",
+            1.0,
+            Color::srgb(0.12, 0.18, 0.22),
+            Color::srgb(0.18, 0.92, 1.0),
+        ),
+        DroneVariant::HeavyFighter => (
+            "Scallarian Heavy Fighter",
+            1.55,
+            Color::srgb(0.24, 0.12, 0.30),
+            Color::srgb(1.0, 0.30, 0.72),
+        ),
+        DroneVariant::SiegeGunship => (
+            "Scallarian Siege Gunship",
+            2.25,
+            Color::srgb(0.20, 0.08, 0.08),
+            Color::srgb(1.0, 0.42, 0.08),
+        ),
+    };
+    let hull = materials.add(StandardMaterial {
+        base_color: hull_color,
+        metallic: 0.88,
+        perceptual_roughness: 0.24,
+        ..default()
+    });
+    let glow = materials.add(StandardMaterial {
+        base_color: glow_color,
+        emissive: LinearRgba::from(glow_color) * 4.0,
+        unlit: true,
+        ..default()
+    });
+    let body_mesh = meshes.add(Cuboid::new(2.8 * scale, 0.8 * scale, 4.2 * scale));
+    let wing_mesh = meshes.add(Cuboid::new(3.2 * scale, 0.18 * scale, 1.6 * scale));
+    let engine_mesh = meshes.add(Sphere::new(0.34 * scale));
+    let root = commands
+        .spawn((
+            Transform::from_translation(position),
+            GlobalTransform::default(),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            Name::new(name),
+        ))
+        .id();
+    commands.entity(root).with_children(|craft| {
+        craft.spawn((
+            PbrBundle {
+                mesh: Mesh3d(body_mesh),
+                material: MeshMaterial3d(hull.clone()),
+                transform: Transform::from_rotation(Quat::from_rotation_x(-0.10)),
+                ..default()
+            },
+            Name::new("Drone Hull"),
+        ));
+        for side in [-1.0_f32, 1.0] {
+            craft.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(wing_mesh.clone()),
+                    material: MeshMaterial3d(hull.clone()),
+                    transform: Transform::from_xyz(side * 2.35 * scale, 0.0, 0.25 * scale)
+                        .with_rotation(Quat::from_rotation_z(-side * 0.12)),
+                    ..default()
+                },
+                Name::new("Drone Wing"),
+            ));
+            craft.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(engine_mesh.clone()),
+                    material: MeshMaterial3d(glow.clone()),
+                    transform: Transform::from_xyz(side * 1.05 * scale, 0.0, 2.15 * scale),
+                    ..default()
+                },
+                Name::new("Drone Engine"),
+            ));
+        }
+    });
     root
 }
 
@@ -708,7 +881,7 @@ fn update_flying_drone(
         13.0
     } else {
         9.0
-    };
+    } * drone.speed_multiplier;
     if to_desired.length_squared() > 0.01 {
         transform.translation += to_desired.clamp_length_max(speed * dt);
     }
@@ -774,7 +947,7 @@ fn flying_drone_attack_system(
                 splash_radius: 0.0,
             },
         ));
-        drone.fire_timer = 0.45;
+        drone.fire_timer = 0.45 * drone.fire_interval_multiplier;
         enemy.attack_cooldown_timer = enemy.config.attack_cooldown * 0.55;
     }
 }
@@ -2075,5 +2248,25 @@ mod tests {
         ] {
             assert_eq!(creature_enemy_base_type(role), EnemyType::Soldier);
         }
+    }
+
+    #[test]
+    fn wasteland_drone_variants_are_stronger_and_slower_than_scouts() {
+        let position = Vec3::new(3_000.0, 0.0, -2_000.0);
+        let mut scout = Enemy::new(EnemyType::Drone, position, 1.0);
+        let mut fighter = scout.clone();
+        let mut gunship = scout.clone();
+        tune_drone_variant(&mut scout, DroneVariant::Scout);
+        tune_drone_variant(&mut fighter, DroneVariant::HeavyFighter);
+        tune_drone_variant(&mut gunship, DroneVariant::SiegeGunship);
+
+        assert!(fighter.scaled_health() > scout.scaled_health());
+        assert!(gunship.scaled_health() > fighter.scaled_health());
+        assert!(gunship.scaled_damage() > fighter.scaled_damage());
+        let scout_flight = FlyingDrone::for_variant(position, DroneVariant::Scout);
+        let fighter_flight = FlyingDrone::for_variant(position, DroneVariant::HeavyFighter);
+        let gunship_flight = FlyingDrone::for_variant(position, DroneVariant::SiegeGunship);
+        assert!(fighter_flight.speed_multiplier < scout_flight.speed_multiplier);
+        assert!(gunship_flight.speed_multiplier < fighter_flight.speed_multiplier);
     }
 }

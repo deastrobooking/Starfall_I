@@ -2979,19 +2979,20 @@ fn sabre_wave_profile(
 ) -> Option<SabreWaveProfile> {
     let tier = (upgrades.sabre_wave_upgrade_tier() + sabre.level.saturating_sub(1)).min(6);
     let is_second_slash = completed_slashes == 2;
-    // Tempest Wave Core adds the third-slash burst; the fourth-slash wave
-    // still needs wave tier 3.
-    let is_third_slash = completed_slashes == 3 && upgrades.sabre_third_slash_wave();
+    // The full starter combo now carries its momentum into a third-slash wave.
+    // Tempest Wave Core remains useful by amplifying that third burst.
+    let is_third_slash = completed_slashes == 3;
     let is_upgraded_fourth_slash = completed_slashes == 4 && tier >= 3;
     if !is_second_slash && !is_third_slash && !is_upgraded_fourth_slash {
         return None;
     }
 
+    let tempest_boost = is_third_slash && upgrades.sabre_third_slash_wave();
     Some(SabreWaveProfile {
-        projectile_count: (1 + tier.div_ceil(2)) as usize,
-        width: 0.60 + tier as f32 * 0.11,
+        projectile_count: ((1 + tier.div_ceil(2)) as usize + usize::from(tempest_boost)).min(4),
+        width: 0.60 + tier as f32 * 0.11 + if tempest_boost { 0.18 } else { 0.0 },
         length: 1.80 + tier as f32 * 0.28,
-        damage_mult: 0.30 + tier as f32 * 0.10,
+        damage_mult: (0.30 + tier as f32 * 0.10) * if tempest_boost { 1.25 } else { 1.0 },
         speed_mult: 0.90 + tier as f32 * 0.04,
         // Blade traits grant these outright, so a wave-tuned hilt behaves like
         // a high-tier sabre even on a fresh save.
@@ -4911,10 +4912,13 @@ mod move_def_wiring_tests {
         assert!(strong.length > base.length);
         assert!(strong.damage_mult > base.damage_mult);
         assert!(strong.explosive);
-        assert!(
-            sabre_wave_profile(&sabre, &upgraded, 3, &crate::combat::blades::STARTER_BLADE)
-                .is_none()
-        );
+        assert!(sabre_wave_profile(
+            &sabre,
+            &base_upgrades,
+            3,
+            &crate::combat::blades::STARTER_BLADE
+        )
+        .is_some());
         assert!(
             sabre_wave_profile(&sabre, &upgraded, 4, &crate::combat::blades::STARTER_BLADE)
                 .is_some()

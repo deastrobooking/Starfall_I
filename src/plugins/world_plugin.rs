@@ -31,8 +31,8 @@ use crate::commands::CommandRegistry;
 use crate::components::armor::ArmorSet;
 use crate::components::discoverable::DiscoverableKind;
 use crate::components::enemy::{
-    CitySpyDrone, Enemy, EnemyAIState, EnemyStateMachine, EnemyType, MountainSpiderMech,
-    SpiderMechLeg,
+    CitySpyDrone, DroneVariant, Enemy, EnemyAIState, EnemyStateMachine, EnemyType,
+    MountainSpiderMech, SpiderMechLeg,
 };
 use crate::components::faction::Faction;
 use crate::components::player::{
@@ -51,7 +51,7 @@ use crate::engine_tools::ProceduralMaterialBinding;
 use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
-use crate::plugins::enemy_plugin::spawn_enemy_entity;
+use crate::plugins::enemy_plugin::{spawn_drone_variant_entity, spawn_enemy_entity};
 use crate::resources::{
     initial_world_routes, initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState,
     DungeonRoomState, GameSettings, PlaySessionTransition, WorldRouteRegistry, WorldRouteState,
@@ -86,6 +86,23 @@ struct ColliderDebugSource;
 
 #[derive(Component)]
 struct ColliderDebugVisual;
+
+/// Lazy encounter anchor for heavy aerial patrols. Every authored position is
+/// well outside the protected starting region, so loading a game does not
+/// populate or pressure the start point.
+#[derive(Component, Debug, Clone, Copy)]
+struct WastelandDronePatrol {
+    spawned: bool,
+    trigger_radius: f32,
+}
+
+const STARTING_REGION_SAFE_RADIUS: f32 = 2_000.0;
+const WASTELAND_DRONE_PATROLS: &[Vec2] = &[
+    Vec2::new(2_850.0, -2_350.0),
+    Vec2::new(-3_250.0, 2_650.0),
+    Vec2::new(5_450.0, 1_150.0),
+    Vec2::new(-5_150.0, -1_850.0),
+];
 
 #[derive(Resource, Clone)]
 struct WaterWakeAssets {
@@ -363,6 +380,10 @@ impl Plugin for WorldPlugin {
                     collider_debug_toggle_system,
                 )
                     .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                wasteland_drone_patrol_system.run_if(in_state(AppState::Playing)),
             )
             .add_systems(
                 Update,
@@ -1314,6 +1335,71 @@ fn setup_world_route_registry(registry: &mut WorldRouteRegistry) {
         return;
     }
     registry.routes = initial_world_routes();
+}
+
+fn spawn_wasteland_drone_patrol_anchors(commands: &mut Commands, seed: u64) {
+    for &xz in WASTELAND_DRONE_PATROLS {
+        debug_assert!(xz.length() > STARTING_REGION_SAFE_RADIUS);
+        let y = terrain_surface_y(xz.x, xz.y, seed);
+        commands.spawn((
+            WastelandDronePatrol {
+                spawned: false,
+                trigger_radius: 260.0,
+            },
+            Transform::from_xyz(xz.x, y, xz.y),
+            GlobalTransform::default(),
+            WorldGeometry,
+            Name::new("Wasteland Drone Patrol Anchor"),
+        ));
+    }
+}
+
+fn wasteland_drone_patrol_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut patrol_q: Query<(&Transform, &mut WastelandDronePatrol)>,
+    player_q: Query<&Transform, With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    const FORMATION: [DroneVariant; 6] = [
+        DroneVariant::Scout,
+        DroneVariant::HeavyFighter,
+        DroneVariant::Scout,
+        DroneVariant::HeavyFighter,
+        DroneVariant::Scout,
+        DroneVariant::SiegeGunship,
+    ];
+
+    for (anchor, mut patrol) in &mut patrol_q {
+        if patrol.spawned
+            || !player_q.iter().any(|player| {
+                player.translation.distance(anchor.translation) <= patrol.trigger_radius
+            })
+        {
+            continue;
+        }
+        patrol.spawned = true;
+        for (index, variant) in FORMATION.into_iter().enumerate() {
+            let angle = index as f32 / FORMATION.len() as f32 * TAU;
+            let radius = 22.0 + (index % 2) as f32 * 9.0;
+            let position =
+                anchor.translation + Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius);
+            spawn_drone_variant_entity(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                variant,
+                position,
+                1.15,
+                Some(Faction::DimensionalAlien),
+            );
+        }
+        msg_ev.write(UiMessageEvent {
+            text: "WASTELAND AIR PATROL — heavy fighters and siege gunship inbound".into(),
+            duration: 4.0,
+        });
+    }
 }
 
 /// Opens routes whose `required_site` has just become Liberated.
@@ -3404,6 +3490,7 @@ fn generate_city(
     spawn_puzzle_anchors(&mut commands, seed);
     setup_world_site_registry(&mut world_site_registry);
     spawn_world_site_props(&mut commands, &mut meshes, m, &world_site_registry, seed);
+    spawn_wasteland_drone_patrol_anchors(&mut commands, seed);
     setup_world_route_registry(&mut world_route_registry);
 }
 
@@ -22465,5 +22552,16 @@ mod tests {
         assert_eq!(cache.get(1).as_deref(), Some(&"one"));
         assert_eq!(cache.get(3).as_deref(), Some(&"three"));
         assert_eq!(cache.values.len(), 2);
+    }
+
+    #[test]
+    fn heavy_drone_patrols_stay_outside_the_starting_region() {
+        assert!(!WASTELAND_DRONE_PATROLS.is_empty());
+        for position in WASTELAND_DRONE_PATROLS {
+            assert!(
+                position.length() > STARTING_REGION_SAFE_RADIUS,
+                "patrol at {position:?} intrudes on the protected start"
+            );
+        }
     }
 }

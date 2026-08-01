@@ -127,6 +127,21 @@ pub fn build_starfall_app(mode: StarfallAppMode) -> App {
         }
     }
 
+    // The authored world routinely has enough visible lights to exceed Bevy's
+    // default 1,024-entry GPU Z-slice list. Reserve the observed requirement up
+    // front so lighting is not corrupted for a few frames while it resizes.
+    if mode == StarfallAppMode::Production {
+        if let Some(mut cluster_settings) =
+            app.world_mut()
+                .get_resource_mut::<bevy::light::cluster::GlobalClusterSettings>()
+        {
+            if let Some(gpu_settings) = cluster_settings.gpu_clustering.as_mut() {
+                gpu_settings.initial_z_slice_list_capacity =
+                    gpu_settings.initial_z_slice_list_capacity.max(2_048);
+            }
+        }
+    }
+
     app.add_plugins(PhysicsPlugins::default())
         .add_plugins(PhysicsCompatPlugin);
     configure_starfall_app(&mut app, mode == StarfallAppMode::Production);

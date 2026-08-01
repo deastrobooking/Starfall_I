@@ -2262,6 +2262,9 @@ fn spawn_joint(
                 rest_scale: Vec3::ONE,
             },
             Name::new(format!("Joint::{kind:?}")),
+            Visibility::Inherited,
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
         ))
         .id();
     commands.entity(parent).add_child(entity);

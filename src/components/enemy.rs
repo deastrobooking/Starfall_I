@@ -298,17 +298,44 @@ pub struct FlyingDrone {
     pub orbit_radius: f32,
     pub orbit_phase: f32,
     pub fire_timer: f32,
+    pub speed_multiplier: f32,
+    pub fire_interval_multiplier: f32,
 }
 
 impl FlyingDrone {
     pub fn new(position: Vec3) -> Self {
+        Self::for_variant(position, DroneVariant::Scout)
+    }
+
+    pub fn for_variant(position: Vec3, variant: DroneVariant) -> Self {
+        let (altitude, orbit_radius, speed_multiplier, fire_interval_multiplier) = match variant {
+            DroneVariant::Scout => (
+                5.0 + (position.x * 0.07).sin().abs() * 2.0,
+                9.0 + (position.z * 0.05).cos().abs() * 5.0,
+                1.0,
+                1.0,
+            ),
+            DroneVariant::HeavyFighter => (8.5, 13.0, 0.68, 1.35),
+            DroneVariant::SiegeGunship => (11.5, 17.0, 0.42, 1.8),
+        };
         Self {
-            altitude: 5.0 + (position.x * 0.07).sin().abs() * 2.0,
-            orbit_radius: 9.0 + (position.z * 0.05).cos().abs() * 5.0,
+            altitude,
+            orbit_radius,
             orbit_phase: position.x * 0.11 + position.z * 0.07,
-            fire_timer: 0.8,
+            fire_timer: 0.8 * fire_interval_multiplier,
+            speed_multiplier,
+            fire_interval_multiplier,
         }
     }
+}
+
+/// Visual and combat class for true flying craft. Humanoid enemies never
+/// receive this component, which keeps the ground/air silhouette rule clear.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DroneVariant {
+    Scout,
+    HeavyFighter,
+    SiegeGunship,
 }
 
 /// A non-combat Scallarian surveillance drone hiding above peaceful cities.

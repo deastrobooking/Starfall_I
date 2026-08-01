@@ -130,7 +130,7 @@ pub const SABRE_RELIC_CATALOG: [SabreRelicDef; 13] = [
         id: "tempest_wave_core",
         name: "Tempest Wave Core",
         kind: SabreRelicKind::Core,
-        effect: "Adds a third-slash wave burst to the Saber chain.",
+        effect: "Amplifies the third-slash wave into a wider, stronger burst.",
         input: "Third slash of the RB chain",
         source_hint: "Solar Sabre Observatory depths",
     },
@@ -437,8 +437,8 @@ impl UpgradeLedger {
         self.has_relic("sabre_throw_blueprint")
     }
 
-    /// The Tempest Wave Core adds a third-slash wave burst on top of the
-    /// second-slash wave every Saber ships with.
+    /// The Tempest Wave Core amplifies the third-slash wave every Saber now
+    /// ships with.
     pub fn sabre_third_slash_wave(&self) -> bool {
         self.has_relic("tempest_wave_core")
     }
