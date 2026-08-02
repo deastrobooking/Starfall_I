@@ -111,11 +111,16 @@ and boot; verification gains a consumer-build check.
   by the forge's own derivation; published creatures load into a
   `PublishedCreatures` spec pool. Missing files are a first-class empty state.
 - Covered by determinism, round-trip, missing-file, resolver, and shop-pricing
-  tests. Remaining P1 follow-up: encounter systems consuming the creature pool.
+  tests. Encounters consume published creatures: the baked seed fills the same
+  `PublishedCreatureCatalog` the dungeon spawners already resolve overrides
+  through, and only fills an *empty* catalog so a Designer session's live
+  project store (drafts included) stays authoritative.
 
 ### P2 — Designer UX pass
-- Weapon Forge: load/rename/delete existing designs (the records helpers
-  already exist), equip-to-test from the forge, character-holding preview.
+- ~~Weapon Forge: load/rename/delete existing designs~~ *(landed: a LIBRARY
+  panel lists the active project's designs with LOAD/DEL per row, and a NAME
+  field with editor-style key capture names designs before saving)*. Still
+  open: equip-to-test from the forge, character-holding preview.
 - Shared forge widgets (cycle/slider/readout) extracted from the three forges
   into `engine_tools` so new tools stop copying UI code.
 - ~~Mouse affordances for tool windows~~ *(landed: corner-grip resize with

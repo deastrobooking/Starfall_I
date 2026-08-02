@@ -12,20 +12,15 @@
 use bevy::prelude::*;
 
 use crate::engine_tools::publish::{published_dir, PublishedWeapon};
+use crate::engine_tools::PublishedCreatureCatalog;
 use crate::resources::{ShopCatalog, ShopCategory, ShopItem};
 use crate::robots::creature::CreatureSpec;
-
-/// Creature designs published from the Creature Forge, available to
-/// encounter/spawn systems as an authored pool.
-#[derive(Resource, Debug, Default)]
-pub struct PublishedCreatures(pub Vec<CreatureSpec>);
 
 pub struct PublishedContentPlugin;
 
 impl Plugin for PublishedContentPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PublishedCreatures>()
-            .add_systems(Startup, load_published_content);
+        app.add_systems(Startup, load_published_content);
     }
 }
 
@@ -61,7 +56,7 @@ fn shop_item_for_published(weapon: &PublishedWeapon) -> ShopItem {
 
 fn load_published_content(
     mut shop: ResMut<ShopCatalog>,
-    mut creatures: ResMut<PublishedCreatures>,
+    mut creature_catalog: ResMut<PublishedCreatureCatalog>,
 ) {
     let weapons: Vec<PublishedWeapon> = read_published("weapons.json");
     if !weapons.is_empty() {
@@ -81,10 +76,17 @@ fn load_published_content(
         info!("published content: {} weapon(s) on sale", weapons.len());
     }
 
+    // Creatures feed the same catalog the dungeon spawners already consult
+    // (`PublishedCreatureCatalog`). In a Designer session the editor
+    // workspace later rebuilds that catalog from the live project store —
+    // drafts included — so the baked seed only fills an empty catalog and
+    // never clobbers the authoritative one.
     let specs: Vec<CreatureSpec> = read_published("creatures.json");
     if !specs.is_empty() {
-        info!("published content: {} creature(s) available", specs.len());
-        creatures.0 = specs;
+        let seeded = creature_catalog.seed_from_published(specs);
+        if seeded > 0 {
+            info!("published content: {seeded} creature(s) available to encounters");
+        }
     }
 }
 
@@ -132,6 +134,28 @@ mod tests {
             blade_for_id(Some("starfall.weapon.never_published")).id,
             "blade_standard_issue"
         );
+    }
+
+    #[test]
+    fn baked_creatures_seed_only_an_empty_catalog() {
+        use crate::robots::creature::CreatureSpec;
+        let mut catalog = PublishedCreatureCatalog::default();
+
+        let first = CreatureSpec {
+            content_id: "starfall.creature.baked".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(catalog.seed_from_published(vec![first]), 1);
+        assert!(catalog.contains("starfall.creature.baked"));
+
+        // A Designer session's workspace rebuild owns a non-empty catalog;
+        // a second seed (stale baked files) must not clobber it.
+        let second = CreatureSpec {
+            content_id: "starfall.creature.stale".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(catalog.seed_from_published(vec![second]), 0);
+        assert!(!catalog.contains("starfall.creature.stale"));
     }
 
     #[test]

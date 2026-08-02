@@ -261,6 +261,24 @@ impl PublishedCreatureCatalog {
     pub fn content_ids(&self) -> impl Iterator<Item = &str> {
         self.entries.keys().map(String::as_str)
     }
+
+    /// Seed the catalog from baked `assets/published/` content at startup.
+    ///
+    /// Only fills an empty catalog: when a Designer session opens a project,
+    /// the workspace rebuild (which loads the *live* store, drafts included)
+    /// remains the authority and must not be clobbered by stale baked files.
+    pub fn seed_from_published(
+        &mut self,
+        creatures: impl IntoIterator<Item = crate::robots::creature::CreatureSpec>,
+    ) -> usize {
+        if !self.entries.is_empty() {
+            return 0;
+        }
+        for spec in creatures {
+            self.entries.insert(spec.content_id.clone(), spec);
+        }
+        self.entries.len()
+    }
 }
 
 /// Published deterministic generator inputs keyed by stable Forge content ID.

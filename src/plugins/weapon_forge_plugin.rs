@@ -11,6 +11,7 @@
 //! separate display constants — a preview that drifts from the maths would make
 //! the whole tool lie.
 
+use bevy::input::keyboard::Key;
 use bevy::prelude::*;
 
 use super::ui_plugin::MenuScrollPanel;
@@ -35,7 +36,9 @@ impl Plugin for WeaponForgePlugin {
             .add_systems(
                 Update,
                 (
+                    weapon_forge_name_input_system,
                     weapon_forge_action_system,
+                    weapon_forge_library_rebuild_system,
                     weapon_forge_preview_rebuild_system,
                     weapon_forge_label_refresh_system,
                     weapon_forge_spin_system,
@@ -55,6 +58,13 @@ struct WeaponForgeState {
     dirty: bool,
     /// Refresh the readout text.
     labels_dirty: bool,
+    /// Typing into the name field: printable keys edit `spec.name` until
+    /// Enter/Escape (button actions are suspended so shortcuts don't fire).
+    naming: bool,
+    /// Saved designs in the active project as `(content_id, display_name)`.
+    library: Vec<(String, String)>,
+    /// Rebuild the library rows.
+    library_dirty: bool,
     status: String,
 }
 
@@ -64,6 +74,9 @@ impl Default for WeaponForgeState {
             spec: WeaponSpec::default(),
             dirty: true,
             labels_dirty: true,
+            naming: false,
+            library: Vec::new(),
+            library_dirty: true,
             status: "Design a sabre. Stats follow the build.".to_string(),
         }
     }
@@ -101,12 +114,23 @@ enum ForgeAction {
     WidthDown,
     WidthUp,
     Preset(usize),
+    /// Toggle typing mode for the weapon's name.
+    NameEdit,
     Save,
+    /// Load a saved design from the active project's library.
+    LibraryLoad(usize),
+    /// Delete a saved design from the active project's library.
+    LibraryDelete(usize),
     Back,
 }
 
 #[derive(Component)]
 struct WeaponForgeButton(ForgeAction);
+
+/// Content node of the LIBRARY window; its rows are rebuilt whenever the
+/// project's saved designs change.
+#[derive(Component)]
+struct WeaponForgeLibraryPanel;
 
 fn next_in<T: PartialEq + Copy>(all: &[T], current: T) -> T {
     let index = all.iter().position(|value| *value == current).unwrap_or(0);
@@ -126,9 +150,16 @@ const COLORS: [BladeColor; 8] = [
 
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 
-fn setup_weapon_forge(mut commands: Commands, mut state: ResMut<WeaponForgeState>) {
+fn setup_weapon_forge(
+    mut commands: Commands,
+    mut state: ResMut<WeaponForgeState>,
+    registry: Res<ForgeProjectRegistry>,
+) {
     state.dirty = true;
     state.labels_dirty = true;
+    state.naming = false;
+    state.library = weapon_records::list_active_project(&registry);
+    state.library_dirty = true;
 
     commands.spawn((
         WeaponForgeRoot,
@@ -479,6 +510,53 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
 /// How far one press moves a dimension slider.
 const DIMENSION_STEP: f32 = 0.05;
 
+/// Longest weapon name the forge accepts (validation blocks past 40; stopping
+/// earlier keeps the readout tidy).
+const NAME_LIMIT: usize = 40;
+
+/// Typing mode for the weapon's name, following the editor's key-capture
+/// idiom: printable characters append, Backspace deletes, Enter/Escape end
+/// the edit. While active, button actions are suspended by the action system
+/// so typing can never trigger shortcuts.
+fn weapon_forge_name_input_system(
+    keys: Res<ButtonInput<Key>>,
+    mut state: ResMut<WeaponForgeState>,
+) {
+    if !state.naming {
+        return;
+    }
+    for key in keys.get_just_pressed() {
+        match key {
+            Key::Character(value) => {
+                for character in value.chars() {
+                    if (character.is_alphanumeric() || matches!(character, ' ' | '.' | '_' | '-'))
+                        && state.spec.name.chars().count() < NAME_LIMIT
+                    {
+                        state.spec.name.push(character);
+                    }
+                }
+            }
+            Key::Space if state.spec.name.chars().count() < NAME_LIMIT => {
+                state.spec.name.push(' ');
+            }
+            Key::Backspace => {
+                state.spec.name.pop();
+            }
+            Key::Enter | Key::Escape => {
+                state.naming = false;
+            }
+            _ => {}
+        }
+    }
+    let name = state.spec.name.clone();
+    let message = if state.naming {
+        format!("Naming: {name}_")
+    } else {
+        format!("Named: {name}")
+    };
+    state.mark(message);
+}
+
 fn weapon_forge_action_system(
     interactions: Query<(&Interaction, &WeaponForgeButton), (Changed<Interaction>, With<Button>)>,
     mut state: ResMut<WeaponForgeState>,
@@ -494,6 +572,11 @@ fn weapon_forge_action_system(
     let Some(action) = action else {
         return;
     };
+    // While typing a name, only the name toggle itself may fire — a stray
+    // click must not load a preset or delete a library entry mid-edit.
+    if state.naming && action != ForgeAction::NameEdit {
+        return;
+    }
 
     match action {
         ForgeAction::GripNext => {
@@ -549,15 +632,117 @@ fn weapon_forge_action_system(
                 state.mark(format!("Loaded preset: {name}"));
             }
         }
+        ForgeAction::NameEdit => {
+            state.naming = !state.naming;
+            let name = state.spec.name.clone();
+            let message = if state.naming {
+                format!("Naming: {name}_  (Enter to finish)")
+            } else {
+                format!("Named: {name}")
+            };
+            state.mark(message);
+        }
         ForgeAction::Save => {
             let spec = state.spec.clone();
             match weapon_records::save_to_active_project(&registry, &spec) {
-                Ok(id) => state.mark(format!("Saved as {id}")),
+                Ok(id) => {
+                    state.library = weapon_records::list_active_project(&registry);
+                    state.library_dirty = true;
+                    state.mark(format!("Saved as {id}"));
+                }
                 Err(error) => state.mark(format!("Cannot save: {error}")),
+            }
+        }
+        ForgeAction::LibraryLoad(index) => {
+            let Some((content_id, name)) = state.library.get(index).cloned() else {
+                return;
+            };
+            match weapon_records::load_from_active_project(&registry, &content_id) {
+                Ok(spec) => {
+                    state.spec = spec;
+                    state.mark(format!("Loaded {name}"));
+                }
+                Err(error) => state.mark(format!("Cannot load {name}: {error}")),
+            }
+        }
+        ForgeAction::LibraryDelete(index) => {
+            let Some((content_id, name)) = state.library.get(index).cloned() else {
+                return;
+            };
+            match weapon_records::delete_from_active_project(&registry, &content_id) {
+                Ok(true) => {
+                    state.library = weapon_records::list_active_project(&registry);
+                    state.library_dirty = true;
+                    state.mark(format!("Deleted {name}"));
+                }
+                Ok(false) => state.mark(format!("{name} was already gone")),
+                Err(error) => state.mark(format!("Cannot delete {name}: {error}")),
             }
         }
         ForgeAction::Back => next_state.set(AppState::ProjectHub),
     }
+}
+
+/// Rebuild the LIBRARY rows whenever the saved-design list changes. Rows are
+/// despawned and respawned rather than patched — the list is small and this
+/// can never leak a stale row.
+fn weapon_forge_library_rebuild_system(
+    mut commands: Commands,
+    mut state: ResMut<WeaponForgeState>,
+    panels: Query<(Entity, Option<&Children>), With<WeaponForgeLibraryPanel>>,
+) {
+    if !state.library_dirty {
+        return;
+    }
+    let Ok((panel, children)) = panels.single() else {
+        return;
+    };
+    state.library_dirty = false;
+    if let Some(children) = children {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+    commands.entity(panel).with_children(|panel| {
+        if state.library.is_empty() {
+            panel.spawn((
+                Text::new("No saved designs yet.
+NAME it, then SAVE."),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.58, 0.60, 0.66)),
+            ));
+            return;
+        }
+        for (index, (_, name)) in state.library.iter().enumerate() {
+            panel
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(6.0),
+                    align_items: AlignItems::Center,
+                    margin: UiRect::bottom(Val::Px(4.0)),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn((
+                        Text::new(name.clone()),
+                        TextFont {
+                            font_size: FontSize::Px(13.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.92, 0.90, 0.80)),
+                        Node {
+                            min_width: Val::Px(120.0),
+                            ..default()
+                        },
+                    ));
+                    forge_button(row, "LOAD", ForgeAction::LibraryLoad(index));
+                    forge_button(row, "DEL", ForgeAction::LibraryDelete(index));
+                });
+        }
+    });
 }
 
 fn weapon_forge_label_refresh_system(
@@ -594,8 +779,10 @@ fn weapon_forge_label_refresh_system(
     let spec = state.spec.clone().sanitized();
 
     for mut text in spec_text.iter_mut() {
+        let caret = if state.naming { "_" } else { "" };
         *text = Text::new(format!(
-            "{} grip • {} guard\n{} emitter • {} pommel\nblade {:.2} long, {:.2} wide",
+            "\"{}{caret}\"\n{} grip • {} guard\n{} emitter • {} pommel\nblade {:.2} long, {:.2} wide",
+            spec.name,
             spec.grip.label(),
             spec.guard.label(),
             spec.emitter.label(),

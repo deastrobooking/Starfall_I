@@ -62,6 +62,22 @@ pub fn list_active_project(registry: &ForgeProjectRegistry) -> Vec<(String, Stri
         .unwrap_or_default()
 }
 
+/// Delete one weapon design from the active project, through the full store
+/// contract so the removal is atomic and snapshotted like any other edit.
+pub fn delete_from_active_project(
+    registry: &ForgeProjectRegistry,
+    content_id: &str,
+) -> Result<bool, String> {
+    let (store, mut project) = open_active_store(registry)?;
+    let removed = delete_weapon(&mut project, content_id);
+    if removed {
+        store
+            .save(&mut project)
+            .map_err(|e| format!("Project save failed: {e}"))?;
+    }
+    Ok(removed)
+}
+
 /// Load one weapon design from the active project.
 pub fn load_from_active_project(
     registry: &ForgeProjectRegistry,
