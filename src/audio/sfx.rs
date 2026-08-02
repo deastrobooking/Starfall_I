@@ -440,7 +440,11 @@ fn modular_action_sfx_system(
 fn modular_fallback_kind(action_id: &str) -> SfxKind {
     if action_id.starts_with("sabre.") || action_id.contains("slash") {
         SfxKind::Slash
-    } else if action_id.starts_with("water.") || action_id.starts_with("waterfall.") {
+    } else if action_id.starts_with("water.")
+        || action_id.starts_with("waterfall.")
+        || action_id.contains("land")
+        || action_id.contains("impact")
+    {
         SfxKind::Hit
     } else if action_id.contains("loot") || action_id.contains("reward") {
         SfxKind::Loot
@@ -526,6 +530,7 @@ mod tests {
             SfxKind::Shoot
         );
         assert_eq!(modular_fallback_kind("waterfall.splash"), SfxKind::Hit);
+        assert_eq!(modular_fallback_kind("player.land_hard"), SfxKind::Hit);
         assert_eq!(modular_fallback_kind("world.reward"), SfxKind::Loot);
     }
 }

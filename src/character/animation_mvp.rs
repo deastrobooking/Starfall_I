@@ -320,13 +320,17 @@ pub(crate) fn drive_graph_animation(
 
         *backend = CharacterAnimationBackend::GraphMvp;
         if state.current == Some(animator.pose) {
+            if let Some(active) = player.animation_mut(node) {
+                active.set_speed(playback_speed(animator.pose, animator.speed));
+            }
             continue;
         }
 
-        transitions
-            .play(&mut player, node, transition_duration(animator.pose))
-            .repeat()
-            .set_speed(playback_speed(animator.pose, animator.speed));
+        let active = transitions.play(&mut player, node, transition_duration(animator.pose));
+        if pose_loops(animator.pose) {
+            active.repeat();
+        }
+        active.set_speed(playback_speed(animator.pose, animator.speed));
         state.current = Some(animator.pose);
     }
 }
@@ -343,11 +347,23 @@ fn transition_duration(pose: CartoonPose) -> Duration {
 fn playback_speed(pose: CartoonPose, movement_speed: f32) -> f32 {
     match pose {
         CartoonPose::Idle => 1.0,
-        CartoonPose::Walk => (movement_speed / 3.0).clamp(0.75, 1.35),
-        CartoonPose::Run => (movement_speed / 6.0).clamp(0.8, 1.45),
-        CartoonPose::Sprint => (movement_speed / 9.0).clamp(0.9, 1.5),
+        // `CartoonAnimator::speed` is measured from world displacement per
+        // second. The motor's authored walk/sprint velocities are delivered at
+        // 60x scale, so compare against their real presentation speeds rather
+        // than the smaller per-tick tuning values.
+        CartoonPose::Walk => (movement_speed / 22.8).clamp(0.68, 1.35),
+        CartoonPose::Run => (movement_speed / 32.0).clamp(0.76, 1.45),
+        CartoonPose::Sprint => (movement_speed / 42.0).clamp(0.84, 1.5),
         _ => 1.0,
     }
+}
+
+fn pose_loops(pose: CartoonPose) -> bool {
+    !matches!(pose, CartoonPose::Jump)
+}
+
+pub(crate) fn graph_owns_joint(joint: JointKind) -> bool {
+    GRAPH_JOINTS.contains(&joint)
 }
 
 fn target_id(joint: JointKind) -> AnimationTargetId {
@@ -513,8 +529,17 @@ mod tests {
 
     #[test]
     fn movement_playback_speed_is_bounded() {
-        assert_eq!(playback_speed(CartoonPose::Run, 0.0), 0.8);
+        assert_eq!(playback_speed(CartoonPose::Run, 0.0), 0.76);
+        assert_eq!(playback_speed(CartoonPose::Walk, 22.8), 1.0);
+        assert_eq!(playback_speed(CartoonPose::Sprint, 42.0), 1.0);
         assert_eq!(playback_speed(CartoonPose::Run, 100.0), 1.45);
         assert_eq!(playback_speed(CartoonPose::Idle, 100.0), 1.0);
+    }
+
+    #[test]
+    fn takeoff_is_a_one_shot_while_sustained_poses_loop() {
+        assert!(!pose_loops(CartoonPose::Jump));
+        assert!(pose_loops(CartoonPose::Walk));
+        assert!(pose_loops(CartoonPose::Fall));
     }
 }

@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{app::AnimationSystems, prelude::*, transform::TransformSystems};
 use std::collections::HashMap;
 use std::f32::consts::PI;
 
@@ -18,8 +18,8 @@ use crate::components::character::{
 };
 use crate::components::player::{
     DodgeState, EdgeGrabState, FlightMode, GrappleHookMode, GrappleHookState, JetpackState,
-    ParryState, PlayerInput, PlayerMovement, PlayerState, PlayerStateMachine, TraversalMode,
-    TraversalModeState,
+    MotionAnimationState, ParryState, PlayerInput, PlayerMovement, PlayerState, PlayerStateMachine,
+    TraversalMode, TraversalModeState,
 };
 use crate::components::weapon::{BeamSabre, MeleeCombo};
 use crate::engine::state::AppState;
@@ -44,6 +44,12 @@ impl Plugin for CharacterPlugin {
                 swap_character_parts,
             )
                 .chain(),
+        )
+        .add_systems(
+            PostUpdate,
+            apply_post_graph_motion_response
+                .after(AnimationSystems)
+                .before(TransformSystems::Propagate),
         );
     }
 }
@@ -155,7 +161,7 @@ fn swap_character_parts(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Component, Clone, Copy)]
 struct PoseSample {
     pose: CartoonPose,
     phase: f32,
@@ -181,6 +187,8 @@ struct PoseSample {
     /// Signed sabre swing position (-1..1) driven by the real slash phase
     /// machine; see [`sabre_swing_position`].
     sabre_swing: f32,
+    /// Presentation-only landing squash sampled from the motor's contact edge.
+    landing_compression: f32,
 }
 
 /// Signed swing position of a Star Sabre slash, in `-1..=1`.
@@ -377,6 +385,8 @@ struct PoseInput {
     melee_attacking: bool,
     dodging: bool,
     parrying: bool,
+    hard_landing: bool,
+    mantling: bool,
 }
 
 fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
@@ -397,6 +407,12 @@ fn select_cartoon_pose(input: PoseInput) -> CartoonPose {
     }
     if input.dodging || input.state == Some(PlayerState::Dodging) {
         return CartoonPose::Roll;
+    }
+    if input.mantling {
+        return CartoonPose::Mantle;
+    }
+    if input.hard_landing {
+        return CartoonPose::HardLand;
     }
 
     match input.grapple_mode {
@@ -827,6 +843,7 @@ fn normalized_or_zero(vector: Vec3) -> Vec3 {
 }
 
 fn cartoon_animation_system(
+    mut commands: Commands,
     time: Res<Time>,
     mut roots: Query<
         (
@@ -844,7 +861,11 @@ fn cartoon_animation_system(
             Option<&ParryState>,
             Option<&PlayerInput>,
             Option<&BeamSabre>,
-            (Option<&MeleeCombo>, Option<&TrickState>),
+            (
+                Option<&MotionAnimationState>,
+                Option<&MeleeCombo>,
+                Option<&TrickState>,
+            ),
         ),
         (Without<CartoonPart>, Without<JointMarker>),
     >,
@@ -873,7 +894,7 @@ fn cartoon_animation_system(
         parry,
         player_input,
         sabre,
-        (melee, tricks),
+        (motion_animation, melee, tricks),
     ) in roots.iter_mut()
     {
         let delta = transform.translation - animator.last_position;
@@ -918,6 +939,12 @@ fn cartoon_animation_system(
             melee_attacking,
             dodging: dodge.map(|d| d.is_dodging).unwrap_or(false),
             parrying: parry.map(|p| p.is_parrying).unwrap_or(false),
+            hard_landing: motion_animation
+                .map(|motion| motion.hard_landing && motion.landing_timer > 0.0)
+                .unwrap_or(false),
+            mantling: motion_animation
+                .map(|motion| motion.mantle_timer > 0.0)
+                .unwrap_or(false),
         });
 
         let stride = character.map(|c| c.stride).unwrap_or(1.0).max(0.45);
@@ -1015,30 +1042,32 @@ fn cartoon_animation_system(
             }
         }
 
-        samples.insert(
-            entity,
-            PoseSample {
-                pose: animator.pose,
-                phase: animator.phase,
-                speed: animator.speed,
-                scale,
-                stride,
-                agility,
-                vertical_velocity,
-                local_velocity,
-                grounded,
-                wall_normal_local,
-                hanging,
-                dodge_direction_local,
-                grapple_attach_local,
-                ik,
-                hands,
-                wall_clasp_time,
-                board_trick,
-                board_carve,
-                sabre_swing,
-            },
-        );
+        let sample = PoseSample {
+            pose: animator.pose,
+            phase: animator.phase,
+            speed: animator.speed,
+            scale,
+            stride,
+            agility,
+            vertical_velocity,
+            local_velocity,
+            grounded,
+            wall_normal_local,
+            hanging,
+            dodge_direction_local,
+            grapple_attach_local,
+            ik,
+            hands,
+            wall_clasp_time,
+            board_trick,
+            board_carve,
+            sabre_swing,
+            landing_compression: motion_animation
+                .map(MotionAnimationState::landing_compression)
+                .unwrap_or(0.0),
+        };
+        commands.entity(entity).insert(sample);
+        samples.insert(entity, sample);
     }
 
     let joint_rests = joints
@@ -1058,6 +1087,45 @@ fn cartoon_animation_system(
             continue;
         };
         apply_part_pose(part, &mut transform, *sample);
+    }
+}
+
+/// Bevy evaluates graph clips in `PostUpdate`. Reapply only the procedural
+/// layers owned by Starfall after that evaluation so graph-controlled torso,
+/// shoulder, and hip joints retain velocity response and contact IK. The base
+/// pose remains graph-authored; unsupported poses stay wholly procedural.
+fn apply_post_graph_motion_response(
+    roots: Query<(
+        Entity,
+        &PoseSample,
+        &crate::character::animation_mvp::CharacterAnimationBackend,
+    )>,
+    mut joints: Query<(&JointMarker, &mut Transform), Without<CartoonPart>>,
+) {
+    let samples_by_root = roots
+        .iter()
+        .filter_map(|(entity, sample, backend)| {
+            (*backend == crate::character::animation_mvp::CharacterAnimationBackend::GraphMvp)
+                .then_some((entity, *sample))
+        })
+        .collect::<HashMap<_, _>>();
+    if samples_by_root.is_empty() {
+        return;
+    }
+    let joint_rests = joints
+        .iter()
+        .map(|(marker, _)| ((marker.root, marker.kind), marker.rest_translation))
+        .collect::<HashMap<_, _>>();
+
+    for (marker, mut transform) in joints.iter_mut() {
+        if !crate::character::animation_mvp::graph_owns_joint(marker.kind) {
+            continue;
+        }
+        let Some(sample) = samples_by_root.get(&marker.root).copied() else {
+            continue;
+        };
+        apply_motion_response(marker, &mut transform, sample);
+        apply_contact_ik(marker, &mut transform, sample, &joint_rests);
     }
 }
 
@@ -1600,6 +1668,7 @@ fn apply_motion_response(marker: &JointMarker, transform: &mut Transform, sample
         JointKind::Pelvis => {
             transform.translation.x += strafe * 0.018 * scale * grounded;
             transform.translation.y -= speed_norm * 0.012 * scale * grounded;
+            transform.translation.y -= sample.landing_compression * 0.085 * scale;
             transform.rotation *= Quat::from_rotation_z(-strafe * 0.07 * speed_norm);
             if sample.pose == CartoonPose::Roll {
                 transform.translation.x += dodge.x * 0.055 * scale;
@@ -1610,6 +1679,7 @@ fn apply_motion_response(marker: &JointMarker, transform: &mut Transform, sample
             transform.rotation *= Quat::from_rotation_x(-forward * 0.055 * speed_norm * grounded)
                 * Quat::from_rotation_y(strafe * 0.05 * speed_norm + hook.x * 0.04)
                 * Quat::from_rotation_z(-strafe * 0.035 * speed_norm);
+            transform.rotation *= Quat::from_rotation_x(sample.landing_compression * 0.12);
             if sample.pose == CartoonPose::WallSlide {
                 transform.rotation *= Quat::from_rotation_z(-wall.x * 0.08);
             }
@@ -1618,6 +1688,7 @@ fn apply_motion_response(marker: &JointMarker, transform: &mut Transform, sample
             transform.rotation *= Quat::from_rotation_x(-forward * 0.075 * speed_norm * grounded)
                 * Quat::from_rotation_y(strafe * 0.075 * speed_norm + hook.x * 0.09)
                 * Quat::from_rotation_z(-strafe * 0.05 * speed_norm + dodge.x * 0.06);
+            transform.rotation *= Quat::from_rotation_x(sample.landing_compression * 0.09);
             if sample.hanging {
                 transform.rotation *= Quat::from_rotation_x(0.08);
             }
@@ -2996,6 +3067,8 @@ mod tests {
             melee_attacking: false,
             dodging: false,
             parrying: false,
+            hard_landing: false,
+            mantling: false,
         }
     }
 
@@ -3012,6 +3085,17 @@ mod tests {
         let mut sprint = locomotion_pose_input(0.70);
         sprint.state = Some(PlayerState::Sprinting);
         assert_eq!(select_cartoon_pose(sprint), CartoonPose::Sprint);
+    }
+
+    #[test]
+    fn landing_and_mantle_edges_reach_their_authored_poses() {
+        let mut landing = locomotion_pose_input(0.0);
+        landing.hard_landing = true;
+        assert_eq!(select_cartoon_pose(landing), CartoonPose::HardLand);
+
+        let mut mantle = locomotion_pose_input(0.0);
+        mantle.mantling = true;
+        assert_eq!(select_cartoon_pose(mantle), CartoonPose::Mantle);
     }
 
     #[test]
@@ -3075,6 +3159,7 @@ mod tests {
             board_trick: trick,
             board_carve: carve,
             sabre_swing: 0.0,
+            landing_compression: 0.0,
         }
     }
 
@@ -3265,6 +3350,7 @@ mod tests {
             board_trick: None,
             board_carve: 0.0,
             sabre_swing: 0.0,
+            landing_compression: 0.0,
         };
         let mut transform = Transform::default();
 

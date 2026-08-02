@@ -869,7 +869,10 @@ fn spawn_players(
                 jetpack,
                 TraversalModeState::default(),
                 BoardBoostState::default(),
-                PlatformerMoveState::default(),
+                (
+                    PlatformerMoveState::default(),
+                    MotionAnimationState::default(),
+                ),
                 SpeedLoopTraversalState::default(),
                 GrappleHookState::default(),
                 EdgeGrabState::new(),
@@ -2310,6 +2313,7 @@ fn player_movement(
                 &BeamSabre,
                 Option<&RailGrindState>,
                 &mut WaterTraversalState,
+                &mut MotionAnimationState,
             ),
         ),
         With<Player>,
@@ -2331,9 +2335,10 @@ fn player_movement(
         mut transform,
         mut state,
         (player_idx, pi),
-        (boat_passenger, progression, sabre, rail_grind, mut water),
+        (boat_passenger, progression, sabre, rail_grind, mut water, mut motion_animation),
     ) in player_q.iter_mut()
     {
+        motion_animation.tick(dt);
         // EC1b: on the fixed tick, consume the latched command buffer so edge
         // presses fire exactly once per tick at any render frame rate. The
         // legacy Update path (fixed_motor off) keeps the live PlayerInput.
@@ -2475,6 +2480,7 @@ fn player_movement(
             board_boost.direction = Vec3::ZERO;
         }
 
+        let contact_vertical_velocity = movement.velocity.y;
         movement.is_grounded = if traversal.active == TraversalMode::Hoverboard {
             stabilized_hoverboard_grounded(
                 output.grounded,
@@ -2495,6 +2501,18 @@ fn player_movement(
             movement.motor_carry.y = 0.0;
         }
         let just_landed = movement.is_grounded && !platformer.was_grounded;
+        if just_landed && traversal.active != TraversalMode::Hoverboard {
+            let impact_speed = (-contact_vertical_velocity).max(0.0);
+            if motion_animation.trigger_landing(impact_speed) {
+                action_sfx.write(ModularActionSfxEvent::new(
+                    if motion_animation.hard_landing {
+                        "player.land_hard"
+                    } else {
+                        "player.land_soft"
+                    },
+                ));
+            }
+        }
         if traversal.active == TraversalMode::Hoverboard {
             if movement.is_grounded {
                 if just_landed && board_boost.airborne_time >= 0.12 {
@@ -2753,6 +2771,7 @@ fn player_movement(
                 started_jump = true;
                 state.force(PlayerState::Jetpack);
             } else if pi.interact {
+                motion_animation.trigger_mantle();
                 if let Some(top) = edge_grab.ledge_top {
                     transform.translation = top + edge_grab.wall_normal * 0.52 + Vec3::Y * 0.16;
                     movement.clear_motor_delivery();
@@ -2838,6 +2857,7 @@ fn player_movement(
             } else if wall_lost {
                 // Crested the top: vault up-and-over so ledges feel generous.
                 climb.is_climbing = false;
+                motion_animation.trigger_mantle();
                 movement.velocity.y = climb.vault_boost;
                 movement.ground_velocity = -edge_grab.wall_normal * 0.30;
                 state.force(PlayerState::Jetpack);

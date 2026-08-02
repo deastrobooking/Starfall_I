@@ -338,6 +338,77 @@ impl Default for PlatformerMoveState {
     }
 }
 
+/// Short-lived visual state derived from authoritative motor transitions.
+///
+/// This component never moves the gameplay root or changes collision. It gives
+/// the animation layer stable, inspectable timing for landing compression and
+/// ledge-vault poses instead of relying on one-frame grounded edges.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct MotionAnimationState {
+    pub landing_timer: f32,
+    pub landing_duration: f32,
+    pub landing_impact_speed: f32,
+    pub hard_landing: bool,
+    pub mantle_timer: f32,
+    pub mantle_duration: f32,
+}
+
+impl Default for MotionAnimationState {
+    fn default() -> Self {
+        Self {
+            landing_timer: 0.0,
+            landing_duration: 0.0,
+            landing_impact_speed: 0.0,
+            hard_landing: false,
+            mantle_timer: 0.0,
+            mantle_duration: 0.28,
+        }
+    }
+}
+
+impl MotionAnimationState {
+    pub const SOFT_LANDING_SPEED: f32 = 0.32;
+    pub const HARD_LANDING_SPEED: f32 = 0.86;
+
+    pub fn tick(&mut self, dt: f32) {
+        self.landing_timer = (self.landing_timer - dt).max(0.0);
+        self.mantle_timer = (self.mantle_timer - dt).max(0.0);
+        if self.landing_timer <= 0.0 {
+            self.landing_impact_speed = 0.0;
+            self.hard_landing = false;
+        }
+    }
+
+    pub fn trigger_landing(&mut self, impact_speed: f32) -> bool {
+        if impact_speed < Self::SOFT_LANDING_SPEED {
+            return false;
+        }
+        self.hard_landing = impact_speed >= Self::HARD_LANDING_SPEED;
+        self.landing_duration = if self.hard_landing { 0.26 } else { 0.16 };
+        self.landing_timer = self.landing_duration;
+        self.landing_impact_speed = impact_speed;
+        true
+    }
+
+    pub fn trigger_mantle(&mut self) {
+        self.mantle_timer = self.mantle_duration;
+        self.landing_timer = 0.0;
+        self.hard_landing = false;
+    }
+
+    pub fn landing_compression(&self) -> f32 {
+        if self.landing_timer <= 0.0 || self.landing_duration <= 0.0 {
+            return 0.0;
+        }
+        let progress = 1.0 - self.landing_timer / self.landing_duration;
+        let envelope = (progress.clamp(0.0, 1.0) * std::f32::consts::PI).sin();
+        let strength = ((self.landing_impact_speed - Self::SOFT_LANDING_SPEED)
+            / (Self::HARD_LANDING_SPEED - Self::SOFT_LANDING_SPEED))
+            .clamp(0.25, 1.0);
+        envelope * strength
+    }
+}
+
 #[derive(Component, Debug, Clone, Copy)]
 pub struct SpeedLoopTraversalState {
     pub guide: Option<Entity>,
@@ -1369,5 +1440,32 @@ mod tests {
         assert_eq!(water.breath, 12.0);
         assert_eq!(water.breath, water.max_breath);
         assert!(!water.wake_requested);
+    }
+
+    #[test]
+    fn motion_animation_classifies_and_expires_landings() {
+        let mut motion = MotionAnimationState::default();
+
+        assert!(!motion.trigger_landing(0.1));
+        assert!(motion.trigger_landing(0.5));
+        assert!(!motion.hard_landing);
+        assert!(motion.landing_timer > 0.0);
+
+        assert!(motion.trigger_landing(1.1));
+        assert!(motion.hard_landing);
+        motion.tick(motion.landing_duration + 0.01);
+        assert_eq!(motion.landing_timer, 0.0);
+        assert!(!motion.hard_landing);
+    }
+
+    #[test]
+    fn landing_compression_has_a_bounded_midpoint_envelope() {
+        let mut motion = MotionAnimationState::default();
+        motion.trigger_landing(MotionAnimationState::HARD_LANDING_SPEED);
+        assert_eq!(motion.landing_compression(), 0.0);
+
+        motion.tick(motion.landing_duration * 0.5);
+        assert!(motion.landing_compression() > 0.95);
+        assert!(motion.landing_compression() <= 1.0);
     }
 }
