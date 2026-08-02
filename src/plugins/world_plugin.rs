@@ -1855,7 +1855,8 @@ fn collider_debug_toggle_system(
     visual_q: Query<Entity, With<ColliderDebugVisual>>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
-    if !keyboard.just_pressed(KeyCode::F9) {
+    // Collider debug view: Designer edition only.
+    if !cfg!(feature = "designer") || !keyboard.just_pressed(KeyCode::F9) {
         return;
     }
 

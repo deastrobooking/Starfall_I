@@ -48,6 +48,7 @@ impl Plugin for WeaponForgePlugin {
                     weapon_forge_action_system,
                     weapon_forge_library_rebuild_system,
                     weapon_forge_preview_rebuild_system,
+                    weapon_forge_mount_preview_system,
                     weapon_forge_label_refresh_system,
                     weapon_forge_spin_system,
                 )
@@ -108,6 +109,10 @@ impl WeaponForgeState {
 
 #[derive(Component)]
 struct WeaponForgeRoot;
+/// The mannequin that holds the design — a real modular character, so the
+/// preview shows the weapon at true scale in an actual hand.
+#[derive(Component)]
+struct ForgeMannequin;
 #[derive(Component)]
 struct WeaponPreviewRoot;
 #[derive(Component)]
@@ -169,6 +174,8 @@ const COLORS: [BladeColor; 8] = [
 
 fn setup_weapon_forge(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: ResMut<WeaponForgeState>,
     registry: Res<ForgeProjectRegistry>,
 ) {
@@ -192,6 +199,21 @@ fn setup_weapon_forge(
         },
         Transform::from_xyz(2.4, 4.0, 3.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
+
+    // A real modular character holds the design: the preview is judged at
+    // true scale in an actual hand, not floating in a void. Rest pose is fine
+    // — it is a mannequin, not an actor.
+    let mannequin = crate::character::player_mesh::spawn_modular_player_preview(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        crate::character::presets::hero_config("Vincenzo"),
+        Vec3::ZERO,
+        crate::character::parts::CharacterLoadout::default(),
+    );
+    commands
+        .entity(mannequin)
+        .insert((WeaponForgeRoot, ForgeMannequin));
 
     spawn_weapon_forge_ui(&mut commands);
 }
@@ -331,10 +353,52 @@ fn weapon_forge_preview_rebuild_system(
 
 fn weapon_forge_spin_system(
     time: Res<Time>,
-    mut previews: Query<&mut Transform, With<WeaponPreviewRoot>>,
+    mut mannequins: Query<&mut Transform, With<ForgeMannequin>>,
 ) {
-    for mut transform in previews.iter_mut() {
+    // The character turns; the weapon rides along in its hand.
+    for mut transform in mannequins.iter_mut() {
         transform.rotate_y(time.delta_secs() * 0.6);
+    }
+}
+
+/// Parent the assembled weapon into the mannequin's right hand and keep its
+/// grip centred in the palm.
+///
+/// The character's parts exist a frame after setup (they spawn through
+/// commands), and every preview rebuild produces a fresh unparented weapon —
+/// so this runs each frame, adopting any orphan weapon root and refreshing
+/// the palm transform (grip length changes move the grip centre).
+fn weapon_forge_mount_preview_system(
+    mut commands: Commands,
+    state: Res<WeaponForgeState>,
+    mannequins: Query<Entity, With<ForgeMannequin>>,
+    hands: Query<(Entity, &crate::components::character::CartoonPart)>,
+    mut weapons: Query<(Entity, Option<&ChildOf>, &mut Transform), With<WeaponPreviewRoot>>,
+) {
+    let Ok(mannequin) = mannequins.single() else {
+        return;
+    };
+    let Some(hand) = hands.iter().find_map(|(entity, part)| {
+        (part.root == mannequin
+            && part.kind == crate::components::character::CartoonPartKind::RightHand)
+            .then_some(entity)
+    }) else {
+        // Mannequin parts still assembling — adopt next frame.
+        return;
+    };
+
+    let grip_len = state.spec.clone().sanitized().grip.length();
+    // Same convention as the gameplay hilt mount: the grip runs along local
+    // +Y and is rotated to project out of the fist; the extra offset drops
+    // the grip's centre (the preview root sits at the pommel) into the palm.
+    let rotation = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+    let palm = Vec3::new(0.0, -0.02, -0.02) + rotation * Vec3::new(0.0, -grip_len * 0.5, 0.0);
+
+    for (weapon, parent, mut transform) in weapons.iter_mut() {
+        if parent.map(|p| p.parent()) != Some(hand) {
+            commands.entity(hand).add_child(weapon);
+        }
+        *transform = Transform::from_translation(palm).with_rotation(rotation);
     }
 }
 
@@ -930,6 +994,49 @@ mod tests {
         app.update();
         let tines = preview_part_count(&mut app);
         assert!(tines >= bare + 2);
+    }
+
+    #[test]
+    fn the_preview_weapon_ends_up_in_the_mannequins_hand() {
+        use crate::components::character::{CartoonPart, CartoonPartKind};
+        let mut app = preview_app();
+        app.add_systems(PostUpdate, weapon_forge_mount_preview_system);
+
+        let mannequin = app.world_mut().spawn((ForgeMannequin, Transform::default())).id();
+        let hand = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                CartoonPart::new(mannequin, CartoonPartKind::RightHand, &Transform::default()),
+            ))
+            .id();
+
+        // Frame 1 builds the weapon; the mount adopts it into the hand.
+        app.update();
+        app.update();
+
+        let mut weapons = app.world_mut().query_filtered::<Entity, With<WeaponPreviewRoot>>();
+        let weapon = weapons.single(app.world()).expect("one preview weapon");
+        assert_eq!(
+            app.world().get::<ChildOf>(weapon).map(|c| c.parent()),
+            Some(hand),
+            "the weapon must hang from the actual hand part"
+        );
+
+        // A rebuild (dirty edit) produces a fresh root — it must be adopted
+        // again rather than left floating at the origin.
+        {
+            let mut state = app.world_mut().resource_mut::<WeaponForgeState>();
+            state.mark("edit");
+        }
+        app.update();
+        app.update();
+        let mut weapons = app.world_mut().query_filtered::<Entity, With<WeaponPreviewRoot>>();
+        let weapon = weapons.single(app.world()).expect("still one weapon");
+        assert_eq!(
+            app.world().get::<ChildOf>(weapon).map(|c| c.parent()),
+            Some(hand)
+        );
     }
 
     #[test]

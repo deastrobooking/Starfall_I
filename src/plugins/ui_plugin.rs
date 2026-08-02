@@ -8088,7 +8088,8 @@ fn toggle_controller_diag(
     mut state: ResMut<ControllerDiagState>,
     mut root_q: Query<&mut Visibility, With<ControllerDiagRoot>>,
 ) {
-    if !keyboard.just_pressed(KeyCode::F8) {
+    // Controller diagnostics: Designer edition only.
+    if !cfg!(feature = "designer") || !keyboard.just_pressed(KeyCode::F8) {
         return;
     }
     state.visible = !state.visible;

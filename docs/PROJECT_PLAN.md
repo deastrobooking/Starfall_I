@@ -121,7 +121,9 @@ and boot; verification gains a consumer-build check.
   panel with LOAD/DEL, NAME field with editor-style key capture)*.
 - ~~Equip-to-test~~ *(landed: TEST jumps into play with every player holding
   the design; the blade registry upserts so iteration always takes effect)*.
-  Still open: character-holding preview inside the forge.
+- ~~Character-holding preview~~ *(landed: a real modular character mannequin
+  holds the design in its right hand at true scale; the character turns and
+  the weapon rides along, and grip-length edits re-centre the palm grip)*.
 - ~~Shared forge widgets~~ *(landed: `engine_tools::forge_widgets` — action
   buttons, rows, section labels; Weapon and Creature Forge both build on it)*.
 - ~~Mouse affordances for tool windows~~ *(landed: corner-grip resize with
@@ -130,8 +132,9 @@ and boot; verification gains a consumer-build check.
 - ~~A designer manual~~ *(landed: [guides/designer-workflow.md](guides/designer-workflow.md))*.
 
 ### P3 — Game edition polish (walk-away list)
-- First-run flow: main menu → player select → chapter select with no dev
-  affordances (perf overlays and diag toggles behind `designer` too).
+- ~~Perf overlays and diag toggles behind `designer`~~ *(landed: F8 controller
+  diag, F9 collider debug, F10 motor escape hatch, F11 perf overlay are all
+  Designer-only)*. Still open: first-run flow review of the remaining menus.
 - Controller rebinding UI (the one control-system gap; the layout itself is
   stable and documented in `input_plugin.rs`).
 - Onboarding: the guidance HUD covers systems; add a first-session tutorial

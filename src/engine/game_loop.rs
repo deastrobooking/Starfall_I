@@ -105,6 +105,11 @@ pub fn fixed_motor_off(sim: Res<SimConfig>) -> bool {
 }
 
 fn toggle_fixed_motor(keyboard: Res<ButtonInput<KeyCode>>, mut sim: ResMut<SimConfig>) {
+    // Dev escape hatch — Designer edition only; consumers never flip the
+    // motor out from under the game (docs/PROJECT_PLAN.md P3).
+    if !cfg!(feature = "designer") {
+        return;
+    }
     if keyboard.just_pressed(KeyCode::F10) {
         sim.fixed_motor = !sim.fixed_motor;
         info!("EC1b fixed-tick motor: {}", sim.fixed_motor);
@@ -237,6 +242,10 @@ fn toggle_perf_overlay(
     mut root_q: Query<&mut Visibility, With<PerfOverlayRoot>>,
 ) {
     // F11: F9 is collider debug (world_plugin), F10 is the fixed-motor toggle.
+    // The perf overlay is a Designer affordance, not a consumer feature.
+    if !cfg!(feature = "designer") {
+        return;
+    }
     if !keyboard.just_pressed(KeyCode::F11) {
         return;
     }
