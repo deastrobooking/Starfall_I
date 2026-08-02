@@ -255,41 +255,48 @@ pub const BLADE_CATALOG: [BladeProfile; 8] = [
     },
 ];
 
-/// Blades published from the Weapon Forge, registered once at startup by the
-/// published-content loader. A `OnceLock` global rather than an ECS resource
-/// because `blade_for_id` is called from pure helpers (HUD text, stat
-/// application) that have no resource access — threading a resource through
-/// every call site would couple the whole blade API to the ECS for one
-/// load-once list.
-static PUBLISHED_BLADES: std::sync::OnceLock<Vec<BladeProfile>> = std::sync::OnceLock::new();
+/// Blades registered at runtime: the published set loaded at startup, plus
+/// the Weapon Forge's equip-to-test design, which is *re-registered on every
+/// test run*. A locked global rather than an ECS resource because
+/// `blade_for_id` is called from pure helpers (HUD text, stat application)
+/// that have no resource access — threading a resource through every call
+/// site would couple the whole blade API to the ECS for one small list.
+static PUBLISHED_BLADES: std::sync::LazyLock<std::sync::RwLock<Vec<BladeProfile>>> =
+    std::sync::LazyLock::new(Default::default);
 
-/// Register the published blade set. First call wins; later calls are ignored
-/// (content loads exactly once per process).
+/// Register or update runtime blades, upserting by id: re-publishing content
+/// or iterating on a test design replaces the previous version, latest wins.
 pub fn register_published_blades(blades: Vec<BladeProfile>) {
-    let _ = PUBLISHED_BLADES.set(blades);
-}
-
-/// Every blade published from the Weapon Forge (empty until the loader runs,
-/// and empty forever on an install with no published content).
-pub fn published_blades() -> &'static [BladeProfile] {
-    PUBLISHED_BLADES
-        .get()
-        .map(|blades| blades.as_slice())
-        .unwrap_or(&[])
+    let mut published = PUBLISHED_BLADES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for blade in blades {
+        if let Some(existing) = published.iter_mut().find(|b| b.id == blade.id) {
+            *existing = blade;
+        } else {
+            published.push(blade);
+        }
+    }
 }
 
 /// Resolve a shop item id to its blade — the built-in catalog first, then the
-/// published set. Unknown or absent ids fall back to the starter blade so a
-/// save referencing a removed item still plays correctly.
-pub fn blade_for_id(id: Option<&str>) -> &'static BladeProfile {
+/// registered runtime set. Returns by value (`BladeProfile` is `Copy`) so
+/// callers never hold a lock. Unknown or absent ids fall back to the starter
+/// blade so a save referencing a removed item still plays correctly.
+pub fn blade_for_id(id: Option<&str>) -> BladeProfile {
     let Some(id) = id else {
-        return &STARTER_BLADE;
+        return STARTER_BLADE;
     };
-    BLADE_CATALOG
+    if let Some(blade) = BLADE_CATALOG.iter().find(|blade| blade.id == id) {
+        return *blade;
+    }
+    PUBLISHED_BLADES
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
         .iter()
         .find(|blade| blade.id == id)
-        .or_else(|| published_blades().iter().find(|blade| blade.id == id))
-        .unwrap_or(&STARTER_BLADE)
+        .copied()
+        .unwrap_or(STARTER_BLADE)
 }
 
 /// Apply a blade to level-scaled sabre stats.
@@ -338,6 +345,32 @@ mod tests {
     }
 
     #[test]
+    fn runtime_registration_upserts_so_test_iterations_take_effect() {
+        // Unique ids: the registry is process-global and tests run in parallel.
+        let mut first = STARTER_BLADE;
+        first.id = "blade_upsert_test";
+        first.slash_damage_mult = 1.1;
+        register_published_blades(vec![first]);
+        assert!((blade_for_id(Some("blade_upsert_test")).slash_damage_mult - 1.1).abs() < 1e-6);
+
+        // Re-registering the same id replaces it — this is what lets the
+        // forge's TEST button iterate instead of freezing the first attempt.
+        let mut second = STARTER_BLADE;
+        second.id = "blade_upsert_test";
+        second.slash_damage_mult = 1.4;
+        register_published_blades(vec![second]);
+        assert!((blade_for_id(Some("blade_upsert_test")).slash_damage_mult - 1.4).abs() < 1e-6);
+
+        // The built-in catalog always wins over a runtime blade of the same id,
+        // so published content can never shadow shipped blades.
+        let mut impostor = STARTER_BLADE;
+        impostor.id = "weapon_crimson_edge";
+        impostor.slash_damage_mult = 99.0;
+        register_published_blades(vec![impostor]);
+        assert!(blade_for_id(Some("weapon_crimson_edge")).slash_damage_mult < 2.0);
+    }
+
+    #[test]
     fn unknown_or_missing_ids_fall_back_to_the_starter_blade() {
         // A save referencing a removed item must still be playable.
         assert_eq!(blade_for_id(None).id, STARTER_BLADE.id);
@@ -358,19 +391,19 @@ mod tests {
     #[test]
     fn blade_stats_compose_with_level_scaling_and_never_break_the_chain() {
         let crimson = blade_for_id(Some("weapon_crimson_edge"));
-        let (damage, _, count, cooldown) = apply_blade_to_stats(crimson, 50.0, 80.0, 5, 0.6);
+        let (damage, _, count, cooldown) = apply_blade_to_stats(&crimson, 50.0, 80.0, 5, 0.6);
         assert!(damage > 50.0, "heavy blade hits harder");
         assert_eq!(count, 4, "and gives up a slash for it");
         assert!(cooldown > 0.6, "and swings slower");
 
         // A negative delta can never leave the sabre unable to swing.
-        let (_, _, floored, _) = apply_blade_to_stats(crimson, 25.0, 40.0, 1, 0.8);
+        let (_, _, floored, _) = apply_blade_to_stats(&crimson, 25.0, 40.0, 1, 0.8);
         assert_eq!(floored, 1);
 
         // Blade and level scaling compose rather than overwrite: the same
         // blade on a stronger sabre still lands proportionally higher.
-        let (low, _, _, _) = apply_blade_to_stats(crimson, 25.0, 40.0, 4, 0.8);
-        let (high, _, _, _) = apply_blade_to_stats(crimson, 85.0, 150.0, 6, 0.4);
+        let (low, _, _, _) = apply_blade_to_stats(&crimson, 25.0, 40.0, 4, 0.8);
+        let (high, _, _, _) = apply_blade_to_stats(&crimson, 85.0, 150.0, 6, 0.4);
         assert!(high > low);
     }
 

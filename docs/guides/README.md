@@ -8,6 +8,7 @@ for the map.
 | Guide | Use it when you… |
 |---|---|
 | [verification.md](verification.md) | are about to land ANY change — gates, debug keys, env flags, smoke runs |
+| [designer-workflow.md](designer-workflow.md) | author content in the Designer edition and ship it into a consumer build |
 | [fixed-tick-motor.md](fixed-tick-motor.md) | touch player movement, input, or add a simulation system |
 | [combat-feel.md](combat-feel.md) | add/tune hit feedback (hitstop, knockback, flinch, numbers, shake) or hook a new gameplay event |
 | [character-studio-pipeline.md](character-studio-pipeline.md) | extend the character generator (morphs, wardrobe, presets, saves) |

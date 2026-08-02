@@ -22,15 +22,23 @@ use crate::combat::weapon_forge::{
     WeaponSpec, BLADE_LENGTH_RANGE, BLADE_WIDTH_RANGE,
 };
 use crate::engine::state::AppState;
+use crate::engine_tools::forge_widgets::{action_button, widget_row, ForgeWidgetStyle};
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::engine_tools::weapon_records;
+
+/// A design queued for in-game testing. Set by the forge's TEST button and
+/// consumed once by `apply_forge_test_equip` when play begins, so the designer
+/// spawns already holding the blade they were just editing.
+#[derive(Resource, Debug, Default)]
+struct ForgeTestEquip(Option<String>);
 
 pub struct WeaponForgePlugin;
 
 impl Plugin for WeaponForgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponForgeState>()
+            .init_resource::<ForgeTestEquip>()
             .add_systems(OnEnter(AppState::WeaponForge), setup_weapon_forge)
             .add_systems(OnExit(AppState::WeaponForge), despawn_weapon_forge)
             .add_systems(
@@ -45,6 +53,13 @@ impl Plugin for WeaponForgePlugin {
                 )
                     .chain()
                     .run_if(in_state(AppState::WeaponForge)),
+            )
+            // Runs in play, not in the forge: hands the queued test blade to
+            // the players once they exist. Designer-edition only by virtue of
+            // this whole plugin being feature-gated.
+            .add_systems(
+                Update,
+                apply_forge_test_equip.run_if(in_state(AppState::Playing)),
             );
     }
 }
@@ -116,6 +131,8 @@ enum ForgeAction {
     Preset(usize),
     /// Toggle typing mode for the weapon's name.
     NameEdit,
+    /// Jump into play holding the current design.
+    Test,
     Save,
     /// Load a saved design from the active project's library.
     LibraryLoad(usize),
@@ -323,46 +340,19 @@ fn weapon_forge_spin_system(
 
 // ── UI ────────────────────────────────────────────────────────────────────────
 
+/// Weapon Forge buttons through the shared widget vocabulary, tagged with
+/// this tool's own action component.
 fn forge_button(parent: &mut ChildSpawnerCommands, label: impl Into<String>, action: ForgeAction) {
-    parent
-        .spawn((
-            Button,
-            WeaponForgeButton(action),
-            Node {
-                min_width: Val::Px(104.0),
-                min_height: Val::Px(36.0),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.12, 0.14, 0.20)),
-            BorderColor::all(Color::srgb(0.34, 0.40, 0.58)),
-        ))
-        .with_children(|button| {
-            button.spawn((
-                Text::new(label.into()),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-        });
+    action_button(
+        parent,
+        label,
+        WeaponForgeButton(action),
+        &ForgeWidgetStyle::default(),
+    );
 }
 
 fn button_row(parent: &mut ChildSpawnerCommands, build: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(6.0),
-            margin: UiRect::bottom(Val::Px(5.0)),
-            flex_wrap: FlexWrap::Wrap,
-            row_gap: Val::Px(5.0),
-            ..default()
-        })
-        .with_children(build);
+    widget_row(parent, build);
 }
 
 fn spawn_weapon_forge_ui(commands: &mut Commands) {
@@ -484,7 +474,7 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
                 root,
                 "PRESETS & SAVE",
                 Vec2::new(12.0, 524.0),
-                style(120.0),
+                style(150.0),
                 (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     button_row(panel, |row| {
@@ -497,10 +487,27 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
                         }
                     });
                     button_row(panel, |row| {
+                        forge_button(row, "NAME", ForgeAction::NameEdit);
                         forge_button(row, "SAVE", ForgeAction::Save);
+                        forge_button(row, "TEST", ForgeAction::Test);
                         forge_button(row, "BACK", ForgeAction::Back);
                     });
                 },
+            );
+
+            // Saved designs in the active project; rows are rebuilt by
+            // `weapon_forge_library_rebuild_system` whenever the list changes.
+            spawn_tool_window(
+                root,
+                "LIBRARY",
+                Vec2::new(340.0, 84.0),
+                style(240.0),
+                (
+                    WeaponForgeLibraryPanel,
+                    MenuScrollPanel,
+                    ScrollPosition::default(),
+                ),
+                |_panel| {},
             );
         });
 }
@@ -561,6 +568,7 @@ fn weapon_forge_action_system(
     interactions: Query<(&Interaction, &WeaponForgeButton), (Changed<Interaction>, With<Button>)>,
     mut state: ResMut<WeaponForgeState>,
     registry: Res<ForgeProjectRegistry>,
+    mut test_equip: ResMut<ForgeTestEquip>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let mut action = None;
@@ -641,6 +649,19 @@ fn weapon_forge_action_system(
                 format!("Named: {name}")
             };
             state.mark(message);
+        }
+        ForgeAction::Test => {
+            // Register (or update — the registry upserts) the design under a
+            // stable test id, queue it for equip, and enter play. Iterating
+            // is the point: TEST, feel it, BACK out, tweak, TEST again.
+            let profile = state
+                .spec
+                .to_published_profile("blade_forge_test");
+            crate::combat::blades::register_published_blades(vec![profile]);
+            test_equip.0 = Some("blade_forge_test".to_string());
+            let name = state.spec.name.clone();
+            state.mark(format!("Testing {name} — entering play"));
+            next_state.set(AppState::Playing);
         }
         ForgeAction::Save => {
             let spec = state.spec.clone();
@@ -826,6 +847,30 @@ fn weapon_forge_label_refresh_system(
     }
 }
 
+/// Give every player the queued test blade the moment they exist in play.
+/// Consumes the queue (`take`) so the override applies to exactly one test
+/// session — a later normal playthrough is untouched.
+fn apply_forge_test_equip(
+    mut test_equip: ResMut<ForgeTestEquip>,
+    mut players: Query<
+        &mut crate::components::player::PlayerProgression,
+        With<crate::components::player::Player>,
+    >,
+) {
+    if test_equip.0.is_none() || players.is_empty() {
+        return;
+    }
+    let Some(id) = test_equip.0.take() else {
+        return;
+    };
+    for mut progression in players.iter_mut() {
+        // Direct equip, deliberately bypassing shop ownership: this is the
+        // designer's test rig, not a purchase.
+        progression.shop.equipped_weapon = Some(id.clone());
+    }
+    info!("forge test: equipped {id} on all players");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -915,6 +960,58 @@ mod tests {
         app.update();
         let mut roots = app.world_mut().query::<&WeaponPreviewRoot>();
         assert_eq!(roots.iter(app.world()).count(), 1);
+    }
+
+    #[test]
+    fn the_test_blade_is_equipped_once_and_only_once() {
+        use crate::components::player::{Player, PlayerProgression};
+        let mut app = App::new();
+        app.init_resource::<ForgeTestEquip>()
+            .add_systems(Update, apply_forge_test_equip);
+
+        // Queue a test while no players exist yet — the queue must survive
+        // until play actually spawns someone.
+        app.world_mut().resource_mut::<ForgeTestEquip>().0 =
+            Some("blade_forge_test".to_string());
+        app.update();
+        assert!(
+            app.world().resource::<ForgeTestEquip>().0.is_some(),
+            "no players yet: the queue must not be consumed"
+        );
+
+        let player = app
+            .world_mut()
+            .spawn((Player, PlayerProgression::default()))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<PlayerProgression>(player)
+                .unwrap()
+                .shop
+                .equipped_weapon
+                .as_deref(),
+            Some("blade_forge_test")
+        );
+        assert!(
+            app.world().resource::<ForgeTestEquip>().0.is_none(),
+            "the queue applies to exactly one session"
+        );
+
+        // A later session with a fresh player is untouched.
+        let later = app
+            .world_mut()
+            .spawn((Player, PlayerProgression::default()))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<PlayerProgression>(later)
+                .unwrap()
+                .shop
+                .equipped_weapon,
+            None
+        );
     }
 
     #[test]

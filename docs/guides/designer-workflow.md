@@ -1,0 +1,93 @@
+# Designer Workflow — Authoring Content That Ships
+
+How to take content from an idea to a consumer build, using the Designer
+edition's tools. For what the editions *are* and where the boundary sits, read
+[PROJECT_PLAN.md](../PROJECT_PLAN.md) first.
+
+## The loop at a glance
+
+```
+Project Hub → open/create a project
+   ↓
+Author (Creature Forge / Weapon Forge / live editor)
+   ↓ NAME + SAVE          — versioned records, atomic writes, snapshots
+TEST                       — jump into play holding the design
+   ↓ BACK, tweak, TEST again
+PUBLISH TO GAME            — validate everything, bake assets/published/
+   ↓
+cargo build --no-default-features   — the consumer Game edition, content included
+```
+
+## Projects
+
+Everything you author lives in a **ForgeProject**: a versioned store with
+atomic writes, recovery snapshots, and draft/published hashes. Open or create
+one from the main menu's **CREATOR TOOLS** (the Project Hub). Tools refuse to
+save without an active project, and tell you so.
+
+## Tool windows
+
+Every authoring screen is built from the same windows. They behave like a DCC
+tool: drag the title bar to move, drag the **◢ corner grip** to resize,
+double-click the title to collapse, and the **—** button minimizes. Windows
+never strand off-screen — shrinking the application window shrinks and
+repositions panels to fit.
+
+## Weapon Forge
+
+Reachable from the hub, or directly with `STARFALL_WEAPON_FORGE=1` while
+iterating on the tool itself.
+
+- **PARTS** — cycle grip / guard / emitter / pommel / colour; step blade
+  length and width. **Stats are derived from the build** — you are designing a
+  physical object, not filling in a spreadsheet. The preview is assembled from
+  the same measurements the derivation reads, so it cannot lie.
+- **PERFORMANCE** — the derived numbers as percentages of the issued blade,
+  plus chain delta, balance point, length, trait, and estimated shop value.
+  Blocking problems are listed here *before* you try to save.
+- **NAME** — toggles typing mode (type, Backspace, Enter to finish). The name
+  matters: the content id — the identity saves, the shop, and publishing all
+  reference — derives from it. Rename-then-save creates a new design.
+- **TEST** — registers the current design under a test id, jumps into play
+  with every player holding it, and consumes itself after one session. Tweak,
+  TEST again; the registry upserts, so iteration always takes effect.
+- **LIBRARY** — the active project's saved designs; LOAD or DEL per row.
+  Deletion goes through the same atomic store as saves.
+
+No design can be a strict upgrade over the issued blade — an all-upside build
+pays for it in swing speed. This is enforced by a build-failing test that
+sweeps every part combination, so don't fight it; trade something.
+
+## Creature Forge
+
+Same window vocabulary against the robot geometry factory. Creatures publish
+into the same catalog dungeon spawners resolve `CreatureSpawnOverride`
+records through — a published creature id in a spawner override fields your
+creature in a consumer build.
+
+## Publishing
+
+**PUBLISH TO GAME** in the Project Hub:
+
+1. Runs the store's validate-and-promote gate — one broken record publishes
+   nothing.
+2. Persists published hashes into the project.
+3. Bakes weapons and creatures into `assets/published/` as deterministic JSON
+   (sorted by id — republishing without edits is byte-identical).
+
+The result appears in the hub status line. The Game edition loads
+`assets/published/` read-only at startup: published weapons go on sale priced
+by the forge's own derivation; published creatures become spawnable. Missing
+files are a first-class empty state, so a build with no published content is
+simply the base game.
+
+## Verifying your content ships
+
+```
+cargo test                                        # both content drift guards run here
+cargo build --no-default-features                 # the consumer build
+STARFALL_AUTOSTART=1 ./target/debug/starfall-i    # boot straight into play
+```
+
+If it plays in that binary, it ships. See
+[verification.md](verification.md) for the full gate list.

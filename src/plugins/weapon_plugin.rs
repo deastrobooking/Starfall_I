@@ -709,7 +709,7 @@ fn apply_sabre_blade_system(
         let level = sabre.level;
         sabre.set_level(level);
         let (slash, wave, count, cooldown) = apply_blade_to_stats(
-            blade,
+            &blade,
             sabre.slash_damage,
             sabre.wave_damage,
             sabre.slash_count,
@@ -3580,7 +3580,7 @@ fn beam_sabre_update_system(
                         }
                         let completed_slashes = sabre.slash_index + 1;
                         if let Some(profile) =
-                            sabre_wave_profile(&sabre, upgrades, completed_slashes, equipped_blade)
+                            sabre_wave_profile(&sabre, upgrades, completed_slashes, &equipped_blade)
                         {
                             action_sfx.write(ModularActionSfxEvent::new("sabre.wave"));
                             spawn_sabre_wave_attack(

@@ -6202,7 +6202,7 @@ fn hud_update_system(
                 PlayerHudTextKind::SabreStatus => sabre_status_text(
                     sabre,
                     &progression.upgrades,
-                    crate::combat::blades::blade_for_id(
+                    &crate::combat::blades::blade_for_id(
                         progression.shop.equipped_weapon.as_deref(),
                     ),
                 ),

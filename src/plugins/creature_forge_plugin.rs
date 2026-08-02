@@ -13,6 +13,7 @@ use crate::character::mesh_modifiers::MeshModifier;
 use crate::engine::platform_paths;
 use crate::engine::state::AppState;
 use crate::engine_tools::creature_records;
+use crate::engine_tools::forge_widgets::ForgeWidgetStyle;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::robots::creature::{
@@ -344,33 +345,16 @@ fn despawn_creature_forge(
 
 // ── UI construction ───────────────────────────────────────────────────────────
 
+/// Creature Forge buttons through the shared widget vocabulary, keeping this
+/// tool's teal accent.
 fn forge_button(parent: &mut ChildSpawnerCommands, label: String, action: ForgeAction) {
-    parent
-        .spawn((
-            Button,
-            ForgeButton(action),
-            Node {
-                min_width: Val::Px(108.0),
-                min_height: Val::Px(36.0),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.10, 0.16, 0.24)),
-            BorderColor::all(Color::srgb(0.20, 0.44, 0.62)),
-        ))
-        .with_children(|button| {
-            button.spawn((
-                Text::new(label),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-        });
+    let style = ForgeWidgetStyle {
+        button_background: Color::srgb(0.10, 0.16, 0.24),
+        button_border: Color::srgb(0.20, 0.44, 0.62),
+        min_width: 108.0,
+        ..Default::default()
+    };
+    crate::engine_tools::forge_widgets::action_button(parent, label, ForgeButton(action), &style);
 }
 
 fn forge_row(parent: &mut ChildSpawnerCommands, content: impl FnOnce(&mut ChildSpawnerCommands)) {

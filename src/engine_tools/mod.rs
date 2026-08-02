@@ -8,6 +8,8 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 pub mod character_records;
 pub mod creature_records;
+/// Shared button/row/label widgets for Forge authoring screens.
+pub mod forge_widgets;
 pub mod editable_mesh;
 pub mod mesh_selection;
 pub mod mesh_uv;

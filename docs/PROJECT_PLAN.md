@@ -117,16 +117,17 @@ and boot; verification gains a consumer-build check.
   project store (drafts included) stays authoritative.
 
 ### P2 — Designer UX pass
-- ~~Weapon Forge: load/rename/delete existing designs~~ *(landed: a LIBRARY
-  panel lists the active project's designs with LOAD/DEL per row, and a NAME
-  field with editor-style key capture names designs before saving)*. Still
-  open: equip-to-test from the forge, character-holding preview.
-- Shared forge widgets (cycle/slider/readout) extracted from the three forges
-  into `engine_tools` so new tools stop copying UI code.
+- ~~Weapon Forge: load/rename/delete existing designs~~ *(landed: LIBRARY
+  panel with LOAD/DEL, NAME field with editor-style key capture)*.
+- ~~Equip-to-test~~ *(landed: TEST jumps into play with every player holding
+  the design; the blade registry upserts so iteration always takes effect)*.
+  Still open: character-holding preview inside the forge.
+- ~~Shared forge widgets~~ *(landed: `engine_tools::forge_widgets` — action
+  buttons, rows, section labels; Weapon and Creature Forge both build on it)*.
 - ~~Mouse affordances for tool windows~~ *(landed: corner-grip resize with
   min/viewport clamping, double-click header collapse, and panels that shrink
   to fit when the application window is resized)*.
-- A designer manual under `docs/guides/`.
+- ~~A designer manual~~ *(landed: [guides/designer-workflow.md](guides/designer-workflow.md))*.
 
 ### P3 — Game edition polish (walk-away list)
 - First-run flow: main menu → player select → chapter select with no dev
