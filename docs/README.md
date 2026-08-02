@@ -1,10 +1,11 @@
 # Starfall I — Documentation
 
-Five active documents. Everything else is either a task-focused guide or a
+Six active documents. Everything else is either a task-focused guide or a
 preserved historical record.
 
 | Document | Read it when you want… |
 |---|---|
+| **[PROJECT_PLAN.md](PROJECT_PLAN.md)** | …the **two-edition plan**: what ships to players (Game) versus what ships to creators (Designer), the boundary between them, and the roadmap to walking away with each. |
 | **[FEATURES.md](FEATURES.md)** | …to know **what the game does**. The master feature reference: every system, from movement and combat to settlements, raids, creation tools, and audio. |
 | **[DEVELOPMENT.md](DEVELOPMENT.md)** | …to **work on the code**. Build and run, repository layout, architectural rules, the simulation frame, data-driven combat, verification, conventions. |
 | **[engine_roadmap.md](engine_roadmap.md)** | …to see **where the engine is going**. The EC# track: phases, acceptance criteria, and what has landed. |

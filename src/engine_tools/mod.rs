@@ -1522,6 +1522,11 @@ fn toggle_editor_workspace(
     }) || (native.pressed(NativeButton::Select)
         && native.just_pressed(NativeButton::Start));
 
+    // The live editor belongs to the Designer edition; consumers never enter
+    // Editing, so the chord must be inert rather than opening dev tooling.
+    if !cfg!(feature = "designer") {
+        return;
+    }
     if keyboard.just_pressed(KeyCode::Tab) || controller_chord {
         match mode.get() {
             EngineToolMode::Playing => next_mode.set(EngineToolMode::Editing),

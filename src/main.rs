@@ -42,10 +42,9 @@ use engine_tools::{EngineToolMode, EngineToolsPlugin};
 use events::EventsPlugin;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
-    CompanionPlugin, CraftingPlugin, CreatureForgePlugin, DiscoverablePlugin, EnemyPlugin,
-    HackingPlugin, ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin,
-    RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponForgePlugin, WeaponPlugin,
-    WorldPlugin,
+    CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, HackingPlugin,
+    ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin, RobotGaragePlugin,
+    SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
 use resources::{
     CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData, CharacterDesignSnapshot,
@@ -271,10 +270,14 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         RobotGaragePlugin,
         ModularCharacterPlugin,
         character_studio::CharacterStudioPlugin,
-        CreatureForgePlugin,
-        WeaponForgePlugin,
         ImportedCharacterForgePlugin,
     ));
+
+    // The authoring screens are the Designer edition (docs/PROJECT_PLAN.md).
+    // A consumer build compiles them out entirely; their AppState variants
+    // remain but nothing can enter them.
+    #[cfg(feature = "designer")]
+    app.add_plugins((plugins::CreatureForgePlugin, plugins::WeaponForgePlugin));
 }
 
 fn apply_boot_overrides(app: &mut App) {
@@ -286,12 +289,12 @@ fn apply_boot_overrides(app: &mut App) {
         app.insert_state(AppState::CharacterStudio);
     }
     // Boot straight into the modular Weapon Forge for tool iteration.
-    if std::env::var_os("STARFALL_WEAPON_FORGE").is_some() {
+    if cfg!(feature = "designer") && std::env::var_os("STARFALL_WEAPON_FORGE").is_some() {
         app.insert_state(AppState::WeaponForge);
     }
     // Boot directly into a live chapter with Starfall Forge open for editor
     // smoke tests and rapid tool iteration.
-    if std::env::var_os("STARFALL_EDITOR").is_some() {
+    if cfg!(feature = "designer") && std::env::var_os("STARFALL_EDITOR").is_some() {
         app.insert_state(AppState::Playing);
         app.insert_state(EngineToolMode::Editing);
     }

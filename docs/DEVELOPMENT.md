@@ -133,6 +133,16 @@ and `hoverboard_claims_trick_input`. Those predicates are deliberately
 independent of cooldowns so behaviour can never depend on which system ran
 first.
 
+## Editions
+
+One codebase produces two products (see [PROJECT_PLAN.md](PROJECT_PLAN.md)):
+the default build is the **Designer** edition; `--no-default-features` is the
+consumer **Game** edition. The `designer` cargo feature gates every authoring
+entry point — the Project Hub menu button, the Creature/Weapon Forge plugins,
+the live-editor toggle (Tab / Select+Start), and designer env hooks. When you
+add a tool, gate its entry point the same way; when you add gameplay, never
+reference designer-gated modules from ungated code.
+
 ## The simulation frame
 
 `GameSet` defines the canonical per-frame order, configured centrally in
@@ -200,6 +210,10 @@ Legacy saves are migrated on load — when adding a field, provide a default and
 migration path rather than invalidating existing profiles.
 
 ## Verification
+
+Both editions must stay green: run checks with default features (Designer) and
+with `--no-default-features` (Game). A change that only compiles as Designer
+is a broken consumer build.
 
 In rough order of cost:
 

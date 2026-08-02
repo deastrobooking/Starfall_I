@@ -25,6 +25,11 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 objc2 = "0.6.4"
 
 [features]
+# The edition boundary (see docs/PROJECT_PLAN.md). Default builds are the
+# Designer edition; `cargo build --no-default-features` produces the consumer
+# Game edition with every authoring entry point compiled out.
+default = ["designer"]
+designer = []
 # Use dynamic linking for faster incremental dev builds:  cargo run --features dynamic
 dynamic = ["bevy/dynamic_linking"]
 # EC0: profile with Tracy:  cargo run --release --features tracy  (then open the Tracy client)

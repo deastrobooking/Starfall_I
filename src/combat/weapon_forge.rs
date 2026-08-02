@@ -20,6 +20,11 @@
 //!
 //! Consumed by `plugins::weapon_forge_plugin`, the in-game authoring screen.
 
+// In the consumer Game edition the authoring panel that consumes this
+// module is compiled out (docs/PROJECT_PLAN.md P0); the model itself is
+// removed from that build in P2.
+#![cfg_attr(not(feature = "designer"), allow(dead_code))]
+
 use serde::{Deserialize, Serialize};
 
 use crate::combat::blades::{BladeColor, BladeProfile, BladeTrait, STARTER_BLADE};

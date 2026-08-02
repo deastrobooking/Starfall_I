@@ -6,6 +6,11 @@
 //! atomic writes, recovery snapshots, draft/published hashes, and validation
 //! gates as every other content type rather than inventing its own save path.
 
+// In the consumer Game edition the authoring panel that consumes this
+// module is compiled out (docs/PROJECT_PLAN.md P0); the model itself is
+// removed from that build in P2.
+#![cfg_attr(not(feature = "designer"), allow(dead_code))]
+
 use super::persistence::{
     ContentCategory, ContentPayload, ContentRecord, ForgeProject, GenericRecipeDraft, ProjectStore,
     CURRENT_PROJECT_SCHEMA,

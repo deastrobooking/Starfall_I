@@ -5,6 +5,7 @@ pub mod character_plugin;
 pub mod chest_plugin;
 pub mod companion_plugin;
 pub mod crafting_plugin;
+#[cfg(feature = "designer")]
 pub mod creature_forge_plugin;
 pub mod discoverable_plugin;
 pub mod enemy_plugin;
@@ -18,6 +19,7 @@ pub mod save_plugin;
 pub mod ui_foundation;
 pub mod ui_plugin;
 pub mod vehicle_plugin;
+#[cfg(feature = "designer")]
 pub mod weapon_forge_plugin;
 pub mod weapon_plugin;
 pub mod world_plugin;
@@ -29,6 +31,7 @@ pub use character_plugin::CharacterPlugin;
 pub use chest_plugin::ChestPlugin;
 pub use companion_plugin::CompanionPlugin;
 pub use crafting_plugin::CraftingPlugin;
+#[cfg(feature = "designer")]
 pub use creature_forge_plugin::CreatureForgePlugin;
 pub use discoverable_plugin::DiscoverablePlugin;
 pub use enemy_plugin::EnemyPlugin;
@@ -41,6 +44,7 @@ pub use robot_garage_plugin::RobotGaragePlugin;
 pub use save_plugin::SavePlugin;
 pub use ui_plugin::UiPlugin;
 pub use vehicle_plugin::VehiclePlugin;
+#[cfg(feature = "designer")]
 pub use weapon_forge_plugin::WeaponForgePlugin;
 pub use weapon_plugin::WeaponPlugin;
 pub use world_plugin::WorldPlugin;

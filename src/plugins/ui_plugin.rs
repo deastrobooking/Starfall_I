@@ -1246,13 +1246,17 @@ fn setup_main_menu(
                     theme.player_accent(0),
                     StartButton,
                 );
-                spawn_main_menu_button(
-                    page,
-                    catalog.text(UiTextKey::StartEditor),
-                    theme.create,
-                    theme.player_accent(1),
-                    EditorStartButton,
-                );
+                // The Project Hub is the Designer edition's front door; a
+                // consumer build has no authoring entry points at all.
+                if cfg!(feature = "designer") {
+                    spawn_main_menu_button(
+                        page,
+                        catalog.text(UiTextKey::StartEditor),
+                        theme.create,
+                        theme.player_accent(1),
+                        EditorStartButton,
+                    );
+                }
                 spawn_main_menu_button(
                     page,
                     catalog.text(UiTextKey::Settings),
