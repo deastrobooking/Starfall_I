@@ -255,8 +255,32 @@ pub const BLADE_CATALOG: [BladeProfile; 8] = [
     },
 ];
 
-/// Resolve a shop item id to its blade. Unknown or absent ids fall back to the
-/// starter blade so a save referencing a removed item still plays correctly.
+/// Blades published from the Weapon Forge, registered once at startup by the
+/// published-content loader. A `OnceLock` global rather than an ECS resource
+/// because `blade_for_id` is called from pure helpers (HUD text, stat
+/// application) that have no resource access — threading a resource through
+/// every call site would couple the whole blade API to the ECS for one
+/// load-once list.
+static PUBLISHED_BLADES: std::sync::OnceLock<Vec<BladeProfile>> = std::sync::OnceLock::new();
+
+/// Register the published blade set. First call wins; later calls are ignored
+/// (content loads exactly once per process).
+pub fn register_published_blades(blades: Vec<BladeProfile>) {
+    let _ = PUBLISHED_BLADES.set(blades);
+}
+
+/// Every blade published from the Weapon Forge (empty until the loader runs,
+/// and empty forever on an install with no published content).
+pub fn published_blades() -> &'static [BladeProfile] {
+    PUBLISHED_BLADES
+        .get()
+        .map(|blades| blades.as_slice())
+        .unwrap_or(&[])
+}
+
+/// Resolve a shop item id to its blade — the built-in catalog first, then the
+/// published set. Unknown or absent ids fall back to the starter blade so a
+/// save referencing a removed item still plays correctly.
 pub fn blade_for_id(id: Option<&str>) -> &'static BladeProfile {
     let Some(id) = id else {
         return &STARTER_BLADE;
@@ -264,6 +288,7 @@ pub fn blade_for_id(id: Option<&str>) -> &'static BladeProfile {
     BLADE_CATALOG
         .iter()
         .find(|blade| blade.id == id)
+        .or_else(|| published_blades().iter().find(|blade| blade.id == id))
         .unwrap_or(&STARTER_BLADE)
 }
 

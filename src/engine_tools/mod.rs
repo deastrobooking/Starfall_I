@@ -14,6 +14,8 @@ pub mod mesh_uv;
 mod persistence;
 mod presets;
 pub mod project_registry;
+/// Designer→Game publish step: bake validated records to assets/published/.
+pub mod publish;
 /// Draggable, minimizable in-game tool windows shared by every editor.
 pub mod tool_windows;
 /// Weapon Forge saves, routed through the versioned project contract.

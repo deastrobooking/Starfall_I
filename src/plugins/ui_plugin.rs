@@ -426,6 +426,11 @@ struct MainMenuSettingsButton;
 struct MainMenuSettingsBackButton;
 #[derive(Component, Clone, Copy)]
 struct ProjectHubButton(ProjectHubAction);
+
+/// The hub's status line; publish results land here so the designer sees the
+/// outcome where they clicked, not in a log file.
+#[derive(Component)]
+struct ProjectHubStatusText;
 #[derive(Clone, Copy)]
 enum ProjectHubAction {
     /// Continue the registry's active project.
@@ -438,6 +443,9 @@ enum ProjectHubAction {
     CreatureForge,
     /// Open the modular Weapon Forge authoring screen.
     WeaponForge,
+    /// Validate the active project and bake it to `assets/published/` — the
+    /// Designer→Game content bridge (docs/PROJECT_PLAN.md P1).
+    Publish,
     /// Open the GLB-based imported character editor.
     ImportedCharacterForge,
     Back,
@@ -1449,6 +1457,7 @@ fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>
             };
             root.spawn((
                 Text::new(status),
+                ProjectHubStatusText,
                 TextFont {
                     font_size: FontSize::Px(16.0),
                     ..default()
@@ -1501,6 +1510,12 @@ fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>
             );
             spawn_project_hub_button(
                 root,
+                "PUBLISH TO GAME".to_string(),
+                ProjectHubAction::Publish,
+                Color::srgb(0.42, 0.30, 0.10),
+            );
+            spawn_project_hub_button(
+                root,
                 "BACK".to_string(),
                 ProjectHubAction::Back,
                 Color::srgb(0.22, 0.26, 0.38),
@@ -1547,6 +1562,7 @@ fn project_hub_action_system(
     mut imported_forge_return: ResMut<ImportedForgeReturnTarget>,
     mut next_state: ResMut<NextState<AppState>>,
     mut next_tool_mode: ResMut<NextState<EngineToolMode>>,
+    mut hub_status: Query<&mut Text, With<ProjectHubStatusText>>,
 ) {
     for (interaction, button) in interactions.iter() {
         if *interaction != Interaction::Pressed {
@@ -1590,6 +1606,17 @@ fn project_hub_action_system(
             ProjectHubAction::ImportedCharacterForge => {
                 *imported_forge_return = ImportedForgeReturnTarget::ProjectHub;
                 next_state.set(AppState::ImportedCharacterForge)
+            }
+            ProjectHubAction::Publish => {
+                let outcome = crate::engine_tools::publish::publish_active_project(&registry);
+                let message = match outcome {
+                    Ok(report) => format!("PUBLISHED ✓  {}", report.summary()),
+                    Err(error) => format!("PUBLISH FAILED — {error}"),
+                };
+                info!("{message}");
+                for mut text in hub_status.iter_mut() {
+                    *text = Text::new(message.clone());
+                }
             }
             ProjectHubAction::Back => next_state.set(AppState::MainMenu),
         }

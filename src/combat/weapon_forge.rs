@@ -388,6 +388,23 @@ impl WeaponSpec {
         }
     }
 
+    /// The equippable profile for a *published* design, carrying its stable
+    /// content id and authored name.
+    ///
+    /// `BladeProfile` uses `&'static str` because the built-in catalog is
+    /// `const`; published designs are load-once-per-process content, so their
+    /// strings are deliberately leaked — bounded by the size of the published
+    /// set, and exactly the lifetime the profile needs.
+    pub fn to_published_profile(&self, content_id: &str) -> BladeProfile {
+        let mut profile = self.to_blade_profile();
+        profile.id = Box::leak(content_id.to_string().into_boxed_str());
+        profile.name = Box::leak(self.name.clone().into_boxed_str());
+        profile.summary = Box::leak(
+            format!("Forged in the Weapon Forge: {}", self.name).into_boxed_str(),
+        );
+        profile
+    }
+
     /// Rough credit value, so forged weapons can be priced against the shop.
     pub fn estimated_value(&self) -> u32 {
         let derived = self.derived_profile();

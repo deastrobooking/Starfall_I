@@ -259,7 +259,10 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         CompanionPlugin,
         ArmorPlugin,
         CraftingPlugin,
-        world::missions::MissionPlugin,
+        (
+            world::missions::MissionPlugin,
+            world::published_content::PublishedContentPlugin,
+        ),
         SavePlugin,
     ))
     .add_plugins((

@@ -86,7 +86,7 @@ scenes…). Consumers must never depend on a project store existing.
 
 1. **Author** (Designer): tools write draft records through the versioned
    store — atomic writes, recovery snapshots, draft hashes.
-2. **Publish** (Designer, planned): a publish step validates every record and
+2. **Publish** (Designer): a publish step validates every record and
    bakes the published set into `assets/published/` as plain JSON the game
    loads read-only — the same pattern `moves.json` / `tricks.json` already
    prove out.
@@ -101,12 +101,17 @@ scenes…). Consumers must never depend on a project store existing.
 forge plugins, editor toggle, and designer env hooks. Both editions compile
 and boot; verification gains a consumer-build check.
 
-### P1 — Publish pipeline (Designer) → consumable content (Game)
-- "PUBLISH" in the Project Hub: validate all records, write `assets/published/`.
-- Game-side loaders for published creatures/weapons (weapons already resolve
-  through `BladeProfile`; creatures through the robot factory).
-- Drift guard tests: every published record loads in a no-default-features
-  build.
+### P1 — Publish pipeline (Designer) → consumable content (Game) *(landed)*
+- **PUBLISH TO GAME** in the Project Hub runs the store's validate-and-promote
+  gate, persists published hashes, and bakes weapons + creatures to
+  `assets/published/` as deterministic JSON (sorted, so re-publishing without
+  edits is byte-identical). Results land in the hub status line.
+- Game-side loader (`world::published_content`, both editions): published
+  weapons register into the blade resolver and go on sale in the shop priced
+  by the forge's own derivation; published creatures load into a
+  `PublishedCreatures` spec pool. Missing files are a first-class empty state.
+- Covered by determinism, round-trip, missing-file, resolver, and shop-pricing
+  tests. Remaining P1 follow-up: encounter systems consuming the creature pool.
 
 ### P2 — Designer UX pass
 - Weapon Forge: load/rename/delete existing designs (the records helpers

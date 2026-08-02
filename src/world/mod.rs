@@ -8,6 +8,7 @@
 //! | Module | Responsibility |
 //! |---|---|
 //! | [`missions`] | Mission/objective definitions and completion rules |
+//! | [`published_content`] | Loads Designer-published weapons/creatures into play |
 //! | [`raids`] | Raid encounters and their progression gates |
 //! | [`final_war`] | Late-campaign escalation state |
 //! | [`settlement_economy`] | Settlement production, prices, and trade |
@@ -23,6 +24,7 @@ pub mod discussion;
 pub mod final_war;
 pub mod hacking;
 pub mod missions;
+pub mod published_content;
 pub mod raids;
 pub mod robot_pets;
 pub mod settlement_economy;
