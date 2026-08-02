@@ -113,7 +113,9 @@ and boot; verification gains a consumer-build check.
   already exist), equip-to-test from the forge, character-holding preview.
 - Shared forge widgets (cycle/slider/readout) extracted from the three forges
   into `engine_tools` so new tools stop copying UI code.
-- Mouse affordances for tool windows (drag is in; add resize + snap).
+- ~~Mouse affordances for tool windows~~ *(landed: corner-grip resize with
+  min/viewport clamping, double-click header collapse, and panels that shrink
+  to fit when the application window is resized)*.
 - A designer manual under `docs/guides/`.
 
 ### P3 — Game edition polish (walk-away list)
