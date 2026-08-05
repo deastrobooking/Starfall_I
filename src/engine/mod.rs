@@ -10,6 +10,7 @@
 //!
 //! | Module | Responsibility |
 //! |---|---|
+//! | [`bindings`] | Player-configurable face layout and keyboard actions |
 //! | [`game_loop`] | `GameSet` ordering, fixed-tick config, perf overlay |
 //! | [`physics`] | Avian compatibility shim (`Collider`, controller, layers) |
 //! | [`input_buffer`] | Per-player edge latch so fixed ticks never drop presses |
@@ -19,6 +20,7 @@
 //! | [`state`] | `AppState` — the top-level screen/mode machine |
 //! | [`platform_paths`] | OS-specific save/config/crash locations |
 
+pub mod bindings;
 pub mod game_loop;
 pub mod game_rng;
 pub mod input_buffer;

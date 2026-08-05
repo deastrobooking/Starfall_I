@@ -137,9 +137,16 @@ impl Plugin for UiPlugin {
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
             .add_systems(OnEnter(AppState::Victory), setup_victory_screen)
             .add_systems(Update, victory_input.run_if(in_state(AppState::Victory)))
+            .init_resource::<PendingRebind>()
             .add_systems(
                 Update,
-                settings_panel_input_system
+                (
+                    settings_panel_input_system,
+                    // Capture runs after the buttons so arming and consuming a
+                    // press can never happen in the same frame (the click that
+                    // arms would otherwise be eaten as the new binding).
+                    settings_rebind_capture_system.after(settings_panel_input_system),
+                )
                     .run_if(in_state(AppState::Paused).or_else(in_state(AppState::MainMenu))),
             )
             .add_systems(
@@ -412,6 +419,9 @@ struct DifficultyText;
 struct VolumeText;
 #[derive(Component)]
 struct InterfaceLayoutText;
+/// Live readout of the control bindings on the settings page.
+#[derive(Component)]
+struct ControlBindingsText;
 #[derive(Component)]
 struct AccessibilitySettingsText;
 #[derive(Component)]
@@ -499,7 +509,19 @@ enum SettingsAction {
     ToggleHighContrast,
     ToggleReducedMotion,
     ToggleSubtitles,
+    /// Cycle the face-button layout preset (Standard / Nintendo / Swap A/B).
+    FaceLayoutNext,
+    /// Invert the look Y axis for mouse and stick together.
+    ToggleInvertLook,
+    /// Begin capturing the next key press for this action.
+    RebindKey(crate::engine::bindings::KeyAction),
+    /// Restore every keyboard binding to its shipped default.
+    ResetKeys,
 }
+
+/// The action currently waiting for a key press, if the player is rebinding.
+#[derive(Resource, Debug, Default)]
+struct PendingRebind(Option<crate::engine::bindings::KeyAction>);
 #[derive(Clone, Copy)]
 enum DifficultyChoice {
     Easy,
@@ -1799,7 +1821,7 @@ fn setup_pause_menu(
                 ));
                 page.spawn((
                     Text::new(
-                        "Movement, aiming, star-beam combat, traversal tools, vehicle boarding, interaction, map use, weapon swaps, and special tools are available during play.\nTraversal supports wall slide, wall-jump, ledge hang, zip, swing, glide, hover, air dash, and hoverboard movement.",
+                        "Movement, aiming, star-beam combat, traversal tools, vehicle boarding, interaction, map use, weapon swaps, and special tools are available during play.\nCamera: P (keyboard) or Select + D-pad Left (controller) toggles your view between first and third person.\nTraversal supports wall slide, wall-jump, ledge hang, zip, swing, glide, hover, air dash, and hoverboard movement.",
                     ),
                     TextFont {
                         font_size: FontSize::Px(16.0),
@@ -1982,6 +2004,50 @@ fn setup_pause_menu(
                     TextColor(Color::srgb(0.72, 0.82, 1.0)),
                     InterfaceLayoutText,
                 ));
+
+                // ── Controls ───────────────────────────────────────────────
+                page.spawn((
+                    Text::new(control_bindings_text(&settings, &PendingRebind::default())),
+                    TextFont {
+                        font_size: FontSize::Px(14.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.86, 0.90, 0.72)),
+                    ControlBindingsText,
+                ));
+                page.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(8.0),
+                    row_gap: Val::Px(8.0),
+                    justify_content: JustifyContent::Center,
+                    max_width: Val::Px(420.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    spawn_settings_button(row, "FACE LAYOUT", SettingsAction::FaceLayoutNext);
+                    spawn_settings_button(row, "INVERT Y", SettingsAction::ToggleInvertLook);
+                    spawn_settings_button(row, "RESET KEYS", SettingsAction::ResetKeys);
+                });
+                page.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(8.0),
+                    row_gap: Val::Px(8.0),
+                    justify_content: JustifyContent::Center,
+                    max_width: Val::Px(420.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    // One rebind button per action; pressing it arms capture.
+                    for action in crate::engine::bindings::KeyAction::ALL {
+                        spawn_settings_button(
+                            row,
+                            action.label(),
+                            SettingsAction::RebindKey(action),
+                        );
+                    }
+                });
                 page.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     flex_wrap: FlexWrap::Wrap,
@@ -7870,11 +7936,13 @@ fn victory_input(
 fn settings_panel_input_system(
     mut settings: ResMut<GameSettings>,
     interaction_q: Query<(&Interaction, &SettingsButton), (Changed<Interaction>, With<Button>)>,
+    mut pending_rebind: ResMut<PendingRebind>,
     mut text_q: ParamSet<(
         Query<&mut Text, With<DifficultyText>>,
         Query<&mut Text, With<VolumeText>>,
         Query<&mut Text, With<InterfaceLayoutText>>,
         Query<&mut Text, With<AccessibilitySettingsText>>,
+        Query<&mut Text, With<ControlBindingsText>>,
     )>,
 ) {
     let mut changed = false;
@@ -7883,6 +7951,27 @@ fn settings_panel_input_system(
             continue;
         }
         match button.0 {
+            SettingsAction::FaceLayoutNext => {
+                use crate::engine::bindings::FaceLayout;
+                let presets = FaceLayout::PRESETS;
+                let current = presets
+                    .iter()
+                    .position(|preset| *preset == settings.bindings.face_layout)
+                    .unwrap_or(0);
+                settings.bindings.face_layout = presets[(current + 1) % presets.len()];
+            }
+            SettingsAction::ToggleInvertLook => {
+                settings.bindings.invert_look_y = !settings.bindings.invert_look_y;
+            }
+            SettingsAction::RebindKey(action) => {
+                // Arm capture; the next bindable key press lands on this
+                // action (see `settings_rebind_capture_system`).
+                pending_rebind.0 = Some(action);
+            }
+            SettingsAction::ResetKeys => {
+                settings.bindings.reset_keys();
+                pending_rebind.0 = None;
+            }
             SettingsAction::Difficulty(DifficultyChoice::Easy) => settings.difficulty_scale = 0.7,
             SettingsAction::Difficulty(DifficultyChoice::Normal) => settings.difficulty_scale = 1.0,
             SettingsAction::Difficulty(DifficultyChoice::Hard) => settings.difficulty_scale = 1.3,
@@ -7973,6 +8062,87 @@ fn volume_text(settings: &GameSettings) -> String {
         settings.sfx_volume * 100.0,
         if settings.rumble_on_hit { "ON" } else { "OFF" },
     )
+}
+
+/// Live control readout: layout, invert, and every action's current key, with
+/// the armed action calling for a press.
+fn control_bindings_text(settings: &GameSettings, pending: &PendingRebind) -> String {
+    use crate::engine::bindings::{key_name, KeyAction};
+    let mut lines = vec![format!(
+        "Face layout: {}   Invert look Y: {}",
+        settings.bindings.face_layout.label(),
+        on_off(settings.bindings.invert_look_y),
+    )];
+    if let Some(action) = pending.0 {
+        lines.push(format!(
+            "Press a key for {}…  (Esc cancels)",
+            action.label()
+        ));
+    }
+    // Two actions per line keeps the block readable at 420px.
+    for pair in KeyAction::ALL.chunks(2) {
+        lines.push(
+            pair.iter()
+                .map(|action| {
+                    format!(
+                        "{}: {}",
+                        action.label(),
+                        key_name(settings.bindings.key(*action))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("   "),
+        );
+    }
+    lines.join("\n")
+}
+
+/// While a rebind is armed, the next key press binds — unless it is Escape
+/// (cancel), reserved, or already taken, in which case the readout says why.
+fn settings_rebind_capture_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut settings: ResMut<GameSettings>,
+    mut pending: ResMut<PendingRebind>,
+    mut text_q: Query<&mut Text, With<ControlBindingsText>>,
+) {
+    let Some(action) = pending.0 else {
+        return;
+    };
+    let Some(pressed) = keyboard.get_just_pressed().next().copied() else {
+        return;
+    };
+    let message = if pressed == KeyCode::Escape {
+        pending.0 = None;
+        None
+    } else {
+        use crate::engine::bindings::{key_name, RebindRejection};
+        match settings.bindings.rebind(action, pressed) {
+            Ok(()) => {
+                pending.0 = None;
+                None
+            }
+            Err(RebindRejection::Reserved) => {
+                Some(format!("{} is reserved — pick another", key_name(pressed)))
+            }
+            Err(RebindRejection::Conflict(existing)) => Some(format!(
+                "{} already runs {} — pick another",
+                key_name(pressed),
+                existing.label()
+            )),
+        }
+    };
+    // Rejections keep the prompt armed so the player can simply try again.
+    for mut text in text_q.iter_mut() {
+        *text = Text::new(match &message {
+            Some(problem) => format!("{}\n{problem}", control_bindings_text(&settings, &pending)),
+            None => control_bindings_text(&settings, &pending),
+        });
+    }
+    if message.is_none() {
+        if let Err(error) = crate::plugins::save_plugin::save_settings(&settings) {
+            warn!("could not persist control bindings: {error}");
+        }
+    }
 }
 
 fn interface_layout_text(settings: &GameSettings) -> String {
@@ -8620,6 +8790,32 @@ mod menu_navigation_tests {
             traversal_status_text(&traversal, &boost, None, None, None),
             "BOARD: OVERDRIVE"
         );
+    }
+
+    #[test]
+    fn the_control_readout_lists_every_action_and_prompts_while_arming() {
+        use crate::engine::bindings::KeyAction;
+        let mut settings = GameSettings::default();
+        let idle = control_bindings_text(&settings, &PendingRebind::default());
+        // Every rebindable action must be visible, or a player cannot tell
+        // what is bound without pressing things at random.
+        for action in KeyAction::ALL {
+            assert!(idle.contains(action.label()), "{} missing", action.label());
+        }
+        assert!(idle.contains("Standard"), "layout is shown");
+        assert!(!idle.contains("Press a key"), "no prompt when idle");
+
+        // Arming shows the prompt for that action.
+        let armed = PendingRebind(Some(KeyAction::Dodge));
+        let prompt = control_bindings_text(&settings, &armed);
+        assert!(prompt.contains("Press a key for Dodge"));
+
+        // A rebind is reflected in the readout.
+        settings
+            .bindings
+            .rebind(KeyAction::Dodge, KeyCode::KeyZ)
+            .unwrap();
+        assert!(control_bindings_text(&settings, &PendingRebind::default()).contains("Dodge: Z"));
     }
 
     #[test]

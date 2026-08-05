@@ -108,6 +108,10 @@ pub struct GameSettings {
     /// Whether to trigger controller rumble on hit events
     #[serde(default = "default_true")]
     pub rumble_on_hit: bool,
+    /// Player-configurable face layout and keyboard actions. Rides the
+    /// existing settings save/load rather than owning a second file.
+    #[serde(default)]
+    pub bindings: crate::engine::bindings::ControlBindings,
     /// Global multiplier for fixed-size UI values.
     #[serde(default = "default_one_f32")]
     pub ui_scale: f32,
@@ -151,6 +155,7 @@ impl Default for GameSettings {
             music_volume: 1.0,
             sfx_volume: 1.0,
             rumble_on_hit: true,
+            bindings: crate::engine::bindings::ControlBindings::default(),
             ui_scale: 1.0,
             safe_area_fraction: default_safe_area_fraction(),
             high_contrast_ui: false,

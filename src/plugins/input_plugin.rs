@@ -37,7 +37,9 @@
 ///    Up/Down     — cycle special weapon (wraps through "none" = primary)
 ///
 ///  Select + DPad — utility actions:
-///    Up → enter vehicle | Down → interact | Right → open map
+///    Left → toggle first/third person | Up → enter vehicle
+///    Down → interact | Right → open map
+///  P                  — toggle first/third person for keyboard player one
 ///
 ///  LT + DPad Left/Right — cycle armor infusion element
 use bevy::input::gamepad::{
@@ -51,6 +53,7 @@ use bevy::prelude::*;
 
 use crate::components::player::TraversalMode;
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
+use crate::engine::bindings::{FaceButton, KeyAction};
 use crate::engine_tools::EngineToolMode;
 use crate::resources::{GameSettings, UiGameplayCapture};
 
@@ -378,22 +381,64 @@ fn update_player_inputs(
 
         pi.gamepad_active = gp.is_some() || use_native;
 
+        // Face-button remap: every gamepad read goes through the player's
+        // layout, so a swap follows chords too (LB+North becomes LB+<whatever
+        // North was moved to>) instead of leaving chord partners pointing at
+        // the old physical button. Non-face buttons pass straight through.
+        let bindings = &settings.bindings;
+        let remap = |b: GamepadButton| -> GamepadButton {
+            let logical = match b {
+                GamepadButton::South => FaceButton::South,
+                GamepadButton::East => FaceButton::East,
+                GamepadButton::West => FaceButton::West,
+                GamepadButton::North => FaceButton::North,
+                other => return other,
+            };
+            match bindings.remap_face(logical) {
+                FaceButton::South => GamepadButton::South,
+                FaceButton::East => GamepadButton::East,
+                FaceButton::West => GamepadButton::West,
+                FaceButton::North => GamepadButton::North,
+            }
+        };
+        let remap_native = |b: NativeButton| -> NativeButton {
+            let logical = match b {
+                NativeButton::South => FaceButton::South,
+                NativeButton::East => FaceButton::East,
+                NativeButton::West => FaceButton::West,
+                NativeButton::North => FaceButton::North,
+                other => return other,
+            };
+            match bindings.remap_face(logical) {
+                FaceButton::South => NativeButton::South,
+                FaceButton::East => NativeButton::East,
+                FaceButton::West => NativeButton::West,
+                FaceButton::North => NativeButton::North,
+            }
+        };
+        // Keyboard key currently bound to an action (player one).
+        let key_for = |action: KeyAction| bindings.key(action);
+
         // Helper closures — all capture `gp`.
-        let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(b)).unwrap_or(false);
+        let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(remap(b))).unwrap_or(false);
         let event_just = |b: GamepadButton| {
+            let physical = remap(b);
             gp_entity.is_some_and(|entity| {
                 pressed_button_events
                     .iter()
                     .any(|(event_entity, event_button)| {
-                        *event_entity == entity && *event_button == b
+                        *event_entity == entity && *event_button == physical
                     })
             })
         };
-        let btn_just =
-            |b: GamepadButton| gp.map(|g| g.just_pressed(b)).unwrap_or(false) || event_just(b);
+        let btn_just = |b: GamepadButton| {
+            gp.map(|g| g.just_pressed(remap(b))).unwrap_or(false) || event_just(b)
+        };
         let axis_val = |a: GamepadAxis| -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
-        let native_held = |b: NativeButton| -> bool { use_native && native.pressed(b) };
-        let native_just = |b: NativeButton| -> bool { use_native && native.just_pressed(b) };
+        let native_held =
+            |b: NativeButton| -> bool { use_native && native.pressed(remap_native(b)) };
+        let native_just =
+            |b: NativeButton| -> bool { use_native && native.just_pressed(remap_native(b)) };
         let left_trigger_axis = axis_pressed(axis_val(GamepadAxis::LeftZ));
         let right_trigger_axis = axis_pressed(axis_val(GamepadAxis::RightZ));
         let left_trigger_held = btn_held(GamepadButton::LeftTrigger2)
@@ -459,6 +504,11 @@ fn update_player_inputs(
         let controller_look = curved * STICK_LOOK_RATE * dt;
         // P1 gets both mouse and gamepad look simultaneously.
         pi.look_delta = if is_p1 { mouse_look } else { Vec2::ZERO } + controller_look;
+        // Invert applies to the assembled delta, so it covers mouse and stick
+        // together rather than only one input device.
+        if bindings.invert_look_y {
+            pi.look_delta.y = -pi.look_delta.y;
+        }
 
         // ── Fire ──────────────────────────────────────────────────────────────
         pi.fire = (is_p1 && mouse_btn.pressed(MouseButton::Left)) || right_trigger_held;
@@ -473,27 +523,27 @@ fn update_player_inputs(
             || left_shoulder_held;
 
         // ── Jump / Jetpack ────────────────────────────────────────────────────
-        pi.jump = (is_p1 && keyboard.just_pressed(KeyCode::Space))
+        pi.jump = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Jump)))
             || btn_just(GamepadButton::South)
             || native_just(NativeButton::South);
-        pi.jetpack = (is_p1 && keyboard.pressed(KeyCode::Space))
+        pi.jetpack = (is_p1 && keyboard.pressed(key_for(KeyAction::Jump)))
             || btn_held(GamepadButton::South)
             || native_held(NativeButton::South);
 
         // ── Dodge ─────────────────────────────────────────────────────────────
-        pi.dodge = (is_p1 && keyboard.just_pressed(KeyCode::KeyQ))
+        pi.dodge = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Dodge)))
             || btn_just(GamepadButton::East)
             || native_just(NativeButton::East);
 
         // ── Reload ────────────────────────────────────────────────────────────
         let west_just = btn_just(GamepadButton::West) || native_just(NativeButton::West);
-        pi.use_quick_item =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyH)) || (left_shoulder_held && west_just);
-        pi.reload =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyR)) || (!left_shoulder_held && west_just);
+        pi.use_quick_item = (is_p1 && keyboard.just_pressed(key_for(KeyAction::QuickItem)))
+            || (left_shoulder_held && west_just);
+        pi.reload = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Reload)))
+            || (!left_shoulder_held && west_just);
 
         // ── Parry ─────────────────────────────────────────────────────────────
-        pi.parry = (is_p1 && keyboard.just_pressed(KeyCode::KeyF))
+        pi.parry = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Parry)))
             || (!left_trigger_held
                 && !left_shoulder_held
                 && (btn_just(GamepadButton::North) || native_just(NativeButton::North)));
@@ -511,10 +561,10 @@ fn update_player_inputs(
             btn_held(GamepadButton::RightTrigger) || native_held(NativeButton::RightShoulder);
         let grapple_button_just =
             btn_just(GamepadButton::RightTrigger) || native_just(NativeButton::RightShoulder);
-        pi.grapple =
-            (is_p1 && keyboard.pressed(KeyCode::KeyG)) || (select_held && grapple_button_held);
-        pi.grapple_just =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyG)) || (select_held && grapple_button_just);
+        pi.grapple = (is_p1 && keyboard.pressed(key_for(KeyAction::Grapple)))
+            || (select_held && grapple_button_held);
+        pi.grapple_just = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Grapple)))
+            || (select_held && grapple_button_just);
 
         // ── Weapon cycle ──────────────────────────────────────────────────────
         let armor_keyboard_modifier =
@@ -547,8 +597,8 @@ fn update_player_inputs(
 
         // ── Special weapon slots ──────────────────────────────────────────────
         // Keyboard (P1): digits 7–0.
-        // Controller: hold Select then tap a DPad direction.
-        //   Select alone (no DPad) still fires crafting below.
+        // Controller special selection uses the bare D-pad cycle below.
+        // Select + D-pad is reserved for utility actions.
         let dpad_any_just = btn_just(GamepadButton::DPadUp)
             || btn_just(GamepadButton::DPadDown)
             || btn_just(GamepadButton::DPadLeft)
@@ -631,22 +681,28 @@ fn update_player_inputs(
         pi.special_prev = dpad_free && dpad_down_just;
 
         // ── Utility actions (Select + D-pad, or keyboard) ─────────────────────
-        pi.interact =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyE)) || (select_held && dpad_down_just);
+        pi.interact = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Interact)))
+            || (select_held && dpad_down_just);
 
-        pi.enter_vehicle =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyJ)) || (select_held && dpad_up_just);
+        pi.enter_vehicle = (is_p1 && keyboard.just_pressed(key_for(KeyAction::EnterVehicle)))
+            || (select_held && dpad_up_just);
 
-        pi.open_map =
-            (is_p1 && keyboard.just_pressed(KeyCode::KeyM)) || (select_held && dpad_right_just);
+        pi.open_map = (is_p1 && keyboard.just_pressed(key_for(KeyAction::OpenMap)))
+            || (select_held && dpad_right_just);
+
+        pi.toggle_perspective = perspective_toggle_requested(
+            is_p1 && keyboard.just_pressed(key_for(KeyAction::TogglePerspective)),
+            select_held,
+            dpad_left_just,
+        );
 
         // ── In-game equipment menus ───────────────────────────────────────────
         // Select alone opens crafting. LB+Select opens the unified loadout;
-        // Select+DPad remains the direct special-slot chord.
-        pi.loadout_menu = (is_p1 && keyboard.just_pressed(KeyCode::KeyI))
+        // Select+DPad remains the utility chord and suppresses crafting.
+        pi.loadout_menu = (is_p1 && keyboard.just_pressed(key_for(KeyAction::LoadoutMenu)))
             || (left_shoulder_held
                 && (btn_just(GamepadButton::Select) || native_just(NativeButton::Select)));
-        pi.crafting = (is_p1 && keyboard.just_pressed(KeyCode::KeyC))
+        pi.crafting = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Crafting)))
             || ((btn_just(GamepadButton::Select) || native_just(NativeButton::Select))
                 && !dpad_any_just
                 && !left_shoulder_held);
@@ -665,7 +721,7 @@ fn update_player_inputs(
         // Fallback: press Left Stick + Right Stick simultaneously.
         let l3r3 = btn_just(GamepadButton::LeftThumb) && btn_held(GamepadButton::RightThumb)
             || btn_just(GamepadButton::RightThumb) && btn_held(GamepadButton::LeftThumb);
-        pi.sabre_toggle = (is_p1 && keyboard.just_pressed(KeyCode::KeyT))
+        pi.sabre_toggle = (is_p1 && keyboard.just_pressed(key_for(KeyAction::SabreToggle)))
             || (left_shoulder_held
                 && (btn_just(GamepadButton::North) || native_just(NativeButton::North)))
             || (left_trigger_held
@@ -731,6 +787,14 @@ fn controller_traversal_mode(
 
 fn controller_sabre_attack(select_held: bool, right_shoulder_just: bool) -> bool {
     right_shoulder_just && !select_held
+}
+
+fn perspective_toggle_requested(
+    keyboard_just: bool,
+    select_held: bool,
+    dpad_left_just: bool,
+) -> bool {
+    keyboard_just || (select_held && dpad_left_just)
 }
 
 fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
@@ -823,6 +887,14 @@ mod tests {
     }
 
     #[test]
+    fn perspective_toggle_requires_keyboard_or_the_select_left_chord() {
+        assert!(perspective_toggle_requested(true, false, false));
+        assert!(perspective_toggle_requested(false, true, true));
+        assert!(!perspective_toggle_requested(false, false, true));
+        assert!(!perspective_toggle_requested(false, true, false));
+    }
+
+    #[test]
     fn modal_ui_capture_preserves_navigation_but_clears_gameplay() {
         let mut input = PlayerInput {
             move_axis: Vec2::ONE,
@@ -831,6 +903,7 @@ mod tests {
             enter_vehicle: true,
             crafting: true,
             loadout_menu: true,
+            toggle_perspective: true,
             ui_vertical: -1.0,
             ui_down: true,
             ui_right: true,
@@ -843,6 +916,7 @@ mod tests {
         assert!(!input.fire);
         assert!(!input.jump);
         assert!(!input.enter_vehicle);
+        assert!(!input.toggle_perspective);
         assert!(input.crafting);
         assert!(input.loadout_menu);
         assert_eq!(input.ui_vertical, -1.0);

@@ -10,9 +10,68 @@ use crate::components::weapon::WeaponRanks;
 #[derive(Component, Default)]
 pub struct Player;
 
-/// Marks the first-person camera child entity.
+/// Marks a gameplay camera owned by a local player.
 #[derive(Component, Default)]
 pub struct PlayerCamera;
+
+/// The individual camera perspective selected by one local player.
+///
+/// Authored party cameras (boss encounters and dungeons) temporarily override
+/// this preference and return to it when the shared view ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CameraPerspective {
+    FirstPerson,
+    #[default]
+    ThirdPerson,
+}
+
+impl CameraPerspective {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FirstPerson => "First Person",
+            Self::ThirdPerson => "Third Person",
+        }
+    }
+}
+
+/// Per-player view preference plus the authored eye height for that character.
+///
+/// Eye height is runtime character data rather than a global constant because
+/// Character Studio recipes can change the playable hero's proportions.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PlayerView {
+    pub perspective: CameraPerspective,
+    pub eye_height: f32,
+}
+
+impl PlayerView {
+    pub const DEFAULT_EYE_HEIGHT: f32 = 1.8;
+
+    pub fn new(eye_height: f32) -> Self {
+        Self {
+            perspective: CameraPerspective::ThirdPerson,
+            eye_height: if eye_height.is_finite() {
+                eye_height.clamp(0.6, 3.5)
+            } else {
+                Self::DEFAULT_EYE_HEIGHT
+            },
+        }
+    }
+
+    pub fn toggle(&mut self) -> CameraPerspective {
+        self.perspective = match self.perspective {
+            CameraPerspective::FirstPerson => CameraPerspective::ThirdPerson,
+            CameraPerspective::ThirdPerson => CameraPerspective::FirstPerson,
+        };
+        self.perspective
+    }
+}
+
+impl Default for PlayerView {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_EYE_HEIGHT)
+    }
+}
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 #[derive(Component, Debug, Clone)]
@@ -1224,7 +1283,8 @@ pub struct PlayerIndex(pub u8);
 
 // ── Per-Player Input ──────────────────────────────────────────────────────────
 /// Written by InputPlugin each PreUpdate. One instance per player entity.
-/// P1 = keyboard + mouse + gamepad 0. P2–P4 = gamepad 1–3.
+/// P1 also accepts keyboard/mouse; controllers resolve through the stable
+/// `GamepadAssignments` owner mapping for every player.
 #[derive(Component, Default, Debug, Clone)]
 pub struct PlayerInput {
     pub move_axis: Vec2,
@@ -1256,6 +1316,8 @@ pub struct PlayerInput {
     pub special_prev: bool,
     pub enter_vehicle: bool,
     pub open_map: bool,
+    /// Toggle this player's individual view between first and third person.
+    pub toggle_perspective: bool,
     pub sabre_toggle: bool,
     /// Per-frame Star Sabre slash request. Controller RB is intentionally
     /// separate from RT ranged fire so both weapons remain available.
@@ -1338,13 +1400,28 @@ impl AimSolution {
 }
 
 // ── Camera-player link ────────────────────────────────────────────────────────
-/// Entity of this player's `PlayerCamera` child. Set during spawn.
+/// This player's linked gameplay camera entity. Set during spawn.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct PlayerCameraRef(pub Entity);
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_view_defaults_to_third_person_and_toggles_both_ways() {
+        let mut view = PlayerView::default();
+        assert_eq!(view.perspective, CameraPerspective::ThirdPerson);
+        assert_eq!(view.toggle(), CameraPerspective::FirstPerson);
+        assert_eq!(view.toggle(), CameraPerspective::ThirdPerson);
+    }
+
+    #[test]
+    fn player_view_sanitizes_authored_eye_height() {
+        assert_eq!(PlayerView::new(f32::NAN).eye_height, 1.8);
+        assert_eq!(PlayerView::new(0.1).eye_height, 0.6);
+        assert_eq!(PlayerView::new(8.0).eye_height, 3.5);
+    }
 
     #[test]
     fn grapple_request_enters_searching_then_recovers() {
