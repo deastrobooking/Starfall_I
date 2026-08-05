@@ -68,6 +68,11 @@ Set `LocalPlayerConfig.active` (1-4) before entering `AppState::Playing` to chan
 | 3 | Top-left, top-right, bottom full |
 | 4 | Four equal quadrants |
 
+Each player can independently switch their viewport between third person and
+first person (`P` for keyboard P1, Select + D-pad Left for any assigned
+controller). Boss and dungeon party cameras temporarily override the individual
+preference, then restore it when the shared view ends.
+
 **Input assignment:** keyboard/mouse remains available to P1. An unassigned
 controller pressing Start in Player Select claims the next available stable
 `PlayerIndex`; disconnect releases the device binding and reconnect can reclaim
@@ -78,7 +83,7 @@ Angelo, Joseph, Gabriella, Nova, Aurora, and Fortuna. The default join order
 still starts on the brothers for P1-P4, but the selectable roster is now all
 eight siblings.
 
-**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. `GamepadAssignments` maps controller entities to stable `PlayerIndex` identities after Start-to-join; runtime input no longer depends on gamepad enumeration order. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component so weapon, movement, camera shake, damage flash, and interaction systems can resolve the correct player.
+**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. `GamepadAssignments` maps controller entities to stable `PlayerIndex` identities after Start-to-join; runtime input no longer depends on gamepad enumeration order. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component, while `PlayerView` owns that player's perspective and character-scaled eye height. Owner-specific avatar render layers hide only the local body in first person without removing it from another split-screen camera. Weapon, movement, camera shake, damage flash, and interaction systems continue to resolve the correct player.
 
 **Controller feel:** gamepad movement uses circular deadzone remapping and preserves analog stick magnitude in `PlayerMovement`, so partial tilt produces partial travel speed. Right-stick look uses a quadratic curve for low-deflection precision. LT/RT aim/fire supports both Bevy digital trigger buttons and `LeftZ` / `RightZ` analog trigger axes, with frame-local just-press tracking for single-shot weapons.
 
@@ -964,9 +969,9 @@ left/right cycle primary weapons, up/down cycle the special through
 LB stays the global modifier (LB + D-pad selects traversal/flight mode), RB is
 the primary attack (Star Sabre swing / physical weapon), and the displaced
 utility actions moved onto Select + D-pad (up = enter vehicle, down =
-interact, right = open map). The old Select + D-pad direct special-slot chord
-was retired since it would double-fire with the utilities; keyboard 7–0 still
-selects specials directly.
+interact, left = toggle first/third person, right = open map). The old Select +
+D-pad direct special-slot chord was retired since it would double-fire with the
+utilities; keyboard 7–0 still selects specials directly.
 
 **Blaster feel pass (2026-07-28):** the primaries were built around stopping to
 line up a shot, which fought the fast-movement game around them. Every primary
@@ -1198,7 +1203,11 @@ were increased with it so the rendered weapon and gameplay reach agree better.
 
 In `DungeonCrawlState`, hand melee and Star Sabre attacks prefer movement/facing direction over camera forward, use wider hit arcs, and Star Sabre fires short ground waves even before the late dual-wave rank. This keeps castle interiors readable from the single shared top-down camera.
 
-Special tools are selected with keyboard `7`, `8`, `9`, `0`, or controller Select + D-pad Up/Down/Left/Right, then fired with RT/LMB. Homing Star—the tracking missile—is Select+D-pad Up. Its name replaces the primary weapon name in the HUD while selected. D-pad Left or primary number keys return RT to primary weapons.
+Special tools are selected directly with keyboard `7`, `8`, `9`, `0`, or cycled
+with controller D-pad Up/Down, then fired with RT/LMB. The cycle includes
+`none`, so one more press returns RT to the primary weapon; D-pad Left/Right
+also selects the previous/next primary immediately. The selected special's name
+replaces the primary weapon name in the HUD.
 
 ---
 

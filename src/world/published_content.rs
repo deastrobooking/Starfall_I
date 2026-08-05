@@ -34,7 +34,10 @@ fn read_published<T: serde::de::DeserializeOwned>(file: &str) -> Vec<T> {
     match serde_json::from_str(&text) {
         Ok(items) => items,
         Err(error) => {
-            warn!("published content {} unparsable ({error}); ignoring", path.display());
+            warn!(
+                "published content {} unparsable ({error}); ignoring",
+                path.display()
+            );
             Vec::new()
         }
     }

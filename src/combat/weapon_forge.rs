@@ -399,9 +399,8 @@ impl WeaponSpec {
         let mut profile = self.to_blade_profile();
         profile.id = Box::leak(content_id.to_string().into_boxed_str());
         profile.name = Box::leak(self.name.clone().into_boxed_str());
-        profile.summary = Box::leak(
-            format!("Forged in the Weapon Forge: {}", self.name).into_boxed_str(),
-        );
+        profile.summary =
+            Box::leak(format!("Forged in the Weapon Forge: {}", self.name).into_boxed_str());
         profile
     }
 

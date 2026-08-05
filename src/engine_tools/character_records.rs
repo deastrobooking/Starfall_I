@@ -100,11 +100,7 @@ impl ImportedUvEdit {
         if self.face_paints.len() > 64 {
             return Err("A primitive is limited to 64 non-destructive paint strokes".into());
         }
-        if self.seam_edges.len() > 250_000
-            || self
-                .seam_edges
-                .iter()
-                .any(|edge| edge[0] >= edge[1])
+        if self.seam_edges.len() > 250_000 || self.seam_edges.iter().any(|edge| edge[0] >= edge[1])
         {
             return Err("UV seam edges must be sorted, distinct vertex pairs".into());
         }

@@ -74,7 +74,10 @@ fn bake_weapons(project: &ForgeProject) -> Result<Vec<PublishedWeapon>, String> 
 fn bake_creatures(project: &ForgeProject) -> Result<Vec<CreatureSpec>, String> {
     let mut creatures = Vec::new();
     for (content_id, _) in super::creature_records::creature_entries(project) {
-        creatures.push(super::creature_records::load_creature(project, &content_id)?);
+        creatures.push(super::creature_records::load_creature(
+            project,
+            &content_id,
+        )?);
     }
     creatures.sort_by(|a, b| a.content_id.cmp(&b.content_id));
     Ok(creatures)
@@ -173,10 +176,8 @@ mod tests {
 
     #[test]
     fn a_published_project_round_trips_through_the_baked_files() {
-        let dir = std::env::temp_dir().join(format!(
-            "starfall_publish_test_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("starfall_publish_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let project = project_with_weapons(&["Round Trip"]);

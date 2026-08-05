@@ -1,6 +1,6 @@
 # Starfall I — Current State
 
-> Living agent handoff. Last reconciled July 23, 2026. Update this file when a
+> Living agent handoff. Last reconciled August 5, 2026. Update this file when a
 > change alters architecture, ownership, persistence, controls, verification,
 > or the next production slice.
 
@@ -42,6 +42,12 @@
   independent RB Star Sabre slash and RT ranged-fire controls, airborne-target
   aim assistance, procedural weapon poses, loot attraction, road ramp
   alignment tests, and the MVP animation/rig bridge are present.
+- Each local player owns an independent first-/third-person camera preference
+  (`P` for keyboard P1 or Select + D-pad Left on the assigned controller).
+  Character-scaled eye height and owner-only avatar render layers keep the
+  first-person view clear without hiding that hero from other split-screen
+  viewports. Boss and dungeon shared cameras remain authoritative and restore
+  the individual preference afterward.
 - Character Studio exposes 26 body/face morphs, including face length, eye
   shape/depth, nose bridge/tip, chin width, and sex-aware chest shape. Its
   original parametric almond eyes, fitted lids, cheek planes, and restrained

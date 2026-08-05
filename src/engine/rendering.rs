@@ -1,4 +1,26 @@
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+
+pub const WORLD_RENDER_LAYER: usize = 0;
+pub const PLAYER_RENDER_LAYER_BASE: usize = 1;
+
+pub fn player_render_layer(index: u8) -> usize {
+    PLAYER_RENDER_LAYER_BASE + usize::from(index.min(3))
+}
+
+/// World geometry plus all possible local-player avatar layers.
+///
+/// Gameplay and Forge cameras that can coexist with live players use this
+/// mask. Individual first-person cameras remove only their owner's layer.
+pub fn all_gameplay_render_layers() -> RenderLayers {
+    RenderLayers::from_layers(&[
+        WORLD_RENDER_LAYER,
+        player_render_layer(0),
+        player_render_layer(1),
+        player_render_layer(2),
+        player_render_layer(3),
+    ])
+}
 
 /// Local mesh bundle that keeps Starfall's existing field-style spawn code
 /// without relying on Bevy's deprecated `PbrBundle` alias.

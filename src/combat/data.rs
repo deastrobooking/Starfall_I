@@ -621,12 +621,42 @@ fn default_ranged_slots() -> Vec<RangedMoveDef> {
     // ordnance the most, and shotgun pellets stay loose so the spread still
     // reads as a spread rather than a cone that converges on one enemy.
     vec![
-        r("Starlight Popper", 16.0, 0.26, 68.0, 0.02, 1, 0.0, 0.50, 1.35),
-        r("Comet Stream", 18.0, 0.075, 105.0, 0.025, 1, 0.0, 0.38, 1.25),
+        r(
+            "Starlight Popper",
+            16.0,
+            0.26,
+            68.0,
+            0.02,
+            1,
+            0.0,
+            0.50,
+            1.35,
+        ),
+        r(
+            "Comet Stream",
+            18.0,
+            0.075,
+            105.0,
+            0.025,
+            1,
+            0.0,
+            0.38,
+            1.25,
+        ),
         r("Sparkle Fan", 7.0, 0.7, 80.0, 0.18, 10, 0.0, 0.22, 1.30),
         r("Nova Orb", 90.0, 1.2, 34.0, 0.0, 1, 6.5, 0.62, 1.45),
         r("Rainbow Ray", 26.0, 0.045, 320.0, 0.0, 1, 0.0, 0.30, 1.20),
-        r("Star Bubble Bombs", 75.0, 0.95, 16.0, 0.0, 1, 8.5, 0.55, 1.40),
+        r(
+            "Star Bubble Bombs",
+            75.0,
+            0.95,
+            16.0,
+            0.0,
+            1,
+            8.5,
+            0.55,
+            1.40,
+        ),
     ]
 }
 

@@ -78,7 +78,10 @@ pub fn action_button(
 }
 
 /// A wrapping row of widgets — the standard layout unit of a forge panel.
-pub fn widget_row(parent: &mut ChildSpawnerCommands, build: impl FnOnce(&mut ChildSpawnerCommands)) {
+pub fn widget_row(
+    parent: &mut ChildSpawnerCommands,
+    build: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     parent
         .spawn(Node {
             flex_direction: FlexDirection::Row,

@@ -8,9 +8,9 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 pub mod character_records;
 pub mod creature_records;
+pub mod editable_mesh;
 /// Shared button/row/label widgets for Forge authoring screens.
 pub mod forge_widgets;
-pub mod editable_mesh;
 pub mod mesh_selection;
 pub mod mesh_uv;
 mod persistence;
@@ -41,9 +41,9 @@ use crate::components::world::{
 };
 use crate::engine::physics::prelude::{Physics, PhysicsTime};
 use crate::engine::rendering::{
-    EnergyMaterial, EnergyMaterialUniform, IceMaterial, IceMaterialUniform, LavaMaterial,
-    LavaMaterialUniform, ShieldMaterial, ShieldMaterialUniform, ToonMaterial, ToonMaterialUniform,
-    WaterMaterial, WaterMaterialUniform,
+    all_gameplay_render_layers, EnergyMaterial, EnergyMaterialUniform, IceMaterial,
+    IceMaterialUniform, LavaMaterial, LavaMaterialUniform, ShieldMaterial, ShieldMaterialUniform,
+    ToonMaterial, ToonMaterialUniform, WaterMaterial, WaterMaterialUniform,
 };
 use crate::engine::state::AppState;
 use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
@@ -1609,6 +1609,7 @@ fn enter_editor_workspace(
             far: 30_000.0,
             ..default()
         }),
+        all_gameplay_render_layers(),
         camera_transform,
     ));
 

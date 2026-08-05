@@ -8073,6 +8073,10 @@ fn control_bindings_text(settings: &GameSettings, pending: &PendingRebind) -> St
         settings.bindings.face_layout.label(),
         on_off(settings.bindings.invert_look_y),
     )];
+    let face_mapping = settings.bindings.face_layout.mapping_summary();
+    if !face_mapping.is_empty() {
+        lines.push(format!("Button mapping: {face_mapping}"));
+    }
     if let Some(action) = pending.0 {
         lines.push(format!(
             "Press a key for {}…  (Esc cancels)",

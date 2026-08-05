@@ -3,7 +3,6 @@ use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
 use crate::audio::sfx::ModularActionSfxEvent;
-use crate::components::character::{CartoonPart, CartoonPartKind, JointKind, JointMarker};
 use crate::combat::blades::{
     apply_blade_to_stats, blade_for_id, BladeTrait, EquippedBlade, BLADE_COLOR_ORDER,
 };
@@ -14,6 +13,7 @@ use crate::combat::data::{ActiveMelee, MeleeChain, MeleePhase, MoveLibrary, Rang
 use crate::combat::hitstop::HitstopState;
 use crate::combat::upgrades::UpgradeLedger;
 use crate::components::armor::ArmorSet;
+use crate::components::character::{CartoonPart, CartoonPartKind, JointKind, JointMarker};
 use crate::components::enemy::{CitySpyDrone, DeadEnemy, Enemy, EnemyType, FlyingDrone};
 use crate::components::player::*;
 use crate::components::weapon::*;
@@ -24,7 +24,9 @@ use crate::engine::physics::{
     prelude::{CollisionProfile, GameCollisionLayer},
     world_line_of_sight,
 };
-use crate::engine::rendering::{SpatialBundle, EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle};
+use crate::engine::rendering::{
+    EnergyMaterial, EnergyMaterialUniform, EnergyPbrBundle, PbrBundle, SpatialBundle,
+};
 use crate::engine::state::AppState;
 use crate::events::*;
 use crate::resources::DungeonCrawlState;
@@ -911,9 +913,8 @@ fn weapon_fire_system(
         };
         let charge_released = weapon.charge_held && !pi.fire;
         if pi.fire {
-            weapon.charge_progress = (weapon.charge_progress
-                + dt * charge_rate / weapon.min_charge_time())
-            .min(1.0);
+            weapon.charge_progress =
+                (weapon.charge_progress + dt * charge_rate / weapon.min_charge_time()).min(1.0);
             weapon.charge_held = true;
         } else if charge_released {
             weapon.charge_held = false;
@@ -974,8 +975,7 @@ fn weapon_fire_system(
         } else {
             // Trigger up and nothing released: bleed any partial charge away
             // rather than banking it between bursts.
-            weapon.charge_progress =
-                (weapon.charge_progress - dt * CHARGE_DECAY_RATE).max(0.0);
+            weapon.charge_progress = (weapon.charge_progress - dt * CHARGE_DECAY_RATE).max(0.0);
             weapon.charge_held = false;
         }
 
@@ -3992,8 +3992,11 @@ fn sabre_blade_local_transform(layer: SabreBladeLayer, ignition: f32) -> Transfo
         SabreBladeLayer::Core => (0.30, 14.4),
     };
     let length = length * extend;
-    Transform::from_translation(Vec3::new(0.0, 0.145 + length * 0.08, 0.0))
-        .with_scale(Vec3::new(thickness, length.max(0.001), thickness))
+    Transform::from_translation(Vec3::new(0.0, 0.145 + length * 0.08, 0.0)).with_scale(Vec3::new(
+        thickness,
+        length.max(0.001),
+        thickness,
+    ))
 }
 
 fn sabre_technique_vfx_system(
@@ -4364,11 +4367,7 @@ mod move_def_wiring_tests {
             .world_mut()
             .spawn((
                 Transform::default(),
-                CartoonPart::new(
-                    player,
-                    CartoonPartKind::RightHand,
-                    &Transform::default(),
-                ),
+                CartoonPart::new(player, CartoonPartKind::RightHand, &Transform::default()),
             ))
             .id();
         (player, hand)

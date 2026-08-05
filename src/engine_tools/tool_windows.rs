@@ -125,8 +125,10 @@ fn resize_target(size_start: Vec2, pointer_start: Vec2, pointer: Vec2, bounds: V
 /// viewport it lives in.
 fn clamp_size_to_bounds(size: Vec2, bounds: Vec2) -> Vec2 {
     Vec2::new(
-        size.x.clamp(MIN_WINDOW_SIZE.x, bounds.x.max(MIN_WINDOW_SIZE.x)),
-        size.y.clamp(MIN_WINDOW_SIZE.y, bounds.y.max(MIN_WINDOW_SIZE.y)),
+        size.x
+            .clamp(MIN_WINDOW_SIZE.x, bounds.x.max(MIN_WINDOW_SIZE.x)),
+        size.y
+            .clamp(MIN_WINDOW_SIZE.y, bounds.y.max(MIN_WINDOW_SIZE.y)),
     )
 }
 
@@ -183,12 +185,7 @@ fn tool_window_drag_system(
                 window.last_title_press = Some(now);
                 if double_click {
                     window.minimized = !window.minimized;
-                    set_window_minimized(
-                        bar.window,
-                        window.minimized,
-                        &mut contents,
-                        &mut glyphs,
-                    );
+                    set_window_minimized(bar.window, window.minimized, &mut contents, &mut glyphs);
                 }
             }
             Some(drag) => {
@@ -242,8 +239,7 @@ fn tool_window_resize_system(
                 commands.entity(grip.window).insert(ZIndex(raise_order.0));
             }
             Some(resize) => {
-                let target =
-                    resize_target(resize.size_start, resize.pointer_start, cursor, bounds);
+                let target = resize_target(resize.size_start, resize.pointer_start, cursor, bounds);
                 window.requested_size = target;
                 apply_window_size(grip.window, target, &mut node, &mut contents);
             }

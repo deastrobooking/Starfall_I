@@ -718,9 +718,7 @@ fn weapon_forge_action_system(
             // Register (or update — the registry upserts) the design under a
             // stable test id, queue it for equip, and enter play. Iterating
             // is the point: TEST, feel it, BACK out, tweak, TEST again.
-            let profile = state
-                .spec
-                .to_published_profile("blade_forge_test");
+            let profile = state.spec.to_published_profile("blade_forge_test");
             crate::combat::blades::register_published_blades(vec![profile]);
             test_equip.0 = Some("blade_forge_test".to_string());
             let name = state.spec.name.clone();
@@ -791,8 +789,10 @@ fn weapon_forge_library_rebuild_system(
     commands.entity(panel).with_children(|panel| {
         if state.library.is_empty() {
             panel.spawn((
-                Text::new("No saved designs yet.
-NAME it, then SAVE."),
+                Text::new(
+                    "No saved designs yet.
+NAME it, then SAVE.",
+                ),
                 TextFont {
                     font_size: FontSize::Px(12.0),
                     ..default()
@@ -1002,7 +1002,10 @@ mod tests {
         let mut app = preview_app();
         app.add_systems(PostUpdate, weapon_forge_mount_preview_system);
 
-        let mannequin = app.world_mut().spawn((ForgeMannequin, Transform::default())).id();
+        let mannequin = app
+            .world_mut()
+            .spawn((ForgeMannequin, Transform::default()))
+            .id();
         let hand = app
             .world_mut()
             .spawn((
@@ -1015,7 +1018,9 @@ mod tests {
         app.update();
         app.update();
 
-        let mut weapons = app.world_mut().query_filtered::<Entity, With<WeaponPreviewRoot>>();
+        let mut weapons = app
+            .world_mut()
+            .query_filtered::<Entity, With<WeaponPreviewRoot>>();
         let weapon = weapons.single(app.world()).expect("one preview weapon");
         assert_eq!(
             app.world().get::<ChildOf>(weapon).map(|c| c.parent()),
@@ -1031,7 +1036,9 @@ mod tests {
         }
         app.update();
         app.update();
-        let mut weapons = app.world_mut().query_filtered::<Entity, With<WeaponPreviewRoot>>();
+        let mut weapons = app
+            .world_mut()
+            .query_filtered::<Entity, With<WeaponPreviewRoot>>();
         let weapon = weapons.single(app.world()).expect("still one weapon");
         assert_eq!(
             app.world().get::<ChildOf>(weapon).map(|c| c.parent()),
@@ -1078,8 +1085,7 @@ mod tests {
 
         // Queue a test while no players exist yet — the queue must survive
         // until play actually spawns someone.
-        app.world_mut().resource_mut::<ForgeTestEquip>().0 =
-            Some("blade_forge_test".to_string());
+        app.world_mut().resource_mut::<ForgeTestEquip>().0 = Some("blade_forge_test".to_string());
         app.update();
         assert!(
             app.world().resource::<ForgeTestEquip>().0.is_some(),

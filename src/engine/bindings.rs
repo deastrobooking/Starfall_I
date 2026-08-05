@@ -287,7 +287,7 @@ pub struct KeyOverride {
 
 /// The player's control configuration. Serialized inside `GameSettings`, so
 /// it rides the existing settings save/load with no new file.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ControlBindings {
     #[serde(default)]
     pub face_layout: FaceLayout,
@@ -298,16 +298,6 @@ pub struct ControlBindings {
     pub key_overrides: Vec<KeyOverride>,
     #[serde(default)]
     pub invert_look_y: bool,
-}
-
-impl Default for ControlBindings {
-    fn default() -> Self {
-        Self {
-            face_layout: FaceLayout::default(),
-            key_overrides: Vec::new(),
-            invert_look_y: false,
-        }
-    }
 }
 
 impl ControlBindings {

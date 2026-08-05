@@ -1,5 +1,6 @@
 use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::audio::SpatialListener;
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::Hdr;
 use bevy::camera::{PerspectiveProjection, Projection, Viewport};
 use bevy::prelude::*;
@@ -41,8 +42,8 @@ use crate::engine::game_loop::{
 use crate::engine::input_buffer::PlayerInputBuffers;
 use crate::engine::physics::prelude::*;
 use crate::engine::rendering::{
-    Camera3dBundle, PbrBundle, ShieldMaterial, ShieldMaterialUniform, ShieldPbrBundle,
-    SpatialBundle,
+    all_gameplay_render_layers, player_render_layer, Camera3dBundle, PbrBundle, ShieldMaterial,
+    ShieldMaterialUniform, ShieldPbrBundle, SpatialBundle,
 };
 use crate::engine::state::AppState;
 use crate::events::*;
@@ -164,6 +165,19 @@ impl Default for CameraDisplayTransition {
 
 fn third_person_camera_offset() -> Vec3 {
     Vec3::new(0.0, 4.5, 11.0)
+}
+
+fn player_camera_render_layers(
+    index: u8,
+    perspective: CameraPerspective,
+    shared_camera_blend: f32,
+) -> RenderLayers {
+    let layers = all_gameplay_render_layers();
+    if perspective == CameraPerspective::FirstPerson && shared_camera_blend < 0.18 {
+        layers.without(player_render_layer(index))
+    } else {
+        layers
+    }
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -315,6 +329,7 @@ fn player_shield_feedback_system(
             PlayerShieldVisual {
                 owner_index: index.0,
             },
+            RenderLayers::layer(player_render_layer(index.0)),
         ));
     }
 }
@@ -338,6 +353,7 @@ impl Plugin for PlayerPlugin {
                 (
                     dedupe_player_entities,
                     player_look,
+                    toggle_player_perspective,
                     update_camera_post_processing,
                     update_rocket_hoverboard_visuals,
                     traversal_mode_switch_update.run_if(hitstop_inactive),
@@ -361,6 +377,7 @@ impl Plugin for PlayerPlugin {
                 (
                     dedupe_player_entities,
                     player_look,
+                    toggle_player_perspective,
                     update_camera_post_processing,
                     update_rocket_hoverboard_visuals,
                     shared_encounter_camera_mode_system,
@@ -413,6 +430,15 @@ impl Plugin for PlayerPlugin {
                     // `player_dodge_update` and the sabre technique trigger
                     // read shared state in a deterministic order.
                     .in_set(GameSet::Motor)
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    bind_player_visual_render_layers,
+                    bind_gameplay_light_render_layers,
+                )
+                    .before(player_camera_follow_system)
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -565,6 +591,33 @@ fn player_viewport(index: u8, active: u8, win_w: u32, win_h: u32) -> Option<View
     })
 }
 
+fn authored_player_collider_dimensions(
+    blueprint: Option<&CharacterBlueprint>,
+    visual_scale: f32,
+) -> (f32, f32) {
+    let (half_height, radius) = blueprint
+        .map(|blueprint| {
+            let body = blueprint.body.validated();
+            (
+                0.6 * (body.height * 0.72 + body.leg_length * 0.28),
+                0.35 * (body.shoulder_width * 0.55
+                    + body.chest_size * 0.25
+                    + body.hip_width * 0.20),
+            )
+        })
+        .unwrap_or((0.6, 0.35));
+
+    (
+        (half_height * visual_scale).clamp(0.44 * visual_scale, 0.86 * visual_scale),
+        (radius * visual_scale).clamp(0.26 * visual_scale, 0.50 * visual_scale),
+    )
+}
+
+fn authored_player_eye_height(blueprint: Option<&CharacterBlueprint>, visual_scale: f32) -> f32 {
+    let (half_height, radius) = authored_player_collider_dimensions(blueprint, visual_scale);
+    half_height + radius * 0.70
+}
+
 fn authored_player_defaults(
     blueprint: Option<&CharacterBlueprint>,
     visual_scale: f32,
@@ -579,11 +632,8 @@ fn authored_player_defaults(
     let mut base_stats = PlayerBaseStats::default();
     let mut movement = PlayerMovement::default();
     let mut dodge = DodgeState::new();
-    let mut half_height = 0.6;
-    let mut radius = 0.35;
 
     if let Some(blueprint) = blueprint {
-        let body = blueprint.body.validated();
         let movement_profile = blueprint.movement_profile;
         let gameplay = blueprint.gameplay_stats;
 
@@ -602,10 +652,6 @@ fn authored_player_defaults(
         base_stats.max_armor = gameplay.max_armor;
         stats.max_armor = base_stats.max_armor;
         stats.armor = base_stats.max_armor;
-
-        half_height = 0.6 * (body.height * 0.72 + body.leg_length * 0.28);
-        radius =
-            0.35 * (body.shoulder_width * 0.55 + body.chest_size * 0.25 + body.hip_width * 0.20);
     }
 
     // Scale physical interaction parameters to match the visual character size.
@@ -614,15 +660,13 @@ fn authored_player_defaults(
     movement.ground_snap_distance *= visual_scale;
     movement.controller_offset *= visual_scale;
 
+    let (half_height, radius) = authored_player_collider_dimensions(blueprint, visual_scale);
     (
         stats,
         base_stats,
         movement,
         dodge,
-        Collider::capsule_y(
-            (half_height * visual_scale).clamp(0.44 * visual_scale, 0.86 * visual_scale),
-            (radius * visual_scale).clamp(0.26 * visual_scale, 0.50 * visual_scale),
-        ),
+        Collider::capsule_y(half_height, radius),
     )
 }
 
@@ -779,6 +823,10 @@ fn spawn_players(
             mut dodge_state,
             player_collider,
         ) = authored_player_defaults(Some(&runtime_blueprint), character_visual_scale);
+        let player_view = PlayerView::new(authored_player_eye_height(
+            Some(&runtime_blueprint),
+            character_visual_scale,
+        ));
         let mut jetpack = JetpackState::default();
         let mut weapon_inventory = WeaponInventory::default();
         let mut special_inventory = SpecialWeaponInventory::default();
@@ -833,7 +881,7 @@ fn spawn_players(
             .spawn((
                 Player,
                 PlayerIndex(i),
-                PlayerInput::default(),
+                (PlayerInput::default(), player_view),
                 AimSolution::default(),
                 Transform::from_translation(spawn_pos),
                 GlobalTransform::default(),
@@ -1004,7 +1052,7 @@ fn spawn_players(
         let cam_entity = commands
             .spawn((
                 Camera3dBundle {
-                    transform: player_camera_transform(
+                    transform: third_person_camera_transform(
                         &Transform::from_translation(spawn_pos),
                         0.0,
                     ),
@@ -1016,6 +1064,7 @@ fn spawn_players(
                     ..default()
                 },
                 PlayerCamera,
+                all_gameplay_render_layers(),
                 CameraPitch::default(),
                 Projection::Perspective(PerspectiveProjection {
                     far: 30_000.0,
@@ -1348,6 +1397,84 @@ fn release_cursor(mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>) {
     }
 }
 
+fn toggle_player_perspective(
+    mut players: Query<(&PlayerIndex, &PlayerInput, &mut PlayerView), With<Player>>,
+    mut messages: MessageWriter<UiMessageEvent>,
+) {
+    for (index, input, mut view) in &mut players {
+        if !input.toggle_perspective {
+            continue;
+        }
+        let perspective = view.toggle();
+        messages.write(UiMessageEvent {
+            text: format!("P{} camera: {}", index.0 + 1, perspective.label()),
+            duration: 1.6,
+        });
+    }
+}
+
+/// Player bodies use owner-specific layers so a first-person camera can hide
+/// only its own avatar without removing that hero from another split-screen
+/// viewport. New runtime attachments are picked up automatically.
+fn bind_player_visual_render_layers(
+    mut commands: Commands,
+    players: Query<&PlayerIndex, With<Player>>,
+    parents: Query<&ChildOf>,
+    renderables: Query<
+        (Entity, Option<&RenderLayers>),
+        (
+            With<Mesh3d>,
+            Or<(Added<Mesh3d>, Changed<ChildOf>)>,
+            Without<DirectionalLight>,
+            Without<PointLight>,
+            Without<SpotLight>,
+        ),
+    >,
+) {
+    for (entity, existing) in &renderables {
+        let Some(index) = player_ancestor_index(entity, &players, &parents) else {
+            continue;
+        };
+        let target = RenderLayers::layer(player_render_layer(index));
+        if existing != Some(&target) {
+            commands.entity(entity).insert(target);
+        }
+    }
+}
+
+fn player_ancestor_index(
+    entity: Entity,
+    players: &Query<&PlayerIndex, With<Player>>,
+    parents: &Query<&ChildOf>,
+) -> Option<u8> {
+    let mut current = entity;
+    loop {
+        if let Ok(index) = players.get(current) {
+            return Some(index.0);
+        }
+        current = parents.get(current).ok()?.parent();
+    }
+}
+
+/// Avatar-only render layers still need the gameplay lights to include them.
+/// World geometry remains on layer zero, while each light illuminates the
+/// world and all four possible player layers.
+fn bind_gameplay_light_render_layers(
+    mut commands: Commands,
+    lights: Query<
+        (Entity, Option<&RenderLayers>),
+        Or<(Added<DirectionalLight>, Added<PointLight>, Added<SpotLight>)>,
+    >,
+) {
+    let target = all_gameplay_render_layers();
+    for (entity, existing) in &lights {
+        if existing == Some(&target) {
+            continue;
+        }
+        commands.entity(entity).insert(target.clone());
+    }
+}
+
 // ── Mouse Look ────────────────────────────────────────────────────────────────
 fn player_look(
     mut player_q: Query<
@@ -1432,6 +1559,7 @@ fn player_camera_follow_system(
             &PlayerIndex,
             &Transform,
             &PlayerCameraRef,
+            &PlayerView,
             Option<&GrappleHookState>,
             Option<&JetpackState>,
             Option<&TraversalModeState>,
@@ -1446,6 +1574,7 @@ fn player_camera_follow_system(
             &mut Transform,
             &CameraPitch,
             &mut Camera,
+            &mut RenderLayers,
             &mut Projection,
             &mut InteriorCameraBlend,
         ),
@@ -1483,7 +1612,7 @@ fn player_camera_follow_system(
         let party_focus = average_positions(
             &player_q
                 .iter()
-                .map(|(_, transform, _, _, _, _, _)| transform.translation)
+                .map(|(_, transform, _, _, _, _, _, _)| transform.translation)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or(dungeon.focus);
@@ -1496,10 +1625,10 @@ fn player_camera_follow_system(
 
     let lead_camera = player_q
         .iter()
-        .min_by_key(|(index, _, _, _, _, _, _)| index.0)
-        .map(|(_, _, camera_ref, _, _, _, _)| camera_ref.0);
+        .min_by_key(|(index, _, _, _, _, _, _, _)| index.0)
+        .map(|(_, _, camera_ref, _, _, _, _, _)| camera_ref.0);
 
-    for (index, player_transform, camera_ref, grapple, jetpack, traversal, prev_tick) in
+    for (index, player_transform, camera_ref, view, grapple, jetpack, traversal, prev_tick) in
         player_q.iter()
     {
         // EC1b render interpolation: while the fixed motor is on, follow a
@@ -1523,6 +1652,7 @@ fn player_camera_follow_system(
             mut camera_transform,
             pitch,
             mut camera,
+            mut render_layers,
             mut projection,
             mut interior_blend,
         )) = cam_q.get_mut(camera_ref.0)
@@ -1540,24 +1670,32 @@ fn player_camera_follow_system(
                     });
             let interior_target = f32::from(inside_building);
             interior_blend.0 += (interior_target - interior_blend.0) * (1.0 - (-dt * 8.5).exp());
-            let exterior_transform = player_camera_transform(player_transform, pitch.0);
-            let mut interior_transform =
-                interior_player_camera_transform(player_transform, pitch.0);
-            interior_transform.translation = clip_interior_camera_position(
-                player_transform.translation + Vec3::Y * 1.35,
-                interior_transform.translation,
-                &spatial_query,
-            );
-            let interior_smooth =
-                interior_blend.0 * interior_blend.0 * (3.0 - 2.0 * interior_blend.0);
-            let mut local_ind_transform = Transform {
-                translation: exterior_transform
-                    .translation
-                    .lerp(interior_transform.translation, interior_smooth),
-                rotation: exterior_transform
-                    .rotation
-                    .slerp(interior_transform.rotation, interior_smooth),
-                scale: Vec3::ONE,
+            let mut local_ind_transform = match view.perspective {
+                CameraPerspective::FirstPerson => {
+                    first_person_camera_transform(player_transform, pitch.0, view.eye_height)
+                }
+                CameraPerspective::ThirdPerson => {
+                    let exterior_transform =
+                        third_person_camera_transform(player_transform, pitch.0);
+                    let mut interior_transform =
+                        interior_player_camera_transform(player_transform, pitch.0);
+                    interior_transform.translation = clip_interior_camera_position(
+                        player_transform.translation + Vec3::Y * 1.35,
+                        interior_transform.translation,
+                        &spatial_query,
+                    );
+                    let interior_smooth =
+                        interior_blend.0 * interior_blend.0 * (3.0 - 2.0 * interior_blend.0);
+                    Transform {
+                        translation: exterior_transform
+                            .translation
+                            .lerp(interior_transform.translation, interior_smooth),
+                        rotation: exterior_transform
+                            .rotation
+                            .slerp(interior_transform.rotation, interior_smooth),
+                        scale: Vec3::ONE,
+                    }
+                }
             };
             let hook_pullback = grapple
                 .map(|g| if g.is_active() { 3.0 } else { 0.0 })
@@ -1585,18 +1723,36 @@ fn player_camera_follow_system(
                     }
                 })
                 .unwrap_or(0.0);
-            local_ind_transform.translation += player_transform.rotation
-                * Vec3::new(
-                    0.0,
-                    flight_lift,
-                    hook_pullback + board_pullback + stunt_intensity * 0.85,
-                );
+            if view.perspective == CameraPerspective::ThirdPerson {
+                local_ind_transform.translation += player_transform.rotation
+                    * Vec3::new(
+                        0.0,
+                        flight_lift,
+                        hook_pullback + board_pullback + stunt_intensity * 0.85,
+                    );
+            }
             if let Projection::Perspective(ref mut perspective) = *projection {
-                let target_fov =
-                    (58.0 + hook_pullback * 1.2 + board_pullback * 1.6 + stunt_intensity * 2.1)
-                        .to_radians()
-                        + interior_blend.0 * 9.0_f32.to_radians();
+                let base_fov = match view.perspective {
+                    CameraPerspective::FirstPerson => 72.0,
+                    CameraPerspective::ThirdPerson => 58.0,
+                };
+                let interior_bonus = if view.perspective == CameraPerspective::ThirdPerson {
+                    interior_blend.0 * 9.0
+                } else {
+                    0.0
+                };
+                let local_target_fov = (base_fov
+                    + hook_pullback * 1.2
+                    + board_pullback * 1.6
+                    + stunt_intensity * 2.1
+                    + interior_bonus)
+                    .to_radians();
+                let target_fov = local_target_fov.lerp(58.0_f32.to_radians(), s);
                 perspective.fov += (target_fov - perspective.fov) * (1.0 - (-dt * 8.0).exp());
+            }
+            let target_render_layers = player_camera_render_layers(index.0, view.perspective, p);
+            if *render_layers != target_render_layers {
+                *render_layers = target_render_layers;
             }
             let is_lead = Some(camera_entity) == lead_camera;
 
@@ -1604,20 +1760,22 @@ fn player_camera_follow_system(
                 // Fully transitioned: Only the lead camera is active, filling screen completely
                 camera.is_active = is_lead;
                 camera.viewport = None;
-                if is_lead {
-                    *camera_transform = shared_target_transform;
-                }
+                *camera_transform = shared_target_transform;
             } else if p <= 0.001 {
                 // Fully split-screen mode
                 camera.is_active = true;
                 camera.viewport = player_viewport(index.0, active_players, win_w, win_h);
-                camera_transform.translation = smooth_camera_position(
-                    camera_transform.translation,
-                    local_ind_transform.translation,
-                    dt,
-                );
-                camera_transform.rotation = local_ind_transform.rotation;
-                camera_transform.scale = Vec3::ONE;
+                if view.perspective == CameraPerspective::FirstPerson {
+                    *camera_transform = local_ind_transform;
+                } else {
+                    camera_transform.translation = smooth_camera_position(
+                        camera_transform.translation,
+                        local_ind_transform.translation,
+                        dt,
+                    );
+                    camera_transform.rotation = local_ind_transform.rotation;
+                    camera_transform.scale = Vec3::ONE;
+                }
             } else {
                 // In transition: Keep both active to perform the blending
                 camera.is_active = true;
@@ -1658,7 +1816,7 @@ fn player_camera_follow_system(
         }
     }
 
-    for (camera, mut camera_transform, _, mut camera_component, _, _) in cam_q.iter_mut() {
+    for (camera, mut camera_transform, _, mut camera_component, _, _, _) in cam_q.iter_mut() {
         if !referenced.contains(&camera) {
             camera_component.is_active = false;
             camera_transform.translation = Vec3::new(0.0, -10_000.0, 0.0);
@@ -1667,10 +1825,25 @@ fn player_camera_follow_system(
     }
 }
 
-fn player_camera_transform(player_transform: &Transform, pitch: f32) -> Transform {
+fn third_person_camera_transform(player_transform: &Transform, pitch: f32) -> Transform {
     let local_offset = third_person_camera_offset();
     Transform {
         translation: player_transform.translation + player_transform.rotation * local_offset,
+        rotation: player_transform.rotation * Quat::from_rotation_x(pitch),
+        scale: Vec3::ONE,
+    }
+}
+
+fn first_person_camera_transform(
+    player_transform: &Transform,
+    pitch: f32,
+    eye_height: f32,
+) -> Transform {
+    Transform {
+        // Keep the eye inside the physics capsule so close walls cannot cross
+        // the near plane for small Character Studio body recipes. The owner's
+        // avatar meshes are hidden from this camera by render layers.
+        translation: player_transform.translation + Vec3::Y * eye_height,
         rotation: player_transform.rotation * Quat::from_rotation_x(pitch),
         scale: Vec3::ONE,
     }
@@ -5182,7 +5355,7 @@ mod tests {
     #[test]
     fn interior_camera_is_close_and_stops_before_walls() {
         let player = Transform::from_xyz(4.0, 2.0, -3.0);
-        let exterior = player_camera_transform(&player, 0.0);
+        let exterior = third_person_camera_transform(&player, 0.0);
         let interior = interior_player_camera_transform(&player, 0.0);
         assert!(
             interior.translation.distance(player.translation)
@@ -5191,6 +5364,112 @@ mod tests {
         assert_eq!(camera_distance_before_obstruction(4.5, None), 4.5);
         assert!((camera_distance_before_obstruction(4.5, Some(2.0)) - 1.72).abs() < 1e-5);
         assert_eq!(camera_distance_before_obstruction(4.5, Some(0.1)), 0.70);
+    }
+
+    #[test]
+    fn first_person_eye_position_does_not_orbit_when_pitch_changes() {
+        let player = Transform::from_xyz(4.0, 2.0, -3.0).with_rotation(Quat::from_rotation_y(0.7));
+        let level = first_person_camera_transform(&player, 0.0, 1.8);
+        let looking_up = first_person_camera_transform(&player, 0.9, 1.8);
+
+        assert!(level.translation.distance(looking_up.translation) < 1e-5);
+        assert!((level.translation.y - 3.8).abs() < 1e-5);
+        assert_ne!(level.rotation, looking_up.rotation);
+        assert!(
+            level.translation.distance(player.translation)
+                < third_person_camera_transform(&player, 0.0)
+                    .translation
+                    .distance(player.translation)
+        );
+    }
+
+    #[test]
+    fn first_person_camera_hides_only_its_owned_avatar_layer() {
+        let p2_layer = RenderLayers::layer(player_render_layer(1));
+        let p1_layer = RenderLayers::layer(player_render_layer(0));
+        let world_layer = RenderLayers::layer(crate::engine::rendering::WORLD_RENDER_LAYER);
+        let first_person = player_camera_render_layers(1, CameraPerspective::FirstPerson, 0.0);
+
+        assert!(!first_person.intersects(&p2_layer));
+        assert!(first_person.intersects(&p1_layer));
+        assert!(first_person.intersects(&world_layer));
+        assert!(
+            player_camera_render_layers(1, CameraPerspective::ThirdPerson, 0.0)
+                .intersects(&p2_layer)
+        );
+        assert!(
+            player_camera_render_layers(1, CameraPerspective::FirstPerson, 1.0)
+                .intersects(&p2_layer)
+        );
+    }
+
+    #[test]
+    fn perspective_toggle_changes_only_the_requesting_player() {
+        let mut app = App::new();
+        app.add_message::<UiMessageEvent>()
+            .add_systems(Update, toggle_player_perspective);
+        let first = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(0),
+                PlayerInput::default(),
+                PlayerView::default(),
+            ))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(1),
+                PlayerInput {
+                    toggle_perspective: true,
+                    ..default()
+                },
+                PlayerView::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PlayerView>(first).unwrap().perspective,
+            CameraPerspective::ThirdPerson
+        );
+        assert_eq!(
+            app.world().get::<PlayerView>(second).unwrap().perspective,
+            CameraPerspective::FirstPerson
+        );
+    }
+
+    #[test]
+    fn new_and_reparented_player_meshes_receive_owner_layers() {
+        let mut app = App::new();
+        app.add_systems(
+            Update,
+            (
+                bind_player_visual_render_layers,
+                bind_gameplay_light_render_layers,
+            ),
+        );
+        let player = app.world_mut().spawn((Player, PlayerIndex(2))).id();
+        let mesh = app.world_mut().spawn(Mesh3d::default()).id();
+        let light = app.world_mut().spawn(DirectionalLight::default()).id();
+
+        app.update();
+        assert!(app.world().get::<RenderLayers>(mesh).is_none());
+        assert_eq!(
+            app.world().get::<RenderLayers>(light),
+            Some(&all_gameplay_render_layers())
+        );
+
+        app.world_mut().entity_mut(player).add_child(mesh);
+        app.update();
+
+        assert_eq!(
+            app.world().get::<RenderLayers>(mesh),
+            Some(&RenderLayers::layer(player_render_layer(2)))
+        );
     }
 }
 #[test]
