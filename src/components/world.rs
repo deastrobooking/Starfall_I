@@ -178,7 +178,9 @@ pub struct SpringJumpPad {
     pub launch_velocity: Vec3,
     pub radius: f32,
     pub cooldown: f32,
-    pub cooldown_timer: f32,
+    /// Independent retrigger windows keep a leading split-screen rider from
+    /// disabling the spring for teammates arriving a few frames later.
+    pub cooldown_timers: [f32; 4],
     pub force_hoverboard: bool,
 }
 
@@ -211,7 +213,9 @@ pub struct BoardBoostPad {
     pub lift: f32,
     pub duration: f32,
     pub cooldown: f32,
-    pub cooldown_timer: f32,
+    /// Owner-scoped contact cooldowns keep one local rider from consuming a
+    /// wide road pad before the rest of the split-screen party reaches it.
+    pub cooldown_timers: [f32; 4],
     pub force_hoverboard: bool,
 }
 

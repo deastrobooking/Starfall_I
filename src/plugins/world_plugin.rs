@@ -36,10 +36,10 @@ use crate::components::enemy::{
 };
 use crate::components::faction::Faction;
 use crate::components::player::{
-    BoardBoostState, GrappleSocket, GrappleTargetKind, ParryState, Player, PlayerIndex,
-    PlayerInput, PlayerMovement, PlayerProgression, PlayerStateMachine, PlayerStats,
-    RooftopTrialProgress, StuntRaceProgress, StuntRunState, TraversalMode, TraversalModeState,
-    WaterTraversalState,
+    BoardBoostState, ClimbState, EdgeGrabState, FlightMode, GrappleHookState, GrappleSocket,
+    GrappleTargetKind, JetpackState, ParryState, Player, PlayerIndex, PlayerInput, PlayerMovement,
+    PlayerProgression, PlayerStateMachine, PlayerStats, RooftopTrialProgress, StuntRaceProgress,
+    StuntRunState, TraversalMode, TraversalModeState, WaterTraversalState,
 };
 use crate::components::world::*;
 use crate::engine::rendering::{
@@ -52,11 +52,13 @@ use crate::events::{PlayerDamagedEvent, PlayerParryEvent, UiMessageEvent};
 use crate::lsystem::tree::{spawn_tree, TreeKind, TreeRoot, TreeTemplate};
 use crate::plugins::chapter_plugin::spawn_discoverable_beacon;
 use crate::plugins::enemy_plugin::{spawn_drone_variant_entity, spawn_enemy_entity};
+use crate::plugins::vehicle_plugin::{VehicleSet, VehicleState};
 use crate::resources::{
     initial_world_routes, initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState,
     DungeonRoomState, GameSettings, PlaySessionTransition, WorldRouteRegistry, WorldRouteState,
     WorldSiteRegistry, WorldSiteState,
 };
+use crate::world::arcade_dungeon::{spawn_arcade_prototype_dungeon, ArcadeDungeonPortal};
 use crate::world::discussion::{
     discussion_script, settlement_discussion_id, settlement_guardian_role, DiscussionState,
 };
@@ -73,7 +75,9 @@ use crate::world::settlement_economy::{
     settlement_build_def, SettlementBuildKind, SettlementEconomy,
 };
 
+mod grass;
 mod roads;
+use grass::*;
 use roads::*;
 
 #[derive(Resource, Default)]
@@ -228,40 +232,6 @@ fn world_space_collider_scale() -> crate::engine::physics::prelude::ColliderScal
     crate::engine::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
 }
 
-// ── Grass wind material ───────────────────────────────────────────────────────
-
-#[derive(Asset, TypePath, AsBindGroup, Clone)]
-struct GrassMaterial {
-    #[uniform(0)]
-    settings: GrassMaterialUniform,
-}
-
-#[derive(ShaderType, Clone, Copy)]
-struct GrassMaterialUniform {
-    tip_color: Vec4,
-    root_color: Vec4,
-    /// X speed, Y strength, Z spatial frequency, W secondary-wave scale.
-    wind: Vec4,
-}
-
-impl Material for GrassMaterial {
-    fn vertex_shader() -> ShaderRef {
-        "shaders/grass.wgsl".into()
-    }
-    fn fragment_shader() -> ShaderRef {
-        "shaders/grass.wgsl".into()
-    }
-    fn specialize(
-        _pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None; // render both faces of each blade
-        Ok(())
-    }
-}
-
 #[derive(Component, Clone, Copy)]
 struct NatureSway {
     base_translation: Vec3,
@@ -343,7 +313,7 @@ impl Plugin for WorldPlugin {
             .init_resource::<WorldRouteRegistry>()
             .init_resource::<RaidRegistry>()
             .init_resource::<DiscussionState>()
-            .add_plugins(MaterialPlugin::<GrassMaterial>::default())
+            .add_plugins(GrassPlugin)
             .add_plugins(MaterialPlugin::<TerrainMaterial>::default())
             .add_systems(
                 OnEnter(AppState::Playing),
@@ -421,6 +391,7 @@ impl Plugin for WorldPlugin {
                     stunt_race_gate_system,
                 )
                     .chain()
+                    .after(VehicleSet::State)
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -900,46 +871,142 @@ fn discussion_interaction_system(
 }
 
 fn dungeon_crawl_gate_system(
+    mut commands: Commands,
     time: Res<Time>,
     mut dungeon: ResMut<DungeonCrawlState>,
-    mut gate_q: Query<&mut DungeonCrawlGate>,
+    mut room_state: ResMut<DungeonRoomState>,
+    mut gate_q: Query<(&mut DungeonCrawlGate, Option<&ArcadeDungeonPortal>)>,
     mut door_q: Query<(&mut Transform, &DungeonGateDoor), Without<Player>>,
-    player_q: Query<(&Transform, &PlayerInput), With<Player>>,
+    mut player_q: Query<
+        (
+            Entity,
+            &PlayerIndex,
+            &mut Transform,
+            &PlayerInput,
+            &mut PlayerMovement,
+            Option<&mut JetpackState>,
+            Option<&mut GrappleHookState>,
+            Option<&mut TraversalModeState>,
+            Option<&mut ClimbState>,
+            Option<&mut EdgeGrabState>,
+            Option<&mut BoardBoostState>,
+        ),
+        With<Player>,
+    >,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
     let mut opened_gates = Vec::new();
+    // Snapshot interact intents before arcade teleports rewrite transforms.
+    let interact_positions = player_q
+        .iter()
+        .filter(|(_, _, _, input, ..)| input.interact)
+        .map(|(_, _, transform, ..)| transform.translation)
+        .collect::<Vec<_>>();
+    let near_positions = player_q
+        .iter()
+        .map(|(_, _, transform, ..)| transform.translation)
+        .collect::<Vec<_>>();
 
-    for mut gate in gate_q.iter_mut() {
-        let party_near_gate = player_q
+    let mut arcade_enter: Option<(
+        &'static str,
+        u8,
+        &'static str,
+        Vec3,
+        f32,
+        ArcadeDungeonPortal,
+    )> = None;
+
+    for (mut gate, arcade_portal) in gate_q.iter_mut() {
+        let party_near_gate = near_positions
             .iter()
-            .any(|(transform, _)| gate.contains_interaction(transform.translation));
+            .any(|position| gate.contains_interaction(*position));
         let should_open = party_near_gate
-            && player_q.iter().any(|(transform, input)| {
-                input.interact && gate.contains_interaction(transform.translation)
-            });
+            && interact_positions
+                .iter()
+                .any(|position| gate.contains_interaction(*position));
 
         if should_open {
-            if !gate.opened {
-                msg_ev.write(UiMessageEvent {
-                    text: format!("{} opened - top-down dungeon crawl linked.", gate.label),
-                    duration: 3.0,
-                });
-            }
+            let entering_fresh =
+                !gate.opened || !dungeon.active || dungeon.gate_id != Some(gate.gate_id);
             gate.opened = true;
-            dungeon.activate(
-                gate.gate_id,
-                crate::chapters::ChapterId(gate.chapter),
-                gate.label,
-                gate.focus,
-                gate.entry,
-                gate.radius,
-            );
+            if let Some(portal) = arcade_portal {
+                if entering_fresh || !dungeon.arcade_rules {
+                    arcade_enter = Some((
+                        gate.gate_id,
+                        gate.chapter,
+                        gate.label,
+                        gate.focus,
+                        gate.radius,
+                        *portal,
+                    ));
+                }
+            } else {
+                if entering_fresh {
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("{} opened - top-down dungeon crawl linked.", gate.label),
+                        duration: 3.0,
+                    });
+                }
+                dungeon.activate(
+                    gate.gate_id,
+                    crate::chapters::ChapterId(gate.chapter),
+                    gate.label,
+                    gate.focus,
+                    gate.entry,
+                    gate.radius,
+                );
+            }
         }
 
         if gate.opened {
             opened_gates.push(gate.gate_id);
         }
+    }
+
+    if let Some((gate_id, chapter, label, focus, radius, portal)) = arcade_enter {
+        for (
+            entity,
+            index,
+            mut transform,
+            _,
+            mut movement,
+            jetpack,
+            grapple,
+            traversal,
+            climb,
+            edge_grab,
+            board_boost,
+        ) in player_q.iter_mut()
+        {
+            transform.translation = portal.stage_spawns[usize::from(index.0.min(3))];
+            strip_player_for_arcade_stage(
+                &mut movement,
+                jetpack,
+                grapple,
+                traversal,
+                climb,
+                edge_grab,
+                board_boost,
+            );
+            commands.entity(entity).remove::<BoatPassenger>();
+        }
+        dungeon.activate_arcade(
+            gate_id,
+            crate::chapters::ChapterId(chapter),
+            label,
+            focus,
+            portal.stage_spawns[0],
+            radius.max(28.0),
+        );
+        room_state.clear_active();
+        room_state.enter_room(gate_id, 0);
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "{label} — arcade stage linked! Hack-and-slash only (no jet/grapple/board)."
+            ),
+            duration: 3.4,
+        });
     }
 
     for (mut transform, door) in door_q.iter_mut() {
@@ -950,6 +1017,46 @@ fn dungeon_crawl_gate_system(
         };
         let blend = 1.0 - (-dt * 5.5).exp();
         transform.translation = transform.translation.lerp(target, blend);
+    }
+}
+
+fn strip_player_for_arcade_stage(
+    movement: &mut PlayerMovement,
+    jetpack: Option<Mut<JetpackState>>,
+    grapple: Option<Mut<GrappleHookState>>,
+    traversal: Option<Mut<TraversalModeState>>,
+    climb: Option<Mut<ClimbState>>,
+    edge_grab: Option<Mut<EdgeGrabState>>,
+    board_boost: Option<Mut<BoardBoostState>>,
+) {
+    movement.velocity = Vec3::ZERO;
+    movement.ground_velocity = Vec3::ZERO;
+    movement.knockback_velocity = Vec3::ZERO;
+    movement.clear_motor_delivery();
+    movement.is_grounded = false;
+    if let Some(mut jetpack) = jetpack {
+        jetpack.is_active = false;
+        jetpack.mode = FlightMode::Grounded;
+        jetpack.air_dash_timer = 0.0;
+    }
+    if let Some(mut grapple) = grapple {
+        grapple.begin_recovery();
+    }
+    if let Some(mut traversal) = traversal {
+        // Keep a grounded-friendly mode selected; arcade rules block the toys.
+        traversal.active = TraversalMode::Grapple;
+    }
+    if let Some(mut climb) = climb {
+        climb.is_climbing = false;
+    }
+    if let Some(mut edge_grab) = edge_grab {
+        edge_grab.release_hang();
+    }
+    if let Some(mut board_boost) = board_boost {
+        board_boost.timer = 0.0;
+        board_boost.speed_mult = 1.0;
+        board_boost.direction = Vec3::ZERO;
+        board_boost.manual_cooldown = 0.0;
     }
 }
 
@@ -1040,6 +1147,11 @@ fn dungeon_exit_portal_system(
             &PlayerInput,
             &mut Transform,
             &mut PlayerMovement,
+            Option<&mut JetpackState>,
+            Option<&mut GrappleHookState>,
+            Option<&mut ClimbState>,
+            Option<&mut EdgeGrabState>,
+            Option<&mut BoardBoostState>,
         ),
         With<Player>,
     >,
@@ -1058,25 +1170,62 @@ fn dungeon_exit_portal_system(
     else {
         return;
     };
-    let exit_requested = player_q.iter().any(|(_, _, input, transform, _)| {
+    let exit_requested = player_q.iter().any(|(_, _, input, transform, ..)| {
         input.interact && transform.translation.distance(portal.position) <= portal.interact_radius
     });
     if !exit_requested {
         return;
     }
 
-    for (entity, index, _, mut transform, mut movement) in player_q.iter_mut() {
+    let was_arcade = dungeon.arcade_rules;
+    for (
+        entity,
+        index,
+        _,
+        mut transform,
+        mut movement,
+        jetpack,
+        grapple,
+        climb,
+        edge_grab,
+        board_boost,
+    ) in player_q.iter_mut()
+    {
         transform.translation = portal.return_positions[usize::from(index.0.min(3))];
         movement.velocity = Vec3::ZERO;
         movement.ground_velocity = Vec3::ZERO;
+        movement.knockback_velocity = Vec3::ZERO;
         movement.clear_motor_delivery();
         movement.is_grounded = false;
+        if let Some(mut jetpack) = jetpack {
+            jetpack.is_active = false;
+            jetpack.mode = FlightMode::Grounded;
+            jetpack.air_dash_timer = 0.0;
+        }
+        if let Some(mut grapple) = grapple {
+            grapple.begin_recovery();
+        }
+        if let Some(mut climb) = climb {
+            climb.is_climbing = false;
+        }
+        if let Some(mut edge_grab) = edge_grab {
+            edge_grab.release_hang();
+        }
+        if let Some(mut board_boost) = board_boost {
+            board_boost.timer = 0.0;
+            board_boost.speed_mult = 1.0;
+            board_boost.direction = Vec3::ZERO;
+        }
         commands.entity(entity).remove::<BoatPassenger>();
     }
     dungeon.clear();
     room_state.clear_active();
     msg_ev.write(UiMessageEvent {
-        text: "Party returned to the mountain entrance.".to_string(),
+        text: if was_arcade {
+            "Party left the arcade stage.".to_string()
+        } else {
+            "Party returned to the mountain entrance.".to_string()
+        },
         duration: 2.4,
     });
 }
@@ -1658,6 +1807,19 @@ fn raid_tick_system(
     }
 }
 
+fn raid_wave_enemy_type(kind: RaidKind, wave_index: u8) -> EnemyType {
+    match kind {
+        RaidKind::DroneSwarm | RaidKind::FighterAttack | RaidKind::GiantUfoSiege => {
+            EnemyType::Drone
+        }
+        // Heavy Water's route blockades mix a siege tank into each four-unit
+        // cadence while preserving the existing infantry composition.
+        RaidKind::RouteBlockade if wave_index.is_multiple_of(4) => EnemyType::Tank,
+        RaidKind::RobotLanding | RaidKind::RouteBlockade => EnemyType::Soldier,
+        RaidKind::DragonDomainAssault => EnemyType::SpikeAlien,
+    }
+}
+
 fn raid_spawn_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -1693,28 +1855,25 @@ fn raid_spawn_system(
             center + Vec3::new(0.0, 34.0, 0.0),
         );
 
-        let enemy_type = match kind {
-            RaidKind::DroneSwarm | RaidKind::FighterAttack | RaidKind::GiantUfoSiege => {
-                EnemyType::Drone
-            }
-            RaidKind::RobotLanding | RaidKind::RouteBlockade => EnemyType::Soldier,
-            RaidKind::DragonDomainAssault => EnemyType::SpikeAlien,
-        };
         let radius = 22.0;
         for i in 0..wave_size {
+            let enemy_type = raid_wave_enemy_type(kind, i);
             let t = i as f32 / wave_size.max(1) as f32;
             let angle = t * std::f32::consts::TAU;
-            let offset = Vec3::new(
-                angle.cos() * radius,
-                8.0 + (i % 3) as f32 * 2.2,
-                angle.sin() * radius,
-            );
+            let x = center.x + angle.cos() * radius;
+            let z = center.z + angle.sin() * radius;
+            let position = match enemy_type {
+                // The tank prefab owns its chassis clearance; give it the
+                // exact local surface instead of the airborne raid offset.
+                EnemyType::Tank => Vec3::new(x, terrain_surface_y(x, z, settings.world_seed), z),
+                _ => Vec3::new(x, center.y + 8.0 + (i % 3) as f32 * 2.2, z),
+            };
             let enemy = spawn_enemy_entity(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
                 enemy_type,
-                center + offset,
+                position,
                 1.12,
                 Some(Faction::DimensionalAlien),
             );
@@ -2047,30 +2206,42 @@ fn sling_shot_system(
 
 fn spring_jump_pad_system(
     time: Res<Time>,
+    vehicle_state: Option<Res<VehicleState>>,
     mut pad_q: Query<(&Transform, &mut SpringJumpPad)>,
     mut player_q: Query<(
+        &PlayerIndex,
         &Transform,
         &mut PlayerMovement,
         &mut TraversalModeState,
         &mut PlayerStateMachine,
+        Option<&BoatPassenger>,
     )>,
     mut action_sfx: MessageWriter<ModularActionSfxEvent>,
 ) {
     let dt = time.delta_secs();
     for (pad_transform, mut pad) in pad_q.iter_mut() {
-        pad.cooldown_timer = (pad.cooldown_timer - dt).max(0.0);
-        if pad.cooldown_timer > 0.0 {
-            continue;
+        for timer in &mut pad.cooldown_timers {
+            *timer = (*timer - dt).max(0.0);
         }
         let mut triggered = false;
-        for (player_transform, mut movement, mut traversal, mut state) in player_q.iter_mut() {
+        for (index, player_transform, mut movement, mut traversal, mut state, passenger) in
+            player_q.iter_mut()
+        {
+            let slot = index.0 as usize;
+            if slot >= pad.cooldown_timers.len() || pad.cooldown_timers[slot] > 0.0 {
+                continue;
+            }
             let offset = player_transform.translation - pad_transform.translation;
             let on_spring =
                 offset.with_y(0.0).length() <= pad.radius && offset.y >= -1.4 && offset.y <= 3.8;
             if !on_spring || movement.velocity.y > 4.0 {
                 continue;
             }
-            if pad.force_hoverboard {
+            let vehicle_active = passenger.is_some()
+                || vehicle_state
+                    .as_ref()
+                    .is_some_and(|vehicles| vehicles.player_owns_active_vehicle(index.0));
+            if pad.force_hoverboard && !vehicle_active {
                 traversal.active = TraversalMode::Hoverboard;
             }
             movement.ground_velocity = pad.launch_velocity.with_y(0.0);
@@ -2079,10 +2250,10 @@ fn spring_jump_pad_system(
             movement.coyote_timer = 0.0;
             movement.jump_buffer_timer = 0.0;
             state.force(crate::components::player::PlayerState::Jetpack);
+            pad.cooldown_timers[slot] = pad.cooldown;
             triggered = true;
         }
         if triggered {
-            pad.cooldown_timer = pad.cooldown;
             action_sfx.write(ModularActionSfxEvent::new("hoverboard.spring"));
         }
     }
@@ -2102,25 +2273,47 @@ fn closest_point_on_stunt_rail(point: Vec3, rail: &StuntGrindRail) -> (f32, Vec3
 fn stunt_grind_rail_system(
     mut commands: Commands,
     time: Res<Time>,
+    vehicle_state: Option<Res<VehicleState>>,
     rail_q: Query<(Entity, &StuntGrindRail)>,
     mut player_q: Query<
         (
             Entity,
+            &PlayerIndex,
             &mut Transform,
             &PlayerInput,
             &mut PlayerMovement,
             &mut TraversalModeState,
             &mut PlayerStateMachine,
             Option<&RailGrindState>,
+            Option<&BoatPassenger>,
         ),
         With<Player>,
     >,
     mut action_sfx: MessageWriter<ModularActionSfxEvent>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, input, mut movement, mut traversal, mut state, grinding) in
-        player_q.iter_mut()
+    for (
+        entity,
+        index,
+        mut transform,
+        input,
+        mut movement,
+        mut traversal,
+        mut state,
+        grinding,
+        passenger,
+    ) in player_q.iter_mut()
     {
+        let vehicle_active = passenger.is_some()
+            || vehicle_state
+                .as_ref()
+                .is_some_and(|vehicles| vehicles.player_owns_active_vehicle(index.0));
+        if vehicle_active {
+            if grinding.is_some() {
+                commands.entity(entity).remove::<RailGrindState>();
+            }
+            continue;
+        }
         if let Some(grinding) = grinding {
             let Ok((_, rail)) = rail_q.get(grinding.rail) else {
                 commands.entity(entity).remove::<RailGrindState>();
@@ -2569,21 +2762,23 @@ fn stunt_race_gate_system(
 
 fn board_boost_pad_system(
     time: Res<Time>,
+    vehicle_state: Option<Res<VehicleState>>,
     mut pad_q: Query<(&Transform, &mut BoardBoostPad)>,
     mut player_q: Query<(
+        &PlayerIndex,
         &Transform,
         &PlayerProgression,
         &mut PlayerMovement,
         &mut TraversalModeState,
         &mut BoardBoostState,
         &mut PlayerStateMachine,
+        Option<&BoatPassenger>,
     )>,
 ) {
     let dt = time.delta_secs();
     for (pad_transform, mut pad) in pad_q.iter_mut() {
-        pad.cooldown_timer = (pad.cooldown_timer - dt).max(0.0);
-        if pad.cooldown_timer > 0.0 {
-            continue;
+        for timer in &mut pad.cooldown_timers {
+            *timer = (*timer - dt).max(0.0);
         }
 
         let direction = pad.direction.with_y(0.0).normalize_or_zero();
@@ -2592,9 +2787,21 @@ fn board_boost_pad_system(
         }
 
         let inv_rot = pad_transform.rotation.inverse();
-        for (player_transform, progression, mut movement, mut traversal, mut boost, mut state) in
-            player_q.iter_mut()
+        for (
+            index,
+            player_transform,
+            progression,
+            mut movement,
+            mut traversal,
+            mut boost,
+            mut state,
+            passenger,
+        ) in player_q.iter_mut()
         {
+            let slot = index.0 as usize;
+            if slot >= pad.cooldown_timers.len() || pad.cooldown_timers[slot] > 0.0 {
+                continue;
+            }
             let local = inv_rot * (player_transform.translation - pad_transform.translation);
             let on_pad = local.x.abs() <= pad.half_width
                 && local.z.abs() <= pad.half_length
@@ -2604,7 +2811,11 @@ fn board_boost_pad_system(
                 continue;
             }
 
-            if pad.force_hoverboard {
+            let vehicle_active = passenger.is_some()
+                || vehicle_state
+                    .as_ref()
+                    .is_some_and(|vehicles| vehicles.player_owns_active_vehicle(index.0));
+            if pad.force_hoverboard && !vehicle_active {
                 traversal.active = TraversalMode::Hoverboard;
             }
 
@@ -2628,8 +2839,7 @@ fn board_boost_pad_system(
             } else {
                 state.transition(crate::components::player::PlayerState::Sprinting);
             }
-            pad.cooldown_timer = pad.cooldown;
-            break;
+            pad.cooldown_timers[slot] = pad.cooldown;
         }
     }
 }
@@ -3357,6 +3567,7 @@ fn generate_city(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut grass_mats: ResMut<Assets<GrassMaterial>>,
+    mut grass_field: ResMut<GrassField>,
     mut terrain_mats: ResMut<Assets<TerrainMaterial>>,
     mut water_mats: ResMut<Assets<WaterMaterial>>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
@@ -3461,7 +3672,9 @@ fn generate_city(
     if current.id.0 == 1 {
         spawn_chapter_one_ocean_island(&mut commands, &mut meshes, &pal, &ocean_water);
     }
-    spawn_grasslands(&mut commands, &mut meshes, &mut grass_mats, seed + 10);
+    // Grass is streamed around the camera rather than spawned up front; this
+    // hands the streamer the terrain seed and clears the previous world's chunks.
+    arm_grass_field(&mut grass_field, &mut grass_mats, seed);
     spawn_neon_lights(&mut commands, seed + 6);
     spawn_street_lights(&mut commands, seed + 7);
     spawn_outer_districts(&mut commands, &mut meshes, &pal, seed + 8, seed);
@@ -3486,6 +3699,8 @@ fn generate_city(
     spawn_secret_cave_systems(&mut commands, &mut meshes, &pal, seed);
     spawn_dragon_lair_dungeons(&mut commands, &mut meshes, m, &pal, seed);
     spawn_great_scientist_temples(&mut commands, &mut meshes, m, &pal, seed);
+    // Concrete build-from example: isolated top-down arcade stage near spawn.
+    spawn_arcade_prototype_dungeon(&mut commands, &mut meshes, m);
     spawn_exploration_settlements(&mut commands, &mut meshes, m, &pal, seed, &economy);
     spawn_chapter_map_locations(&mut commands, &mut meshes, &pal, seed);
     spawn_puzzle_anchors(&mut commands, seed);
@@ -5312,7 +5527,7 @@ fn spawn_city_sky_playground(
             launch_velocity: plan.launch_velocity,
             radius: 1.9,
             cooldown: 0.22,
-            cooldown_timer: 0.0,
+            cooldown_timers: [0.0; 4],
             force_hoverboard: false,
         },
         GrappleSocket::new(GrappleTargetKind::ZipPoint)
@@ -9066,12 +9281,7 @@ fn spawn_terrain(
     let terrain_collider =
         crate::engine::physics::prelude::Collider::trimesh(collider_vertices, collider_triangles);
     let terrain_root = commands
-        .spawn((
-            Transform::IDENTITY,
-            GlobalTransform::IDENTITY,
-            WorldGeometry,
-            WalkableSurface,
-        ))
+        .spawn((SpatialBundle::default(), WorldGeometry, WalkableSurface))
         .id();
     match terrain_collider {
         Ok(collider) => {
@@ -9193,14 +9403,14 @@ fn spawn_mountain_spider_mechs(
         enemy.config.max_health = 1_100.0;
         enemy.config.attack_damage = 24.0;
         enemy.config.defense = 30.0;
-        enemy.config.attack_cooldown = 3.2;
+        enemy.config.attack_cooldown = 2.8;
         enemy.config.attack_windup = 0.92;
         enemy.config.knockback_force = 950.0;
         enemy.config.experience_value = 360;
         enemy.config.credits = 260;
         enemy.config.detection_range = 280.0;
         enemy.config.chase_range = 420.0;
-        enemy.config.attack_range = 18.0;
+        enemy.config.attack_range = 32.0;
         let max_health = enemy.scaled_health();
 
         let root = commands
@@ -11718,8 +11928,10 @@ fn spawn_settlement_sky_foundation(
         ));
     }
 
-    for i in 0..3 {
-        let angle = settlement.facing_yaw + i as f32 * std::f32::consts::TAU / 3.0;
+    // Four world-cardinal approaches preserve an obvious route onto the
+    // floating foundation from every district, independent of facade yaw.
+    for i in 0..4 {
+        let angle = i as f32 * std::f32::consts::FRAC_PI_2;
         let dir = Vec2::new(angle.sin(), angle.cos()).normalize();
         let start_x = settlement.x + dir.x * (layout.platform_radius + 260.0);
         let start_z = settlement.z + dir.y * (layout.platform_radius + 260.0);
@@ -15162,7 +15374,7 @@ fn spawn_board_boost_pad(
             lift,
             duration,
             cooldown: 0.18,
-            cooldown_timer: 0.0,
+            cooldown_timers: [0.0; 4],
             force_hoverboard: true,
         },
     ));
@@ -15225,7 +15437,7 @@ fn spawn_board_boost_ramp(
             lift,
             duration: 1.85,
             cooldown: 0.20,
-            cooldown_timer: 0.0,
+            cooldown_timers: [0.0; 4],
             force_hoverboard: true,
         },
         crate::engine::physics::prelude::RigidBody::Fixed,
@@ -16197,134 +16409,6 @@ fn spawn_mountains(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pal
     }
 }
 
-// ── Grasslands ───────────────────────────────────────────────────────────────
-//
-// L-system grass: axiom F, rule F→F[+F][-F], 2 iterations.
-// The turtle runs on the XZ floor plane (Y is up). Each F step records a blade
-// position. At each position two crossed vertical Rectangle quads are spawned,
-// giving the old-school cross-billboard tuft look without any camera-facing math.
-fn spawn_grasslands(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    grass_mats: &mut Assets<GrassMaterial>,
-    seed: u64,
-) {
-    // ── Shared blade meshes (two sizes for variety) ───────────────────────
-    // Rectangle lives in local XY; standing upright in world space by default.
-    let blade_tall = meshes.add(Rectangle::new(0.07, 0.72));
-    let blade_wide = meshes.add(Rectangle::new(0.09, 0.52));
-
-    // ── Three wind-grass material variants (linear sRGB greens) ──────────
-    let make_grass = |tip: Vec4, root: Vec4| GrassMaterial {
-        settings: GrassMaterialUniform {
-            tip_color: tip,
-            root_color: root,
-            wind: Vec4::new(1.30, 0.13, 0.60, 0.35),
-        },
-    };
-    let mats: [Handle<GrassMaterial>; 3] = [
-        grass_mats.add(make_grass(
-            Vec4::new(0.12, 0.36, 0.09, 1.0),
-            Vec4::new(0.035, 0.11, 0.025, 1.0),
-        )),
-        grass_mats.add(make_grass(
-            Vec4::new(0.17, 0.44, 0.12, 1.0),
-            Vec4::new(0.045, 0.14, 0.03, 1.0),
-        )),
-        grass_mats.add(make_grass(
-            Vec4::new(0.10, 0.30, 0.07, 1.0),
-            Vec4::new(0.028, 0.09, 0.02, 1.0),
-        )),
-    ];
-
-    // ── L-system string, evaluated once ──────────────────────────────────
-    // F → F[+F][-F], 2 iterations → 9 F nodes per tuft.
-    let ls: String = {
-        let mut s = String::from("F");
-        for _ in 0..2 {
-            s = s
-                .chars()
-                .flat_map(|c| {
-                    if c == 'F' {
-                        "F[+F][-F]".chars().collect::<Vec<_>>()
-                    } else {
-                        vec![c]
-                    }
-                })
-                .collect();
-        }
-        s
-    };
-
-    const ANGLE: f32 = 22.0 * std::f32::consts::PI / 180.0;
-    const BASE_STEP: f32 = 0.38;
-    const STEP_SCALE: f32 = 0.76; // branches shrink each push level
-
-    for i in 0..1_260u64 {
-        let x = seeded(seed, i * 4) * 2300.0 - 1150.0;
-        let z = seeded(seed, i * 4 + 1) * 2300.0 - 1150.0;
-        let dist = (x * x + z * z).sqrt();
-        if dist < 95.0 {
-            continue;
-        }
-
-        let y = terrain_surface_y(x, z, seed - 10);
-        if !(0.05..115.0).contains(&y) {
-            continue;
-        }
-
-        let root_dir = seeded(seed, i * 5) * std::f32::consts::TAU;
-        let mat = &mats[(i % 3) as usize];
-        let is_tall = seeded(seed, i * 7) > 0.45;
-        let blade_mesh = if is_tall { &blade_tall } else { &blade_wide };
-        let blade_h = if is_tall { 0.72_f32 } else { 0.52_f32 };
-
-        // ── XZ-plane turtle ───────────────────────────────────────────────
-        // State: (local_x, local_z, direction_radians, step_length)
-        let mut stack: Vec<(f32, f32, f32, f32)> = Vec::new();
-        let mut lx = 0.0_f32;
-        let mut lz = 0.0_f32;
-        let mut dir = root_dir;
-        let mut step = BASE_STEP;
-
-        for ch in ls.chars() {
-            match ch {
-                'F' => {
-                    lx += step * dir.sin();
-                    lz += step * dir.cos();
-                    let wx = x + lx;
-                    let wz = z + lz;
-                    // Two crossed quads: one at dir, one rotated 90°
-                    for cross in [0.0_f32, std::f32::consts::FRAC_PI_2] {
-                        commands.spawn((
-                            Mesh3d(blade_mesh.clone()),
-                            MeshMaterial3d(mat.clone()),
-                            Transform::from_xyz(wx, y + blade_h * 0.5, wz)
-                                .with_rotation(Quat::from_rotation_y(dir + cross)),
-                            WorldGeometry,
-                        ));
-                    }
-                }
-                '+' => dir += ANGLE,
-                '-' => dir -= ANGLE,
-                '[' => {
-                    stack.push((lx, lz, dir, step));
-                    step *= STEP_SCALE;
-                }
-                ']' => {
-                    if let Some((sx, sz, sd, ss)) = stack.pop() {
-                        lx = sx;
-                        lz = sz;
-                        dir = sd;
-                        step = ss;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
 // ── Neon Lights ───────────────────────────────────────────────────────────────
 fn spawn_neon_lights(commands: &mut Commands, seed: u64) {
     let neon_colors = [
@@ -16476,6 +16560,7 @@ fn spawn_outer_districts(
 }
 
 // ── River ─────────────────────────────────────────────────────────────────────
+
 const PERIMETER_OCEAN_LEVEL: f32 = 126.0;
 
 #[derive(Clone, Copy)]
@@ -17968,6 +18053,11 @@ fn building_footprint_clears_speed_roads(x: f32, z: f32, width: f32, depth: f32)
     let road_dist = distance_to_speed_road_network(x, z, road_network_seed());
     let half_diag = Vec2::new(width, depth).length() * 0.5;
     road_dist >= half_diag.max(SPEED_ROAD_WIDTH * 0.5)
+        && building_footprint_clears_star_city(x, z, half_diag)
+}
+
+fn building_footprint_clears_star_city(x: f32, z: f32, half_diag: f32) -> bool {
+    signed_distance_to_star_city_road_footprint(x, z) >= half_diag
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -19042,6 +19132,14 @@ fn spawn_building(
     let seed = road_network_seed();
     let road_dist = distance_to_speed_road_network(position.x, position.z, seed);
     let half_diag = Vec2::new(width, depth).length() * 0.5;
+
+    // The legacy field encodes every road against the 256-unit trunk width,
+    // so it cannot add a small building's footprint margin around Star City's
+    // compact elevated ring/ramps. Keep those silhouettes fully off the deck
+    // rather than generating a ground-level tunnel through an aerial merge.
+    if !building_footprint_clears_star_city(position.x, position.z, half_diag) {
+        return;
+    }
 
     if road_dist < half_diag.max(SPEED_ROAD_WIDTH * 0.5) {
         // Road runs through this footprint. Estimate the road tangent from the
@@ -20620,6 +20718,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn route_blockades_mix_periodic_tanks_without_changing_other_raids() {
+        for index in 0..12 {
+            let expected = if index % 4 == 0 {
+                EnemyType::Tank
+            } else {
+                EnemyType::Soldier
+            };
+            assert_eq!(
+                raid_wave_enemy_type(RaidKind::RouteBlockade, index),
+                expected
+            );
+        }
+
+        for index in 0..12 {
+            assert_eq!(
+                raid_wave_enemy_type(RaidKind::RobotLanding, index),
+                EnemyType::Soldier
+            );
+            assert_eq!(
+                raid_wave_enemy_type(RaidKind::DroneSwarm, index),
+                EnemyType::Drone
+            );
+            assert_eq!(
+                raid_wave_enemy_type(RaidKind::DragonDomainAssault, index),
+                EnemyType::SpikeAlien
+            );
+        }
+    }
+
+    #[test]
     fn rooftop_routes_are_deterministic_bounded_and_limit_roof_degree() {
         let anchors = (0..48)
             .map(|index| CityRoofAnchor {
@@ -21443,6 +21571,23 @@ mod tests {
     }
 
     #[test]
+    fn star_city_building_keepout_includes_the_building_footprint() {
+        let direction = Vec2::new(
+            std::f32::consts::FRAC_1_SQRT_2,
+            std::f32::consts::FRAC_1_SQRT_2,
+        );
+        let just_outside = direction * (STAR_CITY_RING_RADIUS + STAR_CITY_RING_WIDTH * 0.5 + 2.0);
+        assert!(!building_footprint_clears_star_city(
+            just_outside.x,
+            just_outside.y,
+            30.0,
+        ));
+
+        let clear = direction * (STAR_CITY_RING_RADIUS + STAR_CITY_RING_WIDTH * 0.5 + 30.1);
+        assert!(building_footprint_clears_star_city(clear.x, clear.y, 30.0,));
+    }
+
+    #[test]
     fn mountain_speed_roads_cover_authored_routes() {
         assert!(mountain_speed_road_segment_count() >= 70);
 
@@ -21821,6 +21966,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Player,
+                PlayerIndex(0),
                 Transform::from_xyz(4.0, 1.1, 0.5),
                 PlayerInput::default(),
                 PlayerMovement::default(),
@@ -21856,6 +22002,126 @@ mod tests {
     }
 
     #[test]
+    fn active_vehicles_do_not_attach_to_hoverboard_grind_rails() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.add_message::<ModularActionSfxEvent>();
+        app.add_systems(Update, stunt_grind_rail_system);
+        let mut vehicles = VehicleState::default();
+        vehicles.active_owner = Some(0);
+        vehicles.ground_mode = crate::plugins::vehicle_plugin::GroundMode::Tank;
+        app.insert_resource(vehicles);
+        app.world_mut().spawn(StuntGrindRail {
+            start: Vec3::ZERO,
+            end: Vec3::X * 30.0,
+            speed: 60.0,
+            snap_radius: 3.0,
+            exit_lift: 10.0,
+        });
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(0),
+                Transform::from_xyz(4.0, 1.1, 0.5),
+                PlayerInput::default(),
+                PlayerMovement::default(),
+                TraversalModeState {
+                    active: TraversalMode::Vehicle,
+                    ..default()
+                },
+                PlayerStateMachine::default(),
+            ))
+            .id();
+
+        app.update();
+        assert!(app.world().get::<RailGrindState>(player).is_none());
+        assert_eq!(
+            app.world()
+                .get::<TraversalModeState>(player)
+                .unwrap()
+                .active,
+            TraversalMode::Vehicle
+        );
+    }
+
+    #[test]
+    fn road_boost_pad_cooldowns_are_per_player_and_vehicle_safe() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.add_systems(Update, board_boost_pad_system);
+        let mut vehicles = VehicleState::default();
+        vehicles.active_owner = Some(0);
+        vehicles.ground_mode = crate::plugins::vehicle_plugin::GroundMode::Tank;
+        app.insert_resource(vehicles);
+        let pad = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                BoardBoostPad {
+                    direction: Vec3::X,
+                    half_width: 8.0,
+                    half_length: 8.0,
+                    speed_mult: 3.0,
+                    impulse: 4.0,
+                    lift: 0.0,
+                    duration: 1.5,
+                    cooldown: 0.18,
+                    cooldown_timers: [0.0; 4],
+                    force_hoverboard: true,
+                },
+            ))
+            .id();
+        let players = (0..2_u8)
+            .map(|index| {
+                app.world_mut()
+                    .spawn((
+                        PlayerIndex(index),
+                        Transform::from_xyz(index as f32, 0.5, 0.0),
+                        PlayerProgression::default(),
+                        PlayerMovement::default(),
+                        TraversalModeState {
+                            active: if index == 0 {
+                                TraversalMode::Vehicle
+                            } else {
+                                TraversalMode::Grapple
+                            },
+                            ..default()
+                        },
+                        BoardBoostState::default(),
+                        PlayerStateMachine::default(),
+                    ))
+                    .id()
+            })
+            .collect::<Vec<_>>();
+
+        app.update();
+
+        let vehicle_traversal = app.world().get::<TraversalModeState>(players[0]).unwrap();
+        let on_foot_traversal = app.world().get::<TraversalModeState>(players[1]).unwrap();
+        assert_eq!(vehicle_traversal.active, TraversalMode::Vehicle);
+        assert_eq!(on_foot_traversal.active, TraversalMode::Hoverboard);
+        for player in players {
+            assert!(app.world().get::<BoardBoostState>(player).unwrap().timer > 0.0);
+            assert!(
+                app.world()
+                    .get::<PlayerMovement>(player)
+                    .unwrap()
+                    .ground_velocity
+                    .x
+                    > 0.0
+            );
+        }
+        assert!(app
+            .world()
+            .get::<BoardBoostPad>(pad)
+            .unwrap()
+            .cooldown_timers[..2]
+            .iter()
+            .all(|timer| *timer > 0.0));
+    }
+
+    #[test]
     fn sonic_springs_launch_the_whole_local_party_on_contact() {
         let mut app = App::new();
         app.init_resource::<Time>();
@@ -21867,7 +22133,7 @@ mod tests {
                 launch_velocity: Vec3::new(30.0, 18.0, 0.0),
                 radius: 3.5,
                 cooldown: 0.16,
-                cooldown_timer: 0.0,
+                cooldown_timers: [0.0; 4],
                 force_hoverboard: true,
             },
         ));
@@ -21875,6 +22141,7 @@ mod tests {
             .map(|index| {
                 app.world_mut()
                     .spawn((
+                        PlayerIndex(index),
                         Transform::from_xyz(index as f32 * 0.4, 1.0, 0.0),
                         PlayerMovement::default(),
                         TraversalModeState::default(),
@@ -21897,6 +22164,83 @@ mod tests {
                 TraversalMode::Hoverboard
             );
         }
+    }
+
+    #[test]
+    fn sonic_spring_cooldowns_do_not_block_staggered_party_arrivals() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.add_message::<ModularActionSfxEvent>();
+        app.add_systems(Update, spring_jump_pad_system);
+        let pad = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                SpringJumpPad {
+                    launch_velocity: Vec3::new(24.0, 16.0, 0.0),
+                    radius: 3.0,
+                    cooldown: 0.5,
+                    cooldown_timers: [0.0; 4],
+                    force_hoverboard: false,
+                },
+            ))
+            .id();
+        let leader = app
+            .world_mut()
+            .spawn((
+                PlayerIndex(0),
+                Transform::from_xyz(0.0, 1.0, 0.0),
+                PlayerMovement::default(),
+                TraversalModeState::default(),
+                PlayerStateMachine::default(),
+            ))
+            .id();
+        let follower = app
+            .world_mut()
+            .spawn((
+                PlayerIndex(1),
+                Transform::from_xyz(10.0, 1.0, 0.0),
+                PlayerMovement::default(),
+                TraversalModeState::default(),
+                PlayerStateMachine::default(),
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<PlayerMovement>(leader)
+                .unwrap()
+                .ground_velocity,
+            Vec3::X * 24.0
+        );
+
+        app.world_mut()
+            .get_mut::<Transform>(leader)
+            .unwrap()
+            .translation
+            .x = 10.0;
+        app.world_mut()
+            .get_mut::<Transform>(follower)
+            .unwrap()
+            .translation
+            .x = 0.0;
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<PlayerMovement>(follower)
+                .unwrap()
+                .ground_velocity,
+            Vec3::X * 24.0
+        );
+        let timers = &app
+            .world()
+            .get::<SpringJumpPad>(pad)
+            .unwrap()
+            .cooldown_timers;
+        assert!(timers[0] > 0.0);
+        assert!(timers[1] > 0.0);
     }
 
     #[test]

@@ -22,6 +22,7 @@ use crate::components::player::{
 use crate::components::weapon::{SpecialWeaponInventory, WeaponInventory, WeaponRanks};
 use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
+use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{
     initial_world_routes, initial_world_sites, is_stale_reference_blueprint, ChapterProgress,
     GameSettings, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, WaveInfo,
@@ -199,6 +200,7 @@ pub struct SaveParams<'w, 's> {
     pub command_registry: Res<'w, CommandRegistry>,
     pub hacking_registry: Res<'w, HackingRegistry>,
     pub final_war_registry: Res<'w, FinalWarRegistry>,
+    pub vehicle_state: Res<'w, VehicleState>,
 }
 
 /// Bundles the mutable registry resources that were added in later milestones so
@@ -307,6 +309,10 @@ pub struct PlayerSaveData {
     pub primary_weapon_slot: usize,
     #[serde(default)]
     pub special_weapon_slot: Option<u8>,
+    /// Per-player special levels in slot order 7, 8, 9, 0. Hidden-cache
+    /// upgrades are owned by the player who collected them, not party-wide.
+    #[serde(default = "default_special_weapon_levels")]
+    pub special_weapon_levels: [u32; 4],
     #[serde(default)]
     pub armor_element: ElementType,
     /// `None` identifies saves written before inventory persistence existed, so
@@ -340,8 +346,9 @@ impl PlayerSaveData {
         armor: &ArmorSet,
         inventory: &Inventory,
         quick: &QuickItemSlot,
-        traversal: &TraversalModeState,
+        persistent_traversal: TraversalMode,
         progression: &PlayerProgression,
+        persistent_armor: f32,
     ) -> Self {
         Self {
             player_index,
@@ -353,15 +360,21 @@ impl PlayerSaveData {
             base_max_health: Some(base_stats.max_health),
             stamina: stats.stamina,
             max_stamina: stats.max_stamina,
-            armor: stats.armor,
+            armor: persistent_armor,
             max_armor: stats.max_armor,
             base_max_armor: Some(base_stats.max_armor),
             primary_weapon_slot: weapons.active_slot,
             special_weapon_slot: specials.active_slot,
+            special_weapon_levels: [
+                specials.slot7.level,
+                specials.slot8.level,
+                specials.slot9.level,
+                specials.slot0.level,
+            ],
             armor_element: armor.active_element,
             inventory: Some(inventory.clone()),
             quick_item_id: quick.item_id.clone(),
-            traversal_mode: traversal_mode_index(traversal.active),
+            traversal_mode: traversal_mode_index(persistent_traversal),
             perk_tree: Some(progression.perks.clone()),
             tech_upgrades: Some(progression.upgrades.clone()),
             weapon_ranks: Some(progression.weapon_ranks.ranks),
@@ -385,6 +398,7 @@ impl PlayerSaveData {
             base_max_armor: None,
             primary_weapon_slot: 0,
             special_weapon_slot: None,
+            special_weapon_levels: default_special_weapon_levels(),
             armor_element: ElementType::None,
             inventory: None,
             quick_item_id: None,
@@ -445,6 +459,22 @@ impl PlayerSaveData {
     ) {
         weapons.active_slot = self.primary_weapon_slot.min(weapons.slots.len() - 1);
         specials.active_slot = self.special_weapon_slot.filter(|slot| *slot <= 3);
+        specials.slot7.level = specials
+            .slot7
+            .level
+            .max(self.special_weapon_levels[0].max(1));
+        specials.slot8.level = specials
+            .slot8
+            .level
+            .max(self.special_weapon_levels[1].max(1));
+        specials.slot9.level = specials
+            .slot9
+            .level
+            .max(self.special_weapon_levels[2].max(1));
+        specials.slot0.level = specials
+            .slot0
+            .level
+            .max(self.special_weapon_levels[3].max(1));
         armor.active_element = self.armor_element;
         if let Some(saved_inventory) = &self.inventory {
             inventory.clone_from(saved_inventory);
@@ -482,6 +512,9 @@ fn traversal_mode_index(mode: TraversalMode) -> u8 {
         TraversalMode::HoverJet => 1,
         TraversalMode::Flight => 2,
         TraversalMode::Hoverboard => 3,
+        // Vehicle is runtime-only. A normal save reaches this arm only if a
+        // caller bypasses VehicleState's persistent selection helper.
+        TraversalMode::Vehicle => 0,
     }
 }
 
@@ -539,6 +572,10 @@ impl Default for SaveData {
 
 fn default_max_stat() -> f32 {
     100.0
+}
+
+const fn default_special_weapon_levels() -> [u32; 4] {
+    [1; 4]
 }
 
 // ── Settings Persistence ──────────────────────────────────────────────────────
@@ -893,6 +930,7 @@ fn collect_player_saves(
         ),
         With<Player>,
     >,
+    vehicle_state: &VehicleState,
 ) -> Vec<PlayerSaveData> {
     let mut players: Vec<_> = player_q
         .iter()
@@ -920,8 +958,9 @@ fn collect_player_saves(
                     armor,
                     inventory,
                     quick,
-                    traversal,
+                    vehicle_state.persistent_traversal(index.0, traversal.active),
                     progression,
+                    vehicle_state.persistent_armor(index.0, stats.armor),
                 )
             },
         )
@@ -931,7 +970,7 @@ fn collect_player_saves(
 }
 
 pub fn save_current_session(sp: &SaveParams) -> Result<(), String> {
-    let players = collect_player_saves(&sp.player_q);
+    let players = collect_player_saves(&sp.player_q, &sp.vehicle_state);
     if players.is_empty() {
         return Err("No active players to save".to_string());
     }
@@ -1145,7 +1184,7 @@ fn autosave_system(
 
     let slot = rotation.current_slot;
 
-    let players = collect_player_saves(&sp.player_q);
+    let players = collect_player_saves(&sp.player_q, &sp.vehicle_state);
     if players.is_empty() {
         return;
     }
@@ -1225,6 +1264,7 @@ mod tests {
             base_max_armor: Some(90.0),
             primary_weapon_slot: 0,
             special_weapon_slot: None,
+            special_weapon_levels: default_special_weapon_levels(),
             armor_element: ElementType::None,
             inventory: Some(Inventory::default()),
             quick_item_id: None,
@@ -1234,6 +1274,140 @@ mod tests {
             weapon_ranks: None,
             shop: None,
         }
+    }
+
+    fn runtime_player_save(player_index: u8, specials: &SpecialWeaponInventory) -> PlayerSaveData {
+        PlayerSaveData::from_runtime(
+            player_index,
+            &PlayerStats::default(),
+            &PlayerBaseStats::default(),
+            &Health::new(100.0),
+            &WeaponInventory::default(),
+            specials,
+            &ArmorSet::default(),
+            &Inventory::default(),
+            &QuickItemSlot::default(),
+            TraversalMode::Grapple,
+            &PlayerProgression::default(),
+            0.0,
+        )
+    }
+
+    fn apply_saved_loadout(saved: &PlayerSaveData, specials: &mut SpecialWeaponInventory) {
+        saved.apply_loadout(
+            &mut WeaponInventory::default(),
+            specials,
+            &mut ArmorSet::default(),
+            &mut Inventory::default(),
+            &mut QuickItemSlot::default(),
+            &mut TraversalModeState::default(),
+        );
+    }
+
+    fn special_levels(specials: &SpecialWeaponInventory) -> [u32; 4] {
+        [
+            specials.slot7.level,
+            specials.slot8.level,
+            specials.slot9.level,
+            specials.slot0.level,
+        ]
+    }
+
+    #[test]
+    fn runtime_snapshot_writes_persistent_not_temporary_vehicle_armor() {
+        let stats = PlayerStats {
+            armor: 105.0,
+            max_armor: 100.0,
+            ..default()
+        };
+        let mut vehicle_state = VehicleState::default();
+        vehicle_state.select_traversal_while_active(0, TraversalMode::Hoverboard);
+        let saved = PlayerSaveData::from_runtime(
+            0,
+            &stats,
+            &PlayerBaseStats::default(),
+            &Health::new(100.0),
+            &WeaponInventory::default(),
+            &SpecialWeaponInventory::default(),
+            &ArmorSet::default(),
+            &Inventory::default(),
+            &QuickItemSlot::default(),
+            vehicle_state.persistent_traversal(0, TraversalMode::Grapple),
+            &PlayerProgression::default(),
+            80.0,
+        );
+
+        assert_eq!(saved.armor, 80.0);
+        assert_eq!(saved.max_armor, 100.0);
+        assert_eq!(
+            saved.traversal_mode,
+            traversal_mode_index(TraversalMode::Hoverboard)
+        );
+    }
+
+    #[test]
+    fn special_levels_round_trip_per_owner_and_restore_idempotently() {
+        let mut owner_runtime = SpecialWeaponInventory::default();
+        owner_runtime.slot7.level = 2;
+        owner_runtime.slot8.level = 2;
+        owner_runtime.slot9.level = 3;
+        owner_runtime.slot0.level = 2;
+        let peer_runtime = SpecialWeaponInventory::default();
+
+        let json = serde_json::to_string(&vec![
+            runtime_player_save(0, &owner_runtime),
+            runtime_player_save(1, &peer_runtime),
+        ])
+        .unwrap();
+        let decoded: Vec<PlayerSaveData> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded[0].special_weapon_levels, [2, 2, 3, 2]);
+        assert_eq!(decoded[1].special_weapon_levels, [1; 4]);
+
+        let mut owner_loaded = SpecialWeaponInventory::default();
+        owner_loaded.slot7.ammo = 2;
+        owner_loaded.slot8.ammo = 3;
+        owner_loaded.slot9.ammo = 1;
+        owner_loaded.slot0.ammo = 0;
+        let mut peer_loaded = SpecialWeaponInventory::default();
+
+        apply_saved_loadout(&decoded[0], &mut owner_loaded);
+        let after_first_apply = special_levels(&owner_loaded);
+        apply_saved_loadout(&decoded[0], &mut owner_loaded);
+
+        assert_eq!(after_first_apply, [2, 2, 3, 2]);
+        assert_eq!(special_levels(&owner_loaded), after_first_apply);
+        assert_eq!(
+            [
+                owner_loaded.slot7.ammo,
+                owner_loaded.slot8.ammo,
+                owner_loaded.slot9.ammo,
+                owner_loaded.slot0.ammo,
+            ],
+            [2, 3, 1, 0],
+            "rehydration must not replay one-shot cache ammo rewards"
+        );
+        assert_eq!(special_levels(&peer_loaded), [1; 4]);
+
+        apply_saved_loadout(&decoded[1], &mut peer_loaded);
+        assert_eq!(special_levels(&peer_loaded), [1; 4]);
+    }
+
+    #[test]
+    fn legacy_player_records_default_special_levels_without_granting_upgrades() {
+        let current = runtime_player_save(0, &SpecialWeaponInventory::default());
+        let mut legacy_value = serde_json::to_value(current).unwrap();
+        legacy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("special_weapon_levels");
+
+        let legacy: PlayerSaveData = serde_json::from_value(legacy_value).unwrap();
+        assert_eq!(legacy.special_weapon_levels, [1; 4]);
+
+        let mut specials = SpecialWeaponInventory::default();
+        apply_saved_loadout(&legacy, &mut specials);
+        assert_eq!(special_levels(&specials), [1; 4]);
     }
 
     fn test_blueprint(name: &str, height: f32) -> CharacterBlueprint {
@@ -1613,6 +1787,7 @@ mod tests {
             base_max_armor: Some(60.0),
             primary_weapon_slot: 999,
             special_weapon_slot: Some(9),
+            special_weapon_levels: default_special_weapon_levels(),
             armor_element: ElementType::Electric,
             inventory: Some({
                 let mut inventory = Inventory::default();

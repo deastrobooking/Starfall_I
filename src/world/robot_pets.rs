@@ -478,11 +478,13 @@ pub fn store_pet_recipe() -> &'static [PartCost] {
 pub fn salvage_for_enemy(enemy_type: &str, credits: u32, experience: u32) -> RobotPartReward {
     let base_quantity = 1 + u32::from(credits >= 20) + u32::from(experience >= 50);
     let kind = match enemy_type {
-        "Drone" => RobotPartKind::CircuitBoard,
-        "Soldier" => RobotPartKind::ScrapFrame,
-        "Heavy" => RobotPartKind::TreadUnit,
-        "SpikeAlien" => RobotPartKind::ServoMotor,
-        "Hybrid" => RobotPartKind::EnergyCore,
+        "Drone" | "SpyDrone" | "Scallarian scout" | "Scallarian spy drone" => {
+            RobotPartKind::CircuitBoard
+        }
+        "Soldier" | "Scallarian invader" => RobotPartKind::ScrapFrame,
+        "Heavy" | "Tank" | "dragon brute" | "Scallarian siege tank" => RobotPartKind::TreadUnit,
+        "SpikeAlien" | "Scallarian spike alien" => RobotPartKind::ServoMotor,
+        "Hybrid" | "Scallarian rift champion" => RobotPartKind::EnergyCore,
         _ => RobotPartKind::ScrapFrame,
     };
     RobotPartReward {
@@ -499,6 +501,7 @@ pub fn rare_salvage_for_context(
         (Faction::DragonRoyalty | Faction::DragonExile, EnemyType::Heavy) => {
             RobotPartKind::HullPlate
         }
+        (Faction::DimensionalAlien, EnemyType::Tank) => RobotPartKind::HullPlate,
         (Faction::DimensionalAlien, EnemyType::Drone) => RobotPartKind::HoverJet,
         (Faction::DimensionalAlien, EnemyType::Hybrid) => RobotPartKind::StarDrive,
         (Faction::CorruptedHuman, EnemyType::Hybrid) => RobotPartKind::CommandDeck,
@@ -651,10 +654,22 @@ mod tests {
     fn enemy_salvage_maps_generic_bad_guys_to_robot_parts() {
         let drone = salvage_for_enemy("Drone", 5, 15);
         let heavy = salvage_for_enemy("Heavy", 50, 75);
+        let tank = salvage_for_enemy("Tank", 90, 120);
+        let tank_runtime_label = salvage_for_enemy("Scallarian siege tank", 90, 120);
 
         assert_eq!(drone.kind, RobotPartKind::CircuitBoard);
         assert_eq!(drone.quantity, 1);
         assert_eq!(heavy.kind, RobotPartKind::TreadUnit);
         assert_eq!(heavy.quantity, 3);
+        assert_eq!(tank.kind, RobotPartKind::TreadUnit);
+        assert_eq!(tank.quantity, 3);
+        assert_eq!(tank_runtime_label, tank);
+        assert_eq!(
+            rare_salvage_for_context(Faction::DimensionalAlien, EnemyType::Tank),
+            Some(RobotPartReward {
+                kind: RobotPartKind::HullPlate,
+                quantity: 1,
+            })
+        );
     }
 }

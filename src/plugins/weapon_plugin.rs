@@ -1,4 +1,6 @@
-use avian3d::prelude::{Collider as AvianCollider, RayHitData, SpatialQuery, SpatialQueryFilter};
+use avian3d::prelude::{
+    Collider as AvianCollider, RayHitData, SimpleCollider, SpatialQuery, SpatialQueryFilter,
+};
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
@@ -14,7 +16,9 @@ use crate::combat::hitstop::HitstopState;
 use crate::combat::upgrades::UpgradeLedger;
 use crate::components::armor::ArmorSet;
 use crate::components::character::{CartoonPart, CartoonPartKind, JointKind, JointMarker};
-use crate::components::enemy::{CitySpyDrone, DeadEnemy, Enemy, EnemyType, FlyingDrone};
+use crate::components::enemy::{
+    CitySpyDrone, DeadEnemy, DroneVariant, Enemy, EnemyType, FlyingDrone,
+};
 use crate::components::player::*;
 use crate::components::weapon::*;
 use crate::components::world::NpcRoadVehicle;
@@ -29,7 +33,8 @@ use crate::engine::rendering::{
 };
 use crate::engine::state::AppState;
 use crate::events::*;
-use crate::resources::DungeonCrawlState;
+use crate::plugins::vehicle_plugin::VehicleState;
+use crate::resources::{DungeonCrawlState, PlaySessionTransition};
 use crate::world::hacking::HackedUnit;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
@@ -205,6 +210,10 @@ pub struct ProjectileAssets {
     pub sphere_xl: Handle<Mesh>,
     pub flash_sphere: Handle<Mesh>,
     pub lock_ring: Handle<Mesh>,
+    // Mega Beam Cannon layers, authored once and shared by every player.
+    pub mega_beam_core: Handle<Mesh>,
+    pub mega_beam_halo: Handle<Mesh>,
+    pub mega_beam_outer: Handle<Mesh>,
     // Star Sabre hilt: a real handle the character's hand actually holds.
     pub hilt_grip: Handle<Mesh>,
     pub hilt_ring: Handle<Mesh>,
@@ -258,6 +267,11 @@ impl Plugin for WeaponPlugin {
         app.init_resource::<WeaponRanks>()
             .init_resource::<SabreVfxBudget>()
             .add_systems(Startup, setup_weapon_assets)
+            .add_systems(OnExit(AppState::Playing), cleanup_weapon_transients)
+            .add_systems(
+                OnEnter(AppState::MainMenu),
+                cleanup_weapon_transients_for_menu,
+            )
             .add_systems(
                 Update,
                 update_aim_solution_system
@@ -276,7 +290,23 @@ impl Plugin for WeaponPlugin {
                     weapon_fire_system,
                     weapon_reload_system,
                     charge_spark_system,
-                    special_weapon_system,
+                    (
+                        mega_beam_cannon_system
+                            .after(update_aim_solution_system)
+                            .before(tracking_missile_system)
+                            .before(assign_projectile_collision_profiles),
+                        active_mega_beam_system.after(mega_beam_cannon_system),
+                        mega_beam_visual_system.after(mega_beam_cannon_system),
+                    ),
+                    (
+                        special_weapon_system,
+                        sprite_combat_drone_system
+                            .after(special_weapon_system)
+                            .before(assign_projectile_collision_profiles),
+                        sync_sprite_drone_shield
+                            .after(special_weapon_system)
+                            .after(sprite_combat_drone_system),
+                    ),
                     tracking_missile_system.before(projectile_update_system),
                     sync_target_lock_visual.after(tracking_missile_system),
                     assign_projectile_collision_profiles.before(projectile_update_system),
@@ -290,9 +320,11 @@ impl Plugin for WeaponPlugin {
                     mount_sabre_hilt_system.after(beam_sabre_update_system),
                     sync_sabre_blade_visual.after(mount_sabre_hilt_system),
                     sabre_technique_vfx_system.after(beam_sabre_update_system),
-                    hit_particle_spawn_system,
-                    critical_impact_spawn_system.after(hit_particle_spawn_system),
-                    particle_update_system,
+                    (
+                        hit_particle_spawn_system,
+                        critical_impact_spawn_system.after(hit_particle_spawn_system),
+                        particle_update_system,
+                    ),
                 )
                     // EC0 canonical order: attacks resolve in Combat, after the
                     // Motor-set player actions have consumed their inputs.
@@ -482,6 +514,11 @@ fn setup_weapon_assets(
         sphere_xl: meshes.add(Sphere::new(0.72)),
         flash_sphere: meshes.add(Sphere::new(0.9)),
         lock_ring: meshes.add(Torus::new(0.82, 1.0)),
+        // Cylinder's long axis is local Y; the beam root rotates that axis
+        // onto the owner's aim direction at fire time.
+        mega_beam_core: meshes.add(Cylinder::new(1.375, MEGA_BEAM_LENGTH)),
+        mega_beam_halo: meshes.add(Cylinder::new(2.875, MEGA_BEAM_LENGTH)),
+        mega_beam_outer: meshes.add(Cylinder::new(4.625, MEGA_BEAM_LENGTH)),
         // Grip runs along local Y; the mount rotates it into the palm.
         hilt_grip: meshes.add(Cylinder::new(0.030, 0.26)),
         hilt_ring: meshes.add(Cylinder::new(0.042, 0.030)),
@@ -844,6 +881,7 @@ fn weapon_fire_system(
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     library: Res<MoveLibrary>,
+    vehicle_state: Res<VehicleState>,
     mut player_q: Query<
         (
             Entity,
@@ -880,6 +918,17 @@ fn weapon_fire_system(
         magic_caster,
     ) in player_q.iter_mut()
     {
+        // An assembled tank replaces the handheld primary with its cannon.
+        // VehiclePlugin consumes the same owner-specific fire edge and emits
+        // the ordinary WeaponFiredEvent, so VFX/audio remain unified without
+        // double-spawning a handheld bolt from inside the hull.
+        if vehicle_state.player_owns_tank(player_index.0) {
+            let weapon = inv.active_mut();
+            weapon.fire_timer = (weapon.fire_timer - dt).max(0.0);
+            weapon.charge_progress = 0.0;
+            weapon.charge_held = false;
+            continue;
+        }
         let perks = &progression.perks;
         let upgrades = &progression.upgrades;
         let perk_damage_mult = perks.damage_mult();
@@ -1480,11 +1529,711 @@ fn rescale_ammo_cap(current: &mut u32, max: &mut u32, base_max: u32, ammo_mult: 
 }
 
 // ── Special Energy Tools ──────────────────────────────────────────────────────
+
+/// Persistent owner-scoped combat drone deployed by the Sprite Turret slot.
+///
+/// The projectile damage and movement multipliers are captured at deployment
+/// so swapping armor or upgrade loadouts cannot retroactively change an active
+/// drone. The owning player entity remains authoritative for collision
+/// exclusion, while `owner_player` gives four-player sessions a stable orbit
+/// phase and tracking identity.
+#[derive(Component, Debug, Clone, Copy)]
+struct SpriteCombatDrone {
+    owner: Entity,
+    owner_player: u8,
+    level: u32,
+    remaining: f32,
+    fire_timer: f32,
+    orbit_angle: f32,
+    damage: f32,
+    damage_type: DamageType,
+    projectile_speed: f32,
+    target: Option<Entity>,
+    acquisition_timer: f32,
+}
+
+/// Level-three drone shield. It is intentionally a visual aura, matching the
+/// predecessor: the drone upgrade advertises protection without silently
+/// introducing a second damage-reduction path outside the armor system.
+#[derive(Component, Debug, Clone, Copy)]
+struct SpriteDroneShield {
+    drone: Entity,
+    owner: Entity,
+}
+
+/// Marks only the primary Moon Bubble as a cluster parent. Children are normal
+/// projectiles and never receive this component, preventing the predecessor's
+/// accidental recursive split loop.
+#[derive(Component, Debug, Clone, Copy)]
+struct MoonBubbleCluster;
+
+/// Root/session marker for weapon entities which must survive pause but must
+/// never leak into menus or a subsequent play session.
+#[derive(Component, Debug, Clone, Copy)]
+struct WeaponTransient;
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+struct MegaBeamCooldown {
+    remaining: f32,
+}
+
+#[derive(Component, Debug)]
+struct ActiveMegaBeam {
+    owner: Entity,
+    origin: Vec3,
+    direction: Vec3,
+    length: f32,
+    remaining: f32,
+    scan_timer: f32,
+    damage: f32,
+    damage_type: DamageType,
+    hit_entities: EntityHashSet,
+}
+
+impl ActiveMegaBeam {
+    fn register_hit(&mut self, entity: Entity) -> bool {
+        self.hit_entities.insert(entity)
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct MegaBeamVisual {
+    base_scale: Vec3,
+    pulse_rate: f32,
+    pulse_amount: f32,
+    phase: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct MegaBeamSeeker;
+
+const SPRITE_DRONE_RANGE: f32 = 25.0;
+const SPRITE_DRONE_ACQUISITION_INTERVAL: f32 = 0.10;
+const MEGA_BEAM_COOLDOWN: f32 = 6.0;
+const MEGA_BEAM_LENGTH: f32 = 220.0;
+const MEGA_BEAM_RADIUS: f32 = 5.0;
+const MEGA_BEAM_LIFETIME: f32 = 1.4;
+const MEGA_BEAM_DAMAGE: f32 = 1_800.0;
+const MEGA_SEEKER_COUNT: usize = 20;
+const MEGA_SEEKER_DAMAGE: f32 = 90.0;
+const MEGA_SEEKER_EXPLOSION_RADIUS: f32 = 5.0;
+
+fn mega_beam_trigger_ready(
+    sabre_active: bool,
+    sabre_unlocked: bool,
+    aiming: bool,
+    fire_just: bool,
+    cooldown: f32,
+    tank_driver: bool,
+) -> bool {
+    sabre_active && sabre_unlocked && aiming && fire_just && cooldown <= 0.0 && !tank_driver
+}
+
+fn mega_beam_contains_target(
+    origin: Vec3,
+    direction: Vec3,
+    length: f32,
+    radius: f32,
+    target: Vec3,
+    target_radius: f32,
+) -> bool {
+    let direction = direction.normalize_or_zero();
+    if direction.length_squared() <= 0.001 {
+        return false;
+    }
+    let offset = target - origin;
+    let projection = offset.dot(direction);
+    if !(0.0..=length).contains(&projection) {
+        return false;
+    }
+    let perpendicular = offset - direction * projection;
+    perpendicular.length_squared() <= (radius + target_radius).powi(2)
+}
+
+fn clipped_mega_beam_length(world_hit_distance: Option<f32>) -> f32 {
+    world_hit_distance
+        .unwrap_or(MEGA_BEAM_LENGTH)
+        .clamp(0.0, MEGA_BEAM_LENGTH)
+}
+
+fn mega_beam_target_radius(
+    enemy: &Enemy,
+    drone_variant: Option<&DroneVariant>,
+    collider: Option<&AvianCollider>,
+) -> f32 {
+    if let Some(collider) = collider {
+        let half_extents = collider.aabb(Vec3::ZERO, Quat::IDENTITY).size().abs() * 0.5;
+        let radius = half_extents.length();
+        if radius.is_finite() && radius > 0.0 {
+            return radius;
+        }
+    }
+
+    let difficulty = enemy.difficulty_scale.clamp(0.85, 1.8);
+    match enemy.enemy_type {
+        EnemyType::Drone => {
+            let variant_scale = match drone_variant.copied().unwrap_or(DroneVariant::Scout) {
+                DroneVariant::Scout => 1.0,
+                DroneVariant::HeavyFighter => 1.55,
+                DroneVariant::SiegeGunship => 2.25,
+            };
+            (Vec3::new(3.95, 0.68, 2.50) * variant_scale * difficulty).length()
+        }
+        EnemyType::SpyDrone => 3.6 * difficulty,
+        EnemyType::Tank => (Vec3::new(1.9, 1.4, 3.2) * difficulty).length(),
+        EnemyType::Heavy | EnemyType::Hybrid => 1.8 * difficulty,
+        EnemyType::Soldier | EnemyType::SpikeAlien => 1.2 * difficulty,
+    }
+}
+
+/// Deterministic corkscrew layout for one seeker. Returning both its spawn
+/// offset and launch direction keeps split-screen owners independent of a
+/// shared RNG stream.
+fn mega_seeker_launch(index: usize, count: usize, forward: Vec3) -> (Vec3, Vec3) {
+    let forward = forward.normalize_or(Vec3::NEG_Z);
+    let right = forward.cross(Vec3::Y).normalize_or(Vec3::X);
+    let up = right.cross(forward).normalize_or(Vec3::Y);
+    let angle = index as f32 / count.max(1) as f32 * std::f32::consts::TAU;
+    let lateral = (right * angle.cos() + up * angle.sin()) * 1.5;
+    let direction = (forward + lateral * 0.35).normalize_or(forward);
+    (forward * 2.5 + lateral, direction)
+}
+
+fn sprite_drone_duration(level: u32) -> f32 {
+    match level {
+        0 | 1 => 30.0,
+        2 => 45.0,
+        _ => 60.0,
+    }
+}
+
+fn sprite_drone_fire_interval(level: u32) -> f32 {
+    match level {
+        0 | 1 => 0.45,
+        2 => 0.40,
+        _ => 0.35,
+    }
+}
+
+fn homing_star_count(level: u32) -> usize {
+    if level >= 3 {
+        3
+    } else {
+        1
+    }
+}
+
+fn tri_star_tracking_strength(level: u32) -> Option<f32> {
+    match level {
+        0 | 1 => None,
+        2 => Some(0.55),
+        _ => Some(0.78),
+    }
+}
+
+fn moon_bubble_splits(level: u32) -> bool {
+    level >= 2
+}
+
+/// Cardinal directions are stable across runs and independent of frame rate,
+/// making a cluster's threat footprint readable and replay deterministic.
+fn moon_bubble_child_directions() -> [Vec3; 4] {
+    [Vec3::X, Vec3::Z, Vec3::NEG_X, Vec3::NEG_Z]
+}
+
+fn collect_sorted_sprite_candidates(
+    origin: Vec3,
+    range: f32,
+    targets: impl Iterator<Item = (Entity, Vec3)>,
+    candidates: &mut Vec<(f32, Entity, Vec3)>,
+) {
+    candidates.clear();
+    let max_distance_squared = range * range;
+    for (entity, position) in targets {
+        let distance_squared = origin.distance_squared(position);
+        if distance_squared <= max_distance_squared {
+            candidates.push((distance_squared, entity, position));
+        }
+    }
+    candidates.sort_unstable_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+    });
+}
+
+fn tick_sprite_drone_acquisition(timer: f32, dt: f32) -> (f32, bool) {
+    let remaining = (timer - dt).max(0.0);
+    if remaining <= 0.0 {
+        (SPRITE_DRONE_ACQUISITION_INTERVAL, true)
+    } else {
+        (remaining, false)
+    }
+}
+
+/// Beam-Sabre + ranged-fire combination inherited from Heavy Water. The
+/// ordinary slash/shot still resolve alongside it; this system adds the combo
+/// payload only when the owner's sabre is actually active and ready.
+#[allow(clippy::too_many_arguments)]
+fn mega_beam_cannon_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    spatial_query: SpatialQuery,
+    proj_assets: Res<ProjectileAssets>,
+    vehicle_state: Res<VehicleState>,
+    mut player_q: Query<
+        (
+            Entity,
+            &PlayerIndex,
+            &PlayerInput,
+            &AimSolution,
+            &ArmorSet,
+            &PlayerProgression,
+            &BeamSabre,
+            Option<&mut MegaBeamCooldown>,
+        ),
+        With<Player>,
+    >,
+    active_beam_q: Query<(Entity, &ActiveMegaBeam)>,
+    seeker_q: Query<(Entity, &Projectile), With<MegaBeamSeeker>>,
+    mut fired_ev: MessageWriter<WeaponFiredEvent>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let dt = time.delta_secs();
+    for (player_entity, player_index, input, aim, armor, progression, sabre, mut cooldown) in
+        player_q.iter_mut()
+    {
+        let cooldown_remaining = cooldown.as_mut().map_or(0.0, |cooldown| {
+            cooldown.remaining = (cooldown.remaining - dt).max(0.0);
+            cooldown.remaining
+        });
+        let tank_driver = vehicle_state.player_owns_tank(player_index.0);
+        if !mega_beam_trigger_ready(
+            sabre.active,
+            sabre.unlocked,
+            input.aim,
+            input.fire_just,
+            cooldown_remaining,
+            tank_driver,
+        ) {
+            if sabre.active
+                && sabre.unlocked
+                && input.aim
+                && input.fire_just
+                && cooldown_remaining > 0.0
+                && !tank_driver
+            {
+                msg_ev.write(UiMessageEvent {
+                    text: format!("Mega Beam recharging — {cooldown_remaining:.1}s"),
+                    duration: 1.0,
+                });
+            }
+            continue;
+        }
+
+        if let Some(cooldown) = cooldown.as_mut() {
+            cooldown.remaining = MEGA_BEAM_COOLDOWN;
+        } else {
+            commands.entity(player_entity).insert(MegaBeamCooldown {
+                remaining: MEGA_BEAM_COOLDOWN,
+            });
+        }
+
+        // Defensive population caps: cooldown normally makes overlap
+        // impossible, but replacement keeps console/time manipulation and
+        // future cooldown upgrades bounded to one beam + one volley per owner.
+        for (entity, beam) in active_beam_q.iter() {
+            if beam.owner == player_entity {
+                commands.entity(entity).despawn();
+            }
+        }
+        for (entity, projectile) in seeker_q.iter() {
+            if projectile.owner == Some(player_entity) {
+                commands.entity(entity).despawn();
+            }
+        }
+
+        let direction = aim.direction.normalize_or(Vec3::NEG_Z);
+        let origin = aim.muzzle_origin + direction;
+        let outgoing = armor.modified_outgoing_damage(progression.perks.damage_mult());
+        let beam_damage = MEGA_BEAM_DAMAGE
+            * outgoing
+            * progression.upgrades.beam_damage_mult()
+            * progression.upgrades.gauntlet_energy_damage_mult();
+        let beam_damage_type =
+            gauntlet_projectile_damage_type(&progression.upgrades, DamageType::Laser);
+        let world_filter = SpatialQueryFilter::from_mask(GameCollisionLayer::World)
+            .with_excluded_entities([player_entity]);
+        let world_hit_distance = Dir3::new(direction).ok().and_then(|ray_direction| {
+            spatial_query
+                .cast_ray(origin, ray_direction, MEGA_BEAM_LENGTH, true, &world_filter)
+                .map(|hit| hit.distance)
+        });
+        let beam_length = clipped_mega_beam_length(world_hit_distance);
+        let length_scale = beam_length / MEGA_BEAM_LENGTH;
+        let center = origin + direction * (beam_length * 0.5);
+        let beam_rotation = Quat::from_rotation_arc(Vec3::Y, direction);
+        let owner_phase = player_index.0 as f32 * 1.7;
+        let beam_entity = commands
+            .spawn((
+                SpatialBundle::from_transform(
+                    Transform::from_translation(center).with_rotation(beam_rotation),
+                ),
+                ActiveMegaBeam {
+                    owner: player_entity,
+                    origin,
+                    direction,
+                    length: beam_length,
+                    remaining: MEGA_BEAM_LIFETIME,
+                    scan_timer: 0.0,
+                    damage: beam_damage,
+                    damage_type: beam_damage_type,
+                    hit_entities: EntityHashSet::default(),
+                },
+                WeaponTransient,
+                Name::new(format!("P{} Mega Beam Cannon", player_index.0 + 1)),
+            ))
+            .id();
+        commands.entity(beam_entity).with_children(|beam| {
+            beam.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(proj_assets.mega_beam_core.clone()),
+                    material: MeshMaterial3d(proj_assets.mat_muzzle_flash.clone()),
+                    transform: Transform::from_scale(Vec3::new(1.0, length_scale, 1.0)),
+                    ..default()
+                },
+                MegaBeamVisual {
+                    base_scale: Vec3::new(1.0, length_scale, 1.0),
+                    pulse_rate: 31.0,
+                    pulse_amount: 0.035,
+                    phase: owner_phase,
+                },
+                Name::new("Mega Beam White Core"),
+            ));
+            beam.spawn((
+                EnergyPbrBundle {
+                    mesh: Mesh3d(proj_assets.mega_beam_halo.clone()),
+                    material: MeshMaterial3d(proj_assets.energy_magic.clone()),
+                    transform: Transform::from_scale(Vec3::new(1.0, length_scale, 1.0)),
+                    ..default()
+                },
+                MegaBeamVisual {
+                    base_scale: Vec3::new(1.0, length_scale, 1.0),
+                    pulse_rate: 27.0,
+                    pulse_amount: 0.05,
+                    phase: owner_phase + 0.8,
+                },
+                Name::new("Mega Beam Cyan Halo"),
+            ));
+            beam.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(proj_assets.mega_beam_outer.clone()),
+                    material: MeshMaterial3d(proj_assets.mat_magic_lock.clone()),
+                    transform: Transform::from_scale(Vec3::new(1.0, length_scale, 1.0)),
+                    ..default()
+                },
+                MegaBeamVisual {
+                    base_scale: Vec3::new(1.0, length_scale, 1.0),
+                    pulse_rate: 23.0,
+                    pulse_amount: 0.065,
+                    phase: owner_phase + 1.6,
+                },
+                Name::new("Mega Beam Outer Glow"),
+            ));
+            beam.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(proj_assets.sphere_xl.clone()),
+                    material: MeshMaterial3d(proj_assets.mat_muzzle_flash.clone()),
+                    transform: Transform::from_xyz(0.0, -beam_length * 0.5, 0.0)
+                        .with_scale(Vec3::splat(7.0)),
+                    ..default()
+                },
+                MegaBeamVisual {
+                    base_scale: Vec3::splat(7.0),
+                    pulse_rate: 22.0,
+                    pulse_amount: 0.13,
+                    phase: owner_phase,
+                },
+                Name::new("Mega Beam Muzzle Orb"),
+            ));
+            beam.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(proj_assets.sphere_xl.clone()),
+                    material: MeshMaterial3d(proj_assets.mat_magic_lock.clone()),
+                    transform: Transform::from_xyz(0.0, beam_length * 0.5, 0.0)
+                        .with_scale(Vec3::splat(4.0)),
+                    ..default()
+                },
+                MegaBeamVisual {
+                    base_scale: Vec3::splat(4.0),
+                    pulse_rate: 26.0,
+                    pulse_amount: 0.10,
+                    phase: owner_phase + 0.5,
+                },
+                Name::new("Mega Beam Tip Flare"),
+            ));
+        });
+
+        let seeker_damage = MEGA_SEEKER_DAMAGE
+            * outgoing
+            * progression.upgrades.missile_damage_mult()
+            * progression.upgrades.gauntlet_explosive_damage_mult();
+        let seeker_damage_type =
+            gauntlet_projectile_damage_type(&progression.upgrades, DamageType::Explosive);
+        let seeker_speed = 42.0 * progression.upgrades.gauntlet_projectile_speed_mult();
+        let seeker_radius =
+            MEGA_SEEKER_EXPLOSION_RADIUS * progression.upgrades.gauntlet_explosion_radius_mult();
+        for index in 0..MEGA_SEEKER_COUNT {
+            let (offset, launch_direction) =
+                mega_seeker_launch(index, MEGA_SEEKER_COUNT, direction);
+            let mut tracking = TrackingMissile::new(player_index.0);
+            tracking.acquisition_range = MEGA_BEAM_LENGTH;
+            tracking.acquisition_cone_cos = -1.0;
+            tracking.turn_rate_radians = 9.6;
+            tracking.magic_beam = true;
+            tracking.reacquire_timer = index as f32 / MEGA_SEEKER_COUNT as f32 * 0.16;
+            commands.spawn((
+                EnergyPbrBundle {
+                    mesh: Mesh3d(proj_assets.sphere_md.clone()),
+                    material: MeshMaterial3d(proj_assets.energy_explosive.clone()),
+                    transform: Transform::from_translation(aim.muzzle_origin + offset)
+                        .looking_to(launch_direction, Vec3::Y)
+                        .with_scale(Vec3::new(0.65, 0.65, 2.8)),
+                    ..default()
+                },
+                Projectile {
+                    damage: seeker_damage,
+                    damage_type: seeker_damage_type,
+                    speed: seeker_speed,
+                    direction: launch_direction,
+                    lifetime: 6.5,
+                    is_explosive: true,
+                    explosion_radius: seeker_radius,
+                    weapon_type: ProjectileOwner::HomingStar,
+                    owner: Some(player_entity),
+                    piercing: false,
+                    gravity_affected: false,
+                    vertical_velocity: 0.0,
+                },
+                tracking,
+                MegaBeamSeeker,
+                WeaponTransient,
+                Name::new(format!("P{} Mega Beam Seeker", player_index.0 + 1)),
+            ));
+        }
+
+        spawn_muzzle_flash_scaled(&mut commands, &proj_assets, origin, 3.0);
+        fired_ev.write(WeaponFiredEvent);
+        msg_ev.write(UiMessageEvent {
+            text: "MEGA BEAM CANNON!".to_string(),
+            duration: MEGA_BEAM_LIFETIME,
+        });
+    }
+}
+
+fn active_mega_beam_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    spatial_query: SpatialQuery,
+    mut beam_q: Query<(Entity, &mut ActiveMegaBeam)>,
+    mut enemy_q: Query<
+        (
+            Entity,
+            &Transform,
+            &mut Health,
+            &mut Damageable,
+            &Enemy,
+            Option<&DroneVariant>,
+            Option<&AvianCollider>,
+        ),
+        (
+            With<Enemy>,
+            Without<Projectile>,
+            Without<HackedUnit>,
+            Without<NpcRoadVehicle>,
+        ),
+    >,
+    mut damaged_ev: MessageWriter<EnemyDamagedEvent>,
+    mut killed_ev: MessageWriter<EnemyKilledEvent>,
+    mut impact_ev: MessageWriter<CombatImpactEvent>,
+) {
+    let dt = time.delta_secs();
+    for (beam_entity, mut beam) in beam_q.iter_mut() {
+        beam.remaining -= dt;
+        if beam.remaining <= 0.0 {
+            commands.entity(beam_entity).despawn();
+            continue;
+        }
+        beam.scan_timer -= dt;
+        if beam.scan_timer > 0.0 {
+            continue;
+        }
+        beam.scan_timer = 0.08;
+
+        for (enemy_entity, transform, mut health, mut damageable, enemy, drone_variant, collider) in
+            enemy_q.iter_mut()
+        {
+            if !health.is_alive() || beam.hit_entities.contains(&enemy_entity) {
+                continue;
+            }
+            let target = transform.translation + Vec3::Y * 0.9;
+            if !mega_beam_contains_target(
+                beam.origin,
+                beam.direction,
+                beam.length,
+                MEGA_BEAM_RADIUS,
+                target,
+                mega_beam_target_radius(enemy, drone_variant, collider),
+            ) {
+                continue;
+            }
+            // The center ray clips the shared visual/maximum beam length, but
+            // enemies near the capsule edge still need their own cover ray:
+            // a narrow offset wall must not be bypassed by 5 m beam thickness.
+            if !world_line_of_sight(&spatial_query, beam.origin, target, Some(enemy_entity)) {
+                continue;
+            }
+
+            // Insert before resolving damage: even if downstream listeners
+            // alter health or despawn the target, this beam cannot double-hit
+            // the same entity on a later 80 ms scan.
+            if !beam.register_hit(enemy_entity) {
+                continue;
+            }
+            let mut info = DamageInfo::new(beam.damage, beam.damage_type)
+                .with_knockback(12.0)
+                .with_hit_direction(beam.direction + Vec3::Y * 0.1);
+            info.attacker = Some(beam.owner);
+            let result = apply_damage(&mut health, &mut damageable, &info);
+            damaged_ev.write(EnemyDamagedEvent {
+                entity: enemy_entity,
+                damage: result.damage_amount,
+                position: transform.translation,
+            });
+            impact_ev.write(CombatImpactEvent {
+                position: target,
+                damage: result.damage_amount,
+                damage_type: beam.damage_type,
+                is_critical: result.was_critical,
+            });
+            if result.was_killed {
+                killed_ev.write(EnemyKilledEvent {
+                    enemy_type: enemy.enemy_type.as_str().to_string(),
+                    credits: enemy.config.credits,
+                    experience: enemy.config.experience_value,
+                    position: transform.translation,
+                });
+            }
+        }
+    }
+}
+
+fn mega_beam_visual_system(
+    time: Res<Time>,
+    mut visual_q: Query<(&mut Transform, &MegaBeamVisual)>,
+) {
+    for (mut transform, visual) in visual_q.iter_mut() {
+        let pulse = 1.0
+            + (time.elapsed_secs() * visual.pulse_rate + visual.phase).sin() * visual.pulse_amount;
+        transform.scale = Vec3::new(
+            visual.base_scale.x * pulse,
+            visual.base_scale.y,
+            visual.base_scale.z * pulse,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cleanup_weapon_transients(
+    mut commands: Commands,
+    transition: Res<PlaySessionTransition>,
+    transient_q: Query<Entity, With<WeaponTransient>>,
+    projectile_q: Query<Entity, (With<Projectile>, Without<WeaponTransient>)>,
+    particle_q: Query<
+        Entity,
+        (
+            With<HitParticle>,
+            Without<WeaponTransient>,
+            Without<Projectile>,
+            Without<SabreTechniqueVfx>,
+        ),
+    >,
+    sabre_vfx_q: Query<
+        Entity,
+        (
+            With<SabreTechniqueVfx>,
+            Without<WeaponTransient>,
+            Without<Projectile>,
+        ),
+    >,
+    lock_q: Query<Entity, With<TargetLockVisual>>,
+    cooldown_q: Query<Entity, With<MegaBeamCooldown>>,
+) {
+    if transition.pausing {
+        return;
+    }
+    for entity in transient_q
+        .iter()
+        .chain(projectile_q.iter())
+        .chain(particle_q.iter())
+        .chain(sabre_vfx_q.iter())
+        .chain(lock_q.iter())
+    {
+        commands.entity(entity).despawn();
+    }
+    for player in cooldown_q.iter() {
+        commands.entity(player).try_remove::<MegaBeamCooldown>();
+    }
+}
+
+/// A pause-menu "return to title" enters MainMenu from Paused, so it never
+/// executes `OnExit(Playing)`. This unconditional fallback closes that path
+/// while the conditional exit system above preserves entities across pause.
+#[allow(clippy::too_many_arguments)]
+fn cleanup_weapon_transients_for_menu(
+    mut commands: Commands,
+    transient_q: Query<Entity, With<WeaponTransient>>,
+    projectile_q: Query<Entity, (With<Projectile>, Without<WeaponTransient>)>,
+    particle_q: Query<
+        Entity,
+        (
+            With<HitParticle>,
+            Without<WeaponTransient>,
+            Without<Projectile>,
+            Without<SabreTechniqueVfx>,
+        ),
+    >,
+    sabre_vfx_q: Query<
+        Entity,
+        (
+            With<SabreTechniqueVfx>,
+            Without<WeaponTransient>,
+            Without<Projectile>,
+        ),
+    >,
+    lock_q: Query<Entity, With<TargetLockVisual>>,
+    cooldown_q: Query<Entity, With<MegaBeamCooldown>>,
+) {
+    for entity in transient_q
+        .iter()
+        .chain(projectile_q.iter())
+        .chain(particle_q.iter())
+        .chain(sabre_vfx_q.iter())
+        .chain(lock_q.iter())
+    {
+        commands.entity(entity).despawn();
+    }
+    for player in cooldown_q.iter() {
+        commands.entity(player).try_remove::<MegaBeamCooldown>();
+    }
+}
+
 fn special_weapon_system(
     mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
+    vehicle_state: Res<VehicleState>,
     mut player_q: Query<
         (
             Entity,
@@ -1499,6 +2248,7 @@ fn special_weapon_system(
         With<Player>,
     >,
     cam_q: Query<&GlobalTransform, With<PlayerCamera>>,
+    active_drone_q: Query<(Entity, &SpriteCombatDrone)>,
     mut fired_ev: MessageWriter<WeaponFiredEvent>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
@@ -1512,6 +2262,10 @@ fn special_weapon_system(
         inv.slot8.cooldown_timer = (inv.slot8.cooldown_timer - dt).max(0.0);
         inv.slot9.cooldown_timer = (inv.slot9.cooldown_timer - dt).max(0.0);
         inv.slot0.cooldown_timer = (inv.slot0.cooldown_timer - dt).max(0.0);
+
+        if vehicle_state.player_owns_tank(player_index.0) {
+            continue;
+        }
 
         if let Some(slot) = pi.special_slot {
             if let Some(selected) = inv.select(slot) {
@@ -1541,6 +2295,7 @@ fn special_weapon_system(
             // Slot 7 — Homing Star
             0 => {
                 if inv.slot7.can_fire() {
+                    let level = inv.slot7.level;
                     let dmg = inv.slot7.effective_damage()
                         * armor_damage_mult
                         * upgrades.missile_damage_mult()
@@ -1548,29 +2303,36 @@ fn special_weapon_system(
                     let damage_type =
                         gauntlet_projectile_damage_type(upgrades, DamageType::Explosive);
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;
-                    commands.spawn((
-                        EnergyPbrBundle {
-                            mesh: Mesh3d(proj_assets.sphere_md.clone()),
-                            material: MeshMaterial3d(proj_assets.energy_explosive.clone()),
-                            transform: Transform::from_translation(pos),
-                            ..default()
-                        },
-                        Projectile {
-                            damage: dmg,
-                            damage_type,
-                            speed: 35.0 * upgrades.gauntlet_projectile_speed_mult(),
-                            direction: fwd,
-                            lifetime: 5.0,
-                            is_explosive: true,
-                            explosion_radius: 5.0 * upgrades.gauntlet_explosion_radius_mult(),
-                            weapon_type: ProjectileOwner::HomingStar,
-                            owner: Some(player_entity),
-                            piercing: false,
-                            gravity_affected: false,
-                            vertical_velocity: 0.0,
-                        },
-                        TrackingMissile::new(player_index.0),
-                    ));
+                    let count = homing_star_count(level);
+                    let right = cam.right().as_vec3();
+                    for index in 0..count {
+                        let lateral = index as f32 - (count.saturating_sub(1)) as f32 * 0.5;
+                        let direction = (fwd + right * lateral * 0.10).normalize_or(fwd);
+                        commands.spawn((
+                            EnergyPbrBundle {
+                                mesh: Mesh3d(proj_assets.sphere_md.clone()),
+                                material: MeshMaterial3d(proj_assets.energy_explosive.clone()),
+                                transform: Transform::from_translation(pos + right * lateral * 0.5)
+                                    .looking_to(direction, Vec3::Y),
+                                ..default()
+                            },
+                            Projectile {
+                                damage: dmg,
+                                damage_type,
+                                speed: 35.0 * upgrades.gauntlet_projectile_speed_mult(),
+                                direction,
+                                lifetime: 5.0,
+                                is_explosive: true,
+                                explosion_radius: 5.0 * upgrades.gauntlet_explosion_radius_mult(),
+                                weapon_type: ProjectileOwner::HomingStar,
+                                owner: Some(player_entity),
+                                piercing: false,
+                                gravity_affected: false,
+                                vertical_velocity: 0.0,
+                            },
+                            TrackingMissile::new(player_index.0),
+                        ));
+                    }
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
@@ -1587,6 +2349,7 @@ fn special_weapon_system(
             // Slot 8 — Tri-Star Burst
             1 => {
                 if inv.slot8.can_fire() {
+                    let tracking_strength = tri_star_tracking_strength(inv.slot8.level);
                     let dmg = inv.slot8.effective_damage()
                         * armor_damage_mult
                         * upgrades.beam_damage_mult()
@@ -1602,7 +2365,7 @@ fn special_weapon_system(
                         let sx = rng.gen_range(-0.05f32..0.05);
                         let sy = rng.gen_range(-0.05f32..0.05);
                         let dir = (fwd + right * sx + up * sy).normalize();
-                        commands.spawn((
+                        let mut projectile_entity = commands.spawn((
                             EnergyPbrBundle {
                                 mesh: Mesh3d(proj_assets.sphere_sm.clone()),
                                 material: MeshMaterial3d(proj_assets.energy_plasma.clone()),
@@ -1626,6 +2389,12 @@ fn special_weapon_system(
                                 vertical_velocity: 0.0,
                             },
                         ));
+                        if let Some(strength) = tracking_strength {
+                            let mut tracker = TrackingMissile::primary(player_index.0, strength)
+                                .expect("positive Tri-Star tracking strength");
+                            tracker.magic_beam = true;
+                            projectile_entity.insert(tracker);
+                        }
                     }
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
@@ -1643,6 +2412,7 @@ fn special_weapon_system(
             // Slot 9 — Moon Bubble
             2 => {
                 if inv.slot9.can_fire() {
+                    let split = moon_bubble_splits(inv.slot9.level);
                     let dmg = inv.slot9.effective_damage()
                         * armor_damage_mult
                         * upgrades.missile_damage_mult()
@@ -1650,7 +2420,7 @@ fn special_weapon_system(
                     let damage_type =
                         gauntlet_projectile_damage_type(upgrades, DamageType::Explosive);
                     inv.slot9.cooldown_timer = inv.slot9.cooldown;
-                    commands.spawn((
+                    let mut projectile_entity = commands.spawn((
                         PbrBundle {
                             mesh: Mesh3d(proj_assets.sphere_lg.clone()),
                             material: MeshMaterial3d(proj_assets.mat_moon_bubble.clone()),
@@ -1666,12 +2436,15 @@ fn special_weapon_system(
                             is_explosive: true,
                             explosion_radius: 12.0 * upgrades.gauntlet_explosion_radius_mult(),
                             weapon_type: ProjectileOwner::MoonBubble,
-                            owner: None,
+                            owner: Some(player_entity),
                             piercing: false,
                             gravity_affected: true,
                             vertical_velocity: 0.1,
                         },
                     ));
+                    if split {
+                        projectile_entity.insert(MoonBubbleCluster);
+                    }
                     spawn_muzzle_flash(&mut commands, &proj_assets, pos);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
@@ -1688,47 +2461,95 @@ fn special_weapon_system(
             // Slot 0 — Sprite Turret
             3 => {
                 if inv.slot0.can_fire() {
+                    let level = inv.slot0.level;
                     let dmg = inv.slot0.effective_damage()
                         * armor_damage_mult
                         * upgrades.turret_damage_mult()
                         * upgrades.gauntlet_energy_damage_mult();
                     let damage_type = gauntlet_projectile_damage_type(upgrades, DamageType::Plasma);
                     inv.slot0.cooldown_timer = inv.slot0.cooldown;
-                    use rand::Rng;
-                    let rng = game_rng.combat();
-                    let right = cam.right().as_vec3();
-                    let up = cam.up().as_vec3();
-                    let burst_count = 5 + upgrades.gauntlet_extra_pellets();
-                    for _ in 0..burst_count {
-                        let sx = rng.gen_range(-0.08f32..0.08);
-                        let sy = rng.gen_range(-0.08f32..0.08);
-                        let dir = (fwd + right * sx + up * sy).normalize();
-                        commands.spawn((
-                            EnergyPbrBundle {
-                                mesh: Mesh3d(proj_assets.sphere_sm.clone()),
-                                material: MeshMaterial3d(proj_assets.energy_magic.clone()),
-                                transform: Transform::from_translation(pos)
-                                    .looking_to(dir, Vec3::Y)
-                                    .with_scale(Vec3::new(0.8, 0.8, 2.0)),
+                    // Deployment replaces this owner's previous drone. Other
+                    // local players keep theirs, so four-player co-op remains
+                    // strictly owner scoped and the population is bounded.
+                    for (drone_entity, drone) in active_drone_q.iter() {
+                        if drone.owner == player_entity {
+                            commands.entity(drone_entity).despawn();
+                        }
+                    }
+
+                    let orbit_angle = player_index.0 as f32 * 1.7;
+                    let drone_position =
+                        pos + Vec3::new(orbit_angle.sin() * 4.0, 3.0, orbit_angle.cos() * 4.0);
+                    let drone_entity = commands
+                        .spawn((
+                            PbrBundle {
+                                mesh: Mesh3d(proj_assets.sphere_md.clone()),
+                                material: MeshMaterial3d(proj_assets.mat_sprite_shot.clone()),
+                                transform: Transform::from_translation(drone_position)
+                                    .with_scale(Vec3::splat(1.45)),
                                 ..default()
                             },
-                            Projectile {
-                                damage: dmg / burst_count as f32,
+                            SpriteCombatDrone {
+                                owner: player_entity,
+                                owner_player: player_index.0,
+                                level,
+                                remaining: sprite_drone_duration(level),
+                                fire_timer: 0.0,
+                                orbit_angle,
+                                damage: dmg,
                                 damage_type,
-                                speed: 45.0 * upgrades.gauntlet_projectile_speed_mult(),
-                                direction: dir,
-                                lifetime: 3.0,
-                                is_explosive: false,
-                                explosion_radius: 0.0,
-                                weapon_type: ProjectileOwner::SpriteTurret,
-                                owner: Some(player_entity),
-                                piercing: false,
-                                gravity_affected: false,
-                                vertical_velocity: 0.0,
+                                projectile_speed: 45.0 * upgrades.gauntlet_projectile_speed_mult(),
+                                target: None,
+                                acquisition_timer: 0.0,
                             },
+                            WeaponTransient,
+                            Name::new(format!("P{} Sprite Combat Drone", player_index.0 + 1)),
+                        ))
+                        .id();
+                    commands.entity(drone_entity).with_children(|drone| {
+                        for side in [-1.0_f32, 1.0] {
+                            drone.spawn((
+                                PbrBundle {
+                                    mesh: Mesh3d(proj_assets.sphere_sm.clone()),
+                                    material: MeshMaterial3d(proj_assets.mat_companion.clone()),
+                                    transform: Transform::from_xyz(side * 0.38, 0.0, 0.04)
+                                        .with_scale(Vec3::new(2.4, 0.65, 0.85)),
+                                    ..default()
+                                },
+                                Name::new("Sprite Drone Wing"),
+                            ));
+                        }
+                        drone.spawn((
+                            PbrBundle {
+                                mesh: Mesh3d(proj_assets.lock_ring.clone()),
+                                material: MeshMaterial3d(proj_assets.mat_magic_lock.clone()),
+                                transform: Transform::from_rotation(Quat::from_rotation_x(
+                                    std::f32::consts::FRAC_PI_2,
+                                ))
+                                .with_scale(Vec3::splat(0.56)),
+                                ..default()
+                            },
+                            Name::new("Sprite Drone Halo"),
+                        ));
+                    });
+                    if level >= 3 {
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: Mesh3d(proj_assets.sphere_xl.clone()),
+                                material: MeshMaterial3d(proj_assets.mat_magic_lock.clone()),
+                                transform: Transform::from_translation(aim.camera_origin + Vec3::Y)
+                                    .with_scale(Vec3::splat(2.2)),
+                                ..default()
+                            },
+                            SpriteDroneShield {
+                                drone: drone_entity,
+                                owner: player_entity,
+                            },
+                            WeaponTransient,
+                            Name::new(format!("P{} Sprite Shield Aura", player_index.0 + 1)),
                         ));
                     }
-                    spawn_muzzle_flash(&mut commands, &proj_assets, pos);
+                    spawn_muzzle_flash(&mut commands, &proj_assets, drone_position);
                     fired_ev.write(WeaponFiredEvent);
                     msg_ev.write(UiMessageEvent {
                         text: "Sprite Turret! [unlimited]".to_string(),
@@ -1743,6 +2564,209 @@ fn special_weapon_system(
             }
             _ => {}
         }
+    }
+}
+
+/// Keeps each deployed Sprite Turret in formation and converts its autonomous
+/// shots into ordinary player projectiles. That preserves Starfall's swept
+/// collision, damage messages, enemy rewards, cover behavior, and owner
+/// exclusion without a parallel turret-only combat path.
+#[allow(clippy::too_many_arguments)]
+fn sprite_combat_drone_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    spatial_query: SpatialQuery,
+    proj_assets: Res<ProjectileAssets>,
+    owner_q: Query<&GlobalTransform, With<Player>>,
+    target_q: Query<
+        (Entity, &GlobalTransform, &Health),
+        (
+            With<Enemy>,
+            Without<Projectile>,
+            Without<HackedUnit>,
+            Without<DeadEnemy>,
+        ),
+    >,
+    mut drone_q: Query<(Entity, &mut Transform, &mut SpriteCombatDrone)>,
+    mut acquisition_candidates: Local<Vec<(f32, Entity, Vec3)>>,
+) {
+    let dt = time.delta_secs();
+    for (drone_entity, mut transform, mut drone) in drone_q.iter_mut() {
+        let Ok(owner_transform) = owner_q.get(drone.owner) else {
+            commands.entity(drone_entity).despawn();
+            continue;
+        };
+
+        drone.remaining -= dt;
+        if drone.remaining <= 0.0 {
+            commands.entity(drone_entity).despawn();
+            continue;
+        }
+
+        drone.fire_timer -= dt;
+        drone.orbit_angle += dt * (1.0 + drone.owner_player as f32 * 0.035);
+        let hover = (drone.orbit_angle * 2.0).sin() * 0.5;
+        let desired_position = owner_transform.translation()
+            + Vec3::new(
+                drone.orbit_angle.sin() * 4.0,
+                3.0 + hover,
+                drone.orbit_angle.cos() * 4.0,
+            );
+        // Frame-rate-independent follow response prevents the drone lagging
+        // far behind a sprinting, skating, or airborne owner.
+        let follow = 1.0 - (-6.0 * dt).exp();
+        transform.translation = transform.translation.lerp(desired_position, follow);
+
+        let origin = transform.translation;
+        let cached_target_invalid = drone
+            .target
+            .is_some_and(|target| match target_q.get(target) {
+                Ok((_, target_transform, health)) => {
+                    !health.is_alive()
+                        || origin.distance_squared(target_transform.translation())
+                            > SPRITE_DRONE_RANGE * SPRITE_DRONE_RANGE
+                }
+                Err(_) => true,
+            });
+        if cached_target_invalid {
+            drone.target = None;
+            drone.acquisition_timer = 0.0;
+        }
+
+        let (next_acquisition_timer, acquisition_due) =
+            tick_sprite_drone_acquisition(drone.acquisition_timer, dt);
+        drone.acquisition_timer = next_acquisition_timer;
+        if acquisition_due {
+            collect_sorted_sprite_candidates(
+                origin,
+                SPRITE_DRONE_RANGE,
+                target_q
+                    .iter()
+                    .filter(|(_, _, health)| health.is_alive())
+                    .map(|(entity, target_transform, _)| {
+                        (entity, target_transform.translation() + Vec3::Y * 0.9)
+                    }),
+                &mut acquisition_candidates,
+            );
+            drone.target = acquisition_candidates
+                .iter()
+                .find(|(_, target, position)| {
+                    world_line_of_sight(&spatial_query, origin, *position, Some(*target))
+                })
+                .map(|(_, target, _)| *target);
+        }
+
+        let target_position = drone.target.and_then(|target| {
+            target_q
+                .get(target)
+                .ok()
+                .filter(|(_, _, health)| health.is_alive())
+                .map(|(_, target_transform, _)| target_transform.translation() + Vec3::Y * 0.9)
+        });
+        let Some(target_position) = target_position else {
+            transform.rotation *= Quat::from_rotation_y(dt * 0.9);
+            continue;
+        };
+        let direction = (target_position - origin).normalize_or_zero();
+        if direction.length_squared() <= 0.001 {
+            continue;
+        }
+        transform.rotation = Transform::IDENTITY.looking_to(direction, Vec3::Y).rotation;
+        if drone.fire_timer > 0.0 {
+            continue;
+        }
+        drone.fire_timer = sprite_drone_fire_interval(drone.level);
+
+        commands.spawn((
+            EnergyPbrBundle {
+                mesh: Mesh3d(proj_assets.sphere_sm.clone()),
+                material: MeshMaterial3d(proj_assets.energy_magic.clone()),
+                transform: Transform::from_translation(origin + direction * 0.4)
+                    .looking_to(direction, Vec3::Y)
+                    .with_scale(Vec3::new(0.8, 0.8, 2.0)),
+                ..default()
+            },
+            Projectile {
+                damage: drone.damage,
+                damage_type: drone.damage_type,
+                speed: drone.projectile_speed,
+                direction,
+                lifetime: 2.0,
+                is_explosive: false,
+                explosion_radius: 0.0,
+                weapon_type: ProjectileOwner::SpriteTurret,
+                owner: Some(drone.owner),
+                piercing: false,
+                gravity_affected: false,
+                vertical_velocity: 0.0,
+            },
+        ));
+        spawn_muzzle_flash_scaled(&mut commands, &proj_assets, origin, 0.45);
+    }
+}
+
+fn sync_sprite_drone_shield(
+    mut commands: Commands,
+    time: Res<Time>,
+    drone_q: Query<&SpriteCombatDrone>,
+    owner_q: Query<&GlobalTransform, With<Player>>,
+    mut shield_q: Query<(Entity, &SpriteDroneShield, &mut Transform)>,
+) {
+    for (shield_entity, shield, mut transform) in shield_q.iter_mut() {
+        let Ok(drone) = drone_q.get(shield.drone) else {
+            commands.entity(shield_entity).despawn();
+            continue;
+        };
+        let Ok(owner_transform) = owner_q.get(shield.owner) else {
+            commands.entity(shield_entity).despawn();
+            continue;
+        };
+
+        transform.translation = owner_transform.translation() + Vec3::Y;
+        transform.rotation *= Quat::from_rotation_y(time.delta_secs() * 0.8);
+        let pulse =
+            1.0 + (time.elapsed_secs() * 3.2 + drone.owner_player as f32 * 1.7).sin() * 0.06;
+        transform.scale = Vec3::splat(2.2 * pulse);
+    }
+}
+
+fn spawn_moon_bubble_children(
+    commands: &mut Commands,
+    assets: &ProjectileAssets,
+    parent: &Projectile,
+    center: Vec3,
+) {
+    for direction in moon_bubble_child_directions() {
+        // Start just clear of the detonation point. Unlike the predecessor's
+        // three-metre teleport, this makes every child traverse the collision
+        // world, so walls and small flying targets participate in the normal
+        // swept projectile path.
+        let position = center + direction * 0.15 + Vec3::Y * 0.35;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(assets.sphere_sm.clone()),
+                material: MeshMaterial3d(assets.mat_moon_bubble.clone()),
+                transform: Transform::from_translation(position).with_scale(Vec3::splat(1.2)),
+                ..default()
+            },
+            Projectile {
+                damage: parent.damage * 0.4,
+                damage_type: parent.damage_type,
+                speed: 12.5,
+                direction,
+                lifetime: 0.8,
+                is_explosive: true,
+                explosion_radius: parent.explosion_radius * 0.5,
+                weapon_type: ProjectileOwner::MoonBubble,
+                owner: parent.owner,
+                piercing: false,
+                gravity_affected: true,
+                vertical_velocity: 18.75,
+            },
+            // Deliberately no MoonBubbleCluster: a child detonates exactly
+            // once and cannot create grandchildren.
+            Name::new("Moon Bubble Cluster Child"),
+        ));
     }
 }
 
@@ -1779,6 +2803,10 @@ impl ProjectilePulse {
     }
 }
 
+fn missile_emits_transient_trail(is_mega_seeker: bool) -> bool {
+    !is_mega_seeker
+}
+
 /// Drive the pulse. Runs before the projectile moves so a bolt is never drawn
 /// at a stale size after its final step.
 fn projectile_pulse_system(
@@ -1804,7 +2832,12 @@ fn tracking_missile_system(
     time: Res<Time>,
     assets: Res<ProjectileAssets>,
     mut missile_q: Query<
-        (&mut Transform, &mut Projectile, &mut TrackingMissile),
+        (
+            &mut Transform,
+            &mut Projectile,
+            &mut TrackingMissile,
+            Option<&MegaBeamSeeker>,
+        ),
         With<TrackingMissile>,
     >,
     target_q: Query<
@@ -1813,7 +2846,7 @@ fn tracking_missile_system(
     >,
 ) {
     let dt = time.delta_secs();
-    for (mut transform, mut projectile, mut missile) in missile_q.iter_mut() {
+    for (mut transform, mut projectile, mut missile, mega_seeker) in missile_q.iter_mut() {
         missile.reacquire_timer = (missile.reacquire_timer - dt).max(0.0);
         missile.trail_timer -= dt;
 
@@ -1859,7 +2892,11 @@ fn tracking_missile_system(
                 .rotation;
         }
 
-        if missile.trail_timer <= 0.0 {
+        // The volley already has a stretched emissive body. Giving all 20
+        // seekers the ordinary 18 Hz particle trail would create 1,455
+        // entities/sec in four-player play, so only non-volley trackers emit
+        // transient trails; seeker visuals remain persistent and bounded.
+        if missile_emits_transient_trail(mega_seeker.is_some()) && missile.trail_timer <= 0.0 {
             missile.trail_timer = 0.055;
             let transform =
                 Transform::from_translation(transform.translation - projectile.direction * 0.55)
@@ -1896,11 +2933,15 @@ fn sync_target_lock_visual(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<ProjectileAssets>,
-    missile_q: Query<(Entity, &TrackingMissile)>,
+    mut represented: Local<EntityHashSet>,
+    // The twenty-seeker Mega volley deliberately omits ordinary per-missile
+    // lock rings; stacking up to eighty translucent rings on one target is
+    // neither useful feedback nor within the split-screen VFX budget.
+    missile_q: Query<(Entity, &TrackingMissile), Without<MegaBeamSeeker>>,
     target_q: Query<&GlobalTransform, (With<Enemy>, Without<TargetLockVisual>)>,
     mut visual_q: Query<(Entity, &TargetLockVisual, &mut Transform), Without<Enemy>>,
 ) {
-    let mut represented = Vec::new();
+    represented.clear();
     for (visual_entity, visual, mut transform) in visual_q.iter_mut() {
         let Ok((_, missile)) = missile_q.get(visual.missile) else {
             commands.entity(visual_entity).despawn();
@@ -1915,7 +2956,7 @@ fn sync_target_lock_visual(
             continue;
         };
 
-        represented.push(visual.missile);
+        represented.insert(visual.missile);
         let pulse = 1.0 + (time.elapsed_secs() * 8.0 + missile.owner_player as f32).sin() * 0.12;
         transform.translation = target_transform.translation() + Vec3::Y * 1.05;
         transform.rotation *= Quat::from_rotation_y(time.delta_secs() * 2.8);
@@ -2037,12 +3078,14 @@ fn drone_damage_proxy_radius(enemy_type: EnemyType) -> Option<f32> {
 fn projectile_update_system(
     mut commands: Commands,
     time: Res<Time>,
+    proj_assets: Res<ProjectileAssets>,
     spatial_query: SpatialQuery,
     mut proj_q: Query<(
         Entity,
         &mut Transform,
         &mut Projectile,
         Option<&ChargeBlastTag>,
+        Option<&MoonBubbleCluster>,
     )>,
     mut enemy_q: Query<
         (Entity, &Transform, &mut Health, &mut Damageable, &Enemy),
@@ -2075,7 +3118,9 @@ fn projectile_update_system(
 ) {
     let dt = time.delta_secs();
 
-    for (proj_entity, mut proj_transform, mut proj, charge_blast) in proj_q.iter_mut() {
+    for (proj_entity, mut proj_transform, mut proj, charge_blast, cluster_parent) in
+        proj_q.iter_mut()
+    {
         let is_critical = charge_blast.is_some();
         let previous_position = proj_transform.translation;
         proj_transform.translation += proj.direction * proj.speed * dt;
@@ -2109,6 +3154,14 @@ fn projectile_update_system(
                     &mut road_vehicle_q,
                 );
             }
+            if cluster_parent.is_some() {
+                spawn_moon_bubble_children(
+                    &mut commands,
+                    &proj_assets,
+                    &proj,
+                    proj_transform.translation,
+                );
+            }
             commands.entity(proj_entity).despawn();
             continue;
         }
@@ -2134,6 +3187,14 @@ fn projectile_update_system(
                     proj.damage,
                     proj.damage_type,
                     &mut road_vehicle_q,
+                );
+            }
+            if cluster_parent.is_some() {
+                spawn_moon_bubble_children(
+                    &mut commands,
+                    &proj_assets,
+                    &proj,
+                    proj_transform.translation,
                 );
             }
             commands.entity(proj_entity).despawn();
@@ -2355,6 +3416,14 @@ fn projectile_update_system(
             );
         }
         if hit {
+            if cluster_parent.is_some() {
+                spawn_moon_bubble_children(
+                    &mut commands,
+                    &proj_assets,
+                    &proj,
+                    proj_transform.translation,
+                );
+            }
             commands.entity(proj_entity).despawn();
         }
     }
@@ -4228,6 +5297,484 @@ mod tracking_missile_tests {
         let mut special = SpecialWeapon::new(SpecialSlot::Slot7);
         special.ammo = 0;
         assert!(special.can_fire());
+    }
+
+    #[test]
+    fn heavy_water_special_level_breakpoints_are_preserved() {
+        assert_eq!(homing_star_count(1), 1);
+        assert_eq!(homing_star_count(2), 1);
+        assert_eq!(homing_star_count(3), 3);
+
+        assert_eq!(tri_star_tracking_strength(1), None);
+        assert_eq!(tri_star_tracking_strength(2), Some(0.55));
+        assert_eq!(tri_star_tracking_strength(3), Some(0.78));
+
+        assert_eq!(sprite_drone_duration(1), 30.0);
+        assert_eq!(sprite_drone_duration(2), 45.0);
+        assert_eq!(sprite_drone_duration(3), 60.0);
+        assert_eq!(sprite_drone_fire_interval(1), 0.45);
+        assert_eq!(sprite_drone_fire_interval(2), 0.40);
+        assert_eq!(sprite_drone_fire_interval(3), 0.35);
+    }
+
+    #[test]
+    fn moon_bubble_cluster_is_level_gated_and_cardinal() {
+        assert!(!moon_bubble_splits(1));
+        assert!(moon_bubble_splits(2));
+
+        let directions = moon_bubble_child_directions();
+        assert_eq!(directions, [Vec3::X, Vec3::Z, Vec3::NEG_X, Vec3::NEG_Z]);
+        assert!(directions.iter().all(|direction| direction.is_normalized()));
+    }
+
+    #[test]
+    fn sprite_drone_sorts_every_in_range_candidate_before_los() {
+        let mut world = World::new();
+        let nearest = world.spawn_empty().id();
+        let second = world.spawn_empty().id();
+        let third = world.spawn_empty().id();
+        let fourth = world.spawn_empty().id();
+        let fifth = world.spawn_empty().id();
+        let out_of_range = world.spawn_empty().id();
+
+        let mut candidates = Vec::new();
+        collect_sorted_sprite_candidates(
+            Vec3::ZERO,
+            25.0,
+            [
+                (fifth, Vec3::new(5.0, 0.0, 0.0)),
+                (third, Vec3::new(3.0, 0.0, 0.0)),
+                (out_of_range, Vec3::new(26.0, 0.0, 0.0)),
+                (nearest, Vec3::new(1.0, 0.0, 0.0)),
+                (fourth, Vec3::new(4.0, 0.0, 0.0)),
+                (second, Vec3::new(2.0, 0.0, 0.0)),
+            ]
+            .into_iter(),
+            &mut candidates,
+        );
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|(_, entity, _)| *entity)
+                .collect::<Vec<_>>(),
+            [nearest, second, third, fourth, fifth]
+        );
+    }
+
+    #[test]
+    fn sprite_drone_los_acquisition_is_throttled_to_ten_hz() {
+        let (timer, due) = tick_sprite_drone_acquisition(0.10, 0.016);
+        assert!(!due);
+        assert!((timer - 0.084).abs() < 1e-6);
+
+        let (timer, due) = tick_sprite_drone_acquisition(timer, 0.09);
+        assert!(due);
+        assert_eq!(timer, SPRITE_DRONE_ACQUISITION_INTERVAL);
+    }
+
+    #[test]
+    fn mega_beam_combo_requires_every_owner_gate() {
+        assert_eq!(MEGA_BEAM_COOLDOWN, 6.0);
+        assert_eq!(MEGA_BEAM_LIFETIME, 1.4);
+        assert!(mega_beam_trigger_ready(true, true, true, true, 0.0, false));
+        assert!(!mega_beam_trigger_ready(
+            false, true, true, true, 0.0, false
+        ));
+        assert!(!mega_beam_trigger_ready(
+            true, false, true, true, 0.0, false
+        ));
+        assert!(!mega_beam_trigger_ready(
+            true, true, false, true, 0.0, false
+        ));
+        assert!(!mega_beam_trigger_ready(
+            true, true, true, false, 0.0, false
+        ));
+        assert!(!mega_beam_trigger_ready(
+            true, true, true, true, 0.01, false
+        ));
+        assert!(!mega_beam_trigger_ready(true, true, true, true, 0.0, true));
+    }
+
+    #[test]
+    fn mega_beam_capsule_is_220_by_5_plus_target_radius() {
+        let origin = Vec3::ZERO;
+        let forward = Vec3::NEG_Z;
+        assert!(mega_beam_contains_target(
+            origin,
+            forward,
+            MEGA_BEAM_LENGTH,
+            MEGA_BEAM_RADIUS,
+            Vec3::new(5.9, 0.0, -219.0),
+            1.0,
+        ));
+        assert!(!mega_beam_contains_target(
+            origin,
+            forward,
+            MEGA_BEAM_LENGTH,
+            MEGA_BEAM_RADIUS,
+            Vec3::new(6.1, 0.0, -219.0),
+            1.0,
+        ));
+        assert!(!mega_beam_contains_target(
+            origin,
+            forward,
+            MEGA_BEAM_LENGTH,
+            MEGA_BEAM_RADIUS,
+            Vec3::new(0.0, 0.0, -220.1),
+            1.0,
+        ));
+        assert!(!mega_beam_contains_target(
+            origin,
+            forward,
+            MEGA_BEAM_LENGTH,
+            MEGA_BEAM_RADIUS,
+            Vec3::new(0.0, 0.0, 0.1),
+            1.0,
+        ));
+        assert_eq!(clipped_mega_beam_length(None), MEGA_BEAM_LENGTH);
+        assert_eq!(clipped_mega_beam_length(Some(37.5)), 37.5);
+        assert_eq!(
+            clipped_mega_beam_length(Some(MEGA_BEAM_LENGTH + 10.0)),
+            MEGA_BEAM_LENGTH
+        );
+        assert!(!mega_beam_contains_target(
+            origin,
+            forward,
+            37.5,
+            MEGA_BEAM_RADIUS,
+            Vec3::new(0.0, 0.0, -38.0),
+            1.0,
+        ));
+    }
+
+    #[test]
+    fn mega_beam_radius_uses_scaled_craft_variant_and_actual_collider_bounds() {
+        let scout = Enemy::new(EnemyType::Drone, Vec3::ZERO, 1.0);
+        let gunship = Enemy::new(EnemyType::Drone, Vec3::ZERO, 1.8);
+        let tank = Enemy::new(EnemyType::Tank, Vec3::ZERO, 1.8);
+        let scout_radius = mega_beam_target_radius(&scout, Some(&DroneVariant::Scout), None);
+        let gunship_radius =
+            mega_beam_target_radius(&gunship, Some(&DroneVariant::SiegeGunship), None);
+        let tank_radius = mega_beam_target_radius(&tank, None, None);
+        assert!(gunship_radius > scout_radius * 3.9);
+        assert!(tank_radius > 3.4);
+
+        // Avian cuboids take full lengths. The target radius is the bounding
+        // sphere of the actual 12 x 4 x 8 collider, so even a visible corner
+        // at the beam capsule's edge registers.
+        let collider = AvianCollider::cuboid(12.0, 4.0, 8.0);
+        let collider_radius = mega_beam_target_radius(&scout, None, Some(&collider));
+        let expected_radius = Vec3::new(6.0, 2.0, 4.0).length();
+        assert!((collider_radius - expected_radius).abs() < 0.0001);
+        assert!(mega_beam_contains_target(
+            Vec3::ZERO,
+            Vec3::NEG_Z,
+            MEGA_BEAM_LENGTH,
+            MEGA_BEAM_RADIUS,
+            Vec3::new(MEGA_BEAM_RADIUS + expected_radius - 0.01, 0.0, -60.0),
+            collider_radius,
+        ));
+        assert!(!mega_beam_contains_target(
+            Vec3::ZERO,
+            Vec3::NEG_Z,
+            MEGA_BEAM_LENGTH,
+            MEGA_BEAM_RADIUS,
+            Vec3::new(MEGA_BEAM_RADIUS + expected_radius + 0.01, 0.0, -60.0),
+            collider_radius,
+        ));
+    }
+
+    #[test]
+    fn mega_seeker_volley_is_bounded_and_deterministic() {
+        assert!(!missile_emits_transient_trail(true));
+        assert!(missile_emits_transient_trail(false));
+        let forward = Vec3::NEG_Z;
+        let first: Vec<(Vec3, Vec3)> = (0..MEGA_SEEKER_COUNT)
+            .map(|index| mega_seeker_launch(index, MEGA_SEEKER_COUNT, forward))
+            .collect();
+        let second: Vec<(Vec3, Vec3)> = (0..MEGA_SEEKER_COUNT)
+            .map(|index| mega_seeker_launch(index, MEGA_SEEKER_COUNT, forward))
+            .collect();
+
+        assert_eq!(first.len(), 20);
+        assert_eq!(first, second);
+        assert!(first.iter().all(|(_, direction)| direction.is_normalized()));
+        assert!(first.iter().all(|(offset, _)| {
+            let lateral = *offset - forward * 2.5;
+            (lateral.length() - 1.5).abs() < 1e-4
+        }));
+    }
+
+    #[test]
+    fn mega_beam_registers_each_hostile_at_most_once() {
+        let mut world = World::new();
+        let owner = world.spawn_empty().id();
+        let hostile = world.spawn_empty().id();
+        let mut beam = ActiveMegaBeam {
+            owner,
+            origin: Vec3::ZERO,
+            direction: Vec3::NEG_Z,
+            length: MEGA_BEAM_LENGTH,
+            remaining: MEGA_BEAM_LIFETIME,
+            scan_timer: 0.0,
+            damage: MEGA_BEAM_DAMAGE,
+            damage_type: DamageType::Laser,
+            hit_entities: EntityHashSet::default(),
+        };
+
+        assert!(beam.register_hit(hostile));
+        assert!(!beam.register_hit(hostile));
+        assert_eq!(beam.hit_entities.len(), 1);
+    }
+
+    #[test]
+    fn mega_beam_capsule_does_not_damage_offset_targets_through_cover() {
+        use avian3d::prelude::{
+            CollisionEnd, CollisionStart, PhysicsPlugins, RigidBody as AvianRigidBody,
+        };
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            PhysicsPlugins::default(),
+        ))
+        .init_asset::<Mesh>()
+        .add_message::<CollisionStart>()
+        .add_message::<CollisionEnd>()
+        .add_message::<EnemyDamagedEvent>()
+        .add_message::<EnemyKilledEvent>()
+        .add_message::<CombatImpactEvent>()
+        .add_systems(Update, active_mega_beam_system);
+
+        // The wall is offset far enough that the visual's center ray misses,
+        // but it intersects the covered target's individual line of sight.
+        app.world_mut().spawn((
+            AvianCollider::cuboid(1.5, 6.0, 1.5),
+            CollisionProfile::World.layers(),
+            AvianRigidBody::Static,
+            Transform::from_xyz(2.0, 2.0, 5.0),
+        ));
+        let covered_position = Vec3::new(4.0, 1.1, 10.0);
+        let covered = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(covered_position),
+                Enemy::new(EnemyType::Soldier, covered_position, 1.0),
+                Health::new(2_500.0),
+                Damageable::default(),
+            ))
+            .id();
+        let clear_position = Vec3::new(-4.0, 1.1, 10.0);
+        let clear = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(clear_position),
+                Enemy::new(EnemyType::Soldier, clear_position, 1.0),
+                Health::new(2_500.0),
+                Damageable::default(),
+            ))
+            .id();
+        let owner = app.world_mut().spawn_empty().id();
+        let beam = app
+            .world_mut()
+            .spawn(ActiveMegaBeam {
+                owner,
+                origin: Vec3::new(0.0, 2.0, 0.0),
+                direction: Vec3::Z,
+                length: 20.0,
+                remaining: 10.0,
+                // Let the first update populate Avian's spatial-query tree.
+                scan_timer: 10.0,
+                damage: MEGA_BEAM_DAMAGE,
+                damage_type: DamageType::Laser,
+                hit_entities: EntityHashSet::default(),
+            })
+            .id();
+
+        app.update();
+        app.world_mut()
+            .get_mut::<ActiveMegaBeam>(beam)
+            .unwrap()
+            .scan_timer = 0.0;
+        app.update();
+
+        assert_eq!(app.world().get::<Health>(covered).unwrap().current, 2_500.0);
+        assert!(app.world().get::<Health>(clear).unwrap().current < 2_500.0);
+    }
+
+    #[test]
+    fn mega_beam_system_spawns_one_beam_and_twenty_seekers_per_owner() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            avian3d::prelude::PhysicsPlugins::default(),
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<EnergyMaterial>()
+        .insert_resource(VehicleState::default())
+        .add_message::<WeaponFiredEvent>()
+        .add_message::<UiMessageEvent>()
+        .add_systems(Startup, setup_weapon_assets)
+        .add_systems(Update, mega_beam_cannon_system);
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(0),
+                PlayerInput {
+                    aim: true,
+                    fire_just: true,
+                    ..default()
+                },
+                AimSolution::default(),
+                ArmorSet::default(),
+                PlayerProgression::default(),
+                BeamSabre::default(),
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<ActiveMegaBeam>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<MegaBeamSeeker>>()
+                .iter(app.world())
+                .count(),
+            MEGA_SEEKER_COUNT
+        );
+        assert_eq!(
+            app.world()
+                .get::<MegaBeamCooldown>(player)
+                .expect("combo inserts owner cooldown")
+                .remaining,
+            MEGA_BEAM_COOLDOWN
+        );
+        let mesh_count = app.world().resource::<Assets<Mesh>>().len();
+        let material_count = app.world().resource::<Assets<StandardMaterial>>().len();
+        let energy_material_count = app.world().resource::<Assets<EnergyMaterial>>().len();
+
+        // Force readiness and fire again. Replacement, not stacking, keeps
+        // the owner at one beam / twenty seekers and allocates no new assets.
+        app.world_mut()
+            .get_mut::<MegaBeamCooldown>(player)
+            .unwrap()
+            .remaining = 0.0;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<ActiveMegaBeam>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<MegaBeamSeeker>>()
+                .iter(app.world())
+                .count(),
+            MEGA_SEEKER_COUNT
+        );
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), mesh_count);
+        assert_eq!(
+            app.world().resource::<Assets<StandardMaterial>>().len(),
+            material_count
+        );
+        assert_eq!(
+            app.world().resource::<Assets<EnergyMaterial>>().len(),
+            energy_material_count
+        );
+    }
+
+    #[test]
+    fn weapon_transient_cleanup_preserves_pause_then_clears_session() {
+        let mut app = App::new();
+        app.insert_resource(PlaySessionTransition {
+            pausing: true,
+            ..default()
+        });
+        app.add_systems(Update, cleanup_weapon_transients);
+        let transient = app.world_mut().spawn(WeaponTransient).id();
+        let projectile = app
+            .world_mut()
+            .spawn(Projectile {
+                damage: 1.0,
+                damage_type: DamageType::Plasma,
+                speed: 1.0,
+                direction: Vec3::Z,
+                lifetime: 1.0,
+                is_explosive: false,
+                explosion_radius: 0.0,
+                weapon_type: ProjectileOwner::Player,
+                owner: None,
+                piercing: false,
+                gravity_affected: false,
+                vertical_velocity: 0.0,
+            })
+            .id();
+        let particle = app
+            .world_mut()
+            .spawn(HitParticle {
+                lifetime: 1.0,
+                max_lifetime: 1.0,
+                velocity: Vec3::ZERO,
+            })
+            .id();
+        let sabre_vfx = app
+            .world_mut()
+            .spawn(SabreTechniqueVfx {
+                lifetime: 1.0,
+                max_lifetime: 1.0,
+                velocity: Vec3::ZERO,
+                spin: Vec3::ZERO,
+                base_scale: Vec3::ONE,
+                expansion: 0.0,
+            })
+            .id();
+        let player = app
+            .world_mut()
+            .spawn(MegaBeamCooldown { remaining: 4.0 })
+            .id();
+
+        app.update();
+        assert!(app.world().get_entity(transient).is_ok());
+        assert!(app.world().get_entity(projectile).is_ok());
+        assert!(app.world().get_entity(particle).is_ok());
+        assert!(app.world().get_entity(sabre_vfx).is_ok());
+        assert!(app.world().get::<MegaBeamCooldown>(player).is_some());
+
+        app.world_mut()
+            .resource_mut::<PlaySessionTransition>()
+            .pausing = false;
+        app.update();
+        assert!(app.world().get_entity(transient).is_err());
+        assert!(app.world().get_entity(projectile).is_err());
+        assert!(app.world().get_entity(particle).is_err());
+        assert!(app.world().get_entity(sabre_vfx).is_err());
+        assert!(app.world().get::<MegaBeamCooldown>(player).is_none());
+    }
+
+    #[test]
+    fn menu_cleanup_is_unconditional_after_leaving_from_pause() {
+        let mut app = App::new();
+        app.add_systems(Update, cleanup_weapon_transients_for_menu);
+        let transient = app.world_mut().spawn(WeaponTransient).id();
+        let player = app
+            .world_mut()
+            .spawn(MegaBeamCooldown { remaining: 4.0 })
+            .id();
+
+        app.update();
+        assert!(app.world().get_entity(transient).is_err());
+        assert!(app.world().get::<MegaBeamCooldown>(player).is_none());
     }
 
     #[test]

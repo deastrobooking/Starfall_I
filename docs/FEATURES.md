@@ -4,7 +4,9 @@ The single authoritative description of **what the game does**. For *how the
 code is organized and how to work on it*, see [DEVELOPMENT.md](DEVELOPMENT.md).
 Forward-looking engine work lives in [engine_roadmap.md](engine_roadmap.md);
 task-focused how-tos live in [guides/](guides/); superseded reviews, audits, and
-dated plans are preserved under [archive/](archive/).
+dated plans are preserved under [archive/](archive/). Sequel-continuity parity
+and its explicit remaining boundaries live in
+[HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md).
 
 Runtime state ownership worth knowing up front: `MenuFocus` supplies shared
 controller menu navigation, `PlatformerMoveState` owns roll/stomp tuning,
@@ -183,7 +185,7 @@ The panel hides while a discussion is active so the dialogue UI can own the bott
 |---|---|---|
 | Idle | No input, grounded | Default ground state |
 | Moving | WASD / left stick | Smoothed acceleration toward `walk_speed = 0.38` |
-| Sprinting | Shift / LB + move | Drains stamina 15/sec |
+| Sprinting / vehicle turbo | Shift / LB + move | On foot, drains stamina 15/sec; in an active non-boat vehicle mode, requests the 0.7-second shared turbo burst |
 | Jetpack | Hold Space / South while airborne | Burns `fuel_cost_per_sec = 20`/sec from an 800-unit tank (~40 s thrust, sized for the Everest ranges); regens 45/sec on ground |
 | WallSliding | Pushing into wall while falling | One-hand wall clasp; drains light stamina and caps fall speed at `wall_slide_speed = 0.28` |
 | Hanging | Interact while falling into a wall | Max hang time 2.5s; drains stamina 12/sec |
@@ -328,15 +330,29 @@ collidable stone pylons with a metal crossbeam. Pylon feet independently sample
 the terrain collider beneath each side of the road, supporting rising mountain
 approaches and long aerial viaducts instead of leaving them visibly floating.
 
+**Star City continuation ring (2026-08):** the same speed-road generation pass
+spawns one closed elevated landmark at world origin. It uses exactly 56 uniform
+chords around radius 280, a 32-unit deck at `y = 80`, overlapping deck seams,
+continuous two-way neon lanes with eight paired trigger stations, a collidable
+direction divider, outer safety rails, and terrain-founded collidable supports.
+Four world-cardinal approaches run from driveable ground mouths to protected
+outer-lane openings at each cardinal chord midpoint, clear of the center
+divider; each climb uses 24 eased,
+terrain-aware deck sections across a 280-unit run, with rails, support columns,
+and real boost pads. The ring and all four approach centerlines participate in
+the shared road distance field, so procedural props and buildings preserve the
+drivable corridor. Pure tests lock the radius/height/count, chord uniformity,
+closed seam, cardinal merge geometry, and keepout coverage.
+
 Road system v4 (freeway-grade): main mountain trunks are widened for high-speed
-traffic (`SPEED_ROAD_WIDTH = 64`) and resampled into 32-unit deck slices after a
+traffic (`SPEED_ROAD_WIDTH = 256`) and resampled into 32-unit deck slices after a
 bounded automatic Hermite-rounding pass. Settlement rings deliberately remain
 the smaller road/path family (City 46 / Harbor 42 / Village 38 / Outpost 36).
 **Collidable guardrails** on both edges of every trunk deck (4.6 tall and 1.05 thick,
 `spawn_deck_guardrails`) — players and vehicles can no longer slide off the
-network. Each two-way boost overlay also has a 1.75-unit collidable center
-divider, preventing momentum from carrying a player onto the arrows facing the
-opposite direction. **Banked corner fillets** (`spawn_route_corner_fillets`): every
+network. Each two-way boost overlay also has a 2.4-unit-wide, 7.5-unit-tall
+collidable center divider, preventing momentum from carrying a player onto the
+arrows facing the opposite direction. **Banked corner fillets** (`spawn_route_corner_fillets`): every
 interior route waypoint is rounded with a quadratic-arc of short decks rolled
 0.15 rad into the turn, so corners drive like curves instead of sharp joints.
 **Vertical loops**: qualifying straights (>1800) spawn a drivable 360° loop
@@ -610,6 +626,7 @@ Defeated enemies now grant robot salvage directly to the shared collection. Gene
 | Drone | Circuit Board |
 | Soldier / unknown | Scrap Frame |
 | Heavy | Tread Unit |
+| Tank / Scallarian siege tank | Tread Unit |
 | SpikeAlien | Servo Motor |
 | Hybrid | Energy Core |
 
@@ -627,7 +644,10 @@ Save/load persists the whole `robot_pets` section with `serde(default)`, so olde
 
 The Robot Garage screen (`AppState::RobotGarage`, `src/plugins/robot_garage_plugin.rs`) is the current player-facing hub. A/D browsing selects one of the 9 `RobotAssemblyForm` variants; pressing Enter auto-selects the first N eligible pets and calls `robot_pets.assemble(form, &pet_ids)`; X disassembles. `MechCommandLink` upgrade rank gates GiantMech, SpaceShip, and MegaShip. Assembled forms drive `VehicleState` at runtime (see Vehicle System below).
 
-Future runtime work: controller-friendly garage/store UI, runtime 3-D mech/ship controllers, per-player passenger/driver UX, and store-built pet purchasing from salvage.
+Future runtime work: controller-friendly garage/store UI, independent physical
+vehicle collision/mount/destruction beneath the current owner-following 3-D
+bodies, per-player passenger/driver UX, and store-built pet purchasing from
+salvage.
 
 ---
 
@@ -819,6 +839,11 @@ Current first slice:
   the site to `Liberated`.
 - Timeout/failure marks the site `Damaged`; early raids do not erase builds or
   permanently reoccupy major progress.
+- When a `RouteBlockade` record becomes active, one member per four-unit cadence
+  (indices 0, 4, 8, …) is a procedural Scallarian siege tank and the intervening
+  units remain Soldiers.
+  Tanks sample terrain at their individual X/Z spawn point instead of inheriting
+  the airborne raid offset. Other `RaidKind` enemy mappings are unchanged.
 
 Static defense is computed from settlement builds linked to the target site.
 `DefenseOutpost` contributes the most, while `PowerPlant`, `Spaceport`, and
@@ -1221,6 +1246,36 @@ with controller D-pad Up/Down, then fired with RT/LMB. The cycle includes
 also selects the previous/next primary immediately. The selected special's name
 replaces the primary weapon name in the HUD.
 
+**Heavy Water special continuation (2026-08):** all four tools now consume
+their saved `SpecialWeapon.level` instead of applying damage scaling alone.
+Authored hidden-city rewards promote Homing Star, Tri-Star Burst, Moon Bubble,
+and Sprite Turret to at least level 2.
+
+- Homing Star remains one tracking missile at levels 1–2 and launches three at
+  level 3.
+- Tri-Star bolts gain capped tracking at level 2 and stronger tracking at level
+  3, while preserving the normal attributed projectile/damage path.
+- Moon Bubble level 2+ splits once on detonation into four cardinal explosive
+  children. Children cannot recursively split.
+- Sprite Turret deploys one persistent combat drone per owner instead of a
+  one-frame/static shot. It orbits and follows its player, chooses the nearest
+  line-of-sight target within 25 units, and fires owner-attributed projectiles.
+  Duration is 30/45/60 seconds and fire cadence improves at levels 2–3; level 3
+  also displays a player-following shield aura without adding a second damage
+  reduction formula. Redeploying replaces only that owner's prior drone.
+
+With the Star Sabre drawn, hold aim and press fire (RMB + LMB, or LT + RT) to
+trigger the owner-scoped **Mega Beam Cannon**. It emits a 220-unit, radius-5
+layered beam for 1.4 seconds at 1,800 base damage and launches twenty
+deterministically arranged homing explosive seekers (90 base damage,
+5-unit blast radius). A World-layer center ray clips both the rendered beam and
+its damage capsule to the same maximum endpoint, while every contained enemy
+must also pass its own line-of-sight cover check before the one allowed hit.
+Each player has an independent six-second cooldown and a one-beam/one-volley
+population cap; Tank mode owns primary fire and therefore suppresses the combo.
+Seekers reuse the shared projectile/tracking path without per-frame
+trail-entity churn.
+
 ---
 
 **Faction boss controllers (2026-07):** every boss faction now has a distinct
@@ -1255,12 +1310,17 @@ Detection / chase / attack ranges are per-type. `difficulty_scale` (from wave or
 | Drone | 50 | 8 | Fast | Flying Scallarian scout with laser shots, 15 XP |
 | Soldier | 100 | 15 | Med | Standard Scallarian invader, 25 XP |
 | Heavy | 300 | 25 | Slow | Dragon brute, 50 XP |
+| Tank | 600 | 45 | Slow | Procedural Scallarian siege tank; defense 18, 28-unit stand-off, explosive shell, 120 XP |
 | SpikeAlien | 80 | 20 | Fast | Aggressive Scallarian spike alien, 20 XP |
 | Hybrid | 1000 | 40 | Med | Boss-tier Scallarian rift champion, 200 XP |
 
 Dragon-faction boss fights add `DragonBoss`: large scaled boss bodies orbit above the closest player while leashed to their arena, advance through health phases, fire volleys, breathe cone fire, and create slam shockwaves.
 
-Flying-drone wings can also trigger the shared boss camera when at least three nearby drones are active. This is the lightweight "ship/drone encounter" hook for future aerial mini-bosses, boarding fights, and dragon-lair alarm rooms.
+Flying-drone wings can also trigger the shared boss camera when at least three nearby drones are active. Combat craft now carry a `DroneVariant` with distinct procedural silhouette, durability, flight envelope, and volley read: Scout fires one centered bolt, HeavyFighter fires three alternating bolts 120 ms apart, and SiegeGunship fires four simultaneous laterally spread lasers. Authored wasteland patrols deploy a six-craft 3 Scout / 2 HeavyFighter / 1 SiegeGunship formation outside the starting safe radius. This remains the lightweight ship/drone encounter hook for future aerial mini-bosses, boarding fights, and dragon-lair alarm rooms.
+
+`EnemyType::Tank` does not use generic contact melee. Its kinematic procedural tread/hull/turret/barrel craft chases slowly, parks inside a 28-unit envelope, and fires a real `Shell` projectile with 5.5-unit splash on a 3.5-second cadence. Active RouteBlockade raids mix one in every four units. Both raid and chapter spawners sample the exact local terrain surface for tanks. Chapters 4 and 13 add `DimensionalAlien` tank groups; campaign tests ensure tank encounters are not assigned to `DragonRoyalty` or `DragonExile`. A runtime tank kill grants ordinary Tread Unit robot salvage through the canonical enemy-label mapping; rare-context salvage is not part of the kill-reward path.
+
+Everest `MountainSpiderMech`s retain their eight-leg terrain-following patrol, but their attack is now ranged artillery rather than the old generic melee sphere. At 32 units they stop, aim at the nearest player, and launch two target-bearing homing splash missiles every 2.8 seconds. Ordinary lasers, tank shells, and homing missiles share the enemy-projectile collision/damage pipeline; only missiles pay steering-target lookup cost.
 
 ---
 
@@ -1387,7 +1447,7 @@ Chapter select renders those locations as the Everest Range fast-travel map. Key
 
 **Files:** `src/chapters/mod.rs`, `src/world/discussion.rs`, `src/plugins/world_plugin.rs`, `src/plugins/ui_plugin.rs`
 
-`map_settlements()` defines optional cities, villages, harbors, and outposts that fill the 200-mile map between chapter anchors. `WorldPlugin` samples local terrain relief for each settlement and assigns a grounded, terraced, or sky-district layout profile. Plazas, segmented roads, building pads, landmarks, discussion NPCs, caches, anchors, and spy activity all use that shared floor profile so interactables and visuals stay aligned with the heightmap. Mega cities now sit on large walkable floating platforms with giant ramp/bridge approaches, guide lights, tower pads, and underside lift columns; rough mountain edges can spawn inset stone/metal gates with dark openings and threshold paths. Chapter select renders matching non-clickable map markers: `C` city, `V` village, `H` harbor, and `O` outpost. Markers turn green after their cache reward id is collected.
+`map_settlements()` defines optional cities, villages, harbors, and outposts that fill the 200-mile map between chapter anchors. `WorldPlugin` samples local terrain relief for each settlement and assigns a grounded, terraced, or sky-district layout profile. Plazas, segmented roads, building pads, landmarks, discussion NPCs, caches, anchors, and spy activity all use that shared floor profile so interactables and visuals stay aligned with the heightmap. Mega cities now sit on large walkable floating platforms with four world-cardinal ground ramps independent of facade yaw, guide lights, tower pads, and underside lift columns; rough mountain edges can spawn inset stone/metal gates with dark openings and threshold paths. Chapter select renders matching non-clickable map markers: `C` city, `V` village, `H` harbor, and `O` outpost. Markers turn green after their cache reward id is collected.
 
 Each settlement also has one `DiscussionNpc` near its plaza. Press `E` / D-pad Down near that NPC to open the discussion panel. Dialogue scripts live in `src/world/discussion.rs`; each line may reference an MP3 under `assets/voice/...`, and the HUD spawns that clip once when the line appears. Missing voice files are acceptable during prototyping, but final recorded lines should keep the documented paths or update the script.
 
@@ -1656,7 +1716,13 @@ See `docs/FEATURES.md` for the player workflow and manifest schema.
 - Outer districts, spaceports, trees, crystals, mountains, and authored anchors sample the terrain surface so upgraded props sit on the generated ground rather than the old flat plane.
 - Decorative trees via L-system string rewriting (`lsystem/mod.rs`) + 3-D turtle interpreter (`lsystem/turtle.rs`).
 - City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.
-- Lush procedural nature adds dense grass, forest pockets, water gardens, reeds, flowers, shrubs, mossy rocks, and darker stone outcrops.
+- Lush procedural nature adds forest pockets, water gardens, reeds, flowers, shrubs, mossy rocks, and darker stone outcrops.
+- Grass is a streamed, GPU-driven field (`src/plugins/world_plugin/grass.rs` + `assets/shaders/grass.wgsl`) rather than per-blade entities:
+  - Every blade in a 16 m chunk is baked into one merged mesh, so a chunk costs one entity and one draw call. Per-blade sway phase, tint, and the terrain colour beneath the blade ride in the vertex stream (`UV_0` = width/height, `COLOR` = ground colour + blade hash).
+  - Chunks stream around `PlayerCamera` (falling back to `Player`), bake at most 2 meshes per frame after a 16-per-frame warm-up, and cache meshes by coordinate so re-crossing old ground is free. Placement is a pure function of `(world_seed, chunk)`, so an evicted chunk rebuilds identically.
+  - Three LOD tiers (Near/Mid/Far: 4/3/2-segment blades, denser to wider) have overlapping distance windows; the shader dithers each tier in and out so density changes read as a dissolve, not a ring.
+  - Blades only grow on ground the terrain agrees with: slope, altitude band, city clearance, mountain-route corridors, lake basins, and the coastline all mask density, and a two-octave value-noise clump mask breaks the field into tufts.
+  - The shader adds gusting multi-octave wind (waves travel along the wind direction), wrapped diffuse, a subsurface-scattering approximation for back-lit rim light, tip sheen, root occlusion, and blade-width curl shading. Chunks carry explicit `Aabb`s for frustum culling and are `NotShadowCaster`.
 - `NatureSway` gives trees, water surfaces, reeds, flowers, shrubs, and moss caps a subtle hand-animated motion.
 - Downtown towers mix transparent glass panels, glowing window facades, metal mullion grids, brushed-metal skins, and occasional stone-brick bodies for the ancient/new skyline style.
 - Industrial buildings can receive ribbed metal cladding and factory ribbon windows.
@@ -1690,30 +1756,59 @@ See `docs/FEATURES.md` for the player workflow and manifest schema.
   the above physics profiles at a time)
 
 **J / Enter Vehicle** toggles the available single-mode vehicle, handles nearby
-boats, or cycles an assembled Jet Bike through ground → flight → off. **M /
-Open Map** is not consumed by vehicles. Access is gated by either a
-`PlayerLoadout` blueprint or `RobotPetCollection.active_assembly`:
+boats, or cycles an assembled Jet Bike through ground → flight → off. With no
+active robot assembly, owning both loose motorcycle and jet blueprints provides
+the same fallback cycle; a selected Car/Motorcycle/Tank/Mech assembly always
+keeps its authored ground profile. **M / Open Map** is not consumed by vehicles.
+Access is gated by either a `PlayerLoadout` blueprint or
+`RobotPetCollection.active_assembly`:
 
-| Assembly form | Ground mode | Air mode |
-|---|---|---|
-| Car / Motorcycle | Motorcycle | — |
-| Jet Bike | Motorcycle | Jet |
-| Tank | Tank | — |
-| GiantMech | GiantMech | — |
-| SpaceJet or jet_blueprint | — | Jet |
-| SpaceShip / MegaShip | — | Ship |
-
-`apply_vehicle_buffs()` applies per-mode stats:
-
-| Mode | Speed cap | Armor bonus | Notes |
+| Assembly form | Ground mode | Air mode | Runtime body |
 |---|---|---|---|
-| Motorcycle | ×1.58 walk | — | Fast ground travel |
-| Tank | max 0.42 | — | Slow, armored |
-| GiantMech | max 0.34 | +40 | Very slow, heavy armor |
-| Jet | jetpack boosted | — | Enhanced airborne |
-| Ship | 1.5× jet | — | Best air mode |
+| Car / Motorcycle | Motorcycle | — | Procedural all-terrain vehicle |
+| Jet Bike | Motorcycle | Jet | Existing wheel/wing dual-mode Jet Bike |
+| Tank | Tank | — | Procedural treaded siege tank with articulated turret/barrel |
+| GiantMech | GiantMech | — | Procedural biped giant mech |
+| SpaceJet or `jet_blueprint` | — | Jet | Procedural space fighter |
+| SpaceShip / MegaShip | — | Ship | Procedural starship (larger ship profile) |
 
-The party still shares one active vehicle mode at a time. 3-D mech/ship controller runtimes are future work.
+The Heavy Water continuation bodies are party-owned presentation entities. One
+body follows the authoritative `active_owner` and active mode; switching mode
+replaces the incompatible body. Tank turret yaw and barrel pitch consume the
+same `AimSolution` as the HUD reticle and shell. The player motor remains the
+authoritative controller underneath these bodies.
+
+`apply_vehicle_buffs()` applies owner-only tuning:
+
+| Mode | Normal / turbo tuning | Armor bonus | Notes |
+|---|---|---|---|
+| Motorcycle / ATV | sprint floor 1.10 / 1.42 | — | Fast ground travel |
+| Tank | sprint cap 0.42 / 0.58 | +25 | Knockback suppressed; active cannon |
+| GiantMech | sprint cap 0.34 / 0.46 | +40 | Knockback suppressed; heavy armor |
+| Jet / fighter | jet force 0.12 / 0.17; vertical cap 0.70 / 0.90 | — | Enhanced airborne |
+| Ship | jet force 0.18 / 0.25; vertical cap 1.10 / 1.42 | — | Strongest air profile |
+
+Holding Sprint (`Shift` / controller LB) while any non-boat ground or air mode
+is active requests a 0.7-second turbo burst. A shared cooldown prevents form
+switching from stacking bursts and leaves 1.6 seconds of recharge after the
+burst ends. The same input remains ordinary sprint while on foot.
+
+Tank mode owns primary fire: RT/LMB suppresses handheld primary/special firing
+and launches a 95-damage explosive shell along the canonical aim solution. The
+shell travels at 68 (82 during turbo), uses a 7-unit explosion radius, has a
+1.2-second cooldown, adds muzzle flash and recoil, and remains attributed to the
+owning player for the normal swept collision/reward pipeline. The temporary +25
+armor bonus is removed/clamped without inflating saved base armor.
+
+The party still shares one active vehicle mode at a time. These procedural
+bodies are **not independent physical vehicles**: they do not own a separate
+rigid body, collider, health/destruction state, world spawn, or seats, and `J`
+activates a mode rather than mounting a separately simulated entity. Physical
+vehicle collision/mount/destruction, Ghost Ride ejection plus unmanned
+ram/detonation, and general vehicle ramming remain future work. Heavy Water's
+named legacy-region lifecycle and authoritative online play also remain outside
+this shipped slice.
+
 The two-pet Jet Bike assembly is the first spawned hybrid body: a single
 party-owned visual follows its rider, shows wheels in ground mode, deploys
 wings/thrusters in flight mode, and transitions between the existing

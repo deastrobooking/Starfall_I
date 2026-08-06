@@ -1,7 +1,7 @@
 # Starfall I — Documentation
 
-Six active documents. Everything else is either a task-focused guide or a
-preserved historical record.
+The active documents are listed below. Everything else is either a task-focused
+guide or a preserved historical record.
 
 | Document | Read it when you want… |
 |---|---|
@@ -10,6 +10,7 @@ preserved historical record.
 | **[DEVELOPMENT.md](DEVELOPMENT.md)** | …to **work on the code**. Build and run, repository layout, architectural rules, the simulation frame, data-driven combat, verification, conventions. |
 | **[engine_roadmap.md](engine_roadmap.md)** | …to see **where the engine is going**. The EC# track: phases, acceptance criteria, and what has landed. |
 | **[naming.md](naming.md)** | …the canonical cast, place, and terminology list for player-facing text. |
+| **[HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md)** | …the evidence-backed **Heavy Water parity ledger**: what Starfall supersedes, what this continuation ports, and what remains staged. |
 | **[guides/](guides/README.md)** | …a focused how-to: fixed-tick motor, combat feel, spatial LOD, Character Studio pipeline, verification procedure. |
 
 The repository-level `README.md` is the player/developer overview; `agent.md` is
@@ -22,7 +23,7 @@ instructions.
 [archive/](archive/README.md) preserves dated reviews, audits, triage passes,
 milestone logs (`M#`, `MM#`, `ET#`, `PX#`), and superseded plans. They are
 evidence of how the project got here, not current instruction — **prefer the
-five documents above** when they disagree.
+active documents above** when they disagree.
 
 ## Keeping docs honest
 

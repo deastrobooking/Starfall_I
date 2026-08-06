@@ -341,6 +341,9 @@ impl DungeonRoomState {
 }
 
 // ── Dungeon Crawl Mode ───────────────────────────────────────────────────────
+/// Shared-screen dungeon mode. Soft mode only flips camera/combat helpers on
+/// the open world; `arcade_rules` marks a hard stage boundary (teleport + kit
+/// lock) used by the Turtle Yard prototype and future authored arcade stages.
 #[derive(Resource, Debug, Clone)]
 pub struct DungeonCrawlState {
     pub active: bool,
@@ -348,6 +351,9 @@ pub struct DungeonCrawlState {
     /// False on the activation frame so the gate-opening press cannot also
     /// trigger a nearby return portal.
     pub exit_armed: bool,
+    /// Isolated arcade stage: party is teleported and open-world traversal
+    /// toys (jetpack/grapple/hoverboard) are suppressed.
+    pub arcade_rules: bool,
     pub chapter: Option<ChapterId>,
     pub label: String,
     pub focus: Vec3,
@@ -361,6 +367,7 @@ impl Default for DungeonCrawlState {
             active: false,
             gate_id: None,
             exit_armed: false,
+            arcade_rules: false,
             chapter: None,
             label: String::new(),
             focus: Vec3::ZERO,
@@ -380,9 +387,35 @@ impl DungeonCrawlState {
         anchor: Vec3,
         radius: f32,
     ) {
+        self.activate_with_rules(gate_id, chapter, label, focus, anchor, radius, false);
+    }
+
+    pub fn activate_arcade(
+        &mut self,
+        gate_id: &'static str,
+        chapter: ChapterId,
+        label: impl Into<String>,
+        focus: Vec3,
+        anchor: Vec3,
+        radius: f32,
+    ) {
+        self.activate_with_rules(gate_id, chapter, label, focus, anchor, radius, true);
+    }
+
+    fn activate_with_rules(
+        &mut self,
+        gate_id: &'static str,
+        chapter: ChapterId,
+        label: impl Into<String>,
+        focus: Vec3,
+        anchor: Vec3,
+        radius: f32,
+        arcade_rules: bool,
+    ) {
         self.active = true;
         self.gate_id = Some(gate_id);
         self.exit_armed = false;
+        self.arcade_rules = arcade_rules;
         self.chapter = Some(chapter);
         self.label = label.into();
         self.focus = focus;
@@ -394,6 +427,7 @@ impl DungeonCrawlState {
         self.active = false;
         self.gate_id = None;
         self.exit_armed = false;
+        self.arcade_rules = false;
         self.chapter = None;
         self.label.clear();
         self.focus = Vec3::ZERO;
@@ -1847,6 +1881,7 @@ mod tests {
         );
 
         assert!(dungeon.active);
+        assert!(!dungeon.arcade_rules);
         assert_eq!(dungeon.gate_id, Some("test_gate"));
         assert_eq!(dungeon.chapter, Some(ChapterId(6)));
         assert_eq!(dungeon.label, "Collosar's Crown Gate");
@@ -1858,6 +1893,22 @@ mod tests {
         assert!(dungeon.gate_id.is_none());
         assert!(dungeon.chapter.is_none());
         assert!(dungeon.label.is_empty());
+
+        dungeon.activate_arcade(
+            "arcade_gate",
+            ChapterId(1),
+            "Turtle Yard Arcade",
+            Vec3::ZERO,
+            Vec3::ZERO,
+            30.0,
+        );
+        assert!(dungeon.active);
+        assert!(dungeon.arcade_rules);
+        assert_eq!(dungeon.gate_id, Some("arcade_gate"));
+
+        dungeon.clear();
+        assert!(!dungeon.active);
+        assert!(!dungeon.arcade_rules);
     }
 
     #[test]

@@ -14,8 +14,8 @@ use crate::combat::hitstop::hitstop_inactive;
 use crate::components::armor::ArmorSet;
 use crate::components::enemy::{
     boss_phase, BossEnemy, CitySpyDrone, DeadEnemy, DragonBoss, DragonCaste, DroneVariant, Enemy,
-    EnemyAIState, EnemyAttackVfx, EnemyProjectile, EnemyProjectileKind, EnemyStateMachine,
-    EnemyType, FlyingDrone, MechBoss, MountainSpiderMech, RiftBoss,
+    EnemyAIState, EnemyAttackVfx, EnemyHomingProjectile, EnemyProjectile, EnemyProjectileKind,
+    EnemyStateMachine, EnemyType, FlyingDrone, MechBoss, MountainSpiderMech, RiftBoss,
 };
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::inventory::Inventory;
@@ -26,10 +26,11 @@ use crate::engine::physics::{
     prelude::{Collider, CollisionProfile, GameCollisionLayer, RigidBody},
     world_line_of_sight,
 };
-use crate::engine::rendering::PbrBundle;
+use crate::engine::rendering::{PbrBundle, SpatialBundle};
 use crate::engine::state::AppState;
 use crate::events::*;
-use crate::resources::{PlaySessionTransition, WaveInfo};
+use crate::plugins::world_plugin::terrain_surface_y;
+use crate::resources::{GameSettings, PlaySessionTransition, WaveInfo};
 use crate::world::hacking::{Hackable, HackedUnit};
 use crate::world::robot_pets::{salvage_for_enemy, RobotPetCollection};
 
@@ -37,12 +38,16 @@ use crate::world::robot_pets::{salvage_for_enemy, RobotPetCollection};
 struct EnemyAttackAssets {
     laser_mesh: Handle<Mesh>,
     fireball_mesh: Handle<Mesh>,
+    shell_mesh: Handle<Mesh>,
     beam_mesh: Handle<Mesh>,
     shockwave_mesh: Handle<Mesh>,
     laser_mat: Handle<StandardMaterial>,
     fire_mat: Handle<StandardMaterial>,
+    shell_mat: Handle<StandardMaterial>,
     shockwave_mat: Handle<StandardMaterial>,
 }
+
+const TANK_ROOT_CLEARANCE: f32 = 1.18;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct EnemyPlugin;
@@ -61,6 +66,10 @@ impl Plugin for EnemyPlugin {
                 (
                     enemy_ai_system.run_if(hitstop_inactive),
                     apply_enemy_knockback.run_if(hitstop_inactive),
+                    ground_enemy_tanks_to_terrain
+                        .after(enemy_ai_system)
+                        .after(apply_enemy_knockback)
+                        .run_if(hitstop_inactive),
                     flying_drone_attack_system.run_if(hitstop_inactive),
                     dragon_boss_system.run_if(hitstop_inactive),
                     rift_boss_system.run_if(hitstop_inactive),
@@ -126,6 +135,13 @@ fn setup_enemy_attack_assets(
         alpha_mode: AlphaMode::Blend,
         ..default()
     });
+    let shell_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.34, 0.16, 0.035),
+        emissive: LinearRgba::new(5.5, 2.1, 0.12, 1.0),
+        metallic: 0.62,
+        perceptual_roughness: 0.28,
+        ..default()
+    });
     let shockwave_mat = materials.add(StandardMaterial {
         base_color: Color::srgba(1.0, 0.68, 0.18, 0.45),
         emissive: LinearRgba::new(2.8, 1.2, 0.12, 1.0),
@@ -136,10 +152,12 @@ fn setup_enemy_attack_assets(
     commands.insert_resource(EnemyAttackAssets {
         laser_mesh: meshes.add(Sphere::new(0.20)),
         fireball_mesh: meshes.add(Sphere::new(0.70)),
+        shell_mesh: meshes.add(Sphere::new(0.42)),
         beam_mesh: meshes.add(Cylinder::new(0.22, 1.0)),
         shockwave_mesh: meshes.add(Cylinder::new(1.0, 0.10)),
         laser_mat,
         fire_mat,
+        shell_mat,
         shockwave_mat,
     });
 }
@@ -227,6 +245,7 @@ fn preset_for_type(enemy_type: EnemyType, faction: Option<Faction>) -> &'static 
         EnemyType::SpyDrone => "JetWarden",
         EnemyType::Soldier => "ScoutPrime",
         EnemyType::Heavy => "TankTitan",
+        EnemyType::Tank => "TankTitan",
         EnemyType::SpikeAlien => "InsectoidStalker",
         EnemyType::Hybrid => "HybridOmega",
     }
@@ -278,6 +297,31 @@ fn apply_enemy_knockback(
         if damageable.pending_knockback.length_squared() < 1e-4 {
             damageable.pending_knockback = Vec3::ZERO;
         }
+    }
+}
+
+fn tank_root_y(terrain_y: f32, difficulty_scale: f32) -> f32 {
+    terrain_y + TANK_ROOT_CLEARANCE * difficulty_scale.clamp(0.85, 1.8)
+}
+
+/// Keep the kinematic siege-tank chassis planted after both AI locomotion and
+/// combat knockback have changed its horizontal position. Other enemies retain
+/// their existing movement model, and elevated road decks do not pull ground
+/// tanks off the underlying terrain.
+fn ground_enemy_tanks_to_terrain(
+    settings: Res<GameSettings>,
+    mut enemy_q: Query<(&mut Transform, &Enemy), (Without<Player>, Without<MountainSpiderMech>)>,
+) {
+    for (mut transform, enemy) in enemy_q.iter_mut() {
+        if enemy.enemy_type != EnemyType::Tank {
+            continue;
+        }
+        let terrain_y = terrain_surface_y(
+            transform.translation.x,
+            transform.translation.z,
+            settings.world_seed,
+        );
+        transform.translation.y = tank_root_y(terrain_y, enemy.difficulty_scale);
     }
 }
 
@@ -343,10 +387,23 @@ fn spawn_enemy_entity_with_drone_variant(
     }
     let max_hp = enemy_data.scaled_health();
 
-    let root = if enemy_type == EnemyType::Drone {
-        spawn_drone_craft(commands, meshes, materials, drone_variant, position)
-    } else {
-        spawn_cartoon_character(
+    let root = match enemy_type {
+        EnemyType::Drone => spawn_drone_craft(
+            commands,
+            meshes,
+            materials,
+            drone_variant,
+            position,
+            difficulty_scale,
+        ),
+        EnemyType::Tank => spawn_tank_craft(
+            commands,
+            meshes,
+            materials,
+            position,
+            difficulty_scale.clamp(0.85, 1.8),
+        ),
+        _ => spawn_cartoon_character(
             commands,
             meshes,
             materials,
@@ -357,9 +414,9 @@ fn spawn_enemy_entity_with_drone_variant(
                 difficulty_scale.clamp(0.85, 1.8),
             ),
             position,
-        )
+        ),
     };
-    let dragon_caste = (enemy_type != EnemyType::Drone)
+    let dragon_caste = (!matches!(enemy_type, EnemyType::Drone | EnemyType::Tank))
         .then_some(faction)
         .flatten()
         .filter(|f| matches!(f, Faction::DragonRoyalty | Faction::DragonExile))
@@ -378,17 +435,14 @@ fn spawn_enemy_entity_with_drone_variant(
                     EnemyType::SpyDrone => 0.64,
                     EnemyType::Soldier => 1.0,
                     EnemyType::Heavy => 1.22,
+                    EnemyType::Tank => 1.55,
                     EnemyType::SpikeAlien => 1.05,
                     EnemyType::Hybrid => 1.35,
                 },
         );
     }
     let damageable = enemy_damageable(&enemy_data, faction);
-    let drone_body_scale = match drone_variant {
-        DroneVariant::Scout => 1.0,
-        DroneVariant::HeavyFighter => 1.55,
-        DroneVariant::SiegeGunship => 2.25,
-    };
+    let drone_body_scale = drone_craft_scale(drone_variant, difficulty_scale);
     commands.entity(root).insert((
         enemy_data,
         EnemyStateMachine::default(),
@@ -396,16 +450,13 @@ fn spawn_enemy_entity_with_drone_variant(
         damageable,
         faction.unwrap_or_default(),
         RigidBody::KinematicPositionBased,
-        if matches!(enemy_type, EnemyType::Drone | EnemyType::SpyDrone) {
-            Collider::capsule_y(
-                1.45 * difficulty_scale.clamp(0.85, 1.8) * drone_body_scale,
-                1.65 * difficulty_scale.clamp(0.85, 1.8) * drone_body_scale,
-            )
-        } else {
-            Collider::capsule_y(
+        match enemy_type {
+            EnemyType::Drone | EnemyType::SpyDrone => drone_hurtbox(drone_body_scale),
+            EnemyType::Tank => tank_hurtbox(difficulty_scale),
+            _ => Collider::capsule_y(
                 0.9 * difficulty_scale.clamp(0.85, 1.8),
                 difficulty_scale.clamp(0.85, 1.8),
-            )
+            ),
         },
         CollisionProfile::EnemyHurtbox,
         Sensor,
@@ -421,6 +472,45 @@ fn spawn_enemy_entity_with_drone_variant(
         commands.entity(root).insert(caste);
     }
     root
+}
+
+fn drone_variant_body_scale(variant: DroneVariant) -> f32 {
+    match variant {
+        DroneVariant::Scout => 1.0,
+        DroneVariant::HeavyFighter => 1.55,
+        DroneVariant::SiegeGunship => 2.25,
+    }
+}
+
+fn drone_craft_scale(variant: DroneVariant, difficulty_scale: f32) -> f32 {
+    drone_variant_body_scale(variant) * difficulty_scale.clamp(0.85, 1.8)
+}
+
+fn drone_hurtbox(body_scale: f32) -> Collider {
+    cuboid_hurtbox_from_half_extents(drone_hurtbox_half_extents(body_scale))
+}
+
+fn drone_hurtbox_half_extents(body_scale: f32) -> Vec3 {
+    // Hull rotation reaches ~0.61 high / 2.13 long; the banked wings reach
+    // ~3.95 wide and the rear engines ~2.49 long. A flat craft-aligned box is
+    // intentionally a little forgiving without creating invisible vertical
+    // hits above and below the silhouette.
+    Vec3::new(3.95, 0.68, 2.50) * body_scale
+}
+
+fn tank_hurtbox(difficulty_scale: f32) -> Collider {
+    cuboid_hurtbox_from_half_extents(tank_hurtbox_half_extents(difficulty_scale))
+}
+
+fn tank_hurtbox_half_extents(difficulty_scale: f32) -> Vec3 {
+    Vec3::new(1.9, 1.4, 3.2) * difficulty_scale.clamp(0.85, 1.8)
+}
+
+/// Gameplay collider dimensions are authored as half-extents, while Avian's
+/// cuboid constructor ultimately consumes full axis lengths. The compatibility
+/// collider retains half-extents and performs that conversion exactly once.
+fn cuboid_hurtbox_from_half_extents(half_extents: Vec3) -> Collider {
+    Collider::cuboid(half_extents.x, half_extents.y, half_extents.z)
 }
 
 fn tune_drone_variant(enemy: &mut Enemy, variant: DroneVariant) {
@@ -453,27 +543,28 @@ fn spawn_drone_craft(
     materials: &mut Assets<StandardMaterial>,
     variant: DroneVariant,
     position: Vec3,
+    difficulty_scale: f32,
 ) -> Entity {
-    let (name, scale, hull_color, glow_color) = match variant {
+    let (name, hull_color, glow_color) = match variant {
         DroneVariant::Scout => (
             "Scallarian Scout Drone",
-            1.0,
             Color::srgb(0.12, 0.18, 0.22),
             Color::srgb(0.18, 0.92, 1.0),
         ),
         DroneVariant::HeavyFighter => (
             "Scallarian Heavy Fighter",
-            1.55,
             Color::srgb(0.24, 0.12, 0.30),
             Color::srgb(1.0, 0.30, 0.72),
         ),
         DroneVariant::SiegeGunship => (
             "Scallarian Siege Gunship",
-            2.25,
             Color::srgb(0.20, 0.08, 0.08),
             Color::srgb(1.0, 0.42, 0.08),
         ),
     };
+    // The procedural mesh and hurtbox share this exact scale. In particular,
+    // late-chapter difficulty must not create an invisible oversized capsule.
+    let scale = drone_craft_scale(variant, difficulty_scale);
     let hull = materials.add(StandardMaterial {
         base_color: hull_color,
         metallic: 0.88,
@@ -530,6 +621,136 @@ fn spawn_drone_craft(
                 Name::new("Drone Engine"),
             ));
         }
+    });
+    root
+}
+
+/// Procedural siege-tank silhouette. The authoritative enemy/collider lives
+/// on the returned root; every tread, hull, turret, sensor, and barrel part is
+/// a child so the ordinary enemy AI can move and face the whole vehicle.
+fn spawn_tank_craft(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    ground_position: Vec3,
+    scale: f32,
+) -> Entity {
+    let scale = scale.clamp(0.85, 1.8);
+    let armor = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.25, 0.23, 0.21),
+        metallic: 0.82,
+        perceptual_roughness: 0.34,
+        ..default()
+    });
+    let tread = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.035, 0.04, 0.05),
+        metallic: 0.65,
+        perceptual_roughness: 0.52,
+        ..default()
+    });
+    let hostile_glow = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.92, 0.12, 0.035),
+        emissive: LinearRgba::new(5.2, 0.34, 0.06, 1.0),
+        metallic: 0.25,
+        perceptual_roughness: 0.2,
+        ..default()
+    });
+
+    let tread_mesh = meshes.add(Cuboid::new(0.88 * scale, 0.78 * scale, 5.4 * scale));
+    let hull_mesh = meshes.add(Cuboid::new(3.2 * scale, 1.15 * scale, 4.6 * scale));
+    let trim_mesh = meshes.add(Cuboid::new(0.08 * scale, 0.16 * scale, 4.35 * scale));
+    let turret_base_mesh = meshes.add(Cylinder::new(1.16 * scale, 0.40 * scale));
+    let turret_mesh = meshes.add(Cuboid::new(2.4 * scale, 0.95 * scale, 2.45 * scale));
+    let barrel_mesh = meshes.add(Cylinder::new(0.22 * scale, 3.65 * scale));
+    let muzzle_mesh = meshes.add(Cylinder::new(0.32 * scale, 0.42 * scale));
+    let sensor_mesh = meshes.add(Cuboid::new(0.92 * scale, 0.18 * scale, 0.08 * scale));
+
+    // Callers provide terrain-surface Y. Lift the authoritative root until
+    // the lower faces of both treads meet that surface.
+    let root_position = ground_position + Vec3::Y * TANK_ROOT_CLEARANCE * scale;
+    let root = commands
+        .spawn((
+            SpatialBundle::from_transform(Transform::from_translation(root_position)),
+            Name::new("Scallarian Siege Tank"),
+        ))
+        .id();
+    commands.entity(root).with_children(|tank| {
+        for side in [-1.0_f32, 1.0] {
+            tank.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(tread_mesh.clone()),
+                    material: MeshMaterial3d(tread.clone()),
+                    transform: Transform::from_xyz(side * 1.38 * scale, -0.78 * scale, 0.0),
+                    ..default()
+                },
+                Name::new("Tank Tread"),
+            ));
+            tank.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(trim_mesh.clone()),
+                    material: MeshMaterial3d(hostile_glow.clone()),
+                    transform: Transform::from_xyz(side * 1.63 * scale, -0.28 * scale, 0.0),
+                    ..default()
+                },
+                Name::new("Tank Hull Trim"),
+            ));
+        }
+        tank.spawn((
+            PbrBundle {
+                mesh: Mesh3d(hull_mesh),
+                material: MeshMaterial3d(armor.clone()),
+                transform: Transform::from_xyz(0.0, -0.24 * scale, 0.0),
+                ..default()
+            },
+            Name::new("Tank Hull"),
+        ));
+        tank.spawn((
+            PbrBundle {
+                mesh: Mesh3d(turret_base_mesh),
+                material: MeshMaterial3d(armor.clone()),
+                transform: Transform::from_xyz(0.0, 0.56 * scale, 0.0),
+                ..default()
+            },
+            Name::new("Tank Turret Ring"),
+        ));
+        tank.spawn((
+            PbrBundle {
+                mesh: Mesh3d(turret_mesh),
+                material: MeshMaterial3d(armor.clone()),
+                transform: Transform::from_xyz(0.0, 1.03 * scale, 0.08 * scale),
+                ..default()
+            },
+            Name::new("Tank Turret"),
+        ));
+        tank.spawn((
+            PbrBundle {
+                mesh: Mesh3d(barrel_mesh),
+                material: MeshMaterial3d(armor),
+                transform: Transform::from_xyz(0.0, 1.08 * scale, -2.15 * scale)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ..default()
+            },
+            Name::new("Tank Barrel"),
+        ));
+        tank.spawn((
+            PbrBundle {
+                mesh: Mesh3d(muzzle_mesh),
+                material: MeshMaterial3d(hostile_glow.clone()),
+                transform: Transform::from_xyz(0.0, 1.08 * scale, -3.94 * scale)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ..default()
+            },
+            Name::new("Tank Muzzle"),
+        ));
+        tank.spawn((
+            PbrBundle {
+                mesh: Mesh3d(sensor_mesh),
+                material: MeshMaterial3d(hostile_glow),
+                transform: Transform::from_xyz(0.0, 1.28 * scale, -1.18 * scale),
+                ..default()
+            },
+            Name::new("Tank Sensor"),
+        ));
     });
     root
 }
@@ -845,6 +1066,7 @@ fn update_flying_drone(
     dt: f32,
 ) {
     drone.fire_timer = (drone.fire_timer - dt).max(0.0);
+    drone.burst_timer = (drone.burst_timer - dt).max(0.0);
     drone.orbit_phase += dt * 0.85;
 
     if dist_to_player < enemy.config.detection_range * 1.8 {
@@ -903,15 +1125,18 @@ fn flying_drone_attack_system(
             &mut FlyingDrone,
             &EnemyStateMachine,
             &Health,
+            Option<&DroneVariant>,
         ),
         Without<HackedUnit>,
     >,
 ) {
-    for (transform, mut enemy, mut drone, sm, health) in drone_q.iter_mut() {
-        if !health.is_alive() || sm.current != EnemyAIState::Attack {
+    for (transform, mut enemy, mut drone, sm, health, variant) in drone_q.iter_mut() {
+        if !health.is_alive() {
             continue;
         }
-        if drone.fire_timer > 0.0 || enemy.attack_cooldown_timer > 0.0 {
+        if sm.current != EnemyAIState::Attack {
+            drone.burst_shots_remaining = 0;
+            drone.burst_timer = 0.0;
             continue;
         }
 
@@ -924,32 +1149,158 @@ fn flying_drone_attack_system(
         };
 
         let target = player_pos + Vec3::Y * 0.75;
-        let muzzle = transform.translation + Vec3::Y * 0.15 + transform.forward().as_vec3() * 0.8;
-        let direction = (target - muzzle).normalize_or_zero();
-        if direction.length_squared() <= 0.001 {
+        let variant = variant.copied().unwrap_or(DroneVariant::Scout);
+
+        // Heavy-fighter bolts are separated by 120 ms so the burst reads as
+        // three deliberate shots rather than one over-bright projectile.
+        if variant == DroneVariant::HeavyFighter && drone.burst_shots_remaining > 0 {
+            if drone.burst_timer > 0.0 {
+                continue;
+            }
+            let shot_index = 3 - drone.burst_shots_remaining;
+            spawn_heavy_fighter_burst_shot(
+                &mut commands,
+                &assets,
+                transform,
+                target,
+                enemy.scaled_damage(),
+                shot_index,
+            );
+            drone.burst_shots_remaining -= 1;
+            if drone.burst_shots_remaining == 0 {
+                arm_drone_fire_cooldown(&mut enemy, &mut drone);
+            } else {
+                drone.burst_timer = 0.12;
+            }
             continue;
         }
 
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(assets.laser_mesh.clone()),
-                material: MeshMaterial3d(assets.laser_mat.clone()),
-                transform: Transform::from_translation(muzzle),
-                ..default()
-            },
-            EnemyProjectile {
-                kind: EnemyProjectileKind::Laser,
-                damage: enemy.scaled_damage() * 0.85,
-                speed: 36.0,
-                direction,
-                lifetime: 1.8,
-                hit_radius: 0.75,
-                splash_radius: 0.0,
-            },
-        ));
-        drone.fire_timer = 0.45 * drone.fire_interval_multiplier;
-        enemy.attack_cooldown_timer = enemy.config.attack_cooldown * 0.55;
+        if drone.fire_timer > 0.0 || enemy.attack_cooldown_timer > 0.0 {
+            continue;
+        }
+
+        match variant {
+            DroneVariant::Scout => {
+                spawn_drone_laser(
+                    &mut commands,
+                    &assets,
+                    transform,
+                    target,
+                    DroneLaserShot {
+                        damage: enemy.scaled_damage() * 0.85,
+                        speed: 36.0,
+                        lateral_muzzle: 0.0,
+                        lateral_aim: 0.0,
+                    },
+                );
+                arm_drone_fire_cooldown(&mut enemy, &mut drone);
+            }
+            DroneVariant::HeavyFighter => {
+                spawn_heavy_fighter_burst_shot(
+                    &mut commands,
+                    &assets,
+                    transform,
+                    target,
+                    enemy.scaled_damage(),
+                    0,
+                );
+                drone.burst_shots_remaining = 2;
+                drone.burst_timer = 0.12;
+            }
+            DroneVariant::SiegeGunship => {
+                for (lateral_muzzle, lateral_aim) in
+                    [(-2.2, -0.48), (-0.75, -0.16), (0.75, 0.16), (2.2, 0.48)]
+                {
+                    spawn_drone_laser(
+                        &mut commands,
+                        &assets,
+                        transform,
+                        target,
+                        DroneLaserShot {
+                            damage: enemy.scaled_damage() * 0.38,
+                            speed: 32.0,
+                            lateral_muzzle,
+                            lateral_aim,
+                        },
+                    );
+                }
+                arm_drone_fire_cooldown(&mut enemy, &mut drone);
+            }
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DroneLaserShot {
+    damage: f32,
+    speed: f32,
+    lateral_muzzle: f32,
+    lateral_aim: f32,
+}
+
+fn spawn_drone_laser(
+    commands: &mut Commands,
+    assets: &EnemyAttackAssets,
+    craft: &Transform,
+    target: Vec3,
+    shot: DroneLaserShot,
+) {
+    let right = craft.right().as_vec3();
+    let muzzle = craft.translation
+        + Vec3::Y * 0.15
+        + craft.forward().as_vec3() * 0.8
+        + right * shot.lateral_muzzle;
+    let direction = (target + right * shot.lateral_aim - muzzle).normalize_or_zero();
+    if direction.length_squared() <= 0.001 {
+        return;
+    }
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.laser_mesh.clone()),
+            material: MeshMaterial3d(assets.laser_mat.clone()),
+            transform: Transform::from_translation(muzzle),
+            ..default()
+        },
+        EnemyProjectile {
+            kind: EnemyProjectileKind::Laser,
+            damage: shot.damage,
+            speed: shot.speed,
+            direction,
+            lifetime: 1.8,
+            hit_radius: 0.75,
+            splash_radius: 0.0,
+        },
+    ));
+}
+
+fn spawn_heavy_fighter_burst_shot(
+    commands: &mut Commands,
+    assets: &EnemyAttackAssets,
+    craft: &Transform,
+    target: Vec3,
+    base_damage: f32,
+    shot_index: u8,
+) {
+    let index = shot_index.min(2) as usize;
+    let lateral_muzzle = [-0.82_f32, 0.82, -0.82][index];
+    let lateral_aim = [-0.28_f32, 0.0, 0.28][index];
+    spawn_drone_laser(
+        commands,
+        assets,
+        craft,
+        target,
+        DroneLaserShot {
+            damage: base_damage * 0.48,
+            speed: 42.0,
+            lateral_muzzle,
+            lateral_aim,
+        },
+    );
+}
+
+fn arm_drone_fire_cooldown(enemy: &mut Enemy, drone: &mut FlyingDrone) {
+    drone.fire_timer = 0.45 * drone.fire_interval_multiplier;
+    enemy.attack_cooldown_timer = enemy.config.attack_cooldown * 0.55;
 }
 
 fn dragon_boss_system(
@@ -1381,21 +1732,29 @@ fn enemy_projectile_update_system(
     time: Res<Time>,
     assets: Res<EnemyAttackAssets>,
     spatial_query: SpatialQuery,
-    mut projectile_q: Query<(Entity, &mut Transform, &mut EnemyProjectile)>,
+    mut projectile_q: Query<(
+        Entity,
+        &mut Transform,
+        &mut EnemyProjectile,
+        Option<&mut EnemyHomingProjectile>,
+    )>,
     player_pos_q: Query<
         (Entity, &Transform, &PlayerIndex),
         (With<Player>, Without<EnemyProjectile>),
     >,
-    mut player_damage_q: Query<
-        (
-            &mut Health,
-            &mut Damageable,
-            &mut PlayerStats,
-            &mut ParryState,
-            &ArmorSet,
-        ),
-        With<Player>,
-    >,
+    mut player_health_q: ParamSet<(
+        Query<&Health, With<Player>>,
+        Query<
+            (
+                &mut Health,
+                &mut Damageable,
+                &mut PlayerStats,
+                &mut ParryState,
+                &ArmorSet,
+            ),
+            With<Player>,
+        >,
+    )>,
     mut road_vehicle_q: Query<
         (
             Entity,
@@ -1414,7 +1773,52 @@ fn enemy_projectile_update_system(
     mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, mut projectile) in projectile_q.iter_mut() {
+    let player_targets = {
+        let health_q = player_health_q.p0();
+        player_pos_q
+            .iter()
+            .filter_map(|(entity, transform, index)| {
+                health_q
+                    .get(entity)
+                    .ok()
+                    .map(|health| (entity, transform.translation, index.0, health.is_alive()))
+            })
+            .collect::<Vec<_>>()
+    };
+    for (entity, mut transform, mut projectile, homing) in projectile_q.iter_mut() {
+        if let Some(mut homing) = homing {
+            let locked_target = homing
+                .target
+                .and_then(|target| {
+                    player_targets
+                        .iter()
+                        .find(|(entity, _, _, alive)| *entity == target && *alive)
+                })
+                .map(|(entity, position, _, _)| (*entity, *position));
+            let target = locked_target.or_else(|| {
+                closest_living_indexed_player(
+                    transform.translation,
+                    homing.acquisition_range,
+                    player_targets.iter().copied(),
+                )
+                .map(|(entity, position, _, _)| (entity, position))
+            });
+            if let Some((target_entity, target_position)) = target {
+                homing.target = Some(target_entity);
+                let desired =
+                    (target_position + Vec3::Y * 0.8 - transform.translation).normalize_or_zero();
+                projectile.direction = steer_enemy_projectile(
+                    projectile.direction,
+                    desired,
+                    homing.turn_rate_radians * dt,
+                );
+                if projectile.direction.length_squared() > 0.001 {
+                    transform.look_to(projectile.direction, Vec3::Y);
+                }
+            } else {
+                homing.target = None;
+            }
+        }
         let previous_position = transform.translation;
         transform.translation += projectile.direction * projectile.speed * dt;
         projectile.lifetime -= dt;
@@ -1461,6 +1865,7 @@ fn enemy_projectile_update_system(
                 EnemyProjectileKind::Laser => {
                     if let Some((player_entity, player_index)) = hit_player.filter(|_| !hit_vehicle)
                     {
+                        let mut player_damage_q = player_health_q.p1();
                         if let Ok((mut health, mut damageable, mut stats, mut parry, armor)) =
                             player_damage_q.get_mut(player_entity)
                         {
@@ -1482,7 +1887,12 @@ fn enemy_projectile_update_system(
                         }
                     }
                 }
-                EnemyProjectileKind::Fireball => {
+                EnemyProjectileKind::Fireball | EnemyProjectileKind::Shell => {
+                    let (damage_type, knockback) = match projectile.kind {
+                        EnemyProjectileKind::Fireball => (DamageType::Fire, 3.5),
+                        EnemyProjectileKind::Shell => (DamageType::Explosive, 6.5),
+                        EnemyProjectileKind::Laser => unreachable!("laser handled above"),
+                    };
                     let radius = projectile.splash_radius.max(projectile.hit_radius);
                     spawn_shockwave_vfx(
                         &mut commands,
@@ -1491,13 +1901,14 @@ fn enemy_projectile_update_system(
                         radius,
                         0.35,
                     );
+                    let mut player_damage_q = player_health_q.p1();
                     damage_players_in_radius(
                         &spatial_query,
                         transform.translation,
                         radius,
                         projectile.damage,
-                        DamageType::Fire,
-                        3.5,
+                        damage_type,
+                        knockback,
                         &mut player_damage_q,
                         &player_pos_q,
                         &mut damaged_ev,
@@ -1508,13 +1919,32 @@ fn enemy_projectile_update_system(
                         transform.translation,
                         radius,
                         projectile.damage,
-                        DamageType::Fire,
+                        damage_type,
                         &mut road_vehicle_q,
                     );
                 }
             }
             commands.entity(entity).despawn();
         }
+    }
+}
+
+fn steer_enemy_projectile(current: Vec3, desired: Vec3, max_radians: f32) -> Vec3 {
+    let current = current.normalize_or_zero();
+    let desired = desired.normalize_or_zero();
+    if current.length_squared() <= 0.001 {
+        return desired;
+    }
+    if desired.length_squared() <= 0.001 {
+        return current;
+    }
+    let angle = current.dot(desired).clamp(-1.0, 1.0).acos();
+    if angle <= max_radians.max(0.0) || angle <= 0.0001 {
+        desired
+    } else {
+        current
+            .lerp(desired, (max_radians / angle).clamp(0.0, 1.0))
+            .normalize_or_zero()
     }
 }
 
@@ -1598,6 +2028,22 @@ fn closest_indexed_player<F: bevy::ecs::query::QueryFilter>(
         .filter_map(|(entity, transform, index)| {
             let dist = origin.distance(transform.translation);
             (dist <= max_range).then_some((entity, transform.translation, index.0, dist))
+        })
+        .min_by(|a, b| a.3.total_cmp(&b.3))
+}
+
+fn closest_living_indexed_player(
+    origin: Vec3,
+    max_range: f32,
+    players: impl Iterator<Item = (Entity, Vec3, u8, bool)>,
+) -> Option<(Entity, Vec3, u8, f32)> {
+    players
+        .filter_map(|(entity, position, index, is_alive)| {
+            if !is_alive {
+                return None;
+            }
+            let distance = origin.distance(position);
+            (distance <= max_range).then_some((entity, position, index, distance))
         })
         .min_by(|a, b| a.3.total_cmp(&b.3))
 }
@@ -1854,6 +2300,113 @@ fn spawn_shockwave_vfx(
     ));
 }
 
+fn spawn_tank_shell(
+    commands: &mut Commands,
+    assets: &EnemyAttackAssets,
+    tank: &Transform,
+    target_position: Vec3,
+    damage: f32,
+    tank_scale: f32,
+) {
+    let tank_scale = tank_scale.clamp(0.85, 1.8);
+    let muzzle = tank.translation
+        + Vec3::Y * 1.08 * tank_scale
+        + tank.forward().as_vec3() * 3.9 * tank_scale;
+    let target = target_position + Vec3::Y * 0.8;
+    let direction = (target - muzzle).normalize_or_zero();
+    if direction.length_squared() <= 0.001 {
+        return;
+    }
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.shell_mesh.clone()),
+            material: MeshMaterial3d(assets.shell_mat.clone()),
+            transform: Transform::from_translation(muzzle)
+                .looking_to(direction, Vec3::Y)
+                .with_scale(Vec3::new(0.82, 0.82, 1.35)),
+            ..default()
+        },
+        EnemyProjectile {
+            kind: EnemyProjectileKind::Shell,
+            damage,
+            speed: 32.0,
+            direction,
+            lifetime: 3.2,
+            hit_radius: 0.58,
+            splash_radius: 5.5,
+        },
+    ));
+    spawn_enemy_muzzle_flash(commands, assets, muzzle, &assets.shell_mat, 1.55);
+}
+
+fn spawn_spider_missile_salvo(
+    commands: &mut Commands,
+    assets: &EnemyAttackAssets,
+    spider: &Transform,
+    target_entity: Entity,
+    target_position: Vec3,
+    total_damage: f32,
+) {
+    // The wilderness spider visual was authored facing local +Z, while Bevy's
+    // `Transform::forward` is -Z. Derive launch axes from the live target so
+    // missiles leave the visible front pods regardless of that legacy basis.
+    let launch_forward = (target_position - spider.translation)
+        .with_y(0.0)
+        .normalize_or_zero();
+    if launch_forward.length_squared() <= 0.001 {
+        return;
+    }
+    let right = Vec3::new(launch_forward.z, 0.0, -launch_forward.x);
+    for (side, lateral_aim) in [(-1.0_f32, -0.32_f32), (1.0, 0.32)] {
+        let muzzle =
+            spider.translation + Vec3::Y * 3.15 + launch_forward * 3.0 + right * side * 2.35;
+        let target = target_position + Vec3::Y * 0.8 + right * lateral_aim;
+        let direction = (target - muzzle).normalize_or_zero();
+        if direction.length_squared() <= 0.001 {
+            continue;
+        }
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(assets.fireball_mesh.clone()),
+                material: MeshMaterial3d(assets.fire_mat.clone()),
+                transform: Transform::from_translation(muzzle)
+                    .looking_to(direction, Vec3::Y)
+                    .with_scale(Vec3::new(0.72, 0.72, 1.55)),
+                ..default()
+            },
+            EnemyProjectile {
+                kind: EnemyProjectileKind::Fireball,
+                damage: total_damage * 0.55,
+                speed: 18.0,
+                direction,
+                lifetime: 6.5,
+                hit_radius: 1.0,
+                splash_radius: 6.0,
+            },
+            EnemyHomingProjectile::new(target_entity),
+        ));
+        spawn_enemy_muzzle_flash(commands, assets, muzzle, &assets.fire_mat, 1.25);
+    }
+}
+
+fn spawn_enemy_muzzle_flash(
+    commands: &mut Commands,
+    assets: &EnemyAttackAssets,
+    muzzle: Vec3,
+    material: &Handle<StandardMaterial>,
+    scale: f32,
+) {
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.shell_mesh.clone()),
+            material: MeshMaterial3d(material.clone()),
+            transform: Transform::from_translation(muzzle).with_scale(Vec3::splat(scale)),
+            ..default()
+        },
+        EnemyAttackVfx { timer: 0.14 },
+    ));
+}
+
 // ── Attack System ─────────────────────────────────────────────────────────────
 fn enemy_attack_system(
     time: Res<Time>,
@@ -1868,6 +2421,7 @@ fn enemy_attack_system(
             &EnemyStateMachine,
             &Health,
             Option<&FlyingDrone>,
+            Option<&MountainSpiderMech>,
             (Option<&DragonBoss>, Option<&RiftBoss>, Option<&MechBoss>),
         ),
         (
@@ -1876,27 +2430,89 @@ fn enemy_attack_system(
             Without<crate::combat::feedback::Flinch>,
         ),
     >,
-    mut player_damage_q: Query<
-        (
-            &mut crate::combat::damage::Health,
-            &mut Damageable,
-            &mut PlayerStats,
-            &mut crate::components::player::ParryState,
-            &crate::components::armor::ArmorSet,
-        ),
-        With<Player>,
-    >,
+    mut player_health_q: ParamSet<(
+        Query<&Health, With<Player>>,
+        Query<
+            (
+                &mut crate::combat::damage::Health,
+                &mut Damageable,
+                &mut PlayerStats,
+                &mut crate::components::player::ParryState,
+                &crate::components::armor::ArmorSet,
+            ),
+            With<Player>,
+        >,
+    )>,
     mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
     mut parry_ev: MessageWriter<PlayerParryEvent>,
 ) {
     let dt = time.delta_secs();
-    for (e_transform, mut enemy, sm, health, drone, (dragon_boss, rift_boss, mech_boss)) in
-        enemy_q.iter_mut()
+    let player_targets = {
+        let health_q = player_health_q.p0();
+        player_q
+            .iter()
+            .filter_map(|(entity, transform, index)| {
+                health_q
+                    .get(entity)
+                    .ok()
+                    .map(|health| (entity, transform.translation, index.0, health.is_alive()))
+            })
+            .collect::<Vec<_>>()
+    };
+    for (
+        e_transform,
+        mut enemy,
+        sm,
+        health,
+        drone,
+        mountain_spider,
+        (dragon_boss, rift_boss, mech_boss),
+    ) in enemy_q.iter_mut()
     {
         if !health.is_alive() {
             continue;
         }
         if drone.is_some() || dragon_boss.is_some() || rift_boss.is_some() || mech_boss.is_some() {
+            continue;
+        }
+
+        // Siege platforms own real projectiles and never fall through to the
+        // giant generic melee sphere. This also clears a stale committed swing
+        // if an older session/system armed one before the ranged brain ran.
+        if enemy.enemy_type == EnemyType::Tank || mountain_spider.is_some() {
+            enemy.attack_windup_timer = None;
+            if sm.current != EnemyAIState::Attack || enemy.attack_cooldown_timer > 0.0 {
+                continue;
+            }
+            let Some((target_entity, target_position, _target_index, _distance)) =
+                closest_living_indexed_player(
+                    e_transform.translation,
+                    enemy.config.attack_range,
+                    player_targets.iter().copied(),
+                )
+            else {
+                continue;
+            };
+            if mountain_spider.is_some() {
+                spawn_spider_missile_salvo(
+                    &mut commands,
+                    &assets,
+                    e_transform,
+                    target_entity,
+                    target_position,
+                    enemy.scaled_damage(),
+                );
+            } else {
+                spawn_tank_shell(
+                    &mut commands,
+                    &assets,
+                    e_transform,
+                    target_position,
+                    enemy.scaled_damage(),
+                    enemy.difficulty_scale,
+                );
+            }
+            enemy.attack_cooldown_timer = enemy.config.attack_cooldown;
             continue;
         }
 
@@ -1921,6 +2537,7 @@ fn enemy_attack_system(
             // the player's reward.
             // knockback_force is authored on a legacy 100x scale (120-800);
             // world knockback units run ~1-10 (player melee 3-10).
+            let mut player_damage_q = player_health_q.p1();
             execute_enemy_melee_hit(
                 &spatial_query,
                 e_transform.translation,
@@ -2044,6 +2661,7 @@ fn enemy_loot_drop_system(
         let (drop_chance, extra_rolls, quantity_mult, guaranteed_core) =
             match ev.enemy_type.as_str() {
                 "Scallarian rift champion" => (1.0_f32, 2usize, 2.0_f32, true),
+                "Scallarian siege tank" => (0.9, 1, 1.7, false),
                 "dragon brute" => (0.85, 1, 1.5, false),
                 "Scallarian spike alien" | "Scallarian invader" => (0.65, 0, 1.0, false),
                 _ => (0.45, 0, 0.8, false), // scouts / spy drones
@@ -2221,6 +2839,19 @@ fn loot_pickup_system(
 mod tests {
     use super::*;
     use crate::robots::creature::CreatureRole;
+    use avian3d::prelude::SimpleCollider;
+
+    fn converted_avian_cuboid_size(collider: Collider) -> Vec3 {
+        let mut app = App::new();
+        app.add_plugins(crate::engine::physics::PhysicsCompatPlugin);
+        let entity = app.world_mut().spawn((collider, Transform::default())).id();
+        app.world_mut().run_schedule(PreUpdate);
+        app.world()
+            .get::<AvianCollider>(entity)
+            .expect("compatibility collider should convert during PreUpdate")
+            .aabb(Vec3::ZERO, Quat::IDENTITY)
+            .size()
+    }
 
     #[test]
     fn creature_roles_map_to_escalating_enemy_statlines() {
@@ -2268,5 +2899,94 @@ mod tests {
         let gunship_flight = FlyingDrone::for_variant(position, DroneVariant::SiegeGunship);
         assert!(fighter_flight.speed_multiplier < scout_flight.speed_multiplier);
         assert!(gunship_flight.speed_multiplier < fighter_flight.speed_multiplier);
+        assert_eq!(fighter_flight.burst_shots_remaining, 0);
+        assert_eq!(fighter_flight.burst_timer, 0.0);
+    }
+
+    #[test]
+    fn drone_visual_and_hurtbox_share_variant_and_difficulty_scale() {
+        for (variant, variant_scale) in [
+            (DroneVariant::Scout, 1.0),
+            (DroneVariant::HeavyFighter, 1.55),
+            (DroneVariant::SiegeGunship, 2.25),
+        ] {
+            for difficulty in [0.5_f32, 1.0, 1.8, 3.0] {
+                let expected = variant_scale * difficulty.clamp(0.85, 1.8);
+                let visual_scale = drone_craft_scale(variant, difficulty);
+                assert!((visual_scale - expected).abs() < 0.0001);
+
+                let expected_half_extents = Vec3::new(3.95, 0.68, 2.50) * visual_scale;
+                assert_eq!(
+                    drone_hurtbox_half_extents(visual_scale),
+                    expected_half_extents
+                );
+                let collider = drone_hurtbox(visual_scale);
+                assert_eq!(
+                    collider,
+                    Collider::cuboid(
+                        expected_half_extents.x,
+                        expected_half_extents.y,
+                        expected_half_extents.z
+                    )
+                );
+                let actual_size = converted_avian_cuboid_size(collider);
+                assert!(actual_size.abs_diff_eq(expected_half_extents * 2.0, 0.0001));
+            }
+        }
+    }
+
+    #[test]
+    fn tank_hurtbox_converts_authored_half_extents_to_avian_full_lengths() {
+        for difficulty in [0.5_f32, 1.0, 1.8, 3.0] {
+            let expected_half_extents = Vec3::new(1.9, 1.4, 3.2) * difficulty.clamp(0.85, 1.8);
+            assert_eq!(tank_hurtbox_half_extents(difficulty), expected_half_extents);
+            let actual_size = converted_avian_cuboid_size(tank_hurtbox(difficulty));
+            assert!(actual_size.abs_diff_eq(expected_half_extents * 2.0, 0.0001));
+        }
+    }
+
+    #[test]
+    fn siege_targeting_skips_a_dead_nearest_player_for_a_living_teammate() {
+        let mut world = World::new();
+        let dead_nearest = world.spawn_empty().id();
+        let living_farther = world.spawn_empty().id();
+        let selected = closest_living_indexed_player(
+            Vec3::ZERO,
+            60.0,
+            [
+                (dead_nearest, Vec3::new(0.0, 0.0, 4.0), 0, false),
+                (living_farther, Vec3::new(0.0, 0.0, 28.0), 1, true),
+            ]
+            .into_iter(),
+        );
+
+        assert_eq!(
+            selected.map(|(entity, _, index, _)| (entity, index)),
+            Some((living_farther, 1))
+        );
+    }
+
+    #[test]
+    fn homing_projectile_turn_is_bounded_and_moves_toward_target() {
+        let current = Vec3::X;
+        let desired = Vec3::Z;
+        let max_turn = 0.2;
+        let steered = steer_enemy_projectile(current, desired, max_turn);
+        let actual_turn = current.dot(steered).clamp(-1.0, 1.0).acos();
+        assert!(actual_turn <= max_turn + 0.0001);
+        assert!(steered.dot(desired) > current.dot(desired));
+        assert!((steered.length() - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn tank_root_height_tracks_terrain_with_spawn_scale_clamps() {
+        let terrain_y = 37.5;
+        assert!((tank_root_y(terrain_y, 1.0) - (terrain_y + 1.18)).abs() < 0.0001);
+        assert!(
+            (tank_root_y(terrain_y, 0.2) - (terrain_y + TANK_ROOT_CLEARANCE * 0.85)).abs() < 0.0001
+        );
+        assert!(
+            (tank_root_y(terrain_y, 3.0) - (terrain_y + TANK_ROOT_CLEARANCE * 1.8)).abs() < 0.0001
+        );
     }
 }

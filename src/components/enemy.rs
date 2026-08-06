@@ -8,6 +8,7 @@ pub enum EnemyType {
     SpyDrone,
     Soldier,
     Heavy,
+    Tank,
     SpikeAlien,
     Hybrid,
 }
@@ -29,7 +30,7 @@ impl DragonCaste {
         match enemy_type {
             EnemyType::Soldier | EnemyType::Drone | EnemyType::SpyDrone => Self::LizardLegionary,
             EnemyType::SpikeAlien => Self::RaptorRunner,
-            EnemyType::Heavy | EnemyType::Hybrid => Self::HumanoidDragon,
+            EnemyType::Heavy | EnemyType::Tank | EnemyType::Hybrid => Self::HumanoidDragon,
         }
     }
 
@@ -49,6 +50,7 @@ impl EnemyType {
             EnemyType::SpyDrone => "Scallarian spy drone",
             EnemyType::Soldier => "Scallarian invader",
             EnemyType::Heavy => "dragon brute",
+            EnemyType::Tank => "Scallarian siege tank",
             EnemyType::SpikeAlien => "Scallarian spike alien",
             EnemyType::Hybrid => "Scallarian rift champion",
         }
@@ -143,6 +145,25 @@ impl EnemyConfig {
                 patrol_speed: 0.03,
                 chase_speed: 0.07,
                 credits: 50,
+            },
+            // Heavy Water's tank is siege artillery, not a contact brawler:
+            // it trundles into a long 28 m firing envelope, parks, and shells
+            // the party on a deliberately slow cadence.
+            EnemyType::Tank => Self {
+                max_health: 600.0,
+                attack_damage: 45.0,
+                defense: 18.0,
+                movement_speed: 1.8,
+                attack_cooldown: 3.5,
+                attack_windup: 0.65,
+                knockback_force: 1100.0,
+                experience_value: 120,
+                detection_range: 55.0,
+                chase_range: 80.0,
+                attack_range: 28.0,
+                patrol_speed: 0.025,
+                chase_speed: 0.045,
+                credits: 90,
             },
             EnemyType::SpikeAlien => Self {
                 max_health: 80.0,
@@ -300,6 +321,10 @@ pub struct FlyingDrone {
     pub fire_timer: f32,
     pub speed_multiplier: f32,
     pub fire_interval_multiplier: f32,
+    /// Heavy fighters release their three bolts over several frames instead
+    /// of spawning an unreadable stack of projectiles in one instant.
+    pub burst_shots_remaining: u8,
+    pub burst_timer: f32,
 }
 
 impl FlyingDrone {
@@ -325,6 +350,8 @@ impl FlyingDrone {
             fire_timer: 0.8 * fire_interval_multiplier,
             speed_multiplier,
             fire_interval_multiplier,
+            burst_shots_remaining: 0,
+            burst_timer: 0.0,
         }
     }
 }
@@ -481,9 +508,10 @@ pub fn boss_phase(current: f32, max: f32) -> u8 {
 pub enum EnemyProjectileKind {
     Laser,
     Fireball,
+    Shell,
 }
 
-/// Projectile fired by enemy drones and dragon bosses.
+/// Projectile fired by enemy drones, bosses, and siege platforms.
 #[derive(Component, Debug, Clone)]
 pub struct EnemyProjectile {
     pub kind: EnemyProjectileKind,
@@ -493,6 +521,26 @@ pub struct EnemyProjectile {
     pub lifetime: f32,
     pub hit_radius: f32,
     pub splash_radius: f32,
+}
+
+/// Optional steering brain for enemy missiles. Keeping it separate from
+/// [`EnemyProjectile`] means ordinary lasers and tank shells pay no target
+/// lookup or turn-rate cost.
+#[derive(Component, Debug, Clone)]
+pub struct EnemyHomingProjectile {
+    pub target: Option<Entity>,
+    pub turn_rate_radians: f32,
+    pub acquisition_range: f32,
+}
+
+impl EnemyHomingProjectile {
+    pub fn new(target: Entity) -> Self {
+        Self {
+            target: Some(target),
+            turn_rate_radians: 2.8,
+            acquisition_range: 140.0,
+        }
+    }
 }
 
 /// Short-lived enemy attack telegraph/impact visual.
@@ -512,6 +560,7 @@ mod tests {
             EnemyType::SpyDrone,
             EnemyType::Soldier,
             EnemyType::Heavy,
+            EnemyType::Tank,
             EnemyType::SpikeAlien,
             EnemyType::Hybrid,
         ];
@@ -525,7 +574,21 @@ mod tests {
         // Heavier hitters wind up longer than the fastest scout.
         let spike = EnemyConfig::for_type(EnemyType::SpikeAlien).attack_windup;
         assert!(EnemyConfig::for_type(EnemyType::Heavy).attack_windup > spike);
+        assert!(EnemyConfig::for_type(EnemyType::Tank).attack_windup > spike);
         assert!(EnemyConfig::for_type(EnemyType::Hybrid).attack_windup > spike);
+    }
+
+    #[test]
+    fn tank_is_authored_as_long_range_siege_artillery() {
+        let tank = EnemyConfig::for_type(EnemyType::Tank);
+        let heavy = EnemyConfig::for_type(EnemyType::Heavy);
+        assert_eq!(tank.max_health, 600.0);
+        assert_eq!(tank.attack_damage, 45.0);
+        assert_eq!(tank.defense, 18.0);
+        assert_eq!(tank.attack_cooldown, 3.5);
+        assert_eq!(tank.attack_range, 28.0);
+        assert!(tank.attack_range > heavy.attack_range * 3.0);
+        assert!(tank.chase_speed < heavy.chase_speed);
     }
 
     #[test]
@@ -552,7 +615,7 @@ mod tests {
             DragonCaste::for_enemy(EnemyType::SpikeAlien),
             DragonCaste::RaptorRunner
         );
-        for enemy_type in [EnemyType::Heavy, EnemyType::Hybrid] {
+        for enemy_type in [EnemyType::Heavy, EnemyType::Tank, EnemyType::Hybrid] {
             assert_eq!(
                 DragonCaste::for_enemy(enemy_type),
                 DragonCaste::HumanoidDragon

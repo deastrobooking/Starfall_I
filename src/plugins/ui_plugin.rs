@@ -52,6 +52,7 @@ use crate::plugins::input_plugin::{
     NativeControllerState,
 };
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
+use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
     DungeonCrawlState, FastTravelDestination, GameSettings, ImportedForgeReturnTarget,
@@ -7118,6 +7119,7 @@ fn crafting_panel_system(
 #[allow(clippy::too_many_arguments)]
 fn loadout_panel_system(
     time: Res<Time>,
+    mut vehicle_state: ResMut<VehicleState>,
     mut state: ResMut<LoadoutPanelState>,
     mut crafting: ResMut<CraftingPanelState>,
     mut capture: ResMut<UiGameplayCapture>,
@@ -7267,7 +7269,7 @@ fn loadout_panel_system(
         &armor,
         inventory,
         &quick,
-        &traversal,
+        vehicle_state.persistent_traversal(owner, traversal.active),
         &progression.upgrades,
     );
     let tab_slot = state.tab.index();
@@ -7294,16 +7296,20 @@ fn loadout_panel_system(
     let confirm = !opened_this_frame
         && (clicked_entry.is_some() || owner_input.is_some_and(|input| input.ui_confirm));
     if confirm && !entries.is_empty() {
-        let selected_name = activate_loadout_entry(
-            state.tab,
-            selected,
-            &mut weapons,
-            &mut specials,
-            &mut armor,
-            inventory,
-            &mut quick,
-            &mut traversal,
-        );
+        let selected_name = if state.tab == LoadoutTab::Rides {
+            activate_ride_entry(selected, owner, &mut traversal, &mut vehicle_state)
+        } else {
+            activate_loadout_entry(
+                state.tab,
+                selected,
+                &mut weapons,
+                &mut specials,
+                &mut armor,
+                inventory,
+                &mut quick,
+                &mut traversal,
+            )
+        };
         msg_ev.write(UiMessageEvent {
             text: if state.tab == LoadoutTab::Relics {
                 format!("P{} inspected {}", owner + 1, selected_name)
@@ -7319,7 +7325,7 @@ fn loadout_panel_system(
             &armor,
             inventory,
             &quick,
-            &traversal,
+            vehicle_state.persistent_traversal(owner, traversal.active),
             &progression.upgrades,
         );
     }
@@ -7404,7 +7410,7 @@ fn loadout_entry_labels(
     armor: &ArmorSet,
     inventory: &Inventory,
     quick: &QuickItemSlot,
-    traversal: &TraversalModeState,
+    selected_traversal: TraversalMode,
     upgrades: &UpgradeLedger,
 ) -> Vec<String> {
     match tab {
@@ -7490,7 +7496,7 @@ fn loadout_entry_labels(
             .map(|mode| {
                 format!(
                     "{} {}",
-                    if traversal.active == *mode {
+                    if selected_traversal == *mode {
                         "✓"
                     } else {
                         " "
@@ -7563,6 +7569,23 @@ fn activate_loadout_entry(
             .name
             .to_string(),
     }
+}
+
+fn activate_ride_entry(
+    index: usize,
+    owner: u8,
+    traversal: &mut TraversalModeState,
+    vehicle_state: &mut VehicleState,
+) -> String {
+    let selected = ride_modes()[index.min(ride_modes().len() - 1)];
+    if traversal.active == TraversalMode::Vehicle || vehicle_state.player_owns_active_vehicle(owner)
+    {
+        vehicle_state.select_traversal_while_active(owner, selected);
+        traversal.active = TraversalMode::Vehicle;
+    } else {
+        traversal.active = selected;
+    }
+    selected.label().to_string()
 }
 
 fn relic_detail_text(upgrades: &UpgradeLedger, index: usize) -> String {
@@ -8722,7 +8745,7 @@ mod menu_navigation_tests {
             &ArmorSet::default(),
             &Inventory::default(),
             &QuickItemSlot::default(),
-            &TraversalModeState::default(),
+            TraversalMode::Grapple,
             &upgrades,
         );
         assert_eq!(labels.len(), SABRE_RELIC_CATALOG.len());
@@ -8790,6 +8813,38 @@ mod menu_navigation_tests {
         assert_eq!(quick.item_id.as_deref(), Some("health_pack"));
         assert_eq!(traversal.active, TraversalMode::Hoverboard);
         assert_eq!(armor.active_element.display_name(), "None");
+    }
+
+    #[test]
+    fn loadout_ride_selection_updates_suspended_vehicle_choice() {
+        let mut vehicles = VehicleState::default();
+        vehicles.active_owner = Some(0);
+        vehicles.ground_mode = crate::plugins::vehicle_plugin::GroundMode::Tank;
+        vehicles.select_traversal_while_active(0, TraversalMode::Grapple);
+        let mut traversal = TraversalModeState {
+            active: TraversalMode::Vehicle,
+            ..default()
+        };
+
+        let label = activate_ride_entry(3, 0, &mut traversal, &mut vehicles);
+
+        assert_eq!(label, "Rocket Hoverboard");
+        assert_eq!(traversal.active, TraversalMode::Vehicle);
+        assert_eq!(
+            vehicles.persistent_traversal(0, traversal.active),
+            TraversalMode::Hoverboard
+        );
+        let labels = loadout_entry_labels(
+            LoadoutTab::Rides,
+            &WeaponInventory::default(),
+            &SpecialWeaponInventory::default(),
+            &ArmorSet::default(),
+            &Inventory::default(),
+            &QuickItemSlot::default(),
+            vehicles.persistent_traversal(0, traversal.active),
+            &UpgradeLedger::default(),
+        );
+        assert!(labels[3].starts_with('✓'));
     }
 
     #[test]

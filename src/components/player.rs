@@ -805,6 +805,9 @@ pub enum TraversalMode {
     HoverJet,
     Flight,
     Hoverboard,
+    /// Runtime-only locomotion ownership sentinel while a party vehicle is
+    /// active. The player's durable selection is held by `VehicleState`.
+    Vehicle,
 }
 
 impl TraversalMode {
@@ -814,6 +817,7 @@ impl TraversalMode {
             TraversalMode::HoverJet => "Hover Jet",
             TraversalMode::Flight => "Flight",
             TraversalMode::Hoverboard => "Rocket Hoverboard",
+            TraversalMode::Vehicle => "Vehicle",
         }
     }
 }

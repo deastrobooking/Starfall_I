@@ -11,7 +11,7 @@ use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleNode, PuzzleNodeKind,
     PuzzleRelicEncounter, RelicFragmentObstacle, RelicFragmentPuzzlePiece,
 };
-use crate::components::enemy::BossEnemy;
+use crate::components::enemy::{BossEnemy, EnemyType};
 use crate::components::faction::{Faction, NamedCharacter};
 use crate::components::player::{Player, PlayerIndex, PlayerMovement};
 use crate::components::world::{
@@ -23,9 +23,10 @@ use crate::engine::rendering::PbrBundle;
 use crate::engine::state::AppState;
 use crate::events::*;
 use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_named_enemy};
+use crate::plugins::world_plugin::terrain_surface_y;
 use crate::resources::{
     BiomePalette, ChapterProgress, CurrentChapter, DungeonCrawlState, FastTravelDestination,
-    PlaySessionTransition, WaveInfo,
+    GameSettings, PlaySessionTransition, WaveInfo,
 };
 use crate::world::missions::dungeon_destination;
 
@@ -199,6 +200,7 @@ fn chapter_director_system(
     mut player_q: Query<(&PlayerIndex, &mut Transform, &mut PlayerMovement), With<Player>>,
     anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
     mut wave: ResMut<WaveInfo>,
+    settings: Res<GameSettings>,
     mut progress: ResMut<ChapterProgress>,
     mut radio_ev: MessageWriter<RadioChatterEvent>,
     mut step_ev: MessageWriter<EncounterStepAdvancedEvent>,
@@ -265,7 +267,10 @@ fn chapter_director_system(
             scale,
         } => {
             for _ in 0..count {
-                let pos = random_spawn_pos(player_pos, rng);
+                let mut pos = random_spawn_pos(player_pos, rng);
+                if enemy_type == EnemyType::Tank {
+                    pos.y = terrain_surface_y(pos.x, pos.z, settings.world_seed);
+                }
                 spawn_enemy_entity(
                     &mut commands,
                     &mut meshes,

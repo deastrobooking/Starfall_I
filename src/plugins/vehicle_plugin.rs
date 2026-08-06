@@ -10,35 +10,75 @@
 //!
 //! Only one ground mode and one air mode may be active at a time.
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use crate::combat::damage::{DamageType, Damageable};
 use crate::components::mods::PlayerLoadout;
 use crate::components::player::{
-    JetpackState, Player, PlayerIndex, PlayerInput, PlayerMovement, PlayerStats,
+    AimSolution, BoardBoostState, JetpackState, Player, PlayerIndex, PlayerInput, PlayerMovement,
+    PlayerStats, TraversalMode, TraversalModeState,
 };
+use crate::components::weapon::{Projectile, ProjectileOwner};
 use crate::components::world::{BoatPassenger, BoatVehicle};
-use crate::engine::rendering::{PbrBundle, SpatialBundle};
+use crate::engine::game_loop::GameSet;
+use crate::engine::rendering::{player_render_layer, PbrBundle, SpatialBundle};
 use crate::engine::state::AppState;
-use crate::events::UiMessageEvent;
+use crate::events::{UiMessageEvent, WeaponFiredEvent};
+use crate::plugins::weapon_plugin::ProjectileAssets;
 use crate::resources::PlaySessionTransition;
 use crate::world::robot_pets::{RobotAssemblyForm, RobotPetCollection};
 
 pub struct VehiclePlugin;
 
+/// Ordering boundary for systems that change authoritative party-vehicle
+/// ownership. World traversal affordances read vehicle state after this set.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VehicleSet {
+    State,
+}
+
 impl Plugin for VehiclePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<VehicleState>()
+            .add_systems(Startup, setup_heavy_water_vehicle_visual_assets)
             .add_systems(OnEnter(AppState::Playing), reset_vehicle_state_on_enter)
+            .add_systems(OnExit(AppState::Playing), cleanup_vehicle_visuals_on_exit)
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_vehicle_visuals)
             .add_systems(
                 Update,
                 (
                     vehicle_input,
+                    sync_vehicle_traversal,
+                    update_vehicle_turbo,
                     clear_stale_boat_passengers_system,
                     apply_vehicle_buffs,
-                    sync_jet_bike_visual,
                     boat_drive_system,
                 )
                     .chain()
+                    .in_set(VehicleSet::State)
+                    // Entering a tank must take ownership of primary fire
+                    // before handheld weapons consume the same input edge;
+                    // legacy Update motors also see this frame's vehicle
+                    // stats rather than inheriting them one frame later.
+                    .before(GameSet::Motor)
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
+                (
+                    sync_jet_bike_visual,
+                    sync_heavy_water_vehicle_visual,
+                    bind_vehicle_visual_render_layers,
+                    tank_cannon_system,
+                    tank_muzzle_flash_system,
+                )
+                    .chain()
+                    // Combat refreshes AimSolution first; articulated tank aim
+                    // and cannon fire therefore use this frame's reticle. Run
+                    // after pose work and before cameras consume presentation.
+                    .after(GameSet::Animation)
+                    .before(GameSet::Camera)
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -78,6 +118,22 @@ struct VehicleBaseline {
     jet_max_vertical_vel: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct VehicleArmorBuffer {
+    capacity: f32,
+    remaining: f32,
+    last_total: Option<f32>,
+}
+
+impl VehicleArmorBuffer {
+    fn remaining_at_total(self, armor_total: f32) -> f32 {
+        let unobserved_loss = self
+            .last_total
+            .map_or(0.0, |last_total| (last_total - armor_total).max(0.0));
+        (self.remaining - unobserved_loss).max(0.0)
+    }
+}
+
 #[derive(Resource, Debug, Default)]
 pub struct VehicleState {
     pub ground_mode: GroundMode,
@@ -88,7 +144,18 @@ pub struct VehicleState {
     pub boat_heading: f32,
     pub jet_bike_mode: Option<JetBikeMode>,
     baselines: [Option<VehicleBaseline>; 4],
-    applied_armor_bonuses: [f32; 4],
+    armor_buffers: [VehicleArmorBuffer; 4],
+    /// The loadout-selected traversal tool is suspended while a vehicle owns
+    /// this player, then restored exactly on exit. This keeps hoverboard and
+    /// vehicle motors/visuals from stacking without changing durable loadout.
+    suspended_traversals: [Option<TraversalMode>; 4],
+    /// Remaining Heavy Water-style turbo burst and recharge time. Turbo is
+    /// shared by ground and flight profiles so switching forms never stacks it.
+    pub turbo_timer: f32,
+    pub turbo_cooldown: f32,
+    /// The assembled tank owns primary fire while active. Keeping the timer on
+    /// the party vehicle state makes ownership transfer deterministic.
+    pub tank_cannon_cooldown: f32,
     // Legacy accessors used by external code — kept as computed properties.
     pub mech_armor_bonus: f32,
 }
@@ -103,6 +170,204 @@ struct JetBikeGroundPart;
 
 #[derive(Component)]
 struct JetBikeFlightPart;
+
+/// Procedural successor bodies for Heavy Water's ATV, fighter, tank, and the
+/// Starfall-only giant forms. These are gameplay silhouettes rather than loose
+/// props: the active profile follows the authoritative vehicle owner and tank
+/// weapon systems use the same aim solution as the HUD reticle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeavyWaterVehicleProfile {
+    Atv,
+    Tank,
+    GiantMech,
+    SpaceFighter,
+    Starship,
+}
+
+impl HeavyWaterVehicleProfile {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Atv => "All-Terrain Vehicle",
+            Self::Tank => "Siege Tank",
+            Self::GiantMech => "Giant Mech",
+            Self::SpaceFighter => "Space Fighter",
+            Self::Starship => "Starship",
+        }
+    }
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct HeavyWaterVehicleVisual {
+    owner: u8,
+    profile: HeavyWaterVehicleProfile,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct TankTurretVisual {
+    owner: u8,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct TankBarrelVisual {
+    owner: u8,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct TankMuzzleFlash {
+    remaining: f32,
+}
+
+struct AtvVisualMeshes {
+    body: Handle<Mesh>,
+    cowling: Handle<Mesh>,
+    seat: Handle<Mesh>,
+    wheel: Handle<Mesh>,
+    strut: Handle<Mesh>,
+    lamp: Handle<Mesh>,
+    handlebar: Handle<Mesh>,
+}
+
+struct TankVisualMeshes {
+    tread: Handle<Mesh>,
+    tread_glow: Handle<Mesh>,
+    hull: Handle<Mesh>,
+    glacis: Handle<Mesh>,
+    turret_ring: Handle<Mesh>,
+    turret: Handle<Mesh>,
+    sensor: Handle<Mesh>,
+    barrel: Handle<Mesh>,
+}
+
+struct MechVisualMeshes {
+    torso: Handle<Mesh>,
+    cockpit: Handle<Mesh>,
+    leg: Handle<Mesh>,
+    arm: Handle<Mesh>,
+    accent: Handle<Mesh>,
+}
+
+struct FlightVisualMeshes {
+    fuselage: Handle<Mesh>,
+    wing: Handle<Mesh>,
+    canopy: Handle<Mesh>,
+    cannon: Handle<Mesh>,
+    thruster: Handle<Mesh>,
+    tail: Handle<Mesh>,
+}
+
+/// Strong handles for the finite Heavy Water vehicle kit. Visual entities may
+/// be rebuilt as modes change, but their CPU/GPU assets are authored only once.
+#[derive(Resource)]
+struct HeavyWaterVehicleVisualAssets {
+    armor_material: Handle<StandardMaterial>,
+    secondary_material: Handle<StandardMaterial>,
+    dark_material: Handle<StandardMaterial>,
+    glow_material: Handle<StandardMaterial>,
+    glass_material: Handle<StandardMaterial>,
+    atv: AtvVisualMeshes,
+    tank: TankVisualMeshes,
+    mech: MechVisualMeshes,
+    fighter: FlightVisualMeshes,
+    starship: FlightVisualMeshes,
+}
+
+fn flight_visual_meshes(
+    meshes: &mut Assets<Mesh>,
+    canopy: &Handle<Mesh>,
+    scale: f32,
+) -> FlightVisualMeshes {
+    FlightVisualMeshes {
+        fuselage: meshes.add(Cuboid::new(2.35 * scale, 0.84 * scale, 6.2 * scale)),
+        wing: meshes.add(Cuboid::new(8.4 * scale, 0.18 * scale, 2.4 * scale)),
+        canopy: canopy.clone(),
+        cannon: meshes.add(Cylinder::new(0.18 * scale, 2.8 * scale)),
+        thruster: meshes.add(Cylinder::new(0.44 * scale, 1.25 * scale)),
+        // Preserve the original thin shared fin profile: only Y/Z scaled up.
+        tail: meshes.add(Cuboid::new(0.24, 2.2 * scale, 2.4 * scale)),
+    }
+}
+
+fn setup_heavy_water_vehicle_visual_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let armor_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.16, 0.22, 0.30),
+        metallic: 0.78,
+        perceptual_roughness: 0.27,
+        ..default()
+    });
+    let secondary_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.62, 0.08, 0.34),
+        metallic: 0.68,
+        perceptual_roughness: 0.24,
+        ..default()
+    });
+    let dark_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.018, 0.026, 0.045),
+        metallic: 0.38,
+        perceptual_roughness: 0.58,
+        ..default()
+    });
+    let glow_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.05, 0.84, 1.0),
+        emissive: LinearRgba::new(0.10, 2.8, 4.4, 1.0),
+        metallic: 0.32,
+        perceptual_roughness: 0.16,
+        ..default()
+    });
+    let glass_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.08, 0.55, 0.82, 0.70),
+        emissive: LinearRgba::new(0.04, 0.55, 0.9, 1.0),
+        metallic: 0.28,
+        perceptual_roughness: 0.12,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+
+    let canopy = meshes.add(Sphere::new(1.0));
+    let fighter = flight_visual_meshes(&mut meshes, &canopy, 1.0);
+    let starship = flight_visual_meshes(&mut meshes, &canopy, 1.55);
+    commands.insert_resource(HeavyWaterVehicleVisualAssets {
+        armor_material,
+        secondary_material,
+        dark_material,
+        glow_material,
+        glass_material,
+        atv: AtvVisualMeshes {
+            body: meshes.add(Cuboid::new(2.7, 0.62, 3.8)),
+            cowling: meshes.add(Cuboid::new(2.25, 0.48, 1.35)),
+            seat: meshes.add(Cuboid::new(1.25, 0.36, 1.25)),
+            wheel: meshes.add(Torus {
+                major_radius: 0.58,
+                minor_radius: 0.20,
+            }),
+            strut: meshes.add(Cuboid::new(0.16, 1.42, 0.16)),
+            lamp: meshes.add(Sphere::new(0.22)),
+            handlebar: meshes.add(Cuboid::new(2.0, 0.16, 0.16)),
+        },
+        tank: TankVisualMeshes {
+            tread: meshes.add(Cuboid::new(0.92, 0.82, 5.55)),
+            tread_glow: meshes.add(Cuboid::new(0.10, 0.18, 4.65)),
+            hull: meshes.add(Cuboid::new(3.35, 1.18, 4.62)),
+            glacis: meshes.add(Cuboid::new(3.0, 0.58, 1.35)),
+            turret_ring: meshes.add(Cylinder::new(1.26, 0.40)),
+            turret: meshes.add(Cuboid::new(2.42, 1.0, 2.62)),
+            sensor: meshes.add(Cuboid::new(0.92, 0.18, 0.10)),
+            barrel: meshes.add(Cylinder::new(0.22, 3.8)),
+        },
+        mech: MechVisualMeshes {
+            torso: meshes.add(Cuboid::new(3.8, 4.2, 2.5)),
+            cockpit: meshes.add(Cuboid::new(2.1, 1.8, 1.9)),
+            leg: meshes.add(Cuboid::new(1.28, 4.3, 1.55)),
+            arm: meshes.add(Cuboid::new(1.05, 4.1, 1.15)),
+            accent: meshes.add(Cuboid::new(3.1, 0.28, 0.22)),
+        },
+        fighter,
+        starship,
+    });
+}
 
 #[allow(dead_code)] // Mode query helpers for HUD/UI consumers that key off enum modes directly today.
 impl VehicleState {
@@ -121,14 +386,63 @@ impl VehicleState {
     pub fn ship_active(&self) -> bool {
         self.air_mode == AirMode::Ship
     }
+    pub fn player_owns_tank(&self, player: u8) -> bool {
+        self.active_owner == Some(player) && self.tank_active()
+    }
+    pub fn player_owns_active_vehicle(&self, player: u8) -> bool {
+        self.active_owner == Some(player)
+            && (self.ground_mode != GroundMode::None
+                || self.air_mode != AirMode::None
+                || self.boat_active)
+    }
+    pub fn player_owns_ground_vehicle(&self, player: u8) -> bool {
+        self.active_owner == Some(player) && self.ground_mode != GroundMode::None
+    }
+    pub fn player_owns_air_vehicle(&self, player: u8) -> bool {
+        self.active_owner == Some(player) && self.air_mode != AirMode::None
+    }
+    /// Traversal written to a durable save remains the selected loadout tool,
+    /// not the neutral mode temporarily installed by an active vehicle.
+    pub fn persistent_traversal(
+        &self,
+        player: u8,
+        runtime_traversal: TraversalMode,
+    ) -> TraversalMode {
+        self.suspended_traversals
+            .get(player as usize)
+            .and_then(|mode| *mode)
+            .unwrap_or(runtime_traversal)
+    }
+    /// Changes the selection that will be restored when the vehicle releases
+    /// locomotion, while keeping the live component in its neutral sentinel.
+    pub fn select_traversal_while_active(&mut self, player: u8, selected: TraversalMode) {
+        if let Some(slot) = self.suspended_traversals.get_mut(player as usize) {
+            *slot = Some(selected);
+        }
+    }
+    pub fn turbo_active(&self) -> bool {
+        self.turbo_timer > 0.0
+    }
+    /// Armor written to durable saves excludes the unspent temporary vehicle
+    /// buffer, including damage received after the most recent reconciliation.
+    pub fn persistent_armor(&self, player: u8, runtime_armor: f32) -> f32 {
+        let remaining = self
+            .armor_buffers
+            .get(player as usize)
+            .map_or(0.0, |buffer| buffer.remaining_at_total(runtime_armor));
+        (runtime_armor - remaining).max(0.0)
+    }
     fn deactivate_ground(&mut self) {
         self.ground_mode = GroundMode::None;
         self.jet_bike_mode = None;
         self.mech_armor_bonus = 0.0;
+        self.turbo_timer = 0.0;
+        self.tank_cannon_cooldown = 0.0;
     }
     fn deactivate_air(&mut self) {
         self.air_mode = AirMode::None;
         self.jet_bike_mode = None;
+        self.turbo_timer = 0.0;
     }
     fn deactivate_all_vehicle(&mut self) {
         self.deactivate_ground();
@@ -137,6 +451,9 @@ impl VehicleState {
         self.active_boat = None;
         self.active_owner = None;
         self.jet_bike_mode = None;
+        self.turbo_timer = 0.0;
+        self.turbo_cooldown = 0.0;
+        self.tank_cannon_cooldown = 0.0;
     }
 }
 
@@ -146,6 +463,42 @@ fn reset_vehicle_state_on_enter(
 ) {
     if !transition.resuming_from_pause {
         *state = VehicleState::default();
+    }
+}
+
+fn cleanup_vehicle_visuals(
+    mut commands: Commands,
+    visual_q: Query<
+        Entity,
+        Or<(
+            With<JetBikeVisual>,
+            With<HeavyWaterVehicleVisual>,
+            With<TankMuzzleFlash>,
+        )>,
+    >,
+) {
+    for entity in visual_q.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn cleanup_vehicle_visuals_on_exit(
+    mut commands: Commands,
+    transition: Res<PlaySessionTransition>,
+    visual_q: Query<
+        Entity,
+        Or<(
+            With<JetBikeVisual>,
+            With<HeavyWaterVehicleVisual>,
+            With<TankMuzzleFlash>,
+        )>,
+    >,
+) {
+    if transition.pausing {
+        return;
+    }
+    for entity in visual_q.iter() {
+        commands.entity(entity).despawn();
     }
 }
 
@@ -197,12 +550,41 @@ fn available_ground_mode(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VehicleEntryProfile {
+    None,
+    Ground(GroundMode),
+    Air(AirMode),
+}
+
+/// Selects the physical form represented by the current robot assembly before
+/// falling back to loose blueprints.  Otherwise a late jet-blueprint unlock
+/// shadows an assembled Tank/Giant Mech forever because both forms share the
+/// same enter-vehicle input.
+fn preferred_vehicle_entry_profile(
+    robot_pets: &RobotPetCollection,
+    loadout: &PlayerLoadout,
+) -> VehicleEntryProfile {
+    if let Some(mode) = assembled_ground_mode(robot_pets) {
+        return VehicleEntryProfile::Ground(mode);
+    }
+    let air = assembled_air_mode(robot_pets, loadout);
+    if air != AirMode::None {
+        VehicleEntryProfile::Air(air)
+    } else if let Some(mode) = available_ground_mode(robot_pets, loadout) {
+        VehicleEntryProfile::Ground(mode)
+    } else {
+        VehicleEntryProfile::None
+    }
+}
+
 fn jet_bike_available(robot_pets: &RobotPetCollection, loadout: &PlayerLoadout) -> bool {
     robot_pets
         .active_assembly
         .as_ref()
         .is_some_and(|assembly| assembly.form == RobotAssemblyForm::JetBike)
-        || (available_ground_mode(robot_pets, loadout) == Some(GroundMode::Motorcycle)
+        || (robot_pets.active_assembly.is_none()
+            && available_ground_mode(robot_pets, loadout) == Some(GroundMode::Motorcycle)
             && assembled_air_mode(robot_pets, loadout) == AirMode::Jet)
 }
 
@@ -216,6 +598,7 @@ fn set_jet_bike_mode(state: &mut VehicleState, owner: u8, mode: Option<JetBikeMo
     state.boat_active = false;
     state.mech_armor_bonus = 0.0;
     state.jet_bike_mode = Some(mode);
+    state.tank_cannon_cooldown = 0.0;
     match mode {
         JetBikeMode::Ground => {
             state.ground_mode = GroundMode::Motorcycle;
@@ -225,6 +608,56 @@ fn set_jet_bike_mode(state: &mut VehicleState, owner: u8, mode: Option<JetBikeMo
             state.ground_mode = GroundMode::None;
             state.air_mode = AirMode::Jet;
         }
+    }
+}
+
+fn reconcile_vehicle_traversal(
+    vehicle_active: bool,
+    suspended: &mut Option<TraversalMode>,
+    traversal: &mut TraversalModeState,
+    board_boost: &mut BoardBoostState,
+) {
+    if vehicle_active {
+        if suspended.is_none() {
+            *suspended = Some(traversal.active);
+            // Drop only stale/manual board momentum on the entry edge. Road
+            // pads may subsequently boost a vehicle and that sustained timer
+            // must survive later reconciliation frames.
+            *board_boost = BoardBoostState::default();
+        }
+        traversal.active = TraversalMode::Vehicle;
+    } else if let Some(selected) = suspended.take() {
+        traversal.active = selected;
+    }
+}
+
+/// Gives the active vehicle exclusive ownership of locomotion without
+/// permanently changing the player's selected traversal tool. Boat passengers
+/// are included even though only the driver owns the shared VehicleState.
+fn sync_vehicle_traversal(
+    mut state: ResMut<VehicleState>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &mut TraversalModeState,
+            &mut BoardBoostState,
+            Option<&BoatPassenger>,
+        ),
+        With<Player>,
+    >,
+) {
+    for (index, mut traversal, mut board_boost, passenger) in player_q.iter_mut() {
+        let slot = index.0 as usize;
+        if slot >= state.suspended_traversals.len() {
+            continue;
+        }
+        let vehicle_active = state.player_owns_active_vehicle(index.0) || passenger.is_some();
+        reconcile_vehicle_traversal(
+            vehicle_active,
+            &mut state.suspended_traversals[slot],
+            &mut traversal,
+            &mut board_boost,
+        );
     }
 }
 
@@ -255,9 +688,8 @@ fn vehicle_input(
         .collect::<Vec<_>>();
 
     for (entity, idx, player_transform, pi, passenger) in player_q.iter() {
-        let available_ground = available_ground_mode(&robot_pets, &loadout);
-        let available_air = assembled_air_mode(&robot_pets, &loadout);
         let dual_jet_bike = jet_bike_available(&robot_pets, &loadout);
+        let preferred_entry = preferred_vehicle_entry_profile(&robot_pets, &loadout);
 
         // ── Party vehicle toggle (J key / D-pad Up) ───────────────────────────
         if pi.enter_vehicle {
@@ -355,10 +787,21 @@ fn vehicle_input(
                         .total_cmp(&player_transform.translation.distance(rt.translation))
                 })
             {
+                if vehicle_owned_by_other(&state, idx.0) {
+                    msg_ev.write(UiMessageEvent {
+                        text: vehicle_in_use_message(&state),
+                        duration: 1.8,
+                    });
+                    continue;
+                }
                 state.boat_active = true;
                 state.ground_mode = GroundMode::None;
                 state.air_mode = AirMode::None;
                 state.jet_bike_mode = None;
+                state.mech_armor_bonus = 0.0;
+                state.turbo_timer = 0.0;
+                state.turbo_cooldown = 0.0;
+                state.tank_cannon_cooldown = 0.0;
                 state.active_owner = Some(idx.0);
                 state.active_boat = Some(boat_entity);
                 state.boat_heading = yaw_from_rotation(boat_transform.rotation);
@@ -383,8 +826,8 @@ fn vehicle_input(
             }
 
             // A dual-mode Jet Bike cycles Ground → Flight → Off from the
-            // shared enter-vehicle input. M/open-map remains a direct ground
-            // mode shortcut.
+            // shared enter-vehicle input. Other active robot assemblies keep
+            // their authored profile even when fallback blueprints are owned.
             if dual_jet_bike {
                 if vehicle_owned_by_other(&state, idx.0) {
                     msg_ev.write(UiMessageEvent {
@@ -416,7 +859,7 @@ fn vehicle_input(
                     ),
                     duration: 1.8,
                 });
-            } else if available_air != AirMode::None {
+            } else if let VehicleEntryProfile::Air(mode) = preferred_entry {
                 if vehicle_owned_by_other(&state, idx.0) {
                     msg_ev.write(UiMessageEvent {
                         text: vehicle_in_use_message(&state),
@@ -424,29 +867,31 @@ fn vehicle_input(
                     });
                     continue;
                 }
-                let currently_on =
-                    state.air_mode == available_air && state.active_owner == Some(idx.0);
+                let currently_on = state.air_mode == mode && state.active_owner == Some(idx.0);
                 if currently_on {
                     state.deactivate_air();
                     state.active_owner = None;
                     msg_ev.write(UiMessageEvent {
-                        text: format!("P{} {}: OFF", idx.0 + 1, air_mode_label(available_air)),
+                        text: format!("P{} {}: OFF", idx.0 + 1, air_mode_label(mode)),
                         duration: 1.5,
                     });
                 } else {
-                    state.air_mode = available_air;
+                    state.air_mode = mode;
                     state.jet_bike_mode = None;
                     state.ground_mode = GroundMode::None;
+                    state.mech_armor_bonus = 0.0;
+                    state.turbo_timer = 0.0;
+                    state.turbo_cooldown = 0.0;
                     state.boat_active = false;
                     state.active_boat = None;
                     remove_boat_passengers(&mut commands, &player_q, None);
                     state.active_owner = Some(idx.0);
                     msg_ev.write(UiMessageEvent {
-                        text: format!("P{} {}: ON", idx.0 + 1, air_mode_label(available_air)),
+                        text: format!("P{} {}: ON", idx.0 + 1, air_mode_label(mode)),
                         duration: 1.5,
                     });
                 }
-            } else if let Some(mode) = available_ground {
+            } else if let VehicleEntryProfile::Ground(mode) = preferred_entry {
                 if vehicle_owned_by_other(&state, idx.0) {
                     msg_ev.write(UiMessageEvent {
                         text: vehicle_in_use_message(&state),
@@ -462,11 +907,14 @@ fn vehicle_input(
                     state.ground_mode = mode;
                     state.air_mode = AirMode::None;
                     state.jet_bike_mode = None;
-                    state.mech_armor_bonus = if mode == GroundMode::GiantMech {
-                        40.0
-                    } else {
-                        0.0
+                    state.mech_armor_bonus = match mode {
+                        GroundMode::Tank => 25.0,
+                        GroundMode::GiantMech => 40.0,
+                        GroundMode::None | GroundMode::Motorcycle => 0.0,
                     };
+                    state.turbo_timer = 0.0;
+                    state.turbo_cooldown = 0.0;
+                    state.tank_cannon_cooldown = 0.0;
                     state.boat_active = false;
                     state.active_boat = None;
                     state.active_owner = Some(idx.0);
@@ -615,6 +1063,140 @@ fn clear_stale_boat_passengers_system(
     }
 }
 
+/// Heavy Water used the same short turbo verb for both ATVs and fighters.
+/// Starfall keeps that muscle memory: holding sprint starts a 0.7-second burst
+/// when the shared 1.6-second post-burst recharge is ready.
+fn update_vehicle_turbo(
+    time: Res<Time>,
+    mut state: ResMut<VehicleState>,
+    player_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
+) {
+    let dt = time.delta_secs();
+    state.turbo_timer = (state.turbo_timer - dt).max(0.0);
+    state.turbo_cooldown = (state.turbo_cooldown - dt).max(0.0);
+    state.tank_cannon_cooldown = (state.tank_cannon_cooldown - dt).max(0.0);
+
+    let vehicle_can_turbo = !state.boat_active
+        && (state.ground_mode != GroundMode::None || state.air_mode != AirMode::None);
+    if !vehicle_can_turbo || state.turbo_cooldown > 0.0 {
+        return;
+    }
+    let Some(owner) = state.active_owner else {
+        return;
+    };
+    let turbo_requested = player_q
+        .iter()
+        .any(|(index, input)| index.0 == owner && input.sprint);
+    if turbo_requested {
+        const TURBO_DURATION: f32 = 0.7;
+        const POST_BURST_RECHARGE: f32 = 1.6;
+        state.turbo_timer = TURBO_DURATION;
+        state.turbo_cooldown = TURBO_DURATION + POST_BURST_RECHARGE;
+    }
+}
+
+fn active_heavy_water_profile(state: &VehicleState) -> Option<HeavyWaterVehicleProfile> {
+    if state.boat_active || state.jet_bike_mode.is_some() {
+        return None;
+    }
+    match state.ground_mode {
+        GroundMode::Motorcycle => Some(HeavyWaterVehicleProfile::Atv),
+        GroundMode::Tank => Some(HeavyWaterVehicleProfile::Tank),
+        GroundMode::GiantMech => Some(HeavyWaterVehicleProfile::GiantMech),
+        GroundMode::None => match state.air_mode {
+            AirMode::Jet => Some(HeavyWaterVehicleProfile::SpaceFighter),
+            AirMode::Ship => Some(HeavyWaterVehicleProfile::Starship),
+            AirMode::None => None,
+        },
+    }
+}
+
+/// Vehicle bodies live beside the player hierarchy so their transforms can be
+/// replaced independently when a mode changes. Bind every renderable child to
+/// the driver's avatar layer anyway: that owner's first-person camera hides
+/// the cockpit/body, while every other split-screen camera still sees it.
+fn bind_vehicle_visual_render_layers(
+    mut commands: Commands,
+    jet_roots: Query<(Entity, Ref<JetBikeVisual>)>,
+    heavy_roots: Query<(Entity, Ref<HeavyWaterVehicleVisual>)>,
+    children: Query<&Children>,
+    parents: Query<&ChildOf>,
+    new_renderables: Query<
+        (Entity, Option<&RenderLayers>),
+        (With<Mesh3d>, Or<(Added<Mesh3d>, Changed<ChildOf>)>),
+    >,
+    all_renderables: Query<Option<&RenderLayers>, With<Mesh3d>>,
+) {
+    // New or reparented meshes discover their nearest vehicle root without
+    // requiring a scan of the stable world renderables.
+    for (entity, existing) in new_renderables.iter() {
+        let mut current = entity;
+        let owner = loop {
+            if let Ok((_, visual)) = jet_roots.get(current) {
+                break Some(visual.owner);
+            }
+            if let Ok((_, visual)) = heavy_roots.get(current) {
+                break Some(visual.owner);
+            }
+            let Ok(parent) = parents.get(current) else {
+                break None;
+            };
+            current = parent.parent();
+        };
+        let Some(owner) = owner else {
+            continue;
+        };
+        let target = RenderLayers::layer(player_render_layer(owner));
+        if existing != Some(&target) {
+            commands.entity(entity).insert(target);
+        }
+    }
+
+    // A same-profile handoff keeps the existing root and child hierarchy.
+    // Traverse only that root when its owner component actually changed;
+    // newly-added roots are already covered by the Added<Mesh3d> path above.
+    for (root, visual) in jet_roots.iter() {
+        if visual.is_changed() && !visual.is_added() {
+            rebind_vehicle_descendants(
+                &mut commands,
+                root,
+                visual.owner,
+                &children,
+                &all_renderables,
+            );
+        }
+    }
+    for (root, visual) in heavy_roots.iter() {
+        if visual.is_changed() && !visual.is_added() {
+            rebind_vehicle_descendants(
+                &mut commands,
+                root,
+                visual.owner,
+                &children,
+                &all_renderables,
+            );
+        }
+    }
+}
+
+fn rebind_vehicle_descendants(
+    commands: &mut Commands,
+    root: Entity,
+    owner: u8,
+    children: &Query<&Children>,
+    renderables: &Query<Option<&RenderLayers>, With<Mesh3d>>,
+) {
+    let target = RenderLayers::layer(player_render_layer(owner));
+    for descendant in children.iter_descendants(root) {
+        let Ok(existing) = renderables.get(descendant) else {
+            continue;
+        };
+        if existing != Some(&target) {
+            commands.entity(descendant).insert(target.clone());
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn sync_jet_bike_visual(
     mut commands: Commands,
@@ -675,7 +1257,9 @@ fn sync_jet_bike_visual(
     .with_rotation(rider_transform.rotation);
 
     if let Some((_, mut visual, mut transform)) = bike_q.iter_mut().next() {
-        visual.owner = owner;
+        if visual.owner != owner {
+            visual.owner = owner;
+        }
         *transform = visual_transform;
         return;
     }
@@ -783,6 +1367,429 @@ fn sync_jet_bike_visual(
         });
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn sync_heavy_water_vehicle_visual(
+    mut commands: Commands,
+    state: Res<VehicleState>,
+    time: Res<Time>,
+    player_q: Query<(&PlayerIndex, &Transform, &PlayerMovement, &AimSolution), With<Player>>,
+    mut visual_q: Query<
+        (Entity, &mut HeavyWaterVehicleVisual, &mut Transform),
+        (
+            Without<Player>,
+            Without<TankTurretVisual>,
+            Without<TankBarrelVisual>,
+        ),
+    >,
+    mut turret_q: Query<
+        (&TankTurretVisual, &mut Transform),
+        (
+            Without<Player>,
+            Without<HeavyWaterVehicleVisual>,
+            Without<TankBarrelVisual>,
+        ),
+    >,
+    mut barrel_q: Query<
+        (&TankBarrelVisual, &mut Transform),
+        (
+            Without<Player>,
+            Without<HeavyWaterVehicleVisual>,
+            Without<TankTurretVisual>,
+        ),
+    >,
+    assets: Res<HeavyWaterVehicleVisualAssets>,
+) {
+    let Some(profile) = active_heavy_water_profile(&state) else {
+        for (entity, _, _) in visual_q.iter_mut() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+    let Some(owner) = state.active_owner else {
+        return;
+    };
+    let Some((_, rider_transform, movement, aim)) =
+        player_q.iter().find(|(index, _, _, _)| index.0 == owner)
+    else {
+        return;
+    };
+
+    let speed = movement.ground_velocity.with_y(0.0).length();
+    let turbo_lift = if state.turbo_active() { 0.10 } else { 0.0 };
+    let bob = match profile {
+        HeavyWaterVehicleProfile::SpaceFighter | HeavyWaterVehicleProfile::Starship => {
+            (time.elapsed_secs() * 7.0).sin() * 0.08 + turbo_lift
+        }
+        HeavyWaterVehicleProfile::Atv => {
+            (time.elapsed_secs() * 10.0).sin() * (speed * 0.006).min(0.04)
+        }
+        HeavyWaterVehicleProfile::Tank | HeavyWaterVehicleProfile::GiantMech => 0.0,
+    };
+    let offset = match profile {
+        HeavyWaterVehicleProfile::Atv => Vec3::new(0.0, -0.72 + bob, 0.12),
+        HeavyWaterVehicleProfile::Tank => Vec3::new(0.0, -0.82, 0.18),
+        HeavyWaterVehicleProfile::GiantMech => Vec3::new(0.0, -0.12, 0.12),
+        HeavyWaterVehicleProfile::SpaceFighter => Vec3::new(0.0, -0.35 + bob, 0.15),
+        HeavyWaterVehicleProfile::Starship => Vec3::new(0.0, -0.55 + bob, 0.25),
+    };
+    let visual_transform = Transform::from_translation(
+        rider_transform.translation + rider_transform.rotation * offset,
+    )
+    .with_rotation(rider_transform.rotation);
+
+    let mut matching_visual = false;
+    for (entity, mut visual, mut transform) in visual_q.iter_mut() {
+        if matching_visual || visual.profile != profile {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        if visual.owner != owner {
+            visual.owner = owner;
+        }
+        *transform = visual_transform;
+        matching_visual = true;
+    }
+
+    // Turret yaw and barrel pitch both derive from the canonical AimSolution,
+    // so the visible cannon, reticle, and actual shell cannot disagree.
+    if profile == HeavyWaterVehicleProfile::Tank {
+        let horizontal = aim.direction.with_y(0.0).normalize_or(Vec3::NEG_Z);
+        let local_direction = rider_transform.rotation.inverse() * horizontal;
+        let local_yaw = (-local_direction.x).atan2(-local_direction.z);
+        let pitch = aim
+            .direction
+            .y
+            .atan2(aim.direction.with_y(0.0).length().max(0.001))
+            .clamp(-0.42, 0.55);
+        for (turret, mut transform) in turret_q.iter_mut() {
+            if turret.owner == owner {
+                transform.rotation = Quat::from_rotation_y(local_yaw);
+            }
+        }
+        for (barrel, mut transform) in barrel_q.iter_mut() {
+            if barrel.owner == owner {
+                transform.rotation = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2 + pitch);
+            }
+        }
+    }
+
+    if matching_visual {
+        return;
+    }
+
+    let armor_material = &assets.armor_material;
+    let secondary_material = &assets.secondary_material;
+    let dark_material = &assets.dark_material;
+    let glow_material = &assets.glow_material;
+    let glass_material = &assets.glass_material;
+
+    commands
+        .spawn((
+            Name::new(profile.label()),
+            SpatialBundle::from_transform(visual_transform),
+            HeavyWaterVehicleVisual { owner, profile },
+        ))
+        .with_children(|vehicle| match profile {
+            HeavyWaterVehicleProfile::Atv => {
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.atv.body.clone()),
+                    material: MeshMaterial3d(armor_material.clone()),
+                    transform: Transform::from_xyz(0.0, 0.55, 0.0),
+                    ..default()
+                });
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.atv.cowling.clone()),
+                    material: MeshMaterial3d(secondary_material.clone()),
+                    transform: Transform::from_xyz(0.0, 0.78, -1.82)
+                        .with_rotation(Quat::from_rotation_x(0.18)),
+                    ..default()
+                });
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.atv.seat.clone()),
+                    material: MeshMaterial3d(dark_material.clone()),
+                    transform: Transform::from_xyz(0.0, 1.16, 0.45),
+                    ..default()
+                });
+                for x in [-1.43_f32, 1.43] {
+                    for z in [-1.22_f32, 1.22] {
+                        vehicle.spawn(PbrBundle {
+                            mesh: Mesh3d(assets.atv.wheel.clone()),
+                            material: MeshMaterial3d(dark_material.clone()),
+                            transform: Transform::from_xyz(x, 0.24, z)
+                                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                            ..default()
+                        });
+                    }
+                }
+                for x in [-0.92_f32, 0.92] {
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(assets.atv.strut.clone()),
+                        material: MeshMaterial3d(secondary_material.clone()),
+                        transform: Transform::from_xyz(x, 1.63, 0.54)
+                            .with_rotation(Quat::from_rotation_x(-0.18)),
+                        ..default()
+                    });
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(assets.atv.lamp.clone()),
+                        material: MeshMaterial3d(glow_material.clone()),
+                        transform: Transform::from_xyz(x * 0.72, 0.82, -2.46),
+                        ..default()
+                    });
+                }
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.atv.handlebar.clone()),
+                    material: MeshMaterial3d(secondary_material.clone()),
+                    transform: Transform::from_xyz(0.0, 2.28, 0.30),
+                    ..default()
+                });
+            }
+            HeavyWaterVehicleProfile::Tank => {
+                for x in [-1.48_f32, 1.48] {
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(assets.tank.tread.clone()),
+                        material: MeshMaterial3d(dark_material.clone()),
+                        transform: Transform::from_xyz(x, 0.42, 0.0),
+                        ..default()
+                    });
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(assets.tank.tread_glow.clone()),
+                        material: MeshMaterial3d(glow_material.clone()),
+                        transform: Transform::from_xyz(x.signum() * 1.96, 1.02, 0.05),
+                        ..default()
+                    });
+                }
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.tank.hull.clone()),
+                    material: MeshMaterial3d(armor_material.clone()),
+                    transform: Transform::from_xyz(0.0, 1.02, 0.0),
+                    ..default()
+                });
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.tank.glacis.clone()),
+                    material: MeshMaterial3d(secondary_material.clone()),
+                    transform: Transform::from_xyz(0.0, 1.25, -2.22)
+                        .with_rotation(Quat::from_rotation_x(-0.22)),
+                    ..default()
+                });
+                vehicle
+                    .spawn((
+                        SpatialBundle::from_transform(Transform::from_xyz(0.0, 1.86, -0.10)),
+                        TankTurretVisual { owner },
+                    ))
+                    .with_children(|turret| {
+                        turret.spawn(PbrBundle {
+                            mesh: Mesh3d(assets.tank.turret_ring.clone()),
+                            material: MeshMaterial3d(armor_material.clone()),
+                            ..default()
+                        });
+                        turret.spawn(PbrBundle {
+                            mesh: Mesh3d(assets.tank.turret.clone()),
+                            material: MeshMaterial3d(armor_material.clone()),
+                            transform: Transform::from_xyz(0.0, 0.55, -0.08),
+                            ..default()
+                        });
+                        turret.spawn(PbrBundle {
+                            mesh: Mesh3d(assets.tank.sensor.clone()),
+                            material: MeshMaterial3d(glow_material.clone()),
+                            transform: Transform::from_xyz(0.0, 0.78, -1.42),
+                            ..default()
+                        });
+                        turret.spawn((
+                            PbrBundle {
+                                mesh: Mesh3d(assets.tank.barrel.clone()),
+                                material: MeshMaterial3d(armor_material.clone()),
+                                transform: Transform::from_xyz(0.0, 0.52, -2.65).with_rotation(
+                                    Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+                                ),
+                                ..default()
+                            },
+                            TankBarrelVisual { owner },
+                        ));
+                    });
+            }
+            HeavyWaterVehicleProfile::GiantMech => {
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.mech.torso.clone()),
+                    material: MeshMaterial3d(armor_material.clone()),
+                    transform: Transform::from_xyz(0.0, 4.6, 0.0),
+                    ..default()
+                });
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.mech.cockpit.clone()),
+                    material: MeshMaterial3d(glass_material.clone()),
+                    transform: Transform::from_xyz(0.0, 7.35, -0.42),
+                    ..default()
+                });
+                for x in [-1.45_f32, 1.45] {
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(assets.mech.leg.clone()),
+                        material: MeshMaterial3d(dark_material.clone()),
+                        transform: Transform::from_xyz(x, 1.92, 0.10),
+                        ..default()
+                    });
+                }
+                for x in [-2.75_f32, 2.75] {
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(assets.mech.arm.clone()),
+                        material: MeshMaterial3d(secondary_material.clone()),
+                        transform: Transform::from_xyz(x, 4.5, 0.0)
+                            .with_rotation(Quat::from_rotation_z(x.signum() * -0.12)),
+                        ..default()
+                    });
+                }
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(assets.mech.accent.clone()),
+                    material: MeshMaterial3d(glow_material.clone()),
+                    transform: Transform::from_xyz(0.0, 4.88, -1.38),
+                    ..default()
+                });
+            }
+            HeavyWaterVehicleProfile::SpaceFighter | HeavyWaterVehicleProfile::Starship => {
+                let scale = if profile == HeavyWaterVehicleProfile::Starship {
+                    1.55
+                } else {
+                    1.0
+                };
+                let flight_meshes = if profile == HeavyWaterVehicleProfile::Starship {
+                    &assets.starship
+                } else {
+                    &assets.fighter
+                };
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(flight_meshes.fuselage.clone()),
+                    material: MeshMaterial3d(armor_material.clone()),
+                    transform: Transform::from_xyz(0.0, 0.35 * scale, 0.0),
+                    ..default()
+                });
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(flight_meshes.wing.clone()),
+                    material: MeshMaterial3d(secondary_material.clone()),
+                    transform: Transform::from_xyz(0.0, 0.18 * scale, 0.35 * scale)
+                        .with_rotation(Quat::from_rotation_y(0.08)),
+                    ..default()
+                });
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(flight_meshes.canopy.clone()),
+                    material: MeshMaterial3d(glass_material.clone()),
+                    transform: Transform::from_xyz(0.0, 0.92 * scale, -0.95 * scale)
+                        .with_scale(Vec3::new(0.95, 0.62, 1.65) * scale),
+                    ..default()
+                });
+                for x in [-1.85_f32, 1.85] {
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(flight_meshes.cannon.clone()),
+                        material: MeshMaterial3d(glow_material.clone()),
+                        transform: Transform::from_xyz(x * scale, 0.15 * scale, -2.45 * scale)
+                            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                        ..default()
+                    });
+                    vehicle.spawn(PbrBundle {
+                        mesh: Mesh3d(flight_meshes.thruster.clone()),
+                        material: MeshMaterial3d(glow_material.clone()),
+                        transform: Transform::from_xyz(x * 0.48 * scale, 0.1, 3.2 * scale)
+                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                        ..default()
+                    });
+                }
+                vehicle.spawn(PbrBundle {
+                    mesh: Mesh3d(flight_meshes.tail.clone()),
+                    material: MeshMaterial3d(secondary_material.clone()),
+                    transform: Transform::from_xyz(0.0, 1.1 * scale, 2.35 * scale)
+                        .with_rotation(Quat::from_rotation_x(-0.18)),
+                    ..default()
+                });
+            }
+        });
+}
+
+fn tank_cannon_system(
+    mut commands: Commands,
+    mut state: ResMut<VehicleState>,
+    assets: Res<ProjectileAssets>,
+    mut player_q: Query<
+        (
+            Entity,
+            &PlayerIndex,
+            &Transform,
+            &PlayerInput,
+            &AimSolution,
+            &mut PlayerMovement,
+        ),
+        With<Player>,
+    >,
+    mut fired_ev: MessageWriter<WeaponFiredEvent>,
+) {
+    let Some(owner) = state
+        .active_owner
+        .filter(|owner| state.player_owns_tank(*owner))
+    else {
+        return;
+    };
+    let Some((player, _, transform, input, aim, mut movement)) = player_q
+        .iter_mut()
+        .find(|(_, index, _, _, _, _)| index.0 == owner)
+    else {
+        return;
+    };
+    if !input.fire_just || state.tank_cannon_cooldown > 0.0 {
+        return;
+    }
+
+    let direction = aim.direction.normalize_or(transform.forward().as_vec3());
+    let muzzle = transform.translation + Vec3::Y * 1.55 + direction * 4.25;
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.sphere_md.clone()),
+            material: MeshMaterial3d(assets.mat_rocket.clone()),
+            transform: Transform::from_translation(muzzle)
+                .looking_to(direction, Vec3::Y)
+                .with_scale(Vec3::new(0.9, 0.9, 2.2)),
+            ..default()
+        },
+        Projectile {
+            damage: 95.0,
+            damage_type: DamageType::Explosive,
+            speed: if state.turbo_active() { 82.0 } else { 68.0 },
+            direction,
+            lifetime: 4.0,
+            is_explosive: true,
+            explosion_radius: 7.0,
+            weapon_type: ProjectileOwner::Player,
+            owner: Some(player),
+            piercing: false,
+            gravity_affected: false,
+            vertical_velocity: 0.0,
+        },
+    ));
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(assets.flash_sphere.clone()),
+            material: MeshMaterial3d(assets.mat_muzzle_flash.clone()),
+            transform: Transform::from_translation(muzzle).with_scale(Vec3::splat(2.2)),
+            ..default()
+        },
+        TankMuzzleFlash { remaining: 0.13 },
+    ));
+    movement.ground_velocity -= direction.with_y(0.0) * 0.055;
+    state.tank_cannon_cooldown = 1.20;
+    fired_ev.write(WeaponFiredEvent);
+}
+
+fn tank_muzzle_flash_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut flash_q: Query<(Entity, &mut TankMuzzleFlash, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut flash, mut transform) in flash_q.iter_mut() {
+        flash.remaining -= dt;
+        transform.scale *= 1.0 + dt * 7.5;
+        if flash.remaining <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 /// Apply vehicle speed/force buffs only to the player who activated the vehicle.
 fn apply_vehicle_buffs(
     mut state: ResMut<VehicleState>,
@@ -792,11 +1799,13 @@ fn apply_vehicle_buffs(
             &mut PlayerMovement,
             &mut JetpackState,
             &mut PlayerStats,
+            &mut Damageable,
         ),
         With<Player>,
     >,
 ) {
-    for (idx, mut mv, mut jet, mut stats) in q.iter_mut() {
+    let turbo_active = state.turbo_active();
+    for (idx, mut mv, mut jet, mut stats, mut damageable) in q.iter_mut() {
         let slot_index = idx.0 as usize;
         let Some(slot) = state.baselines.get_mut(slot_index) else {
             continue;
@@ -826,16 +1835,33 @@ fn apply_vehicle_buffs(
                 }
                 GroundMode::Motorcycle => {
                     mv.walk_speed = baseline.walk_speed.max(0.70);
-                    mv.sprint_speed = baseline.sprint_speed.max(1.10);
+                    mv.sprint_speed =
+                        baseline
+                            .sprint_speed
+                            .max(if turbo_active { 1.42 } else { 1.10 });
                 }
                 GroundMode::Tank => {
-                    // Slow but cannot be knocked back
-                    mv.walk_speed = baseline.walk_speed.min(0.32);
-                    mv.sprint_speed = baseline.sprint_speed.min(0.42);
+                    // Slow, armored, and immune to accumulated knockback.
+                    mv.walk_speed = baseline
+                        .walk_speed
+                        .min(if turbo_active { 0.46 } else { 0.32 });
+                    mv.sprint_speed =
+                        baseline
+                            .sprint_speed
+                            .min(if turbo_active { 0.58 } else { 0.42 });
+                    mv.knockback_velocity = Vec3::ZERO;
+                    damageable.pending_knockback = Vec3::ZERO;
                 }
                 GroundMode::GiantMech => {
-                    mv.walk_speed = baseline.walk_speed.min(0.24);
-                    mv.sprint_speed = baseline.sprint_speed.min(0.34);
+                    mv.walk_speed = baseline
+                        .walk_speed
+                        .min(if turbo_active { 0.34 } else { 0.24 });
+                    mv.sprint_speed =
+                        baseline
+                            .sprint_speed
+                            .min(if turbo_active { 0.46 } else { 0.34 });
+                    mv.knockback_velocity = Vec3::ZERO;
+                    damageable.pending_knockback = Vec3::ZERO;
                 }
             }
         } else {
@@ -852,14 +1878,24 @@ fn apply_vehicle_buffs(
                     jet.max_vertical_vel = baseline.jet_max_vertical_vel;
                 }
                 AirMode::Jet => {
-                    jet.force = baseline.jet_force.max(0.12);
+                    jet.force = baseline
+                        .jet_force
+                        .max(if turbo_active { 0.17 } else { 0.12 });
                     jet.regen_rate = baseline.jet_regen_rate.max(80.0);
-                    jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(0.7);
+                    jet.max_vertical_vel =
+                        baseline
+                            .jet_max_vertical_vel
+                            .max(if turbo_active { 0.90 } else { 0.7 });
                 }
                 AirMode::Ship => {
-                    jet.force = baseline.jet_force.max(0.18);
+                    jet.force = baseline
+                        .jet_force
+                        .max(if turbo_active { 0.25 } else { 0.18 });
                     jet.regen_rate = baseline.jet_regen_rate.max(120.0);
-                    jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(1.1);
+                    jet.max_vertical_vel =
+                        baseline
+                            .jet_max_vertical_vel
+                            .max(if turbo_active { 1.42 } else { 1.1 });
                 }
             }
         } else {
@@ -874,22 +1910,43 @@ fn apply_vehicle_buffs(
         } else {
             0.0
         };
-        let previous_armor_bonus = state.applied_armor_bonuses[slot_index];
-        apply_vehicle_armor_bonus(&mut stats, previous_armor_bonus, desired_armor_bonus);
-        state.applied_armor_bonuses[slot_index] = desired_armor_bonus;
+        apply_vehicle_armor_bonus(
+            &mut stats,
+            &mut state.armor_buffers[slot_index],
+            desired_armor_bonus,
+        );
     }
 }
 
-fn apply_vehicle_armor_bonus(stats: &mut PlayerStats, previous_bonus: f32, desired_bonus: f32) {
-    let previous_bonus = previous_bonus.max(0.0);
+fn apply_vehicle_armor_bonus(
+    stats: &mut PlayerStats,
+    buffer: &mut VehicleArmorBuffer,
+    desired_bonus: f32,
+) {
     let desired_bonus = desired_bonus.max(0.0);
-    let desired_cap = stats.max_armor + desired_bonus;
 
-    if desired_bonus > previous_bonus {
-        stats.armor = (stats.armor + desired_bonus - previous_bonus).min(desired_cap);
-    } else {
-        stats.armor = stats.armor.min(desired_cap);
+    // Damage consumes the temporary buffer before base armor. Positive armor
+    // changes are healing and must remain base armor rather than refilling a
+    // spent vehicle buffer for free.
+    if buffer.capacity > 0.0 {
+        buffer.remaining = buffer.remaining_at_total(stats.armor);
     }
+
+    if desired_bonus > buffer.capacity {
+        let added = desired_bonus - buffer.capacity;
+        stats.armor += added;
+        buffer.remaining += added;
+    } else if desired_bonus < buffer.capacity {
+        let allowed_remaining = buffer.remaining.min(desired_bonus);
+        stats.armor = (stats.armor - (buffer.remaining - allowed_remaining)).max(0.0);
+        buffer.remaining = allowed_remaining;
+    }
+
+    buffer.capacity = desired_bonus;
+    let unclamped = stats.armor;
+    stats.armor = stats.armor.min(stats.max_armor + desired_bonus);
+    buffer.remaining = (buffer.remaining - (unclamped - stats.armor).max(0.0)).max(0.0);
+    buffer.last_total = (desired_bonus > 0.0).then_some(stats.armor);
 }
 
 #[allow(clippy::type_complexity)]
@@ -1075,6 +2132,74 @@ mod tests {
     }
 
     #[test]
+    fn air_blueprint_does_not_turn_an_assembled_atv_into_a_jet_bike() {
+        let mut loadout = PlayerLoadout::default();
+        loadout.add_blueprint("jet_blueprint");
+
+        for form in [RobotAssemblyForm::Car, RobotAssemblyForm::Motorcycle] {
+            let robots = robot_pets_with_assembly(form);
+            assert!(!jet_bike_available(&robots, &loadout));
+            assert_eq!(
+                preferred_vehicle_entry_profile(&robots, &loadout),
+                VehicleEntryProfile::Ground(GroundMode::Motorcycle)
+            );
+        }
+    }
+
+    #[test]
+    fn paired_loose_blueprints_keep_the_no_assembly_jet_bike_fallback() {
+        let robots = RobotPetCollection::default();
+        let mut loadout = PlayerLoadout::default();
+        loadout.add_blueprint("motorcycle_blueprint");
+        loadout.add_blueprint("jet_blueprint");
+
+        assert!(jet_bike_available(&robots, &loadout));
+    }
+
+    #[test]
+    fn assembled_heavy_ground_vehicle_wins_over_air_blueprint_fallback() {
+        let mut loadout = PlayerLoadout::default();
+        loadout.add_blueprint("jet_blueprint");
+
+        for (form, expected) in [
+            (RobotAssemblyForm::Tank, GroundMode::Tank),
+            (RobotAssemblyForm::GiantMech, GroundMode::GiantMech),
+        ] {
+            assert_eq!(
+                preferred_vehicle_entry_profile(&robot_pets_with_assembly(form), &loadout),
+                VehicleEntryProfile::Ground(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn assembled_ship_wins_over_ground_blueprint_fallback() {
+        let mut loadout = PlayerLoadout::default();
+        loadout.add_blueprint("motorcycle_blueprint");
+
+        assert_eq!(
+            preferred_vehicle_entry_profile(
+                &robot_pets_with_assembly(RobotAssemblyForm::SpaceShip),
+                &loadout
+            ),
+            VehicleEntryProfile::Air(AirMode::Ship)
+        );
+    }
+
+    #[test]
+    fn assembled_space_jet_wins_over_ground_blueprint_fallback() {
+        let mut loadout = PlayerLoadout::default();
+        loadout.add_blueprint("motorcycle_blueprint");
+        let robots = robot_pets_with_assembly(RobotAssemblyForm::SpaceJet);
+
+        assert!(!jet_bike_available(&robots, &loadout));
+        assert_eq!(
+            preferred_vehicle_entry_profile(&robots, &loadout),
+            VehicleEntryProfile::Air(AirMode::Jet)
+        );
+    }
+
+    #[test]
     fn jet_bike_mode_transition_keeps_one_owner_and_one_physics_profile() {
         let mut state = VehicleState::default();
         set_jet_bike_mode(&mut state, 2, Some(JetBikeMode::Ground));
@@ -1096,22 +2221,291 @@ mod tests {
     }
 
     #[test]
+    fn vehicle_traversal_suspends_restores_and_saves_the_selected_tool() {
+        let mut suspended = None;
+        let mut traversal = TraversalModeState {
+            active: TraversalMode::Hoverboard,
+            ..default()
+        };
+        let mut boost = BoardBoostState {
+            timer: 1.4,
+            speed_mult: 3.2,
+            direction: Vec3::X,
+            ..default()
+        };
+
+        reconcile_vehicle_traversal(true, &mut suspended, &mut traversal, &mut boost);
+        assert_eq!(suspended, Some(TraversalMode::Hoverboard));
+        assert_eq!(traversal.active, TraversalMode::Vehicle);
+        assert_eq!(boost.timer, 0.0);
+        assert_eq!(boost.speed_mult, 1.0);
+
+        // Reconciliation is idempotent and cannot replace the saved selection
+        // with the neutral runtime mode while the vehicle remains active. A
+        // road-pad boost applied after entry also remains active.
+        boost.timer = 1.7;
+        boost.speed_mult = 3.1;
+        reconcile_vehicle_traversal(true, &mut suspended, &mut traversal, &mut boost);
+        assert_eq!(suspended, Some(TraversalMode::Hoverboard));
+        assert_eq!(boost.timer, 1.7);
+        assert_eq!(boost.speed_mult, 3.1);
+
+        let mut state = VehicleState::default();
+        state.suspended_traversals[0] = suspended;
+        assert_eq!(
+            state.persistent_traversal(0, traversal.active),
+            TraversalMode::Hoverboard
+        );
+
+        reconcile_vehicle_traversal(false, &mut suspended, &mut traversal, &mut boost);
+        assert_eq!(suspended, None);
+        assert_eq!(traversal.active, TraversalMode::Hoverboard);
+    }
+
+    #[test]
+    fn heavy_water_vehicle_profiles_follow_authoritative_modes() {
+        let mut state = VehicleState {
+            ground_mode: GroundMode::Motorcycle,
+            active_owner: Some(1),
+            ..default()
+        };
+        assert_eq!(
+            active_heavy_water_profile(&state),
+            Some(HeavyWaterVehicleProfile::Atv)
+        );
+
+        state.ground_mode = GroundMode::Tank;
+        assert_eq!(
+            active_heavy_water_profile(&state),
+            Some(HeavyWaterVehicleProfile::Tank)
+        );
+        assert!(state.player_owns_tank(1));
+        assert!(!state.player_owns_tank(0));
+
+        state.ground_mode = GroundMode::None;
+        state.air_mode = AirMode::Jet;
+        assert_eq!(
+            active_heavy_water_profile(&state),
+            Some(HeavyWaterVehicleProfile::SpaceFighter)
+        );
+
+        state.air_mode = AirMode::Ship;
+        assert_eq!(
+            active_heavy_water_profile(&state),
+            Some(HeavyWaterVehicleProfile::Starship)
+        );
+
+        state.boat_active = true;
+        assert_eq!(active_heavy_water_profile(&state), None);
+    }
+
+    #[test]
+    fn heavy_water_vehicle_visual_assets_are_authored_once() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .add_systems(Startup, setup_heavy_water_vehicle_visual_assets);
+
+        app.update();
+
+        let assets = app.world().resource::<HeavyWaterVehicleVisualAssets>();
+        assert_eq!(assets.fighter.canopy, assets.starship.canopy);
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 31);
+        assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 5);
+    }
+
+    #[test]
+    fn same_profile_owner_handoff_rebinds_only_vehicle_descendants() {
+        let mut app = App::new();
+        app.add_systems(Update, bind_vehicle_visual_render_layers);
+
+        let heavy_root = app
+            .world_mut()
+            .spawn(HeavyWaterVehicleVisual {
+                owner: 0,
+                profile: HeavyWaterVehicleProfile::Tank,
+            })
+            .id();
+        let heavy_group = app.world_mut().spawn_empty().id();
+        let heavy_mesh = app.world_mut().spawn(Mesh3d::default()).id();
+        app.world_mut()
+            .entity_mut(heavy_group)
+            .add_child(heavy_mesh);
+        app.world_mut()
+            .entity_mut(heavy_root)
+            .add_child(heavy_group);
+
+        let jet_root = app.world_mut().spawn(JetBikeVisual { owner: 1 }).id();
+        let jet_mesh = app.world_mut().spawn(Mesh3d::default()).id();
+        app.world_mut().entity_mut(jet_root).add_child(jet_mesh);
+
+        let sentinel = RenderLayers::layer(31);
+        let unrelated = app
+            .world_mut()
+            .spawn((Mesh3d::default(), sentinel.clone()))
+            .id();
+
+        app.update();
+        assert_eq!(
+            app.world().get::<RenderLayers>(heavy_mesh),
+            Some(&RenderLayers::layer(player_render_layer(0)))
+        );
+        assert_eq!(
+            app.world().get::<RenderLayers>(jet_mesh),
+            Some(&RenderLayers::layer(player_render_layer(1)))
+        );
+
+        // A stable owner does not traverse or rewrite its existing hierarchy.
+        app.world_mut()
+            .entity_mut(heavy_mesh)
+            .insert(sentinel.clone());
+        app.world_mut()
+            .entity_mut(jet_mesh)
+            .insert(sentinel.clone());
+        app.update();
+        assert_eq!(app.world().get::<RenderLayers>(heavy_mesh), Some(&sentinel));
+        assert_eq!(app.world().get::<RenderLayers>(jet_mesh), Some(&sentinel));
+
+        // Retaining the same profile/root while changing owners rebinds every
+        // descendant, but never scans or mutates unrelated world meshes.
+        app.world_mut()
+            .get_mut::<HeavyWaterVehicleVisual>(heavy_root)
+            .unwrap()
+            .owner = 2;
+        app.world_mut()
+            .get_mut::<JetBikeVisual>(jet_root)
+            .unwrap()
+            .owner = 3;
+        app.update();
+        assert_eq!(
+            app.world().get::<RenderLayers>(heavy_mesh),
+            Some(&RenderLayers::layer(player_render_layer(2)))
+        );
+        assert_eq!(
+            app.world().get::<RenderLayers>(jet_mesh),
+            Some(&RenderLayers::layer(player_render_layer(3)))
+        );
+        assert_eq!(app.world().get::<RenderLayers>(unrelated), Some(&sentinel));
+    }
+
+    #[test]
+    fn tank_and_mech_suppress_fresh_pending_knockback_before_motor_intake() {
+        for mode in [GroundMode::Tank, GroundMode::GiantMech] {
+            let mut app = App::new();
+            app.add_systems(Update, apply_vehicle_buffs);
+            app.insert_resource(VehicleState {
+                ground_mode: mode,
+                active_owner: Some(0),
+                ..default()
+            });
+            let player = app
+                .world_mut()
+                .spawn((
+                    Player,
+                    PlayerIndex(0),
+                    PlayerMovement {
+                        knockback_velocity: Vec3::X * 8.0,
+                        ..default()
+                    },
+                    JetpackState::default(),
+                    PlayerStats::default(),
+                    Damageable {
+                        pending_knockback: Vec3::Z * 12.0,
+                        ..default()
+                    },
+                ))
+                .id();
+
+            app.update();
+
+            assert_eq!(
+                app.world()
+                    .get::<PlayerMovement>(player)
+                    .unwrap()
+                    .knockback_velocity,
+                Vec3::ZERO
+            );
+            assert_eq!(
+                app.world()
+                    .get::<Damageable>(player)
+                    .unwrap()
+                    .pending_knockback,
+                Vec3::ZERO
+            );
+        }
+    }
+
+    #[test]
     fn mech_armor_bonus_applies_once_and_clamps_when_removed() {
         let mut stats = PlayerStats {
             armor: 60.0,
             max_armor: 100.0,
             ..default()
         };
+        let mut buffer = VehicleArmorBuffer::default();
 
-        apply_vehicle_armor_bonus(&mut stats, 0.0, 40.0);
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 40.0);
         assert_eq!(stats.armor, 100.0);
 
-        apply_vehicle_armor_bonus(&mut stats, 40.0, 40.0);
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 40.0);
         assert_eq!(stats.armor, 100.0);
 
-        stats.armor = 135.0;
-        apply_vehicle_armor_bonus(&mut stats, 40.0, 0.0);
-        assert_eq!(stats.armor, 100.0);
+        stats.armor = 80.0;
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 0.0);
+        assert_eq!(stats.armor, 60.0);
+    }
+
+    #[test]
+    fn tank_armor_is_a_temporary_twenty_five_point_buffer() {
+        let mut stats = PlayerStats {
+            armor: 80.0,
+            max_armor: 100.0,
+            ..default()
+        };
+        let mut buffer = VehicleArmorBuffer::default();
+
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 25.0);
+        assert_eq!(stats.armor, 105.0);
+
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 25.0);
+        assert_eq!(stats.armor, 105.0);
+
+        // Fifteen damage consumes fifteen temporary points; exiting removes
+        // only the ten that remain, restoring the exact pre-vehicle armor.
+        stats.armor = 90.0;
+        let mut active_state = VehicleState::default();
+        active_state.armor_buffers[0] = buffer;
+        assert_eq!(active_state.persistent_armor(0, stats.armor), 80.0);
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 0.0);
+        assert_eq!(stats.armor, 80.0);
+
+        // Repeated toggles cannot manufacture permanent armor.
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 25.0);
+        assert_eq!(stats.armor, 105.0);
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 0.0);
+        assert_eq!(stats.armor, 80.0);
+    }
+
+    #[test]
+    fn vehicle_armor_buffer_preserves_real_healing_without_refilling_itself() {
+        let mut stats = PlayerStats {
+            armor: 80.0,
+            max_armor: 100.0,
+            ..default()
+        };
+        let mut buffer = VehicleArmorBuffer::default();
+
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 25.0);
+        stats.armor = 90.0;
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 25.0);
+        assert_eq!(buffer.remaining, 10.0);
+
+        stats.armor += 10.0;
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 25.0);
+        assert_eq!(buffer.remaining, 10.0);
+        apply_vehicle_armor_bonus(&mut stats, &mut buffer, 0.0);
+        assert_eq!(stats.armor, 90.0);
     }
 
     #[test]

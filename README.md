@@ -18,9 +18,9 @@ Implemented:
 - Authored level rewards now introduce robot rescue pods and tech caches across the campaign, feeding robot parts, upgrade-route hints, rejuvenation reserve, and small robot-pet power amplification into chapter progression.
 - Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
 - Everest-range world-map foundation: the imported Everest heightmap now spans a 200 x 200 mile `20_000`-unit range, with smoothed height/slope terrain color layers, snowfields, glacier streams, alpine forests, sci-fantasy outposts, carved mountain path corridors, glowing guide studs, dragon-lair silhouettes, visible fast-travel beacons, and clickable chapter-select map markers for all 14 chapters.
-- Exploration settlement foundation: eight additional cities, villages, harbors, and outposts now appear physically in the range, use terrain-aware grounded/terraced/sky-district layouts with floating mega-city ramps and mountain-inset gates, show as map markers, expose `WorldAnchor`s for future subquests, and hold saved exploration caches.
+- Exploration settlement foundation: eight additional cities, villages, harbors, and outposts now appear physically in the range, use terrain-aware grounded/terraced/sky-district layouts with four world-cardinal ramps on every floating mega-city foundation plus mountain-inset gates, show as map markers, expose `WorldAnchor`s for future subquests, and hold saved exploration caches.
 - Settlement builder/economy vertical slice: settlement terminals unlock after cache recovery or site liberation, spend shared resources and robot salvage on farms, factories, spaceports, power plants, research labs, defense outposts, and bridge hubs, save/load build tiers, tick bounded passive outputs, and spawn physical rebuilt modules in the world.
-- Raid counteroffensive slice: liberated Cloudrail City can enter an `UnderAttack` warning, spawn a visible Scallarian UFO marker plus drone swarm, resolve through player combat or static settlement defenses, and save/load raid state.
+- Raid counteroffensive slice: liberated Cloudrail City can enter an `UnderAttack` warning, spawn a visible Scallarian UFO marker plus drone swarm, resolve through player combat or static settlement defenses, and save/load raid state. Active RouteBlockade records preserve their soldier wave while placing a terrain-grounded Scallarian siege tank at one per four-unit cadence (indices 0, 4, 8, …).
 - Command strategy first slice: `CommandRegistry` tracks 9 commandable asset kinds (Worker/Scout/FighterDrones, TurretDrone, GroundMech, Boat, FighterJet, Ship, MegaShip) with health/readiness/assignment; assets assigned to a liberated site add to its raid defense score so players can auto-resolve threats with positioned forces; F7 overlay shows asset roster grouped by site; save/load persistent.
 - Tech hacking first slice: small Scallarian drones are hackable with interact, grant the saved `blueprint_scallarian_drone_core`, add a Scout Drone command asset, temporarily link as a friendly follower, and pulse nearby hostile enemies from the owner's fire/melee input.
 - Great Scientist temple subquests now fill the wider map with optional dungeon-like labs and chapter-select map hints that grant full mechanics upgrades: Ancient Flight Core, Solar Sabre Glyph, Nova Missile Matrix, and Aegis Armor Frame.
@@ -42,9 +42,11 @@ Implemented:
 - Tiered loot: drop chance, quantity, and rolls scale with the kill — rift champions guarantee an energy core plus bonus drops, while scouts stay pocket change.
 - Faction boss variety: dragons fly and breathe fire, Scallarian rift champions blink around the arena summoning portal reinforcements and detonating laser novas, and corrupted-human reactor mechs strafe, barrage, charge-dash into shockwaves, and cycle invulnerable shield windows — three distinct boss brains with three HP phases each.
 - High-speed stunt-road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with protected guardrail merge mouths and its own support columns. Taller outer barriers contain players and vehicles, and collidable center medians separate opposite boost-arrow directions. The southeast range now blends `assets/terrain/RACE.png` into a dedicated Grand Raceway district with two network entrances, a 94-unit-wide closed circuit, embedded boost lanes, four launch ramps, six ordered gates, two rivals, checkpoints/recovery, and two `R` fast-travel points on the chapter map. Motion Boot and Aegis logic upgrades strengthen road-pad impulse and sustain. The wider network also combines vertical loops, strongly banked mega-curves, 28 trunk boost ramps, 18 elevated neon grind lines, automatic Sonic-style approach/transfer springs, settlement rings/spurs, NPC traffic, and guided hoverboard adhesion. Rail grinding is per-player, supports either approach direction, forces the Rocket Hoverboard for stability, and allows jump-off transfers with preserved speed. Every settlement ring is also a three-lap four-gate race course with two hovercraft rivals. Airtime, rail transfers, and stick-driven aerial rotations build a per-player combo that banks on clean landing, animates the board spin, expands the stunt camera/FOV, reports score, and drives owner-mapped controller rumble.
+- Heavy Water Star City continuation: one 56-chord elevated ring circles world origin at radius 280 and deck height 80. Its 32-unit collidable deck carries continuous two-way neon lanes, eight paired boost stations, safety rails, a direction divider, and terrain-founded supports. Four smooth 24-section cardinal ramps climb from driveable ground mouths to protected outer-lane merges, and the complete loop/access network participates in procedural building and prop keepout.
 - Explorable buildings now replace selected solid blocks throughout downtown, industrial, residential, and settlement districts. These use textured exterior/interior materials, open doorways, hollow collision shells, multiple wood floors, smooth ramp-backed stair flights with visible treads, partitioned rooms, sparse furniture, interior lights, and windows. Background buildings remain lightweight for four-player performance.
 - Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
-- RPG combat with unlimited-ammo primary beams and special tools, swept projectile collision, stronger body-centered aim assistance, arm-cannon charge shots, magic-user tracking beams, Star Sabre controller support and animated slash poses, melee combos, armor elements, XP, perks, crafting, rewards, and save/load. Homing Star acquires/reacquires hostile targets, steers with a capped turn rate, leaves an energy trail, and reports SEEK/LOCK per player in the HUD.
+- RPG combat with unlimited-ammo primary beams and special tools, swept projectile collision, stronger body-centered aim assistance, arm-cannon charge shots, magic-user tracking beams, Star Sabre controller support and animated slash poses, melee combos, armor elements, XP, perks, crafting, rewards, and save/load. Homing Star acquires/reacquires hostile targets, steers with a capped turn rate, leaves an energy trail, and reports SEEK/LOCK per player in the HUD. Authored upgrades now add Tri-Star tracking, a four-child Moon Bubble cluster, the higher-level multi-Homing-Star branch, and a persistent owner-scoped Sprite combat drone that follows, checks line of sight, and fires attributed projectiles. Aiming and firing with the Star Sabre drawn also triggers the owner-scoped Mega Beam Cannon: a cover-clipped 220-unit beam plus twenty deterministic homing explosive seekers on a six-second cooldown.
+- Heavy Water enemy/vehicle continuation: wasteland patrols combine single-shot Scout drones, staged three-bolt Heavy Fighters, and four-laser-spread Siege Gunships. The procedural Scallarian Tank enemy fires real splash shells and appears on exact local terrain in RouteBlockades plus DimensionalAlien encounters in Chapters 4 and 13; its runtime kill grants Tread Unit salvage. Everest spider mechs now fire paired homing splash missiles from a 32-unit stand-off. Robot assembly modes render party-owned procedural ATV, tank, giant-mech, space-fighter, and starship bodies. Sprint triggers a short shared turbo, while Tank mode grants temporary armor and replaces handheld fire with an aim-driven explosive cannon.
 
 In progress:
 
@@ -53,6 +55,7 @@ In progress:
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
 - Character design is the single playable-character editor, with GLB-inspired base models, modular silhouette presets, armor layers, and saved per-slot loadouts.
 - Menu actions are rendered as clearly named Bevy buttons across the main flow; action-critical controls avoid icon-only font glyphs. The shared focus layer supplies deterministic initial focus, spatial arrows/WASD/D-pad/left-stick navigation with held repeat, mouse-hover synchronization, focused/pressed/disabled styling, Enter/Space/controller-South activation, and Escape/controller-East Back routing. Character Studio retains its specialized field navigator.
+- Heavy Water continuation boundaries remain explicit: current vehicle bodies follow the authoritative player/mode and are not independently colliding, world-mountable, damageable, or destructible vehicles. Physical vehicle collision/mount/destruction, Ghost Ride and unmanned ram/detonation, named legacy-region sessions, and authoritative online play remain unported.
 
 ## Cast
 
@@ -162,9 +165,9 @@ Keyboard and mouse:
 | `E` | Interact; trigger nearby slingshots |
 | `G` | Fire the grapple hook; zip, swing, or pull the selected target |
 | `Q` | Dodge/drop; Rocket Hoverboard overdrive; Saber Comet Dash/Meteor Pound after blueprint |
-| `LMB` | Fire active star beam / Star Sabre slash |
+| `LMB` | Fire active star beam / Star Sabre slash; fire the cannon while Tank mode is active |
 | `RMB` | Aim |
-| `Shift` | Sprint |
+| `Shift` | Sprint; trigger the shared turbo burst while a non-boat vehicle mode is active |
 | `R` | Reload active star beam |
 | `V` / `B` | Light / heavy mana combo; heavy input stomps while airborne |
 | `F` | Parry |
@@ -206,11 +209,11 @@ Controller:
 | East | Dodge/drop; Rocket Hoverboard overdrive (Grind while rail-bound); Saber Comet Dash/Meteor Pound after blueprint |
 | West | Reload active star beam |
 | North | Parry |
-| RT | Fire star beam |
+| RT | Fire star beam; fire the cannon while Tank mode is active |
 | LT | Aim |
 | LB + North | Toggle Star Sabre; RB performs its animated slash |
 | LT + North | Alternate Star Sabre toggle |
-| LB | Sprint |
+| LB | Sprint; trigger the shared turbo burst while a non-boat vehicle mode is active |
 | LB + Select | Open/close the owning player's Star Loadout |
 | LB + West | Use equipped quick item |
 | RB | Star Sabre slash while drawn |
@@ -238,7 +241,8 @@ Controller:
 | 6 | Star Bubble Bombs |
 
 Special tools:
-Homing Star, Tri-Star Burst, Moon Bubble, and Sprite Turret.
+Homing Star, Tri-Star Burst, Moon Bubble, and the persistent Sprite combat drone
+deployed through Sprite Turret.
 
 Rocket Hoverboard controls: select it from Star Loadout → Rides, move to carve,
 jump to launch, hold jump for rocket lift, and hold LB while airborne for a
@@ -264,6 +268,7 @@ faster forward boost. Fuel uses the existing per-player jet gauge.
 ## Documentation
 
 - **[Current State](docs/archive/current_state.md)** — canonical verified baseline and next production order for agents
+- **[Heavy Water Port Ledger](docs/HEAVY_WATER_PORT.md)** — verified sequel-continuity parity and explicit remaining boundaries
 - **[Documentation Map](docs/README.md)** — what every doc is for, living vs. snapshot
 - **[Developer Guides](docs/guides/README.md)** — process how-tos: [verification gates](docs/guides/verification.md), [fixed-tick motor](docs/guides/fixed-tick-motor.md), [combat feel](docs/guides/combat-feel.md), [character-studio pipeline](docs/guides/character-studio-pipeline.md)
 - [Engine Core Roadmap](docs/engine_roadmap.md) — `EC#` fixed-tick/combat/profiling substrate track
@@ -277,7 +282,7 @@ faster forward boost. Fuel uses the existing per-player jet gauge.
 - [Engine Upgrade Milestones](docs/archive/engine_upgrade_milestones.md) — campaign/engine milestones `M#`; also defines the `MM#` / `AI#` naming convention
 - [Game Maker Toolchain](docs/FEATURES.md) — shared recipe, generator, validator, and scene-composer architecture
 - [Engine Tools Multistage Pass](docs/archive/engine_tools_multistage_pass.md) — Blender capability triage and ET1–ET11 implementation program
-- [Parallel Review Triage — July 2026](docs/parallel_review_triage_2026-07.md) — evidence-based disposition of the external 156-item suggestion inventory
+- [Parallel Review Triage — July 2026](docs/archive/parallel_review_triage_2026-07.md) — evidence-based disposition of the external 156-item suggestion inventory
 
 ## Project Structure
 

@@ -47,6 +47,7 @@ use crate::engine::rendering::{
 };
 use crate::engine::state::AppState;
 use crate::events::*;
+use crate::plugins::vehicle_plugin::{VehicleSet, VehicleState};
 use crate::plugins::world_plugin::terrain_surface_y;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
@@ -368,6 +369,7 @@ impl Plugin for PlayerPlugin {
                     dungeon_crawl_party_pull_system,
                 )
                     .chain()
+                    .after(VehicleSet::State)
                     .run_if(in_state(AppState::Playing))
                     .run_if(fixed_motor_off),
             )
@@ -385,6 +387,7 @@ impl Plugin for PlayerPlugin {
                     dungeon_crawl_party_pull_system,
                 )
                     .chain()
+                    .after(VehicleSet::State)
                     .run_if(in_state(AppState::Playing))
                     .run_if(fixed_motor_on),
             )
@@ -2178,10 +2181,40 @@ fn boss_mode_player_slot_offset(index: u8) -> Vec3 {
 fn traversal_mode_switch_update(
     sim: Res<SimConfig>,
     buffers: Res<PlayerInputBuffers>,
-    mut player_q: Query<(&PlayerIndex, &PlayerInput, &mut TraversalModeState), With<Player>>,
+    dungeon: Res<DungeonCrawlState>,
+    mut vehicle_state: Option<ResMut<VehicleState>>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &PlayerInput,
+            &mut TraversalModeState,
+            Option<&BoatPassenger>,
+        ),
+        With<Player>,
+    >,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
-    for (idx, input, mut traversal) in player_q.iter_mut() {
+    if dungeon.active && dungeon.arcade_rules {
+        // Arcade stages lock the party to foot combat/platforming.
+        for (index, _, mut traversal, passenger) in player_q.iter_mut() {
+            let vehicle_active = passenger.is_some()
+                || vehicle_state
+                    .as_ref()
+                    .is_some_and(|vehicles| vehicles.player_owns_active_vehicle(index.0));
+            if vehicle_active {
+                if let Some(vehicles) = vehicle_state.as_mut() {
+                    vehicles.select_traversal_while_active(index.0, TraversalMode::Grapple);
+                }
+                traversal.active = TraversalMode::Vehicle;
+                continue;
+            }
+            if traversal.active != TraversalMode::Grapple {
+                traversal.active = TraversalMode::Grapple;
+            }
+        }
+        return;
+    }
+    for (idx, input, mut traversal, passenger) in player_q.iter_mut() {
         // EC1b: fixed tick reads the buffered edge; Update path reads live input.
         let switch = if sim.fixed_motor {
             buffers.fixed(idx.0).and_then(|f| f.edges.traversal)
@@ -2191,6 +2224,21 @@ fn traversal_mode_switch_update(
         let Some(mode) = switch else {
             continue;
         };
+        let vehicle_active = passenger.is_some()
+            || vehicle_state
+                .as_ref()
+                .is_some_and(|vehicles| vehicles.player_owns_active_vehicle(idx.0));
+        if vehicle_active {
+            if let Some(vehicles) = vehicle_state.as_mut() {
+                vehicles.select_traversal_while_active(idx.0, mode);
+            }
+            traversal.active = TraversalMode::Vehicle;
+            msg_ev.write(UiMessageEvent {
+                text: format!("Traversal selected for vehicle exit: {}", mode.label()),
+                duration: 1.2,
+            });
+            continue;
+        }
         if traversal.active == mode {
             continue;
         }
@@ -2458,6 +2506,7 @@ fn player_movement(
     time: Res<Time>,
     spatial_query: SpatialQuery,
     water_q: Query<(Entity, &Transform, &WaterBody), Without<Player>>,
+    vehicle_state: Option<Res<VehicleState>>,
     dungeon: Res<DungeonCrawlState>,
     shared_camera: Res<SharedEncounterCamera>,
     player_config: Res<LocalPlayerConfig>,
@@ -2525,6 +2574,15 @@ fn player_movement(
         } else {
             pi
         };
+        let vehicle_active = traversal.active == TraversalMode::Vehicle;
+        let air_vehicle_active = vehicle_active
+            && vehicle_state
+                .as_ref()
+                .is_some_and(|vehicles| vehicles.player_owns_air_vehicle(player_idx.0));
+        // Vehicle is a runtime-only sentinel. Only an explicitly owned air
+        // profile may consume the generic jet path; unknown/ground profiles
+        // fail closed so tanks and ATVs cannot fly.
+        let ground_vehicle_active = vehicle_active && !air_vehicle_active;
         if boat_passenger.is_some() {
             water.body = None;
             water.swimming = false;
@@ -2553,7 +2611,10 @@ fn player_movement(
             continue;
         }
 
-        if let Some(contact) = water_contact_at(transform.translation, &water_q) {
+        let water_contact = (!vehicle_active)
+            .then(|| water_contact_at(transform.translation, &water_q))
+            .flatten();
+        if let Some(contact) = water_contact {
             water.body = Some(contact.entity);
             water.surface_y = contact.surface_y;
             water.swimming = true;
@@ -2636,11 +2697,21 @@ fn player_movement(
         }
 
         jetpack.jump_tap_timer = (jetpack.jump_tap_timer - dt).max(0.0);
-        if pi.jump {
+        if pi.jump && !ground_vehicle_active {
             jetpack.register_jump_tap();
             movement.jump_buffer_timer = movement.jump_buffer_time;
         } else {
             movement.jump_buffer_timer = (movement.jump_buffer_timer - dt).max(0.0);
+        }
+        if ground_vehicle_active {
+            movement.jump_buffer_timer = 0.0;
+        }
+        if vehicle_active {
+            edge_grab.release_hang();
+            edge_grab.wall_contact_timer = 0.0;
+            climb.is_climbing = false;
+            platformer.rolling = false;
+            platformer.stomp_active = false;
         }
         movement.wall_jump_lock_timer = (movement.wall_jump_lock_timer - dt).max(0.0);
         jetpack.air_dash_timer = (jetpack.air_dash_timer - dt).max(0.0);
@@ -2733,6 +2804,9 @@ fn player_movement(
             movement.coyote_timer = (movement.coyote_timer - dt).max(0.0);
         }
 
+        // Turtle Yard / arcade stages: foot combat + jump only.
+        let arcade_lock = dungeon.active && dungeon.arcade_rules;
+
         let (fwd, right) = if dungeon.active {
             (Vec3::NEG_Z, Vec3::X)
         } else {
@@ -2746,12 +2820,14 @@ fn player_movement(
             )
         };
         let (mut input, mut input_strength) = movement_input_from_axes(fwd, right, pi.move_axis);
-        if hoverboard_overdrive_requested(
-            traversal.active,
-            pi.dodge,
-            rail_grind.is_some(),
-            board_boost.manual_cooldown,
-        ) {
+        if !arcade_lock
+            && hoverboard_overdrive_requested(
+                traversal.active,
+                pi.dodge,
+                rail_grind.is_some(),
+                board_boost.manual_cooldown,
+            )
+        {
             let boost_direction = if input.length_squared() > 0.05 {
                 input
             } else {
@@ -2833,6 +2909,7 @@ fn player_movement(
 
         if movement.is_grounded
             && pi.dodge
+            && !vehicle_active
             && !sabre_claims_dodge
             && traversal.active != TraversalMode::Hoverboard
             && movement.ground_velocity.length() >= platformer.roll_min_speed
@@ -2849,6 +2926,7 @@ fn player_movement(
 
         if !movement.is_grounded
             && pi.melee_heavy
+            && !vehicle_active
             && !sabre_claims_heavy
             && !platformer.stomp_active
         {
@@ -2898,6 +2976,7 @@ fn player_movement(
             edge_grab.wall_contact_timer > 0.0 && edge_grab.wall_normal.length_squared() > 0.25;
         let pushing_into_wall = has_wall_contact && input.dot(-edge_grab.wall_normal) > 0.15;
         let wall_sliding = !movement.is_grounded
+            && !vehicle_active
             && !edge_grab.is_hanging
             && !dodge.is_dodging
             && pushing_into_wall
@@ -2990,6 +3069,7 @@ fn player_movement(
         // (jump buffer → leap off the face), so climbing adds to — never
         // replaces — the double-jump-off-buildings verb.
         if !climb.is_climbing
+            && !vehicle_active
             && !edge_grab.is_hanging
             && !dodge.is_dodging
             && has_wall_contact
@@ -3065,6 +3145,7 @@ fn player_movement(
         }
 
         if movement.jump_buffer_timer > 0.0
+            && !vehicle_active
             && !movement.is_grounded
             && has_wall_contact
             && edge_grab.cooldown_timer <= 0.0
@@ -3082,7 +3163,10 @@ fn player_movement(
             edge_grab.cooldown_timer = edge_grab.grab_cooldown;
             started_jump = true;
             state.force(PlayerState::Jetpack);
-        } else if movement.jump_buffer_timer > 0.0 && movement.coyote_timer > 0.0 {
+        } else if movement.jump_buffer_timer > 0.0
+            && !ground_vehicle_active
+            && movement.coyote_timer > 0.0
+        {
             movement.velocity.y = movement.jump_force
                 * if traversal.active == TraversalMode::Hoverboard {
                     traversal.hoverboard_jump_mult
@@ -3098,6 +3182,7 @@ fn player_movement(
         }
 
         let ledge_candidate = (!movement.is_grounded
+            && !vehicle_active
             && !dodge.is_dodging
             && traversal.active != TraversalMode::Hoverboard
             && edge_grab.cooldown_timer <= 0.0
@@ -3126,9 +3211,32 @@ fn player_movement(
             continue;
         }
 
-        let wants_air_traversal = pi.jetpack && !started_jump && !movement.is_grounded;
+        // Turtle Yard / arcade stages: foot combat + jump only.
+        let arcade_lock = dungeon.active && dungeon.arcade_rules;
+        if arcade_lock {
+            jetpack.is_active = false;
+            jetpack.mode = if movement.is_grounded {
+                FlightMode::Grounded
+            } else if movement.velocity.y >= 0.0 {
+                FlightMode::Jump
+            } else {
+                FlightMode::Fall
+            };
+            jetpack.air_dash_timer = 0.0;
+            if board_boost.timer > 0.0 {
+                board_boost.timer = 0.0;
+                board_boost.speed_mult = 1.0;
+                board_boost.direction = Vec3::ZERO;
+            }
+        }
+
+        let wants_air_traversal = !arcade_lock
+            && !ground_vehicle_active
+            && pi.jetpack
+            && !started_jump
+            && !movement.is_grounded;
         jetpack.is_active = false;
-        if jetpack.air_dash_timer > 0.0 {
+        if !arcade_lock && !ground_vehicle_active && jetpack.air_dash_timer > 0.0 {
             jetpack.mode = FlightMode::AirDash;
             movement.velocity.y = movement.velocity.y.max(0.0);
             movement.ground_velocity = approach_vec3(
@@ -3381,7 +3489,10 @@ fn player_movement(
             movement.ground_velocity
         };
 
-        if dodge.is_dodging {
+        // `TraversalMode::Vehicle` is a runtime ownership sentinel, not an
+        // on-foot stance.  A dodge that was already active when boarding must
+        // never replace the craft's tuned horizontal velocity.
+        if dodge.is_dodging && !vehicle_active {
             h_vel = dodge.dodge_direction * dodge.dodge_speed;
         }
 
@@ -3452,6 +3563,15 @@ fn speed_loop_traversal_system(
         player_q.iter_mut()
     {
         loop_state.cooldown = (loop_state.cooldown - dt).max(0.0);
+
+        if traversal.active == TraversalMode::Vehicle {
+            if loop_state.guide.take().is_some() {
+                loop_state.progress = 0.0;
+                loop_state.speed = 0.0;
+                loop_state.cooldown = 0.4;
+            }
+            continue;
+        }
 
         if loop_state.guide.is_none()
             && loop_state.cooldown <= 0.0
@@ -3822,7 +3942,12 @@ fn enemy_grapple_kind(
     boss: Option<&BossEnemy>,
     drone: Option<&FlyingDrone>,
 ) -> GrappleTargetKind {
-    if boss.is_some() || matches!(enemy.enemy_type, EnemyType::Heavy | EnemyType::Hybrid) {
+    if boss.is_some()
+        || matches!(
+            enemy.enemy_type,
+            EnemyType::Heavy | EnemyType::Hybrid | EnemyType::Tank
+        )
+    {
         GrappleTargetKind::BossWeakPoint
     } else if drone.is_some() {
         GrappleTargetKind::ZipPoint
@@ -3838,6 +3963,7 @@ fn grapple_hook_update(
     route_registry: Res<WorldRouteRegistry>,
     sim: Res<SimConfig>,
     buffers: Res<PlayerInputBuffers>,
+    dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
             Entity,
@@ -3871,9 +3997,16 @@ fn grapple_hook_update(
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let dt = time.delta_secs();
+    let arcade_lock = dungeon.active && dungeon.arcade_rules;
     for (entity, transform, (idx, input), traversal, mut grapple, mut state) in player_q.iter_mut()
     {
         grapple.tick_foundation(dt);
+        if arcade_lock || traversal.active == TraversalMode::Vehicle {
+            if grapple.is_active() {
+                grapple.begin_recovery();
+            }
+            continue;
+        }
 
         // EC1b: fixed tick reads the buffered edge; Update path reads live input.
         let grapple_just = if sim.fixed_motor {
@@ -4146,7 +4279,10 @@ fn grapple_hook_impact_system(
         }
 
         let is_heavy = boss.is_some()
-            || matches!(enemy.enemy_type, EnemyType::Heavy | EnemyType::Hybrid)
+            || matches!(
+                enemy.enemy_type,
+                EnemyType::Heavy | EnemyType::Hybrid | EnemyType::Tank
+            )
             || matches!(grapple.target_kind, GrappleTargetKind::BossWeakPoint);
         let damage = if is_heavy { 28.0 } else { 18.0 };
         let result = apply_damage(
@@ -4252,6 +4388,14 @@ fn player_knockback_intake(
     }
 }
 
+fn finish_on_foot_dodge(dodge: &mut DodgeState, damageable: &mut Damageable) {
+    dodge.is_dodging = false;
+    dodge.dodge_timer = 0.0;
+    // A damage-hit i-frame may overlap the roll. Ending the dodge removes only
+    // its indefinite flag and must preserve that independently timed guard.
+    damageable.is_invulnerable = damageable.invulnerability_timer > 0.0;
+}
+
 fn player_dodge_update(
     time: Res<Time>,
     mut player_q: Query<
@@ -4275,13 +4419,27 @@ fn player_dodge_update(
     {
         dodge.cooldown_timer = (dodge.cooldown_timer - dt).max(0.0);
         let dodge_cost = dodge.dodge_cost * progression.perks.dodge_cost_mult();
+        let vehicle_active =
+            sabre_ctx.is_some_and(|(_, _, traversal)| traversal.active == TraversalMode::Vehicle);
+
+        // Boarding owns movement and defense tuning.  Cancel a roll carried
+        // across the mount edge before it can grant invulnerability, and do
+        // not start an ordinary on-foot dodge while the craft is active.
+        if vehicle_active {
+            if dodge.is_dodging {
+                finish_on_foot_dodge(&mut dodge, &mut damageable);
+                if state.current == PlayerState::Dodging {
+                    state.force(PlayerState::Idle);
+                }
+            }
+            continue;
+        }
 
         if dodge.is_dodging {
             dodge.dodge_timer -= dt;
             damageable.is_invulnerable = true;
             if dodge.dodge_timer <= 0.0 {
-                dodge.is_dodging = false;
-                damageable.is_invulnerable = false;
+                finish_on_foot_dodge(&mut dodge, &mut damageable);
                 state.transition(PlayerState::Idle);
             }
         }
@@ -4695,6 +4853,33 @@ mod tests {
             Vec3::new(0.9, -0.2, 0.0),
             Vec3::X,
         );
+    }
+
+    #[test]
+    fn vehicle_mount_cancels_dodge_without_stripping_hit_iframes() {
+        let mut dodge = DodgeState {
+            is_dodging: true,
+            dodge_timer: 0.2,
+            ..default()
+        };
+        let mut damageable = Damageable {
+            is_invulnerable: true,
+            invulnerability_timer: 0.12,
+            ..default()
+        };
+
+        finish_on_foot_dodge(&mut dodge, &mut damageable);
+
+        assert!(!dodge.is_dodging);
+        assert_eq!(dodge.dodge_timer, 0.0);
+        assert!(damageable.is_invulnerable);
+        assert_eq!(damageable.invulnerability_timer, 0.12);
+
+        damageable.invulnerability_timer = 0.0;
+        damageable.is_invulnerable = true;
+        dodge.is_dodging = true;
+        finish_on_foot_dodge(&mut dodge, &mut damageable);
+        assert!(!damageable.is_invulnerable);
     }
 
     #[test]

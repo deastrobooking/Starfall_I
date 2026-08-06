@@ -20,6 +20,7 @@
 //! Terrain, buildings, and roads are generated in `plugins/world_plugin`; this
 //! folder holds the data and rules those systems consult.
 
+pub mod arcade_dungeon;
 pub mod discussion;
 pub mod final_war;
 pub mod hacking;

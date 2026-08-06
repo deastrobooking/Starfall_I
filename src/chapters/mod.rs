@@ -884,7 +884,7 @@ fn build_chapters() -> Vec<ChapterDef> {
     use Faction::*;
     // Note: deliberately NOT `use EnemyType::*;` so script calls stay explicit
     // where the specialized spike alien appears.
-    use EnemyType::{Drone, Heavy, Hybrid, Soldier};
+    use EnemyType::{Drone, Heavy, Hybrid, Soldier, Tank};
 
     vec![
         ChapterDef {
@@ -1008,7 +1008,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                 dialogue("Angelo", HeroBrother, "If we hit the switches together, the bridge sings.", 3.0),
                 secret_cave(4, "secret_cave_ch04", "Brother Trial Burrow"),
                 spawn(DimensionalAlien, Soldier, 6, 1.4),
-                spawn(DimensionalAlien, Heavy, 3, 1.4),
+                spawn(DimensionalAlien, Tank, 2, 1.4),
                 mid_boss("Brutus", "Portal Bouncer", DimensionalAlien, 1.45),
                 place(DiscoverableKind::WeaponMod("piercing_rounds"), "Star Pierce Mod", Vec3::new(8.0, 0.5, 0.0)),
                 robot_pet(
@@ -1354,6 +1354,7 @@ fn build_chapters() -> Vec<ChapterDef> {
                 secret_cave(13, "secret_cave_ch13", "Crown Gate Underpath"),
                 dialogue("Fortuna", HeroSister, "Then we make it bite a star.", 2.5),
                 spawn(DimensionalAlien, Drone, 8, 1.8),
+                spawn(DimensionalAlien, Tank, 3, 1.85),
                 mid_boss("Selene", "Scallarian Rift Herald", DimensionalAlien, 1.8),
                 boss("HybridOmega", "Scallarian Crown Gate Avatar", DimensionalAlien,
                      "AVATAR: Earth belongs to the between-place.", 1.9),
@@ -1456,6 +1457,43 @@ mod tests {
 
         assert_eq!(anchors.len(), map_settlements().len());
         assert_eq!(rewards.len(), map_settlements().len());
+    }
+
+    #[test]
+    fn campaign_fields_scallarian_tanks_in_multiple_non_dragon_encounters() {
+        let chapters_with_scallarian_tanks = chapter_catalog()
+            .iter()
+            .filter(|chapter| {
+                chapter.script.iter().any(|step| {
+                    matches!(
+                        step,
+                        EncounterStep::SpawnGroup {
+                            faction: Faction::DimensionalAlien,
+                            enemy_type: EnemyType::Tank,
+                            ..
+                        }
+                    )
+                })
+            })
+            .count();
+        assert!(chapters_with_scallarian_tanks >= 2);
+
+        for step in chapter_catalog()
+            .iter()
+            .flat_map(|chapter| chapter.script.iter())
+        {
+            if let EncounterStep::SpawnGroup {
+                faction,
+                enemy_type: EnemyType::Tank,
+                ..
+            } = step
+            {
+                assert!(!matches!(
+                    *faction,
+                    Faction::DragonRoyalty | Faction::DragonExile
+                ));
+            }
+        }
     }
 
     #[test]

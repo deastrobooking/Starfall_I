@@ -28,6 +28,28 @@ pub(super) const RACE_REGION_ROAD_WIDTH: f32 = 384.0;
 pub(super) const SPEED_ROAD_OUTER_WALL_HEIGHT: f32 = 12.0;
 pub(super) const SPEED_ROAD_CENTER_WALL_HEIGHT: f32 = 7.5;
 
+// Heavy Water's Star City silhouette returns at Starfall scale as a compact,
+// elevated boost ring around the world origin. Offset the authored circle by
+// half a chord so every cardinal access ramp meets the middle of a deck
+// section rather than a collider seam.
+pub(super) const STAR_CITY_RING_RADIUS: f32 = 280.0;
+pub(super) const STAR_CITY_RING_HEIGHT: f32 = 80.0;
+pub(super) const STAR_CITY_RING_WIDTH: f32 = 32.0;
+pub(super) const STAR_CITY_RING_SEGMENTS: usize = 56;
+pub(super) const STAR_CITY_RING_RAMP_COUNT: usize = 4;
+pub(super) const STAR_CITY_RING_RAMP_RUN: f32 = 280.0;
+pub(super) const STAR_CITY_RING_RAMP_SEGMENTS: usize = 24;
+const STAR_CITY_RING_RAMP_WIDTH: f32 = 24.0;
+const STAR_CITY_RING_GROUND_EMBED: f32 = 0.08;
+const STAR_CITY_RING_LANE_SPAN_WIDTH: f32 = STAR_CITY_RING_WIDTH * 0.72;
+const STAR_CITY_RING_LANE_OFFSET: f32 = STAR_CITY_RING_LANE_SPAN_WIDTH * 0.24;
+const STAR_CITY_RING_DIVIDER_WIDTH: f32 = 2.4;
+// Keep real trigger pads sparse on the short ring chords. Continuous emissive
+// lane strips still sell the two-way boost loop, while eight stations avoid
+// thousands of chevron/light entities and hundreds of per-pad meshes.
+const STAR_CITY_RING_BOOST_INTERVAL: usize = 7;
+const STAR_CITY_RING_BOOST_PHASE: usize = 3;
+
 pub(super) fn speed_road_width_for_route(route_index: usize) -> f32 {
     if route_index >= BASE_MOUNTAIN_ROUTE_COUNT {
         RACE_REGION_ROAD_WIDTH
@@ -243,8 +265,126 @@ pub(super) fn settlement_speed_ring_radius(seed: u64, settlement: MapSettlement)
     settlement_speed_ring_radius_for_layout(settlement.kind, layout)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StarCityRingRampPlan {
+    merge: Vec2,
+    ground_mouth: Vec2,
+}
+
+/// Closed chord loop for the elevated Star City ring. The duplicated final
+/// point makes section count and collider continuity explicit to callers.
+fn star_city_ring_points() -> Vec<Vec3> {
+    let angle_step = TAU / STAR_CITY_RING_SEGMENTS as f32;
+    (0..=STAR_CITY_RING_SEGMENTS)
+        .map(|index| {
+            let angle = index as f32 * angle_step - angle_step * 0.5;
+            Vec3::new(
+                angle.cos() * STAR_CITY_RING_RADIUS,
+                STAR_CITY_RING_HEIGHT,
+                angle.sin() * STAR_CITY_RING_RADIUS,
+            )
+        })
+        .collect()
+}
+
+fn star_city_ring_has_boost_station(segment: usize) -> bool {
+    segment % STAR_CITY_RING_BOOST_INTERVAL == STAR_CITY_RING_BOOST_PHASE
+}
+
+/// Four world-cardinal approaches whose elevated ends land on the outer lane
+/// at the midpoint of the corresponding chord, where a protected opening
+/// exists in the outside guardrail.
+fn star_city_ring_ramp_plans() -> [StarCityRingRampPlan; STAR_CITY_RING_RAMP_COUNT] {
+    let chord_midpoint_radius =
+        STAR_CITY_RING_RADIUS * (std::f32::consts::PI / STAR_CITY_RING_SEGMENTS as f32).cos();
+    let outer_lane_radius = chord_midpoint_radius + STAR_CITY_RING_LANE_OFFSET;
+    std::array::from_fn(|index| {
+        let angle = index as f32 * TAU / STAR_CITY_RING_RAMP_COUNT as f32;
+        let direction = Vec2::new(angle.cos(), angle.sin());
+        StarCityRingRampPlan {
+            // End on the outer travel lane, not the centerline divider. The
+            // chord's outer guardrail still opens at this longitudinal point,
+            // creating a protected T-merge into either tangent direction.
+            merge: direction * outer_lane_radius,
+            ground_mouth: direction * (outer_lane_radius + STAR_CITY_RING_RAMP_RUN),
+        }
+    })
+}
+
+fn star_city_ring_ramp_points(ramp: StarCityRingRampPlan, terrain_seed: u64) -> Vec<Vec3> {
+    let mouth_ground = terrain_surface_y(ramp.ground_mouth.x, ramp.ground_mouth.y, terrain_seed);
+    // Start embedded slightly into the terrain, matching the established
+    // ground-access roads, so the first deck has a driveable half-metre lip
+    // instead of a two-metre vertical step.
+    let mouth_height = mouth_ground + STAR_CITY_RING_GROUND_EMBED;
+    let mut points = Vec::with_capacity(STAR_CITY_RING_RAMP_SEGMENTS + 1);
+    for step in 0..=STAR_CITY_RING_RAMP_SEGMENTS {
+        let t = step as f32 / STAR_CITY_RING_RAMP_SEGMENTS as f32;
+        let xz = ramp.ground_mouth.lerp(ramp.merge, t);
+        let eased = t * t * (3.0 - 2.0 * t);
+        let engineered_height = mouth_height + (STAR_CITY_RING_HEIGHT - mouth_height) * eased;
+        let terrain_clearance =
+            terrain_surface_y(xz.x, xz.y, terrain_seed) + STAR_CITY_RING_GROUND_EMBED;
+        points.push(Vec3::new(
+            xz.x,
+            engineered_height.max(terrain_clearance),
+            xz.y,
+        ));
+    }
+    if let Some(last) = points.last_mut() {
+        *last = Vec3::new(ramp.merge.x, STAR_CITY_RING_HEIGHT, ramp.merge.y);
+    }
+    points
+}
+
+#[cfg(test)]
+fn distance_to_star_city_ring_network(x: f32, z: f32) -> f32 {
+    let point = Vec2::new(x, z);
+    let mut best = (point.length() - STAR_CITY_RING_RADIUS).abs();
+    for ramp in star_city_ring_ramp_plans() {
+        best = best.min(distance_to_segment_xz(
+            x,
+            z,
+            ramp.merge.x,
+            ramp.merge.y,
+            ramp.ground_mouth.x,
+            ramp.ground_mouth.y,
+        ));
+    }
+    best
+}
+
+/// Signed horizontal distance from the actual compact Star City road edge.
+/// Negative values are on its 32-unit ring or 24-unit ramp footprint.
+pub(super) fn signed_distance_to_star_city_road_footprint(x: f32, z: f32) -> f32 {
+    let point = Vec2::new(x, z);
+    let mut signed_edge =
+        (point.length() - STAR_CITY_RING_RADIUS).abs() - STAR_CITY_RING_WIDTH * 0.5;
+    for ramp in star_city_ring_ramp_plans() {
+        signed_edge = signed_edge.min(
+            distance_to_segment_xz(
+                x,
+                z,
+                ramp.merge.x,
+                ramp.merge.y,
+                ramp.ground_mouth.x,
+                ramp.ground_mouth.y,
+            ) - STAR_CITY_RING_RAMP_WIDTH * 0.5,
+        );
+    }
+    signed_edge
+}
+
+/// Express compact Star City edge distance in the legacy speed-road field,
+/// whose consumers subtract the 256-unit trunk half-width themselves. This
+/// prevents a 32-unit ring from clearing a 256-unit donut through downtown.
+fn star_city_equivalent_speed_road_distance(x: f32, z: f32) -> f32 {
+    signed_distance_to_star_city_road_footprint(x, z) + SPEED_ROAD_WIDTH * 0.5
+}
+
 pub(super) fn distance_to_speed_road_network(x: f32, z: f32, seed: u64) -> f32 {
-    let mut best = distance_to_mountain_route_network(x, z);
+    let mut best = distance_to_mountain_route_network(x, z)
+        .min(star_city_equivalent_speed_road_distance(x, z));
     let point = Vec2::new(x, z);
 
     // Ground-access ramps extend beyond route endpoints. Include their
@@ -337,6 +477,7 @@ pub(super) fn spawn_speed_road_network(
     terrain_seed: u64,
 ) {
     let deck_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    spawn_star_city_elevated_ring(commands, meshes, pal, &deck_mesh, terrain_seed);
     let road_profiles = speed_road_network_profiles(terrain_seed);
 
     for (ri, route) in mountain_routes().iter().enumerate() {
@@ -559,6 +700,198 @@ pub(super) fn spawn_speed_road_network(
     }
 
     spawn_npc_road_vehicles(commands, meshes, pal, seed + 63_000, &road_profiles);
+}
+
+/// Build Heavy Water's elevated Star City speed ring as one continuous,
+/// collidable loop with four protected cardinal merges. The loop retains
+/// Starfall's two-way neon boost lanes and uses the shared viaduct supports;
+/// each access ramp is a smooth terrain-aware climb onto the outer ring lane.
+fn spawn_star_city_elevated_ring(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    deck_mesh: &Handle<Mesh>,
+    terrain_seed: u64,
+) {
+    let ring_points = star_city_ring_points();
+    let ramp_plans = star_city_ring_ramp_plans();
+    let segments_per_quadrant = STAR_CITY_RING_SEGMENTS / STAR_CITY_RING_RAMP_COUNT;
+
+    for (segment, points) in ring_points.windows(2).enumerate() {
+        let start = points[0];
+        let end = points[1];
+        let has_cardinal_merge = segment.is_multiple_of(segments_per_quadrant);
+        spawn_banked_deck_segment(
+            commands,
+            pal,
+            deck_mesh,
+            start,
+            end,
+            STAR_CITY_RING_WIDTH,
+            0.0,
+            !has_cardinal_merge,
+        );
+
+        if has_cardinal_merge {
+            let ramp = ramp_plans[segment / segments_per_quadrant];
+            spawn_merge_chunk_guardrails(
+                commands,
+                pal,
+                deck_mesh,
+                start,
+                end,
+                ramp.ground_mouth,
+                STAR_CITY_RING_WIDTH,
+            );
+        }
+
+        let delta = end - start;
+        let length = delta.length();
+        let yaw = delta.x.atan2(delta.z);
+        let rot = Quat::from_rotation_y(yaw);
+        let forward = rot * Vec3::Z;
+        let right = rot * Vec3::X;
+        let lane_span_width = STAR_CITY_RING_LANE_SPAN_WIDTH;
+        let lane_width = (lane_span_width * 0.16).max(6.0);
+        let lane_offset = STAR_CITY_RING_LANE_OFFSET;
+        let road_surface = start.lerp(end, 0.5) + Vec3::Y * 0.58;
+
+        // Shared-mesh emissive strips give the entire ring a continuous neon
+        // identity without calling spawn_boost_road_span for every ~31m chord.
+        for side in [-1.0_f32, 1.0] {
+            let lane_center = road_surface + right * side * lane_offset;
+            commands.spawn((
+                PbrBundle {
+                    mesh: Mesh3d(deck_mesh.clone()),
+                    material: MeshMaterial3d(pal.boost_lane.clone()),
+                    transform: Transform::from_translation(lane_center)
+                        .with_rotation(rot)
+                        .with_scale(Vec3::new(lane_width, 0.07, length * 0.98)),
+                    ..default()
+                },
+                WorldGeometry,
+            ));
+
+            if star_city_ring_has_boost_station(segment) {
+                let direction = if side > 0.0 { forward } else { -forward };
+                let lane_yaw = if side > 0.0 {
+                    yaw
+                } else {
+                    yaw + std::f32::consts::PI
+                };
+                spawn_board_boost_pad(
+                    commands,
+                    meshes,
+                    pal,
+                    lane_center + Vec3::Y * 0.08,
+                    lane_yaw,
+                    0.0,
+                    direction,
+                    lane_width * 0.84,
+                    length.min(15.0),
+                    3.15,
+                    3.10,
+                    0.0,
+                    1.70,
+                );
+            }
+        }
+
+        // One shared-mesh physical divider per chord contains opposing boost
+        // directions. Collider overlap across seams preserves continuity.
+        let divider_height = SPEED_ROAD_CENTER_WALL_HEIGHT;
+        let divider_width = STAR_CITY_RING_DIVIDER_WIDTH;
+        commands.spawn((
+            PbrBundle {
+                mesh: Mesh3d(deck_mesh.clone()),
+                material: MeshMaterial3d(pal.brushed_metal.clone()),
+                transform: Transform::from_translation(
+                    road_surface + Vec3::Y * (divider_height * 0.5 + 0.12),
+                )
+                .with_rotation(rot)
+                .with_scale(Vec3::new(
+                    divider_width,
+                    divider_height,
+                    length * 1.02,
+                )),
+                ..default()
+            },
+            WorldGeometry,
+            RoadSafetyBarrier::DirectionDivider,
+            crate::engine::physics::prelude::RigidBody::Fixed,
+            crate::engine::physics::prelude::Collider::cuboid(
+                divider_width * 0.5,
+                divider_height * 0.5,
+                length * 0.51,
+            ),
+            world_space_collider_scale(),
+        ));
+        spawn_speed_road_support_columns(
+            commands,
+            pal,
+            deck_mesh,
+            start,
+            end,
+            STAR_CITY_RING_WIDTH,
+            terrain_seed,
+        );
+    }
+
+    for (ramp_index, ramp) in ramp_plans.into_iter().enumerate() {
+        let points = star_city_ring_ramp_points(ramp, terrain_seed);
+
+        for (segment, pair) in points.windows(2).enumerate() {
+            spawn_banked_deck_segment(
+                commands,
+                pal,
+                deck_mesh,
+                pair[0],
+                pair[1],
+                STAR_CITY_RING_RAMP_WIDTH,
+                0.0,
+                true,
+            );
+            spawn_speed_road_support_columns(
+                commands,
+                pal,
+                deck_mesh,
+                pair[0],
+                pair[1],
+                STAR_CITY_RING_RAMP_WIDTH,
+                terrain_seed,
+            );
+
+            // Two real boost sections per climb establish the ring's fast
+            // access line without carpeting every short curved ramp chord in
+            // overlapping pads.
+            if matches!(segment, 3 | 15) {
+                let delta = pair[1] - pair[0];
+                let horizontal_len = Vec2::new(delta.x, delta.z).length().max(0.001);
+                spawn_board_boost_pad(
+                    commands,
+                    meshes,
+                    pal,
+                    pair[0].lerp(pair[1], 0.5) + Vec3::Y * 0.52,
+                    delta.x.atan2(delta.z),
+                    (delta.y / horizontal_len).atan(),
+                    delta.normalize_or_zero(),
+                    STAR_CITY_RING_RAMP_WIDTH * 0.62,
+                    delta.length() * 1.35,
+                    3.2,
+                    3.4,
+                    0.0,
+                    1.8,
+                );
+            }
+        }
+
+        commands.spawn((
+            Name::new(format!("Star City Ring Access {}", ramp_index + 1)),
+            Transform::from_xyz(ramp.merge.x, STAR_CITY_RING_HEIGHT, ramp.merge.y),
+            GlobalTransform::default(),
+            WorldGeometry,
+        ));
+    }
 }
 
 pub(super) fn speed_road_terrain_point(x: f32, z: f32, terrain_seed: u64, clearance: f32) -> Vec3 {
@@ -1801,7 +2134,7 @@ pub(super) fn spawn_sonic_spring_pad(
             launch_velocity: direction * launch_speed + Vec3::Y * launch_lift,
             radius: 3.4,
             cooldown: 0.16,
-            cooldown_timer: 0.0,
+            cooldown_timers: [0.0; 4],
             force_hoverboard,
         },
         GrappleSocket::new(GrappleTargetKind::ZipPoint)
@@ -2627,4 +2960,139 @@ pub(super) fn route_heading_yaw(route: &[(f32, f32)]) -> f32 {
     let (ax, az) = route[0];
     let (bx, bz) = route[1];
     (bx - ax).atan2(bz - az)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_near(actual: f32, expected: f32, tolerance: f32) {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected} +/- {tolerance}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn star_city_ring_keeps_heavy_water_parameters_and_section_count() {
+        assert_eq!(STAR_CITY_RING_SEGMENTS, 56);
+        assert_near(STAR_CITY_RING_RADIUS, 280.0, f32::EPSILON);
+        assert_near(STAR_CITY_RING_HEIGHT, 80.0, f32::EPSILON);
+
+        let points = star_city_ring_points();
+        assert_eq!(points.len(), STAR_CITY_RING_SEGMENTS + 1);
+        assert!(points[0].distance(points[STAR_CITY_RING_SEGMENTS]) < 0.001);
+        assert!(points.iter().all(|point| {
+            (Vec2::new(point.x, point.z).length() - STAR_CITY_RING_RADIUS).abs() < 0.001
+                && (point.y - STAR_CITY_RING_HEIGHT).abs() < f32::EPSILON
+        }));
+    }
+
+    #[test]
+    fn star_city_ring_chords_are_uniform_and_continuous() {
+        let points = star_city_ring_points();
+        let expected_chord = 2.0
+            * STAR_CITY_RING_RADIUS
+            * (std::f32::consts::PI / STAR_CITY_RING_SEGMENTS as f32).sin();
+        for pair in points.windows(2) {
+            assert_near(pair[0].distance(pair[1]), expected_chord, 0.001);
+        }
+
+        // The closed point list gives each section exactly one shared endpoint
+        // with its successor, including the last-to-first seam.
+        for segment in 0..STAR_CITY_RING_SEGMENTS {
+            let next_segment = (segment + 1) % STAR_CITY_RING_SEGMENTS;
+            let end = points[segment + 1];
+            let next_start = if next_segment == 0 {
+                points[0]
+            } else {
+                points[next_segment]
+            };
+            assert!(end.distance(next_start) < 0.001);
+        }
+    }
+
+    #[test]
+    fn star_city_ring_uses_eight_sparse_boost_stations_away_from_merges() {
+        let stations: Vec<_> = (0..STAR_CITY_RING_SEGMENTS)
+            .filter(|segment| star_city_ring_has_boost_station(*segment))
+            .collect();
+        assert_eq!(stations.len(), 8);
+
+        let segments_per_quadrant = STAR_CITY_RING_SEGMENTS / STAR_CITY_RING_RAMP_COUNT;
+        assert!(stations
+            .iter()
+            .all(|segment| !segment.is_multiple_of(segments_per_quadrant)));
+    }
+
+    #[test]
+    fn star_city_ring_has_four_cardinal_mid_chord_access_ramps() {
+        let points = star_city_ring_points();
+        let ramps = star_city_ring_ramp_plans();
+        assert_eq!(ramps.len(), STAR_CITY_RING_RAMP_COUNT);
+        assert_eq!(STAR_CITY_RING_RAMP_SEGMENTS, 24);
+
+        let segments_per_quadrant = STAR_CITY_RING_SEGMENTS / STAR_CITY_RING_RAMP_COUNT;
+        for (index, ramp) in ramps.iter().enumerate() {
+            let ring_segment = index * segments_per_quadrant;
+            let chord_midpoint = Vec2::new(
+                (points[ring_segment].x + points[ring_segment + 1].x) * 0.5,
+                (points[ring_segment].z + points[ring_segment + 1].z) * 0.5,
+            );
+            let angle = index as f32 * TAU / STAR_CITY_RING_RAMP_COUNT as f32;
+            let cardinal = Vec2::new(angle.cos(), angle.sin());
+            let expected_outer_lane = chord_midpoint + cardinal * STAR_CITY_RING_LANE_OFFSET;
+            assert!(ramp.merge.distance(expected_outer_lane) < 0.001);
+            assert!(
+                ramp.merge.distance(chord_midpoint) > STAR_CITY_RING_DIVIDER_WIDTH * 0.5 + 2.0,
+                "ramp endpoint must clear the ring's center divider"
+            );
+            assert!(ramp.ground_mouth.normalize().dot(cardinal) > 0.9999);
+            assert_near(
+                ramp.ground_mouth.length(),
+                ramp.merge.length() + STAR_CITY_RING_RAMP_RUN,
+                0.001,
+            );
+        }
+    }
+
+    #[test]
+    fn star_city_ring_ramp_mouths_are_driveable_from_terrain() {
+        let terrain_seed = 0x5a17_c170_u64;
+        for ramp in star_city_ring_ramp_plans() {
+            let points = star_city_ring_ramp_points(ramp, terrain_seed);
+            let mouth = points.first().expect("ramp has a ground mouth");
+            let ground = terrain_surface_y(mouth.x, mouth.z, terrain_seed);
+
+            assert_near(mouth.y, ground + STAR_CITY_RING_GROUND_EMBED, f32::EPSILON);
+            assert_eq!(points.len(), STAR_CITY_RING_RAMP_SEGMENTS + 1);
+        }
+    }
+
+    #[test]
+    fn star_city_ring_and_ramps_participate_in_world_keepout_distance() {
+        assert!(distance_to_star_city_ring_network(STAR_CITY_RING_RADIUS, 0.0) < 0.001);
+        for ramp in star_city_ring_ramp_plans() {
+            let midpoint = ramp.merge.lerp(ramp.ground_mouth, 0.5);
+            assert!(distance_to_star_city_ring_network(midpoint.x, midpoint.y) < 0.001);
+        }
+        assert!(distance_to_star_city_ring_network(0.0, 0.0) > 270.0);
+    }
+
+    #[test]
+    fn star_city_keepout_preserves_compact_ring_and_ramp_widths() {
+        assert_near(
+            star_city_equivalent_speed_road_distance(STAR_CITY_RING_RADIUS, 0.0),
+            SPEED_ROAD_WIDTH * 0.5 - STAR_CITY_RING_WIDTH * 0.5,
+            0.001,
+        );
+
+        let ramp = star_city_ring_ramp_plans()[0];
+        let midpoint = ramp.merge.lerp(ramp.ground_mouth, 0.5);
+        assert_near(
+            star_city_equivalent_speed_road_distance(midpoint.x, midpoint.y),
+            SPEED_ROAD_WIDTH * 0.5 - STAR_CITY_RING_RAMP_WIDTH * 0.5,
+            0.001,
+        );
+    }
 }
