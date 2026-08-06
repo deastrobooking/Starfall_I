@@ -37,6 +37,7 @@ use crate::components::weapon::{
 use crate::components::world::{
     BoatPassenger, BoatVehicle, DiscussionNpc, DungeonCrawlGate, DungeonExitPortal, WorldLoot,
 };
+use crate::engine::bindings::{ControlBindings, FaceButton};
 use crate::engine::physics::prelude::{Physics, PhysicsTime};
 use crate::engine::rendering::Camera3dBundle;
 use crate::engine::state::AppState;
@@ -46,7 +47,10 @@ use crate::engine_tools::{
 };
 use crate::events::*;
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
-use crate::plugins::input_plugin::{GamepadAssignments, NativeButton, NativeControllerState};
+use crate::plugins::input_plugin::{
+    mapped_gamepad_face, mapped_native_face, GamepadAssignments, NativeButton,
+    NativeControllerState,
+};
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
 use crate::resources::{
     ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
@@ -783,6 +787,7 @@ fn menu_focus_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
+    settings: Res<GameSettings>,
     mut focus: ResMut<MenuFocus>,
     mut button_set: ParamSet<(
         Query<
@@ -806,13 +811,14 @@ fn menu_focus_navigation(
 
     let direction_input = menu_direction_input(&keyboard, &gamepads, &native);
     let direction = repeated_menu_direction(&mut focus, direction_input, time.delta_secs());
+    let (confirm_gamepad, confirm_native) = mapped_menu_face(&settings.bindings, FaceButton::South);
     let confirm = keyboard.just_pressed(KeyCode::Enter)
         || keyboard.just_pressed(KeyCode::NumpadEnter)
         || keyboard.just_pressed(KeyCode::Space)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::South))
-        || native.just_pressed(NativeButton::South);
+            .any(|gamepad| gamepad.just_pressed(confirm_gamepad))
+        || native.just_pressed(confirm_native);
 
     let mut visible = Vec::new();
     let mut hovered = None;
@@ -977,6 +983,7 @@ fn menu_back_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
+    settings: Res<GameSettings>,
     state: Res<State<AppState>>,
     design_data: Res<CharacterDesignData>,
     imported_forge_return: Res<ImportedForgeReturnTarget>,
@@ -987,11 +994,12 @@ fn menu_back_navigation(
     mut commands: Commands,
     victory_q: Query<Entity, With<VictoryRoot>>,
 ) {
+    let (back_gamepad, back_native) = mapped_menu_face(&settings.bindings, FaceButton::East);
     let back = keyboard.just_pressed(KeyCode::Escape)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::East))
-        || native.just_pressed(NativeButton::East);
+            .any(|gamepad| gamepad.just_pressed(back_gamepad))
+        || native.just_pressed(back_native);
     if !back {
         return;
     }
@@ -1031,6 +1039,19 @@ fn menu_back_navigation(
             next_state.set(AppState::MainMenu);
         }
     }
+}
+
+/// Resolve one logical menu face action for Bevy and native-controller input.
+/// Keeping the pair together prevents the two controller backends from
+/// drifting when the configured face layout swaps confirm and back.
+fn mapped_menu_face(
+    bindings: &ControlBindings,
+    logical: FaceButton,
+) -> (GamepadButton, NativeButton) {
+    (
+        mapped_gamepad_face(bindings, logical),
+        mapped_native_face(bindings, logical),
+    )
 }
 
 fn default_menu_focus(buttons: &[(Entity, Vec2)]) -> Option<Entity> {
@@ -8042,6 +8063,10 @@ fn settings_panel_input_system(
     for mut text in text_q.p3().iter_mut() {
         *text = Text::new(accessibility_str.clone());
     }
+    let bindings_str = control_bindings_text(&settings, &pending_rebind);
+    for mut text in text_q.p4().iter_mut() {
+        *text = Text::new(bindings_str.clone());
+    }
 }
 
 fn difficulty_text(settings: &GameSettings) -> String {
@@ -8531,6 +8556,29 @@ mod menu_navigation_tests {
     }
 
     #[test]
+    fn shared_menu_confirm_and_back_follow_the_face_layout() {
+        let mut bindings = ControlBindings::default();
+        assert_eq!(
+            mapped_menu_face(&bindings, FaceButton::South),
+            (GamepadButton::South, NativeButton::South)
+        );
+        assert_eq!(
+            mapped_menu_face(&bindings, FaceButton::East),
+            (GamepadButton::East, NativeButton::East)
+        );
+
+        bindings.face_layout = crate::engine::bindings::FaceLayout::Nintendo;
+        assert_eq!(
+            mapped_menu_face(&bindings, FaceButton::South),
+            (GamepadButton::East, NativeButton::East)
+        );
+        assert_eq!(
+            mapped_menu_face(&bindings, FaceButton::East),
+            (GamepadButton::South, NativeButton::South)
+        );
+    }
+
+    #[test]
     fn accessibility_summary_reports_every_toggle_without_color_dependency() {
         let settings = GameSettings {
             show_damage_numbers: false,
@@ -8820,6 +8868,13 @@ mod menu_navigation_tests {
             .rebind(KeyAction::Dodge, KeyCode::KeyZ)
             .unwrap();
         assert!(control_bindings_text(&settings, &PendingRebind::default()).contains("Dodge: Z"));
+
+        settings.bindings.face_layout = crate::engine::bindings::FaceLayout::Nintendo;
+        settings.bindings.invert_look_y = true;
+        let adjusted = control_bindings_text(&settings, &PendingRebind::default());
+        assert!(adjusted.contains("Face layout: Nintendo"));
+        assert!(adjusted.contains("Invert look Y: ON"));
+        assert!(adjusted.contains("Button mapping:"));
     }
 
     #[test]

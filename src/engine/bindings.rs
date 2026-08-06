@@ -1,16 +1,19 @@
 //! Player-configurable control bindings (docs/PROJECT_PLAN.md P3).
 //!
-//! Two things are configurable, and one deliberately is not.
+//! Three things are configurable, and one category deliberately is not.
 //!
-//! **Face-button layout** is remapped at the source: `update_player_inputs`
-//! reads every gamepad button through [`ControlBindings::remap_face`], so a
-//! swap follows *everything* — including chords. If a player moves the sabre
-//! toggle's North to West, `LB + North` becomes `LB + West` automatically
-//! instead of the chord quietly pointing at the old key. Nintendo-layout pads
-//! report their physical A/B and X/Y positions swapped from Xbox, so this is
-//! the single most-needed rebind in the whole system.
+//! **Face-button layout** is remapped at the source. Gameplay, shared menus,
+//! Character Studio, and Forge tools resolve their logical face actions through
+//! the same adapters, so a swap follows *everything* — including chords. If a
+//! player moves the sabre toggle's North to West, `LB + North` becomes
+//! `LB + West` automatically instead of the chord quietly pointing at the old
+//! key. Nintendo-layout pads report their physical A/B and X/Y positions
+//! swapped from Xbox, so this is the single most-needed rebind in the system.
 //!
 //! **Keyboard action keys** are looked up per action for player one.
+//!
+//! **Invert look Y** applies after mouse and stick look are assembled, keeping
+//! both devices consistent.
 //!
 //! **Chords and modifiers are not rebindable, by design.** LB is *the*
 //! modifier, Select is *the* utility modifier, the bare D-pad swaps what RT
@@ -51,8 +54,9 @@ impl FaceButton {
     }
 }
 
-/// A named face-button arrangement. `Custom` carries an explicit
-/// logical→physical permutation so a player can build any arrangement.
+/// A named face-button arrangement. Every preset is a complete
+/// logical-to-physical permutation, so no face-button action becomes
+/// unreachable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FaceLayout {
     /// As labelled on an Xbox-style pad: what the game calls South is South.

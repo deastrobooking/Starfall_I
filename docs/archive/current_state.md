@@ -7,9 +7,9 @@
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 432 tests across the main crate and example targets,
-  `cargo build`, `cargo fmt --check`, and
-  `cargo clippy --all-targets -- -D warnings` pass locally.
+- Automated baseline: 655 Designer-edition tests and 643 Game-edition tests,
+  `cargo check --all-targets`, `cargo fmt --check`, and strict clippy for both
+  feature sets pass locally.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
   split-screen performance acceptance is still required. Automated success is
   not evidence that those hardware gates passed.
@@ -183,8 +183,12 @@
   device-aware prompt rendering. Shared help copy follows the last-used
   keyboard or gamepad across menus and common in-game panels, with persisted
   Auto/Xbox/PlayStation/Nintendo controller glyph selection and vendor-aware
-  Auto detection. Remaining screens still migrate incrementally to the
-  semantic theme and text catalog; complete input remapping and translated
+  Auto detection. Settings now persist four complete face-button layouts,
+  thirteen discrete Player 1 keyboard bindings, and combined mouse/stick
+  invert-look Y. Both controller backends remap face buttons at the source so
+  chords follow the selected layout; LB, Select, D-pad modifiers, and movement
+  axes remain fixed to keep every action reachable. Remaining screens still
+  migrate incrementally to the semantic theme and text catalog; translated
   locale assets remain.
 
 ## Current production order

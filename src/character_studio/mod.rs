@@ -30,10 +30,15 @@ use std::path::PathBuf;
 use crate::character::blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
 };
+use crate::engine::bindings::FaceButton;
 use crate::engine::game_rng::GameRng;
 use crate::engine::state::AppState;
-use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
-use crate::resources::{CharacterDesignData, CharacterDesignReturnTarget, PlayerSelectState};
+use crate::plugins::input_plugin::{
+    mapped_gamepad_face, mapped_native_face, NativeButton, NativeControllerState,
+};
+use crate::resources::{
+    CharacterDesignData, CharacterDesignReturnTarget, GameSettings, PlayerSelectState,
+};
 use generators::build_character_patch;
 use rig_bridge::{ImportedHumanoidRig, ImportedRigStatus};
 use spec::{CharacterSpec, MorphField, StyleField};
@@ -1347,6 +1352,7 @@ fn morph_slider_interaction(
 fn studio_controller_navigation(
     mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
+    settings: Res<GameSettings>,
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
@@ -1365,23 +1371,29 @@ fn studio_controller_navigation(
 ) {
     let input = studio_nav_input(&keyboard, &gamepads, &native);
     let direction = repeated_studio_direction(&mut repeat, input, time.delta_secs());
+    let confirm_gamepad = mapped_gamepad_face(&settings.bindings, FaceButton::South);
+    let confirm_native = mapped_native_face(&settings.bindings, FaceButton::South);
+    let back_gamepad = mapped_gamepad_face(&settings.bindings, FaceButton::East);
+    let back_native = mapped_native_face(&settings.bindings, FaceButton::East);
+    let reset_gamepad = mapped_gamepad_face(&settings.bindings, FaceButton::West);
+    let reset_native = mapped_native_face(&settings.bindings, FaceButton::West);
     let confirm = keyboard.just_pressed(KeyCode::Enter)
         || keyboard.just_pressed(KeyCode::NumpadEnter)
         || keyboard.just_pressed(KeyCode::Space)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::South))
-        || native.just_pressed(NativeButton::South);
+            .any(|gamepad| gamepad.just_pressed(confirm_gamepad))
+        || native.just_pressed(confirm_native);
     let back = keyboard.just_pressed(KeyCode::Escape)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::East))
-        || native.just_pressed(NativeButton::East);
+            .any(|gamepad| gamepad.just_pressed(back_gamepad))
+        || native.just_pressed(back_native);
     let reset_field = keyboard.just_pressed(KeyCode::KeyR)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::West))
-        || native.just_pressed(NativeButton::West);
+            .any(|gamepad| gamepad.just_pressed(reset_gamepad))
+        || native.just_pressed(reset_native);
     let previous_section = gamepads
         .iter()
         .any(|gamepad| gamepad.just_pressed(GamepadButton::LeftTrigger))

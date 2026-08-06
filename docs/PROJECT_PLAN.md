@@ -135,8 +135,11 @@ and boot; verification gains a consumer-build check.
 - ~~Perf overlays and diag toggles behind `designer`~~ *(landed: F8 controller
   diag, F9 collider debug, F10 motor escape hatch, F11 perf overlay are all
   Designer-only)*. Still open: first-run flow review of the remaining menus.
-- Controller rebinding UI (the one control-system gap; the layout itself is
-  stable and documented in `input_plugin.rs`).
+- ~~Configurable controls UI~~ *(landed: thirteen discrete Player 1 keyboard
+  actions, four complete controller face-layout presets, combined mouse/stick
+  invert-look Y, conflict/reserved-key feedback, reset-to-defaults, and
+  settings persistence. Structural LB/Select/D-pad chords remain fixed so no
+  configuration can strand an action)*.
 - Onboarding: the guidance HUD covers systems; add a first-session tutorial
   route.
 - Balance/feel passes driven by play: sabre timings, tracking strengths, trick

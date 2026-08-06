@@ -53,7 +53,7 @@ use bevy::prelude::*;
 
 use crate::components::player::TraversalMode;
 use crate::components::player::{Player, PlayerIndex, PlayerInput};
-use crate::engine::bindings::{FaceButton, KeyAction};
+use crate::engine::bindings::{ControlBindings, FaceButton, KeyAction};
 use crate::engine_tools::EngineToolMode;
 use crate::resources::{GameSettings, UiGameplayCapture};
 
@@ -171,7 +171,7 @@ struct TriggerAxisState {
     right: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeButton {
     South,
     East,
@@ -194,6 +194,31 @@ pub enum NativeButton {
 impl NativeButton {
     const fn mask(self) -> u32 {
         1 << (self as u32)
+    }
+}
+
+/// Resolve a logical face-button action to the physical Bevy button selected
+/// by the player's global layout. Menus and designer tools share this adapter
+/// with gameplay so Nintendo/swap presets behave consistently everywhere.
+pub(crate) fn mapped_gamepad_face(
+    bindings: &ControlBindings,
+    logical: FaceButton,
+) -> GamepadButton {
+    match bindings.remap_face(logical) {
+        FaceButton::South => GamepadButton::South,
+        FaceButton::East => GamepadButton::East,
+        FaceButton::West => GamepadButton::West,
+        FaceButton::North => GamepadButton::North,
+    }
+}
+
+/// Native-macOS counterpart to [`mapped_gamepad_face`].
+pub(crate) fn mapped_native_face(bindings: &ControlBindings, logical: FaceButton) -> NativeButton {
+    match bindings.remap_face(logical) {
+        FaceButton::South => NativeButton::South,
+        FaceButton::East => NativeButton::East,
+        FaceButton::West => NativeButton::West,
+        FaceButton::North => NativeButton::North,
     }
 }
 
@@ -394,12 +419,7 @@ fn update_player_inputs(
                 GamepadButton::North => FaceButton::North,
                 other => return other,
             };
-            match bindings.remap_face(logical) {
-                FaceButton::South => GamepadButton::South,
-                FaceButton::East => GamepadButton::East,
-                FaceButton::West => GamepadButton::West,
-                FaceButton::North => GamepadButton::North,
-            }
+            mapped_gamepad_face(bindings, logical)
         };
         let remap_native = |b: NativeButton| -> NativeButton {
             let logical = match b {
@@ -409,12 +429,7 @@ fn update_player_inputs(
                 NativeButton::North => FaceButton::North,
                 other => return other,
             };
-            match bindings.remap_face(logical) {
-                FaceButton::South => NativeButton::South,
-                FaceButton::East => NativeButton::East,
-                FaceButton::West => NativeButton::West,
-                FaceButton::North => NativeButton::North,
-            }
+            mapped_native_face(bindings, logical)
         };
         // Keyboard key currently bound to an action (player one).
         let key_for = |action: KeyAction| bindings.key(action);
@@ -853,6 +868,31 @@ mod tests {
     fn trigger_axis_threshold_matches_controller_action_gate() {
         assert!(!axis_pressed(TRIGGER_AXIS_THRESHOLD));
         assert!(axis_pressed(TRIGGER_AXIS_THRESHOLD + 0.01));
+    }
+
+    #[test]
+    fn face_layout_adapters_match_across_both_controller_backends() {
+        let bindings = ControlBindings {
+            face_layout: crate::engine::bindings::FaceLayout::Nintendo,
+            ..default()
+        };
+
+        assert_eq!(
+            mapped_gamepad_face(&bindings, FaceButton::South),
+            GamepadButton::East
+        );
+        assert_eq!(
+            mapped_native_face(&bindings, FaceButton::South),
+            NativeButton::East
+        );
+        assert_eq!(
+            mapped_gamepad_face(&bindings, FaceButton::West),
+            GamepadButton::North
+        );
+        assert_eq!(
+            mapped_native_face(&bindings, FaceButton::West),
+            NativeButton::North
+        );
     }
 
     #[test]

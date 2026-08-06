@@ -39,6 +39,7 @@ use crate::components::world::{
     DungeonCrawlGate, EnterableBuilding, SettlementBuildTerminal, SpeedLoopGuide, WorldAnchor,
     WorldRouteMarker,
 };
+use crate::engine::bindings::FaceButton;
 use crate::engine::physics::prelude::{Physics, PhysicsTime};
 use crate::engine::rendering::{
     all_gameplay_render_layers, EnergyMaterial, EnergyMaterialUniform, IceMaterial,
@@ -46,7 +47,10 @@ use crate::engine::rendering::{
     ToonMaterial, ToonMaterialUniform, WaterMaterial, WaterMaterialUniform,
 };
 use crate::engine::state::AppState;
-use crate::plugins::input_plugin::{NativeButton, NativeControllerState};
+use crate::plugins::input_plugin::{
+    mapped_gamepad_face, mapped_native_face, NativeButton, NativeControllerState,
+};
+use crate::resources::GameSettings;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
     GenericRecipeDraft, LevelTemplate, ProceduralRecipeDraft, ProjectLoadSource, ProjectStore,
@@ -3463,6 +3467,7 @@ fn editor_search_input(
     keys: Res<ButtonInput<Key>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
+    settings: Res<GameSettings>,
     mut filter: ResMut<EditorOutlinerFilter>,
     mut registry: ResMut<EditorRegistryState>,
     mut session: ResMut<EditorProjectSession>,
@@ -3475,14 +3480,14 @@ fn editor_search_input(
         return;
     }
 
-    let controller_accept = gamepads
-        .iter()
-        .any(|gamepad| gamepad.just_pressed(GamepadButton::South))
-        || native.just_pressed(NativeButton::South);
-    let controller_clear = gamepads
-        .iter()
-        .any(|gamepad| gamepad.just_pressed(GamepadButton::East))
-        || native.just_pressed(NativeButton::East);
+    let controller_accept = gamepads.iter().any(|gamepad| {
+        gamepad.just_pressed(mapped_gamepad_face(&settings.bindings, FaceButton::South))
+    }) || native
+        .just_pressed(mapped_native_face(&settings.bindings, FaceButton::South));
+    let controller_clear = gamepads.iter().any(|gamepad| {
+        gamepad.just_pressed(mapped_gamepad_face(&settings.bindings, FaceButton::East))
+    }) || native
+        .just_pressed(mapped_native_face(&settings.bindings, FaceButton::East));
 
     if registry.search_active {
         if controller_clear {
@@ -3626,6 +3631,7 @@ fn editor_controller_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
+    settings: Res<GameSettings>,
     buttons: Query<&EditorButton>,
     mut focus: ResMut<EditorFocus>,
     mut pending: ResMut<EditorPendingActions>,
@@ -3711,10 +3717,10 @@ fn editor_controller_navigation(
         || native.just_pressed(NativeButton::DPadDown)
         || native.just_pressed(NativeButton::DPadRight);
     let activate = keyboard.just_pressed(KeyCode::Enter)
-        || gamepads
-            .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::South))
-        || native.just_pressed(NativeButton::South);
+        || gamepads.iter().any(|gamepad| {
+            gamepad.just_pressed(mapped_gamepad_face(&settings.bindings, FaceButton::South))
+        })
+        || native.just_pressed(mapped_native_face(&settings.bindings, FaceButton::South));
 
     let count = buttons.iter().count();
     if count == 0 {

@@ -145,6 +145,11 @@ Tech upgrades are also in chapter select and spend robot salvage:
 
 ## Controls
 
+Settings & Accessibility can rebind the discrete Player 1 keyboard actions,
+cycle Standard/Nintendo/Swap A-B/Swap X-Y controller face layouts, invert look
+Y, or restore the shipped defaults. Movement axes and the LB/Select/D-pad chord
+grammar remain fixed so every action stays reachable.
+
 Keyboard and mouse:
 
 | Input | Action |
