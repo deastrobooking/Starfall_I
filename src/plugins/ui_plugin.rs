@@ -24,7 +24,9 @@ use crate::components::discoverable::{
     Discoverable, DiscoverableKind, PuzzleArchetype, PuzzleRelicEncounter,
 };
 use crate::components::enemy::CitySpyDrone;
-use crate::components::inventory::{all_items, Inventory, ItemType, QuickItemSlot};
+use crate::components::inventory::{
+    all_items, item_definition as canonical_item_definition, Inventory, ItemType, QuickItemSlot,
+};
 use crate::components::player::{
     AimReticleState, AimSolution, BoardBoostState, ClimbState, JetpackState, Player, PlayerCamera,
     PlayerCameraRef, PlayerIndex, PlayerInput, PlayerMovement, PlayerProgression, PlayerStats,
@@ -47,6 +49,11 @@ use crate::engine_tools::{
 };
 use crate::events::*;
 use crate::plugins::crafting_plugin::{all_recipes, start_craft, CraftingQueue};
+use crate::plugins::heavy_bio_plugin::{try_harvest_bio_plot, try_plant_bio_seed, HeavyBioClock};
+use crate::plugins::heavy_economy_plugin::{
+    buy_from_vendor_canonical_atomic, mount_jewel_from_canonical_atomic,
+    sell_to_vendor_canonical_atomic, unmount_jewel_to_canonical_atomic,
+};
 use crate::plugins::input_plugin::{
     mapped_gamepad_face, mapped_native_face, GamepadAssignments, NativeButton,
     NativeControllerState,
@@ -60,6 +67,9 @@ use crate::resources::{
     ShopCategory, UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::world::discussion::DiscussionState;
+use crate::world::heavy_bio::{GrowthStage, GARDEN_PLOT_COUNT};
+use crate::world::heavy_economy::{JewelTier, OwnerId, WeaponSocket};
+use crate::world::heavy_water::{local_player_key, HeavyWaterProgress};
 use crate::world::missions::{
     active_custom_mission, chapter_mission, mission_for_travel_anchor, CustomMissionState,
     SPECIAL_MISSION_TRAVEL_POINTS,
@@ -670,9 +680,38 @@ struct GuidanceActionText;
 struct CraftingPanelState {
     visible: bool,
     owner: Option<u8>,
+    tab: [WorkshopTab; 4],
     recipe_index: [usize; 4],
+    jewel_index: [usize; 4],
+    garden_index: [usize; 4],
+    vendor_index: [usize; 4],
+    vendor_item_index: [usize; 4],
     repeat_direction: i8,
     repeat_timer: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum WorkshopTab {
+    #[default]
+    Crafting,
+    Jewels,
+    BioGarden,
+    Market,
+}
+
+impl WorkshopTab {
+    const fn offset(self, direction: i8) -> Self {
+        match (self, direction.signum()) {
+            (Self::Crafting, -1) => Self::Market,
+            (Self::Crafting, _) => Self::Jewels,
+            (Self::Jewels, -1) => Self::Crafting,
+            (Self::Jewels, _) => Self::BioGarden,
+            (Self::BioGarden, -1) => Self::Jewels,
+            (Self::BioGarden, _) => Self::Market,
+            (Self::Market, -1) => Self::BioGarden,
+            (Self::Market, _) => Self::Crafting,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -6958,6 +6997,41 @@ fn boss_alert_system(
 }
 
 // ── Crafting Panel ────────────────────────────────────────────────────────────
+const fn weapon_socket_label(socket: WeaponSocket) -> &'static str {
+    match socket {
+        WeaponSocket::Pistol => "Starlight Popper",
+        WeaponSocket::Rifle => "Comet Stream",
+        WeaponSocket::Shotgun => "Sparkle Fan",
+        WeaponSocket::Rocket => "Nova Orb",
+        WeaponSocket::Laser => "Rainbow Ray",
+        WeaponSocket::Grenade => "Star Bubble Bombs",
+        WeaponSocket::TrackingMissile => "Homing Star",
+    }
+}
+
+const fn jewel_tier_label(tier: JewelTier) -> &'static str {
+    match tier {
+        JewelTier::Rough => "Rough +15%",
+        JewelTier::Cut => "Cut +30%",
+        JewelTier::Flawless => "Flawless +50%",
+    }
+}
+
+fn best_available_jewel(inventory: &Inventory) -> Option<JewelTier> {
+    [JewelTier::Flawless, JewelTier::Cut, JewelTier::Rough]
+        .into_iter()
+        .find(|tier| inventory.has(tier.item_id(), 1))
+}
+
+const fn garden_stage_label(stage: GrowthStage) -> &'static str {
+    match stage {
+        GrowthStage::Empty => "Empty",
+        GrowthStage::Seeded => "Seeded",
+        GrowthStage::Sprout => "Sprout",
+        GrowthStage::Grown => "Grown",
+    }
+}
+
 fn crafting_panel_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -6966,8 +7040,11 @@ fn crafting_panel_system(
     mut panel_q: Query<&mut Node, With<CraftingPanelRoot>>,
     mut text_q: Query<&mut Text, With<CraftingPanelText>>,
     player_input_q: Query<(&PlayerIndex, &PlayerInput), With<Player>>,
-    mut player_q: Query<(&PlayerIndex, &mut Inventory, &PlayerStats), With<Player>>,
+    mut player_q: Query<(&PlayerIndex, &mut Inventory, &mut PlayerStats), With<Player>>,
     mut queue: ResMut<CraftingQueue>,
+    mut heavy_water: ResMut<HeavyWaterProgress>,
+    bio_clock: Option<Res<HeavyBioClock>>,
+    mut inventory_changed: MessageWriter<InventoryChangedEvent>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let mut opened_this_frame = false;
@@ -7013,15 +7090,428 @@ fn crafting_panel_system(
         return;
     }
 
-    let Some((_, mut inventory, stats)) = player_q.iter_mut().find(|(idx, _, _)| idx.0 == owner)
+    let Some((_, mut inventory, mut stats)) =
+        player_q.iter_mut().find(|(idx, _, _)| idx.0 == owner)
     else {
         panel_state.visible = false;
         panel_state.owner = None;
         input_capture.owner = None;
         return;
     };
-    let recipes = all_recipes();
     let selection_slot = usize::from(owner).min(panel_state.recipe_index.len() - 1);
+    let tab_direction = if opened_this_frame {
+        0
+    } else {
+        owner_input.map_or(0, |input| {
+            if input.ui_left {
+                -1
+            } else if input.ui_right {
+                1
+            } else {
+                0
+            }
+        })
+    };
+    if tab_direction != 0 {
+        panel_state.tab[selection_slot] = panel_state.tab[selection_slot].offset(tab_direction);
+        panel_state.repeat_direction = 0;
+        panel_state.repeat_timer = 0.0;
+    }
+
+    if panel_state.tab[selection_slot] == WorkshopTab::Jewels {
+        let direction = if opened_this_frame {
+            0
+        } else {
+            owner_input
+                .map(|input| {
+                    crafting_navigation_direction(&mut panel_state, input, time.delta_secs())
+                })
+                .unwrap_or(0)
+        };
+        if direction != 0 {
+            panel_state.jewel_index[selection_slot] = cycle_index(
+                panel_state.jewel_index[selection_slot],
+                WeaponSocket::ALL.len(),
+                direction,
+            );
+        }
+        let selected_socket = WeaponSocket::ALL[panel_state.jewel_index[selection_slot]];
+        let owner_id = OwnerId(owner);
+        let account = heavy_water.economy.account(owner_id).ok();
+        let mut display = String::from(
+            "JEWELS  [Left/Right: tabs]\nPower Jewels apply once to their matching weapon.\n\n",
+        );
+        for (index, socket) in WeaponSocket::ALL.into_iter().enumerate() {
+            let mounted = account
+                .and_then(|account| account.jewel_mounts.get(&socket).copied())
+                .map_or("Empty", jewel_tier_label);
+            display.push_str(&format!(
+                "{} {:<18} {}\n",
+                if index == panel_state.jewel_index[selection_slot] {
+                    "▶"
+                } else {
+                    " "
+                },
+                weapon_socket_label(socket),
+                mounted,
+            ));
+        }
+        display.push_str(&format!(
+            "\nBag: Rough {}  Cut {}  Flawless {}\nA/Enter: {}",
+            inventory.count(JewelTier::Rough.item_id()),
+            inventory.count(JewelTier::Cut.item_id()),
+            inventory.count(JewelTier::Flawless.item_id()),
+            if account.is_some_and(|account| account.jewel_mounts.contains_key(&selected_socket)) {
+                "Unmount selected jewel"
+            } else {
+                "Mount best available jewel"
+            }
+        ));
+        if let Ok(mut text) = text_q.single_mut() {
+            *text = Text::new(format!("P{} Workshop\n\n{}", owner + 1, display));
+        }
+
+        let confirm = !opened_this_frame && owner_input.is_some_and(|input| input.ui_confirm);
+        if confirm {
+            let mounted = heavy_water
+                .economy
+                .account(owner_id)
+                .ok()
+                .and_then(|account| account.jewel_mounts.get(&selected_socket).copied());
+            let Some(transaction_id) = heavy_water.allocate_economy_transaction_id() else {
+                msg_ev.write(UiMessageEvent {
+                    text: "Jewel transaction IDs exhausted".to_string(),
+                    duration: 2.0,
+                });
+                return;
+            };
+            let result = if mounted.is_some() {
+                unmount_jewel_to_canonical_atomic(
+                    &mut heavy_water.economy,
+                    &mut inventory,
+                    &stats,
+                    owner_id,
+                    transaction_id,
+                    selected_socket,
+                )
+                .map(|tier| format!("Unmounted {}", jewel_tier_label(tier)))
+            } else if let Some(tier) = best_available_jewel(&inventory) {
+                mount_jewel_from_canonical_atomic(
+                    &mut heavy_water.economy,
+                    &mut inventory,
+                    &stats,
+                    owner_id,
+                    transaction_id,
+                    selected_socket,
+                    tier,
+                )
+                .map(|()| {
+                    format!(
+                        "Mounted {} on {}",
+                        jewel_tier_label(tier),
+                        weapon_socket_label(selected_socket)
+                    )
+                })
+            } else {
+                msg_ev.write(UiMessageEvent {
+                    text: format!("P{} has no Power Jewel to mount", owner + 1),
+                    duration: 2.0,
+                });
+                return;
+            };
+            match result {
+                Ok(message) => {
+                    inventory_changed.write(InventoryChangedEvent);
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {message}", owner + 1),
+                        duration: 2.2,
+                    });
+                }
+                Err(error) => {
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} Jewel change failed: {error}", owner + 1),
+                        duration: 2.5,
+                    });
+                }
+            }
+        }
+        return;
+    }
+
+    if panel_state.tab[selection_slot] == WorkshopTab::BioGarden {
+        let direction = if opened_this_frame {
+            0
+        } else {
+            owner_input
+                .map(|input| {
+                    crafting_navigation_direction(&mut panel_state, input, time.delta_secs())
+                })
+                .unwrap_or(0)
+        };
+        if direction != 0 {
+            panel_state.garden_index[selection_slot] = cycle_index(
+                panel_state.garden_index[selection_slot],
+                GARDEN_PLOT_COUNT,
+                direction,
+            );
+        }
+
+        let player_key = local_player_key(owner);
+        let now_ms = bio_clock.as_deref().map_or(0, |clock| clock.game_time_ms);
+        let profile = heavy_water.bio.player_mut(player_key.clone());
+        profile.garden.advance_growth(now_ms);
+        let selected_plot = panel_state.garden_index[selection_slot];
+        let selected_stage = profile.garden.plots[selected_plot].stage;
+        let (dex_caught, dex_total) = profile.dex_completion();
+        let mut display = format!(
+            "BIO GARDEN  [Left/Right: tabs]\nDex {dex_caught}/{dex_total}  Creatures {}/{}  Active {}\n\n",
+            profile.creatures.len(),
+            profile.garden_capture_cap(),
+            profile.active_creature_ids.len(),
+        );
+        for (index, plot) in profile.garden.plots.iter().enumerate() {
+            display.push_str(&format!(
+                "{} Plot {:02}: {:<7}{}",
+                if index == selected_plot { "▶" } else { " " },
+                index + 1,
+                garden_stage_label(plot.stage),
+                if index % 2 == 1 { "\n" } else { "   " },
+            ));
+        }
+        display.push_str(&format!(
+            "\nBag: Seed {}  Crop {}  Feed {}\nA/Enter: {}",
+            inventory.count("bio_seed"),
+            inventory.count("bio_crop"),
+            inventory.count("animaton_feed"),
+            match selected_stage {
+                GrowthStage::Empty => "Plant one Bio Seed",
+                GrowthStage::Grown => "Harvest this plot",
+                GrowthStage::Seeded | GrowthStage::Sprout => "Growing (check back soon)",
+            }
+        ));
+        if let Ok(mut text) = text_q.single_mut() {
+            *text = Text::new(format!("P{} Workshop\n\n{}", owner + 1, display));
+        }
+
+        let confirm = !opened_this_frame && owner_input.is_some_and(|input| input.ui_confirm);
+        if confirm {
+            let result = match selected_stage {
+                GrowthStage::Empty => {
+                    try_plant_bio_seed(profile, &mut inventory, selected_plot, now_ms)
+                        .map(|_| format!("planted Bio Seed in plot {}", selected_plot + 1))
+                }
+                GrowthStage::Grown => try_harvest_bio_plot(
+                    &player_key,
+                    profile,
+                    &mut inventory,
+                    selected_plot,
+                    now_ms,
+                )
+                .map(|applied| {
+                    format!(
+                        "harvested plot {}: +{} crop, +{} feed, +{} seed",
+                        selected_plot + 1,
+                        applied.outcome.bio_crops,
+                        applied.outcome.animaton_feed,
+                        applied.outcome.bio_seeds,
+                    )
+                }),
+                GrowthStage::Seeded | GrowthStage::Sprout => {
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} plot {} is still growing", owner + 1, selected_plot + 1),
+                        duration: 2.0,
+                    });
+                    return;
+                }
+            };
+            match result {
+                Ok(message) => {
+                    inventory_changed.write(InventoryChangedEvent);
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {message}", owner + 1),
+                        duration: 2.2,
+                    });
+                }
+                Err(error) => {
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} Bio Garden action failed: {error:?}", owner + 1),
+                        duration: 2.5,
+                    });
+                }
+            }
+        }
+        return;
+    }
+
+    if panel_state.tab[selection_slot] == WorkshopTab::Market {
+        let vendor_count = heavy_water.economy.vendors.len();
+        if vendor_count == 0 {
+            if let Ok(mut text) = text_q.single_mut() {
+                *text = Text::new(format!(
+                    "P{} Market Uplink\n\nNo material vendors are registered.",
+                    owner + 1
+                ));
+            }
+            return;
+        }
+
+        let vendor_direction = if opened_this_frame {
+            0
+        } else {
+            owner_input.map_or(0, |input| {
+                if input.weapon_prev {
+                    -1
+                } else if input.weapon_next {
+                    1
+                } else {
+                    0
+                }
+            })
+        };
+        if vendor_direction != 0 {
+            panel_state.vendor_index[selection_slot] = cycle_index(
+                panel_state.vendor_index[selection_slot],
+                vendor_count,
+                vendor_direction,
+            );
+            panel_state.vendor_item_index[selection_slot] = 0;
+        }
+        panel_state.vendor_index[selection_slot] =
+            panel_state.vendor_index[selection_slot].min(vendor_count - 1);
+        let vendor = heavy_water
+            .economy
+            .vendors
+            .values()
+            .nth(panel_state.vendor_index[selection_slot])
+            .expect("bounded vendor index")
+            .clone();
+        let item_count = vendor.items.len();
+        if item_count == 0 {
+            if let Ok(mut text) = text_q.single_mut() {
+                *text = Text::new(format!(
+                    "P{} Market Uplink\n\n{} has no catalog lines.",
+                    owner + 1,
+                    vendor.name
+                ));
+            }
+            return;
+        }
+
+        let direction = if opened_this_frame {
+            0
+        } else {
+            owner_input
+                .map(|input| {
+                    crafting_navigation_direction(&mut panel_state, input, time.delta_secs())
+                })
+                .unwrap_or(0)
+        };
+        if direction != 0 {
+            panel_state.vendor_item_index[selection_slot] = cycle_index(
+                panel_state.vendor_item_index[selection_slot],
+                item_count,
+                direction,
+            );
+        }
+        panel_state.vendor_item_index[selection_slot] =
+            panel_state.vendor_item_index[selection_slot].min(item_count - 1);
+        let selected_item_index = panel_state.vendor_item_index[selection_slot];
+        let selected_line = vendor.items[selected_item_index].clone();
+
+        let mut display = format!(
+            "MARKET UPLINK  [Left/Right: tabs]\n{}  ({}/{})  Credits {}\n[Prev/Next weapon: vendor]\n\n",
+            vendor.name,
+            panel_state.vendor_index[selection_slot] + 1,
+            vendor_count,
+            stats.credits,
+        );
+        for (index, line) in vendor.items.iter().enumerate() {
+            let item_name = canonical_item_definition(&line.item_id)
+                .map_or(line.item_id.as_str(), |definition| definition.name);
+            display.push_str(&format!(
+                "{} {:<20} {:>4}c  stock {:>2}  bag {}\n",
+                if index == selected_item_index {
+                    "▶"
+                } else {
+                    " "
+                },
+                item_name,
+                line.buy_price,
+                line.stock,
+                inventory.count(&line.item_id),
+            ));
+        }
+        display.push_str("\nA/Enter: buy one   Reload/West: sell one");
+        if let Ok(mut text) = text_q.single_mut() {
+            *text = Text::new(format!("P{} Workshop\n\n{}", owner + 1, display));
+        }
+
+        let buying = !opened_this_frame && owner_input.is_some_and(|input| input.ui_confirm);
+        let selling = !opened_this_frame && owner_input.is_some_and(|input| input.reload);
+        if buying || selling {
+            let Some(transaction_id) = heavy_water.allocate_economy_transaction_id() else {
+                msg_ev.write(UiMessageEvent {
+                    text: "Market transaction IDs exhausted".to_string(),
+                    duration: 2.0,
+                });
+                return;
+            };
+            let owner_id = OwnerId(owner);
+            let result = if buying {
+                buy_from_vendor_canonical_atomic(
+                    &mut heavy_water.economy,
+                    &mut inventory,
+                    &mut stats,
+                    owner_id,
+                    transaction_id,
+                    &vendor.id,
+                    &selected_line.item_id,
+                    1,
+                )
+                .map(|balance| {
+                    format!(
+                        "bought {} for {} credits ({} left)",
+                        selected_line.item_id, selected_line.buy_price, balance
+                    )
+                })
+            } else {
+                sell_to_vendor_canonical_atomic(
+                    &mut heavy_water.economy,
+                    &mut inventory,
+                    &mut stats,
+                    owner_id,
+                    transaction_id,
+                    &vendor.id,
+                    &selected_line.item_id,
+                    1,
+                )
+                .map(|balance| {
+                    format!(
+                        "sold {} for {} credits ({} total)",
+                        selected_line.item_id, selected_line.sell_price, balance
+                    )
+                })
+            };
+            match result {
+                Ok(message) => {
+                    inventory_changed.write(InventoryChangedEvent);
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {message}", owner + 1),
+                        duration: 2.2,
+                    });
+                }
+                Err(error) => {
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} Market transaction failed: {error}", owner + 1),
+                        duration: 2.5,
+                    });
+                }
+            }
+        }
+        return;
+    }
+
+    let recipes = all_recipes();
     panel_state.recipe_index[selection_slot] =
         panel_state.recipe_index[selection_slot].min(recipes.len().saturating_sub(1));
 
@@ -7039,9 +7529,26 @@ fn crafting_panel_system(
     }
     let selected_index = panel_state.recipe_index[selection_slot];
 
-    // Build recipe display text
-    let mut display = String::new();
-    for (i, recipe) in recipes.iter().enumerate() {
+    // Keep the expanded 25-recipe Heavy Water catalog readable inside the
+    // split-screen-safe modal instead of drawing rows beyond its bounds.
+    const VISIBLE_RECIPE_ROWS: usize = 9;
+    let max_start = recipes.len().saturating_sub(VISIBLE_RECIPE_ROWS);
+    let visible_start = selected_index
+        .saturating_sub(VISIBLE_RECIPE_ROWS / 2)
+        .min(max_start);
+    let visible_end = (visible_start + VISIBLE_RECIPE_ROWS).min(recipes.len());
+    let mut display = format!(
+        "Recipes {}–{} / {}\n",
+        visible_start + usize::from(!recipes.is_empty()),
+        visible_end,
+        recipes.len()
+    );
+    for (i, recipe) in recipes
+        .iter()
+        .enumerate()
+        .skip(visible_start)
+        .take(VISIBLE_RECIPE_ROWS)
+    {
         let can_craft = stats.level >= recipe.required_level
             && recipe
                 .materials
@@ -7066,7 +7573,11 @@ fn crafting_panel_system(
     }
 
     if let Ok(mut t) = text_q.single_mut() {
-        *t = Text::new(format!("P{} Crafting\n\n{}", owner + 1, display));
+        *t = Text::new(format!(
+            "P{} Crafting  [Left/Right: Workshop tabs]\n\n{}",
+            owner + 1,
+            display
+        ));
     }
 
     // Number keys retain direct access. The panel owner can also navigate with
@@ -7093,7 +7604,7 @@ fn crafting_panel_system(
 
     if let Some(idx) = craft_index {
         if let Some(recipe) = recipes.get(idx) {
-            match start_craft(recipe.id, owner, &mut inventory, stats, &mut queue) {
+            match start_craft(recipe.id, owner, &mut inventory, &stats, &mut queue) {
                 Ok(()) => {
                     msg_ev.write(UiMessageEvent {
                         text: format!(
@@ -8721,6 +9232,43 @@ mod menu_navigation_tests {
         state.recipe_index[1] = 1;
         assert_eq!(state.recipe_index[0], 3);
         assert_eq!(state.recipe_index[1], 1);
+    }
+
+    #[test]
+    fn workshop_tabs_and_jewel_cursors_are_persistent_per_player() {
+        let mut state = CraftingPanelState::default();
+        state.tab[0] = state.tab[0].offset(1);
+        state.jewel_index[0] = 6;
+        state.jewel_index[1] = 2;
+
+        assert_eq!(state.tab[0], WorkshopTab::Jewels);
+        assert_eq!(state.tab[1], WorkshopTab::Crafting);
+        assert_eq!(state.jewel_index[0], 6);
+        assert_eq!(state.jewel_index[1], 2);
+        assert_eq!(WorkshopTab::Jewels.offset(1), WorkshopTab::BioGarden);
+        assert_eq!(WorkshopTab::BioGarden.offset(1), WorkshopTab::Market);
+        assert_eq!(WorkshopTab::Market.offset(1), WorkshopTab::Crafting);
+        assert_eq!(WorkshopTab::Crafting.offset(-1), WorkshopTab::Market);
+    }
+
+    #[test]
+    fn jewel_workshop_prefers_the_strongest_available_tier() {
+        let mut inventory = Inventory::default();
+        assert_eq!(best_available_jewel(&inventory), None);
+
+        assert_eq!(inventory.add_item(JewelTier::Rough.item_id(), 1, 99), 0);
+        assert_eq!(best_available_jewel(&inventory), Some(JewelTier::Rough));
+
+        assert_eq!(inventory.add_item(JewelTier::Cut.item_id(), 1, 99), 0);
+        assert_eq!(best_available_jewel(&inventory), Some(JewelTier::Cut));
+
+        assert_eq!(inventory.add_item(JewelTier::Flawless.item_id(), 1, 99), 0);
+        assert_eq!(best_available_jewel(&inventory), Some(JewelTier::Flawless));
+        assert_eq!(jewel_tier_label(JewelTier::Flawless), "Flawless +50%");
+        assert_eq!(
+            weapon_socket_label(WeaponSocket::TrackingMissile),
+            "Homing Star"
+        );
     }
 
     #[test]

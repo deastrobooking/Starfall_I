@@ -567,7 +567,7 @@ The current runtime consumes the first practical slice of that model:
 | Head | Cartoon head and hair scale |
 
 Confirmed blueprints are kept on each player-select slot, saved in the rotating
-schema-v4 campaign slots, and restored on load. When a player has not authored a
+schema-v5 campaign slots, and restored on load. When a player has not authored a
 custom body yet, the runtime creates an upgraded default hero blueprint so
 movement stats, collider proportions, visible body shape, and animation stride
 all use the same data path.

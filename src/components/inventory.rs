@@ -37,7 +37,7 @@ pub struct ItemDefinition {
 
 // All pre-defined items
 pub fn all_items() -> Vec<ItemDefinition> {
-    vec![
+    let mut items = vec![
         ItemDefinition {
             id: "credits",
             name: "Credits",
@@ -127,6 +127,132 @@ pub fn all_items() -> Vec<ItemDefinition> {
             max_stack: 50,
             value: 25,
             description: "Grants 25 XP.",
+        },
+        ItemDefinition {
+            id: "gear",
+            name: "Gear",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Common,
+            max_stack: 999,
+            value: 8,
+            description: "Universal upgrade currency salvaged from machines.",
+        },
+        ItemDefinition {
+            id: "bio_essence",
+            name: "Bio Essence",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Uncommon,
+            max_stack: 99,
+            value: 30,
+            description: "Organic residue used to capture and care for bio-creatures.",
+        },
+        ItemDefinition {
+            id: "weapon_part_pistol",
+            name: "Pistol Part",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Uncommon,
+            max_stack: 99,
+            value: 18,
+            description: "Salvaged star-pistol component.",
+        },
+        ItemDefinition {
+            id: "weapon_part_rifle",
+            name: "Rifle Part",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Uncommon,
+            max_stack: 99,
+            value: 22,
+            description: "Salvaged pulse-rifle component.",
+        },
+        ItemDefinition {
+            id: "weapon_part_shotgun",
+            name: "Shotgun Part",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Uncommon,
+            max_stack: 99,
+            value: 22,
+            description: "Salvaged scatter-blaster component.",
+        },
+        ItemDefinition {
+            id: "weapon_part_rocket",
+            name: "Rocket Part",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Rare,
+            max_stack: 50,
+            value: 35,
+            description: "Salvaged nova-launcher component.",
+        },
+        ItemDefinition {
+            id: "weapon_part_laser",
+            name: "Laser Part",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Rare,
+            max_stack: 50,
+            value: 35,
+            description: "Salvaged photon-beam component.",
+        },
+        ItemDefinition {
+            id: "weapon_part_grenade",
+            name: "Grenade Part",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Rare,
+            max_stack: 50,
+            value: 32,
+            description: "Salvaged fusion-grenade component.",
+        },
+        ItemDefinition {
+            id: "bio_seed",
+            name: "Bio Seed",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Common,
+            max_stack: 99,
+            value: 6,
+            description: "Engineered seed for a sanctuary garden plot.",
+        },
+        ItemDefinition {
+            id: "bio_crop",
+            name: "Bio Crop",
+            item_type: ItemType::Consumable,
+            rarity: ItemRarity::Uncommon,
+            max_stack: 99,
+            value: 18,
+            description: "Sanctuary harvest that can be eaten or refined into feed.",
+        },
+        ItemDefinition {
+            id: "animaton_feed",
+            name: "Animaton Feed",
+            item_type: ItemType::Consumable,
+            rarity: ItemRarity::Rare,
+            max_stack: 50,
+            value: 60,
+            description: "Refined bio-crop blend that strengthens a companion.",
+        },
+        ItemDefinition {
+            id: "power_jewel_rough",
+            name: "Rough Power Jewel",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Epic,
+            max_stack: 9,
+            value: 600,
+            description: "Mount on a ranged weapon for 15% more damage.",
+        },
+        ItemDefinition {
+            id: "power_jewel_cut",
+            name: "Cut Power Jewel",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Legendary,
+            max_stack: 9,
+            value: 1_500,
+            description: "Mount on a ranged weapon for 30% more damage.",
+        },
+        ItemDefinition {
+            id: "power_jewel_flawless",
+            name: "Flawless Power Jewel",
+            item_type: ItemType::Material,
+            rarity: ItemRarity::Legendary,
+            max_stack: 9,
+            value: 4_000,
+            description: "Mount on a ranged weapon for 50% more damage.",
         },
         // Crafting materials
         ItemDefinition {
@@ -282,7 +408,43 @@ pub fn all_items() -> Vec<ItemDefinition> {
             value: 200,
             description: "Legendary material.",
         },
-    ]
+    ];
+
+    // The world-content catalog carries the complete Heavy Water crafting,
+    // vendor, building, farming, and jewel result set. Native Starfall entries
+    // above win on names/descriptions; only missing stable IDs are appended.
+    for ported in crate::world::heavy_economy::ITEM_CATALOG {
+        if items.iter().any(|item| item.id == ported.id) {
+            continue;
+        }
+        use crate::world::heavy_economy::{ItemKind as PortedKind, ItemRarity as PortedRarity};
+        let item_type = match ported.kind {
+            PortedKind::Weapon => ItemType::Weapon,
+            PortedKind::Armor => ItemType::Armor,
+            PortedKind::Consumable => ItemType::Consumable,
+            PortedKind::Ammo => ItemType::Ammo,
+            PortedKind::KeyItem => ItemType::KeyItem,
+            PortedKind::Currency => ItemType::Currency,
+            PortedKind::Material => ItemType::Material,
+        };
+        let rarity = match ported.rarity {
+            PortedRarity::Common => ItemRarity::Common,
+            PortedRarity::Uncommon => ItemRarity::Uncommon,
+            PortedRarity::Rare => ItemRarity::Rare,
+            PortedRarity::Epic => ItemRarity::Epic,
+            PortedRarity::Legendary => ItemRarity::Legendary,
+        };
+        items.push(ItemDefinition {
+            id: ported.id,
+            name: ported.name,
+            item_type,
+            rarity,
+            max_stack: ported.max_stack,
+            value: ported.value,
+            description: "Heavy Water continuity item.",
+        });
+    }
+    items
 }
 
 // ── Inventory Slot ────────────────────────────────────────────────────────────
@@ -309,7 +471,11 @@ pub struct QuickItemSlot {
 
 impl Default for Inventory {
     fn default() -> Self {
-        let max = 24;
+        // Heavy Water deliberately raised its slot ceiling from 24 to 100 so
+        // very rare jewels could never be silently lost to an otherwise full
+        // bag. Starfall keeps that player-facing guarantee while retaining
+        // per-item stack limits.
+        let max = 100;
         Self {
             slots: vec![None; max],
             max_slots: max,
@@ -318,6 +484,15 @@ impl Default for Inventory {
 }
 
 impl Inventory {
+    /// Expand legacy inventories without compacting or reordering their slots.
+    /// Save records created before the Heavy Water port commonly contain 24
+    /// slots; hydration calls this before any rare rewards can be granted.
+    pub fn ensure_capacity(&mut self, minimum_slots: usize) {
+        let target = self.max_slots.max(self.slots.len()).max(minimum_slots);
+        self.slots.resize(target, None);
+        self.max_slots = target;
+    }
+
     /// Add items. Returns leftover quantity that didn't fit.
     pub fn add_item(&mut self, item_id: &str, quantity: u32, max_stack: u32) -> u32 {
         let mut remaining = quantity;
@@ -389,5 +564,70 @@ impl Inventory {
 
     pub fn is_full(&self) -> bool {
         self.slots.iter().all(|s| s.is_some())
+    }
+}
+
+pub fn item_definition(item_id: &str) -> Option<ItemDefinition> {
+    all_items().into_iter().find(|item| item.id == item_id)
+}
+
+pub fn max_stack_for(item_id: &str) -> u32 {
+    item_definition(item_id).map_or(99, |item| item.max_stack)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_inventory_has_heavy_water_rare_drop_capacity() {
+        let inventory = Inventory::default();
+        assert_eq!(inventory.max_slots, 100);
+        assert_eq!(inventory.slots.len(), 100);
+    }
+
+    #[test]
+    fn legacy_inventory_expands_without_moving_existing_stacks() {
+        let mut inventory = Inventory {
+            slots: vec![
+                Some(InventorySlot {
+                    item_id: "power_jewel_flawless".to_string(),
+                    quantity: 1,
+                });
+                24
+            ],
+            max_slots: 24,
+        };
+
+        inventory.ensure_capacity(100);
+
+        assert_eq!(inventory.max_slots, 100);
+        assert_eq!(inventory.slots.len(), 100);
+        assert_eq!(
+            inventory.slots[0]
+                .as_ref()
+                .map(|slot| slot.item_id.as_str()),
+            Some("power_jewel_flawless")
+        );
+        assert!(inventory.slots[24..].iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn heavy_water_material_catalog_ids_are_unique() {
+        let items = all_items();
+        let mut ids = std::collections::HashSet::new();
+        assert!(items.iter().all(|item| ids.insert(item.id)));
+        for item_id in [
+            "gear",
+            "bio_essence",
+            "bio_seed",
+            "bio_crop",
+            "animaton_feed",
+            "power_jewel_rough",
+            "power_jewel_cut",
+            "power_jewel_flawless",
+        ] {
+            assert!(item_definition(item_id).is_some(), "missing {item_id}");
+        }
     }
 }

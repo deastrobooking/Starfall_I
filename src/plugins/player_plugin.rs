@@ -37,7 +37,7 @@ use crate::components::world::{
     SpeedRoadCheckpoint, WaterBody, WaterBodyKind, WorldAnchor, WorldRouteMarker,
 };
 use crate::engine::game_loop::{
-    fixed_motor_off, fixed_motor_on, GameSet, PreviousTickPosition, SimConfig,
+    fixed_motor_off, fixed_motor_on, GameSet, PlayingSetupSet, PreviousTickPosition, SimConfig,
 };
 use crate::engine::input_buffer::PlayerInputBuffers;
 use crate::engine::physics::prelude::*;
@@ -341,7 +341,13 @@ impl Plugin for PlayerPlugin {
             .init_resource::<DungeonCrawlState>()
             .init_resource::<CameraDisplayTransition>()
             .add_systems(Startup, setup_player_shield_vfx)
-            .add_systems(OnEnter(AppState::Playing), (spawn_players, grab_cursor))
+            .add_systems(
+                OnEnter(AppState::Playing),
+                (
+                    spawn_players.in_set(PlayingSetupSet::SpawnPlayers),
+                    grab_cursor.in_set(PlayingSetupSet::SpawnPlayers),
+                ),
+            )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_players_for_menu)
             .add_systems(OnExit(AppState::Playing), release_cursor)
             .add_systems(

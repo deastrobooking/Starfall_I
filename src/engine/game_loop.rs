@@ -56,6 +56,18 @@ pub enum GameSet {
     Presentation,
 }
 
+/// Cross-plugin ordering for a fresh transition into gameplay.
+///
+/// Player entities must exist (including their deferred spawn commands) before
+/// save data hydrates canonical components. Domain adapters can then observe
+/// hydrated values on the first Playing frame.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlayingSetupSet {
+    SpawnPlayers,
+    HydrateSave,
+    InitializeDomains,
+}
+
 /// Simulation tick rate (EC1). 64 Hz is Bevy's default; A/B against 120 with the
 /// F9 perf overlay before committing. Change here to retune the whole fixed loop.
 pub const FIXED_HZ: f64 = 64.0;
@@ -143,6 +155,15 @@ impl Plugin for GameLoopPlugin {
                 GameSet::Animation,
                 GameSet::Camera,
                 GameSet::Presentation,
+            )
+                .chain(),
+        )
+        .configure_sets(
+            OnEnter(crate::engine::state::AppState::Playing),
+            (
+                PlayingSetupSet::SpawnPlayers,
+                PlayingSetupSet::HydrateSave,
+                PlayingSetupSet::InitializeDomains,
             )
                 .chain(),
         )

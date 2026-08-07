@@ -1,6 +1,7 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
-use crate::components::inventory::Inventory;
+use crate::components::inventory::{max_stack_for, Inventory};
 use crate::components::player::{Player, PlayerIndex, PlayerStats};
 use crate::engine::state::AppState;
 use crate::events::InventoryChangedEvent;
@@ -29,115 +30,49 @@ pub struct CraftingRecipe {
 pub enum RecipeCategory {
     Weapon,
     Armor,
-    #[allow(dead_code)]
     Base,
     Consumable,
     Upgrade,
+    Drone,
+    Robot,
+    City,
+    Ship,
 }
 
 // ── Recipe Registry ───────────────────────────────────────────────────────────
 pub fn all_recipes() -> Vec<CraftingRecipe> {
-    vec![
-        CraftingRecipe {
-            id: "damage_mod",
-            name: "Damage Mod",
-            category: RecipeCategory::Weapon,
-            materials: vec![
-                CraftingMaterial {
-                    item_id: "scrap_metal",
-                    quantity: 5,
-                },
-                CraftingMaterial {
-                    item_id: "energy_core",
-                    quantity: 2,
-                },
-            ],
-            result_item: "damage_amp",
-            result_quantity: 1,
-            craft_time: 3.0,
-            required_level: 2,
-        },
-        CraftingRecipe {
-            id: "basic_helmet",
-            name: "Basic Helmet",
-            category: RecipeCategory::Armor,
-            materials: vec![
-                CraftingMaterial {
-                    item_id: "scrap_metal",
-                    quantity: 6,
-                },
-                CraftingMaterial {
-                    item_id: "nano_fiber",
-                    quantity: 2,
-                },
-            ],
-            result_item: "armor_shard",
-            result_quantity: 3,
-            craft_time: 5.0,
-            required_level: 1,
-        },
-        CraftingRecipe {
-            id: "health_pack_adv",
-            name: "Advanced Health Pack",
-            category: RecipeCategory::Consumable,
-            materials: vec![
-                CraftingMaterial {
-                    item_id: "bio_sample",
-                    quantity: 3,
-                },
-                CraftingMaterial {
-                    item_id: "circuit_board",
-                    quantity: 1,
-                },
-            ],
-            result_item: "health_pack",
-            result_quantity: 2,
-            craft_time: 4.0,
-            required_level: 3,
-        },
-        CraftingRecipe {
-            id: "shield_bat",
-            name: "Shield Battery",
-            category: RecipeCategory::Consumable,
-            materials: vec![
-                CraftingMaterial {
-                    item_id: "energy_core",
-                    quantity: 3,
-                },
-                CraftingMaterial {
-                    item_id: "circuit_board",
-                    quantity: 2,
-                },
-            ],
-            result_item: "shield_booster",
-            result_quantity: 1,
-            craft_time: 5.0,
-            required_level: 4,
-        },
-        CraftingRecipe {
-            id: "beam_core",
-            name: "Star Sabre Core",
-            category: RecipeCategory::Upgrade,
-            materials: vec![
-                CraftingMaterial {
-                    item_id: "dark_matter",
-                    quantity: 1,
-                },
-                CraftingMaterial {
-                    item_id: "crystal_shard",
-                    quantity: 5,
-                },
-                CraftingMaterial {
-                    item_id: "energy_core",
-                    quantity: 8,
-                },
-            ],
-            result_item: "xp_chip",
-            result_quantity: 10,
-            craft_time: 15.0,
-            required_level: 8,
-        },
-    ]
+    use crate::world::heavy_economy::RecipeCategory as PortedCategory;
+
+    crate::world::heavy_economy::RECIPE_CATALOG
+        .iter()
+        .map(|recipe| CraftingRecipe {
+            id: recipe.id,
+            name: recipe.name,
+            category: match recipe.category {
+                PortedCategory::Weapon => RecipeCategory::Weapon,
+                PortedCategory::Armor => RecipeCategory::Armor,
+                PortedCategory::Base => RecipeCategory::Base,
+                PortedCategory::Upgrade => RecipeCategory::Upgrade,
+                PortedCategory::Consumable => RecipeCategory::Consumable,
+                PortedCategory::Drone => RecipeCategory::Drone,
+                PortedCategory::Robot => RecipeCategory::Robot,
+                PortedCategory::City => RecipeCategory::City,
+                PortedCategory::Ship => RecipeCategory::Ship,
+            },
+            materials: recipe
+                .materials
+                .iter()
+                .map(|material| CraftingMaterial {
+                    item_id: material.item_id,
+                    quantity: material.quantity,
+                })
+                .collect(),
+            result_item: recipe.result.item_id,
+            result_quantity: recipe.result.quantity,
+            craft_time: recipe.craft_seconds as f32,
+            required_level: u32::from(recipe.required_level),
+        })
+        .collect()
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -153,12 +88,12 @@ impl Plugin for CraftingPlugin {
 }
 
 // ── Craft Queue ───────────────────────────────────────────────────────────────
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CraftingQueue {
     pub items: Vec<ActiveCraft>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveCraft {
     pub owner: u8,
     #[allow(dead_code)]
@@ -178,24 +113,31 @@ fn crafting_queue_system(
     mut inv_ev: MessageWriter<InventoryChangedEvent>,
 ) {
     let dt = time.delta_secs();
-    let mut finished = vec![];
+    let mut ready = vec![];
     for (i, craft) in queue.items.iter_mut().enumerate() {
         craft.timer -= dt;
         if craft.timer <= 0.0 {
-            finished.push(i);
+            ready.push(i);
         }
     }
 
-    let mut completed = Vec::with_capacity(finished.len());
-    for i in finished.into_iter().rev() {
-        completed.push(queue.items.swap_remove(i));
-    }
-
-    for craft in completed {
-        if let Some((_, mut inventory)) = player_q.iter_mut().find(|(idx, _)| idx.0 == craft.owner)
-        {
-            inventory.add_item(&craft.result_item, craft.result_qty, 10);
+    // A finished craft remains queued until every result item has entered the
+    // owner's inventory. This turns a full bag into a visible pending delivery
+    // instead of deleting rare jewels, vehicle frames, or building prefabs.
+    for i in ready.into_iter().rev() {
+        let owner = queue.items[i].owner;
+        let Some((_, mut inventory)) = player_q.iter_mut().find(|(idx, _)| idx.0 == owner) else {
+            continue;
+        };
+        let result_item = queue.items[i].result_item.clone();
+        let result_qty = queue.items[i].result_qty;
+        let leftover = inventory.add_item(&result_item, result_qty, max_stack_for(&result_item));
+        if leftover == 0 {
+            queue.items.swap_remove(i);
             inv_ev.write(InventoryChangedEvent);
+        } else {
+            queue.items[i].timer = 0.0;
+            queue.items[i].result_qty = leftover;
         }
     }
 }
@@ -257,7 +199,7 @@ mod tests {
         for owner in 0..4 {
             let mut inventory = Inventory::default();
             inventory.add_item("scrap_metal", 5, 99);
-            inventory.add_item("energy_core", 2, 50);
+            inventory.add_item("circuit_board", 2, 50);
             start_craft("damage_mod", owner, &mut inventory, &stats, &mut queue)
                 .expect("every player can own a craft");
         }
@@ -289,5 +231,79 @@ mod tests {
         );
         assert!(inventory.has("scrap_metal", 5));
         assert!(queue.items.is_empty());
+    }
+
+    #[test]
+    fn executable_heavy_water_recipe_catalog_is_fully_player_craftable() {
+        let recipes = all_recipes();
+        assert_eq!(recipes.len(), 25);
+        let mut ids = std::collections::HashSet::new();
+        assert!(recipes.iter().all(|recipe| ids.insert(recipe.id)));
+        for recipe in &recipes {
+            assert!(
+                crate::components::inventory::item_definition(recipe.result_item).is_some(),
+                "missing result definition for {}",
+                recipe.id
+            );
+            assert!(recipe.craft_time > 0.0);
+            assert!(!recipe.materials.is_empty());
+        }
+    }
+
+    #[test]
+    fn finished_craft_waits_when_inventory_is_full_instead_of_losing_result() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<InventoryChangedEvent>()
+            .insert_resource(CraftingQueue {
+                items: vec![ActiveCraft {
+                    owner: 0,
+                    recipe_id: "rare_result".to_string(),
+                    timer: 0.0,
+                    duration: 1.0,
+                    result_item: "power_jewel_flawless".to_string(),
+                    result_qty: 1,
+                }],
+            })
+            .add_systems(Update, crafting_queue_system);
+        let mut inventory = Inventory {
+            slots: vec![
+                Some(crate::components::inventory::InventorySlot {
+                    item_id: "scrap_metal".to_string(),
+                    quantity: 99,
+                });
+                100
+            ],
+            max_slots: 100,
+        };
+        inventory.ensure_capacity(100);
+        let player = app
+            .world_mut()
+            .spawn((Player, PlayerIndex(0), inventory))
+            .id();
+
+        app.update();
+        assert_eq!(app.world().resource::<CraftingQueue>().items.len(), 1);
+        assert_eq!(
+            app.world()
+                .get::<Inventory>(player)
+                .unwrap()
+                .count("power_jewel_flawless"),
+            0
+        );
+
+        app.world_mut()
+            .get_mut::<Inventory>(player)
+            .unwrap()
+            .remove_item("scrap_metal", 99);
+        app.update();
+        assert!(app.world().resource::<CraftingQueue>().items.is_empty());
+        assert_eq!(
+            app.world()
+                .get::<Inventory>(player)
+                .unwrap()
+                .count("power_jewel_flawless"),
+            1
+        );
     }
 }

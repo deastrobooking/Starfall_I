@@ -43,6 +43,7 @@ use events::EventsPlugin;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
     CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, HackingPlugin,
+    HeavyBioPlugin, HeavyCombatPlugin, HeavyEconomyPlugin, HeavyRegionsPlugin,
     ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin, RobotGaragePlugin,
     SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
@@ -266,6 +267,12 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         SavePlugin,
     ))
     .add_plugins((
+        HeavyEconomyPlugin,
+        HeavyBioPlugin,
+        HeavyCombatPlugin,
+        HeavyRegionsPlugin,
+    ))
+    .add_plugins((
         ChapterPlugin,
         DiscoverablePlugin,
         RadioPlugin,
@@ -330,6 +337,7 @@ mod app_smoke_tests {
         assert!(world.contains_resource::<LocalPlayerConfig>());
         assert!(world.contains_resource::<PlayerSelectState>());
         assert!(world.contains_resource::<GameSettings>());
+        assert!(world.contains_resource::<world::heavy_water::HeavyWaterProgress>());
         assert!(world.contains_resource::<Messages<events::UiMessageEvent>>());
         assert!(world.contains_resource::<Messages<events::PlayerDamagedEvent>>());
 
@@ -341,6 +349,10 @@ mod app_smoke_tests {
         assert!(app.is_plugin_added::<WeaponPlugin>());
         assert!(app.is_plugin_added::<WorldPlugin>());
         assert!(app.is_plugin_added::<SavePlugin>());
+        assert!(app.is_plugin_added::<HeavyEconomyPlugin>());
+        assert!(app.is_plugin_added::<HeavyBioPlugin>());
+        assert!(app.is_plugin_added::<HeavyCombatPlugin>());
+        assert!(app.is_plugin_added::<HeavyRegionsPlugin>());
     }
 
     #[test]

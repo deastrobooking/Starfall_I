@@ -31,7 +31,7 @@ Full detail lives in [FEATURES.md](FEATURES.md); this is the shape of it.
 **Engine core (shared)** — Bevy 0.19 + Avian 0.7 behind a compat shim;
 fixed-tick motor (64 Hz) with carry-smoothed delivery; `GameSet` ordering;
 deterministic RNG streams; per-player input edge buffer; procedural audio bus;
-spatial LOD; v4 atomic saves. The EC# track in
+spatial LOD; v5 atomic saves with durable Heavy Water continuation state. The EC# track in
 [engine_roadmap.md](engine_roadmap.md) continues independently of the edition
 split.
 

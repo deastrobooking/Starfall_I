@@ -4,11 +4,13 @@ use crate::engine::game_rng::GameRng;
 use rand::Rng;
 
 use crate::combat::damage::Health;
-use crate::components::player::{Player, PlayerStats};
+use crate::components::inventory::{max_stack_for, Inventory};
+use crate::components::player::{Player, PlayerProgression, PlayerStats};
+use crate::components::weapon::{WeaponInventory, WeaponType, MAX_WEAPON_RANK};
 use crate::components::world::{Chest, LootType};
 use crate::engine::rendering::PbrBundle;
 use crate::engine::state::AppState;
-use crate::events::{ChestOpenedEvent, LootCollectedEvent};
+use crate::events::{ChestOpenedEvent, InventoryChangedEvent, LootCollectedEvent};
 use crate::resources::{PlaySessionTransition, PlayerScore};
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -21,10 +23,15 @@ impl Plugin for ChestPlugin {
             .add_systems(OnExit(AppState::Playing), cleanup_chests)
             .add_systems(
                 Update,
-                chest_proximity_system.run_if(in_state(AppState::Playing)),
+                (chest_proximity_system, animate_open_chests)
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
             );
     }
 }
+
+#[derive(Component)]
+struct ChestLid;
 
 fn spawn_chests(
     mut game_rng: ResMut<GameRng>,
@@ -64,21 +71,35 @@ fn spawn_chests(
             (LootType::WeaponUpgrade, 1)
         };
 
-        commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(1.5, 1.2, 1.5))),
-                material: MeshMaterial3d(gold_mat.clone()),
-                transform: Transform::from_xyz(x, 0.6, z),
-                ..default()
-            },
-            Chest::new(loot_type, amount),
-            PointLight {
-                color: Color::srgb(1.0, 0.85, 0.2),
-                intensity: 5_000.0,
-                range: 8.0,
-                ..default()
-            },
-        ));
+        let body_mesh = meshes.add(Cuboid::new(1.5, 0.9, 1.5));
+        let lid_mesh = meshes.add(Cuboid::new(1.62, 0.28, 1.58));
+        commands
+            .spawn((
+                PbrBundle {
+                    mesh: Mesh3d(body_mesh),
+                    material: MeshMaterial3d(gold_mat.clone()),
+                    transform: Transform::from_xyz(x, 0.48, z),
+                    ..default()
+                },
+                Chest::new(loot_type, amount),
+                PointLight {
+                    color: Color::srgb(1.0, 0.85, 0.2),
+                    intensity: 5_000.0,
+                    range: 8.0,
+                    ..default()
+                },
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    PbrBundle {
+                        mesh: Mesh3d(lid_mesh),
+                        material: MeshMaterial3d(gold_mat.clone()),
+                        transform: Transform::from_xyz(0.0, 0.58, 0.0),
+                        ..default()
+                    },
+                    ChestLid,
+                ));
+            });
     }
 }
 
@@ -103,16 +124,24 @@ fn cleanup_chests_for_menu(mut commands: Commands, chest_q: Query<Entity, With<C
 }
 
 fn chest_proximity_system(
-    mut commands: Commands,
     player_q: Query<(Entity, &Transform), With<Player>>,
-    mut player_stats_q: Query<&mut PlayerStats, With<Player>>,
+    mut player_loot_q: Query<
+        (
+            &mut PlayerStats,
+            &mut Inventory,
+            &mut WeaponInventory,
+            &mut PlayerProgression,
+        ),
+        With<Player>,
+    >,
     mut player_health_q: Query<&mut Health, With<Player>>,
     mut chest_q: Query<(Entity, &Transform, &mut Chest)>,
     mut loot_ev: MessageWriter<LootCollectedEvent>,
     mut chest_ev: MessageWriter<ChestOpenedEvent>,
+    mut inventory_ev: MessageWriter<InventoryChangedEvent>,
     mut score: ResMut<PlayerScore>,
 ) {
-    for (entity, chest_transform, mut chest) in chest_q.iter_mut() {
+    for (_entity, chest_transform, mut chest) in chest_q.iter_mut() {
         if chest.is_open {
             continue;
         }
@@ -138,7 +167,7 @@ fn chest_proximity_system(
         let amount = chest.loot_amount;
         match chest.loot_type {
             LootType::Credits => {
-                if let Ok(mut stats) = player_stats_q.get_mut(player_entity) {
+                if let Ok((mut stats, _, _, _)) = player_loot_q.get_mut(player_entity) {
                     stats.credits += amount;
                 }
             }
@@ -148,11 +177,32 @@ fn chest_proximity_system(
                 }
             }
             LootType::Armor => {
-                if let Ok(mut stats) = player_stats_q.get_mut(player_entity) {
+                if let Ok((mut stats, _, _, _)) = player_loot_q.get_mut(player_entity) {
                     stats.armor = (stats.armor + amount as f32).min(stats.max_armor);
                 }
             }
-            LootType::Ammo | LootType::WeaponUpgrade => {}
+            LootType::Ammo => {
+                if let Ok((_, mut inventory, mut weapons, _)) = player_loot_q.get_mut(player_entity)
+                {
+                    let active = weapons.active_mut();
+                    active.ammo = active.ammo.saturating_add(amount).min(active.max_ammo);
+                    let item_id = ammo_item_for(active.weapon_type);
+                    let _ = inventory.add_item(item_id, amount, max_stack_for(item_id));
+                    inventory_ev.write(InventoryChangedEvent);
+                }
+            }
+            LootType::WeaponUpgrade => {
+                if let Ok((_, mut inventory, mut weapons, mut progression)) =
+                    player_loot_q.get_mut(player_entity)
+                {
+                    if !upgrade_active_weapon(&mut progression, &mut weapons) {
+                        // A max-rank cache remains valuable instead of becoming
+                        // a no-op: convert it into universal upgrade currency.
+                        let _ = inventory.add_item("gear", 5, max_stack_for("gear"));
+                        inventory_ev.write(InventoryChangedEvent);
+                    }
+                }
+            }
         }
 
         loot_ev.write(LootCollectedEvent {
@@ -160,7 +210,99 @@ fn chest_proximity_system(
             amount,
         });
 
-        // Despawn after short delay (simplified: despawn immediately)
-        commands.entity(entity).despawn();
+        // `animate_open_chests` owns the readable lid/burst presentation and
+        // despawns the hierarchy after it has had time to play.
+    }
+}
+
+fn animate_open_chests(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut chest_q: Query<(Entity, &mut Chest, &mut PointLight)>,
+    mut lid_q: Query<(&ChildOf, &mut Transform), With<ChestLid>>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut chest, mut light) in chest_q.iter_mut() {
+        if !chest.is_open {
+            continue;
+        }
+        chest.open_timer += dt;
+        let progress = (chest.open_timer / 0.55).clamp(0.0, 1.0);
+        for (parent, mut lid_transform) in lid_q.iter_mut() {
+            if parent.parent() != entity {
+                continue;
+            }
+            lid_transform.rotation = Quat::from_rotation_x(-progress * 1.35);
+            lid_transform.translation.y = 0.58 + progress * 0.18;
+            lid_transform.translation.z = progress * 0.28;
+        }
+        light.intensity = if chest.open_timer < 0.22 {
+            5_000.0 + chest.open_timer / 0.22 * 11_000.0
+        } else {
+            (16_000.0 * (1.0 - (chest.open_timer - 0.22) / 1.18)).max(0.0)
+        };
+        if chest.open_timer >= 1.4 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn ammo_item_for(weapon_type: WeaponType) -> &'static str {
+    match weapon_type {
+        WeaponType::Pistol | WeaponType::Laser => "plasma_cell",
+        WeaponType::Rifle | WeaponType::Shotgun => "kinetic_rounds",
+        WeaponType::Rocket => "rocket_ammo",
+        WeaponType::Grenade => "grenade_pack",
+    }
+}
+
+fn upgrade_active_weapon(
+    progression: &mut PlayerProgression,
+    weapons: &mut WeaponInventory,
+) -> bool {
+    let slot = weapons.active_slot.min(weapons.slots.len() - 1);
+    let Some(rank) = progression.weapon_ranks.ranks.get_mut(slot) else {
+        return false;
+    };
+    if *rank >= MAX_WEAPON_RANK {
+        return false;
+    }
+    *rank += 1;
+    weapons.slots[slot].rank = *rank;
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ammo_cache_maps_every_primary_weapon_to_real_inventory_ammo() {
+        let pairs = [
+            (WeaponType::Pistol, "plasma_cell"),
+            (WeaponType::Rifle, "kinetic_rounds"),
+            (WeaponType::Shotgun, "kinetic_rounds"),
+            (WeaponType::Rocket, "rocket_ammo"),
+            (WeaponType::Laser, "plasma_cell"),
+            (WeaponType::Grenade, "grenade_pack"),
+        ];
+        for (weapon_type, expected) in pairs {
+            assert_eq!(ammo_item_for(weapon_type), expected);
+        }
+    }
+
+    #[test]
+    fn weapon_upgrade_cache_advances_active_owner_rank_once() {
+        let mut progression = PlayerProgression::default();
+        let mut weapons = WeaponInventory::default();
+        weapons.active_slot = 4;
+
+        assert!(upgrade_active_weapon(&mut progression, &mut weapons));
+        assert_eq!(progression.weapon_ranks.ranks[4], 1);
+        assert_eq!(weapons.slots[4].rank, 1);
+
+        progression.weapon_ranks.ranks[4] = MAX_WEAPON_RANK;
+        assert!(!upgrade_active_weapon(&mut progression, &mut weapons));
+        assert_eq!(progression.weapon_ranks.ranks[4], MAX_WEAPON_RANK);
     }
 }

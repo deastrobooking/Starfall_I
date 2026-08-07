@@ -20,8 +20,11 @@ use crate::components::player::{
     TraversalModeState,
 };
 use crate::components::weapon::{SpecialWeaponInventory, WeaponInventory, WeaponRanks};
+use crate::engine::game_loop::PlayingSetupSet;
 use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
+use crate::plugins::crafting_plugin::CraftingQueue;
+use crate::plugins::heavy_bio_plugin::HeavyBioClock;
 use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{
     initial_world_routes, initial_world_sites, is_stale_reference_blueprint, ChapterProgress,
@@ -30,6 +33,7 @@ use crate::resources::{
 };
 use crate::world::final_war::{FinalWarRegistry, FinalWarSaveRecord};
 use crate::world::hacking::HackingRegistry;
+use crate::world::heavy_water::HeavyWaterProgress;
 use crate::world::raids::{RaidRecord, RaidRegistry};
 use crate::world::robot_pets::RobotPetCollection;
 use crate::world::settlement_economy::SettlementEconomy;
@@ -40,9 +44,10 @@ const SAVE_FILE_A: &str = "starfall_i_save_a.json";
 const SAVE_FILE_B: &str = "starfall_i_save_b.json";
 const SAVE_FILE_C: &str = "starfall_i_save_c.json";
 const SETTINGS_FILE: &str = "starfall_i_settings.json";
-/// Current on-disk schema version. v4 introduced `save_generation`, the
-/// monotonic counter that decides which rotating slot is newest on load.
-const SAVE_VERSION: u32 = 4;
+/// Current on-disk schema version. v5 adds durable Heavy Water domain state
+/// and persists in-flight crafting deliveries. `save_generation`, introduced
+/// by v4, remains the monotonic rotating-slot authority.
+const SAVE_VERSION: u32 = 5;
 
 // ── Save Rotation State ───────────────────────────────────────────────────────
 /// Tracks which save slot (0=A, 1=B, 2=C) to write to next.
@@ -191,6 +196,9 @@ pub struct SaveParams<'w, 's> {
     pub select: Res<'w, PlayerSelectState>,
     pub robot_pets: Res<'w, RobotPetCollection>,
     pub settlement_economy: Res<'w, SettlementEconomy>,
+    pub crafting_queue: Res<'w, CraftingQueue>,
+    pub heavy_water: Res<'w, HeavyWaterProgress>,
+    pub heavy_bio_clock: Res<'w, HeavyBioClock>,
     pub upgrades: Res<'w, UpgradeLedger>,
     pub part_loadout: Res<'w, PlayerPartLoadout>,
     pub weapon_ranks: Res<'w, WeaponRanks>,
@@ -251,6 +259,12 @@ pub struct SaveData {
     pub robot_pets: RobotPetCollection,
     #[serde(default)]
     pub settlement_economy: SettlementEconomy,
+    #[serde(default)]
+    pub crafting_queue: CraftingQueue,
+    #[serde(default)]
+    pub heavy_water: HeavyWaterProgress,
+    #[serde(default)]
+    pub heavy_bio_clock: HeavyBioClock,
     #[serde(default)]
     pub tech_upgrades: UpgradeLedger,
     #[serde(default)]
@@ -478,6 +492,7 @@ impl PlayerSaveData {
         armor.active_element = self.armor_element;
         if let Some(saved_inventory) = &self.inventory {
             inventory.clone_from(saved_inventory);
+            inventory.ensure_capacity(100);
         }
         quick.item_id.clone_from(&self.quick_item_id);
         if quick
@@ -550,6 +565,9 @@ impl Default for SaveData {
             players: Vec::new(),
             robot_pets: RobotPetCollection::default(),
             settlement_economy: SettlementEconomy::default(),
+            crafting_queue: CraftingQueue::default(),
+            heavy_water: HeavyWaterProgress::default(),
+            heavy_bio_clock: HeavyBioClock::default(),
             tech_upgrades: UpgradeLedger::default(),
             part_loadout_body: BodyPreset::default(),
             part_loadout_arms: ArmPreset::default(),
@@ -638,11 +656,16 @@ impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SaveState>()
             .init_resource::<SaveRotationState>()
+            .init_resource::<HeavyWaterProgress>()
+            .init_resource::<HeavyBioClock>()
             .add_systems(
                 Startup,
                 (hydrate_progress_from_disk, load_settings_on_startup),
             )
-            .add_systems(OnEnter(AppState::Playing), load_save_on_enter)
+            .add_systems(
+                OnEnter(AppState::Playing),
+                load_save_on_enter.in_set(PlayingSetupSet::HydrateSave),
+            )
             .add_systems(
                 Update,
                 (autosave_system, manual_save_system).run_if(in_state(AppState::Playing)),
@@ -661,6 +684,9 @@ pub struct SaveSnapshot<'a> {
     pub select: &'a PlayerSelectState,
     pub robot_pets: &'a RobotPetCollection,
     pub settlement_economy: &'a SettlementEconomy,
+    pub crafting_queue: &'a CraftingQueue,
+    pub heavy_water: &'a HeavyWaterProgress,
+    pub heavy_bio_clock: &'a HeavyBioClock,
     pub upgrades: &'a UpgradeLedger,
     pub part_loadout: &'a PlayerPartLoadout,
     pub weapon_ranks: &'a WeaponRanks,
@@ -682,6 +708,9 @@ impl<'a> SaveSnapshot<'a> {
             select: &sp.select,
             robot_pets: &sp.robot_pets,
             settlement_economy: &sp.settlement_economy,
+            crafting_queue: &sp.crafting_queue,
+            heavy_water: &sp.heavy_water,
+            heavy_bio_clock: &sp.heavy_bio_clock,
             upgrades: &sp.upgrades,
             part_loadout: &sp.part_loadout,
             weapon_ranks: &sp.weapon_ranks,
@@ -745,6 +774,9 @@ fn build_save_data(snapshot: SaveSnapshot) -> SaveData {
         select,
         robot_pets,
         settlement_economy,
+        crafting_queue,
+        heavy_water,
+        heavy_bio_clock,
         upgrades,
         part_loadout,
         weapon_ranks,
@@ -775,6 +807,9 @@ fn build_save_data(snapshot: SaveSnapshot) -> SaveData {
         players,
         robot_pets: robot_pets.clone(),
         settlement_economy: settlement_economy.clone(),
+        crafting_queue: crafting_queue.clone(),
+        heavy_water: heavy_water.clone(),
+        heavy_bio_clock: heavy_bio_clock.clone(),
         tech_upgrades: upgrades.clone(),
         part_loadout_body: part_loadout.body,
         part_loadout_arms: part_loadout.arms,
@@ -852,8 +887,8 @@ fn migrate_save_data(mut data: SaveData, path: &Path) -> Option<SaveData> {
         return None;
     }
     if data.save_version < SAVE_VERSION {
-        // v3 and earlier predate the generation counter; serde's default has
-        // already assigned generation 0, so they sort as the oldest records.
+        // v3 and earlier predate the generation counter; serde's defaults have
+        // already assigned generation 0 and empty v5 domain/queue state.
         data.save_version = SAVE_VERSION;
     }
     Some(data)
@@ -984,6 +1019,9 @@ fn hydrate_progress_from_disk(
     mut select: ResMut<PlayerSelectState>,
     mut robot_pets: ResMut<RobotPetCollection>,
     mut settlement_economy: ResMut<SettlementEconomy>,
+    mut crafting_queue: ResMut<CraftingQueue>,
+    mut heavy_water: ResMut<HeavyWaterProgress>,
+    mut heavy_bio_clock: ResMut<HeavyBioClock>,
     mut upgrades: ResMut<UpgradeLedger>,
     mut part_loadout: ResMut<PlayerPartLoadout>,
     mut weapon_ranks: ResMut<WeaponRanks>,
@@ -1015,6 +1053,11 @@ fn hydrate_progress_from_disk(
         }
         *robot_pets = data.robot_pets.clone();
         *settlement_economy = data.settlement_economy.clone();
+        *crafting_queue = data.crafting_queue.clone();
+        *heavy_water = data.heavy_water.clone();
+        heavy_water.normalize(0);
+        *heavy_bio_clock = data.heavy_bio_clock.clone();
+        heavy_bio_clock.normalize();
         *upgrades = data.tech_upgrades.clone();
         progress.completed = data.completed_chapters;
         progress.discoverables = data.discoverables;
@@ -1075,6 +1118,9 @@ fn load_save_on_enter(
     mut perks: ResMut<PerkTree>,
     mut robot_pets: ResMut<RobotPetCollection>,
     mut settlement_economy: ResMut<SettlementEconomy>,
+    mut crafting_queue: ResMut<CraftingQueue>,
+    mut heavy_water: ResMut<HeavyWaterProgress>,
+    mut heavy_bio_clock: ResMut<HeavyBioClock>,
     mut upgrades: ResMut<UpgradeLedger>,
     mut weapon_ranks: ResMut<WeaponRanks>,
     mut world_site_registry: ResMut<WorldSiteRegistry>,
@@ -1090,6 +1136,11 @@ fn load_save_on_enter(
     if let Some(data) = load_save() {
         *robot_pets = data.robot_pets.clone();
         *settlement_economy = data.settlement_economy.clone();
+        *crafting_queue = data.crafting_queue.clone();
+        *heavy_water = data.heavy_water.clone();
+        heavy_water.normalize(0);
+        *heavy_bio_clock = data.heavy_bio_clock.clone();
+        heavy_bio_clock.normalize();
         *upgrades = data.tech_upgrades.clone();
         let mut active_players = 0usize;
         for (
@@ -1485,6 +1536,11 @@ mod tests {
             shoulders: ShoulderPreset::SpikedPauldrons,
             head: HeadPreset::CombatHelmet,
         };
+        let mut heavy_water = HeavyWaterProgress::new(8_675_309);
+        heavy_water
+            .bio
+            .player_mut(crate::world::heavy_water::local_player_key(0))
+            .garden_level = 2;
 
         let data = build_save_data(SaveSnapshot {
             players: vec![
@@ -1497,6 +1553,9 @@ mod tests {
             select: &select,
             robot_pets: &robot_pets,
             settlement_economy: &settlement_economy,
+            crafting_queue: &CraftingQueue::default(),
+            heavy_water: &heavy_water,
+            heavy_bio_clock: &HeavyBioClock::from_parts(7_000, 500_000),
             upgrades: &upgrades,
             part_loadout: &part_loadout,
             weapon_ranks: &WeaponRanks::default(),
@@ -1536,6 +1595,17 @@ mod tests {
         );
         assert_eq!(data.tech_upgrades.rank(TechUpgradeId::BeamCapacitors), 2);
         assert_eq!(data.tech_upgrades.rejuvenation_charge, 75.0);
+        assert_eq!(data.heavy_water.economy.world_seed, 8_675_309);
+        assert_eq!(data.heavy_bio_clock.game_time_ms, 7_000);
+        assert_eq!(data.heavy_bio_clock.submillisecond_nanos(), 500_000);
+        assert_eq!(
+            data.heavy_water
+                .bio
+                .player("local:p1")
+                .expect("Heavy Bio player should survive snapshot")
+                .garden_level,
+            2
+        );
         assert!(data.raids.is_empty());
         assert_eq!(data.part_loadout_body, BodyPreset::HeavyPlate);
         assert_eq!(data.part_loadout_arms, ArmPreset::ScoutArms);
@@ -1568,6 +1638,11 @@ mod tests {
             .ranks
             .push((TechUpgradeId::RejuvenationMatrix, 1));
         tech_upgrades.rejuvenation_charge = 120.0;
+        let mut heavy_water = HeavyWaterProgress::new(99);
+        heavy_water
+            .bio
+            .player_mut(crate::world::heavy_water::local_player_key(1))
+            .garden_level = 3;
 
         let data = SaveData {
             players: vec![
@@ -1621,6 +1696,8 @@ mod tests {
                 economy
             },
             tech_upgrades,
+            heavy_water,
+            heavy_bio_clock: HeavyBioClock::from_parts(12_345, 678),
             part_loadout_body: BodyPreset::VoidArmor,
             part_loadout_arms: ArmPreset::ClawArms,
             part_loadout_legs: LegPreset::HeavyLegs,
@@ -1667,6 +1744,18 @@ mod tests {
             1
         );
         assert_eq!(loaded.tech_upgrades.rejuvenation_charge, 120.0);
+        assert_eq!(loaded.heavy_water.economy.world_seed, 99);
+        assert_eq!(loaded.heavy_bio_clock.game_time_ms, 12_345);
+        assert_eq!(loaded.heavy_bio_clock.submillisecond_nanos(), 678);
+        assert_eq!(
+            loaded
+                .heavy_water
+                .bio
+                .player("local:p2")
+                .expect("Heavy Bio player should survive JSON")
+                .garden_level,
+            3
+        );
         assert_eq!(loaded.part_loadout_body, BodyPreset::VoidArmor);
         assert_eq!(loaded.part_loadout_arms, ArmPreset::ClawArms);
         assert_eq!(loaded.part_loadout_legs, LegPreset::HeavyLegs);
@@ -2044,7 +2133,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v3_save_still_loads_and_migrates_to_v4() {
+    fn legacy_v3_save_still_loads_and_migrates_to_v5() {
         let root = test_save_root("legacy_v3");
         // Build a genuine v3 record: version 3 and no save_generation field.
         let mut value = serde_json::to_value(SaveData {
@@ -2059,6 +2148,21 @@ mod tests {
             .unwrap()
             .remove("save_generation")
             .expect("current schema should carry save_generation");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("crafting_queue")
+            .expect("current schema should carry crafting_queue");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("heavy_water")
+            .expect("current schema should carry Heavy Water progress");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("heavy_bio_clock")
+            .expect("current schema should carry the Heavy Bio clock");
         fs::write(
             save_slot_path_in(&root, 0),
             serde_json::to_string_pretty(&value).unwrap(),
@@ -2071,6 +2175,9 @@ mod tests {
         assert_eq!(data.save_generation, 0);
         assert_eq!(data.wave_number, 9);
         assert_eq!(data.completed_chapters, vec![1, 2]);
+        assert!(data.crafting_queue.items.is_empty());
+        assert_eq!(data.heavy_water, HeavyWaterProgress::default());
+        assert_eq!(data.heavy_bio_clock, HeavyBioClock::default());
         // The first post-migration write supersedes the legacy record.
         assert_eq!(next_generation_in(&root), 1);
         let _ = fs::remove_dir_all(&root);

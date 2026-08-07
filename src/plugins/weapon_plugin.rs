@@ -36,6 +36,8 @@ use crate::events::*;
 use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{DungeonCrawlState, PlaySessionTransition};
 use crate::world::hacking::HackedUnit;
+use crate::world::heavy_economy::{OwnerId, WeaponSocket};
+use crate::world::heavy_water::HeavyWaterProgress;
 
 // ── Hit Particle ──────────────────────────────────────────────────────────────
 #[derive(Component)]
@@ -705,6 +707,94 @@ fn primary_fallback_damage_type(weapon_type: WeaponType, is_explosive: bool) -> 
     }
 }
 
+const fn heavy_weapon_socket(weapon_type: WeaponType) -> WeaponSocket {
+    match weapon_type {
+        WeaponType::Pistol => WeaponSocket::Pistol,
+        WeaponType::Rifle => WeaponSocket::Rifle,
+        WeaponType::Shotgun => WeaponSocket::Shotgun,
+        WeaponType::Rocket => WeaponSocket::Rocket,
+        WeaponType::Laser => WeaponSocket::Laser,
+        WeaponType::Grenade => WeaponSocket::Grenade,
+    }
+}
+
+fn heavy_jewel_damage_multiplier(
+    progress: &HeavyWaterProgress,
+    player_index: u8,
+    weapon_type: WeaponType,
+) -> f32 {
+    heavy_socket_damage_multiplier(progress, player_index, heavy_weapon_socket(weapon_type))
+}
+
+fn heavy_socket_damage_multiplier(
+    progress: &HeavyWaterProgress,
+    player_index: u8,
+    socket: WeaponSocket,
+) -> f32 {
+    progress
+        .economy
+        .account(OwnerId(player_index))
+        .map_or(1.0, |account| account.mounted_damage_multiplier(socket))
+}
+
+#[cfg(test)]
+mod heavy_jewel_tests {
+    use super::*;
+    use crate::world::heavy_economy::JewelTier;
+
+    #[test]
+    fn mounted_power_jewels_apply_once_to_the_matching_owner_and_slot() {
+        let mut progress = HeavyWaterProgress::new(7);
+        progress.economy.register_owner(OwnerId(1));
+        progress
+            .economy
+            .owners
+            .get_mut(&OwnerId(1))
+            .unwrap()
+            .jewel_mounts
+            .insert(WeaponSocket::Rifle, JewelTier::Flawless);
+        progress
+            .economy
+            .owners
+            .get_mut(&OwnerId(1))
+            .unwrap()
+            .jewel_mounts
+            .insert(WeaponSocket::TrackingMissile, JewelTier::Cut);
+
+        assert_eq!(
+            heavy_jewel_damage_multiplier(&progress, 1, WeaponType::Rifle),
+            1.5
+        );
+        assert_eq!(
+            heavy_jewel_damage_multiplier(&progress, 1, WeaponType::Pistol),
+            1.0
+        );
+        assert_eq!(
+            heavy_jewel_damage_multiplier(&progress, 0, WeaponType::Rifle),
+            1.0
+        );
+        assert_eq!(
+            heavy_socket_damage_multiplier(&progress, 1, WeaponSocket::TrackingMissile),
+            1.3
+        );
+    }
+
+    #[test]
+    fn every_primary_weapon_maps_to_its_stable_heavy_socket() {
+        let mappings = [
+            (WeaponType::Pistol, WeaponSocket::Pistol),
+            (WeaponType::Rifle, WeaponSocket::Rifle),
+            (WeaponType::Shotgun, WeaponSocket::Shotgun),
+            (WeaponType::Rocket, WeaponSocket::Rocket),
+            (WeaponType::Laser, WeaponSocket::Laser),
+            (WeaponType::Grenade, WeaponSocket::Grenade),
+        ];
+        for (weapon, socket) in mappings {
+            assert_eq!(heavy_weapon_socket(weapon), socket);
+        }
+    }
+}
+
 // ── Apply weapon ranks ────────────────────────────────────────────────────────
 fn apply_weapon_ranks_system(
     mut player_q: Query<(&PlayerProgression, &mut WeaponInventory), With<Player>>,
@@ -878,6 +968,7 @@ const CHARGE_DECAY_RATE: f32 = 1.5;
 fn weapon_fire_system(
     mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
+    heavy_water: Option<Res<HeavyWaterProgress>>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     library: Res<MoveLibrary>,
@@ -948,6 +1039,9 @@ fn weapon_fire_system(
             .ranged_slot(active_slot)
             .map_or(3.0, |def| def.projectile_lifetime);
         let weapon = inv.active_mut();
+        let jewel_damage_mult = heavy_water.as_deref().map_or(1.0, |progress| {
+            heavy_jewel_damage_multiplier(progress, player_index.0, weapon.weapon_type)
+        });
         weapon.fire_timer = (weapon.fire_timer - dt).max(0.0);
 
         // ── Charge tracking ──────────────────────────────────────────────────
@@ -989,6 +1083,7 @@ fn weapon_fire_system(
                         * perk_damage_mult
                         * tech_mult
                         * gauntlet_mult
+                        * jewel_damage_mult
                         * weapon.charge_damage_mult(),
                 );
                 let wt = weapon.weapon_type;
@@ -1059,7 +1154,8 @@ fn weapon_fire_system(
                 * weapon.rank_damage_mult()
                 * perk_damage_mult
                 * tech_damage_mult
-                * gauntlet_damage_mult,
+                * gauntlet_damage_mult
+                * jewel_damage_mult,
         );
         let speed = weapon.speed * upgrades.gauntlet_projectile_speed_mult();
         let extra_pellets = if explosive_weapon {
@@ -2231,6 +2327,7 @@ fn cleanup_weapon_transients_for_menu(
 fn special_weapon_system(
     mut game_rng: ResMut<GameRng>,
     time: Res<Time>,
+    heavy_water: Option<Res<HeavyWaterProgress>>,
     mut commands: Commands,
     proj_assets: Res<ProjectileAssets>,
     vehicle_state: Res<VehicleState>,
@@ -2296,10 +2393,18 @@ fn special_weapon_system(
             0 => {
                 if inv.slot7.can_fire() {
                     let level = inv.slot7.level;
+                    let jewel_damage_mult = heavy_water.as_deref().map_or(1.0, |progress| {
+                        heavy_socket_damage_multiplier(
+                            progress,
+                            player_index.0,
+                            WeaponSocket::TrackingMissile,
+                        )
+                    });
                     let dmg = inv.slot7.effective_damage()
                         * armor_damage_mult
                         * upgrades.missile_damage_mult()
-                        * upgrades.gauntlet_explosive_damage_mult();
+                        * upgrades.gauntlet_explosive_damage_mult()
+                        * jewel_damage_mult;
                     let damage_type =
                         gauntlet_projectile_damage_type(upgrades, DamageType::Explosive);
                     inv.slot7.cooldown_timer = inv.slot7.cooldown;

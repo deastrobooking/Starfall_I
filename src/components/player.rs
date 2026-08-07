@@ -1336,6 +1336,11 @@ pub struct PlayerInput {
     pub ui_left: bool,
     pub ui_right: bool,
     pub ui_confirm: bool,
+    /// Modal-UI alternate action (keyboard Reload / controller West).
+    pub ui_secondary: bool,
+    /// Modal-UI page/category navigation (Q/E or controller shoulders).
+    pub ui_page_prev: bool,
+    pub ui_page_next: bool,
     /// UI-only cancel/back request (Escape or East/B/Circle).
     pub ui_cancel: bool,
     pub weapon_slot: Option<usize>,
