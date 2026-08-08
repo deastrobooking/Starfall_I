@@ -1645,14 +1645,27 @@ plus atomic settings. Legacy working-directory saves migrate non-destructively.
 
 - **Autosave**: every 30 seconds while `Playing`.
 - **Manual save**: F5 key.
-- **Schema**: v4 with a monotonic generation; loading selects the valid slot
+- **Schema**: v5 with a monotonic generation; loading selects the valid slot
   with the highest generation, skips corrupt slots, migrates older schemas, and
   rejects unsupported future versions.
 - **Crash reports**: timestamped, path-sanitized logs share the platform data
   root and retain the newest five files.
-- **Load**: chapter progress is hydrated on startup; player stats are applied on `OnEnter(Playing)`.
+- **Load**: chapter progress is hydrated on startup; the selected record is
+  cached for the first `OnEnter(Playing)`, avoiding a second three-slot scan and
+  repeated global-state hydration. Player components are applied only after
+  player spawn. Schema-v4 24-slot inventories expand to 100 slots without
+  reordering or dropping stacks.
+- **Feedback and diagnostics**: chapter travel reveals a pre-spawned loading
+  card before the state transition. World startup logs elapsed generation,
+  standard-material count, and mesh counts for base, city, traversal,
+  mountains, range, nature, and landmarks so save I/O and world stalls are
+  distinguishable.
 
-Saved shared fields: `wave_number`, completed chapters, discoverables, recruited companions, recovered scientist relics, recovered relic fragments, unspent perk points, perk ranks, robot pets, tech upgrade ranks, rejuvenation reserve, player-slot character blueprints, and chassis part loadout (`part_loadout_body/arms/legs/shoulders` as `CharacterPartStyle`).
+Saved shared fields include `wave_number`, completed chapters, discoverables,
+recruited companions, recovered scientist relics/fragments, perk ranks, robot
+pets, tech upgrades, character blueprints and part loadouts, crafting queue,
+the Heavy economy/Bio/combat/region/vehicle continuation record and Bio clock,
+plus campaign/player-scoped Heavy invasion/manual state.
 
 Saved per-player fields live in `players[]` records keyed by `player_index`:
 level, experience, credits, health, stamina, armor values, inventory stacks,
@@ -1717,9 +1730,15 @@ See `docs/FEATURES.md` for the player workflow and manifest schema.
 - Decorative trees via L-system string rewriting (`lsystem/mod.rs`) + 3-D turtle interpreter (`lsystem/turtle.rs`).
 - City-safe terrain is clamped to the invisible gameplay floor, keeping terrain visuals and collision from diverging below Y=0.
 - Lush procedural nature adds forest pockets, water gardens, reeds, flowers, shrubs, mossy rocks, and darker stone outcrops.
+- Repeated road, facade, rooftop, trim, forest, bridge, and moss geometry shares
+  cached unit cube/sphere/cylinder/cone meshes and expresses authored dimensions
+  through entity transforms. Visual sizes, colliders, entity layout, trigger
+  positions, and sway scales remain unchanged while render-asset creation is
+  bounded. A fixed-seed M3 Pro optimized-development smoke reduced initial world
+  assets from 108,755 meshes to 9,257, queued in 0.80-0.90 seconds.
 - Grass is a streamed, GPU-driven field (`src/plugins/world_plugin/grass.rs` + `assets/shaders/grass.wgsl`) rather than per-blade entities:
   - Every blade in a 16 m chunk is baked into one merged mesh, so a chunk costs one entity and one draw call. Per-blade sway phase, tint, and the terrain colour beneath the blade ride in the vertex stream (`UV_0` = width/height, `COLOR` = ground colour + blade hash).
-  - Chunks stream around `PlayerCamera` (falling back to `Player`), bake at most 2 meshes per frame after a 16-per-frame warm-up, and cache meshes by coordinate so re-crossing old ground is free. Placement is a pure function of `(world_seed, chunk)`, so an evicted chunk rebuilds identically.
+  - Chunks stream around `PlayerCamera` (falling back to `Player`), bake at most 2 fresh meshes and 24,000 candidate vertices per frame, and cache meshes by coordinate so re-crossing old ground is free. Placement is a pure function of `(world_seed, chunk)`, so an evicted chunk rebuilds identically.
   - Three LOD tiers (Near/Mid/Far: 4/3/2-segment blades, denser to wider) have overlapping distance windows; the shader dithers each tier in and out so density changes read as a dissolve, not a ring.
   - Blades only grow on ground the terrain agrees with: slope, altitude band, city clearance, mountain-route corridors, lake basins, and the coastline all mask density, and a two-octave value-noise clump mask breaks the field into tufts.
   - The shader adds gusting multi-octave wind (waves travel along the wind direction), wrapped diffuse, a subsurface-scattering approximation for back-lit rim light, tip sheen, root occlusion, and blade-width curl shading. Chunks carry explicit `Aabb`s for frustum culling and are `NotShadowCaster`.
@@ -1800,14 +1819,17 @@ shell travels at 68 (82 during turbo), uses a 7-unit explosion radius, has a
 owning player for the normal swept collision/reward pipeline. The temporary +25
 armor bonus is removed/clamped without inflating saved base armor.
 
-The party still shares one active vehicle mode at a time. These procedural
-bodies are **not independent physical vehicles**: they do not own a separate
-rigid body, collider, health/destruction state, world spawn, or seats, and `J`
-activates a mode rather than mounting a separately simulated entity. Physical
-vehicle collision/mount/destruction, Ghost Ride ejection plus unmanned
-ram/detonation, and general vehicle ramming remain future work. Heavy Water's
-named legacy-region lifecycle and authoritative online play also remain outside
-this shipped slice.
+The party still shares one native active vehicle mode at a time, and those
+procedural bodies remain player-motor driven. Separately,
+`HeavyWaterProgress::vehicles` is a durable independent ATV/fighter authority:
+it owns positions, 200 HP, access leases, nearest mounting, eject/respawn,
+swept AABB motion, turbo/orbital cruise, destruction, and Ghost Ride. The
+`HeavyVehiclePlugin` binds stable local operators and advances that authority
+at fixed tick, emitting typed spawn/mount/motion/damage/detonation descriptors.
+It deliberately does not write Bevy transforms, Avian bodies, player input,
+camera state, or combat health. A physical ECS/Avian consumer remains before
+these records appear as independently mountable world entities; authoritative
+online play remains a separate networking/security program.
 
 The two-pet Jet Bike assembly is the first spawned hybrid body: a single
 party-owned visual follows its rider, shows wheels in ground mode, deploys

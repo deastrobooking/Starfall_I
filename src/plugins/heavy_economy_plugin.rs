@@ -48,18 +48,19 @@ pub enum HeavyEconomyTrustBoundary {
 }
 
 /// Result of the one-time deterministic mining-layout initialization.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum HeavyMiningSeedStatus {
+    #[default]
     WaitingForPlaying,
-    Seeded { world_seed: u64, node_count: usize },
-    PreservedExisting { world_seed: u64, node_count: usize },
+    Seeded {
+        world_seed: u64,
+        node_count: usize,
+    },
+    PreservedExisting {
+        world_seed: u64,
+        node_count: usize,
+    },
     Rejected(String),
-}
-
-impl Default for HeavyMiningSeedStatus {
-    fn default() -> Self {
-        Self::WaitingForPlaying
-    }
 }
 
 /// Runtime-only diagnostics for the canonical-to-domain mirror.

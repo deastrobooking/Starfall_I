@@ -43,9 +43,9 @@ use events::EventsPlugin;
 use plugins::{
     ArmorPlugin, ChapterPlugin, CharacterDesignPlugin, CharacterPlugin, ChestPlugin,
     CompanionPlugin, CraftingPlugin, DiscoverablePlugin, EnemyPlugin, HackingPlugin,
-    HeavyBioPlugin, HeavyCombatPlugin, HeavyEconomyPlugin, HeavyRegionsPlugin,
-    ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin, RobotGaragePlugin,
-    SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
+    HeavyBioPlugin, HeavyCombatPlugin, HeavyEconomyPlugin, HeavyRegionsPlugin, HeavyVehiclePlugin,
+    HeavyWorldEventsPlugin, ImportedCharacterForgePlugin, InputPlugin, PlayerPlugin, RadioPlugin,
+    RobotGaragePlugin, SavePlugin, UiPlugin, VehiclePlugin, WeaponPlugin, WorldPlugin,
 };
 use resources::{
     CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData, CharacterDesignSnapshot,
@@ -271,6 +271,8 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         HeavyBioPlugin,
         HeavyCombatPlugin,
         HeavyRegionsPlugin,
+        HeavyVehiclePlugin,
+        HeavyWorldEventsPlugin,
     ))
     .add_plugins((
         ChapterPlugin,
@@ -353,6 +355,8 @@ mod app_smoke_tests {
         assert!(app.is_plugin_added::<HeavyBioPlugin>());
         assert!(app.is_plugin_added::<HeavyCombatPlugin>());
         assert!(app.is_plugin_added::<HeavyRegionsPlugin>());
+        assert!(app.is_plugin_added::<HeavyVehiclePlugin>());
+        assert!(app.is_plugin_added::<HeavyWorldEventsPlugin>());
     }
 
     #[test]

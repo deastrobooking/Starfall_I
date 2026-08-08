@@ -2013,8 +2013,10 @@ mod tests {
 
     #[test]
     fn target_selection_is_oldest_resolution_then_world_level() {
-        let mut director = InvasionDirector::default();
-        director.main_campaign_complete = true;
+        let mut director = InvasionDirector {
+            main_campaign_complete: true,
+            ..Default::default()
+        };
         for zone in director.zones.values_mut() {
             zone.state = ZoneState::Uncleared;
         }
@@ -2076,9 +2078,11 @@ mod tests {
 
     #[test]
     fn no_eligible_target_restarts_repeat_peace_window() {
-        let mut director = InvasionDirector::default();
-        director.main_campaign_complete = true;
-        director.next_invasion_in_ms = 1;
+        let mut director = InvasionDirector {
+            main_campaign_complete: true,
+            next_invasion_in_ms: 1,
+            ..Default::default()
+        };
         assert!(director.tick(1, 50, 0).is_empty());
         assert_eq!(director.next_invasion_in_ms, REPEAT_PEACE_MS);
         assert!(director.warning_zone_id.is_none());
@@ -2127,8 +2131,10 @@ mod tests {
 
     #[test]
     fn direct_defense_can_resolve_during_warning() {
-        let mut director = InvasionDirector::default();
-        director.main_campaign_complete = true;
+        let mut director = InvasionDirector {
+            main_campaign_complete: true,
+            ..Default::default()
+        };
         set_only_candidate(&mut director, WorldZoneId::OrbitalFront);
         director.next_invasion_in_ms = 0;
         director.tick(1, 300, 0);
@@ -2147,8 +2153,10 @@ mod tests {
 
     #[test]
     fn invasion_normalization_repairs_partial_and_transient_saves() {
-        let mut director = InvasionDirector::default();
-        director.schema_version = 0;
+        let mut director = InvasionDirector {
+            schema_version: 0,
+            ..Default::default()
+        };
         director.zones.remove(&WorldZoneId::MichiganWilds);
         let detroit = director
             .zones

@@ -576,9 +576,9 @@ pub struct HeavyInvasionEncounterDescriptor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeavyWorldEventsCheckpointReason {
-    InvasionWarning,
-    InvasionStarted,
-    InvasionResolved,
+    Warning,
+    Started,
+    Resolved,
 }
 
 /// Mirrors Heavy Water's force-save boundary without directly invoking the
@@ -619,9 +619,9 @@ pub fn invasion_checkpoint_request(
     event: &InvasionEvent,
 ) -> Option<HeavyWorldEventsCheckpointRequested> {
     let reason = match event {
-        InvasionEvent::Warning { .. } => HeavyWorldEventsCheckpointReason::InvasionWarning,
-        InvasionEvent::Started { .. } => HeavyWorldEventsCheckpointReason::InvasionStarted,
-        InvasionEvent::Resolved { .. } => HeavyWorldEventsCheckpointReason::InvasionResolved,
+        InvasionEvent::Warning { .. } => HeavyWorldEventsCheckpointReason::Warning,
+        InvasionEvent::Started { .. } => HeavyWorldEventsCheckpointReason::Started,
+        InvasionEvent::Resolved { .. } => HeavyWorldEventsCheckpointReason::Resolved,
         InvasionEvent::ZoneStateChanged { .. } | InvasionEvent::RebuildEraUnlocked { .. } => {
             return None;
         }
@@ -1476,7 +1476,7 @@ mod tests {
             invasion_checkpoint_request(key, &warning),
             Some(HeavyWorldEventsCheckpointRequested {
                 campaign_key: key,
-                reason: HeavyWorldEventsCheckpointReason::InvasionWarning,
+                reason: HeavyWorldEventsCheckpointReason::Warning,
             })
         );
         assert!(invasion_encounter_descriptor(key, &warning).is_none());
@@ -1495,7 +1495,7 @@ mod tests {
         };
         assert_eq!(
             invasion_checkpoint_request(key, &resolved).unwrap().reason,
-            HeavyWorldEventsCheckpointReason::InvasionResolved
+            HeavyWorldEventsCheckpointReason::Resolved
         );
         assert!(invasion_encounter_descriptor(key, &resolved).is_none());
     }

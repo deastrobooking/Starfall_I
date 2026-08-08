@@ -11,6 +11,7 @@ use super::heavy_bio::HeavyBioSave;
 use super::heavy_combat::HeavyCombatSave;
 use super::heavy_economy::HeavyEconomyState;
 use super::heavy_regions::{LegacyRegionId, PropStateRegistry, RegionSession};
+use super::heavy_vehicle::HeavyVehicleFleet;
 
 pub const HEAVY_WATER_PROGRESS_SCHEMA_VERSION: u16 = 1;
 
@@ -23,6 +24,7 @@ pub struct HeavyWaterProgress {
     pub combat: HeavyCombatSave,
     pub regions: RegionSession,
     pub props: PropStateRegistry,
+    pub vehicles: HeavyVehicleFleet,
     /// Monotonic source for replay-protected offline economy operations.
     /// Persisting it prevents a fresh process from reusing an applied ID.
     pub next_economy_transaction_id: u64,
@@ -43,6 +45,7 @@ impl HeavyWaterProgress {
             combat: HeavyCombatSave::default(),
             regions: RegionSession::new(LegacyRegionId::DetroitStarCityFront),
             props: PropStateRegistry::default(),
+            vehicles: HeavyVehicleFleet::default(),
             next_economy_transaction_id: 1,
         }
     }
@@ -69,6 +72,10 @@ impl HeavyWaterProgress {
         }
         if self.props.validate().is_err() {
             self.props = PropStateRegistry::default();
+            repaired = true;
+        }
+        if self.vehicles.validate().is_err() {
+            self.vehicles = HeavyVehicleFleet::default();
             repaired = true;
         }
         let minimum_next_transaction = self

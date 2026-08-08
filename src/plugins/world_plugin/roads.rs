@@ -476,8 +476,9 @@ pub(super) fn spawn_speed_road_network(
     seed: u64,
     terrain_seed: u64,
 ) {
-    let deck_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    spawn_star_city_elevated_ring(commands, meshes, pal, &deck_mesh, terrain_seed);
+    let mesh_cache = SpeedRoadMeshCache::new(meshes);
+    let deck_mesh = mesh_cache.unit_cube.clone();
+    spawn_star_city_elevated_ring(commands, pal, &mesh_cache, &deck_mesh, terrain_seed);
     let road_profiles = speed_road_network_profiles(terrain_seed);
 
     for (ri, route) in mountain_routes().iter().enumerate() {
@@ -487,8 +488,8 @@ pub(super) fn spawn_speed_road_network(
         for (chunk, points) in profile.windows(2).enumerate() {
             spawn_speed_road_deck_between(
                 commands,
-                meshes,
                 pal,
+                &mesh_cache,
                 &deck_mesh,
                 points[0],
                 points[1],
@@ -541,8 +542,8 @@ pub(super) fn spawn_speed_road_network(
                 );
                 spawn_speed_loop_gate(
                     commands,
-                    meshes,
                     pal,
+                    &mesh_cache,
                     center,
                     delta.x.atan2(delta.y),
                     22.0 + (ri % 2) as f32 * 5.0,
@@ -603,10 +604,10 @@ pub(super) fn spawn_speed_road_network(
                 // BoardBoostPad entity existed for board_boost_pad_system to
                 // detect. Populate every loop with a real entrance pad that
                 // supplies enough sustained speed to complete the stunt.
-                spawn_board_boost_pad(
+                spawn_board_boost_pad_cached(
                     commands,
-                    meshes,
                     pal,
+                    &mesh_cache,
                     base + Vec3::Y * 0.52,
                     delta.x.atan2(delta.y),
                     0.0,
@@ -639,8 +640,8 @@ pub(super) fn spawn_speed_road_network(
 
     spawn_mountain_wrap_ramps(
         commands,
-        meshes,
         pal,
+        &mesh_cache,
         &deck_mesh,
         seed + 30_000,
         terrain_seed,
@@ -648,8 +649,8 @@ pub(super) fn spawn_speed_road_network(
     spawn_route_sweeper_curves(commands, pal, &deck_mesh, terrain_seed);
     spawn_hoverboard_trick_ramps(
         commands,
-        meshes,
         pal,
+        &mesh_cache,
         seed + 52_000,
         terrain_seed,
         &road_profiles,
@@ -666,6 +667,7 @@ pub(super) fn spawn_speed_road_network(
         commands,
         meshes,
         pal,
+        &mesh_cache,
         seed + 61_000,
         terrain_seed,
         &road_profiles,
@@ -679,6 +681,7 @@ pub(super) fn spawn_speed_road_network(
             commands,
             meshes,
             pal,
+            &mesh_cache,
             &deck_mesh,
             settlement,
             layout,
@@ -688,8 +691,8 @@ pub(super) fn spawn_speed_road_network(
         );
         spawn_settlement_speed_spur(
             commands,
-            meshes,
             pal,
+            &mesh_cache,
             &deck_mesh,
             settlement,
             layout,
@@ -708,8 +711,8 @@ pub(super) fn spawn_speed_road_network(
 /// each access ramp is a smooth terrain-aware climb onto the outer ring lane.
 fn spawn_star_city_elevated_ring(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     deck_mesh: &Handle<Mesh>,
     terrain_seed: u64,
 ) {
@@ -779,10 +782,10 @@ fn spawn_star_city_elevated_ring(
                 } else {
                     yaw + std::f32::consts::PI
                 };
-                spawn_board_boost_pad(
+                spawn_board_boost_pad_cached(
                     commands,
-                    meshes,
                     pal,
+                    mesh_cache,
                     lane_center + Vec3::Y * 0.08,
                     lane_yaw,
                     0.0,
@@ -867,10 +870,10 @@ fn spawn_star_city_elevated_ring(
             if matches!(segment, 3 | 15) {
                 let delta = pair[1] - pair[0];
                 let horizontal_len = Vec2::new(delta.x, delta.z).length().max(0.001);
-                spawn_board_boost_pad(
+                spawn_board_boost_pad_cached(
                     commands,
-                    meshes,
                     pal,
+                    mesh_cache,
                     pair[0].lerp(pair[1], 0.5) + Vec3::Y * 0.52,
                     delta.x.atan2(delta.z),
                     (delta.y / horizontal_len).atan(),
@@ -1076,8 +1079,8 @@ pub(super) fn road_profile_tangent_at(profile: &[Vec3], x: f32, z: f32) -> Optio
 #[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_speed_road_deck_between(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     deck_mesh: &Handle<Mesh>,
     mut start: Vec3,
     mut end: Vec3,
@@ -1142,10 +1145,10 @@ pub(super) fn spawn_speed_road_deck_between(
     }
 
     if boost_overlay {
-        spawn_boost_road_span(
+        spawn_boost_road_span_cached(
             commands,
-            meshes,
             pal,
+            mesh_cache,
             center + Vec3::Y * 0.58,
             yaw,
             pitch,
@@ -1736,6 +1739,7 @@ pub(super) fn spawn_settlement_speed_ring(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     deck_mesh: &Handle<Mesh>,
     settlement: MapSettlement,
     layout: SettlementTerrainLayout,
@@ -1770,8 +1774,8 @@ pub(super) fn spawn_settlement_speed_ring(
         let end = settlement_speed_ring_point(settlement, layout, ring_radius, a1, terrain_seed);
         spawn_speed_road_deck_between(
             commands,
-            meshes,
             pal,
+            mesh_cache,
             deck_mesh,
             start,
             end,
@@ -1865,8 +1869,8 @@ pub(super) fn spawn_settlement_speed_ring(
     let yaw = tangent.x.atan2(tangent.y);
     spawn_speed_loop_gate(
         commands,
-        meshes,
         pal,
+        mesh_cache,
         gate_pos + Vec3::Y * 0.72,
         yaw,
         if matches!(settlement.kind, MapSettlementKind::City) {
@@ -1906,8 +1910,8 @@ pub(super) fn stunt_race_opponent_count() -> usize {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_settlement_speed_spur(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     deck_mesh: &Handle<Mesh>,
     settlement: MapSettlement,
     layout: SettlementTerrainLayout,
@@ -1942,8 +1946,8 @@ pub(super) fn spawn_settlement_speed_spur(
         let t1 = (chunk + 1) as f32 / chunk_count as f32;
         spawn_speed_road_deck_between(
             commands,
-            meshes,
             pal,
+            mesh_cache,
             deck_mesh,
             start.lerp(end, t0),
             start.lerp(end, t1),
@@ -2020,8 +2024,8 @@ pub(super) fn speed_road_sweeper_curve_count() -> usize {
 
 pub(super) fn spawn_hoverboard_trick_ramps(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     seed: u64,
     terrain_seed: u64,
     road_profiles: &[Vec<Vec3>],
@@ -2065,10 +2069,10 @@ pub(super) fn spawn_hoverboard_trick_ramps(
                 let road_direction = road_profile_tangent_at(&road_profiles[ri], ramp_x, ramp_z)
                     .filter(|tangent| tangent.dot(dir) >= 0.0)
                     .unwrap_or(dir);
-                spawn_board_boost_ramp(
+                spawn_board_boost_ramp_cached(
                     commands,
-                    meshes,
                     pal,
+                    mesh_cache,
                     base_center,
                     road_direction,
                     18.0,
@@ -2079,8 +2083,8 @@ pub(super) fn spawn_hoverboard_trick_ramps(
                 );
                 spawn_speed_loop_gate(
                     commands,
-                    meshes,
                     pal,
+                    mesh_cache,
                     base_center + dir * 42.0 + Vec3::Y * 2.4,
                     yaw,
                     18.0 + seeded(seed, spawned as u64 * 17) * 7.0,
@@ -2348,8 +2352,8 @@ fn spawn_raceway_bowl(
 #[allow(clippy::too_many_arguments)]
 fn spawn_raceway_vertical_loop(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     deck_mesh: &Handle<Mesh>,
     base: Vec3,
     direction: Vec3,
@@ -2381,10 +2385,10 @@ fn spawn_raceway_vertical_loop(
         },
         WorldGeometry,
     ));
-    spawn_board_boost_pad(
+    spawn_board_boost_pad_cached(
         commands,
-        meshes,
         pal,
+        mesh_cache,
         base + Vec3::Y * 0.52,
         direction.x.atan2(direction.z),
         0.0,
@@ -2402,6 +2406,7 @@ pub(super) fn spawn_race_region_features(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     seed: u64,
     terrain_seed: u64,
     road_profiles: &[Vec<Vec3>],
@@ -2409,7 +2414,7 @@ pub(super) fn spawn_race_region_features(
     let Some(profile) = road_profiles.get(RACE_CIRCUIT_ROUTE_INDEX) else {
         return;
     };
-    let skate_deck_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let skate_deck_mesh = mesh_cache.unit_cube.clone();
 
     for point in RACE_REGION_TRAVEL_POINTS {
         let y = road_profile_height_at(profile, point.x, point.z)
@@ -2502,10 +2507,10 @@ pub(super) fn spawn_race_region_features(
         let ramp_xz = xz + right * lane_offset;
         let y = road_profile_height_at(profile, xz.x, xz.y)
             .unwrap_or_else(|| terrain_surface_y(xz.x, xz.y, terrain_seed) + 1.0);
-        spawn_board_boost_ramp(
+        spawn_board_boost_ramp_cached(
             commands,
-            meshes,
             pal,
+            mesh_cache,
             Vec3::new(ramp_xz.x, y + 0.55, ramp_xz.y),
             direction,
             44.0,
@@ -2582,8 +2587,8 @@ pub(super) fn spawn_race_region_features(
             .unwrap_or_else(|| terrain_surface_y(center_xz.x, center_xz.y, terrain_seed) + 1.0);
         spawn_raceway_vertical_loop(
             commands,
-            meshes,
             pal,
+            mesh_cache,
             &skate_deck_mesh,
             Vec3::new(center_xz.x, y + 0.55, center_xz.y) + right * side * 112.0,
             direction,
@@ -2657,8 +2662,8 @@ pub(super) fn spawn_race_region_features(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_mountain_wrap_ramps(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     deck_mesh: &Handle<Mesh>,
     seed: u64,
     terrain_seed: u64,
@@ -2685,8 +2690,8 @@ pub(super) fn spawn_mountain_wrap_ramps(
             let start_angle = seeded(seed, ri as u64 * 239 + vi as u64 * 23) * TAU;
             spawn_helical_speed_ramp(
                 commands,
-                meshes,
                 pal,
+                mesh_cache,
                 deck_mesh,
                 Vec2::new(x, z),
                 radius,
@@ -2705,8 +2710,8 @@ pub(super) fn spawn_mountain_wrap_ramps(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_helical_speed_ramp(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     deck_mesh: &Handle<Mesh>,
     center: Vec2,
     radius: f32,
@@ -2733,8 +2738,8 @@ pub(super) fn spawn_helical_speed_ramp(
 
         spawn_speed_road_deck_between(
             commands,
-            meshes,
             pal,
+            mesh_cache,
             deck_mesh,
             point(a0, t0),
             point(a1, t1),
@@ -2749,15 +2754,14 @@ pub(super) fn spawn_helical_speed_ramp(
 
 pub(super) fn spawn_speed_loop_gate(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     center: Vec3,
     yaw: f32,
     radius: f32,
     width: f32,
     seed: u64,
 ) {
-    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let yaw_rot = Quat::from_rotation_y(yaw);
     let forward = yaw_rot * Vec3::Z;
     let segments = 18usize;
@@ -2789,7 +2793,7 @@ pub(super) fn spawn_speed_loop_gate(
         if angle.sin() < -0.20 {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(unit_cube.clone()),
+                    mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                     material: MeshMaterial3d(pal.boost_ramp.clone()),
                     transform,
                     ..default()
@@ -2807,7 +2811,7 @@ pub(super) fn spawn_speed_loop_gate(
         } else {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(unit_cube.clone()),
+                    mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                     material: MeshMaterial3d(if segment % 2 == 0 {
                         pal.boost_lane.clone()
                     } else {
@@ -2821,10 +2825,10 @@ pub(super) fn spawn_speed_loop_gate(
         }
     }
 
-    spawn_board_boost_pad(
+    spawn_board_boost_pad_cached(
         commands,
-        meshes,
         pal,
+        mesh_cache,
         center + Vec3::Y * 0.34,
         yaw,
         0.0,
@@ -2839,10 +2843,10 @@ pub(super) fn spawn_speed_loop_gate(
 
     for end in [-1.0_f32, 1.0] {
         let ramp_dir = if end > 0.0 { forward } else { -forward };
-        spawn_board_boost_ramp(
+        spawn_board_boost_ramp_cached(
             commands,
-            meshes,
             pal,
+            mesh_cache,
             center + forward * end * radius * 1.16 + Vec3::Y * 0.80,
             ramp_dir,
             width * 0.48,

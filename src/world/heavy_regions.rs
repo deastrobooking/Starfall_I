@@ -366,7 +366,7 @@ impl AtmosphereProfile {
         }
 
         let hour = normalize_hour(hour);
-        let (from, to, blend) = if hour < 5.0 || hour >= 21.0 {
+        let (from, to, blend) = if !(5.0..21.0).contains(&hour) {
             (MIDNIGHT_SKY_PALETTE, MIDNIGHT_SKY_PALETTE, 0.0)
         } else if hour < 7.0 {
             (MIDNIGHT_SKY_PALETTE, DAWN_SKY_PALETTE, (hour - 5.0) / 2.0)
@@ -1032,23 +1032,12 @@ pub enum RegionMountPhase {
     Unmounting,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegionLifecycleRecord {
     pub visits: u32,
     pub clears: u32,
     pub last_generation: u64,
     pub persistent_flags: BTreeSet<RegionPersistentFlag>,
-}
-
-impl Default for RegionLifecycleRecord {
-    fn default() -> Self {
-        Self {
-            visits: 0,
-            clears: 0,
-            last_generation: 0,
-            persistent_flags: BTreeSet::new(),
-        }
-    }
 }
 
 impl RegionLifecycleRecord {

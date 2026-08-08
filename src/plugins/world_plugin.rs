@@ -303,6 +303,84 @@ struct CelestialVisual {
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct WorldPlugin;
 
+/// Last completed procedural-world boot. Kept as a resource so automated
+/// smoke runs and logs can distinguish save I/O from world/mesh generation
+/// stalls.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct WorldLoadDiagnostics {
+    pub generation_seconds: f32,
+    pub meshes_added: usize,
+    pub standard_materials_added: usize,
+}
+
+/// Unit primitives shared by the complete generated speed-road network.
+///
+/// Road pieces express their authored dimensions through `Transform::scale`,
+/// so one cube can back decks, dividers, boost pads, chevrons, and ramps. The
+/// sphere is shared by every edge light. Keeping these handles at network
+/// scope avoids allocating tens of thousands of identical `Mesh` assets while
+/// preserving every visual entity and gameplay trigger.
+#[derive(Debug, Clone)]
+struct SpeedRoadMeshCache {
+    unit_cube: Handle<Mesh>,
+    unit_sphere: Handle<Mesh>,
+}
+
+impl SpeedRoadMeshCache {
+    fn new(meshes: &mut Assets<Mesh>) -> Self {
+        Self {
+            unit_cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+            unit_sphere: meshes.add(Sphere::new(1.0)),
+        }
+    }
+}
+
+/// Unit primitives shared by the downtown facade-detail pass.
+///
+/// Window grids and cladding deliberately remain separate entities so their
+/// authored layout and materials are unchanged; only their repeated primitive
+/// geometry is shared. Rooftop cylinders and beacons use the same approach.
+#[derive(Debug, Clone)]
+struct DowntownFacadeMeshCache {
+    unit_cube: Handle<Mesh>,
+    unit_cylinder: Handle<Mesh>,
+    unit_sphere: Handle<Mesh>,
+}
+
+impl DowntownFacadeMeshCache {
+    fn new(meshes: &mut Assets<Mesh>) -> Self {
+        Self {
+            unit_cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+            unit_cylinder: meshes.add(Cylinder::new(1.0, 1.0)),
+            unit_sphere: meshes.add(Sphere::new(1.0)),
+        }
+    }
+}
+
+/// Unit primitives shared by one generated forest or bio-city batch.
+///
+/// Authored dimensions stay in each entity's transform, so thousands of
+/// trunks, roots, crowns, moss pads, vines, and rails can reuse four meshes
+/// without changing their world-space silhouettes or animation bases.
+#[derive(Debug, Clone)]
+struct NaturePrimitiveMeshCache {
+    unit_cube: Handle<Mesh>,
+    unit_sphere: Handle<Mesh>,
+    unit_cylinder: Handle<Mesh>,
+    unit_cone: Handle<Mesh>,
+}
+
+impl NaturePrimitiveMeshCache {
+    fn new(meshes: &mut Assets<Mesh>) -> Self {
+        Self {
+            unit_cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+            unit_sphere: meshes.add(Sphere::new(1.0)),
+            unit_cylinder: meshes.add(Cylinder::new(1.0, 1.0)),
+            unit_cone: meshes.add(Cone::new(1.0, 1.0)),
+        }
+    }
+}
+
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ColliderDebugState>()
@@ -3584,6 +3662,10 @@ fn generate_city(
         return;
     }
 
+    let load_started = std::time::Instant::now();
+    let initial_mesh_count = meshes.len();
+    let initial_standard_material_count = mats.len();
+
     let seed = settings.world_seed;
     let _ = ROAD_NETWORK_SEED.set(seed);
     let m = &mut *mats;
@@ -3643,6 +3725,7 @@ fn generate_city(
     spawn_lighting(&mut commands, &mut meshes, m);
     spawn_ground_plane(&mut commands);
     spawn_terrain(&mut commands, &mut meshes, &terrain_material, seed);
+    let base_mesh_count = meshes.len();
     spawn_downtown(&mut commands, &mut meshes, &pal, seed);
     spawn_industrial(&mut commands, &mut meshes, &pal, seed + 1, seed);
     spawn_residential(&mut commands, &mut meshes, &pal, seed + 2, seed);
@@ -3651,13 +3734,17 @@ fn generate_city(
     spawn_city_life(&mut commands, &mut meshes, &pal, seed + 23);
     spawn_city_hidden_rooms(&mut commands, &mut meshes, m, &pal);
     spawn_traversal_courses(&mut commands, &mut meshes, m, &pal);
+    let city_mesh_count = meshes.len();
     spawn_sky_platforms(&mut commands, &mut meshes, &pal, seed + 3);
     spawn_sky_bridges(&mut commands, &mut meshes, &pal, seed + 4);
     spawn_moving_platforms(&mut commands, &mut meshes, &pal, seed + 15, seed);
     spawn_spaceports(&mut commands, &mut meshes, &pal, seed);
     spawn_laser_turrets(&mut commands, &mut meshes, &pal, seed + 16, seed);
+    let traversal_mesh_count = meshes.len();
     spawn_mountains(&mut commands, &mut meshes, &pal, seed + 5);
+    let mountain_mesh_count = meshes.len();
     spawn_everest_range_biomes(&mut commands, &mut meshes, &pal, seed);
+    let range_mesh_count = meshes.len();
     spawn_mountain_spider_mechs(&mut commands, &mut meshes, &pal, seed);
     spawn_perimeter_ocean_and_islands(&mut commands, &mut meshes, &pal, &ocean_water, seed);
     spawn_mountain_water_network(
@@ -3693,6 +3780,7 @@ fn generate_city(
     spawn_rock_fields(&mut commands, &mut meshes, &pal, seed + 13, seed);
     spawn_understory(&mut commands, &mut meshes, &pal, seed + 14, seed);
     spawn_trees(&mut commands, &mut meshes, &pal, seed + 9, seed);
+    let nature_mesh_count = meshes.len();
     spawn_aurora_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_collosar_castle(&mut commands, &mut meshes, &pal, seed);
     spawn_magic_crystals(&mut commands, &mut meshes, &pal, seed);
@@ -3708,6 +3796,26 @@ fn generate_city(
     spawn_world_site_props(&mut commands, &mut meshes, m, &world_site_registry, seed);
     spawn_wasteland_drone_patrol_anchors(&mut commands, seed);
     setup_world_route_registry(&mut world_route_registry);
+
+    let diagnostics = WorldLoadDiagnostics {
+        generation_seconds: load_started.elapsed().as_secs_f32(),
+        meshes_added: meshes.len().saturating_sub(initial_mesh_count),
+        standard_materials_added: m.len().saturating_sub(initial_standard_material_count),
+    };
+    info!(
+        "World generation queued in {:.2}s ({} meshes: base {}, city {}, traversal {}, mountains {}, range {}, nature {}, landmarks {}; {} standard materials)",
+        diagnostics.generation_seconds,
+        diagnostics.meshes_added,
+        base_mesh_count.saturating_sub(initial_mesh_count),
+        city_mesh_count.saturating_sub(base_mesh_count),
+        traversal_mesh_count.saturating_sub(city_mesh_count),
+        mountain_mesh_count.saturating_sub(traversal_mesh_count),
+        range_mesh_count.saturating_sub(mountain_mesh_count),
+        nature_mesh_count.saturating_sub(range_mesh_count),
+        meshes.len().saturating_sub(nature_mesh_count),
+        diagnostics.standard_materials_added,
+    );
+    commands.insert_resource(diagnostics);
 }
 
 fn water_wake_spawn_system(
@@ -9346,15 +9454,36 @@ fn spawn_everest_range_biomes(
     pal: &Palette,
     seed: u64,
 ) {
+    let start_mesh_count = meshes.len();
     spawn_range_snowfields(commands, meshes, pal, seed);
+    let snow_mesh_count = meshes.len();
     spawn_glacial_streams(commands, meshes, pal, seed);
+    let stream_mesh_count = meshes.len();
     spawn_range_forests(commands, meshes, pal, seed);
+    let forest_mesh_count = meshes.len();
     spawn_range_waylines(commands, meshes, pal, seed);
+    let wayline_mesh_count = meshes.len();
     spawn_mountain_path_network(commands, meshes, pal, seed);
+    let path_mesh_count = meshes.len();
     spawn_mountain_route_bridges(commands, meshes, pal, seed + 83, seed);
+    let bridge_mesh_count = meshes.len();
     spawn_speed_road_network(commands, meshes, pal, seed + 1_241, seed);
+    let road_mesh_count = meshes.len();
     spawn_range_outposts(commands, meshes, pal, seed);
+    let outpost_mesh_count = meshes.len();
     spawn_dragon_lair_silhouettes(commands, meshes, pal, seed);
+    info!(
+        "Everest range meshes: snow {}, streams {}, forest {}, waylines {}, paths {}, bridges {}, speed roads {}, outposts {}, silhouettes {}",
+        snow_mesh_count.saturating_sub(start_mesh_count),
+        stream_mesh_count.saturating_sub(snow_mesh_count),
+        forest_mesh_count.saturating_sub(stream_mesh_count),
+        wayline_mesh_count.saturating_sub(forest_mesh_count),
+        path_mesh_count.saturating_sub(wayline_mesh_count),
+        bridge_mesh_count.saturating_sub(path_mesh_count),
+        road_mesh_count.saturating_sub(bridge_mesh_count),
+        outpost_mesh_count.saturating_sub(road_mesh_count),
+        meshes.len().saturating_sub(outpost_mesh_count),
+    );
 }
 
 const MOUNTAIN_SPIDER_MECH_SPAWNS: &[(&str, f32, f32, f32)] = &[
@@ -9810,6 +9939,7 @@ fn spawn_range_forests(
     pal: &Palette,
     seed: u64,
 ) {
+    let mesh_cache = NaturePrimitiveMeshCache::new(meshes);
     let patches = [
         (-6200.0_f32, 6500.0_f32, 860.0_f32, 42_u64),
         (-2800.0, 3300.0, 660.0, 34),
@@ -9839,8 +9969,8 @@ fn spawn_range_forests(
             let scale = 1.65 + seeded(seed, idx * 7 + 2) * 2.35;
             spawn_alpine_tree(
                 commands,
-                meshes,
                 pal,
+                &mesh_cache,
                 Vec3::new(x, ground, z),
                 scale,
                 seed + idx,
@@ -9853,6 +9983,18 @@ fn spawn_moss_pad(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    center: Vec3,
+    radius: f32,
+    seed: u64,
+) {
+    let unit_sphere = meshes.add(Sphere::new(1.0));
+    spawn_moss_pad_cached(commands, pal, &unit_sphere, center, radius, seed);
+}
+
+fn spawn_moss_pad_cached(
+    commands: &mut Commands,
+    pal: &Palette,
+    unit_sphere: &Handle<Mesh>,
     center: Vec3,
     radius: f32,
     seed: u64,
@@ -9873,7 +10015,7 @@ fn spawn_moss_pad(
             .with_scale(Vec3::new(scale * 1.55, 0.055, scale));
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Sphere::new(1.0))),
+                mesh: Mesh3d(unit_sphere.clone()),
                 material: MeshMaterial3d(pal.moss.clone()),
                 transform,
                 ..default()
@@ -9895,7 +10037,35 @@ fn spawn_vine_curtain(
     strands: u64,
     seed: u64,
 ) {
-    let leaf_mesh = meshes.add(Sphere::new(1.0));
+    let unit_sphere = meshes.add(Sphere::new(1.0));
+    let unit_cylinder = meshes.add(Cylinder::new(1.0, 1.0));
+    spawn_vine_curtain_cached(
+        commands,
+        pal,
+        &unit_sphere,
+        &unit_cylinder,
+        anchor,
+        yaw,
+        radius,
+        height,
+        strands,
+        seed,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_vine_curtain_cached(
+    commands: &mut Commands,
+    pal: &Palette,
+    unit_sphere: &Handle<Mesh>,
+    unit_cylinder: &Handle<Mesh>,
+    anchor: Vec3,
+    yaw: f32,
+    radius: f32,
+    height: f32,
+    strands: u64,
+    seed: u64,
+) {
     let strand_count = strands.max(1);
     for strand in 0..strand_count {
         let angle = yaw + seeded(seed, strand * 17) * TAU;
@@ -9910,10 +10080,17 @@ fn spawn_vine_curtain(
         let bottom = top + drift - Vec3::Y * sag;
         let vine_radius = 0.035 + seeded(seed, strand * 17 + 5) * 0.050;
 
-        spawn_static_cylinder_between(commands, meshes, pal.vine.clone(), top, mid, vine_radius);
-        spawn_static_cylinder_between(
+        spawn_static_cylinder_between_cached(
             commands,
-            meshes,
+            unit_cylinder,
+            pal.vine.clone(),
+            top,
+            mid,
+            vine_radius,
+        );
+        spawn_static_cylinder_between_cached(
+            commands,
+            unit_cylinder,
             pal.vine.clone(),
             mid,
             bottom,
@@ -9935,7 +10112,7 @@ fn spawn_vine_curtain(
             };
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(leaf_mesh.clone()),
+                    mesh: Mesh3d(unit_sphere.clone()),
                     material: MeshMaterial3d(mat),
                     transform,
                     ..default()
@@ -9949,8 +10126,8 @@ fn spawn_vine_curtain(
 
 fn spawn_alpine_tree(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &NaturePrimitiveMeshCache,
     base: Vec3,
     scale: f32,
     seed: u64,
@@ -9976,10 +10153,11 @@ fn spawn_alpine_tree(
 
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cylinder::new(trunk_r, trunk_h))),
+            mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
             material: MeshMaterial3d(bark.clone()),
             transform: Transform::from_xyz(base.x, base.y + trunk_h * 0.5, base.z)
-                .with_rotation(Quat::from_rotation_y(yaw)),
+                .with_rotation(Quat::from_rotation_y(yaw))
+                .with_scale(Vec3::new(trunk_r, trunk_h, trunk_r)),
             ..default()
         },
         WorldGeometry,
@@ -9993,7 +10171,7 @@ fn spawn_alpine_tree(
             .with_scale(Vec3::new(trunk_r * 0.45, trunk_r * 0.34, root_len));
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                 material: MeshMaterial3d(bark.clone()),
                 transform: root_transform,
                 ..default()
@@ -10003,14 +10181,12 @@ fn spawn_alpine_tree(
     }
 
     let lower = Transform::from_xyz(base.x, base.y + trunk_h * 0.55 + lower_h * 0.5, base.z)
-        .with_rotation(Quat::from_rotation_y(yaw));
+        .with_rotation(Quat::from_rotation_y(yaw))
+        .with_scale(Vec3::new(lower_r, lower_h, lower_r));
     let lower_sway = NatureSway::new(&lower, seeded(seed, 11) * 6.0, 0.35, 0.010, 0.015, 0.006);
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cone {
-                radius: lower_r,
-                height: lower_h,
-            })),
+            mesh: Mesh3d(mesh_cache.unit_cone.clone()),
             material: MeshMaterial3d(foliage.clone()),
             transform: lower,
             ..default()
@@ -10024,7 +10200,7 @@ fn spawn_alpine_tree(
         .with_scale(Vec3::new(lower_r * 0.38, trunk_r * 0.30, lower_r * 0.95));
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+            mesh: Mesh3d(mesh_cache.unit_cube.clone()),
             material: MeshMaterial3d(bark.clone()),
             transform: branch_ring,
             ..default()
@@ -10032,19 +10208,20 @@ fn spawn_alpine_tree(
         WorldGeometry,
     ));
 
-    spawn_moss_pad(
+    spawn_moss_pad_cached(
         commands,
-        meshes,
         pal,
+        &mesh_cache.unit_sphere,
         base + Vec3::Y * 0.04,
         trunk_r * 3.2,
         seed + 701,
     );
     if seed % 4 != 1 {
-        spawn_vine_curtain(
+        spawn_vine_curtain_cached(
             commands,
-            meshes,
             pal,
+            &mesh_cache.unit_sphere,
+            &mesh_cache.unit_cylinder,
             base + Vec3::Y * (trunk_h * 1.05),
             yaw + 0.4,
             lower_r * 0.42,
@@ -10055,14 +10232,12 @@ fn spawn_alpine_tree(
     }
 
     let upper = Transform::from_xyz(base.x, base.y + trunk_h * 1.10 + lower_h * 0.58, base.z)
-        .with_rotation(Quat::from_rotation_y(yaw + 0.7));
+        .with_rotation(Quat::from_rotation_y(yaw + 0.7))
+        .with_scale(Vec3::new(upper_r, upper_h, upper_r));
     let upper_sway = NatureSway::new(&upper, seeded(seed, 13) * 6.0, 0.42, 0.014, 0.018, 0.007);
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cone {
-                radius: upper_r,
-                height: upper_h,
-            })),
+            mesh: Mesh3d(mesh_cache.unit_cone.clone()),
             material: MeshMaterial3d(foliage),
             transform: upper,
             ..default()
@@ -10079,6 +10254,7 @@ fn spawn_mana_forests(
     seed: u64,
     terrain_seed: u64,
 ) {
+    let mesh_cache = NaturePrimitiveMeshCache::new(meshes);
     let groves = [
         (-520.0_f32, 380.0_f32, 360.0_f32, 24_u64, 1.25_f32),
         (520.0, -420.0, 340.0, 23, 1.22),
@@ -10116,8 +10292,8 @@ fn spawn_mana_forests(
             };
             spawn_giant_mana_tree(
                 commands,
-                meshes,
                 pal,
+                &mesh_cache,
                 Vec3::new(x, y, z),
                 scale,
                 grove_seed + i * 37,
@@ -10145,12 +10321,13 @@ fn spawn_bio_city_tamborn(
     seed: u64,
     terrain_seed: u64,
 ) {
+    let mesh_cache = NaturePrimitiveMeshCache::new(meshes);
     let center_x = -760.0_f32;
     let center_z = 1040.0_f32;
     let center_ground = terrain_surface_y(center_x, center_z, terrain_seed);
     let center = Vec3::new(center_x, center_ground, center_z);
 
-    spawn_mother_tree_tamborn(commands, meshes, pal, center, seed);
+    spawn_mother_tree_tamborn(commands, pal, &mesh_cache, center, seed);
 
     let tower_count = 13usize;
     let mut towers = Vec::with_capacity(tower_count);
@@ -10165,8 +10342,8 @@ fn spawn_bio_city_tamborn(
         let radius = 7.8 + seeded(seed, idx * 23 + 2) * 5.4 + (i % 2) as f32 * 1.8;
         towers.push(spawn_tamborn_tree_skyscraper(
             commands,
-            meshes,
             pal,
+            &mesh_cache,
             Vec3::new(x, ground, z),
             height,
             radius,
@@ -10193,8 +10370,8 @@ fn spawn_bio_city_tamborn(
         let end = tamborn_bridge_anchor(tower_b.base, b_y, tower_a.base, tower_b.radius * 2.0);
         spawn_rope_bridge_between(
             commands,
-            meshes,
             pal,
+            &mesh_cache,
             start,
             end,
             9.5 + (i % 3) as f32 * 0.8,
@@ -10218,8 +10395,8 @@ fn spawn_bio_city_tamborn(
         let end = tamborn_bridge_anchor(center, target_y, tower.base, 36.0);
         spawn_rope_bridge_between(
             commands,
-            meshes,
             pal,
+            &mesh_cache,
             start,
             end,
             12.0,
@@ -10246,8 +10423,8 @@ fn spawn_bio_city_tamborn(
                 tamborn_bridge_anchor(tower.base, tower.lower_deck_y, start, tower.radius * 2.4);
             spawn_rope_bridge_between(
                 commands,
-                meshes,
                 pal,
+                &mesh_cache,
                 start,
                 end,
                 13.5,
@@ -10264,8 +10441,8 @@ fn spawn_bio_city_tamborn(
         let ground = terrain_surface_y(x, z, terrain_seed);
         spawn_giant_mana_tree(
             commands,
-            meshes,
             pal,
+            &mesh_cache,
             Vec3::new(x, ground, z),
             2.2 + seeded(seed, 8_000 + grove * 5 + 2) * 1.9,
             seed + 5_000 + grove * 17,
@@ -10291,13 +10468,11 @@ fn spawn_bio_city_tamborn(
 
 fn spawn_mother_tree_tamborn(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &NaturePrimitiveMeshCache,
     base: Vec3,
     seed: u64,
 ) {
-    let trunk_mesh = meshes.add(Cylinder::new(1.0, 1.0));
-    let sphere_mesh = meshes.add(Sphere::new(1.0));
     let yaw = seeded(seed, 31) * TAU;
 
     for (offset_y, height, radius, material) in [
@@ -10307,7 +10482,7 @@ fn spawn_mother_tree_tamborn(
     ] {
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(trunk_mesh.clone()),
+                mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
                 material: MeshMaterial3d(material),
                 transform: Transform::from_xyz(base.x, base.y + offset_y, base.z)
                     .with_rotation(Quat::from_rotation_y(yaw))
@@ -10324,9 +10499,9 @@ fn spawn_mother_tree_tamborn(
         let dir = Vec3::new(root_yaw.cos(), 0.0, root_yaw.sin());
         let start = base + dir * 8.0 + Vec3::Y * 7.5;
         let end = base + dir * (78.0 + seeded(seed, 140 + root) * 52.0) + Vec3::Y * 1.6;
-        spawn_static_cylinder_between(
+        spawn_static_cylinder_between_cached(
             commands,
-            meshes,
+            &mesh_cache.unit_cylinder,
             pal.bark_dark.clone(),
             start,
             end,
@@ -10336,7 +10511,7 @@ fn spawn_mother_tree_tamborn(
 
     spawn_tamborn_platform(
         commands,
-        meshes,
+        mesh_cache,
         pal.moss.clone(),
         base + Vec3::Y * TAMBORN_MOTHER_LOWER_DECK,
         76.0,
@@ -10345,7 +10520,7 @@ fn spawn_mother_tree_tamborn(
     );
     spawn_tamborn_ring_rail(
         commands,
-        meshes,
+        mesh_cache,
         pal.vine.clone(),
         base + Vec3::Y * TAMBORN_MOTHER_LOWER_DECK,
         78.0,
@@ -10355,7 +10530,7 @@ fn spawn_mother_tree_tamborn(
     );
     spawn_tamborn_platform(
         commands,
-        meshes,
+        mesh_cache,
         pal.bridge_deck.clone(),
         base + Vec3::Y * TAMBORN_MOTHER_UPPER_DECK,
         58.0,
@@ -10364,7 +10539,7 @@ fn spawn_mother_tree_tamborn(
     );
     spawn_tamborn_ring_rail(
         commands,
-        meshes,
+        mesh_cache,
         pal.vine.clone(),
         base + Vec3::Y * TAMBORN_MOTHER_UPPER_DECK,
         60.0,
@@ -10374,7 +10549,7 @@ fn spawn_mother_tree_tamborn(
     );
     spawn_tamborn_platform(
         commands,
-        meshes,
+        mesh_cache,
         pal.marble.clone(),
         base + Vec3::Y * TAMBORN_MOTHER_CROWN_DECK,
         38.0,
@@ -10383,7 +10558,7 @@ fn spawn_mother_tree_tamborn(
     );
     spawn_tamborn_ring_rail(
         commands,
-        meshes,
+        mesh_cache,
         pal.guide_glow.clone(),
         base + Vec3::Y * TAMBORN_MOTHER_CROWN_DECK,
         40.0,
@@ -10412,7 +10587,7 @@ fn spawn_mother_tree_tamborn(
         .with_scale(Vec3::new(width, height, width * 0.88));
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(sphere_mesh.clone()),
+                mesh: Mesh3d(mesh_cache.unit_sphere.clone()),
                 material: MeshMaterial3d(material),
                 transform,
                 ..default()
@@ -10426,9 +10601,9 @@ fn spawn_mother_tree_tamborn(
                 base + Vec3::new(a.cos() * 12.0, 178.0 + i as f32 * 8.0, a.sin() * 12.0);
             let branch_end =
                 canopy_center + Vec3::new(a.cos() * radial * 0.72, -12.0, a.sin() * radial * 0.72);
-            spawn_static_cylinder_between(
+            spawn_static_cylinder_between_cached(
                 commands,
-                meshes,
+                &mesh_cache.unit_cylinder,
                 pal.bark_mid.clone(),
                 branch_start,
                 branch_end,
@@ -10440,6 +10615,8 @@ fn spawn_mother_tree_tamborn(
     for crystal in 0..10u64 {
         let angle = yaw + crystal as f32 * TAU / 10.0 + seeded(seed, 400 + crystal) * 0.18;
         let ring = 44.0 + seeded(seed, 430 + crystal) * 19.0;
+        let crystal_radius = 2.0 + seeded(seed, 470 + crystal) * 1.2;
+        let crystal_height = 8.0 + seeded(seed, 510 + crystal) * 6.0;
         let pos = base
             + Vec3::new(
                 angle.cos() * ring,
@@ -10448,13 +10625,11 @@ fn spawn_mother_tree_tamborn(
             );
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cone {
-                    radius: 2.0 + seeded(seed, 470 + crystal) * 1.2,
-                    height: 8.0 + seeded(seed, 510 + crystal) * 6.0,
-                })),
+                mesh: Mesh3d(mesh_cache.unit_cone.clone()),
                 material: MeshMaterial3d(pal.crystal_emerald.clone()),
                 transform: Transform::from_translation(pos)
-                    .with_rotation(Quat::from_rotation_y(angle)),
+                    .with_rotation(Quat::from_rotation_y(angle))
+                    .with_scale(Vec3::new(crystal_radius, crystal_height, crystal_radius)),
                 ..default()
             },
             WorldGeometry,
@@ -10462,10 +10637,11 @@ fn spawn_mother_tree_tamborn(
         ));
     }
 
-    spawn_vine_curtain(
+    spawn_vine_curtain_cached(
         commands,
-        meshes,
         pal,
+        &mesh_cache.unit_sphere,
+        &mesh_cache.unit_cylinder,
         canopy_center + Vec3::Y * 32.0,
         yaw,
         84.0,
@@ -10494,16 +10670,13 @@ fn spawn_mother_tree_tamborn(
 
 fn spawn_tamborn_tree_skyscraper(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &NaturePrimitiveMeshCache,
     base: Vec3,
     height: f32,
     radius: f32,
     seed: u64,
 ) -> TambornTower {
-    let trunk_mesh = meshes.add(Cylinder::new(1.0, 1.0));
-    let sphere_mesh = meshes.add(Sphere::new(1.0));
-    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let yaw = seeded(seed, 8) * TAU;
     let bark = match seed % 4 {
         0 => pal.bark_light.clone(),
@@ -10520,7 +10693,7 @@ fn spawn_tamborn_tree_skyscraper(
 
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(trunk_mesh.clone()),
+            mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
             material: MeshMaterial3d(bark.clone()),
             transform: Transform::from_xyz(base.x, base.y + height * 0.5, base.z)
                 .with_rotation(Quat::from_rotation_y(yaw))
@@ -10538,7 +10711,14 @@ fn spawn_tamborn_tree_skyscraper(
         let end = base
             + dir * (radius * (4.6 + seeded(seed, 70 + root) * 2.7))
             + Vec3::Y * (radius * 0.08);
-        spawn_static_cylinder_between(commands, meshes, bark.clone(), start, end, radius * 0.34);
+        spawn_static_cylinder_between_cached(
+            commands,
+            &mesh_cache.unit_cylinder,
+            bark.clone(),
+            start,
+            end,
+            radius * 0.34,
+        );
     }
 
     let lower_deck_y = base.y + height * 0.50;
@@ -10547,7 +10727,7 @@ fn spawn_tamborn_tree_skyscraper(
     let upper_radius = radius * 2.35;
     spawn_tamborn_platform(
         commands,
-        meshes,
+        mesh_cache,
         pal.bridge_deck.clone(),
         Vec3::new(base.x, lower_deck_y, base.z),
         lower_radius,
@@ -10556,7 +10736,7 @@ fn spawn_tamborn_tree_skyscraper(
     );
     spawn_tamborn_ring_rail(
         commands,
-        meshes,
+        mesh_cache,
         pal.vine.clone(),
         Vec3::new(base.x, lower_deck_y, base.z),
         lower_radius + 1.0,
@@ -10566,7 +10746,7 @@ fn spawn_tamborn_tree_skyscraper(
     );
     spawn_tamborn_platform(
         commands,
-        meshes,
+        mesh_cache,
         pal.moss.clone(),
         Vec3::new(base.x, upper_deck_y, base.z),
         upper_radius,
@@ -10575,7 +10755,7 @@ fn spawn_tamborn_tree_skyscraper(
     );
     spawn_tamborn_ring_rail(
         commands,
-        meshes,
+        mesh_cache,
         pal.vine.clone(),
         Vec3::new(base.x, upper_deck_y, base.z),
         upper_radius + 1.0,
@@ -10600,7 +10780,7 @@ fn spawn_tamborn_tree_skyscraper(
             };
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(cube_mesh.clone()),
+                    mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                     material: MeshMaterial3d(mat),
                     transform: Transform::from_translation(
                         base + dir * (radius + 0.28) + Vec3::Y * pod_y,
@@ -10640,7 +10820,7 @@ fn spawn_tamborn_tree_skyscraper(
         ));
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(sphere_mesh.clone()),
+                mesh: Mesh3d(mesh_cache.unit_sphere.clone()),
                 material: MeshMaterial3d(foliage.clone()),
                 transform,
                 ..default()
@@ -10650,9 +10830,9 @@ fn spawn_tamborn_tree_skyscraper(
         ));
 
         if crown != 0 {
-            spawn_static_cylinder_between(
+            spawn_static_cylinder_between_cached(
                 commands,
-                meshes,
+                &mesh_cache.unit_cylinder,
                 bark.clone(),
                 base + Vec3::new(
                     a.cos() * radius * 0.55,
@@ -10670,10 +10850,11 @@ fn spawn_tamborn_tree_skyscraper(
         }
     }
 
-    spawn_vine_curtain(
+    spawn_vine_curtain_cached(
         commands,
-        meshes,
         pal,
+        &mesh_cache.unit_sphere,
+        &mesh_cache.unit_cylinder,
         canopy_base + Vec3::Y * (radius * 2.2),
         yaw,
         radius * 4.4,
@@ -10692,7 +10873,7 @@ fn spawn_tamborn_tree_skyscraper(
 
 fn spawn_tamborn_platform(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
+    mesh_cache: &NaturePrimitiveMeshCache,
     material: Handle<StandardMaterial>,
     center: Vec3,
     radius: f32,
@@ -10701,9 +10882,10 @@ fn spawn_tamborn_platform(
 ) {
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cylinder::new(radius, thickness))),
+            mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
             material: MeshMaterial3d(material),
-            transform: Transform::from_translation(center),
+            transform: Transform::from_translation(center)
+                .with_scale(Vec3::new(radius, thickness, radius)),
             ..default()
         },
         WorldGeometry,
@@ -10711,12 +10893,13 @@ fn spawn_tamborn_platform(
         Name::new(name),
         crate::engine::physics::prelude::RigidBody::Fixed,
         crate::engine::physics::prelude::Collider::cylinder(thickness * 0.5, radius),
+        world_space_collider_scale(),
     ));
 }
 
 fn spawn_tamborn_ring_rail(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
+    mesh_cache: &NaturePrimitiveMeshCache,
     material: Handle<StandardMaterial>,
     center: Vec3,
     radius: f32,
@@ -10730,7 +10913,14 @@ fn spawn_tamborn_ring_rail(
         let a1 = (segment + 1) as f32 / count as f32 * TAU;
         let start = center + Vec3::new(a0.cos() * radius, y_offset, a0.sin() * radius);
         let end = center + Vec3::new(a1.cos() * radius, y_offset, a1.sin() * radius);
-        spawn_static_cylinder_between(commands, meshes, material.clone(), start, end, tube_radius);
+        spawn_static_cylinder_between_cached(
+            commands,
+            &mesh_cache.unit_cylinder,
+            material.clone(),
+            start,
+            end,
+            tube_radius,
+        );
     }
 }
 
@@ -10746,8 +10936,8 @@ fn tamborn_bridge_anchor(from: Vec3, y: f32, toward: Vec3, offset: f32) -> Vec3 
 
 fn spawn_rope_bridge_between(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &NaturePrimitiveMeshCache,
     start: Vec3,
     end: Vec3,
     width: f32,
@@ -10759,7 +10949,6 @@ fn spawn_rope_bridge_between(
         return;
     }
 
-    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let yaw = delta.x.atan2(delta.z);
     let pitch = (delta.y / horizontal_len).atan().clamp(-0.46, 0.46);
     let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
@@ -10769,7 +10958,7 @@ fn spawn_rope_bridge_between(
 
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(unit_cube.clone()),
+            mesh: Mesh3d(mesh_cache.unit_cube.clone()),
             material: MeshMaterial3d(pal.bridge_deck.clone()),
             transform: Transform::from_translation(center)
                 .with_rotation(rot)
@@ -10798,7 +10987,7 @@ fn spawn_rope_bridge_between(
         let twist = (seeded(seed, plank as u64 * 13) - 0.5) * 0.06;
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(unit_cube.clone()),
+                mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                 material: MeshMaterial3d(pal.bridge_deck.clone()),
                 transform: Transform::from_translation(
                     center + rot * Vec3::new(0.0, 0.44 + sag, local_z),
@@ -10821,12 +11010,19 @@ fn spawn_rope_bridge_between(
             let high = start.lerp(end, t) + side_offset + Vec3::Y * (2.8 - mid_sag * 1.1);
             let low = start.lerp(end, t) + side_offset + Vec3::Y * (1.05 - mid_sag * 0.55);
             if let Some(last) = last_high {
-                spawn_static_cylinder_between(commands, meshes, pal.vine.clone(), last, high, 0.16);
+                spawn_static_cylinder_between_cached(
+                    commands,
+                    &mesh_cache.unit_cylinder,
+                    pal.vine.clone(),
+                    last,
+                    high,
+                    0.16,
+                );
             }
             if let Some(last) = last_low {
-                spawn_static_cylinder_between(
+                spawn_static_cylinder_between_cached(
                     commands,
-                    meshes,
+                    &mesh_cache.unit_cylinder,
                     pal.bark_dark.clone(),
                     last,
                     low,
@@ -10834,7 +11030,14 @@ fn spawn_rope_bridge_between(
                 );
             }
             if cable_step % 3 == 0 {
-                spawn_static_cylinder_between(commands, meshes, pal.vine.clone(), low, high, 0.08);
+                spawn_static_cylinder_between_cached(
+                    commands,
+                    &mesh_cache.unit_cylinder,
+                    pal.vine.clone(),
+                    low,
+                    high,
+                    0.08,
+                );
             }
             last_high = Some(high);
             last_low = Some(low);
@@ -10844,8 +11047,8 @@ fn spawn_rope_bridge_between(
 
 fn spawn_giant_mana_tree(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &NaturePrimitiveMeshCache,
     base: Vec3,
     scale: f32,
     seed: u64,
@@ -10854,9 +11057,6 @@ fn spawn_giant_mana_tree(
     let trunk_r = 3.2 * scale;
     let canopy_r = 12.5 * scale;
     let yaw = seeded(seed, 3) * TAU;
-    let trunk_mesh = meshes.add(Cylinder::new(1.0, 1.0));
-    let sphere_mesh = meshes.add(Sphere::new(1.0));
-    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let bark = match seed % 3 {
         0 => pal.bark_light.clone(),
         1 => pal.bark_mid.clone(),
@@ -10871,7 +11071,7 @@ fn spawn_giant_mana_tree(
 
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(trunk_mesh.clone()),
+            mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
             material: MeshMaterial3d(bark.clone()),
             transform: Transform::from_xyz(base.x, base.y + trunk_h * 0.5, base.z)
                 .with_rotation(Quat::from_rotation_y(yaw))
@@ -10889,7 +11089,7 @@ fn spawn_giant_mana_tree(
             .with_scale(Vec3::new(trunk_r * 0.54, trunk_r * 0.36, root_len));
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(cube_mesh.clone()),
+                mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                 material: MeshMaterial3d(bark.clone()),
                 transform: root_transform,
                 ..default()
@@ -10913,9 +11113,9 @@ fn spawn_giant_mana_tree(
                 seeded(seed, 150 + branch) * canopy_r * 0.32,
                 branch_yaw.sin() * canopy_r * 0.62,
             );
-        spawn_static_cylinder_between(
+        spawn_static_cylinder_between_cached(
             commands,
-            meshes,
+            &mesh_cache.unit_cylinder,
             bark.clone(),
             branch_start,
             branch_end,
@@ -10951,7 +11151,7 @@ fn spawn_giant_mana_tree(
                 ));
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(sphere_mesh.clone()),
+                mesh: Mesh3d(mesh_cache.unit_sphere.clone()),
                 material: MeshMaterial3d(foliage.clone()),
                 transform,
                 ..default()
@@ -10961,18 +11161,19 @@ fn spawn_giant_mana_tree(
         ));
     }
 
-    spawn_moss_pad(
+    spawn_moss_pad_cached(
         commands,
-        meshes,
         pal,
+        &mesh_cache.unit_sphere,
         base + Vec3::Y * 0.08,
         trunk_r * 4.8,
         seed + 500,
     );
-    spawn_vine_curtain(
+    spawn_vine_curtain_cached(
         commands,
-        meshes,
         pal,
+        &mesh_cache.unit_sphere,
+        &mesh_cache.unit_cylinder,
         canopy_center + Vec3::Y * canopy_r * 0.45,
         yaw,
         canopy_r * 0.92,
@@ -13703,6 +13904,7 @@ fn spawn_dragon_lair_silhouettes(
 
 // ── Downtown ──────────────────────────────────────────────────────────────────
 fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Palette, seed: u64) {
+    let facade_meshes = DowntownFacadeMeshCache::new(meshes);
     let glass = [
         &pal.downtown_a,
         &pal.downtown_b,
@@ -13796,14 +13998,24 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             pal.window_cool.clone()
         };
         if !enterable {
-            spawn_window_facades(commands, meshes, win_mat, x, z, h, w, d);
-            spawn_modern_window_grid(commands, meshes, pal, x, z, h, w, d, seed + i * 17);
+            spawn_window_facades(commands, &facade_meshes.unit_cube, win_mat, x, z, h, w, d);
+            spawn_modern_window_grid(
+                commands,
+                &facade_meshes.unit_cube,
+                pal,
+                x,
+                z,
+                h,
+                w,
+                d,
+                seed + i * 17,
+            );
         }
         if !enterable && i % 7 == 0 {
-            spawn_metal_cladding(
+            spawn_metal_cladding_cached(
                 commands,
-                meshes,
                 pal,
+                &facade_meshes.unit_cube,
                 Vec3::new(x, h * 0.5, z),
                 w,
                 h,
@@ -13812,10 +14024,10 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             );
         }
         if !enterable && i % 17 == 0 {
-            spawn_metal_cladding(
+            spawn_metal_cladding_cached(
                 commands,
-                meshes,
                 pal,
+                &facade_meshes.unit_cube,
                 Vec3::new(x, h * 0.5, z),
                 w + 0.7,
                 h * 0.72,
@@ -13824,10 +14036,10 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
             );
         }
         if !enterable && i % 13 == 0 {
-            spawn_stone_brick_courses(
+            spawn_stone_brick_courses_cached(
                 commands,
-                meshes,
                 pal,
+                &facade_meshes.unit_cube,
                 Vec3::new(x, h * 0.5, z),
                 w,
                 h,
@@ -13838,7 +14050,7 @@ fn spawn_downtown(commands: &mut Commands, meshes: &mut Assets<Mesh>, pal: &Pale
 
         // Rooftop details on taller buildings
         if h > 50.0 {
-            spawn_rooftop_details(commands, meshes, pal, x, z, h, w, d, seed + i);
+            spawn_rooftop_details(commands, &facade_meshes, pal, x, z, h, w, d, seed + i);
         }
     }
 }
@@ -14546,7 +14758,7 @@ fn spawn_course_block(
 /// of the building height. They simulate rows of lit windows from a distance.
 fn spawn_window_facades(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
+    unit_cube: &Handle<Mesh>,
     mat: Handle<StandardMaterial>,
     x: f32,
     z: f32,
@@ -14563,9 +14775,13 @@ fn spawn_window_facades(
     for &fz in &[z - d * 0.5 - thickness * 0.5, z + d * 0.5 + thickness * 0.5] {
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(w - 0.8, win_h, thickness))),
+                mesh: Mesh3d(unit_cube.clone()),
                 material: MeshMaterial3d(mat.clone()),
-                transform: Transform::from_xyz(x, center_y, fz),
+                transform: unit_cuboid_transform(
+                    Vec3::new(x, center_y, fz),
+                    Quat::IDENTITY,
+                    Vec3::new(w - 0.8, win_h, thickness),
+                ),
                 ..default()
             },
             WorldGeometry,
@@ -14575,9 +14791,13 @@ fn spawn_window_facades(
     for &fx in &[x - w * 0.5 - thickness * 0.5, x + w * 0.5 + thickness * 0.5] {
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(thickness, win_h, d - 0.8))),
+                mesh: Mesh3d(unit_cube.clone()),
                 material: MeshMaterial3d(mat.clone()),
-                transform: Transform::from_xyz(fx, center_y, z),
+                transform: unit_cuboid_transform(
+                    Vec3::new(fx, center_y, z),
+                    Quat::IDENTITY,
+                    Vec3::new(thickness, win_h, d - 0.8),
+                ),
                 ..default()
             },
             WorldGeometry,
@@ -14587,7 +14807,7 @@ fn spawn_window_facades(
 
 fn spawn_modern_window_grid(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
+    unit_cube: &Handle<Mesh>,
     pal: &Palette,
     x: f32,
     z: f32,
@@ -14611,9 +14831,13 @@ fn spawn_modern_window_grid(
         for &fz in &[z - d * 0.5 - 0.45, z + d * 0.5 + 0.45] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(w - 1.2, win_h, glass_thickness))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(pal.glass_panel.clone()),
-                    transform: Transform::from_xyz(x, center_y, fz),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(x, center_y, fz),
+                        Quat::IDENTITY,
+                        Vec3::new(w - 1.2, win_h, glass_thickness),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14622,9 +14846,13 @@ fn spawn_modern_window_grid(
         for &fx in &[x - w * 0.5 - 0.45, x + w * 0.5 + 0.45] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(glass_thickness, win_h, d - 1.2))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(pal.glass_panel.clone()),
-                    transform: Transform::from_xyz(fx, center_y, z),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(fx, center_y, z),
+                        Quat::IDENTITY,
+                        Vec3::new(glass_thickness, win_h, d - 1.2),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14638,9 +14866,13 @@ fn spawn_modern_window_grid(
         for &fz in &[z - d * 0.5 - 0.58, z + d * 0.5 + 0.58] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(w - 0.7, frame_thickness, 0.24))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(frame_mat.clone()),
-                    transform: Transform::from_xyz(x, y, fz),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(x, y, fz),
+                        Quat::IDENTITY,
+                        Vec3::new(w - 0.7, frame_thickness, 0.24),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14649,9 +14881,13 @@ fn spawn_modern_window_grid(
         for &fx in &[x - w * 0.5 - 0.58, x + w * 0.5 + 0.58] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.24, frame_thickness, d - 0.7))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(frame_mat.clone()),
-                    transform: Transform::from_xyz(fx, y, z),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(fx, y, z),
+                        Quat::IDENTITY,
+                        Vec3::new(0.24, frame_thickness, d - 0.7),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14665,9 +14901,13 @@ fn spawn_modern_window_grid(
         for &fz in &[z - d * 0.5 - 0.60, z + d * 0.5 + 0.60] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(frame_thickness, win_h, 0.26))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(frame_mat.clone()),
-                    transform: Transform::from_xyz(x + x_off, center_y, fz),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(x + x_off, center_y, fz),
+                        Quat::IDENTITY,
+                        Vec3::new(frame_thickness, win_h, 0.26),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14681,9 +14921,13 @@ fn spawn_modern_window_grid(
         for &fx in &[x - w * 0.5 - 0.60, x + w * 0.5 + 0.60] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.26, win_h, frame_thickness))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(frame_mat.clone()),
-                    transform: Transform::from_xyz(fx, center_y, z + z_off),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(fx, center_y, z + z_off),
+                        Quat::IDENTITY,
+                        Vec3::new(0.26, win_h, frame_thickness),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14696,6 +14940,23 @@ fn spawn_metal_cladding(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    position: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    seed: u64,
+) {
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    spawn_metal_cladding_cached(
+        commands, pal, &unit_cube, position, width, height, depth, seed,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_metal_cladding_cached(
+    commands: &mut Commands,
+    pal: &Palette,
+    unit_cube: &Handle<Mesh>,
     position: Vec3,
     width: f32,
     height: f32,
@@ -14719,9 +14980,13 @@ fn spawn_metal_cladding(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.26, rib_h, 0.28))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(rib_mat.clone()),
-                    transform: Transform::from_xyz(position.x + x_off, rib_y, fz),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(position.x + x_off, rib_y, fz),
+                        Quat::IDENTITY,
+                        Vec3::new(0.26, rib_h, 0.28),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14738,9 +15003,13 @@ fn spawn_metal_cladding(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.28, rib_h, 0.26))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(rib_mat.clone()),
-                    transform: Transform::from_xyz(fx, rib_y, position.z + z_off),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(fx, rib_y, position.z + z_off),
+                        Quat::IDENTITY,
+                        Vec3::new(0.28, rib_h, 0.26),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14759,9 +15028,13 @@ fn spawn_metal_cladding(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.55, 0.22, 0.30))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(rib_mat.clone()),
-                    transform: Transform::from_xyz(position.x, y, fz),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(position.x, y, fz),
+                        Quat::IDENTITY,
+                        Vec3::new(width + 0.55, 0.22, 0.30),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14773,9 +15046,13 @@ fn spawn_metal_cladding(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.30, 0.22, depth + 0.55))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(rib_mat.clone()),
-                    transform: Transform::from_xyz(fx, y, position.z),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(fx, y, position.z),
+                        Quat::IDENTITY,
+                        Vec3::new(0.30, 0.22, depth + 0.55),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14821,10 +15098,35 @@ fn spawn_factory_window_ribbons(
     }
 }
 
+#[allow(dead_code)] // Retained for isolated/downtown callers that do not own a facade cache.
 fn spawn_stone_brick_courses(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    position: Vec3,
+    width: f32,
+    height: f32,
+    depth: f32,
+    heavy_corners: bool,
+) {
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    spawn_stone_brick_courses_cached(
+        commands,
+        pal,
+        &unit_cube,
+        position,
+        width,
+        height,
+        depth,
+        heavy_corners,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_stone_brick_courses_cached(
+    commands: &mut Commands,
+    pal: &Palette,
+    unit_cube: &Handle<Mesh>,
     position: Vec3,
     width: f32,
     height: f32,
@@ -14842,9 +15144,13 @@ fn spawn_stone_brick_courses(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.20, 0.08, 0.12))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(pal.mortar_line.clone()),
-                    transform: Transform::from_xyz(position.x, y, fz),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(position.x, y, fz),
+                        Quat::IDENTITY,
+                        Vec3::new(width + 0.20, 0.08, 0.12),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14856,9 +15162,13 @@ fn spawn_stone_brick_courses(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.12, 0.08, depth + 0.20))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(pal.mortar_line.clone()),
-                    transform: Transform::from_xyz(fx, y, position.z),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(fx, y, position.z),
+                        Quat::IDENTITY,
+                        Vec3::new(0.12, 0.08, depth + 0.20),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -14883,9 +15193,13 @@ fn spawn_stone_brick_courses(
             ] {
                 commands.spawn((
                     PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(0.08, seam_h, 0.14))),
+                        mesh: Mesh3d(unit_cube.clone()),
                         material: MeshMaterial3d(pal.mortar_line.clone()),
-                        transform: Transform::from_xyz(position.x + x_off, y, fz),
+                        transform: unit_cuboid_transform(
+                            Vec3::new(position.x + x_off, y, fz),
+                            Quat::IDENTITY,
+                            Vec3::new(0.08, seam_h, 0.14),
+                        ),
                         ..default()
                     },
                     WorldGeometry,
@@ -14903,9 +15217,13 @@ fn spawn_stone_brick_courses(
             ] {
                 commands.spawn((
                     PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(0.14, seam_h, 0.08))),
+                        mesh: Mesh3d(unit_cube.clone()),
                         material: MeshMaterial3d(pal.mortar_line.clone()),
-                        transform: Transform::from_xyz(fx, y, position.z + z_off),
+                        transform: unit_cuboid_transform(
+                            Vec3::new(fx, y, position.z + z_off),
+                            Quat::IDENTITY,
+                            Vec3::new(0.14, seam_h, 0.08),
+                        ),
                         ..default()
                     },
                     WorldGeometry,
@@ -14925,9 +15243,13 @@ fn spawn_stone_brick_courses(
             ] {
                 commands.spawn((
                     PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(0.42, height * 0.92, 0.42))),
+                        mesh: Mesh3d(unit_cube.clone()),
                         material: MeshMaterial3d(pal.stone_block.clone()),
-                        transform: Transform::from_xyz(x, position.y, z),
+                        transform: unit_cuboid_transform(
+                            Vec3::new(x, position.y, z),
+                            Quat::IDENTITY,
+                            Vec3::new(0.42, height * 0.92, 0.42),
+                        ),
                         ..default()
                     },
                     WorldGeometry,
@@ -14941,7 +15263,7 @@ fn spawn_stone_brick_courses(
 /// Add an antenna or water-tank cluster to the top of a building.
 fn spawn_rooftop_details(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
+    mesh_cache: &DowntownFacadeMeshCache,
     pal: &Palette,
     x: f32,
     z: f32,
@@ -14958,9 +15280,14 @@ fn spawn_rooftop_details(
         let mast_h = 8.0 + seeded(seed, 1) * 14.0;
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cylinder::new(0.22, mast_h))),
+                mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
                 material: MeshMaterial3d(pal.rooftop.clone()),
-                transform: Transform::from_xyz(x, top + mast_h * 0.5, z),
+                transform: unit_cylinder_transform(
+                    Vec3::new(x, top + mast_h * 0.5, z),
+                    Quat::IDENTITY,
+                    0.22,
+                    mast_h,
+                ),
                 ..default()
             },
             WorldGeometry,
@@ -14973,9 +15300,9 @@ fn spawn_rooftop_details(
         };
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Sphere::new(0.45))),
+                mesh: Mesh3d(mesh_cache.unit_sphere.clone()),
                 material: MeshMaterial3d(pal.window_warm.clone()),
-                transform: Transform::from_xyz(x, top + mast_h + 0.5, z),
+                transform: unit_sphere_transform(Vec3::new(x, top + mast_h + 0.5, z), 0.45),
                 ..default()
             },
             WorldGeometry,
@@ -15003,9 +15330,14 @@ fn spawn_rooftop_details(
         let oz = (seeded(seed, 6) - 0.5) * (d * 0.4);
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cylinder::new(tank_r, tank_h))),
+                mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
                 material: MeshMaterial3d(pal.rooftop.clone()),
-                transform: Transform::from_xyz(x + ox, top + tank_h * 0.5, z + oz),
+                transform: unit_cylinder_transform(
+                    Vec3::new(x + ox, top + tank_h * 0.5, z + oz),
+                    Quat::IDENTITY,
+                    tank_r,
+                    tank_h,
+                ),
                 ..default()
             },
             WorldGeometry,
@@ -15017,10 +15349,14 @@ fn spawn_rooftop_details(
         let oz = (seeded(seed, 9) - 0.5) * (d * 0.35);
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cylinder::new(dish_r, 0.25))),
+                mesh: Mesh3d(mesh_cache.unit_cylinder.clone()),
                 material: MeshMaterial3d(pal.rooftop.clone()),
-                transform: Transform::from_xyz(x + ox, top + 1.5, z + oz)
-                    .with_rotation(Quat::from_rotation_x(0.45)),
+                transform: unit_cylinder_transform(
+                    Vec3::new(x + ox, top + 1.5, z + oz),
+                    Quat::from_rotation_x(0.45),
+                    dish_r,
+                    0.25,
+                ),
                 ..default()
             },
             WorldGeometry,
@@ -15212,6 +15548,34 @@ fn spawn_boost_road_span(
     include_ramps: bool,
     seed: u64,
 ) {
+    let mesh_cache = SpeedRoadMeshCache::new(meshes);
+    spawn_boost_road_span_cached(
+        commands,
+        pal,
+        &mesh_cache,
+        center,
+        yaw,
+        pitch,
+        length,
+        width,
+        include_ramps,
+        seed,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_boost_road_span_cached(
+    commands: &mut Commands,
+    pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
+    center: Vec3,
+    yaw: f32,
+    pitch: f32,
+    length: f32,
+    width: f32,
+    include_ramps: bool,
+    seed: u64,
+) {
     let flat_rot = Quat::from_rotation_y(yaw);
     let rot = flat_rot * Quat::from_rotation_x(-pitch);
     let forward = flat_rot * Vec3::Z;
@@ -15221,8 +15585,6 @@ fn spawn_boost_road_span(
     // shoulders remain available for carving, traffic, ramps, and rails.
     let lane_width = (width * 0.16).max(6.0);
     let side_offset = width * 0.24;
-    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-    let light_mesh = meshes.add(Sphere::new(1.0));
 
     // A physical median prevents a player boosted in one direction from
     // drifting across the centerline and striking the opposite arrows. It is
@@ -15233,7 +15595,7 @@ fn spawn_boost_road_span(
     let divider_width = 2.4;
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(unit_cube.clone()),
+            mesh: Mesh3d(mesh_cache.unit_cube.clone()),
             material: MeshMaterial3d(pal.brushed_metal.clone()),
             transform: Transform::from_translation(
                 center + rot * Vec3::new(0.0, divider_height * 0.5 + 0.12, 0.0),
@@ -15264,7 +15626,7 @@ fn spawn_boost_road_span(
 
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(unit_cube.clone()),
+                mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                 material: MeshMaterial3d(pal.boost_lane.clone()),
                 transform: Transform::from_translation(lane_center)
                     .with_rotation(rot)
@@ -15281,9 +15643,9 @@ fn spawn_boost_road_span(
             let pad_len = 13.0 + seeded(seed, lane_index as u64 * 97 + pad as u64) * 5.5;
             let pad_width = lane_width * 0.84;
             let pad_center = lane_center + rot * Vec3::new(0.0, 0.0, local_z) + Vec3::Y * 0.08;
-            spawn_board_boost_pad(
-                commands, meshes, pal, pad_center, lane_yaw, pitch, lane_dir, pad_width, pad_len,
-                3.15, 3.10, 0.0, 1.70,
+            spawn_board_boost_pad_cached(
+                commands, pal, mesh_cache, pad_center, lane_yaw, pitch, lane_dir, pad_width,
+                pad_len, 3.15, 3.10, 0.0, 1.70,
             );
         }
 
@@ -15297,7 +15659,7 @@ fn spawn_boost_road_span(
                     + Vec3::Y * 0.18;
                 commands.spawn((
                     PbrBundle {
-                        mesh: Mesh3d(light_mesh.clone()),
+                        mesh: Mesh3d(mesh_cache.unit_sphere.clone()),
                         material: MeshMaterial3d(pal.boost_pad.clone()),
                         transform: Transform::from_translation(light_pos)
                             .with_scale(Vec3::splat(0.42)),
@@ -15324,10 +15686,10 @@ fn spawn_boost_road_span(
                 // former flat-forward + fixed-Y offset detached ramps from
                 // steep chunks at either end of a span.
                 let ramp_base = lane_center + rot * Vec3::new(0.0, 0.18, end * length * 0.43);
-                spawn_board_boost_ramp(
+                spawn_board_boost_ramp_cached(
                     commands,
-                    meshes,
                     pal,
+                    mesh_cache,
                     ramp_base,
                     ramp_road_direction,
                     lane_width * 0.92,
@@ -15341,10 +15703,32 @@ fn spawn_boost_road_span(
     }
 }
 
-fn spawn_board_boost_pad(
+fn unit_cuboid_transform(translation: Vec3, rotation: Quat, size: Vec3) -> Transform {
+    Transform::from_translation(translation)
+        .with_rotation(rotation)
+        .with_scale(size)
+}
+
+fn unit_cylinder_transform(
+    translation: Vec3,
+    rotation: Quat,
+    radius: f32,
+    height: f32,
+) -> Transform {
+    Transform::from_translation(translation)
+        .with_rotation(rotation)
+        .with_scale(Vec3::new(radius, height, radius))
+}
+
+fn unit_sphere_transform(translation: Vec3, radius: f32) -> Transform {
+    Transform::from_translation(translation).with_scale(Vec3::splat(radius))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_board_boost_pad_cached(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     center: Vec3,
     yaw: f32,
     pitch: f32,
@@ -15359,9 +15743,9 @@ fn spawn_board_boost_pad(
     let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch);
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.16, length))),
+            mesh: Mesh3d(mesh_cache.unit_cube.clone()),
             material: MeshMaterial3d(pal.boost_pad.clone()),
-            transform: Transform::from_translation(center).with_rotation(rot),
+            transform: unit_cuboid_transform(center, rot, Vec3::new(width, 0.16, length)),
             ..default()
         },
         WorldGeometry,
@@ -15379,20 +15763,18 @@ fn spawn_board_boost_pad(
         },
     ));
 
-    let chevron_mesh = meshes.add(Cuboid::new(width * 0.34, 0.05, 0.82));
     for (i, offset) in [-0.26_f32, 0.0, 0.26].iter().copied().enumerate() {
         let z = offset * length;
         for side in [-1.0_f32, 1.0] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(chevron_mesh.clone()),
+                    mesh: Mesh3d(mesh_cache.unit_cube.clone()),
                     material: MeshMaterial3d(pal.boost_ramp.clone()),
-                    transform: Transform::from_translation(
+                    transform: unit_cuboid_transform(
                         center + rot * Vec3::new(side * width * 0.13, 0.115, z),
-                    )
-                    .with_rotation(
                         rot * Quat::from_rotation_y(side * 0.34)
                             * Quat::from_rotation_z(if i % 2 == 0 { 0.03 } else { -0.03 }),
+                        Vec3::new(width * 0.34, 0.05, 0.82),
                     ),
                     ..default()
                 },
@@ -15402,10 +15784,11 @@ fn spawn_board_boost_pad(
     }
 }
 
-fn spawn_board_boost_ramp(
+#[allow(clippy::too_many_arguments)]
+fn spawn_board_boost_ramp_cached(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
     pal: &Palette,
+    mesh_cache: &SpeedRoadMeshCache,
     base_center: Vec3,
     direction: Vec3,
     width: f32,
@@ -15421,9 +15804,9 @@ fn spawn_board_boost_ramp(
     };
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(width, 0.72, surface_length))),
+            mesh: Mesh3d(mesh_cache.unit_cube.clone()),
             material: MeshMaterial3d(pal.boost_ramp.clone()),
-            transform: Transform::from_translation(center).with_rotation(rot),
+            transform: unit_cuboid_transform(center, rot, Vec3::new(width, 0.72, surface_length)),
             ..default()
         },
         WorldGeometry,
@@ -15442,6 +15825,7 @@ fn spawn_board_boost_ramp(
         },
         crate::engine::physics::prelude::RigidBody::Fixed,
         crate::engine::physics::prelude::Collider::cuboid(width * 0.5, 0.36, surface_length * 0.5),
+        world_space_collider_scale(),
     ));
 }
 
@@ -15881,6 +16265,43 @@ fn spawn_sky_platforms(
 }
 
 // ── Sky Bridges ───────────────────────────────────────────────────────────────
+fn unit_cylinder_between_transform(start: Vec3, end: Vec3, radius: f32) -> Option<Transform> {
+    let delta = end - start;
+    let length = delta.length();
+    if length <= 0.05 {
+        return None;
+    }
+
+    Some(
+        Transform::from_translation(start + delta * 0.5)
+            .with_rotation(Quat::from_rotation_arc(Vec3::Y, delta / length))
+            .with_scale(Vec3::new(radius, length, radius)),
+    )
+}
+
+fn spawn_static_cylinder_between_cached(
+    commands: &mut Commands,
+    unit_cylinder: &Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+    start: Vec3,
+    end: Vec3,
+    radius: f32,
+) {
+    let Some(transform) = unit_cylinder_between_transform(start, end, radius) else {
+        return;
+    };
+
+    commands.spawn((
+        PbrBundle {
+            mesh: Mesh3d(unit_cylinder.clone()),
+            material: MeshMaterial3d(material),
+            transform,
+            ..default()
+        },
+        WorldGeometry,
+    ));
+}
+
 fn spawn_static_cylinder_between(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -17656,11 +18077,12 @@ fn spawn_trees(
     seed: u64,
     terrain_seed: u64,
 ) {
+    let mesh_cache = NaturePrimitiveMeshCache::new(meshes);
     // Build one template per species (L-system evaluated once, materials allocated once).
     // All species share a single unit cylinder + unit sphere mesh so the
     // thousands of branch/leaf entities batch into a handful of draw calls.
-    let branch_mesh = TreeTemplate::unit_branch_mesh(meshes);
-    let leaf_mesh = TreeTemplate::unit_leaf_mesh(meshes);
+    let branch_mesh = mesh_cache.unit_cylinder.clone();
+    let leaf_mesh = mesh_cache.unit_sphere.clone();
     let oak = TreeTemplate::new_with_materials(
         TreeKind::Oak,
         pal.bark_mid.clone(),
@@ -17821,20 +18243,21 @@ fn spawn_trees(
                 pulse: 0.002,
             });
             if !matches!(p.template.kind, TreeKind::Cyber) {
-                spawn_moss_pad(
+                spawn_moss_pad_cached(
                     commands,
-                    meshes,
                     pal,
+                    &mesh_cache.unit_sphere,
                     pos + Vec3::Y * 0.035,
                     sc * (1.75 + seeded(seed, idx * 4 + 7) * 1.05),
                     seed + idx * 43,
                 );
             }
             match p.template.kind {
-                TreeKind::Oak if idx % 3 != 1 => spawn_vine_curtain(
+                TreeKind::Oak if idx % 3 != 1 => spawn_vine_curtain_cached(
                     commands,
-                    meshes,
                     pal,
+                    &mesh_cache.unit_sphere,
+                    &mesh_cache.unit_cylinder,
                     pos + Vec3::Y * (sc * 3.5),
                     rot,
                     sc * 1.9,
@@ -17842,10 +18265,11 @@ fn spawn_trees(
                     2 + idx % 3,
                     seed + idx * 47,
                 ),
-                TreeKind::Pine if idx.is_multiple_of(4) => spawn_vine_curtain(
+                TreeKind::Pine if idx.is_multiple_of(4) => spawn_vine_curtain_cached(
                     commands,
-                    meshes,
                     pal,
+                    &mesh_cache.unit_sphere,
+                    &mesh_cache.unit_cylinder,
                     pos + Vec3::Y * (sc * 3.1),
                     rot + 0.5,
                     sc * 1.25,
@@ -17853,10 +18277,11 @@ fn spawn_trees(
                     2,
                     seed + idx * 53,
                 ),
-                TreeKind::Dead if idx.is_multiple_of(2) => spawn_vine_curtain(
+                TreeKind::Dead if idx.is_multiple_of(2) => spawn_vine_curtain_cached(
                     commands,
-                    meshes,
                     pal,
+                    &mesh_cache.unit_sphere,
+                    &mesh_cache.unit_cylinder,
                     pos + Vec3::Y * (sc * 2.4),
                     rot + 0.8,
                     sc * 1.35,
@@ -19254,6 +19679,7 @@ fn spawn_small_building_details(
     seed: u64,
     stone_variant: bool,
 ) {
+    let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let ground_y = position.y - height * 0.5;
     let top_y = position.y + height * 0.5;
     let trim = if stone_variant {
@@ -19270,34 +19696,47 @@ fn spawn_small_building_details(
     // Stone plinth and roof cap keep the smaller buildings grounded and tactile.
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.45, 0.42, depth + 0.45))),
+            mesh: Mesh3d(unit_cube.clone()),
             material: MeshMaterial3d(pal.stone_block.clone()),
-            transform: Transform::from_xyz(position.x, ground_y + 0.21, position.z),
+            transform: unit_cuboid_transform(
+                Vec3::new(position.x, ground_y + 0.21, position.z),
+                Quat::IDENTITY,
+                Vec3::new(width + 0.45, 0.42, depth + 0.45),
+            ),
             ..default()
         },
         WorldGeometry,
     ));
     commands.spawn((
         PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.65, 0.34, depth + 0.65))),
+            mesh: Mesh3d(unit_cube.clone()),
             material: MeshMaterial3d(trim.clone()),
-            transform: Transform::from_xyz(position.x, top_y + 0.17, position.z),
+            transform: unit_cuboid_transform(
+                Vec3::new(position.x, top_y + 0.17, position.z),
+                Quat::IDENTITY,
+                Vec3::new(width + 0.65, 0.34, depth + 0.65),
+            ),
             ..default()
         },
         WorldGeometry,
     ));
 
     if seeded(seed, 91) > 0.45 {
+        let moss_transform = unit_cuboid_transform(
+            Vec3::new(position.x, top_y + 0.42, position.z),
+            Quat::IDENTITY,
+            Vec3::new(width * 0.62, 0.16, depth * 0.52),
+        );
         commands.spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(width * 0.62, 0.16, depth * 0.52))),
+                mesh: Mesh3d(unit_cube.clone()),
                 material: MeshMaterial3d(pal.moss.clone()),
-                transform: Transform::from_xyz(position.x, top_y + 0.42, position.z),
+                transform: moss_transform,
                 ..default()
             },
             WorldGeometry,
             NatureSway::new(
-                &Transform::from_xyz(position.x, top_y + 0.42, position.z),
+                &moss_transform,
                 seeded(seed, 92) * std::f32::consts::TAU,
                 1.2,
                 0.004,
@@ -19317,9 +19756,13 @@ fn spawn_small_building_details(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(width + 0.10, row_h, 0.09))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(course_line.clone()),
-                    transform: Transform::from_xyz(position.x, y, z),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(position.x, y, z),
+                        Quat::IDENTITY,
+                        Vec3::new(width + 0.10, row_h, 0.09),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -19331,9 +19774,13 @@ fn spawn_small_building_details(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.09, row_h, depth + 0.10))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(course_line.clone()),
-                    transform: Transform::from_xyz(x, y, position.z),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(x, y, position.z),
+                        Quat::IDENTITY,
+                        Vec3::new(0.09, row_h, depth + 0.10),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -19352,9 +19799,13 @@ fn spawn_small_building_details(
         ] {
             commands.spawn((
                 PbrBundle {
-                    mesh: Mesh3d(meshes.add(Cuboid::new(0.22, height * 0.88, 0.22))),
+                    mesh: Mesh3d(unit_cube.clone()),
                     material: MeshMaterial3d(pal.stone_block.clone()),
-                    transform: Transform::from_xyz(x, ground_y + height * 0.44, z),
+                    transform: unit_cuboid_transform(
+                        Vec3::new(x, ground_y + height * 0.44, z),
+                        Quat::IDENTITY,
+                        Vec3::new(0.22, height * 0.88, 0.22),
+                    ),
                     ..default()
                 },
                 WorldGeometry,
@@ -19363,7 +19814,9 @@ fn spawn_small_building_details(
     }
 
     if stone_variant {
-        spawn_stone_brick_courses(commands, meshes, pal, position, width, height, depth, false);
+        spawn_stone_brick_courses_cached(
+            commands, pal, &unit_cube, position, width, height, depth, false,
+        );
     }
 
     let floors = ((height - 3.0) / 4.6).floor().clamp(1.0, 5.0) as i32;
@@ -19387,9 +19840,13 @@ fn spawn_small_building_details(
             ] {
                 commands.spawn((
                     PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(win_w, win_h, 0.12))),
+                        mesh: Mesh3d(unit_cube.clone()),
                         material: MeshMaterial3d(mat.clone()),
-                        transform: Transform::from_xyz(x, y, z),
+                        transform: unit_cuboid_transform(
+                            Vec3::new(x, y, z),
+                            Quat::IDENTITY,
+                            Vec3::new(win_w, win_h, 0.12),
+                        ),
                         ..default()
                     },
                     WorldGeometry,
@@ -19406,9 +19863,13 @@ fn spawn_small_building_details(
             ] {
                 commands.spawn((
                     PbrBundle {
-                        mesh: Mesh3d(meshes.add(Cuboid::new(0.12, win_h, win_w))),
+                        mesh: Mesh3d(unit_cube.clone()),
                         material: MeshMaterial3d(mat.clone()),
-                        transform: Transform::from_xyz(x, y, z),
+                        transform: unit_cuboid_transform(
+                            Vec3::new(x, y, z),
+                            Quat::IDENTITY,
+                            Vec3::new(0.12, win_h, win_w),
+                        ),
                         ..default()
                     },
                     WorldGeometry,
@@ -20716,6 +21177,139 @@ fn spawn_magic_crystals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speed_road_mesh_cache_allocates_exactly_two_shared_assets() {
+        let mut meshes = Assets::<Mesh>::default();
+        let before = meshes.len();
+        let cache = SpeedRoadMeshCache::new(&mut meshes);
+
+        assert_eq!(meshes.len() - before, 2);
+        assert!(meshes.get(&cache.unit_cube).is_some());
+        assert!(meshes.get(&cache.unit_sphere).is_some());
+
+        let another_pad = cache.unit_cube.clone();
+        let another_light = cache.unit_sphere.clone();
+        assert_eq!(another_pad.id(), cache.unit_cube.id());
+        assert_eq!(another_light.id(), cache.unit_sphere.id());
+        assert_eq!(meshes.len() - before, 2);
+    }
+
+    #[test]
+    fn nature_cache_allocates_four_meshes_and_preserves_cylinder_transform() {
+        let mut meshes = Assets::<Mesh>::default();
+        let before = meshes.len();
+        let cache = NaturePrimitiveMeshCache::new(&mut meshes);
+
+        assert_eq!(meshes.len() - before, 4);
+        assert!(meshes.get(&cache.unit_cube).is_some());
+        assert!(meshes.get(&cache.unit_sphere).is_some());
+        assert!(meshes.get(&cache.unit_cylinder).is_some());
+        assert!(meshes.get(&cache.unit_cone).is_some());
+
+        let another_root = cache.unit_cube.clone();
+        let another_leaf = cache.unit_sphere.clone();
+        let another_trunk = cache.unit_cylinder.clone();
+        let another_crown = cache.unit_cone.clone();
+        assert_eq!(another_root.id(), cache.unit_cube.id());
+        assert_eq!(another_leaf.id(), cache.unit_sphere.id());
+        assert_eq!(another_trunk.id(), cache.unit_cylinder.id());
+        assert_eq!(another_crown.id(), cache.unit_cone.id());
+        assert_eq!(meshes.len() - before, 4);
+
+        let start = Vec3::new(-12.0, 3.5, 8.0);
+        let end = Vec3::new(27.0, 44.0, -19.0);
+        let radius = 2.75;
+        let delta = end - start;
+        let transform = unit_cylinder_between_transform(start, end, radius).unwrap();
+
+        assert!(transform.translation.abs_diff_eq((start + end) * 0.5, 1e-5));
+        assert!(transform
+            .scale
+            .abs_diff_eq(Vec3::new(radius, delta.length(), radius), 1e-5));
+        assert!((transform.rotation * Vec3::Y).abs_diff_eq(delta.normalize(), 1e-5));
+
+        let lower = transform.transform_point(Vec3::new(0.0, -0.5, 0.0));
+        let upper = transform.transform_point(Vec3::new(0.0, 0.5, 0.0));
+        assert!(lower.abs_diff_eq(start, 1e-4));
+        assert!(upper.abs_diff_eq(end, 1e-4));
+        assert!(unit_cylinder_between_transform(start, start, radius).is_none());
+    }
+
+    #[test]
+    fn downtown_facade_mesh_cache_allocates_exactly_three_shared_assets() {
+        let mut meshes = Assets::<Mesh>::default();
+        let before = meshes.len();
+        let cache = DowntownFacadeMeshCache::new(&mut meshes);
+
+        assert_eq!(meshes.len() - before, 3);
+        assert!(meshes.get(&cache.unit_cube).is_some());
+        assert!(meshes.get(&cache.unit_cylinder).is_some());
+        assert!(meshes.get(&cache.unit_sphere).is_some());
+
+        let another_window = cache.unit_cube.clone();
+        let another_tank = cache.unit_cylinder.clone();
+        let another_beacon = cache.unit_sphere.clone();
+        assert_eq!(another_window.id(), cache.unit_cube.id());
+        assert_eq!(another_tank.id(), cache.unit_cylinder.id());
+        assert_eq!(another_beacon.id(), cache.unit_sphere.id());
+        assert_eq!(meshes.len() - before, 3);
+    }
+
+    #[test]
+    fn scaled_unit_primitives_preserve_facade_and_rooftop_dimensions() {
+        let panel_center = Vec3::new(14.0, 38.5, -22.0);
+        let panel_size = Vec3::new(21.4, 53.2, 0.18);
+        let panel = unit_cuboid_transform(panel_center, Quat::IDENTITY, panel_size);
+        assert_eq!(panel.translation, panel_center);
+        assert_eq!(panel.rotation, Quat::IDENTITY);
+        assert_eq!(panel.scale, panel_size);
+
+        let dish_center = Vec3::new(-7.0, 92.0, 11.0);
+        let dish_rotation = Quat::from_rotation_x(0.45);
+        let dish = unit_cylinder_transform(dish_center, dish_rotation, 3.6, 0.25);
+        assert_eq!(dish.translation, dish_center);
+        assert_eq!(dish.rotation, dish_rotation);
+        assert_eq!(dish.scale, Vec3::new(3.6, 0.25, 3.6));
+
+        let beacon_center = Vec3::new(4.0, 121.5, -9.0);
+        let beacon = unit_sphere_transform(beacon_center, 0.45);
+        assert_eq!(beacon.translation, beacon_center);
+        assert_eq!(beacon.scale, Vec3::splat(0.45));
+    }
+
+    #[test]
+    fn scaled_unit_cube_preserves_boost_ramp_visual_and_collider_extents() {
+        let center = Vec3::new(18.0, 7.5, -42.0);
+        let rotation = Quat::from_rotation_y(0.72) * Quat::from_rotation_x(-0.18);
+        let width = 14.0;
+        let surface_length = 37.5;
+        let transform =
+            unit_cuboid_transform(center, rotation, Vec3::new(width, 0.72, surface_length));
+
+        assert_eq!(transform.translation, center);
+        assert_eq!(transform.rotation, rotation);
+        assert_eq!(transform.scale, Vec3::new(width, 0.72, surface_length));
+        assert_eq!(
+            transform.scale * 0.5,
+            Vec3::new(width * 0.5, 0.36, surface_length * 0.5)
+        );
+        assert_eq!(
+            world_space_collider_scale(),
+            crate::engine::physics::prelude::ColliderScale::Absolute(Vec3::ONE)
+        );
+    }
+
+    #[test]
+    fn scaled_roof_moss_keeps_its_authored_nature_sway_scale() {
+        let size = Vec3::new(12.4, 0.16, 8.32);
+        let transform = unit_cuboid_transform(Vec3::new(-18.0, 26.42, 7.0), Quat::IDENTITY, size);
+        let sway = NatureSway::new(&transform, 0.4, 1.2, 0.004, 0.015, 0.015);
+
+        assert_eq!(sway.base_translation, transform.translation);
+        assert_eq!(sway.base_rotation, transform.rotation);
+        assert_eq!(sway.base_scale, size);
+    }
 
     #[test]
     fn route_blockades_mix_periodic_tanks_without_changing_other_raids() {

@@ -45,12 +45,15 @@ const GRASS_SLOPE_PROBE: f32 = GRASS_CHUNK_SIZE * 0.5;
 /// and avoids running the route/erosion noise thousands of times per chunk.
 const GRASS_GROUND_SAMPLES: usize = 4;
 
-/// Meshes are built on the main thread, so cap how many a single frame may bake.
-const GRASS_BUILD_BUDGET: usize = 2;
-/// While the field is still filling in — world load, or a teleport — bake at
-/// this rate instead. Loading already stalls, so the cost lands where it hides.
-const GRASS_WARMUP_BUDGET: usize = 16;
-const GRASS_WARMUP_CHUNKS: usize = 48;
+/// Meshes are built on the main thread and extracted for upload by the renderer,
+/// so both operations need a hard per-frame cap. In particular, startup is not
+/// a safe place for a larger "warmup" burst: it competes with terrain loading
+/// and can queue many large render assets before the previous frame is drawn.
+const GRASS_BUILD_MESH_BUDGET: usize = 2;
+/// Upper bound on blade vertices considered by fresh chunk bakes in one frame.
+/// A full-density near chunk has 20,736 candidate vertices, so this admits one
+/// near chunk or two cheaper distance chunks while keeping uploads incremental.
+const GRASS_BUILD_VERTEX_BUDGET: usize = 24_000;
 
 /// Cached meshes are dropped once the player is this far past a tier's spawn
 /// radius. The slack means pacing back and forth across a boundary re-uses the
@@ -221,6 +224,9 @@ pub(super) struct GrassField {
     /// Cleared on arm; set once the field has finished its first fill so the
     /// summary below is logged a single time per world rather than per frame.
     reported: bool,
+    /// Startup-fill counters make the streaming budget observable without
+    /// logging every frame (which would itself make a slow load noisier).
+    load_diagnostics: GrassLoadDiagnostics,
 }
 
 impl GrassField {
@@ -244,11 +250,60 @@ pub(super) fn arm_grass_field(
     field.baked.clear();
     field.live.clear();
     field.reported = false;
+    field.load_diagnostics = GrassLoadDiagnostics::default();
     field.materials = GrassTier::ALL
         .iter()
         .map(|&tier| (tier, materials.add(tier_material(tier.profile().range))))
         .collect();
     field.active = true;
+}
+
+/// Conservative upper bound for the work and upload size of a chunk. Terrain
+/// masking may reject candidates, but never creates more vertices than this.
+fn chunk_candidate_vertices(tier: GrassTier) -> usize {
+    let profile = tier.profile();
+    let cells = ((GRASS_CHUNK_SIZE * profile.density.sqrt()).round() as usize).max(1);
+    cells * cells * (profile.segments * 2 + 1)
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct GrassFrameBudget {
+    meshes: usize,
+    candidate_vertices: usize,
+}
+
+impl GrassFrameBudget {
+    fn try_reserve(&mut self, tier: GrassTier) -> bool {
+        let candidate_vertices = chunk_candidate_vertices(tier);
+        if self.meshes >= GRASS_BUILD_MESH_BUDGET
+            || self.candidate_vertices.saturating_add(candidate_vertices)
+                > GRASS_BUILD_VERTEX_BUDGET
+        {
+            return false;
+        }
+        self.meshes += 1;
+        self.candidate_vertices += candidate_vertices;
+        true
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct GrassLoadDiagnostics {
+    streaming_frames: u32,
+    resolved_chunks: usize,
+    peak_frame_meshes: usize,
+    peak_frame_candidate_vertices: usize,
+}
+
+impl GrassLoadDiagnostics {
+    fn record(&mut self, frame: GrassFrameBudget) {
+        self.streaming_frames = self.streaming_frames.saturating_add(1);
+        self.resolved_chunks = self.resolved_chunks.saturating_add(frame.meshes);
+        self.peak_frame_meshes = self.peak_frame_meshes.max(frame.meshes);
+        self.peak_frame_candidate_vertices = self
+            .peak_frame_candidate_vertices
+            .max(frame.candidate_vertices);
+    }
 }
 
 /// `cleanup_world` despawns every `WorldGeometry` when play ends, and grass
@@ -343,23 +398,20 @@ fn stream_grass_chunks(
     // Chunks already in the cache cost nothing to spawn, so only fresh bakes
     // draw against the budget: crossing back over old ground never hitches.
     missing.sort_by(|a, b| a.2.total_cmp(&b.2));
-    // Loading into a world needs a few hundred chunks at once. Filling that in
-    // two-at-a-time would take seconds of visible pop-in, so the field bakes
-    // aggressively until it is populated and then drops to a trickle that keeps
-    // ordinary movement hitch-free.
-    let budget = if field.live.len() < GRASS_WARMUP_CHUNKS {
-        GRASS_WARMUP_BUDGET
-    } else {
-        GRASS_BUILD_BUDGET
-    };
-    let mut baked_this_frame = 0usize;
+    // Apply the same bounded rate during initial load, teleports, and ordinary
+    // movement. A previous 16-mesh startup burst made the first few frames do
+    // the most work exactly while terrain and render pipelines were loading.
+    let fresh_missing = missing
+        .iter()
+        .filter(|(coord, tier, _)| !field.baked.contains_key(&(*coord, *tier)))
+        .count();
+    let mut frame_budget = GrassFrameBudget::default();
     for (coord, tier, _) in missing {
         let key = (coord, tier);
         if let std::collections::hash_map::Entry::Vacant(entry) = field.baked.entry(key) {
-            if baked_this_frame >= budget {
+            if !frame_budget.try_reserve(tier) {
                 break;
             }
-            baked_this_frame += 1;
             let baked = bake_chunk_mesh(coord, tier, seed).map(|mesh| meshes.add(mesh));
             entry.insert(baked);
         }
@@ -394,12 +446,17 @@ fn stream_grass_chunks(
         field.live.insert(key, entity);
     }
 
+    if !field.reported {
+        field.load_diagnostics.record(frame_budget);
+    }
+    let fresh_remaining = fresh_missing.saturating_sub(frame_budget.meshes);
+
     // One line per world, once the field has settled: enough to confirm the
     // streamer found ground and to spot a badly tuned density at a glance.
     // Fires on the first frame that needed no new bakes, which is when the ring
     // around the spawn point is fully resolved — including the paved city core,
     // where the honest answer is "almost no chunks".
-    if !field.reported && baked_this_frame == 0 && !field.baked.is_empty() {
+    if !field.reported && fresh_remaining == 0 && !field.baked.is_empty() {
         field.reported = true;
         let blades: usize = GrassTier::ALL
             .iter()
@@ -409,10 +466,16 @@ fn stream_grass_chunks(
             })
             .sum();
         info!(
-            "Grass field: {} chunks live, ~{} blade candidates, {} meshes cached",
+            "Grass field settled over {} streaming frames: {} chunks live, ~{} blade candidates, {} meshes cached; resolved {} fresh chunks (peak frame: {} meshes / {} candidate vertices; caps: {} / {})",
+            field.load_diagnostics.streaming_frames,
             field.live.len(),
             blades,
-            field.baked.len()
+            field.baked.len(),
+            field.load_diagnostics.resolved_chunks,
+            field.load_diagnostics.peak_frame_meshes,
+            field.load_diagnostics.peak_frame_candidate_vertices,
+            GRASS_BUILD_MESH_BUDGET,
+            GRASS_BUILD_VERTEX_BUDGET,
         );
     }
 
@@ -954,6 +1017,61 @@ mod tests {
         // Neighbouring lattice cells must not correlate, or clumps line up in
         // visible rows across the field.
         assert!((grass_hash(7, -3, 11, 42, 5) - grass_hash(7, -2, 11, 42, 5)).abs() > 0.02);
+    }
+
+    #[test]
+    fn build_budget_caps_mesh_count_and_candidate_vertices() {
+        assert_eq!(chunk_candidate_vertices(GrassTier::Near), 20_736);
+        assert_eq!(chunk_candidate_vertices(GrassTier::Mid), 4_032);
+        assert_eq!(chunk_candidate_vertices(GrassTier::Far), 1_125);
+        assert!(
+            GrassTier::ALL
+                .into_iter()
+                .all(|tier| chunk_candidate_vertices(tier) <= GRASS_BUILD_VERTEX_BUDGET),
+            "every individual tier must fit or it could be starved forever"
+        );
+
+        let mut near_frame = GrassFrameBudget::default();
+        assert!(near_frame.try_reserve(GrassTier::Near));
+        assert!(
+            !near_frame.try_reserve(GrassTier::Near),
+            "two dense chunks would exceed the vertex cap"
+        );
+        assert_eq!(near_frame.meshes, 1);
+        assert_eq!(near_frame.candidate_vertices, 20_736);
+
+        let mut distance_frame = GrassFrameBudget::default();
+        assert!(distance_frame.try_reserve(GrassTier::Mid));
+        assert!(distance_frame.try_reserve(GrassTier::Far));
+        assert!(
+            !distance_frame.try_reserve(GrassTier::Far),
+            "the mesh cap applies even when vertex work is cheap"
+        );
+        assert_eq!(distance_frame.meshes, GRASS_BUILD_MESH_BUDGET);
+        assert!(distance_frame.candidate_vertices <= GRASS_BUILD_VERTEX_BUDGET);
+    }
+
+    #[test]
+    fn load_diagnostics_accumulate_and_retain_peak_frame() {
+        let mut diagnostics = GrassLoadDiagnostics::default();
+        diagnostics.record(GrassFrameBudget {
+            meshes: 1,
+            candidate_vertices: chunk_candidate_vertices(GrassTier::Near),
+        });
+        diagnostics.record(GrassFrameBudget {
+            meshes: 2,
+            candidate_vertices: chunk_candidate_vertices(GrassTier::Mid)
+                + chunk_candidate_vertices(GrassTier::Far),
+        });
+        diagnostics.record(GrassFrameBudget::default());
+
+        assert_eq!(diagnostics.streaming_frames, 3);
+        assert_eq!(diagnostics.resolved_chunks, 3);
+        assert_eq!(diagnostics.peak_frame_meshes, 2);
+        assert_eq!(
+            diagnostics.peak_frame_candidate_vertices,
+            chunk_candidate_vertices(GrassTier::Near)
+        );
     }
 
     #[test]

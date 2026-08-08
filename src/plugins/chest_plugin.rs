@@ -294,8 +294,10 @@ mod tests {
     #[test]
     fn weapon_upgrade_cache_advances_active_owner_rank_once() {
         let mut progression = PlayerProgression::default();
-        let mut weapons = WeaponInventory::default();
-        weapons.active_slot = 4;
+        let mut weapons = WeaponInventory {
+            active_slot: 4,
+            ..default()
+        };
 
         assert!(upgrade_active_weapon(&mut progression, &mut weapons));
         assert_eq!(progression.weapon_ranks.ranks[4], 1);

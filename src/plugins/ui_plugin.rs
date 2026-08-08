@@ -84,6 +84,12 @@ pub use super::ui_foundation::{UiTextCatalog, UiTextKey, UiTheme};
 
 pub struct UiPlugin;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ChapterSelectUiSet {
+    TravelActions,
+    LoadingFeedback,
+}
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiFoundationPlugin)
@@ -98,6 +104,14 @@ impl Plugin for UiPlugin {
             .init_resource::<MenuFocus>()
             .init_resource::<ChapterProgressionOwner>()
             .init_resource::<CustomMissionState>()
+            .configure_sets(
+                Update,
+                (
+                    ChapterSelectUiSet::TravelActions,
+                    ChapterSelectUiSet::LoadingFeedback,
+                )
+                    .chain(),
+            )
             .add_systems(Startup, spawn_menu_camera)
             .add_systems(
                 Update,
@@ -285,11 +299,11 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    chapter_select_action_buttons,
+                    chapter_select_action_buttons.in_set(ChapterSelectUiSet::TravelActions),
                     chapter_select_progression_owner_buttons,
-                    chapter_select_fast_travel_buttons,
-                    cave_fast_travel_buttons,
-                    world_anchor_fast_travel_buttons,
+                    chapter_select_fast_travel_buttons.in_set(ChapterSelectUiSet::TravelActions),
+                    cave_fast_travel_buttons.in_set(ChapterSelectUiSet::TravelActions),
+                    world_anchor_fast_travel_buttons.in_set(ChapterSelectUiSet::TravelActions),
                     chapter_select_perk_buttons,
                     chapter_select_upgrade_buttons,
                     chapter_select_weapon_rank_buttons,
@@ -300,6 +314,12 @@ impl Plugin for UiPlugin {
                     chapter_select_economy_panel_update,
                     final_push_unlock_system,
                 )
+                    .run_if(in_state(AppState::ChapterSelect)),
+            )
+            .add_systems(
+                Update,
+                update_chapter_loading_overlay
+                    .in_set(ChapterSelectUiSet::LoadingFeedback)
                     .run_if(in_state(AppState::ChapterSelect)),
             );
     }
@@ -2827,6 +2847,8 @@ struct ChapterSelectRoot;
 #[derive(Component)]
 struct ChapterSelectScrollPanel;
 #[derive(Component)]
+struct ChapterLoadingOverlay;
+#[derive(Component)]
 struct ChapterFastTravelButton(ChapterId);
 #[derive(Component, Clone, Copy)]
 struct CaveFastTravelButton {
@@ -3292,11 +3314,102 @@ fn setup_chapter_select(
                 }
             });
         });
+
+    // `NextState` changes requested by the travel buttons are not applied
+    // until the following frame. Keep this overlay ready but out of layout so
+    // that frame can present an acknowledgement before synchronous
+    // `OnEnter(Playing)` world generation begins.
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                display: Display::None,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(theme.canvas),
+            ZIndex(1_000),
+            ChapterLoadingOverlay,
+        ))
+        .with_children(|overlay| {
+            overlay
+                .spawn((
+                    Node {
+                        width: Val::Px(560.0),
+                        max_width: Val::Percent(88.0),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(12.0),
+                        padding: UiRect::all(Val::Px(28.0)),
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme.panel),
+                    BorderColor::all(theme.energy),
+                ))
+                .with_children(|panel| {
+                    panel.spawn((
+                        Text::new("LOADING WORLD…"),
+                        TextFont {
+                            font_size: FontSize::Px(42.0),
+                            ..default()
+                        },
+                        TextColor(theme.objective),
+                    ));
+                    panel.spawn((
+                        Text::new("Preparing the city, roads, ramps, and skyline."),
+                        TextFont {
+                            font_size: FontSize::Px(18.0),
+                            ..default()
+                        },
+                        TextLayout::justify(Justify::Center),
+                        TextColor(theme.text_primary),
+                    ));
+                    panel.spawn((
+                        Text::new("The first visit can take a moment."),
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
+                        TextColor(theme.text_muted),
+                    ));
+                });
+        });
 }
 
-fn despawn_chapter_select(mut commands: Commands, q: Query<Entity, With<ChapterSelectRoot>>) {
-    for e in q.iter() {
+fn despawn_chapter_select(
+    mut commands: Commands,
+    root_q: Query<Entity, With<ChapterSelectRoot>>,
+    overlay_q: Query<Entity, With<ChapterLoadingOverlay>>,
+) {
+    for e in root_q.iter().chain(overlay_q.iter()) {
         commands.entity(e).despawn();
+    }
+}
+
+fn chapter_loading_overlay_display(next_state: &NextState<AppState>) -> Display {
+    match next_state {
+        NextState::Pending(AppState::Playing) | NextState::PendingIfNeq(AppState::Playing) => {
+            Display::Flex
+        }
+        _ => Display::None,
+    }
+}
+
+fn update_chapter_loading_overlay(
+    next_state: Res<NextState<AppState>>,
+    mut overlay_q: Query<&mut Node, With<ChapterLoadingOverlay>>,
+) {
+    let display = chapter_loading_overlay_display(&next_state);
+    for mut node in overlay_q.iter_mut() {
+        if node.display != display {
+            node.display = display;
+        }
     }
 }
 
@@ -7359,9 +7472,9 @@ fn crafting_panel_system(
             0
         } else {
             owner_input.map_or(0, |input| {
-                if input.weapon_prev {
+                if input.ui_page_prev {
                     -1
-                } else if input.weapon_next {
+                } else if input.ui_page_next {
                     1
                 } else {
                     0
@@ -7419,7 +7532,7 @@ fn crafting_panel_system(
         let selected_line = vendor.items[selected_item_index].clone();
 
         let mut display = format!(
-            "MARKET UPLINK  [Left/Right: tabs]\n{}  ({}/{})  Credits {}\n[Prev/Next weapon: vendor]\n\n",
+            "MARKET UPLINK  [Left/Right: tabs]\n{}  ({}/{})  Credits {}\n[Q/E or shoulders: vendor]\n\n",
             vendor.name,
             panel_state.vendor_index[selection_slot] + 1,
             vendor_count,
@@ -7447,7 +7560,7 @@ fn crafting_panel_system(
         }
 
         let buying = !opened_this_frame && owner_input.is_some_and(|input| input.ui_confirm);
-        let selling = !opened_this_frame && owner_input.is_some_and(|input| input.reload);
+        let selling = !opened_this_frame && owner_input.is_some_and(|input| input.ui_secondary);
         if buying || selling {
             let Some(transaction_id) = heavy_water.allocate_economy_transaction_id() else {
                 msg_ev.write(UiMessageEvent {
@@ -9402,6 +9515,30 @@ mod menu_navigation_tests {
         assert_eq!(reticle_center_percent(1, 2), (50.0, 75.0));
         assert_eq!(reticle_center_percent(0, 4), (25.0, 25.0));
         assert_eq!(reticle_center_percent(3, 4), (75.0, 75.0));
+    }
+
+    #[test]
+    fn chapter_loading_overlay_only_shows_for_a_pending_play_transition() {
+        for next_state in [
+            NextState::Unchanged,
+            NextState::Pending(AppState::MainMenu),
+            NextState::PendingIfNeq(AppState::CharacterDesign),
+        ] {
+            assert_eq!(
+                chapter_loading_overlay_display(&next_state),
+                Display::None,
+                "non-gameplay navigation must leave the overlay hidden"
+            );
+        }
+
+        assert_eq!(
+            chapter_loading_overlay_display(&NextState::Pending(AppState::Playing)),
+            Display::Flex
+        );
+        assert_eq!(
+            chapter_loading_overlay_display(&NextState::PendingIfNeq(AppState::Playing)),
+            Display::Flex
+        );
     }
 
     #[test]

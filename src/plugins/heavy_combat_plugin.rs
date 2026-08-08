@@ -3,6 +3,7 @@
 //! Durable unlocks live in [`HeavyWaterProgress`], while Starfall's
 //! [`Inventory`] and [`PlayerStats`] remain the only material/wallet authority.
 //! Every purchase below stages all three values and commits them together.
+#![allow(dead_code)] // Public purchase seam; player-facing combat lab lands incrementally.
 
 use std::collections::BTreeMap;
 
@@ -215,7 +216,10 @@ mod tests {
             ("circuit_board", 100),
             ("weapon_part_rifle", 20),
         ] {
-            assert_eq!(inventory.add_item(item_id, quantity, max_stack_for(item_id)), 0);
+            assert_eq!(
+                inventory.add_item(item_id, quantity, max_stack_for(item_id)),
+                0
+            );
         }
         inventory
     }

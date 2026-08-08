@@ -1,3 +1,5 @@
+use bevy::app::MainScheduleOrder;
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -5,6 +7,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use crate::character::blueprint::CharacterBlueprint;
 use crate::character::parts::{ArmPreset, BodyPreset, HeadPreset, LegPreset, ShoulderPreset};
@@ -25,6 +28,7 @@ use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
 use crate::plugins::crafting_plugin::CraftingQueue;
 use crate::plugins::heavy_bio_plugin::HeavyBioClock;
+use crate::plugins::heavy_world_events_plugin::HeavyWorldEventsStore;
 use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{
     initial_world_routes, initial_world_sites, is_stale_reference_blueprint, ChapterProgress,
@@ -49,11 +53,54 @@ const SETTINGS_FILE: &str = "starfall_i_settings.json";
 /// by v4, remains the monotonic rotating-slot authority.
 const SAVE_VERSION: u32 = 5;
 
+/// One-shot boot schedule that runs before Bevy's initial state transition.
+///
+/// Bevy deliberately runs the initial `OnEnter` schedules before `PreStartup`
+/// and `Startup`. A direct-to-game launch therefore needs the rotating-save
+/// selection earlier than ordinary startup or `OnEnter(Playing)` would perform
+/// the same disk scan itself. Normal menu launches use this same path, keeping
+/// both boot modes on one deterministic save snapshot.
+#[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
+struct SaveBootstrap;
+
+fn install_save_bootstrap_order(app: &mut App) {
+    app.world_mut()
+        .resource_mut::<MainScheduleOrder>()
+        .insert_startup_before(StateTransition, SaveBootstrap);
+}
+
 // ── Save Rotation State ───────────────────────────────────────────────────────
 /// Tracks which save slot (0=A, 1=B, 2=C) to write to next.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SaveRotationState {
     pub current_slot: u8,
+}
+
+/// One-shot result of the startup disk scan. The lobby needs progression before
+/// gameplay exists, while player components cannot be hydrated until
+/// `OnEnter(Playing)`. Keeping the selected record here avoids reading and
+/// deserializing all three rotating slots twice during the initial load.
+#[derive(Resource, Debug, Default)]
+struct InitialSaveCache {
+    scan_complete: bool,
+    selected: Option<(u8, SaveData)>,
+}
+
+impl InitialSaveCache {
+    fn record_scan(&mut self, selected: Option<(u8, SaveData)>) {
+        self.scan_complete = true;
+        self.selected = selected;
+    }
+
+    /// `Some(None)` means startup completed a scan and found no compatible
+    /// record. The outer `None` means the one-shot result was already consumed.
+    fn take_scan(&mut self) -> Option<Option<(u8, SaveData)>> {
+        if !self.scan_complete {
+            return None;
+        }
+        self.scan_complete = false;
+        Some(self.selected.take())
+    }
 }
 
 fn slot_file_name(slot: u8) -> &'static str {
@@ -199,6 +246,7 @@ pub struct SaveParams<'w, 's> {
     pub crafting_queue: Res<'w, CraftingQueue>,
     pub heavy_water: Res<'w, HeavyWaterProgress>,
     pub heavy_bio_clock: Res<'w, HeavyBioClock>,
+    pub heavy_world_events: Res<'w, HeavyWorldEventsStore>,
     pub upgrades: Res<'w, UpgradeLedger>,
     pub part_loadout: Res<'w, PlayerPartLoadout>,
     pub weapon_ranks: Res<'w, WeaponRanks>,
@@ -219,6 +267,8 @@ struct LoadRegistriesParam<'w> {
     command_registry: ResMut<'w, CommandRegistry>,
     hacking_registry: ResMut<'w, HackingRegistry>,
     final_war_registry: ResMut<'w, FinalWarRegistry>,
+    heavy_world_events: ResMut<'w, HeavyWorldEventsStore>,
+    initial_save_cache: ResMut<'w, InitialSaveCache>,
 }
 
 // ── Save Data ─────────────────────────────────────────────────────────────────
@@ -265,6 +315,8 @@ pub struct SaveData {
     pub heavy_water: HeavyWaterProgress,
     #[serde(default)]
     pub heavy_bio_clock: HeavyBioClock,
+    #[serde(default)]
+    pub heavy_world_events: HeavyWorldEventsStore,
     #[serde(default)]
     pub tech_upgrades: UpgradeLedger,
     #[serde(default)]
@@ -568,6 +620,7 @@ impl Default for SaveData {
             crafting_queue: CraftingQueue::default(),
             heavy_water: HeavyWaterProgress::default(),
             heavy_bio_clock: HeavyBioClock::default(),
+            heavy_world_events: HeavyWorldEventsStore::default(),
             tech_upgrades: UpgradeLedger::default(),
             part_loadout_body: BodyPreset::default(),
             part_loadout_arms: ArmPreset::default(),
@@ -656,12 +709,12 @@ impl Plugin for SavePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SaveState>()
             .init_resource::<SaveRotationState>()
+            .init_resource::<InitialSaveCache>()
             .init_resource::<HeavyWaterProgress>()
             .init_resource::<HeavyBioClock>()
-            .add_systems(
-                Startup,
-                (hydrate_progress_from_disk, load_settings_on_startup),
-            )
+            .init_resource::<HeavyWorldEventsStore>()
+            .add_systems(SaveBootstrap, hydrate_progress_from_disk)
+            .add_systems(Startup, load_settings_on_startup)
             .add_systems(
                 OnEnter(AppState::Playing),
                 load_save_on_enter.in_set(PlayingSetupSet::HydrateSave),
@@ -670,6 +723,12 @@ impl Plugin for SavePlugin {
                 Update,
                 (autosave_system, manual_save_system).run_if(in_state(AppState::Playing)),
             );
+
+        // `StatesPlugin` places its first transition ahead of every built-in
+        // startup schedule. Insert our one-shot scan even earlier so an app
+        // whose initial state is Playing can consume the same cache as the
+        // ordinary MainMenu -> Playing path.
+        install_save_bootstrap_order(app);
     }
 }
 
@@ -687,6 +746,7 @@ pub struct SaveSnapshot<'a> {
     pub crafting_queue: &'a CraftingQueue,
     pub heavy_water: &'a HeavyWaterProgress,
     pub heavy_bio_clock: &'a HeavyBioClock,
+    pub heavy_world_events: &'a HeavyWorldEventsStore,
     pub upgrades: &'a UpgradeLedger,
     pub part_loadout: &'a PlayerPartLoadout,
     pub weapon_ranks: &'a WeaponRanks,
@@ -711,6 +771,7 @@ impl<'a> SaveSnapshot<'a> {
             crafting_queue: &sp.crafting_queue,
             heavy_water: &sp.heavy_water,
             heavy_bio_clock: &sp.heavy_bio_clock,
+            heavy_world_events: &sp.heavy_world_events,
             upgrades: &sp.upgrades,
             part_loadout: &sp.part_loadout,
             weapon_ranks: &sp.weapon_ranks,
@@ -777,6 +838,7 @@ fn build_save_data(snapshot: SaveSnapshot) -> SaveData {
         crafting_queue,
         heavy_water,
         heavy_bio_clock,
+        heavy_world_events,
         upgrades,
         part_loadout,
         weapon_ranks,
@@ -810,6 +872,7 @@ fn build_save_data(snapshot: SaveSnapshot) -> SaveData {
         crafting_queue: crafting_queue.clone(),
         heavy_water: heavy_water.clone(),
         heavy_bio_clock: heavy_bio_clock.clone(),
+        heavy_world_events: heavy_world_events.clone(),
         tech_upgrades: upgrades.clone(),
         part_loadout_body: part_loadout.body,
         part_loadout_arms: part_loadout.arms,
@@ -836,6 +899,7 @@ pub fn load_save() -> Option<SaveData> {
 /// save generation, along with the slot it was read from. Corrupt, unreadable,
 /// or unsupported slots are logged and skipped so any surviving slot recovers.
 fn load_newest_save_in(root: &Path) -> Option<(u8, SaveData)> {
+    let started = Instant::now();
     let mut newest: Option<(u8, SaveData)> = None;
     for slot in 0u8..3 {
         let Some(data) = read_save_slot(root, slot) else {
@@ -847,6 +911,20 @@ fn load_newest_save_in(root: &Path) -> Option<(u8, SaveData)> {
         if is_newer {
             newest = Some((slot, data));
         }
+    }
+    if let Some((slot, data)) = newest.as_ref() {
+        info!(
+            "Selected save slot {} generation {} (schema v{}) in {:.2} ms",
+            (b'A' + *slot) as char,
+            data.save_generation,
+            data.save_version,
+            started.elapsed().as_secs_f64() * 1_000.0
+        );
+    } else {
+        info!(
+            "No compatible rotating save found in {:.2} ms",
+            started.elapsed().as_secs_f64() * 1_000.0
+        );
     }
     newest
 }
@@ -886,10 +964,36 @@ fn migrate_save_data(mut data: SaveData, path: &Path) -> Option<SaveData> {
         );
         return None;
     }
-    if data.save_version < SAVE_VERSION {
+    let source_version = data.save_version;
+    if source_version < SAVE_VERSION {
         // v3 and earlier predate the generation counter; serde's defaults have
         // already assigned generation 0 and empty v5 domain/queue state.
         data.save_version = SAVE_VERSION;
+    }
+    // Schema-v4 inventories used 24 slots. Normalize the in-memory record at
+    // the migration boundary so every load consumer sees the current 100-slot
+    // guarantee, not only the eventual player-component hydration path.
+    let mut expanded_inventories = 0usize;
+    for player in &mut data.players {
+        if let Some(inventory) = &mut player.inventory {
+            let old_capacity = inventory.max_slots.max(inventory.slots.len());
+            inventory.ensure_capacity(100);
+            expanded_inventories += usize::from(old_capacity < inventory.max_slots);
+        }
+    }
+    if source_version < SAVE_VERSION {
+        info!(
+            "Migrated save {} from schema v{} to v{} (expanded {} inventor{})",
+            path.display(),
+            source_version,
+            SAVE_VERSION,
+            expanded_inventories,
+            if expanded_inventories == 1 {
+                "y"
+            } else {
+                "ies"
+            }
+        );
     }
     Some(data)
 }
@@ -1030,7 +1134,9 @@ fn hydrate_progress_from_disk(
     mut regs: LoadRegistriesParam,
     mut rotation: ResMut<SaveRotationState>,
 ) {
-    if let Some((loaded_slot, data)) = load_newest_save_in(save_root()) {
+    let loaded = load_newest_save_in(save_root());
+    regs.initial_save_cache.record_scan(loaded.clone());
+    if let Some((loaded_slot, data)) = loaded {
         // Resume rotation after the newest record so the next autosave
         // overwrites the oldest slot instead of the freshest one.
         rotation.current_slot = next_save_slot(loaded_slot);
@@ -1058,6 +1164,8 @@ fn hydrate_progress_from_disk(
         heavy_water.normalize(0);
         *heavy_bio_clock = data.heavy_bio_clock.clone();
         heavy_bio_clock.normalize();
+        *regs.heavy_world_events = data.heavy_world_events.clone();
+        regs.heavy_world_events.normalize();
         *upgrades = data.tech_upgrades.clone();
         progress.completed = data.completed_chapters;
         progress.discoverables = data.discoverables;
@@ -1133,15 +1241,28 @@ fn load_save_on_enter(
         return;
     }
 
-    if let Some(data) = load_save() {
-        *robot_pets = data.robot_pets.clone();
-        *settlement_economy = data.settlement_economy.clone();
-        *crafting_queue = data.crafting_queue.clone();
-        *heavy_water = data.heavy_water.clone();
-        heavy_water.normalize(0);
-        *heavy_bio_clock = data.heavy_bio_clock.clone();
-        heavy_bio_clock.normalize();
-        *upgrades = data.tech_upgrades.clone();
+    // Startup has already scanned the rotating slots to hydrate lobby-facing
+    // progression. Consume that exact record for the first gameplay entry so
+    // loading is consistent and does not repeat disk I/O. Later non-pause
+    // entries scan again and can observe saves written during the session.
+    let (data, global_state_already_hydrated) = match regs.initial_save_cache.take_scan() {
+        Some(selected) => (selected.map(|(_, data)| data), true),
+        None => (load_save(), false),
+    };
+
+    if let Some(data) = data {
+        if !global_state_already_hydrated {
+            *robot_pets = data.robot_pets.clone();
+            *settlement_economy = data.settlement_economy.clone();
+            *crafting_queue = data.crafting_queue.clone();
+            *heavy_water = data.heavy_water.clone();
+            heavy_water.normalize(0);
+            *heavy_bio_clock = data.heavy_bio_clock.clone();
+            heavy_bio_clock.normalize();
+            *regs.heavy_world_events = data.heavy_world_events.clone();
+            regs.heavy_world_events.normalize();
+            *upgrades = data.tech_upgrades.clone();
+        }
         let mut active_players = 0usize;
         for (
             index,
@@ -1177,36 +1298,38 @@ fn load_save_on_enter(
             }
         }
         wave.wave_number = data.wave_number;
-        progress.completed = data.completed_chapters;
-        progress.discoverables = data.discoverables;
-        progress.companions_recruited = data.companions_recruited;
-        progress.scientist_relics = data.scientist_relics;
-        progress.relic_fragments = data.relic_fragments;
-        progress.campaign_complete = data.campaign_complete;
-        perks.points_unspent = data.perk_points_unspent;
-        perks.ranks = data.perk_ranks;
-        // Character customization is hydrated at startup and may have been edited
-        // in the lobby immediately before entering gameplay. Do not overwrite it
-        // here with the previous disk save, or fresh editor changes will be lost
-        // before the next autosave/manual save.
-        weapon_ranks.ranks = data.weapon_ranks;
-        if world_site_registry.sites.is_empty() {
-            world_site_registry.sites = initial_world_sites();
+        if !global_state_already_hydrated {
+            progress.completed = data.completed_chapters;
+            progress.discoverables = data.discoverables;
+            progress.companions_recruited = data.companions_recruited;
+            progress.scientist_relics = data.scientist_relics;
+            progress.relic_fragments = data.relic_fragments;
+            progress.campaign_complete = data.campaign_complete;
+            perks.points_unspent = data.perk_points_unspent;
+            perks.ranks = data.perk_ranks;
+            // Character customization is hydrated at startup and may have been edited
+            // in the lobby immediately before entering gameplay. Do not overwrite it
+            // here with the previous disk save, or fresh editor changes will be lost
+            // before the next autosave/manual save.
+            weapon_ranks.ranks = data.weapon_ranks;
+            if world_site_registry.sites.is_empty() {
+                world_site_registry.sites = initial_world_sites();
+            }
+            world_site_registry.apply_save_records(&data.world_sites);
+            if world_route_registry.routes.is_empty() {
+                world_route_registry.routes = initial_world_routes();
+            }
+            world_route_registry.apply_save_records(&data.world_routes);
+            regs.raid_registry.apply_save_records(data.raids);
+            if regs.command_registry.assets.is_empty() {
+                regs.command_registry.assets = initial_command_assets();
+            }
+            regs.command_registry
+                .apply_save_records(&data.command_assets);
+            *regs.hacking_registry = data.hacking.clone();
+            regs.final_war_registry
+                .apply_save_record(data.final_war.clone());
         }
-        world_site_registry.apply_save_records(&data.world_sites);
-        if world_route_registry.routes.is_empty() {
-            world_route_registry.routes = initial_world_routes();
-        }
-        world_route_registry.apply_save_records(&data.world_routes);
-        regs.raid_registry.apply_save_records(data.raids);
-        if regs.command_registry.assets.is_empty() {
-            regs.command_registry.assets = initial_command_assets();
-        }
-        regs.command_registry
-            .apply_save_records(&data.command_assets);
-        *regs.hacking_registry = data.hacking.clone();
-        regs.final_war_registry
-            .apply_save_record(data.final_war.clone());
         let loaded_players = data.players.len().max(active_players);
         msg_ev.write(UiMessageEvent {
             text: format!(
@@ -1556,6 +1679,7 @@ mod tests {
             crafting_queue: &CraftingQueue::default(),
             heavy_water: &heavy_water,
             heavy_bio_clock: &HeavyBioClock::from_parts(7_000, 500_000),
+            heavy_world_events: &HeavyWorldEventsStore::default(),
             upgrades: &upgrades,
             part_loadout: &part_loadout,
             weapon_ranks: &WeaponRanks::default(),
@@ -2163,6 +2287,11 @@ mod tests {
             .unwrap()
             .remove("heavy_bio_clock")
             .expect("current schema should carry the Heavy Bio clock");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("heavy_world_events")
+            .expect("current schema should carry Heavy world-event state");
         fs::write(
             save_slot_path_in(&root, 0),
             serde_json::to_string_pretty(&value).unwrap(),
@@ -2178,9 +2307,151 @@ mod tests {
         assert!(data.crafting_queue.items.is_empty());
         assert_eq!(data.heavy_water, HeavyWaterProgress::default());
         assert_eq!(data.heavy_bio_clock, HeavyBioClock::default());
+        assert_eq!(data.heavy_world_events, HeavyWorldEventsStore::default());
         // The first post-migration write supersedes the legacy record.
         assert_eq!(next_generation_in(&root), 1);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn schema_v4_inventory_expands_to_100_without_reordering_items() {
+        let root = test_save_root("schema_v4_inventory");
+        let mut slots = vec![None; 24];
+        slots[0] = Some(crate::components::inventory::InventorySlot {
+            item_id: "health_pack".to_string(),
+            quantity: 6,
+        });
+        slots[23] = Some(crate::components::inventory::InventorySlot {
+            item_id: "plasma_cell".to_string(),
+            quantity: 40,
+        });
+        let mut player = player_save(0, 3, 20, 240, 90.0, 100.0);
+        player.inventory = Some(Inventory {
+            slots,
+            max_slots: 24,
+        });
+        write_save_data(
+            &root,
+            2,
+            &SaveData {
+                save_version: 4,
+                save_generation: 184,
+                players: vec![player],
+                ..SaveData::default()
+            },
+        )
+        .unwrap();
+
+        let (slot, migrated) = load_newest_save_in(&root).expect("v4 save should migrate");
+        assert_eq!(slot, 2);
+        assert_eq!(migrated.save_version, SAVE_VERSION);
+        let inventory = migrated.players[0]
+            .inventory
+            .as_ref()
+            .expect("persisted inventory should remain present");
+        assert_eq!(inventory.max_slots, 100);
+        assert_eq!(inventory.slots.len(), 100);
+        assert_eq!(inventory.slots[0].as_ref().unwrap().item_id, "health_pack");
+        assert_eq!(inventory.slots[0].as_ref().unwrap().quantity, 6);
+        assert_eq!(inventory.slots[23].as_ref().unwrap().item_id, "plasma_cell");
+        assert_eq!(inventory.slots[23].as_ref().unwrap().quantity, 40);
+        assert!(inventory.slots[24..].iter().all(Option::is_none));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn initial_save_cache_is_consumed_exactly_once_even_when_no_save_exists() {
+        let mut cache = InitialSaveCache::default();
+        assert!(cache.take_scan().is_none());
+
+        cache.record_scan(Some((2, save_with_generation(184))));
+        let selected = cache
+            .take_scan()
+            .expect("completed scan should be available")
+            .expect("selected save should be retained");
+        assert_eq!(selected.0, 2);
+        assert_eq!(selected.1.save_generation, 184);
+        assert!(cache.take_scan().is_none());
+
+        cache.record_scan(None);
+        assert!(matches!(cache.take_scan(), Some(None)));
+        assert!(cache.take_scan().is_none());
+    }
+
+    #[derive(Resource, Default)]
+    struct SaveBootstrapProbe {
+        scans: usize,
+        playing_entries: usize,
+        cached_entries: usize,
+    }
+
+    fn probe_save_bootstrap(
+        mut cache: ResMut<InitialSaveCache>,
+        mut probe: ResMut<SaveBootstrapProbe>,
+    ) {
+        probe.scans += 1;
+        cache.record_scan(None);
+    }
+
+    fn probe_playing_entry(
+        mut cache: ResMut<InitialSaveCache>,
+        mut probe: ResMut<SaveBootstrapProbe>,
+    ) {
+        probe.playing_entries += 1;
+        probe.cached_entries += usize::from(matches!(cache.take_scan(), Some(None)));
+    }
+
+    fn save_bootstrap_probe_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .init_resource::<InitialSaveCache>()
+            .init_resource::<SaveBootstrapProbe>()
+            .add_systems(SaveBootstrap, probe_save_bootstrap)
+            .add_systems(OnEnter(AppState::Playing), probe_playing_entry);
+        install_save_bootstrap_order(&mut app);
+        app
+    }
+
+    #[test]
+    fn direct_playing_boot_scans_once_before_on_enter_consumes_cache() {
+        let mut app = save_bootstrap_probe_app();
+        app.insert_state(AppState::Playing);
+
+        app.update();
+        app.update();
+
+        let probe = app.world().resource::<SaveBootstrapProbe>();
+        assert_eq!(probe.scans, 1);
+        assert_eq!(probe.playing_entries, 1);
+        assert_eq!(probe.cached_entries, 1);
+        assert!(!app.world().resource::<InitialSaveCache>().scan_complete);
+    }
+
+    #[test]
+    fn normal_menu_boot_keeps_one_scan_cached_until_playing_entry() {
+        let mut app = save_bootstrap_probe_app();
+
+        app.update();
+        app.update();
+        {
+            let probe = app.world().resource::<SaveBootstrapProbe>();
+            assert_eq!(probe.scans, 1);
+            assert_eq!(probe.playing_entries, 0);
+            assert_eq!(probe.cached_entries, 0);
+        }
+        assert!(app.world().resource::<InitialSaveCache>().scan_complete);
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Playing);
+        app.update();
+
+        let probe = app.world().resource::<SaveBootstrapProbe>();
+        assert_eq!(probe.scans, 1);
+        assert_eq!(probe.playing_entries, 1);
+        assert_eq!(probe.cached_entries, 1);
+        assert!(!app.world().resource::<InitialSaveCache>().scan_complete);
     }
 
     #[test]

@@ -764,6 +764,15 @@ fn update_player_inputs(
         pi.ui_confirm = (is_p1 && keyboard.just_pressed(KeyCode::Enter))
             || btn_just(GamepadButton::South)
             || native_just(NativeButton::South);
+        pi.ui_secondary = (is_p1 && keyboard.just_pressed(key_for(KeyAction::Reload)))
+            || btn_just(GamepadButton::West)
+            || native_just(NativeButton::West);
+        pi.ui_page_prev = (is_p1 && keyboard.just_pressed(KeyCode::KeyQ))
+            || btn_just(GamepadButton::LeftTrigger)
+            || native_just(NativeButton::LeftShoulder);
+        pi.ui_page_next = (is_p1 && keyboard.just_pressed(KeyCode::KeyE))
+            || btn_just(GamepadButton::RightTrigger)
+            || native_just(NativeButton::RightShoulder);
         pi.ui_cancel = (is_p1 && keyboard.just_pressed(KeyCode::Escape))
             || btn_just(GamepadButton::East)
             || native_just(NativeButton::East);
@@ -823,6 +832,9 @@ fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
         input.ui_left,
         input.ui_right,
         input.ui_confirm,
+        input.ui_secondary,
+        input.ui_page_prev,
+        input.ui_page_next,
         input.ui_cancel,
     );
     *input = PlayerInput::default();
@@ -836,6 +848,9 @@ fn suppress_gameplay_for_ui(input: &mut PlayerInput) {
         input.ui_left,
         input.ui_right,
         input.ui_confirm,
+        input.ui_secondary,
+        input.ui_page_prev,
+        input.ui_page_next,
         input.ui_cancel,
     ) = preserved;
 }
@@ -948,6 +963,9 @@ mod tests {
             ui_down: true,
             ui_right: true,
             ui_confirm: true,
+            ui_secondary: true,
+            ui_page_prev: true,
+            ui_page_next: true,
             ui_cancel: true,
             ..default()
         };
@@ -963,6 +981,9 @@ mod tests {
         assert!(input.ui_down);
         assert!(input.ui_right);
         assert!(input.ui_confirm);
+        assert!(input.ui_secondary);
+        assert!(input.ui_page_prev);
+        assert!(input.ui_page_next);
         assert!(input.ui_cancel);
     }
 
