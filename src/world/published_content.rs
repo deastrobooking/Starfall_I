@@ -1,9 +1,9 @@
 //! Game-side loader for Designer-published content (docs/PROJECT_PLAN.md P1).
 //!
-//! Reads the plain JSON the publish step baked into `assets/published/` and
-//! makes it playable: published weapons become resolvable blades and shop
-//! stock, published creatures become a spec pool for encounter systems. This
-//! is the *read* half of the pipeline and ships in **both** editions — the
+//! Resolves the generation manifest in `assets/published/`, reads its plain
+//! JSON, and makes it playable: published weapons become resolvable blades and
+//! shop stock, published creatures become a spec pool for encounter systems.
+//! This is the *read* half of the pipeline and ships in **both** editions — the
 //! consumer Game edition has no writer, only this.
 //!
 //! A fresh install with no published content is a first-class state: missing
@@ -11,7 +11,9 @@
 
 use bevy::prelude::*;
 
-use crate::engine_tools::publish::{published_dir, PublishedWeapon};
+use crate::engine_tools::publish::{
+    published_dir, published_generation_in, PublishedGenerationSnapshot, PublishedWeapon,
+};
 use crate::engine_tools::PublishedCreatureCatalog;
 use crate::resources::{ShopCatalog, ShopCategory, ShopItem};
 use crate::robots::creature::CreatureSpec;
@@ -26,8 +28,11 @@ impl Plugin for PublishedContentPlugin {
 
 /// Parse a published file, treating "missing" as empty and only warning on
 /// files that exist but do not parse (that is real corruption worth surfacing).
-fn read_published<T: serde::de::DeserializeOwned>(file: &str) -> Vec<T> {
-    let path = published_dir().join(file);
+fn read_published<T: serde::de::DeserializeOwned>(
+    snapshot: &PublishedGenerationSnapshot,
+    file: &str,
+) -> Vec<T> {
+    let path = snapshot.file(file);
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
@@ -61,7 +66,19 @@ fn load_published_content(
     mut shop: ResMut<ShopCatalog>,
     mut creature_catalog: ResMut<PublishedCreatureCatalog>,
 ) {
-    let weapons: Vec<PublishedWeapon> = read_published("weapons.json");
+    // Keep one immutable manifest resolution for the whole logical load. A
+    // publish that commits concurrently is picked up on the next load, never
+    // halfway through this weapon + creature pair.
+    let root = published_dir();
+    let snapshot = match published_generation_in(&root) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            warn!("{error}; ignoring published content");
+            return;
+        }
+    };
+
+    let weapons: Vec<PublishedWeapon> = read_published(&snapshot, "weapons.json");
     if !weapons.is_empty() {
         // Blades register into the global resolver (pure helpers consult it),
         // and each published weapon goes on sale beside the built-in catalog.
@@ -84,7 +101,7 @@ fn load_published_content(
     // workspace later rebuilds that catalog from the live project store —
     // drafts included — so the baked seed only fills an empty catalog and
     // never clobbers the authoritative one.
-    let specs: Vec<CreatureSpec> = read_published("creatures.json");
+    let specs: Vec<CreatureSpec> = read_published(&snapshot, "creatures.json");
     if !specs.is_empty() {
         let seeded = creature_catalog.seed_from_published(specs);
         if seeded > 0 {
@@ -98,6 +115,7 @@ mod tests {
     use super::*;
     use crate::combat::blades::blade_for_id;
     use crate::combat::weapon_forge::{GripStyle, WeaponSpec};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn published(name: &str, id: &str) -> PublishedWeapon {
         PublishedWeapon {
@@ -111,12 +129,88 @@ mod tests {
         }
     }
 
+    fn test_dir(label: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "starfall_published_catalog_{label}_{}_{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn a_missing_published_directory_is_a_first_class_empty_state() {
         // A fresh consumer install has no published content; that must read
         // as "no extra weapons", never as an error path.
-        let missing: Vec<PublishedWeapon> = read_published("does_not_exist.json");
+        let missing_root =
+            std::env::temp_dir().join(format!("starfall_missing_published_{}", std::process::id()));
+        let snapshot = published_generation_in(&missing_root).unwrap();
+        let missing: Vec<PublishedWeapon> = read_published(&snapshot, "does_not_exist.json");
         assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn one_catalog_load_cannot_mix_generations_when_manifest_changes_mid_read() {
+        let root = test_dir("snapshot");
+        let generations = root.join("generations");
+        let generation_a = "aaaaaaaaaaaaaaaa";
+        let generation_b = "bbbbbbbbbbbbbbbb";
+
+        for (generation, label) in [(generation_a, "a"), (generation_b, "b")] {
+            let dir = generations.join(generation);
+            std::fs::create_dir_all(&dir).unwrap();
+            let weapons = vec![published(
+                &format!("Generation {label}"),
+                &format!("starfall.weapon.{label}"),
+            )];
+            let creatures = vec![CreatureSpec {
+                content_id: format!("starfall.creature.{label}"),
+                display_name: format!("Generation {label}"),
+                ..Default::default()
+            }];
+            std::fs::write(
+                dir.join("weapons.json"),
+                serde_json::to_vec_pretty(&weapons).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("creatures.json"),
+                serde_json::to_vec_pretty(&creatures).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let manifest = |generation: &str| {
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "generation": generation,
+            }))
+            .unwrap()
+        };
+        std::fs::write(root.join("current.json"), manifest(generation_a)).unwrap();
+
+        let snapshot = published_generation_in(&root).unwrap();
+        let weapons: Vec<PublishedWeapon> = read_published(&snapshot, "weapons.json");
+        assert_eq!(weapons[0].content_id, "starfall.weapon.a");
+
+        // A concurrent publish becomes visible between the two logical reads.
+        std::fs::write(root.join("current.json"), manifest(generation_b)).unwrap();
+        let creatures: Vec<CreatureSpec> = read_published(&snapshot, "creatures.json");
+
+        assert_eq!(creatures[0].content_id, "starfall.creature.a");
+        assert_eq!(
+            published_generation_in(&root)
+                .unwrap()
+                .file("creatures.json"),
+            generations.join(generation_b).join("creatures.json"),
+            "a later catalog load observes the new commit"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

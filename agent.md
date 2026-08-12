@@ -4,7 +4,8 @@ This file is the concise handoff for future Codex/agent work on Starfall I.
 Read `docs/archive/current_state.md` first for the reconciled baseline and production
 order. For detailed next steps, use `docs/archive/agent_next_steps.md`. For the
 detailed engine upgrade and milestone process, use
-`docs/archive/engine_upgrade_milestones.md`.
+`docs/archive/engine_upgrade_milestones.md`. The active Forge architecture plan
+is `docs/editor_roadmap.md`.
 
 ## Project North Star
 
@@ -49,6 +50,14 @@ together.
   controller-driven undoable edits and green viewport targets. Structured
   validation highlighting and published-layer promotion remain; ET4 production
   workspace integration also remains.
+- Forge M0 correctness hardening now centralizes controller focus in one stable
+  action registry, validates and hashes the complete level set, detects stale
+  project sessions under an OS-backed writer lock, preserves duplicate names/modifier stacks,
+  drops invalid history entries, caches unchanged disk diagnostics, assigns
+  unique new-project identities, and atomically selects immutable published
+  generations through one `current.json` snapshot. This is a contract pass, not the final
+  editor architecture: `docs/editor_roadmap.md` owns the M1–M5 extraction,
+  document/command, asset/cook, Edit/Simulate/PIE, and extensibility sequence.
 - Gameplay communication uses Bevy messages: `Message`, `MessageReader`,
   `MessageWriter`, and `App::add_message`.
 - Local Bevy render bundle compatibility helpers live in `src/engine/rendering.rs`.
@@ -232,8 +241,10 @@ together.
   companion/chest/aim/fixed-loop claims were stale. Per-player inventory and
   active loadout persistence plus the Star Loadout button GUI are now delivered;
   four-pad acceptance, broader vehicle bodies, and missile obstacle casts remain.
-- Current gates for Rust/engine work are `cargo fmt --check`, `cargo check`,
-  `cargo clippy --all-targets -- -D warnings`, and `cargo test`.
+- Current gates for Rust/engine work are `cargo fmt --all -- --check`, locked
+  all-target check, strict Clippy, and tests for both the default Designer and
+  `--no-default-features` Game editions. See `docs/guides/verification.md` for
+  the exact commands mirrored by CI.
 - The July 2026 audit is `docs/archive/game_review_2026-07.md`. Shared menu navigation
   now includes spatial D-pad/stick focus, repeat, Confirm, Back, and disabled
   skipping/styles. Speed roads include checkpoints, recovery, and guided
@@ -317,14 +328,17 @@ together.
    construction/Startup/steady-frame plugin smoke tests.
 2. Maintain the save-compatible `PlayerBaseStats`/derived-cap contract; new
    permanent health or armor-cap rewards must update bases, not effective caches.
-3. Continue small, behavior-preserving world/UI/Forge hotspot extractions.
+3. Execute Forge M1 from `docs/editor_roadmap.md`: establish the library and
+   neutral schema/runtime seams, then split editor ownership without behavior
+   changes.
 4. Complete recorded four-controller hardware acceptance for ownership,
    controller-only menus, aiming, shops, editor launch, and save/reload.
 5. Measure large-world simulation and one-to-four-camera costs before expanding
    density or streaming.
 6. Tune the playable MVP: camera/animation feel, road traversal, weapons, shop,
    loot attraction, and mountain collision.
-7. Finish the remaining PM1–PM3 project/preset/level workflow gaps.
+7. Continue behavior-preserving world/UI hotspot extraction and finish the
+   remaining PM1–PM3 project/preset/level workflow gaps behind the new seams.
 
 ## Definition Of Done
 

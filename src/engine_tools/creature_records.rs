@@ -11,8 +11,8 @@
 use std::path::Path;
 
 use super::persistence::{
-    ContentCategory, ContentPayload, ContentRecord, GenericRecipeDraft, ProjectStore,
-    CURRENT_PROJECT_SCHEMA,
+    ContentCategory, ContentPayload, ContentRecord, GenericRecipeDraft, ProjectLoadSource,
+    ProjectStore, CURRENT_PROJECT_SCHEMA,
 };
 use super::project_registry::ForgeProjectRegistry;
 use crate::robots::creature::{CreatureSpec, ValidationSeverity};
@@ -112,15 +112,36 @@ pub fn next_free_content_id(project: &ForgeProject) -> String {
 
 fn open_active_store(
     registry: &ForgeProjectRegistry,
-) -> Result<(ProjectStore, ForgeProject), String> {
+) -> Result<
+    (
+        ProjectStore,
+        ForgeProject,
+        ProjectLoadSource,
+        Option<String>,
+    ),
+    String,
+> {
     let Some(active) = registry.active.as_deref() else {
         return Err("No active project — open one in the Project Hub first".to_string());
     };
     let store = ProjectStore::new(active, RECOVERY_LIMIT);
-    let (project, _) = store
-        .load_with_recovery()
+    let (project, source, revision) = store
+        .load_with_recovery_and_revision()
         .map_err(|e| format!("Could not load active project: {e}"))?;
-    Ok((store, project))
+    Ok((store, project, source, revision))
+}
+
+fn writable_revision(
+    source: ProjectLoadSource,
+    revision: Option<String>,
+) -> Result<String, String> {
+    if matches!(source, ProjectLoadSource::Recovery(_)) {
+        return Err(
+            "Active project opened from recovery; promote it explicitly in the level editor before saving"
+                .to_string(),
+        );
+    }
+    revision.ok_or_else(|| "Active primary project has no writable revision".to_string())
 }
 
 /// Save `spec` into the active project through the full store contract.
@@ -134,13 +155,14 @@ pub fn save_to_active_project(
     if !issues.is_empty() {
         return Err(format!("Fix before saving: {}", issues.join(" • ")));
     }
-    let (store, mut project) = open_active_store(registry)?;
+    let (store, mut project, source, revision) = open_active_store(registry)?;
+    let revision = writable_revision(source, revision)?;
     if spec.content_id == DEFAULT_CONTENT_ID {
         spec.content_id = next_free_content_id(&project);
     }
     upsert_creature(&mut project, spec)?;
     store
-        .save(&mut project)
+        .compare_and_save(&mut project, &revision)
         .map_err(|e| format!("Project save failed: {e}"))?;
     Ok(spec.content_id.clone())
 }
@@ -148,7 +170,7 @@ pub fn save_to_active_project(
 /// List the active project's creature records.
 pub fn list_active_project(registry: &ForgeProjectRegistry) -> Vec<(String, String)> {
     open_active_store(registry)
-        .map(|(_, project)| creature_entries(&project))
+        .map(|(_, project, _, _)| creature_entries(&project))
         .unwrap_or_default()
 }
 
@@ -157,7 +179,7 @@ pub fn load_from_active_project(
     registry: &ForgeProjectRegistry,
     content_id: &str,
 ) -> Result<CreatureSpec, String> {
-    let (_, project) = open_active_store(registry)?;
+    let (_, project, _, _) = open_active_store(registry)?;
     load_creature(&project, content_id)
 }
 
@@ -240,6 +262,43 @@ mod tests {
             .expect_err("invalid content id must be refused");
         assert!(error.contains("Fix before saving"));
         assert!(list_active_project(&registry).is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recovery_records_remain_readable_but_cannot_be_silently_saved() {
+        let (root, registry) = test_registry("recovery_read_only");
+        let mut spec = CreatureSpec {
+            display_name: "Recovery Wyvern".into(),
+            seed: 91,
+            ..Default::default()
+        };
+        let content_id = save_to_active_project(&registry, &mut spec).unwrap();
+        // A second generation puts the first creature-bearing project into
+        // recovery slot 1 before we damage the primary.
+        spec.seed = 92;
+        save_to_active_project(&registry, &mut spec).unwrap();
+        let project_path = registry.active.as_ref().unwrap();
+        std::fs::write(project_path, b"{ damaged primary").unwrap();
+
+        assert!(list_active_project(&registry)
+            .iter()
+            .any(|(id, name)| id == &content_id && name == "Recovery Wyvern"));
+        assert_eq!(
+            load_from_active_project(&registry, &content_id)
+                .expect("recovery content should remain readable")
+                .seed,
+            91
+        );
+        spec.seed = 93;
+        let error = save_to_active_project(&registry, &mut spec)
+            .expect_err("specialized Forge must not silently promote recovery");
+        assert!(error.contains("promote it explicitly"));
+        assert_eq!(
+            std::fs::read(project_path).unwrap(),
+            b"{ damaged primary",
+            "read-only recovery use must leave the damaged primary untouched"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

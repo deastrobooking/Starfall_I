@@ -31,17 +31,21 @@ baseline is Bevy `0.19.0` with Avian `0.7`.
 Run these before pushing Rust or engine work:
 
 ```sh
-cargo fmt --check
-cargo check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo fmt --all -- --check
+cargo check --all-targets --locked
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+cargo check --all-targets --locked --no-default-features
+cargo clippy --all-targets --locked --no-default-features -- -D warnings
+cargo test --locked --no-default-features
 ```
 
-The active `.github/workflows/rust.yml` workflow mirrors these commands on
-`macos-latest` for pushes to `main` and all pull requests, without the `dynamic`
-feature. The workflow has read-only repository permissions, cancels superseded
-runs on the same ref, and caches Cargo artifacts. The `dynamic` feature is for
-local incremental development only.
+The active `.github/workflows/rust.yml` workflow runs formatting once and then
+mirrors the check, strict-Clippy, and test commands in separate Designer and
+Game matrix jobs on `macos-latest` for pushes to `main` and all pull requests,
+without the `dynamic` feature. The workflow has read-only repository
+permissions, cancels superseded runs on the same ref, and caches Cargo
+artifacts. The `dynamic` feature is for local incremental development only.
 
 The July 16, 2026 hardening audit found that this workflow had been fully
 commented out even though the docs described it as active. The workflow was

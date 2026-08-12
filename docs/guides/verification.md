@@ -4,13 +4,20 @@
 
 ```sh
 cargo fmt --all -- --check
-cargo check
-cargo clippy --all-targets -- -D warnings
-cargo test                     # full suite (bin crate — there is no lib target)
-cargo build
+cargo check --all-targets --locked
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked                     # Designer edition
+cargo check --all-targets --locked --no-default-features
+cargo clippy --all-targets --locked --no-default-features -- -D warnings
+cargo test --locked --no-default-features  # Game edition
+cargo build --locked
 STARFALL_AUTOSTART=1 ./target/debug/starfall-i
                                # observe ~15s in Playing, then quit; zero panics
 ```
+
+GitHub Actions runs formatting once, then applies the all-target check, strict
+Clippy, and test gates independently to the Designer and Game editions on
+macOS. Local verification should keep the same locked dependency graph.
 
 For app/plugin registration changes, the fast headless guard is:
 

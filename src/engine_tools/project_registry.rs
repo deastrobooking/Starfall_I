@@ -109,24 +109,53 @@ impl ForgeProjectRegistry {
     /// saves.
     pub fn create_new_project_in(&mut self, root: &Path) -> Result<ProjectEntry, String> {
         let number = self.projects.len() + 1;
-        let (name, path) = (0..)
-            .map(|offset| {
+        let projects_root = root.join("projects");
+        std::fs::create_dir_all(&projects_root)
+            .map_err(|error| format!("Could not create projects directory: {error}"))?;
+        let (name, project_dir, path) = (0..)
+            .find_map(|offset| {
                 let n = number + offset;
-                (
-                    format!("Starfall Project {n}"),
-                    root.join("projects")
-                        .join(format!("starfall-project-{n}"))
-                        .join("project.json"),
-                )
+                let project_dir = projects_root.join(format!("starfall-project-{n}"));
+                let path = project_dir.join("project.json");
+                if self.projects.iter().any(|project| project.path == path) {
+                    return None;
+                }
+                match std::fs::create_dir(&project_dir) {
+                    Ok(()) => Some(Ok((format!("Starfall Project {n}"), project_dir, path))),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => None,
+                    Err(error) => Some(Err(format!(
+                        "Could not reserve project directory {}: {error}",
+                        project_dir.display()
+                    ))),
+                }
             })
-            .find(|(_, candidate)| !self.projects.iter().any(|p| &p.path == candidate))
-            .expect("unbounded numbering always finds a free project slot");
+            .expect("unbounded numbering always finds a free project slot")?;
 
         let store = ProjectStore::new(&path, PROJECT_RECOVERY_LIMIT);
         let mut project = ForgeProject::default();
-        store
-            .save(&mut project)
-            .map_err(|e| format!("Could not create project file: {e:?}"))?;
+        // A project's serialized identity must not inherit the factory
+        // document's shared `starfall-main-world` id. The directory number is
+        // already selected uniquely against the registry, so use the same
+        // durable slug for both the project id and its initial display name.
+        let project_slug = path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|value| value.to_str())
+            .unwrap_or("starfall-project")
+            .to_owned();
+        project.project_id = project_slug;
+        project.display_name = name.clone();
+        if let Err(error) = store.save(&mut project) {
+            // This call atomically created `project_dir`, so it is safe to
+            // release only that reservation if the initial save fails.
+            if let Err(cleanup_error) = std::fs::remove_dir_all(&project_dir) {
+                return Err(format!(
+                    "Could not create project file: {error:?}; could not release reserved directory {}: {cleanup_error}",
+                    project_dir.display()
+                ));
+            }
+            return Err(format!("Could not create project file: {error:?}"));
+        }
 
         let entry = ProjectEntry { name, path };
         self.projects.push(entry.clone());
@@ -220,13 +249,74 @@ mod tests {
         assert_eq!(registry.active.as_deref(), Some(entry.path.as_path()));
 
         let store = ProjectStore::new(&entry.path, PROJECT_RECOVERY_LIMIT);
-        store.load().expect("new project file should load");
+        let first_project = store.load().expect("new project file should load");
+        assert_eq!(first_project.project_id, "starfall-project-1");
+        assert_eq!(first_project.display_name, entry.name);
 
         let second = registry
             .create_new_project_in(&root)
             .expect("second project creation should succeed");
         assert_eq!(second.name, "Starfall Project 2");
         assert_ne!(second.path, entry.path);
+        let second_project = ProjectStore::new(&second.path, PROJECT_RECOVERY_LIMIT)
+            .load()
+            .expect("second project file should load");
+        assert_eq!(second_project.project_id, "starfall-project-2");
+        assert_ne!(second_project.project_id, first_project.project_id);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_new_project_never_overwrites_an_unregistered_project_file() {
+        let root = test_root("create_preserves_unregistered");
+        let occupied = root
+            .join("projects")
+            .join("starfall-project-1")
+            .join("project.json");
+        std::fs::create_dir_all(occupied.parent().expect("occupied project has a parent"))
+            .expect("occupied project directory should be creatable");
+        std::fs::write(&occupied, b"preserve this project").expect("fixture should be writable");
+
+        let mut registry = ForgeProjectRegistry {
+            projects: Vec::new(),
+            active: None,
+        };
+        let entry = registry
+            .create_new_project_in(&root)
+            .expect("project creation should skip occupied paths");
+
+        assert_eq!(entry.name, "Starfall Project 2");
+        assert_eq!(
+            std::fs::read(&occupied).expect("occupied project remains readable"),
+            b"preserve this project"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_new_project_skips_an_occupied_source_only_directory() {
+        let root = test_root("create_preserves_source_only");
+        let occupied_dir = root.join("projects").join("starfall-project-1");
+        let source = occupied_dir.join("characters").join("hero.json");
+        std::fs::create_dir_all(source.parent().expect("source fixture has a parent"))
+            .expect("source-only project directory should be creatable");
+        std::fs::write(&source, b"preserve source-only project")
+            .expect("source-only fixture should be writable");
+
+        let mut registry = ForgeProjectRegistry {
+            projects: Vec::new(),
+            active: None,
+        };
+        let entry = registry
+            .create_new_project_in(&root)
+            .expect("project creation should skip an occupied directory");
+
+        assert_eq!(entry.name, "Starfall Project 2");
+        assert_eq!(
+            std::fs::read(&source).expect("source-only project remains readable"),
+            b"preserve source-only project"
+        );
+        assert!(!occupied_dir.join("project.json").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

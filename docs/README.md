@@ -9,6 +9,7 @@ guide or a preserved historical record.
 | **[FEATURES.md](FEATURES.md)** | …to know **what the game does**. The master feature reference: every system, from movement and combat to settlements, raids, creation tools, and audio. |
 | **[DEVELOPMENT.md](DEVELOPMENT.md)** | …to **work on the code**. Build and run, repository layout, architectural rules, the simulation frame, data-driven combat, verification, conventions. |
 | **[engine_roadmap.md](engine_roadmap.md)** | …to see **where the engine is going**. The EC# track: phases, acceptance criteria, and what has landed. |
+| **[editor_roadmap.md](editor_roadmap.md)** | …the **Forge editor upgrade plan**: target dependency boundaries, delivered M0 hardening, and the M1–M5 path toward isolated Edit/Simulate/PIE and extensible tools. |
 | **[naming.md](naming.md)** | …the canonical cast, place, and terminology list for player-facing text. |
 | **[HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md)** | …the evidence-backed **Heavy Water parity ledger**: what Starfall supersedes, what this continuation ports, and what remains staged. |
 | **[guides/](guides/README.md)** | …a focused how-to: fixed-tick motor, combat feel, spatial LOD, Character Studio pipeline, verification procedure. |

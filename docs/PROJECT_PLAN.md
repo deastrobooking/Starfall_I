@@ -87,9 +87,9 @@ scenes…). Consumers must never depend on a project store existing.
 1. **Author** (Designer): tools write draft records through the versioned
    store — atomic writes, recovery snapshots, draft hashes.
 2. **Publish** (Designer): a publish step validates every record and
-   bakes the published set into `assets/published/` as plain JSON the game
-   loads read-only — the same pattern `moves.json` / `tricks.json` already
-   prove out.
+   bakes the published set into an immutable generation under
+   `assets/published/`; an atomically promoted `current.json` selects the
+   complete read-only generation.
 3. **Ship** (Game): the consumer build loads baked assets only; it has no
    writer for project stores. Player saves (v4) stay completely separate from
    authored content.
@@ -105,7 +105,10 @@ and boot; verification gains a consumer-build check.
 - **PUBLISH TO GAME** in the Project Hub runs the store's validate-and-promote
   gate, persists published hashes, and bakes weapons + creatures to
   `assets/published/` as deterministic JSON (sorted, so re-publishing without
-  edits is byte-identical). Results land in the hub status line.
+  edits is byte-identical). The live editor uses the same publisher. A project
+  writer lock spans hash save, generation-manifest promotion, and rollback;
+  consumers resolve that manifest once per catalog load. Results land in the
+  active tool's status line.
 - Game-side loader (`world::published_content`, both editions): published
   weapons register into the blade resolver and go on sale in the shop priced
   by the forge's own derivation; published creatures load into a
@@ -150,7 +153,10 @@ and boot; verification gains a consumer-build check.
   baked assets; the Designer edition ships as the default build.
 - Version/branding split (window title, main-menu badge) driven by the same
   feature flag.
-- CI matrix: default and `--no-default-features`, suite + clippy on both.
+- ~~CI matrix: default and `--no-default-features`, suite + clippy on both~~
+  *(landed: one format gate plus independent Designer/Game all-target check,
+  strict Clippy, and test jobs; the first hosted run remains the remote
+  acceptance gate)*.
 
 ## 5. Walk-away criteria
 

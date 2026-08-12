@@ -12,8 +12,8 @@
 #![cfg_attr(not(feature = "designer"), allow(dead_code))]
 
 use super::persistence::{
-    ContentCategory, ContentPayload, ContentRecord, ForgeProject, GenericRecipeDraft, ProjectStore,
-    CURRENT_PROJECT_SCHEMA,
+    ContentCategory, ContentPayload, ContentRecord, ForgeProject, GenericRecipeDraft,
+    ProjectLoadSource, ProjectStore, CURRENT_PROJECT_SCHEMA,
 };
 use super::project_registry::ForgeProjectRegistry;
 use crate::combat::weapon_forge::WeaponSpec;
@@ -26,15 +26,36 @@ const RECOVERY_LIMIT: usize = 3;
 /// into the store themselves.
 fn open_active_store(
     registry: &ForgeProjectRegistry,
-) -> Result<(ProjectStore, ForgeProject), String> {
+) -> Result<
+    (
+        ProjectStore,
+        ForgeProject,
+        ProjectLoadSource,
+        Option<String>,
+    ),
+    String,
+> {
     let Some(active) = registry.active.as_deref() else {
         return Err("No active project — open one in the Project Hub first".to_string());
     };
     let store = ProjectStore::new(active, RECOVERY_LIMIT);
-    let (project, _) = store
-        .load_with_recovery()
+    let (project, source, revision) = store
+        .load_with_recovery_and_revision()
         .map_err(|e| format!("Could not load active project: {e}"))?;
-    Ok((store, project))
+    Ok((store, project, source, revision))
+}
+
+fn writable_revision(
+    source: ProjectLoadSource,
+    revision: Option<String>,
+) -> Result<String, String> {
+    if matches!(source, ProjectLoadSource::Recovery(_)) {
+        return Err(
+            "Active project opened from recovery; promote it explicitly in the level editor before saving"
+                .to_string(),
+        );
+    }
+    revision.ok_or_else(|| "Active primary project has no writable revision".to_string())
 }
 
 /// Save `spec` into the active project through the full store contract,
@@ -47,10 +68,11 @@ pub fn save_to_active_project(
     if !issues.is_empty() {
         return Err(format!("Fix before saving: {}", issues.join(" • ")));
     }
-    let (store, mut project) = open_active_store(registry)?;
+    let (store, mut project, source, revision) = open_active_store(registry)?;
+    let revision = writable_revision(source, revision)?;
     let id = upsert_weapon(&mut project, spec)?;
     store
-        .save(&mut project)
+        .compare_and_save(&mut project, &revision)
         .map_err(|e| format!("Project save failed: {e}"))?;
     Ok(id)
 }
@@ -58,7 +80,7 @@ pub fn save_to_active_project(
 /// List the active project's weapon records.
 pub fn list_active_project(registry: &ForgeProjectRegistry) -> Vec<(String, String)> {
     open_active_store(registry)
-        .map(|(_, project)| weapon_entries(&project))
+        .map(|(_, project, _, _)| weapon_entries(&project))
         .unwrap_or_default()
 }
 
@@ -68,11 +90,12 @@ pub fn delete_from_active_project(
     registry: &ForgeProjectRegistry,
     content_id: &str,
 ) -> Result<bool, String> {
-    let (store, mut project) = open_active_store(registry)?;
+    let (store, mut project, source, revision) = open_active_store(registry)?;
     let removed = delete_weapon(&mut project, content_id);
     if removed {
+        let revision = writable_revision(source, revision)?;
         store
-            .save(&mut project)
+            .compare_and_save(&mut project, &revision)
             .map_err(|e| format!("Project save failed: {e}"))?;
     }
     Ok(removed)
@@ -83,7 +106,7 @@ pub fn load_from_active_project(
     registry: &ForgeProjectRegistry,
     content_id: &str,
 ) -> Result<WeaponSpec, String> {
-    let (_, project) = open_active_store(registry)?;
+    let (_, project, _, _) = open_active_store(registry)?;
     load_weapon(&project, content_id)
 }
 

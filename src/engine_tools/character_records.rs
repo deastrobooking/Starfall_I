@@ -4,7 +4,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::persistence::{ContentCategory, ContentPayload, GenericRecipeDraft, ProjectStore};
+use super::persistence::{
+    ContentCategory, ContentPayload, GenericRecipeDraft, ProjectLoadSource, ProjectStore,
+};
 use super::project_registry::ForgeProjectRegistry;
 use crate::character::mesh_modifiers::MeshModifier;
 
@@ -386,16 +388,37 @@ impl ImportedCharacterSpec {
 
 fn open_active(
     registry: &ForgeProjectRegistry,
-) -> Result<(ProjectStore, super::persistence::ForgeProject), String> {
+) -> Result<
+    (
+        ProjectStore,
+        super::persistence::ForgeProject,
+        ProjectLoadSource,
+        Option<String>,
+    ),
+    String,
+> {
     let active = registry
         .active
         .as_deref()
         .ok_or_else(|| "Open a Forge project before saving".to_string())?;
     let store = ProjectStore::new(active, RECOVERY_LIMIT);
-    let (project, _) = store
-        .load_with_recovery()
+    let (project, source, revision) = store
+        .load_with_recovery_and_revision()
         .map_err(|error| format!("Could not load active project: {error}"))?;
-    Ok((store, project))
+    Ok((store, project, source, revision))
+}
+
+fn writable_revision(
+    source: ProjectLoadSource,
+    revision: Option<String>,
+) -> Result<String, String> {
+    if matches!(source, ProjectLoadSource::Recovery(_)) {
+        return Err(
+            "Active project opened from recovery; promote it explicitly in the level editor before saving"
+                .to_string(),
+        );
+    }
+    revision.ok_or_else(|| "Active primary project has no writable revision".to_string())
 }
 
 pub fn save_to_active_project(
@@ -404,7 +427,8 @@ pub fn save_to_active_project(
 ) -> Result<String, String> {
     spec.schema_version = CURRENT_IMPORTED_CHARACTER_SCHEMA;
     spec.validate()?;
-    let (store, mut project) = open_active(registry)?;
+    let (store, mut project, source, revision) = open_active(registry)?;
+    let revision = writable_revision(source, revision)?;
     let existing = project
         .records
         .iter()
@@ -437,14 +461,14 @@ pub fn save_to_active_project(
         .payloads
         .insert(spec.content_id.clone(), ContentPayload::Character(recipe));
     store
-        .save(&mut project)
+        .compare_and_save(&mut project, &revision)
         .map_err(|error| format!("Project save failed: {error}"))?;
     Ok(spec.content_id.clone())
 }
 
 pub fn list_active_project(registry: &ForgeProjectRegistry) -> Vec<(String, String)> {
     open_active(registry)
-        .map(|(_, project)| {
+        .map(|(_, project, _, _)| {
             project
                 .records
                 .iter()
@@ -474,7 +498,8 @@ pub fn save_part_to_active_project(
     if assignment.face_indices.is_empty() {
         return Err("Select at least one face before saving a part".into());
     }
-    let (store, mut project) = open_active(registry)?;
+    let (store, mut project, source, revision) = open_active(registry)?;
+    let revision = writable_revision(source, revision)?;
     let content_id = project
         .create_content(ContentCategory::Character, &assignment.display_name)
         .map_err(|error| error.to_string())?;
@@ -504,14 +529,14 @@ pub fn save_part_to_active_project(
         .payloads
         .insert(content_id.clone(), ContentPayload::Character(recipe));
     store
-        .save(&mut project)
+        .compare_and_save(&mut project, &revision)
         .map_err(|error| format!("Project save failed: {error}"))?;
     Ok(content_id)
 }
 
 pub fn list_part_library(registry: &ForgeProjectRegistry) -> Vec<(String, String)> {
     open_active(registry)
-        .map(|(_, project)| {
+        .map(|(_, project, _, _)| {
             project
                 .records
                 .iter()
@@ -535,7 +560,7 @@ pub fn load_part_from_active_project(
     registry: &ForgeProjectRegistry,
     content_id: &str,
 ) -> Result<ImportedPartAsset, String> {
-    let (_, project) = open_active(registry)?;
+    let (_, project, _, _) = open_active(registry)?;
     let Some(ContentPayload::Character(recipe)) = project.payloads.get(content_id) else {
         return Err(format!("{content_id} has no character payload"));
     };
@@ -550,7 +575,7 @@ pub fn load_from_active_project(
     registry: &ForgeProjectRegistry,
     content_id: &str,
 ) -> Result<ImportedCharacterSpec, String> {
-    let (_, project) = open_active(registry)?;
+    let (_, project, _, _) = open_active(registry)?;
     let Some(ContentPayload::Character(recipe)) = project.payloads.get(content_id) else {
         return Err(format!("{content_id} has no character payload"));
     };

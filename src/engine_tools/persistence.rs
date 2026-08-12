@@ -110,6 +110,35 @@ impl ForgeProject {
             .find(|level| level.level_id == self.active_level_id)
     }
 
+    /// Visit each authored scene exactly once. The live workspace is the
+    /// source of truth for the active level until it is stashed on save or a
+    /// level switch; inactive level documents remain authoritative for their
+    /// own scenes. Legacy projects without level documents expose the
+    /// workspace as their sole scene.
+    fn visit_authored_scenes(&self, mut visit: impl FnMut(&str, &EditorSceneDraft)) {
+        if self.levels.is_empty() {
+            visit("workspace", &self.scene);
+            return;
+        }
+
+        let mut visited_live_workspace = false;
+        for level in &self.levels {
+            if !visited_live_workspace && level.level_id == self.active_level_id {
+                visit(&level.level_id, &self.scene);
+                visited_live_workspace = true;
+            } else {
+                visit(&level.level_id, &level.scene);
+            }
+        }
+
+        // Invalid active ids are normally repaired by normalize_levels. Keep
+        // direct validation calls honest rather than silently ignoring edits
+        // in a malformed project's live workspace.
+        if !visited_live_workspace {
+            visit("workspace", &self.scene);
+        }
+    }
+
     /// Copy the working scene back into the active level document.
     pub fn stash_active_level(&mut self) {
         let scene = self.scene.clone();
@@ -231,8 +260,11 @@ impl ForgeProject {
                 );
             }
         }
+        let authored_scene_hash = project_scene_hash(self)?;
         for record in &mut self.records {
-            if let Some(payload) = self.payloads.get(&record.content_id) {
+            if record.category == ContentCategory::Scene {
+                record.draft_hash = authored_scene_hash.clone();
+            } else if let Some(payload) = self.payloads.get(&record.content_id) {
                 record.draft_hash = payload_hash(payload)?;
             }
         }
@@ -277,6 +309,13 @@ impl ForgeProject {
                 object.material_id = Some(new_id.into());
             }
         }
+        for level in &mut self.levels {
+            for object in &mut level.scene.objects {
+                if object.material_id.as_deref() == Some(old_id) {
+                    object.material_id = Some(new_id.into());
+                }
+            }
+        }
         for payload in self.payloads.values_mut() {
             let Some(recipe) = payload.procedural_recipe_mut() else {
                 continue;
@@ -313,12 +352,15 @@ impl ForgeProject {
             .filter(|record| record.category == ContentCategory::Material)
             .map(|record| record.content_id.clone())
             .collect::<BTreeSet<_>>();
-        let scene_materials = self
-            .scene
-            .objects
-            .iter()
-            .filter_map(|object| object.material_id.clone())
-            .collect::<BTreeSet<_>>();
+        let mut scene_materials = BTreeSet::new();
+        self.visit_authored_scenes(|_, scene| {
+            scene_materials.extend(
+                scene
+                    .objects
+                    .iter()
+                    .filter_map(|object| object.material_id.clone()),
+            );
+        });
         let authored = self
             .records
             .iter()
@@ -467,6 +509,22 @@ impl ForgeProject {
             return Err(ProjectMutationError::ContentHasDependents {
                 content_id: content_id.into(),
                 owner: "scene object material binding".into(),
+            });
+        }
+        let mut skipped_live_level = false;
+        if let Some((level_id, editor_id)) = self.levels.iter().find_map(|level| {
+            if !skipped_live_level && level.level_id == self.active_level_id {
+                skipped_live_level = true;
+                return None;
+            }
+            level.scene.objects.iter().find_map(|object| {
+                (object.material_id.as_deref() == Some(content_id))
+                    .then(|| (level.level_id.clone(), object.editor_id))
+            })
+        }) {
+            return Err(ProjectMutationError::ContentHasDependents {
+                content_id: content_id.into(),
+                owner: format!("level {level_id} editor object {editor_id} material binding"),
             });
         }
         if let Some((owner, slot)) = self.payloads.iter().find_map(|(owner, payload)| {
@@ -1276,6 +1334,14 @@ pub enum ProjectIoError {
     Serialization(String),
     Validation(Vec<ProjectValidationError>),
     SourceConsistency(String),
+    RevisionConflict {
+        expected: String,
+        actual: Option<String>,
+    },
+    RollbackFailed {
+        commit: String,
+        rollback: String,
+    },
     NoValidProject,
 }
 
@@ -1288,6 +1354,15 @@ impl std::fmt::Display for ProjectIoError {
             Self::SourceConsistency(message) => {
                 write!(formatter, "content source consistency error: {message}")
             }
+            Self::RevisionConflict { expected, actual } => write!(
+                formatter,
+                "project revision conflict: expected {expected}, found {}",
+                actual.as_deref().unwrap_or("no primary project")
+            ),
+            Self::RollbackFailed { commit, rollback } => write!(
+                formatter,
+                "post-save commit failed ({commit}) and project rollback also failed ({rollback})"
+            ),
             Self::NoValidProject => write!(formatter, "no valid project or recovery snapshot"),
         }
     }
@@ -1380,36 +1455,6 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
         }
     }
 
-    let mut editor_ids = BTreeSet::new();
-    for object in &project.scene.objects {
-        if object.editor_id == 0 {
-            errors.push(ProjectValidationError::InvalidEditorId(object.editor_id));
-        } else if !editor_ids.insert(object.editor_id) {
-            errors.push(ProjectValidationError::DuplicateEditorId(object.editor_id));
-        }
-        validate_transform(
-            &object.transform,
-            format!("editor object {}", object.editor_id),
-            &mut errors,
-        );
-        if let Some(material_id) = &object.material_id {
-            let valid = project
-                .records
-                .iter()
-                .find(|record| record.content_id == *material_id)
-                .is_some_and(|record| record.category == ContentCategory::Material)
-                && matches!(
-                    project.payloads.get(material_id),
-                    Some(ContentPayload::Material(_))
-                );
-            if !valid {
-                errors.push(ProjectValidationError::InvalidMaterialBinding(format!(
-                    "editor object {} references missing/non-material {}",
-                    object.editor_id, material_id
-                )));
-            }
-        }
-    }
     let mut level_ids = BTreeSet::new();
     for level in &project.levels {
         if level.level_id.trim().is_empty() {
@@ -1422,9 +1467,71 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
             ));
         }
     }
+    if !project.levels.is_empty() {
+        if !level_ids.contains(&project.active_level_id) {
+            errors.push(ProjectValidationError::InvalidLevelId(format!(
+                "active level {}",
+                project.active_level_id
+            )));
+        }
+        if !level_ids.contains(&project.startup_level_id) {
+            errors.push(ProjectValidationError::InvalidLevelId(format!(
+                "startup level {}",
+                project.startup_level_id
+            )));
+        }
+    }
+
+    // Editor entity ids are project-wide identities, so the set deliberately
+    // spans every level. Adapter keys are only required to be unique within a
+    // level because separate levels may override the same runtime adapter.
+    let mut editor_ids = BTreeSet::new();
+    project.visit_authored_scenes(|level_id, scene| {
+        validate_scene(project, level_id, scene, &mut editor_ids, &mut errors);
+    });
+    errors
+}
+
+fn validate_scene(
+    project: &ForgeProject,
+    level_id: &str,
+    scene: &EditorSceneDraft,
+    editor_ids: &mut BTreeSet<u64>,
+    errors: &mut Vec<ProjectValidationError>,
+) {
+    let owner_prefix = (level_id != "workspace").then(|| format!("level {level_id} "));
+    for object in &scene.objects {
+        if object.editor_id == 0 {
+            errors.push(ProjectValidationError::InvalidEditorId(object.editor_id));
+        } else if !editor_ids.insert(object.editor_id) {
+            errors.push(ProjectValidationError::DuplicateEditorId(object.editor_id));
+        }
+        let owner = format!(
+            "{}editor object {}",
+            owner_prefix.as_deref().unwrap_or_default(),
+            object.editor_id
+        );
+        validate_transform(&object.transform, owner.clone(), errors);
+        if let Some(material_id) = &object.material_id {
+            let valid = project
+                .records
+                .iter()
+                .find(|record| record.content_id == *material_id)
+                .is_some_and(|record| record.category == ContentCategory::Material)
+                && matches!(
+                    project.payloads.get(material_id),
+                    Some(ContentPayload::Material(_))
+                );
+            if !valid {
+                errors.push(ProjectValidationError::InvalidMaterialBinding(format!(
+                    "{owner} references missing/non-material {material_id}"
+                )));
+            }
+        }
+    }
 
     let mut adapter_keys = BTreeSet::new();
-    for adapter in &project.scene.adapter_overrides {
+    for adapter in &scene.adapter_overrides {
         if adapter.adapter_key.trim().is_empty() {
             errors.push(ProjectValidationError::InvalidAdapterKey(
                 adapter.adapter_key.clone(),
@@ -1436,11 +1543,14 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
         }
         validate_transform(
             &adapter.transform,
-            format!("adapter {}", adapter.adapter_key),
-            &mut errors,
+            format!(
+                "{}adapter {}",
+                owner_prefix.as_deref().unwrap_or_default(),
+                adapter.adapter_key
+            ),
+            errors,
         );
     }
-    errors
 }
 
 fn validate_procedural_recipe(
@@ -1940,6 +2050,7 @@ pub fn migrate_project(mut project: ForgeProject) -> Result<ForgeProject, Projec
                 }
             });
     }
+    project.normalize_levels();
     if project
         .records
         .iter()
@@ -1947,7 +2058,6 @@ pub fn migrate_project(mut project: ForgeProject) -> Result<ForgeProject, Projec
     {
         project.refresh_hashes()?;
     }
-    project.normalize_levels();
     Ok(project)
 }
 
@@ -2054,6 +2164,19 @@ pub struct ProjectStore {
     recovery_limit: usize,
 }
 
+/// Exact pre-transaction file state. Rollback restores these bytes verbatim
+/// instead of invoking the normal save path, which would rotate the failed
+/// candidate into `.recovery.1`, shift known-good recoveries, and leave
+/// candidate-only record sources behind.
+struct ProjectTransactionSnapshot {
+    files: Vec<ProjectFileSnapshot>,
+}
+
+struct ProjectFileSnapshot {
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+}
+
 impl ProjectStore {
     pub fn new(path: impl Into<PathBuf>, recovery_limit: usize) -> Self {
         Self {
@@ -2068,6 +2191,15 @@ impl ProjectStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Fingerprint the exact primary manifest bytes for optimistic editor
+    /// conflict detection. This is intentionally read-only and independent of
+    /// semantic record hashes: any external rewrite of `project.json` changes
+    /// the revision observed by a live session.
+    pub fn primary_revision(&self) -> Result<String, ProjectIoError> {
+        self.primary_revision_if_present()?
+            .ok_or(ProjectIoError::NoValidProject)
     }
 
     pub fn source_diagnostics(&self, project: &ForgeProject) -> Vec<String> {
@@ -2111,13 +2243,32 @@ impl ProjectStore {
                     record.category
                 ));
             }
-            match payload_hash(&document.payload) {
-                Ok(hash) if hash != record.draft_hash => diagnostics.push(format!(
-                    "{} hash {} does not match manifest {}",
-                    record.source_path, hash, record.draft_hash
-                )),
-                Err(error) => diagnostics.push(error.to_string()),
-                _ => {}
+            if record.category == ContentCategory::Scene {
+                if let ContentPayload::Scene(source_scene) = &document.payload {
+                    if source_scene != &project.scene {
+                        diagnostics.push(format!(
+                            "{} does not match the active level workspace",
+                            record.source_path
+                        ));
+                    }
+                }
+                match project_scene_hash(project) {
+                    Ok(hash) if hash != record.draft_hash => diagnostics.push(format!(
+                        "{} authored level-set hash {} does not match manifest {}",
+                        record.source_path, hash, record.draft_hash
+                    )),
+                    Err(error) => diagnostics.push(error.to_string()),
+                    _ => {}
+                }
+            } else {
+                match payload_hash(&document.payload) {
+                    Ok(hash) if hash != record.draft_hash => diagnostics.push(format!(
+                        "{} hash {} does not match manifest {}",
+                        record.source_path, hash, record.draft_hash
+                    )),
+                    Err(error) => diagnostics.push(error.to_string()),
+                    _ => {}
+                }
             }
         }
         diagnostics
@@ -2210,7 +2361,146 @@ impl ProjectStore {
         Ok(())
     }
 
+    /// Save while holding the store-wide exclusive writer lock. Record source,
+    /// recovery, manifest, and reproducibility-lock writes therefore cannot be
+    /// interleaved with another `ProjectStore` writer for the same project.
     pub fn save(&self, project: &mut ForgeProject) -> Result<(), ProjectIoError> {
+        let _save_lock = self.acquire_save_lock()?;
+        self.save_unlocked(project)
+    }
+
+    /// Optimistic save with an atomic revision check. The exact primary bytes
+    /// are fingerprinted only after the exclusive writer lock is held, and the
+    /// lock stays held through the full save. This closes the check-then-save
+    /// window between independent Forge screens and processes.
+    pub fn compare_and_save(
+        &self,
+        project: &mut ForgeProject,
+        expected_revision: &str,
+    ) -> Result<String, ProjectIoError> {
+        self.compare_and_save_revision(project, Some(expected_revision))
+    }
+
+    /// Compare and save against either an exact primary revision or an exact
+    /// missing-primary state. `None` is reserved for an explicit recovery
+    /// promotion; ordinary editor/record saves should require `Some`.
+    ///
+    /// This method prevents concurrent writers, but a late cross-file I/O
+    /// error can still be reported after part of the candidate is visible.
+    /// Workflows that require restoration of a prior coherent project must
+    /// use [`Self::compare_and_save_with_rollback`].
+    pub fn compare_and_save_revision(
+        &self,
+        project: &mut ForgeProject,
+        expected_revision: Option<&str>,
+    ) -> Result<String, ProjectIoError> {
+        let _save_lock = self.acquire_save_lock()?;
+        let actual = self.primary_revision_if_present()?;
+        if actual.as_deref() != expected_revision {
+            return Err(ProjectIoError::RevisionConflict {
+                expected: expected_revision.unwrap_or("no primary project").to_owned(),
+                actual,
+            });
+        }
+        self.save_unlocked(project)?;
+        self.primary_revision()
+    }
+
+    /// Save a project and perform a caller-owned final promotion as one
+    /// writer transaction. The exclusive store lock spans revision check,
+    /// project save, and `commit`. If promotion fails, the previous project is
+    /// restored from an exact pre-save byte snapshot before another writer can
+    /// enter. The snapshot covers the primary, lock document, all source paths
+    /// touched by either document, and every recovery slot, avoiding both a
+    /// manifest/artifact split and recovery pollution by the failed candidate.
+    ///
+    /// `commit` must not call a locking method on this same `ProjectStore`.
+    pub fn compare_and_save_with_rollback<T>(
+        &self,
+        project: &mut ForgeProject,
+        rollback_project: &ForgeProject,
+        expected_revision: &str,
+        commit: impl FnOnce() -> Result<T, ProjectIoError>,
+    ) -> Result<(T, String), ProjectIoError> {
+        let _save_lock = self.acquire_save_lock()?;
+        let actual = self.primary_revision_if_present()?;
+        if actual.as_deref() != Some(expected_revision) {
+            return Err(ProjectIoError::RevisionConflict {
+                expected: expected_revision.to_owned(),
+                actual,
+            });
+        }
+        let transaction_snapshot = self.snapshot_transaction_files(project, rollback_project)?;
+        if let Err(save_error) = self.save_unlocked(project) {
+            return Err(self.reconcile_failed_candidate_save(
+                project,
+                expected_revision,
+                save_error,
+                &transaction_snapshot,
+            ));
+        }
+        match commit() {
+            Ok(value) => Ok((value, self.primary_revision()?)),
+            Err(commit_error) => Err(self.restore_project_after_error(
+                commit_error,
+                "candidate project was saved before final promotion",
+                &transaction_snapshot,
+            )),
+        }
+    }
+
+    /// A late save error can occur after the candidate manifest has already
+    /// replaced the primary (for example, directory sync or lock-document
+    /// failure). Inspect the manifest to make rollback failures diagnosable,
+    /// then restore the prior project before releasing the writer lock. Even
+    /// an unchanged primary is not enough to skip restoration because record
+    /// sources are written before the manifest.
+    fn reconcile_failed_candidate_save(
+        &self,
+        candidate: &ForgeProject,
+        expected_revision: &str,
+        save_error: ProjectIoError,
+        transaction_snapshot: &ProjectTransactionSnapshot,
+    ) -> ProjectIoError {
+        let candidate_revision = manifest_revision(candidate).ok();
+        let current_revision = self.primary_revision_if_present();
+        let candidate_is_primary = matches!(
+            (&current_revision, candidate_revision.as_deref()),
+            (Ok(Some(current)), Some(candidate)) if current == candidate
+        );
+        let original_is_still_primary = matches!(
+            &current_revision,
+            Ok(Some(revision)) if revision == expected_revision
+        );
+        let primary_state = if candidate_is_primary {
+            "candidate primary was visible after the failed save"
+        } else if original_is_still_primary {
+            // Record sources are written before project.json, so an unchanged
+            // primary alone does not prove that the old project is coherent.
+            "original primary remained visible but auxiliary files may have changed"
+        } else {
+            "primary state could not be matched to the original or candidate"
+        };
+
+        self.restore_project_after_error(save_error, primary_state, transaction_snapshot)
+    }
+
+    fn restore_project_after_error(
+        &self,
+        error: ProjectIoError,
+        context: &str,
+        transaction_snapshot: &ProjectTransactionSnapshot,
+    ) -> ProjectIoError {
+        match self.restore_transaction_files(transaction_snapshot) {
+            Ok(()) => error,
+            Err(rollback_error) => ProjectIoError::RollbackFailed {
+                commit: format!("{} ({context})", error),
+                rollback: rollback_error.to_string(),
+            },
+        }
+    }
+
+    fn save_unlocked(&self, project: &mut ForgeProject) -> Result<(), ProjectIoError> {
         // PM3: the working scene is the source of truth on save; stash it
         // into the active level document before hashing/validation.
         project.sync_active_level();
@@ -2226,11 +2516,112 @@ impl ProjectStore {
         self.write_record_sources(project)?;
         let bytes = serde_json::to_vec_pretty(project)
             .map_err(|error| ProjectIoError::Serialization(error.to_string()))?;
-        atomic_write(&self.path, &bytes)?;
+        atomic_write_with_post_rename(&self.path, &bytes, || {
+            #[cfg(test)]
+            trigger_project_save_fault(ProjectSaveFault::PrimaryRenamed)?;
+            Ok(())
+        })?;
         let lock = ProjectLockDocument::from_project(project);
         let lock_bytes = serde_json::to_vec_pretty(&lock)
             .map_err(|error| ProjectIoError::Serialization(error.to_string()))?;
-        atomic_write(&self.lock_path(), &lock_bytes)
+        atomic_write_with_post_rename(&self.lock_path(), &lock_bytes, || {
+            #[cfg(test)]
+            trigger_project_save_fault(ProjectSaveFault::LockRenamed)?;
+            Ok(())
+        })
+    }
+
+    fn snapshot_transaction_files(
+        &self,
+        candidate: &ForgeProject,
+        rollback_project: &ForgeProject,
+    ) -> Result<ProjectTransactionSnapshot, ProjectIoError> {
+        let root = self.path.parent().unwrap_or_else(|| Path::new("."));
+        let mut paths = BTreeSet::new();
+        paths.insert(self.path.clone());
+        paths.insert(self.lock_path());
+        for index in 1..=self.recovery_limit {
+            paths.insert(self.recovery_path(index));
+        }
+        for project in [candidate, rollback_project] {
+            for record in &project.records {
+                // Invalid source paths fail validation before `save_unlocked`
+                // mutates files and must never escape the project root during
+                // snapshot collection.
+                if safe_source_path(&record.source_path) {
+                    paths.insert(root.join(&record.source_path));
+                }
+            }
+        }
+
+        let mut files = Vec::with_capacity(paths.len());
+        for path in paths {
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(io_error(error)),
+            };
+            files.push(ProjectFileSnapshot { path, bytes });
+        }
+        Ok(ProjectTransactionSnapshot { files })
+    }
+
+    fn restore_transaction_files(
+        &self,
+        snapshot: &ProjectTransactionSnapshot,
+    ) -> Result<(), ProjectIoError> {
+        let mut failures = Vec::new();
+        for file in &snapshot.files {
+            let result = match &file.bytes {
+                Some(bytes) => atomic_write(&file.path, bytes),
+                None => match fs::remove_file(&file.path) {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(io_error(error)),
+                },
+            };
+            if let Err(error) = result {
+                failures.push(format!("{}: {error}", file.path.display()));
+            }
+        }
+        #[cfg(test)]
+        if let Err(error) = trigger_project_save_fault(ProjectSaveFault::TransactionRestored) {
+            failures.push(error.to_string());
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(ProjectIoError::Io(failures.join("; ")))
+        }
+    }
+
+    fn primary_revision_if_present(&self) -> Result<Option<String>, ProjectIoError> {
+        match fs::read(&self.path) {
+            Ok(bytes) => Ok(Some(fnv1a_hash(&bytes))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_error(error)),
+        }
+    }
+
+    fn acquire_save_lock(&self) -> Result<ProjectSaveLock, ProjectIoError> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(io_error)?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(self.save_lock_path())
+            .map_err(io_error)?;
+        file.lock().map_err(io_error)?;
+        Ok(ProjectSaveLock(file))
+    }
+
+    fn save_lock_path(&self) -> PathBuf {
+        let mut value = self.path.as_os_str().to_owned();
+        value.push(".save.lock");
+        PathBuf::from(value)
     }
 
     /// The PM2 lock document path: `project.lock.json` beside `project.json`.
@@ -2255,6 +2646,20 @@ impl ProjectStore {
         load_project_file(&self.recovery_path(index))
     }
 
+    /// Load one explicit recovery snapshot together with the exact current
+    /// primary revision while holding the writer lock. Feeding the returned
+    /// revision into `compare_and_save_revision` makes recovery promotion a
+    /// coherent compare-and-save rather than a load/check race.
+    pub fn load_recovery_with_revision(
+        &self,
+        index: usize,
+    ) -> Result<(ForgeProject, Option<String>), ProjectIoError> {
+        let _save_lock = self.acquire_save_lock()?;
+        let project = self.load_recovery(index)?;
+        let revision = self.primary_revision_if_present()?;
+        Ok((project, revision))
+    }
+
     pub fn load_with_recovery(&self) -> Result<(ForgeProject, ProjectLoadSource), ProjectIoError> {
         if let Ok(project) = self.load() {
             return Ok((project, ProjectLoadSource::Primary));
@@ -2265,6 +2670,23 @@ impl ProjectStore {
             }
         }
         Err(ProjectIoError::NoValidProject)
+    }
+
+    /// Load a coherent project snapshot and its exact primary-manifest
+    /// revision while holding the same exclusive lock used by writers. The
+    /// revision is present only when the returned document came from the
+    /// primary. Recovery snapshots remain readable, but cannot be fed into an
+    /// ordinary compare-and-save without an explicit recovery workflow.
+    pub fn load_with_recovery_and_revision(
+        &self,
+    ) -> Result<(ForgeProject, ProjectLoadSource, Option<String>), ProjectIoError> {
+        let _save_lock = self.acquire_save_lock()?;
+        let loaded = self.load_with_recovery()?;
+        let revision = match loaded.1 {
+            ProjectLoadSource::Primary => self.primary_revision_if_present()?,
+            ProjectLoadSource::Recovery(_) => None,
+        };
+        Ok((loaded.0, loaded.1, revision))
     }
 
     fn rotate_recoveries(&self) -> Result<(), ProjectIoError> {
@@ -2311,6 +2733,15 @@ impl ProjectStore {
             atomic_write(&root.join(&record.source_path), &bytes)?;
         }
         Ok(())
+    }
+}
+
+/// RAII guard for the process- and OS-wide project writer lock.
+struct ProjectSaveLock(File);
+
+impl Drop for ProjectSaveLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
     }
 }
 
@@ -2373,6 +2804,51 @@ fn hydrate_record_sources(
                 Ok(document.payload)
             });
 
+        if record.category == ContentCategory::Scene {
+            let expected_hash = project_scene_hash(project)?;
+            let legacy_hash = scene_hash(&project.scene)?;
+            if record.draft_hash != expected_hash && record.draft_hash != legacy_hash {
+                return Err(ProjectIoError::SourceConsistency(format!(
+                    "{} and its embedded recovery copy do not match authored level-set hash {}",
+                    record.source_path, record.draft_hash
+                )));
+            }
+
+            let source_matches = matches!(
+                &source_result,
+                Ok(ContentPayload::Scene(scene)) if scene == &project.scene
+            );
+            let embedded_matches = matches!(
+                &embedded_payload,
+                Some(ContentPayload::Scene(scene)) if scene == &project.scene
+            );
+            if !source_matches && !embedded_matches {
+                return Err(ProjectIoError::SourceConsistency(format!(
+                    "{} and its embedded recovery copy do not match the active level workspace",
+                    record.source_path
+                )));
+            }
+
+            // Scene sources retain the backward-compatible active-scene
+            // payload. The manifest level documents carry the complete set,
+            // whose context-aware hash owns dirty/publish tracking. Upgrade a
+            // legacy active-only draft hash in memory. Its published hash is
+            // deliberately left unchanged so the expanded level set must be
+            // republished under the stronger fingerprint.
+            project.payloads.insert(
+                record.content_id.clone(),
+                ContentPayload::Scene(project.scene.clone()),
+            );
+            if let Some(manifest_record) = project
+                .records
+                .iter_mut()
+                .find(|candidate| candidate.content_id == record.content_id)
+            {
+                manifest_record.draft_hash = expected_hash;
+            }
+            continue;
+        }
+
         if let Ok(payload) = source_result {
             if payload_hash(&payload)? == record.draft_hash {
                 if let ContentPayload::Scene(scene) = &payload {
@@ -2394,6 +2870,14 @@ fn hydrate_record_sources(
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProjectIoError> {
+    atomic_write_with_post_rename(path, bytes, || Ok(()))
+}
+
+fn atomic_write_with_post_rename(
+    path: &Path,
+    bytes: &[u8],
+    after_rename: impl FnOnce() -> Result<(), ProjectIoError>,
+) -> Result<(), ProjectIoError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }
@@ -2404,6 +2888,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProjectIoErr
     file.write_all(bytes).map_err(io_error)?;
     file.sync_all().map_err(io_error)?;
     fs::rename(&temp, path).map_err(io_error)?;
+    after_rename()?;
     if let Some(parent) = path.parent() {
         File::open(parent)
             .and_then(|directory| directory.sync_all())
@@ -2412,10 +2897,107 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProjectIoErr
     Ok(())
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectSaveFault {
+    PrimaryRenamed,
+    LockRenamed,
+    TransactionRestored,
+}
+
+#[cfg(test)]
+thread_local! {
+    static PROJECT_SAVE_FAULT: std::cell::Cell<Option<ProjectSaveFault>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+#[cfg(test)]
+fn arm_project_save_fault(fault: ProjectSaveFault) {
+    PROJECT_SAVE_FAULT.with(|slot| slot.set(Some(fault)));
+}
+
+#[cfg(test)]
+fn trigger_project_save_fault(fault: ProjectSaveFault) -> Result<(), ProjectIoError> {
+    PROJECT_SAVE_FAULT.with(|slot| {
+        if slot.get() == Some(fault) {
+            // One-shot faults let the transactional rollback itself complete.
+            slot.set(None);
+            Err(ProjectIoError::Io(format!(
+                "injected project save fault at {fault:?}"
+            )))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+fn manifest_revision(project: &ForgeProject) -> Result<String, ProjectIoError> {
+    let bytes = serde_json::to_vec_pretty(project)
+        .map_err(|error| ProjectIoError::Serialization(error.to_string()))?;
+    Ok(fnv1a_hash(&bytes))
+}
+
 fn scene_hash(scene: &EditorSceneDraft) -> Result<String, ProjectIoError> {
     let scene_json = serde_json::to_vec(scene)
         .map_err(|error| ProjectIoError::Serialization(error.to_string()))?;
     Ok(fnv1a_hash(&scene_json))
+}
+
+#[derive(Serialize)]
+struct AuthoredSceneSetHashDocument<'a> {
+    hash_schema: u32,
+    startup_level_id: &'a str,
+    levels: Vec<AuthoredLevelHashDocument<'a>>,
+}
+
+#[derive(Serialize)]
+struct AuthoredLevelHashDocument<'a> {
+    level_id: &'a str,
+    display_name: &'a str,
+    template: LevelTemplate,
+    scene: &'a EditorSceneDraft,
+}
+
+/// Hash the complete authored scene set represented by the single Scene
+/// content record. Level order and startup identity affect runtime behavior
+/// and therefore participate in the hash. `active_level_id` is intentionally
+/// omitted: selecting a workspace tab must not make published content dirty.
+fn project_scene_hash(project: &ForgeProject) -> Result<String, ProjectIoError> {
+    // Preserve the legacy single-scene hash until a project has adopted level
+    // documents. Save/migration normalization creates that document before a
+    // modern project is persisted.
+    if project.levels.is_empty() {
+        return scene_hash(&project.scene);
+    }
+
+    let mut used_live_workspace = false;
+    let levels = project
+        .levels
+        .iter()
+        .map(|level| {
+            let scene = if !used_live_workspace && level.level_id == project.active_level_id {
+                used_live_workspace = true;
+                &project.scene
+            } else {
+                &level.scene
+            };
+            AuthoredLevelHashDocument {
+                level_id: &level.level_id,
+                display_name: &level.display_name,
+                template: level.template,
+                scene,
+            }
+        })
+        .collect();
+    let document = AuthoredSceneSetHashDocument {
+        hash_schema: 1,
+        startup_level_id: &project.startup_level_id,
+        levels,
+    };
+    let bytes = serde_json::to_vec(&document)
+        .map_err(|error| ProjectIoError::Serialization(error.to_string()))?;
+    Ok(fnv1a_hash(&bytes))
 }
 
 fn payload_hash(payload: &ContentPayload) -> Result<String, ProjectIoError> {
@@ -2548,6 +3130,234 @@ mod tests {
         assert!(validate_project(&duplicated)
             .iter()
             .any(|error| matches!(error, ProjectValidationError::DuplicateLevelId(_))));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inactive_levels_participate_in_scene_validation() {
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 41,
+            name: "Active marker".into(),
+            primitive: DraftPrimitive::Beacon,
+            transform: TransformDraft::default(),
+            material_id: None,
+            modifiers: Vec::new(),
+        });
+        project.levels.push(LevelDocument {
+            level_id: "level.inactive".into(),
+            display_name: "Inactive".into(),
+            template: LevelTemplate::Dungeon,
+            scene: EditorSceneDraft {
+                objects: vec![SceneObjectDraft {
+                    editor_id: 41,
+                    name: "Broken inactive object".into(),
+                    primitive: DraftPrimitive::Cube,
+                    transform: TransformDraft {
+                        rotation_xyzw: [0.0; 4],
+                        ..TransformDraft::default()
+                    },
+                    material_id: Some("material.missing".into()),
+                    modifiers: Vec::new(),
+                }],
+                adapter_overrides: Vec::new(),
+            },
+        });
+
+        let errors = validate_project(&project);
+        assert!(errors
+            .iter()
+            .any(|error| matches!(error, ProjectValidationError::DuplicateEditorId(41))));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidTransform(owner)
+                if owner.contains("level.inactive")
+        )));
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            ProjectValidationError::InvalidMaterialBinding(owner)
+                if owner.contains("level.inactive") && owner.contains("material.missing")
+        )));
+    }
+
+    #[test]
+    fn inactive_level_material_references_sync_rename_and_guard_delete() {
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        let material_id = project
+            .create_content(ContentCategory::Material, "Inactive Stone")
+            .unwrap();
+        project.levels.push(LevelDocument {
+            level_id: "level.inactive".into(),
+            display_name: "Inactive".into(),
+            template: LevelTemplate::Dungeon,
+            scene: EditorSceneDraft {
+                objects: vec![SceneObjectDraft {
+                    editor_id: 73,
+                    name: "Inactive stone floor".into(),
+                    primitive: DraftPrimitive::Cube,
+                    transform: TransformDraft::default(),
+                    material_id: Some(material_id.clone()),
+                    modifiers: Vec::new(),
+                }],
+                adapter_overrides: Vec::new(),
+            },
+        });
+
+        project.synchronize_authored_dependencies();
+        let scene_record = project
+            .records
+            .iter()
+            .find(|record| record.category == ContentCategory::Scene)
+            .unwrap();
+        assert_eq!(
+            scene_record.dependencies,
+            std::slice::from_ref(&material_id)
+        );
+
+        let renamed = "material.inactive_stone_runtime";
+        project.rename_content(&material_id, renamed).unwrap();
+        assert_eq!(
+            project.levels[1].scene.objects[0].material_id.as_deref(),
+            Some(renamed)
+        );
+        assert_eq!(project.records[0].dependencies, [renamed.to_string()]);
+
+        // The direct authored-reference guard must work even if a caller has
+        // not synchronized the cached dependency list first.
+        project.records[0].dependencies.clear();
+        assert!(matches!(
+            project.delete_content(renamed),
+            Err(ProjectMutationError::ContentHasDependents { owner, .. })
+                if owner.contains("level.inactive")
+        ));
+    }
+
+    #[test]
+    fn live_active_scene_overrides_its_stashed_copy_for_delete_guards() {
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        let material_id = project
+            .create_content(ContentCategory::Material, "Temporary Active Material")
+            .unwrap();
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 91,
+            name: "Active material owner".into(),
+            primitive: DraftPrimitive::Cube,
+            transform: TransformDraft::default(),
+            material_id: Some(material_id.clone()),
+            modifiers: Vec::new(),
+        });
+        project.stash_active_level();
+
+        // Removing the binding in the live workspace is authoritative even
+        // before the next save stashes it over the active level document.
+        project.scene.objects[0].material_id = None;
+        project.delete_content(&material_id).unwrap();
+    }
+
+    #[test]
+    fn scene_hash_covers_all_levels_order_and_startup_but_not_active_selection() {
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        let main_id = project.active_level_id.clone();
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 700,
+            name: "Main level marker".into(),
+            primitive: DraftPrimitive::Beacon,
+            transform: TransformDraft::default(),
+            material_id: None,
+            modifiers: Vec::new(),
+        });
+        let dungeon_id = project.create_level(LevelTemplate::Dungeon);
+        let boss_id = project.create_level(LevelTemplate::BossArena);
+        project.sync_active_level();
+        project.refresh_hashes().unwrap();
+        let scene_hash = |project: &ForgeProject| {
+            project
+                .records
+                .iter()
+                .find(|record| record.category == ContentCategory::Scene)
+                .unwrap()
+                .draft_hash
+                .clone()
+        };
+        let baseline = scene_hash(&project);
+
+        let mut inactive_edit = project.clone();
+        inactive_edit.levels[0].scene.objects[0].name = "Changed inactive level".into();
+        inactive_edit.refresh_hashes().unwrap();
+        assert_ne!(scene_hash(&inactive_edit), baseline);
+
+        let mut reordered = project.clone();
+        reordered.move_level(&dungeon_id, -1).unwrap();
+        reordered.refresh_hashes().unwrap();
+        assert_ne!(scene_hash(&reordered), baseline);
+
+        let mut startup_changed = project.clone();
+        startup_changed.startup_level_id = dungeon_id.clone();
+        startup_changed.refresh_hashes().unwrap();
+        assert_ne!(scene_hash(&startup_changed), baseline);
+
+        let mut active_changed = project.clone();
+        active_changed.activate_level(&main_id).unwrap();
+        active_changed.refresh_hashes().unwrap();
+        assert_eq!(scene_hash(&active_changed), baseline);
+        assert_eq!(project.active_level_id, boss_id);
+    }
+
+    #[test]
+    fn multilevel_scene_hash_round_trips_with_backward_compatible_source() {
+        let (root, store) = test_store("multilevel_scene_hash");
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        project.scene.objects.push(SceneObjectDraft {
+            editor_id: 88,
+            name: "Inactive after switch".into(),
+            primitive: DraftPrimitive::Pillar,
+            transform: TransformDraft::default(),
+            material_id: None,
+            modifiers: Vec::new(),
+        });
+        project.create_level(LevelTemplate::BossArena);
+        project.scene.objects[0].name = "Live boss workspace".into();
+        store.save(&mut project).unwrap();
+        let saved_hash = project.records[0].draft_hash.clone();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.levels, project.levels);
+        assert_eq!(loaded.records[0].draft_hash, saved_hash);
+        assert_eq!(project_scene_hash(&loaded).unwrap(), saved_hash);
+        assert!(store.source_diagnostics(&loaded).is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_active_scene_hash_loads_and_is_upgraded_without_false_publish() {
+        let (root, store) = test_store("legacy_scene_hash");
+        let mut project = ForgeProject::default();
+        project.normalize_levels();
+        project.create_level(LevelTemplate::Dungeon);
+        store.save(&mut project).unwrap();
+
+        let mut manifest: ForgeProject =
+            serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+        let legacy_hash = scene_hash(&manifest.scene).unwrap();
+        manifest.records[0].draft_hash = legacy_hash.clone();
+        manifest.records[0].published_hash = Some(legacy_hash.clone());
+        fs::write(store.path(), serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(
+            loaded.records[0].draft_hash,
+            project_scene_hash(&loaded).unwrap()
+        );
+        assert_ne!(loaded.records[0].draft_hash, legacy_hash);
+        assert_eq!(
+            loaded.records[0].published_hash.as_deref(),
+            Some(legacy_hash.as_str())
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2710,6 +3520,423 @@ mod tests {
         assert!(!loaded.records[0].draft_hash.is_empty());
         assert!(root.join("scenes/main_world.json").is_file());
         assert!(store.source_diagnostics(&loaded).is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn primary_revision_tracks_exact_manifest_bytes() {
+        let (root, store) = test_store("primary_revision");
+        assert!(matches!(
+            store.primary_revision(),
+            Err(ProjectIoError::NoValidProject)
+        ));
+        let mut project = ForgeProject::default();
+        store.save(&mut project).unwrap();
+        let first = store.primary_revision().unwrap();
+
+        let mut bytes = fs::read(store.path()).unwrap();
+        bytes.push(b'\n');
+        fs::write(store.path(), bytes).unwrap();
+        let second = store.primary_revision().unwrap();
+        assert_ne!(second, first);
+        assert!(store.load().is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn compare_and_save_rejects_a_stale_revision_without_overwriting() {
+        let (root, store) = test_store("compare_and_save");
+        let mut seed = ForgeProject::default();
+        store.save(&mut seed).unwrap();
+
+        let (mut winner, source, revision) = store
+            .load_with_recovery_and_revision()
+            .expect("coherent load should succeed");
+        assert_eq!(source, ProjectLoadSource::Primary);
+        let revision = revision.expect("primary load should have a revision");
+        let mut stale = winner.clone();
+
+        winner.display_name = "Winning writer".into();
+        let winning_revision = store
+            .compare_and_save(&mut winner, &revision)
+            .expect("matching revision should save");
+        assert_ne!(winning_revision, revision);
+        assert_eq!(store.primary_revision().unwrap(), winning_revision);
+
+        stale.display_name = "Stale writer".into();
+        let error = store
+            .compare_and_save(&mut stale, &revision)
+            .expect_err("stale revision must not overwrite the winner");
+        assert!(matches!(
+            error,
+            ProjectIoError::RevisionConflict {
+                expected,
+                actual: Some(actual),
+            } if expected == revision && actual == winning_revision
+        ));
+        assert_eq!(store.load().unwrap().display_name, "Winning writer");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn compare_and_save_reports_a_missing_primary_as_a_conflict() {
+        let (root, store) = test_store("compare_missing");
+        let mut project = ForgeProject::default();
+        let error = store
+            .compare_and_save(&mut project, "revision-from-old-session")
+            .expect_err("a missing primary cannot match an observed revision");
+        assert!(matches!(
+            error,
+            ProjectIoError::RevisionConflict {
+                expected,
+                actual: None,
+            } if expected == "revision-from-old-session"
+        ));
+        assert!(!store.path().exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn explicit_recovery_load_captures_the_matching_primary_revision() {
+        let (root, store) = test_store("recovery_revision");
+        let mut recovered = ForgeProject {
+            display_name: "Recovery generation".into(),
+            ..ForgeProject::default()
+        };
+        store.save(&mut recovered).unwrap();
+        let mut current = recovered.clone();
+        current.display_name = "Current generation".into();
+        store.save(&mut current).unwrap();
+
+        let (mut snapshot, revision) = store.load_recovery_with_revision(1).unwrap();
+        let revision = revision.expect("current primary should have a revision");
+        assert_eq!(snapshot.display_name, "Recovery generation");
+        assert_eq!(revision, store.primary_revision().unwrap());
+
+        store
+            .compare_and_save_revision(&mut snapshot, Some(&revision))
+            .expect("explicit recovery promotion should match captured primary");
+        assert_eq!(store.load().unwrap().display_name, "Recovery generation");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn explicit_recovery_can_promote_only_while_primary_remains_missing() {
+        let (root, store) = test_store("recovery_missing_primary");
+        let mut recovered = ForgeProject {
+            display_name: "Recovery generation".into(),
+            ..ForgeProject::default()
+        };
+        store.save(&mut recovered).unwrap();
+        let recovery_path = store.recovery_path(1);
+        fs::copy(store.path(), &recovery_path).unwrap();
+        fs::remove_file(store.path()).unwrap();
+
+        let (mut snapshot, revision) = store.load_recovery_with_revision(1).unwrap();
+        assert!(revision.is_none());
+        store
+            .compare_and_save_revision(&mut snapshot, None)
+            .expect("explicit recovery may replace an observed missing primary");
+        assert_eq!(store.load().unwrap().display_name, "Recovery generation");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_post_save_commit_rolls_project_back_before_unlocking() {
+        let (root, store) = test_store("transactional_rollback");
+        let mut original = ForgeProject {
+            display_name: "Recovery seed".into(),
+            ..ForgeProject::default()
+        };
+        store.save(&mut original).unwrap();
+        original.display_name = "Original project".into();
+        store.save(&mut original).unwrap();
+        let revision = store.primary_revision().unwrap();
+        let recoveries_before = recovery_chain_bytes(&store);
+        let mut candidate = original.clone();
+        candidate.display_name = "Published candidate".into();
+
+        let error = store
+            .compare_and_save_with_rollback(
+                &mut candidate,
+                &original,
+                &revision,
+                || -> Result<(), ProjectIoError> {
+                    Err(ProjectIoError::Io("artifact promotion failed".into()))
+                },
+            )
+            .expect_err("failed promotion should report an error");
+
+        assert!(matches!(error, ProjectIoError::Io(message) if message.contains("promotion")));
+        assert_eq!(store.load().unwrap().display_name, "Original project");
+        assert_eq!(recovery_chain_bytes(&store), recoveries_before);
+        fs::write(store.path(), b"corrupt primary after rollback").unwrap();
+        let (recovered, source) = store.load_with_recovery().unwrap();
+        assert!(matches!(source, ProjectLoadSource::Recovery(_)));
+        assert_ne!(
+            recovered.display_name, "Published candidate",
+            "the failed candidate must never become a recovery snapshot"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn recovery_chain_bytes(store: &ProjectStore) -> Vec<Option<Vec<u8>>> {
+        (1..=store.recovery_limit)
+            .map(|index| fs::read(store.recovery_path(index)).ok())
+            .collect()
+    }
+
+    fn seed_distinct_recovery_chain(store: &ProjectStore) -> ForgeProject {
+        let mut project = ForgeProject::default();
+        for generation in 0..=store.recovery_limit {
+            project.display_name = format!("Known generation {generation}");
+            store.save(&mut project).unwrap();
+        }
+        project
+    }
+
+    fn assert_partial_candidate_save_restores_project(label: &str, fault: ProjectSaveFault) {
+        let (root, store) = test_store(label);
+        let mut original = seed_distinct_recovery_chain(&store);
+        original.display_name = "Original project".into();
+        store.save(&mut original).unwrap();
+        let revision = store.primary_revision().unwrap();
+        let original_primary = fs::read(store.path()).unwrap();
+        let original_lock = fs::read(store.lock_path()).unwrap();
+        let source_path = root.join(&original.records[0].source_path);
+        let original_source = fs::read(&source_path).unwrap();
+        let original_scene_hash = original.records[0].draft_hash.clone();
+        let recoveries_before = recovery_chain_bytes(&store);
+
+        let mut candidate = original.clone();
+        candidate.display_name = "Partially written candidate".into();
+        let candidate_only_id = candidate
+            .create_content(ContentCategory::Material, "Candidate Only Material")
+            .unwrap();
+        let candidate_only_source = root.join(
+            &candidate
+                .records
+                .iter()
+                .find(|record| record.content_id == candidate_only_id)
+                .unwrap()
+                .source_path,
+        );
+        candidate.scene.objects.push(SceneObjectDraft {
+            editor_id: 991,
+            name: "Candidate-only object".into(),
+            primitive: DraftPrimitive::Beacon,
+            transform: TransformDraft::default(),
+            material_id: None,
+            modifiers: Vec::new(),
+        });
+        let commit_called = std::cell::Cell::new(false);
+        arm_project_save_fault(fault);
+
+        let error = store
+            .compare_and_save_with_rollback(&mut candidate, &original, &revision, || {
+                commit_called.set(true);
+                Ok(())
+            })
+            .expect_err("a fault after rename must fail the candidate transaction");
+
+        assert!(
+            matches!(error, ProjectIoError::Io(message) if message.contains("injected project save fault"))
+        );
+        assert!(!commit_called.get(), "final promotion must not run");
+        assert_ne!(candidate.records[0].draft_hash, original_scene_hash);
+        assert_eq!(fs::read(store.path()).unwrap(), original_primary);
+        assert_eq!(fs::read(store.lock_path()).unwrap(), original_lock);
+        assert_eq!(fs::read(source_path).unwrap(), original_source);
+        assert!(
+            !candidate_only_source.exists(),
+            "a failed candidate must not leave a new record source behind"
+        );
+        assert_eq!(
+            recovery_chain_bytes(&store),
+            recoveries_before,
+            "failed candidate save must restore every recovery slot byte-for-byte"
+        );
+        assert_eq!(store.primary_revision().unwrap(), revision);
+        assert_eq!(
+            store.load_lock().unwrap().records[0].draft_hash,
+            original_scene_hash
+        );
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.display_name, "Original project");
+        assert!(loaded
+            .scene
+            .objects
+            .iter()
+            .all(|object| object.editor_id != 991));
+        fs::write(store.path(), b"corrupt primary after rollback").unwrap();
+        let (recovered, source) = store.load_with_recovery().unwrap();
+        assert!(matches!(source, ProjectLoadSource::Recovery(1)));
+        assert_ne!(recovered.display_name, "Partially written candidate");
+        assert!(recovered
+            .scene
+            .objects
+            .iter()
+            .all(|object| object.editor_id != 991));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_save_after_primary_rename_restores_primary_sources_and_hash_claims() {
+        assert_partial_candidate_save_restores_project(
+            "rollback_after_primary_rename",
+            ProjectSaveFault::PrimaryRenamed,
+        );
+    }
+
+    #[test]
+    fn failed_save_after_lock_rename_restores_primary_sources_and_hash_claims() {
+        assert_partial_candidate_save_restores_project(
+            "rollback_after_lock_rename",
+            ProjectSaveFault::LockRenamed,
+        );
+    }
+
+    #[test]
+    fn failed_transaction_reports_a_structured_rollback_failure() {
+        let (root, store) = test_store("structured_transaction_rollback_failure");
+        let mut original = ForgeProject::default();
+        store.save(&mut original).unwrap();
+        let revision = store.primary_revision().unwrap();
+        let recoveries_before = recovery_chain_bytes(&store);
+        let mut candidate = original.clone();
+        candidate.display_name = "Visible candidate".into();
+        arm_project_save_fault(ProjectSaveFault::TransactionRestored);
+
+        let error = store
+            .compare_and_save_with_rollback(
+                &mut candidate,
+                &original,
+                &revision,
+                || -> Result<(), ProjectIoError> {
+                    Err(ProjectIoError::Io("injected commit failure".into()))
+                },
+            )
+            .expect_err("a failed restoration must retain both error causes");
+
+        assert!(matches!(
+            error,
+            ProjectIoError::RollbackFailed { commit, rollback }
+                if commit.contains("injected commit failure")
+                    && commit.contains("saved before final promotion")
+                    && rollback.contains("TransactionRestored")
+        ));
+        assert_eq!(
+            recovery_chain_bytes(&store),
+            recoveries_before,
+            "recovery restoration must still run when document rollback fails validation"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_commit_callback_restores_every_recovery_slot_exactly() {
+        let (root, store) = test_store("commit_recovery_chain");
+        let mut original = seed_distinct_recovery_chain(&store);
+        original.display_name = "Original before publish".into();
+        store.save(&mut original).unwrap();
+        let revision = store.primary_revision().unwrap();
+        let recoveries_before = recovery_chain_bytes(&store);
+        assert!(recoveries_before.iter().all(Option::is_some));
+
+        let mut candidate = original.clone();
+        candidate.display_name = "Failed publish candidate".into();
+        let error = store
+            .compare_and_save_with_rollback(
+                &mut candidate,
+                &original,
+                &revision,
+                || -> Result<(), ProjectIoError> {
+                    Err(ProjectIoError::Io(
+                        "injected commit callback failure".into(),
+                    ))
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, ProjectIoError::Io(message) if message.contains("callback")));
+        assert_eq!(
+            store.load().unwrap().display_name,
+            "Original before publish"
+        );
+        assert_eq!(recovery_chain_bytes(&store), recoveries_before);
+        fs::write(store.path(), b"corrupt primary after callback rollback").unwrap();
+        let (recovered, source) = store.load_with_recovery().unwrap();
+        assert!(matches!(source, ProjectLoadSource::Recovery(1)));
+        assert_ne!(recovered.display_name, "Failed publish candidate");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn post_save_commit_runs_while_other_project_writers_are_excluded() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (root, store) = test_store("transactional_commit_lock");
+        let mut original = ForgeProject::default();
+        store.save(&mut original).unwrap();
+        let revision = store.primary_revision().unwrap();
+        let mut candidate = original.clone();
+        candidate.display_name = "Committed project".into();
+        let waiter_store = store.clone();
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let mut waiter = None;
+
+        let (_, saved_revision) = store
+            .compare_and_save_with_rollback(&mut candidate, &original, &revision, || {
+                waiter = Some(std::thread::spawn(move || {
+                    let _lock = waiter_store.acquire_save_lock().unwrap();
+                    locked_tx.send(()).unwrap();
+                }));
+                assert!(matches!(
+                    locked_rx.recv_timeout(Duration::from_millis(100)),
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                ));
+                Ok(())
+            })
+            .expect("successful promotion should keep the candidate");
+
+        locked_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("waiting writer should enter after commit unlocks");
+        waiter.take().unwrap().join().unwrap();
+        assert_eq!(saved_revision, store.primary_revision().unwrap());
+        assert_eq!(store.load().unwrap().display_name, "Committed project");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ordinary_save_waits_for_the_store_writer_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (root, store) = test_store("exclusive_save_lock");
+        let held_lock = store.acquire_save_lock().unwrap();
+        let writer_store = store.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let mut project = ForgeProject::default();
+            result_tx.send(writer_store.save(&mut project)).unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(matches!(
+            result_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        drop(held_lock);
+        result_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("writer should continue after lock release")
+            .expect("writer save should succeed");
+        writer.join().unwrap();
+        assert!(store.path().is_file());
         let _ = fs::remove_dir_all(root);
     }
 

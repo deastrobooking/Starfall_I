@@ -1,15 +1,16 @@
 # Starfall I — Current State
 
-> Living agent handoff. Last reconciled August 5, 2026. Update this file when a
+> Living agent handoff. Last reconciled August 12, 2026. Update this file when a
 > change alters architecture, ownership, persistence, controls, verification,
 > or the next production slice.
 
 ## Baseline
 
 - Rust 2021, Bevy `0.19.0`, Avian `0.7`; one binary crate.
-- Automated baseline: 655 Designer-edition tests and 643 Game-edition tests,
-  `cargo check --all-targets`, `cargo fmt --check`, and strict clippy for both
-  feature sets pass locally.
+- Automated baseline: 939 Designer-edition tests and 927 Game-edition tests,
+  locked all-target checks, `cargo fmt --all -- --check`, and strict Clippy for
+  both feature sets pass locally. CI runs formatting once, then verifies the
+  Designer and Game editions independently on macOS.
 - Manual macOS one-to-four-controller, TV-layout, terrain traversal, and
   split-screen performance acceptance is still required. Automated success is
   not evidence that those hardware gates passed.
@@ -112,6 +113,17 @@
   validation/publishing, immutable presets and lock documents, deterministic
   modifier stacks, typed World Kit recipes, multi-level projects, and startup
   level playtest.
+- The August Forge M0 contract pass replaces numeric focus orders with one
+  stable action/navigation registry; validates, hashes, and guards references
+  across every authored level; adds an OS-backed writer lock, atomic
+  primary-manifest revision conflicts, explicit recovery promotion, and
+  clean external reload; preserves authored duplicate names/modifiers; evicts
+  failed stale history; caches unchanged disk diagnostics; assigns unique new
+  project identities; and publishes Weapon/Creature output through immutable
+  hashed generations selected once per load by atomically promoted `current.json`.
+  Designer/Game locked CI coverage is active. The remaining architecture path
+  is `docs/editor_roadmap.md`; M0 does not yet isolate editor/runtime worlds or
+  provide universal command history and complete content cooking.
 - Multi-level projects expose the active level's order/startup state and support
   controller-driven reordering plus guarded deletion. Deletion requires a
   same-level second confirmation, cannot remove the final level, and repairs
@@ -198,9 +210,9 @@
    and a steady frame.
 2. Maintain the schema-compatible base-stat/derived-cap contract and keep new
    permanent bonuses on `PlayerBaseStats` rather than effective cap caches.
-3. Continue mechanical hotspot extraction: world terrain, settlements, and
-   dungeons; UI screens and HUD; then isolated Forge panels. Preserve schedule
-   ordering and behavior in each slice.
+3. Execute Forge M1 from `docs/editor_roadmap.md`: add the library/composition
+   seam, extract neutral content/runtime ownership, and split editor modules
+   without changing behavior.
 4. Complete manual one-to-four-controller acceptance for joining, aiming,
    shops, editor launch, save/reload identity, disconnect/reconnect, and
    controller-only menu flows.
@@ -212,7 +224,8 @@
    freeway barrier containment, rounded connectors,
    technique inputs/VFX readability, elemental and Starheart differentiation,
    four-player effect-budget behavior, and per-player save/reload ownership.
-7. Continue PM1–PM3 creator gaps: templates/import/recovery/settings, preset
+7. Continue behavior-preserving world/UI hotspot extraction and PM1–PM3 creator
+   gaps behind the new seams: templates/import/recovery/settings, preset
    thumbnails and validation capture, and per-level metadata/budgets plus
    rename.
 
