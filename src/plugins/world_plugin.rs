@@ -66,6 +66,7 @@ use crate::world::final_war::{
     coordinated_raid_trigger_system, final_war_phase_announce_system, pressure_accumulation_system,
     win_condition_system,
 };
+use crate::world::published_craft::PublishedFleet;
 use crate::world::raids::{
     static_defense_score_for_site, RaidId, RaidKind, RaidRegistry, RaidStartResult,
     RaidThreatMarker, RaidTickEvent, RaidUfoMarker, CLOUDRAIL_TUTORIAL_RAID_SITE,
@@ -1816,10 +1817,14 @@ fn raid_counteroffensive_start_system(
     mut sites: ResMut<WorldSiteRegistry>,
     economy: Res<SettlementEconomy>,
     command_registry: Res<CommandRegistry>,
+    published_fleet: Option<Res<PublishedFleet>>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let defense_score = static_defense_score_for_site(CLOUDRAIL_TUTORIAL_RAID_SITE, &economy)
-        + command_registry.defense_score_for_site(CLOUDRAIL_TUTORIAL_RAID_SITE);
+        + command_registry.defense_score_for_site(CLOUDRAIL_TUTORIAL_RAID_SITE)
+        + published_fleet.as_ref().map_or(0, |fleet| {
+            fleet.defense_score_for_site(CLOUDRAIL_TUTORIAL_RAID_SITE)
+        });
     match raids.try_start_cloudrail_tutorial(&mut sites, defense_score) {
         RaidStartResult::Started(_) => {
             msg_ev.write(UiMessageEvent {
@@ -1843,6 +1848,7 @@ fn raid_tick_system(
     mut sites: ResMut<WorldSiteRegistry>,
     economy: Res<SettlementEconomy>,
     command_registry: Res<CommandRegistry>,
+    published_fleet: Option<Res<PublishedFleet>>,
     mut msg_ev: MessageWriter<UiMessageEvent>,
 ) {
     let defense_scores: Vec<_> = raids
@@ -1853,7 +1859,10 @@ fn raid_tick_system(
             (
                 raid.target_site,
                 static_defense_score_for_site(raid.target_site, &economy)
-                    + command_registry.defense_score_for_site(raid.target_site),
+                    + command_registry.defense_score_for_site(raid.target_site)
+                    + published_fleet
+                        .as_ref()
+                        .map_or(0, |fleet| fleet.defense_score_for_site(raid.target_site)),
             )
         })
         .collect();

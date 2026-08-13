@@ -27,6 +27,7 @@ use crate::engine::state::AppState;
 use crate::events::{UiMessageEvent, WeaponFiredEvent};
 use crate::plugins::weapon_plugin::ProjectileAssets;
 use crate::resources::PlaySessionTransition;
+use crate::world::published_craft::{PublishedRide, PublishedRideKind, PublishedRideTuning};
 use crate::world::robot_pets::{RobotAssemblyForm, RobotPetCollection};
 
 pub struct VehiclePlugin;
@@ -69,6 +70,7 @@ impl Plugin for VehiclePlugin {
                 (
                     sync_jet_bike_visual,
                     sync_heavy_water_vehicle_visual,
+                    sync_published_ride_visual,
                     bind_vehicle_visual_render_layers,
                     tank_cannon_system,
                     tank_muzzle_flash_system,
@@ -141,6 +143,12 @@ pub struct VehicleState {
     pub boat_active: bool,
     pub active_owner: Option<u8>,
     pub active_boat: Option<Entity>,
+    /// Session-only authored craft binding. Stable content IDs and tuning
+    /// snapshots stay outside the legacy campaign vehicle/save enums.
+    pub active_published_ride: Option<Entity>,
+    pub active_published_content_id: Option<String>,
+    pub active_published_kind: Option<PublishedRideKind>,
+    pub active_published_tuning: Option<PublishedRideTuning>,
     pub boat_heading: f32,
     pub jet_bike_mode: Option<JetBikeMode>,
     baselines: [Option<VehicleBaseline>; 4],
@@ -444,12 +452,19 @@ impl VehicleState {
         self.jet_bike_mode = None;
         self.turbo_timer = 0.0;
     }
+    fn clear_published_binding(&mut self) {
+        self.active_published_ride = None;
+        self.active_published_content_id = None;
+        self.active_published_kind = None;
+        self.active_published_tuning = None;
+    }
     fn deactivate_all_vehicle(&mut self) {
         self.deactivate_ground();
         self.deactivate_air();
         self.boat_active = false;
         self.active_boat = None;
         self.active_owner = None;
+        self.clear_published_binding();
         self.jet_bike_mode = None;
         self.turbo_timer = 0.0;
         self.turbo_cooldown = 0.0;
@@ -593,6 +608,7 @@ fn set_jet_bike_mode(state: &mut VehicleState, owner: u8, mode: Option<JetBikeMo
         state.deactivate_all_vehicle();
         return;
     };
+    state.clear_published_binding();
     state.active_owner = Some(owner);
     state.active_boat = None;
     state.boat_active = false;
@@ -675,6 +691,7 @@ fn vehicle_input(
         With<Player>,
     >,
     boat_q: Query<(Entity, &Transform, &BoatVehicle)>,
+    mut published_ride_q: Query<(Entity, &Transform, &mut PublishedRide), Without<Player>>,
     loadout: Res<PlayerLoadout>,
     robot_pets: Res<RobotPetCollection>,
     mut state: ResMut<VehicleState>,
@@ -719,6 +736,29 @@ fn vehicle_input(
                     duration: 1.8,
                 });
                 continue;
+            }
+
+            // An authored ride uses the same party lease and J edge as every
+            // legacy vehicle. Eject before considering any other nearby craft
+            // so one input can never both dismount and remount.
+            if state.active_owner == Some(idx.0) {
+                if let Some(active) = state.active_published_ride {
+                    let label = if let Ok((_, _, mut ride)) = published_ride_q.get_mut(active) {
+                        ride.mounted_owner = None;
+                        ride.display_name.clone()
+                    } else {
+                        state
+                            .active_published_content_id
+                            .clone()
+                            .unwrap_or_else(|| "Published ride".into())
+                    };
+                    state.deactivate_all_vehicle();
+                    msg_ev.write(UiMessageEvent {
+                        text: format!("P{} {label}: PARKED", idx.0 + 1),
+                        duration: 1.8,
+                    });
+                    continue;
+                }
             }
 
             // A party boat has one driver. Players who board after departure
@@ -795,6 +835,7 @@ fn vehicle_input(
                     continue;
                 }
                 state.boat_active = true;
+                state.clear_published_binding();
                 state.ground_mode = GroundMode::None;
                 state.air_mode = AirMode::None;
                 state.jet_bike_mode = None;
@@ -821,6 +862,66 @@ fn vehicle_input(
                         trip_distance
                     ),
                     duration: 2.4,
+                });
+                continue;
+            }
+
+            // Published ground craft and pilotable spacecraft are tangible
+            // parked world objects. Resolve nearest by distance then stable id
+            // instead of silently choosing the first JSON/catalog entry.
+            let nearest_published = published_ride_q
+                .iter_mut()
+                .filter(|(_, transform, ride)| {
+                    ride.mounted_owner.is_none()
+                        && player_transform.translation.distance(transform.translation)
+                            <= ride.mount_radius
+                })
+                .map(|(entity, transform, ride)| {
+                    (
+                        player_transform.translation.distance(transform.translation),
+                        ride.content_id.clone(),
+                        entity,
+                    )
+                })
+                .min_by(|left, right| {
+                    left.0
+                        .total_cmp(&right.0)
+                        .then_with(|| left.1.cmp(&right.1))
+                })
+                .map(|(_, _, entity)| entity);
+            if let Some(ride_entity) = nearest_published {
+                if vehicle_owned_by_other(&state, idx.0) {
+                    msg_ev.write(UiMessageEvent {
+                        text: vehicle_in_use_message(&state),
+                        duration: 1.8,
+                    });
+                    continue;
+                }
+                let Ok((_, _, mut ride)) = published_ride_q.get_mut(ride_entity) else {
+                    continue;
+                };
+                state.deactivate_all_vehicle();
+                state.active_owner = Some(idx.0);
+                state.active_published_ride = Some(ride_entity);
+                state.active_published_content_id = Some(ride.content_id.clone());
+                state.active_published_kind = Some(ride.kind);
+                state.active_published_tuning = Some(ride.tuning);
+                state.mech_armor_bonus = ride.tuning.armor_bonus;
+                match ride.kind {
+                    PublishedRideKind::Ground(_) => {
+                        // The existing avatar controller remains the only motor;
+                        // this sentinel activates its ground vehicle path.
+                        state.ground_mode = GroundMode::Motorcycle;
+                    }
+                    PublishedRideKind::Flight(_) => {
+                        state.air_mode = AirMode::Jet;
+                    }
+                }
+                ride.mounted_owner = Some(idx.0);
+                remove_boat_passengers(&mut commands, &player_q, None);
+                msg_ev.write(UiMessageEvent {
+                    text: format!("P{} {}: ON", idx.0 + 1, ride.display_name),
+                    duration: 2.0,
                 });
                 continue;
             }
@@ -876,6 +977,7 @@ fn vehicle_input(
                         duration: 1.5,
                     });
                 } else {
+                    state.clear_published_binding();
                     state.air_mode = mode;
                     state.jet_bike_mode = None;
                     state.ground_mode = GroundMode::None;
@@ -904,6 +1006,7 @@ fn vehicle_input(
                     state.deactivate_ground();
                     state.active_owner = None;
                 } else {
+                    state.clear_published_binding();
                     state.ground_mode = mode;
                     state.air_mode = AirMode::None;
                     state.jet_bike_mode = None;
@@ -1096,7 +1199,7 @@ fn update_vehicle_turbo(
 }
 
 fn active_heavy_water_profile(state: &VehicleState) -> Option<HeavyWaterVehicleProfile> {
-    if state.boat_active || state.jet_bike_mode.is_some() {
+    if state.boat_active || state.jet_bike_mode.is_some() || state.active_published_ride.is_some() {
         return None;
     }
     match state.ground_mode {
@@ -1115,10 +1218,39 @@ fn active_heavy_water_profile(state: &VehicleState) -> Option<HeavyWaterVehicleP
 /// replaced independently when a mode changes. Bind every renderable child to
 /// the driver's avatar layer anyway: that owner's first-person camera hides
 /// the cockpit/body, while every other split-screen camera still sees it.
+fn sync_published_ride_visual(
+    state: Res<VehicleState>,
+    player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
+    mut ride_q: Query<(Entity, &mut PublishedRide, &mut Transform), Without<Player>>,
+) {
+    for (entity, mut ride, mut transform) in ride_q.iter_mut() {
+        let Some(owner) = ride.mounted_owner else {
+            continue;
+        };
+        if state.active_published_ride != Some(entity) || state.active_owner != Some(owner) {
+            ride.mounted_owner = None;
+            continue;
+        }
+        let Some((_, player_transform)) = player_q.iter().find(|(index, _)| index.0 == owner)
+        else {
+            ride.mounted_owner = None;
+            continue;
+        };
+        let local_offset = match ride.kind {
+            PublishedRideKind::Ground(_) => Vec3::new(0.0, -0.66, 0.12),
+            PublishedRideKind::Flight(_) => Vec3::new(0.0, -0.34, 0.18),
+        };
+        transform.translation =
+            player_transform.translation + player_transform.rotation * local_offset;
+        transform.rotation = player_transform.rotation;
+    }
+}
+
 fn bind_vehicle_visual_render_layers(
     mut commands: Commands,
     jet_roots: Query<(Entity, Ref<JetBikeVisual>)>,
     heavy_roots: Query<(Entity, Ref<HeavyWaterVehicleVisual>)>,
+    published_roots: Query<(Entity, Ref<PublishedRide>)>,
     children: Query<&Children>,
     parents: Query<&ChildOf>,
     new_renderables: Query<
@@ -1137,6 +1269,9 @@ fn bind_vehicle_visual_render_layers(
             }
             if let Ok((_, visual)) = heavy_roots.get(current) {
                 break Some(visual.owner);
+            }
+            if let Ok((_, ride)) = published_roots.get(current) {
+                break ride.mounted_owner;
             }
             let Ok(parent) = parents.get(current) else {
                 break None;
@@ -1177,6 +1312,16 @@ fn bind_vehicle_visual_render_layers(
             );
         }
     }
+    for (root, ride) in published_roots.iter() {
+        if !ride.is_changed() || ride.is_added() {
+            continue;
+        }
+        if let Some(owner) = ride.mounted_owner {
+            rebind_vehicle_descendants(&mut commands, root, owner, &children, &all_renderables);
+        } else {
+            clear_vehicle_descendant_layers(&mut commands, root, &children, &all_renderables);
+        }
+    }
 }
 
 fn rebind_vehicle_descendants(
@@ -1193,6 +1338,22 @@ fn rebind_vehicle_descendants(
         };
         if existing != Some(&target) {
             commands.entity(descendant).insert(target.clone());
+        }
+    }
+}
+
+fn clear_vehicle_descendant_layers(
+    commands: &mut Commands,
+    root: Entity,
+    children: &Query<&Children>,
+    renderables: &Query<Option<&RenderLayers>, With<Mesh3d>>,
+) {
+    for descendant in children.iter_descendants(root) {
+        if renderables
+            .get(descendant)
+            .is_ok_and(|layer| layer.is_some())
+        {
+            commands.entity(descendant).remove::<RenderLayers>();
         }
     }
 }
@@ -1805,6 +1966,10 @@ fn apply_vehicle_buffs(
     >,
 ) {
     let turbo_active = state.turbo_active();
+    let active_owner = state.active_owner;
+    let published_tuning = state.active_published_tuning;
+    let published_kind = state.active_published_kind;
+    let legacy_armor_bonus = state.mech_armor_bonus;
     for (idx, mut mv, mut jet, mut stats, mut damageable) in q.iter_mut() {
         let slot_index = idx.0 as usize;
         let Some(slot) = state.baselines.get_mut(slot_index) else {
@@ -1818,50 +1983,63 @@ fn apply_vehicle_buffs(
             jet_max_vertical_vel: jet.max_vertical_vel,
         });
 
-        let is_active_owner = state.active_owner == Some(idx.0);
+        let is_active_owner = active_owner == Some(idx.0);
 
         // Ground movement
         if is_active_owner {
-            match state.ground_mode {
-                GroundMode::None => {
-                    if !state.boat_active {
-                        mv.walk_speed = baseline.walk_speed;
-                        mv.sprint_speed = baseline.sprint_speed;
-                    } else {
-                        // Slow on boat deck
-                        mv.walk_speed = baseline.walk_speed.min(0.58);
-                        mv.sprint_speed = baseline.sprint_speed.min(0.82);
+            if let (Some(tuning), Some(PublishedRideKind::Ground(_))) =
+                (published_tuning, published_kind)
+            {
+                mv.walk_speed = baseline.walk_speed.max(tuning.walk_speed);
+                mv.sprint_speed = baseline.sprint_speed.max(if turbo_active {
+                    tuning.turbo_sprint_speed
+                } else {
+                    tuning.sprint_speed
+                });
+            } else {
+                match state.ground_mode {
+                    GroundMode::None => {
+                        if !state.boat_active {
+                            mv.walk_speed = baseline.walk_speed;
+                            mv.sprint_speed = baseline.sprint_speed;
+                        } else {
+                            // Slow on boat deck
+                            mv.walk_speed = baseline.walk_speed.min(0.58);
+                            mv.sprint_speed = baseline.sprint_speed.min(0.82);
+                        }
                     }
-                }
-                GroundMode::Motorcycle => {
-                    mv.walk_speed = baseline.walk_speed.max(0.70);
-                    mv.sprint_speed =
-                        baseline
-                            .sprint_speed
-                            .max(if turbo_active { 1.42 } else { 1.10 });
-                }
-                GroundMode::Tank => {
-                    // Slow, armored, and immune to accumulated knockback.
-                    mv.walk_speed = baseline
-                        .walk_speed
-                        .min(if turbo_active { 0.46 } else { 0.32 });
-                    mv.sprint_speed =
-                        baseline
-                            .sprint_speed
-                            .min(if turbo_active { 0.58 } else { 0.42 });
-                    mv.knockback_velocity = Vec3::ZERO;
-                    damageable.pending_knockback = Vec3::ZERO;
-                }
-                GroundMode::GiantMech => {
-                    mv.walk_speed = baseline
-                        .walk_speed
-                        .min(if turbo_active { 0.34 } else { 0.24 });
-                    mv.sprint_speed =
-                        baseline
-                            .sprint_speed
-                            .min(if turbo_active { 0.46 } else { 0.34 });
-                    mv.knockback_velocity = Vec3::ZERO;
-                    damageable.pending_knockback = Vec3::ZERO;
+                    GroundMode::Motorcycle => {
+                        mv.walk_speed = baseline.walk_speed.max(0.70);
+                        mv.sprint_speed =
+                            baseline
+                                .sprint_speed
+                                .max(if turbo_active { 1.42 } else { 1.10 });
+                    }
+                    GroundMode::Tank => {
+                        // Slow, armored, and immune to accumulated knockback.
+                        mv.walk_speed =
+                            baseline
+                                .walk_speed
+                                .min(if turbo_active { 0.46 } else { 0.32 });
+                        mv.sprint_speed =
+                            baseline
+                                .sprint_speed
+                                .min(if turbo_active { 0.58 } else { 0.42 });
+                        mv.knockback_velocity = Vec3::ZERO;
+                        damageable.pending_knockback = Vec3::ZERO;
+                    }
+                    GroundMode::GiantMech => {
+                        mv.walk_speed =
+                            baseline
+                                .walk_speed
+                                .min(if turbo_active { 0.34 } else { 0.24 });
+                        mv.sprint_speed =
+                            baseline
+                                .sprint_speed
+                                .min(if turbo_active { 0.46 } else { 0.34 });
+                        mv.knockback_velocity = Vec3::ZERO;
+                        damageable.pending_knockback = Vec3::ZERO;
+                    }
                 }
             }
         } else {
@@ -1871,31 +2049,47 @@ fn apply_vehicle_buffs(
 
         // Air / jetpack
         if is_active_owner {
-            match state.air_mode {
-                AirMode::None => {
-                    jet.force = baseline.jet_force;
-                    jet.regen_rate = baseline.jet_regen_rate;
-                    jet.max_vertical_vel = baseline.jet_max_vertical_vel;
-                }
-                AirMode::Jet => {
-                    jet.force = baseline
-                        .jet_force
-                        .max(if turbo_active { 0.17 } else { 0.12 });
-                    jet.regen_rate = baseline.jet_regen_rate.max(80.0);
-                    jet.max_vertical_vel =
-                        baseline
-                            .jet_max_vertical_vel
-                            .max(if turbo_active { 0.90 } else { 0.7 });
-                }
-                AirMode::Ship => {
-                    jet.force = baseline
-                        .jet_force
-                        .max(if turbo_active { 0.25 } else { 0.18 });
-                    jet.regen_rate = baseline.jet_regen_rate.max(120.0);
-                    jet.max_vertical_vel =
-                        baseline
-                            .jet_max_vertical_vel
-                            .max(if turbo_active { 1.42 } else { 1.1 });
+            if let (Some(tuning), Some(PublishedRideKind::Flight(_))) =
+                (published_tuning, published_kind)
+            {
+                jet.force = baseline.jet_force.max(if turbo_active {
+                    (tuning.jet_force * 1.22).min(0.28)
+                } else {
+                    tuning.jet_force
+                });
+                jet.regen_rate = baseline.jet_regen_rate.max(tuning.jet_regen_rate);
+                jet.max_vertical_vel = baseline
+                    .jet_max_vertical_vel
+                    .max(tuning.jet_max_vertical_velocity);
+            } else {
+                match state.air_mode {
+                    AirMode::None => {
+                        jet.force = baseline.jet_force;
+                        jet.regen_rate = baseline.jet_regen_rate;
+                        jet.max_vertical_vel = baseline.jet_max_vertical_vel;
+                    }
+                    AirMode::Jet => {
+                        jet.force = baseline
+                            .jet_force
+                            .max(if turbo_active { 0.17 } else { 0.12 });
+                        jet.regen_rate = baseline.jet_regen_rate.max(80.0);
+                        jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(if turbo_active {
+                            0.90
+                        } else {
+                            0.7
+                        });
+                    }
+                    AirMode::Ship => {
+                        jet.force = baseline
+                            .jet_force
+                            .max(if turbo_active { 0.25 } else { 0.18 });
+                        jet.regen_rate = baseline.jet_regen_rate.max(120.0);
+                        jet.max_vertical_vel = baseline.jet_max_vertical_vel.max(if turbo_active {
+                            1.42
+                        } else {
+                            1.1
+                        });
+                    }
                 }
             }
         } else {
@@ -1906,7 +2100,7 @@ fn apply_vehicle_buffs(
 
         // Tank / Mech armor bonus applied to current stats (not max, to avoid save drift)
         let desired_armor_bonus = if is_active_owner {
-            state.mech_armor_bonus
+            published_tuning.map_or(legacy_armor_bonus, |tuning| tuning.armor_bonus)
         } else {
             0.0
         };
@@ -2297,6 +2491,117 @@ mod tests {
 
         state.boat_active = true;
         assert_eq!(active_heavy_water_profile(&state), None);
+
+        state.boat_active = false;
+        state.active_published_ride = Some(Entity::PLACEHOLDER);
+        assert_eq!(
+            active_heavy_water_profile(&state),
+            None,
+            "an authored ride must never spawn a legacy ATV/fighter body over itself"
+        );
+    }
+
+    #[test]
+    fn authored_ground_tuning_applies_to_one_owner_and_restores_on_eject() {
+        let spec =
+            crate::vehicle_forge::VehicleSpec::preset(crate::vehicle_forge::VehicleClass::Truck);
+        let tuning = PublishedRideTuning::from_vehicle(&spec);
+        let mut app = App::new();
+        app.add_systems(Update, apply_vehicle_buffs);
+        app.insert_resource(VehicleState {
+            ground_mode: GroundMode::Motorcycle,
+            active_owner: Some(0),
+            active_published_ride: Some(Entity::PLACEHOLDER),
+            active_published_kind: Some(PublishedRideKind::Ground(spec.class)),
+            active_published_tuning: Some(tuning),
+            ..default()
+        });
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(0),
+                PlayerMovement {
+                    walk_speed: 0.24,
+                    sprint_speed: 0.48,
+                    ..default()
+                },
+                JetpackState::default(),
+                PlayerStats {
+                    armor: 50.0,
+                    max_armor: 100.0,
+                    ..default()
+                },
+                Damageable::default(),
+            ))
+            .id();
+
+        app.update();
+        let movement = app.world().get::<PlayerMovement>(player).unwrap();
+        assert_eq!(movement.walk_speed, tuning.walk_speed);
+        assert_eq!(movement.sprint_speed, tuning.sprint_speed);
+        assert!(app.world().get::<PlayerStats>(player).unwrap().armor > 50.0);
+
+        app.world_mut()
+            .resource_mut::<VehicleState>()
+            .deactivate_all_vehicle();
+        app.update();
+        let movement = app.world().get::<PlayerMovement>(player).unwrap();
+        assert_eq!((movement.walk_speed, movement.sprint_speed), (0.24, 0.48));
+        assert!((app.world().get::<PlayerStats>(player).unwrap().armor - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn authored_fighter_tuning_uses_the_existing_flight_motor_and_restores() {
+        let spec = crate::spaceship_forge::SpacecraftSpec::preset(
+            crate::spaceship_forge::SpacecraftClass::Fighter,
+        );
+        let tuning = PublishedRideTuning::from_spacecraft(&spec).unwrap();
+        let mut app = App::new();
+        app.add_systems(Update, apply_vehicle_buffs);
+        app.insert_resource(VehicleState {
+            air_mode: AirMode::Jet,
+            active_owner: Some(0),
+            active_published_ride: Some(Entity::PLACEHOLDER),
+            active_published_kind: Some(PublishedRideKind::Flight(spec.class)),
+            active_published_tuning: Some(tuning),
+            ..default()
+        });
+        let baseline = JetpackState::default();
+        let player = app
+            .world_mut()
+            .spawn((
+                Player,
+                PlayerIndex(0),
+                PlayerMovement::default(),
+                baseline.clone(),
+                PlayerStats::default(),
+                Damageable::default(),
+            ))
+            .id();
+
+        app.update();
+        let jet = app.world().get::<JetpackState>(player).unwrap();
+        assert_eq!(jet.force, baseline.force.max(tuning.jet_force));
+        assert_eq!(
+            jet.regen_rate,
+            baseline.regen_rate.max(tuning.jet_regen_rate)
+        );
+        assert_eq!(
+            jet.max_vertical_vel,
+            baseline
+                .max_vertical_vel
+                .max(tuning.jet_max_vertical_velocity)
+        );
+
+        app.world_mut()
+            .resource_mut::<VehicleState>()
+            .deactivate_all_vehicle();
+        app.update();
+        let jet = app.world().get::<JetpackState>(player).unwrap();
+        assert_eq!(jet.force, baseline.force);
+        assert_eq!(jet.regen_rate, baseline.regen_rate);
+        assert_eq!(jet.max_vertical_vel, baseline.max_vertical_vel);
     }
 
     #[test]

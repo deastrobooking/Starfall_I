@@ -21,7 +21,8 @@ use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::engine_tools::vehicle_records;
 use crate::resources::{AuthoringTextInputCapture, AuthoringUnsavedChanges, GameSettings};
 use crate::vehicle_forge::{
-    BodyStyle, DriveLayout, VehicleClass, VehicleIssueSeverity, VehicleSpec,
+    despawn_generated_vehicle, spawn_vehicle, vehicle_preview_scale, BodyStyle, DriveLayout,
+    GeneratedVehicleAssets, VehicleClass, VehicleIssueSeverity, VehicleSpec,
 };
 
 pub struct VehicleForgePlugin;
@@ -361,14 +362,29 @@ fn setup_vehicle_forge(
 
 fn teardown_vehicle_forge(
     mut commands: Commands,
-    roots: Query<Entity, Or<(With<VehicleForgeRoot>, With<VehiclePreviewRoot>)>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    roots: Query<
+        (Entity, Option<&GeneratedVehicleAssets>),
+        Or<(With<VehicleForgeRoot>, With<VehiclePreviewRoot>)>,
+    >,
     mut text_capture: ResMut<AuthoringTextInputCapture>,
     mut unsaved: ResMut<AuthoringUnsavedChanges>,
 ) {
     text_capture.active = false;
     unsaved.active = false;
-    for entity in roots.iter() {
-        commands.entity(entity).despawn();
+    for (entity, generated_assets) in roots.iter() {
+        if generated_assets.is_some() {
+            despawn_generated_vehicle(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                entity,
+                generated_assets,
+            );
+        } else {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -1139,192 +1155,37 @@ fn vehicle_forge_preview_rebuild_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: ResMut<VehicleForgeState>,
-    previews: Query<Entity, With<VehiclePreviewRoot>>,
+    previews: Query<(Entity, Option<&GeneratedVehicleAssets>), With<VehiclePreviewRoot>>,
 ) {
     if !state.dirty {
         return;
     }
     state.dirty = false;
-    for entity in previews.iter() {
-        commands.entity(entity).despawn();
+    for (entity, generated_assets) in previews.iter() {
+        despawn_generated_vehicle(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            entity,
+            generated_assets,
+        );
     }
     let spec = state.spec.clone().sanitized();
-    spawn_vehicle_preview(&mut commands, &mut meshes, &mut materials, &spec);
-}
-
-fn material_from_rgba(
-    materials: &mut Assets<StandardMaterial>,
-    rgba: [f32; 4],
-    metallic: f32,
-    roughness: f32,
-    emissive: f32,
-) -> Handle<StandardMaterial> {
-    materials.add(StandardMaterial {
-        base_color: Color::srgba(rgba[0], rgba[1], rgba[2], rgba[3]),
-        metallic,
-        perceptual_roughness: roughness,
-        emissive: LinearRgba::rgb(rgba[0] * emissive, rgba[1] * emissive, rgba[2] * emissive),
-        ..default()
-    })
-}
-
-fn spawn_vehicle_preview(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    spec: &VehicleSpec,
-) -> Entity {
-    let primary = material_from_rgba(materials, spec.palette.primary, 0.72, 0.32, 0.0);
-    let secondary = material_from_rgba(materials, spec.palette.secondary, 0.82, 0.28, 0.0);
-    let accent = material_from_rgba(materials, spec.palette.accent, 0.55, 0.30, 0.0);
-    let glow = material_from_rgba(materials, spec.palette.emissive, 0.18, 0.18, 4.0);
-    let glass = materials.add(StandardMaterial {
-        base_color: Color::srgba(0.12, 0.28, 0.38, 0.72),
-        metallic: 0.25,
-        perceptual_roughness: 0.12,
-        alpha_mode: AlphaMode::Blend,
-        ..default()
-    });
-
-    let preview_scale = (6.4 / spec.length.max(spec.width)).min(1.0);
-    let root = commands
-        .spawn((
+    if let Ok(root) = spawn_vehicle(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &spec,
+        Vec3::ZERO,
+    ) {
+        let preview_scale = vehicle_preview_scale(&spec);
+        commands.entity(root).insert((
             VehiclePreviewRoot,
-            Transform::from_xyz(0.0, spec.wheel_radius * preview_scale + 0.05, 0.0)
-                .with_scale(Vec3::splat(preview_scale)),
-            Visibility::Visible,
-        ))
-        .id();
-
-    commands
-        .entity(root)
-        .with_children(|craft| match spec.class {
-            VehicleClass::Boat => {
-                let hull_height = spec.height * 0.48;
-                craft.spawn((
-                    Mesh3d(meshes.add(Capsule3d::new(spec.width * 0.46, spec.length * 0.72))),
-                    MeshMaterial3d(primary.clone()),
-                    Transform::from_xyz(0.0, hull_height * 0.46, 0.0)
-                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
-                        .with_scale(Vec3::new(1.0, 1.0, 0.42)),
-                ));
-                craft.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(
-                        spec.width * 0.78,
-                        spec.height * 0.42,
-                        spec.length * 0.36,
-                    ))),
-                    MeshMaterial3d(glass.clone()),
-                    Transform::from_xyz(
-                        0.0,
-                        spec.height * 0.58,
-                        (spec.cabin_position - 0.5) * spec.length * 0.8,
-                    ),
-                ));
-                for side in [-1.0_f32, 1.0] {
-                    craft.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.08, 0.12, spec.length * 0.72))),
-                        MeshMaterial3d(glow.clone()),
-                        Transform::from_xyz(side * spec.width * 0.46, spec.height * 0.32, 0.0),
-                    ));
-                }
-            }
-            VehicleClass::Motorcycle => {
-                for z in [-spec.length * 0.34, spec.length * 0.34] {
-                    craft.spawn((
-                        Mesh3d(meshes.add(Torus::new(spec.wheel_radius * 0.62, spec.wheel_radius))),
-                        MeshMaterial3d(secondary.clone()),
-                        Transform::from_xyz(0.0, spec.wheel_radius, z)
-                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
-                    ));
-                }
-                craft.spawn((
-                    Mesh3d(meshes.add(Capsule3d::new(spec.width * 0.22, spec.length * 0.58))),
-                    MeshMaterial3d(primary.clone()),
-                    Transform::from_xyz(0.0, spec.wheel_radius * 1.65, 0.0)
-                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
-                        .with_scale(Vec3::new(1.0, 1.0, 0.68)),
-                ));
-                craft.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(spec.width * 0.68, 0.16, spec.length * 0.34))),
-                    MeshMaterial3d(accent.clone()),
-                    Transform::from_xyz(0.0, spec.wheel_radius * 2.05, spec.length * 0.05),
-                ));
-                craft.spawn((
-                    Mesh3d(meshes.add(Sphere::new(0.11))),
-                    MeshMaterial3d(glow.clone()),
-                    Transform::from_xyz(0.0, spec.wheel_radius * 2.0, -spec.length * 0.38),
-                ));
-            }
-            VehicleClass::Car | VehicleClass::Truck => {
-                let body_y = spec.wheel_radius + spec.ground_clearance + spec.height * 0.28;
-                let (body_width, body_height, body_length) = match spec.body_style {
-                    BodyStyle::Sport => (1.0, 0.82, 1.0),
-                    BodyStyle::Utility => (1.02, 1.0, 0.98),
-                    BodyStyle::Armored => (1.08, 1.12, 1.0),
-                    BodyStyle::Touring => (0.96, 0.94, 1.04),
-                };
-                craft.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(
-                        spec.width * body_width,
-                        spec.height * 0.52 * body_height,
-                        spec.length * body_length,
-                    ))),
-                    MeshMaterial3d(primary.clone()),
-                    Transform::from_xyz(0.0, body_y, 0.0),
-                ));
-                let cabin_length = if spec.class == VehicleClass::Truck {
-                    spec.length * 0.32
-                } else {
-                    spec.length * 0.52
-                };
-                craft.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(
-                        spec.width * 0.78,
-                        spec.height * 0.46,
-                        cabin_length,
-                    ))),
-                    MeshMaterial3d(glass.clone()),
-                    Transform::from_xyz(
-                        0.0,
-                        body_y + spec.height * 0.42,
-                        (spec.cabin_position - 0.5) * (spec.length - cabin_length),
-                    ),
-                ));
-                if spec.class == VehicleClass::Truck {
-                    craft.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(
-                            spec.width * 0.92,
-                            spec.height * 0.42,
-                            spec.length * 0.46,
-                        ))),
-                        MeshMaterial3d(secondary.clone()),
-                        Transform::from_xyz(0.0, body_y + spec.height * 0.20, spec.length * 0.22),
-                    ));
-                }
-                let axle_z = spec.length * 0.34;
-                for x in [-spec.width * 0.48, spec.width * 0.48] {
-                    for z in [-axle_z, axle_z] {
-                        craft.spawn((
-                            Mesh3d(
-                                meshes.add(Torus::new(spec.wheel_radius * 0.58, spec.wheel_radius)),
-                            ),
-                            MeshMaterial3d(secondary.clone()),
-                            Transform::from_xyz(x, spec.wheel_radius, z)
-                                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
-                        ));
-                    }
-                }
-                for x in [-spec.width * 0.30, spec.width * 0.30] {
-                    craft.spawn((
-                        Mesh3d(meshes.add(Sphere::new(0.11))),
-                        MeshMaterial3d(glow.clone()),
-                        Transform::from_xyz(x, body_y, -spec.length * 0.51),
-                    ));
-                }
-            }
-        });
-    root
+            // Wheel centers are authored at one local wheel radius, so the
+            // compiled tire bottoms already sit at local ground zero.
+            Transform::from_xyz(0.0, 0.05, 0.0).with_scale(Vec3::splat(preview_scale)),
+        ));
+    }
 }
 
 fn vehicle_forge_preview_spin_system(
@@ -1387,6 +1248,10 @@ mod tests {
             let world = app.world_mut();
             let mut roots = world.query_filtered::<Entity, With<VehiclePreviewRoot>>();
             let root = roots.single(world).expect("exactly one preview root");
+            let generated = world
+                .get::<crate::vehicle_forge::GeneratedVehicle>(root)
+                .expect("preview uses the shared runtime compiler");
+            assert_eq!(generated.class, class);
             let parts = world.get::<Children>(root).map_or(0, Children::len);
             assert!(parts >= 3, "{} preview is incomplete", class.label());
         }

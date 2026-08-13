@@ -10,8 +10,10 @@
 
 use std::collections::BTreeMap;
 
-use bevy::prelude::Resource;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+
+use crate::engine::rendering::{PbrBundle, SpatialBundle};
 
 pub const VEHICLE_SCHEMA_VERSION: u32 = 1;
 
@@ -519,6 +521,381 @@ impl PublishedVehicleCatalog {
     }
 }
 
+/// Stable metadata carried by every procedural Vehicle Forge hierarchy.
+///
+/// The complete sanitized recipe is retained as a session snapshot so a live
+/// catalog refresh cannot change a parked or mounted craft underneath a
+/// player.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct GeneratedVehicle {
+    pub content_id: String,
+    pub schema_version: u32,
+    pub class: VehicleClass,
+    pub stats: DerivedVehicleStats,
+    pub spec: VehicleSpec,
+}
+
+/// Strong handles allocated by one procedural vehicle compilation.
+///
+/// Bevy's asset collections outlive the entities that reference them. Call
+/// [`despawn_generated_vehicle`] when replacing previews or runtime visuals so
+/// those per-instance assets are reclaimed as well.
+#[derive(Component, Debug, Clone, Default)]
+pub struct GeneratedVehicleAssets {
+    meshes: Vec<Handle<Mesh>>,
+    materials: Vec<Handle<StandardMaterial>>,
+}
+
+impl GeneratedVehicleAssets {
+    pub fn mesh_count(&self) -> usize {
+        self.meshes.len()
+    }
+
+    pub fn material_count(&self) -> usize {
+        self.materials.len()
+    }
+
+    pub fn release(&self, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) {
+        for mesh in &self.meshes {
+            meshes.remove(mesh.id());
+        }
+        for material in &self.materials {
+            materials.remove(material.id());
+        }
+    }
+}
+
+/// Validation failure returned by the runtime-safe procedural compiler.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VehicleSpawnError {
+    pub issues: Vec<VehicleValidationIssue>,
+}
+
+impl std::fmt::Display for VehicleSpawnError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "vehicle recipe has {} blocking validation issue(s)",
+            self.issues
+                .iter()
+                .filter(|issue| issue.severity == VehicleIssueSeverity::Error)
+                .count()
+        )
+    }
+}
+
+impl std::error::Error for VehicleSpawnError {}
+
+/// Release compiler-owned assets and recursively despawn a generated root.
+/// `try_despawn` keeps this composable with broad world teardown systems.
+pub fn despawn_generated_vehicle(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    generated_assets: Option<&GeneratedVehicleAssets>,
+) {
+    if let Some(generated_assets) = generated_assets {
+        generated_assets.release(meshes, materials);
+    }
+    commands.entity(root).try_despawn();
+}
+
+fn vehicle_color(value: [f32; 4]) -> Color {
+    Color::srgba(value[0], value[1], value[2], value[3])
+}
+
+fn add_vehicle_part(
+    commands: &mut Commands,
+    parent: Entity,
+    meshes: &mut Assets<Mesh>,
+    generated_assets: &mut GeneratedVehicleAssets,
+    material: Handle<StandardMaterial>,
+    mesh: impl Into<Mesh>,
+    transform: Transform,
+    name: &'static str,
+) {
+    let mesh = meshes.add(mesh.into());
+    generated_assets.meshes.push(mesh.clone());
+    let child = commands
+        .spawn((
+            PbrBundle {
+                mesh: Mesh3d(mesh),
+                material: MeshMaterial3d(material),
+                transform,
+                ..default()
+            },
+            Name::new(name),
+        ))
+        .id();
+    commands.entity(parent).add_child(child);
+}
+
+/// Compile one validated recipe into a procedural hierarchy at authored metre
+/// scale. Editor and runtime consumers uniformly scale only the returned root,
+/// preserving every recipe proportion.
+pub fn spawn_vehicle(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    spec: &VehicleSpec,
+    position: Vec3,
+) -> Result<Entity, VehicleSpawnError> {
+    let issues = spec.validate();
+    if issues
+        .iter()
+        .any(|issue| issue.severity == VehicleIssueSeverity::Error)
+    {
+        return Err(VehicleSpawnError { issues });
+    }
+    let spec = spec.clone().sanitized();
+
+    let primary = materials.add(StandardMaterial {
+        base_color: vehicle_color(spec.palette.primary),
+        metallic: 0.72,
+        perceptual_roughness: 0.32,
+        ..default()
+    });
+    let secondary = materials.add(StandardMaterial {
+        base_color: vehicle_color(spec.palette.secondary),
+        metallic: 0.82,
+        perceptual_roughness: 0.28,
+        ..default()
+    });
+    let accent = materials.add(StandardMaterial {
+        base_color: vehicle_color(spec.palette.accent),
+        metallic: 0.55,
+        perceptual_roughness: 0.30,
+        ..default()
+    });
+    let emissive_color = vehicle_color(spec.palette.emissive);
+    let glow = materials.add(StandardMaterial {
+        base_color: emissive_color,
+        emissive: LinearRgba::from(emissive_color) * 4.0,
+        metallic: 0.18,
+        perceptual_roughness: 0.18,
+        ..default()
+    });
+    let glass = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.12, 0.28, 0.38, 0.72),
+        metallic: 0.25,
+        perceptual_roughness: 0.12,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+    let mut generated_assets = GeneratedVehicleAssets {
+        meshes: Vec::new(),
+        materials: vec![
+            primary.clone(),
+            secondary.clone(),
+            accent.clone(),
+            glow.clone(),
+            glass.clone(),
+        ],
+    };
+    let root = commands
+        .spawn((
+            SpatialBundle::from_transform(Transform::from_translation(position)),
+            GeneratedVehicle {
+                content_id: spec.content_id.clone(),
+                schema_version: spec.schema_version,
+                class: spec.class,
+                stats: spec.derived_stats(),
+                spec: spec.clone(),
+            },
+            Name::new(spec.display_name.clone()),
+        ))
+        .id();
+
+    match spec.class {
+        VehicleClass::Boat => {
+            let hull_height = spec.height * 0.48;
+            add_vehicle_part(
+                commands,
+                root,
+                meshes,
+                &mut generated_assets,
+                primary,
+                Capsule3d::new(spec.width * 0.46, spec.length * 0.72),
+                Transform::from_xyz(0.0, hull_height * 0.46, 0.0)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::new(1.0, 1.0, 0.42)),
+                "Vehicle Boat Hull",
+            );
+            add_vehicle_part(
+                commands,
+                root,
+                meshes,
+                &mut generated_assets,
+                glass,
+                Cuboid::new(spec.width * 0.78, spec.height * 0.42, spec.length * 0.36),
+                Transform::from_xyz(
+                    0.0,
+                    spec.height * 0.58,
+                    (spec.cabin_position - 0.5) * spec.length * 0.8,
+                ),
+                "Vehicle Boat Cabin",
+            );
+            for side in [-1.0_f32, 1.0] {
+                add_vehicle_part(
+                    commands,
+                    root,
+                    meshes,
+                    &mut generated_assets,
+                    glow.clone(),
+                    Cuboid::new(0.08, 0.12, spec.length * 0.72),
+                    Transform::from_xyz(side * spec.width * 0.46, spec.height * 0.32, 0.0),
+                    "Vehicle Boat Running Light",
+                );
+            }
+        }
+        VehicleClass::Motorcycle => {
+            for z in [-spec.length * 0.34, spec.length * 0.34] {
+                add_vehicle_part(
+                    commands,
+                    root,
+                    meshes,
+                    &mut generated_assets,
+                    secondary.clone(),
+                    Torus::new(spec.wheel_radius * 0.62, spec.wheel_radius),
+                    Transform::from_xyz(0.0, spec.wheel_radius, z)
+                        .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                    "Vehicle Motorcycle Wheel",
+                );
+            }
+            add_vehicle_part(
+                commands,
+                root,
+                meshes,
+                &mut generated_assets,
+                primary,
+                Capsule3d::new(spec.width * 0.22, spec.length * 0.58),
+                Transform::from_xyz(0.0, spec.wheel_radius * 1.65, 0.0)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::new(1.0, 1.0, 0.68)),
+                "Vehicle Motorcycle Frame",
+            );
+            add_vehicle_part(
+                commands,
+                root,
+                meshes,
+                &mut generated_assets,
+                accent,
+                Cuboid::new(spec.width * 0.68, 0.16, spec.length * 0.34),
+                Transform::from_xyz(0.0, spec.wheel_radius * 2.05, spec.length * 0.05),
+                "Vehicle Motorcycle Seat",
+            );
+            add_vehicle_part(
+                commands,
+                root,
+                meshes,
+                &mut generated_assets,
+                glow,
+                Sphere::new(0.11),
+                Transform::from_xyz(0.0, spec.wheel_radius * 2.0, -spec.length * 0.38),
+                "Vehicle Motorcycle Lamp",
+            );
+        }
+        VehicleClass::Car | VehicleClass::Truck => {
+            let body_y = spec.wheel_radius + spec.ground_clearance + spec.height * 0.28;
+            let (body_width, body_height, body_length) = match spec.body_style {
+                BodyStyle::Sport => (1.0, 0.82, 1.0),
+                BodyStyle::Utility => (1.02, 1.0, 0.98),
+                BodyStyle::Armored => (1.08, 1.12, 1.0),
+                BodyStyle::Touring => (0.96, 0.94, 1.04),
+            };
+            add_vehicle_part(
+                commands,
+                root,
+                meshes,
+                &mut generated_assets,
+                primary,
+                Cuboid::new(
+                    spec.width * body_width,
+                    spec.height * 0.52 * body_height,
+                    spec.length * body_length,
+                ),
+                Transform::from_xyz(0.0, body_y, 0.0),
+                "Vehicle Body",
+            );
+            let cabin_length = if spec.class == VehicleClass::Truck {
+                spec.length * 0.32
+            } else {
+                spec.length * 0.52
+            };
+            add_vehicle_part(
+                commands,
+                root,
+                meshes,
+                &mut generated_assets,
+                glass,
+                Cuboid::new(spec.width * 0.78, spec.height * 0.46, cabin_length),
+                Transform::from_xyz(
+                    0.0,
+                    body_y + spec.height * 0.42,
+                    (spec.cabin_position - 0.5) * (spec.length - cabin_length),
+                ),
+                "Vehicle Cabin",
+            );
+            if spec.class == VehicleClass::Truck {
+                add_vehicle_part(
+                    commands,
+                    root,
+                    meshes,
+                    &mut generated_assets,
+                    secondary.clone(),
+                    Cuboid::new(spec.width * 0.92, spec.height * 0.42, spec.length * 0.46),
+                    Transform::from_xyz(0.0, body_y + spec.height * 0.20, spec.length * 0.22),
+                    "Vehicle Cargo Bed",
+                );
+            }
+            let axle_z = spec.length * 0.34;
+            for x in [-spec.width * 0.48, spec.width * 0.48] {
+                for z in [-axle_z, axle_z] {
+                    add_vehicle_part(
+                        commands,
+                        root,
+                        meshes,
+                        &mut generated_assets,
+                        secondary.clone(),
+                        Torus::new(spec.wheel_radius * 0.58, spec.wheel_radius),
+                        Transform::from_xyz(x, spec.wheel_radius, z)
+                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                        "Vehicle Wheel",
+                    );
+                }
+            }
+            for x in [-spec.width * 0.30, spec.width * 0.30] {
+                add_vehicle_part(
+                    commands,
+                    root,
+                    meshes,
+                    &mut generated_assets,
+                    glow.clone(),
+                    Sphere::new(0.11),
+                    Transform::from_xyz(x, body_y, -spec.length * 0.51),
+                    "Vehicle Lamp",
+                );
+            }
+        }
+    }
+    debug_assert!(generated_assets.mesh_count() > 0);
+    debug_assert_eq!(generated_assets.material_count(), 5);
+    commands.entity(root).insert(generated_assets);
+    Ok(root)
+}
+
+/// Uniformly scales an authored hierarchy into a bounded presentation extent.
+pub fn vehicle_presentation_scale(spec: &VehicleSpec, longest_extent: f32) -> f32 {
+    let spec = spec.clone().sanitized();
+    longest_extent.clamp(1.0, 24.0) / spec.length.max(spec.width).max(spec.height).max(1.0)
+}
+
+/// Uniform viewport framing shared by every Vehicle Forge preview class.
+pub fn vehicle_preview_scale(spec: &VehicleSpec) -> f32 {
+    vehicle_presentation_scale(spec, 6.4).min(1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,5 +952,64 @@ mod tests {
             0
         );
         assert_eq!(catalog.len(), 1);
+    }
+
+    #[test]
+    fn every_class_compiles_with_owned_assets_and_metadata() {
+        use bevy::asset::AssetPlugin;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>();
+
+        for class in VehicleClass::ALL {
+            let spec = VehicleSpec::preset(class);
+            let root = app
+                .world_mut()
+                .resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+                    world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
+                        let mut commands = world.commands();
+                        spawn_vehicle(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            &spec,
+                            Vec3::ZERO,
+                        )
+                        .expect("publishable preset compiles")
+                    })
+                });
+            app.world_mut().flush();
+
+            let generated = app.world().get::<GeneratedVehicle>(root).unwrap();
+            assert_eq!(generated.class, class);
+            assert_eq!(generated.spec, spec);
+            let owned = app
+                .world()
+                .get::<GeneratedVehicleAssets>(root)
+                .cloned()
+                .unwrap();
+            assert!(
+                owned.mesh_count() >= 3,
+                "{} needs a complete kit",
+                class.label()
+            );
+            assert_eq!(owned.material_count(), 5);
+
+            app.world_mut()
+                .resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+                    world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
+                        owned.release(&mut meshes, &mut materials);
+                        world.commands().entity(root).try_despawn();
+                    });
+                });
+            app.world_mut().flush();
+        }
+        assert!(app.world().resource::<Assets<Mesh>>().is_empty());
+        assert!(app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .is_empty());
     }
 }

@@ -56,6 +56,8 @@ use crate::plugins::input_plugin::{
     mapped_gamepad_face, mapped_native_face, NativeButton, NativeControllerState,
 };
 use crate::resources::GameSettings;
+use crate::spaceship_forge::PublishedSpacecraftCatalog;
+use crate::vehicle_forge::PublishedVehicleCatalog;
 use persistence::{
     validate_project, AdapterOverrideDraft, DraftPrimitive, EditorSceneDraft, ForgeProject,
     GenericRecipeDraft, LevelTemplate, ProceduralRecipeDraft, ProjectIoError, ProjectLoadSource,
@@ -739,6 +741,8 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<PublishedMaterialCatalog>()
             .init_resource::<PublishedProceduralRecipeCatalog>()
             .init_resource::<PublishedCreatureCatalog>()
+            .init_resource::<PublishedVehicleCatalog>()
+            .init_resource::<PublishedSpacecraftCatalog>()
             .init_resource::<PublishedContentCatalogEpoch>()
             .init_resource::<EditorRegistryState>()
             .init_resource::<WorldKitPreviewState>()
@@ -2054,6 +2058,34 @@ fn rebuild_published_content_catalogs(world: &mut World, project: &ForgeProject)
         })
         .collect();
     world.resource_mut::<PublishedCreatureCatalog>().entries = creatures;
+
+    let vehicles = project
+        .records
+        .iter()
+        .filter(|record| {
+            record.category == persistence::ContentCategory::Vehicle
+                && record.published_hash.as_ref() == Some(&record.draft_hash)
+                && record.published_hash.is_some()
+        })
+        .filter_map(|record| vehicle_records::load_vehicle(project, &record.content_id).ok())
+        .collect::<Vec<_>>();
+    world
+        .resource_mut::<PublishedVehicleCatalog>()
+        .replace(vehicles);
+
+    let spacecraft = project
+        .records
+        .iter()
+        .filter(|record| {
+            record.category == persistence::ContentCategory::Spaceship
+                && record.published_hash.as_ref() == Some(&record.draft_hash)
+                && record.published_hash.is_some()
+        })
+        .filter_map(|record| spaceship_records::load_spaceship(project, &record.content_id).ok())
+        .collect::<Vec<_>>();
+    world
+        .resource_mut::<PublishedSpacecraftCatalog>()
+        .replace(spacecraft);
 
     let mut epoch = world.resource_mut::<PublishedContentCatalogEpoch>();
     epoch.0 = epoch.0.wrapping_add(1).max(1);
@@ -8766,6 +8798,8 @@ mod tests {
         world.init_resource::<PublishedMaterialCatalog>();
         world.init_resource::<PublishedProceduralRecipeCatalog>();
         world.init_resource::<PublishedCreatureCatalog>();
+        world.init_resource::<PublishedVehicleCatalog>();
+        world.init_resource::<PublishedSpacecraftCatalog>();
         world.init_resource::<PublishedContentCatalogEpoch>();
         world.init_resource::<WorldKitPreviewState>();
         world.init_resource::<WorldKitSandboxState>();

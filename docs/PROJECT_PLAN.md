@@ -113,9 +113,13 @@ and boot; verification gains a consumer-build check.
 - Game-side loader (`world::published_content`, both editions): published
   weapons register into the blade resolver and go on sale in the shop priced
   by the forge's own derivation; published creatures load into a
-  `PublishedCreatures` spec pool; vehicle and spacecraft recipes load into
-  runtime-safe catalogs ready for explicit gameplay adapters. Missing files
-  are a first-class empty state.
+  `PublishedCreatures` spec pool. Vehicle recipes compile into mountable
+  ground rides or authored boat-route visuals; fighter and bomber recipes use
+  the existing flight motor, and all five spacecraft roles project into the
+  liberated-site strategic fleet and raid-defense score. Catalog bootstrap
+  runs before the initial state transition, and a successful in-process
+  publish refreshes both craft catalogs without restarting. Missing files are
+  a first-class empty state.
 - Covered by determinism, round-trip, missing-file, resolver, and shop-pricing
   tests. Encounters consume published creatures: the baked seed fills the same
   `PublishedCreatureCatalog` the dungeon spawners already resolve overrides

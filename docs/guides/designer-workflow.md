@@ -100,8 +100,17 @@ type. Fighter, Bomber, Destroyer, Command Ship, and Base presets lead into
 shape, system, and palette controls with derived statistics; the project
 library supports SAVE, LOAD, and DELETE. Vehicle and spacecraft records remain
 separate so ground-vehicle and flight-runtime adapters can evolve without
-ambiguous payloads. This slice does not claim gameplay spawning or flight
-controls for authored spacecraft.
+ambiguous payloads. Published cars, trucks, and motorcycles become nearby
+mountable rides through the existing vehicle input; boats reskin authored
+world routes. Fighters and bombers use the existing flight motor, while every
+spacecraft class also projects into the strategic fleet at liberated sites.
+Destroyers, command ships, and orbital bases are strategic assets rather than
+avatar-scale mounts.
+
+Runtime craft are reconstructed deterministically from the published
+generation for each play session. Their stable recipe IDs and compiled tuning
+do not alter the legacy campaign vehicle enums; per-craft damage/readiness
+persistence is a separate save-schema milestone.
 
 ## Publishing
 
@@ -114,10 +123,13 @@ controls for authored spacecraft.
    `assets/published/` as deterministic JSON (sorted by id — republishing
    without edits is byte-identical).
 
-The result appears in the hub status line. The Game edition loads
-`assets/published/` read-only at startup: published weapons go on sale priced
-by the forge's own derivation, published creatures become spawnable, and
-vehicle/spacecraft recipes populate stable catalogs for runtime adapters.
+The result appears in the hub status line and refreshes craft catalogs in the
+same Designer process. The Game edition loads `assets/published/` read-only
+before the first state transition: published weapons go on sale priced by the
+forge's own derivation, published creatures become spawnable, and vehicle and
+spacecraft recipes populate their gameplay adapters. Packaged builds may set
+`STARFALL_ASSET_ROOT`; otherwise an `assets/` folder beside the executable is
+preferred before the development checkout fallback.
 Missing files are a first-class empty state, so a build with no published
 content is simply the base game.
 

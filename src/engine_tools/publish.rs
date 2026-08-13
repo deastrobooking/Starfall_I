@@ -174,9 +174,7 @@ impl PublishReport {
 
 /// The directory the Game edition reads published content from.
 pub fn published_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("assets")
-        .join("published")
+    crate::engine::platform_paths::asset_root().join("published")
 }
 
 /// Collect every publishable weapon, sorted by content id for deterministic

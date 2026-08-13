@@ -716,6 +716,52 @@ pub struct GeneratedSpacecraft {
     pub stats: SpacecraftDerivedStats,
 }
 
+/// Strong handles allocated while compiling one spacecraft hierarchy.
+///
+/// Bevy does not immediately reclaim procedurally inserted `Assets` when the
+/// entities that reference them are despawned. Runtime adapters and Forge
+/// previews can pass this component to [`despawn_generated_spacecraft`] so
+/// repeated reconciliation does not leave orphan meshes/materials behind.
+#[derive(Component, Debug, Clone, Default)]
+pub struct GeneratedSpacecraftAssets {
+    meshes: Vec<Handle<Mesh>>,
+    materials: Vec<Handle<StandardMaterial>>,
+}
+
+impl GeneratedSpacecraftAssets {
+    pub fn mesh_count(&self) -> usize {
+        self.meshes.len()
+    }
+
+    pub fn material_count(&self) -> usize {
+        self.materials.len()
+    }
+
+    pub fn release(&self, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) {
+        for mesh in &self.meshes {
+            meshes.remove(mesh.id());
+        }
+        for material in &self.materials {
+            materials.remove(material.id());
+        }
+    }
+}
+
+/// Release compiler-owned assets and recursively despawn a generated root.
+/// `try_despawn` makes this safe to compose with broad world teardown systems.
+pub fn despawn_generated_spacecraft(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    root: Entity,
+    generated_assets: Option<&GeneratedSpacecraftAssets>,
+) {
+    if let Some(generated_assets) = generated_assets {
+        generated_assets.release(meshes, materials);
+    }
+    commands.entity(root).try_despawn();
+}
+
 fn srgb(value: [f32; 4]) -> Color {
     Color::srgba(value[0], value[1], value[2], value[3])
 }
@@ -724,15 +770,18 @@ fn add_part(
     commands: &mut Commands,
     parent: Entity,
     meshes: &mut Assets<Mesh>,
+    generated_assets: &mut GeneratedSpacecraftAssets,
     material: Handle<StandardMaterial>,
     mesh: impl Into<Mesh>,
     transform: Transform,
     name: &'static str,
 ) {
+    let mesh = meshes.add(mesh.into());
+    generated_assets.meshes.push(mesh.clone());
     let child = commands
         .spawn((
             PbrBundle {
-                mesh: Mesh3d(meshes.add(mesh.into())),
+                mesh: Mesh3d(mesh),
                 material: MeshMaterial3d(material),
                 transform,
                 ..default()
@@ -794,6 +843,16 @@ pub fn spawn_spacecraft(
         alpha_mode: AlphaMode::Blend,
         ..default()
     });
+    let mut generated_assets = GeneratedSpacecraftAssets {
+        meshes: Vec::new(),
+        materials: vec![
+            primary.clone(),
+            secondary.clone(),
+            accent.clone(),
+            emissive.clone(),
+            glass.clone(),
+        ],
+    };
 
     let root = commands
         .spawn((
@@ -810,13 +869,32 @@ pub fn spawn_spacecraft(
 
     if spec.class == SpacecraftClass::Base {
         spawn_base_geometry(
-            commands, meshes, root, &spec, primary, secondary, accent, emissive, glass,
+            commands,
+            meshes,
+            &mut generated_assets,
+            root,
+            &spec,
+            primary,
+            secondary,
+            accent,
+            emissive,
+            glass,
         );
     } else {
         spawn_ship_geometry(
-            commands, meshes, root, &spec, primary, secondary, accent, emissive, glass,
+            commands,
+            meshes,
+            &mut generated_assets,
+            root,
+            &spec,
+            primary,
+            secondary,
+            accent,
+            emissive,
+            glass,
         );
     }
+    commands.entity(root).insert(generated_assets);
     Ok(root)
 }
 
@@ -824,6 +902,7 @@ pub fn spawn_spacecraft(
 fn spawn_ship_geometry(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
+    generated_assets: &mut GeneratedSpacecraftAssets,
     root: Entity,
     spec: &SpacecraftSpec,
     primary: Handle<StandardMaterial>,
@@ -839,6 +918,7 @@ fn spawn_ship_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         primary.clone(),
         Sphere::new(1.0),
         Transform::from_xyz(0.0, 0.0, l * 0.02).with_scale(Vec3::new(w * 0.42, h * 0.48, l * 0.42)),
@@ -848,6 +928,7 @@ fn spawn_ship_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         secondary.clone(),
         Cuboid::new(w * 0.48, h * 0.34, l * 0.64),
         Transform::from_xyz(0.0, -h * 0.15, l * 0.04),
@@ -858,6 +939,7 @@ fn spawn_ship_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         accent.clone(),
         Sphere::new(1.0),
         Transform::from_xyz(0.0, 0.0, -l * 0.43).with_scale(Vec3::new(
@@ -875,6 +957,7 @@ fn spawn_ship_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             primary.clone(),
             Cuboid::new(exposed_wing, (h * 0.09).max(0.16), wing_chord),
             Transform::from_xyz(side * (w * 0.20 + exposed_wing * 0.50), -h * 0.08, l * 0.06)
@@ -887,6 +970,7 @@ fn spawn_ship_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         glass,
         Sphere::new(1.0),
         Transform::from_xyz(0.0, h * 0.42, -l * 0.16).with_scale(Vec3::new(
@@ -900,6 +984,7 @@ fn spawn_ship_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         accent.clone(),
         Cuboid::new((w * 0.06).max(0.18), h * 0.78, l * 0.20),
         Transform::from_xyz(0.0, h * 0.43, l * 0.30),
@@ -919,6 +1004,7 @@ fn spawn_ship_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             emissive.clone(),
             Cylinder::new(radius, (l * 0.10 * spec.engine_scale).max(0.45)),
             Transform::from_xyz(fraction * w * 0.72, -h * 0.12, l * 0.47)
@@ -937,6 +1023,7 @@ fn spawn_ship_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             emissive.clone(),
             Cylinder::new((h * 0.025).max(0.10), (l * 0.10).clamp(0.7, 5.0)),
             Transform::from_xyz(x, h * 0.08, z)
@@ -952,6 +1039,7 @@ fn spawn_ship_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             secondary.clone(),
             Cuboid::new(w * 0.08, h * 0.24, l * 0.16),
             Transform::from_xyz(side * w * 0.43, -h * 0.08, z),
@@ -964,6 +1052,7 @@ fn spawn_ship_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             accent.clone(),
             Cuboid::new(w * 0.10, h * 0.28, l * 0.08),
             Transform::from_xyz(x, h * 0.51, l * 0.04),
@@ -977,6 +1066,7 @@ fn spawn_ship_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             emissive.clone(),
             Sphere::new((h * 0.055).max(0.12)),
             Transform::from_xyz(angle.cos() * w * 0.38, h * 0.30, angle.sin() * l * 0.30),
@@ -989,6 +1079,7 @@ fn spawn_ship_geometry(
 fn spawn_base_geometry(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
+    generated_assets: &mut GeneratedSpacecraftAssets,
     root: Entity,
     spec: &SpacecraftSpec,
     primary: Handle<StandardMaterial>,
@@ -1003,6 +1094,7 @@ fn spawn_base_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         primary.clone(),
         Torus::new(radius * 0.58, radius),
         Transform::default(),
@@ -1012,6 +1104,7 @@ fn spawn_base_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         secondary.clone(),
         Cylinder::new(radius * 0.16, h * 0.92),
         Transform::default(),
@@ -1021,6 +1114,7 @@ fn spawn_base_geometry(
         commands,
         root,
         meshes,
+        generated_assets,
         glass,
         Sphere::new(radius * 0.20),
         Transform::from_xyz(0.0, h * 0.52, 0.0).with_scale(Vec3::new(1.0, 0.52, 1.0)),
@@ -1032,6 +1126,7 @@ fn spawn_base_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             accent.clone(),
             Cuboid::new(radius * 1.55, h * 0.09, h * 0.18),
             Transform::from_xyz(
@@ -1050,6 +1145,7 @@ fn spawn_base_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             secondary.clone(),
             Cuboid::new(radius * 0.18, h * 0.20, radius * 0.28),
             Transform::from_xyz(angle.cos() * radius, -h * 0.10, angle.sin() * radius)
@@ -1064,6 +1160,7 @@ fn spawn_base_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             emissive.clone(),
             Cylinder::new((h * 0.025).max(0.20), h * 0.22),
             Transform::from_xyz(
@@ -1081,6 +1178,7 @@ fn spawn_base_geometry(
             commands,
             root,
             meshes,
+            generated_assets,
             emissive.clone(),
             Sphere::new((h * 0.045).max(0.22)),
             Transform::from_xyz(
@@ -1093,16 +1191,24 @@ fn spawn_base_geometry(
     }
 }
 
+/// Uniform presentation scale for an authored hierarchy. The compiled child
+/// geometry remains in metres; only the generated root is scaled to a bounded
+/// gameplay or editor envelope.
+pub fn spacecraft_presentation_scale(spec: &SpacecraftSpec, longest_extent: f32) -> f32 {
+    let spec = spec.sanitized();
+    longest_extent.clamp(1.0, 80.0)
+        / spec
+            .hull_length
+            .max(spec.wing_span)
+            .max(spec.hull_width)
+            .max(spec.hull_height)
+            .max(1.0)
+}
+
 /// Uniform scale that frames any class in the Forge preview without changing
 /// the compiler's real-metre geometry.
 pub fn spacecraft_preview_scale(spec: &SpacecraftSpec) -> f32 {
-    let spec = spec.sanitized();
-    9.0 / spec
-        .hull_length
-        .max(spec.wing_span)
-        .max(spec.hull_width)
-        .max(spec.hull_height)
-        .max(1.0)
+    spacecraft_presentation_scale(spec, 9.0)
 }
 
 #[cfg(test)]
@@ -1171,5 +1277,54 @@ mod tests {
         let base = SpacecraftSpec::preset(SpacecraftClass::Base);
         assert!(spacecraft_preview_scale(&base) < spacecraft_preview_scale(&fighter));
         assert_eq!(base.hull_length, 280.0);
+    }
+
+    #[test]
+    fn generated_asset_ownership_releases_compiler_allocations() {
+        use bevy::asset::AssetPlugin;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>();
+        let spec = SpacecraftSpec::preset(SpacecraftClass::Fighter);
+        let root = app
+            .world_mut()
+            .resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+                world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
+                    let mut commands = world.commands();
+                    spawn_spacecraft(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &spec,
+                        Vec3::ZERO,
+                    )
+                    .unwrap()
+                })
+            });
+        app.world_mut().flush();
+        let owned = app
+            .world()
+            .get::<GeneratedSpacecraftAssets>(root)
+            .cloned()
+            .unwrap();
+        assert!(owned.mesh_count() > 0);
+        assert_eq!(owned.material_count(), 5);
+
+        app.world_mut()
+            .resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+                world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
+                    owned.release(&mut meshes, &mut materials);
+                    world.commands().entity(root).try_despawn();
+                });
+            });
+        app.world_mut().flush();
+        assert!(app.world().resource::<Assets<Mesh>>().is_empty());
+        assert!(app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .is_empty());
+        assert!(app.world().get_entity(root).is_err());
     }
 }

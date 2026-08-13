@@ -10,7 +10,10 @@
 //! A fresh install with no published content is a first-class state: missing
 //! files mean empty sets, never errors.
 
+use bevy::app::MainScheduleOrder;
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
+use std::path::PathBuf;
 
 use crate::engine_tools::publish::{
     published_dir, published_generation_in, PublishedGenerationSnapshot, PublishedSpaceship,
@@ -24,12 +27,89 @@ use crate::vehicle_forge::PublishedVehicleCatalog;
 
 pub struct PublishedContentPlugin;
 
+/// Runtime-resolved published-content directory. Tests, portable packages,
+/// and launchers can inject a root without depending on the source checkout.
+#[derive(Resource, Debug, Clone)]
+pub struct PublishedContentRoot(pub PathBuf);
+
+impl Default for PublishedContentRoot {
+    fn default() -> Self {
+        Self(published_dir())
+    }
+}
+
+/// Same-process publisher/editor bridge. The immutable generation manifest is
+/// resolved once when handled, so both craft catalogs advance together.
+#[derive(Message, Debug, Clone, Copy, Default)]
+pub struct ReloadPublishedCraftCatalogs;
+
+/// One-shot content load before Bevy's initial state transition. Direct-to-
+/// Playing boots can therefore resolve authored craft during their first
+/// gameplay reconciliation instead of racing the ordinary Startup schedule.
+#[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PublishedContentBootstrap;
+
 impl Plugin for PublishedContentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PublishedVehicleCatalog>()
             .init_resource::<PublishedSpacecraftCatalog>()
-            .add_systems(Startup, load_published_content);
+            .init_resource::<PublishedContentRoot>()
+            .add_message::<ReloadPublishedCraftCatalogs>()
+            .add_systems(PublishedContentBootstrap, load_published_content)
+            .add_systems(Update, reload_published_craft_catalogs);
+        app.world_mut()
+            .resource_mut::<MainScheduleOrder>()
+            .insert_startup_before(StateTransition, PublishedContentBootstrap);
     }
+}
+
+fn reload_published_craft_catalogs(
+    mut requests: MessageReader<ReloadPublishedCraftCatalogs>,
+    root: Res<PublishedContentRoot>,
+    mut vehicle_catalog: ResMut<PublishedVehicleCatalog>,
+    mut spacecraft_catalog: ResMut<PublishedSpacecraftCatalog>,
+) {
+    if requests.read().next().is_none() {
+        return;
+    }
+    let snapshot = match published_generation_in(&root.0) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            warn!("published craft reload failed: {error}; keeping current catalogs");
+            return;
+        }
+    };
+    let vehicles = read_published::<PublishedVehicle>(&snapshot, "vehicles.json")
+        .into_iter()
+        .filter_map(|published| {
+            (published.spec.content_id == published.content_id)
+                .then_some(published.spec)
+                .or_else(|| {
+                    warn!(
+                        "published vehicle {} embeds a mismatched id; ignoring",
+                        published.content_id
+                    );
+                    None
+                })
+        })
+        .collect::<Vec<_>>();
+    let spacecraft = read_published::<PublishedSpaceship>(&snapshot, "spaceships.json")
+        .into_iter()
+        .filter_map(|published| {
+            (published.spec.content_id == published.content_id)
+                .then_some(published.spec)
+                .or_else(|| {
+                    warn!(
+                        "published spacecraft {} embeds a mismatched id; ignoring",
+                        published.content_id
+                    );
+                    None
+                })
+        })
+        .collect::<Vec<_>>();
+    let vehicle_count = vehicle_catalog.replace(vehicles);
+    let spacecraft_count = spacecraft_catalog.replace(spacecraft);
+    info!("published craft reloaded: {vehicle_count} vehicle(s), {spacecraft_count} spacecraft");
 }
 
 /// Parse a published file, treating "missing" as empty and only warning on
@@ -39,8 +119,16 @@ fn read_published<T: serde::de::DeserializeOwned>(
     file: &str,
 ) -> Vec<T> {
     let path = snapshot.file(file);
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            warn!(
+                "published content {} unreadable ({error}); ignoring",
+                path.display()
+            );
+            return Vec::new();
+        }
     };
     match serde_json::from_str(&text) {
         Ok(items) => items,
@@ -69,6 +157,7 @@ fn shop_item_for_published(weapon: &PublishedWeapon) -> ShopItem {
 }
 
 fn load_published_content(
+    root: Res<PublishedContentRoot>,
     mut shop: ResMut<ShopCatalog>,
     mut creature_catalog: ResMut<PublishedCreatureCatalog>,
     mut vehicle_catalog: ResMut<PublishedVehicleCatalog>,
@@ -77,8 +166,7 @@ fn load_published_content(
     // Keep one immutable manifest resolution for the whole logical load. A
     // publish that commits concurrently is picked up on the next load, never
     // halfway through this cross-category content set.
-    let root = published_dir();
-    let snapshot = match published_generation_in(&root) {
+    let snapshot = match published_generation_in(&root.0) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             warn!("{error}; ignoring published content");
@@ -161,6 +249,7 @@ mod tests {
     use super::*;
     use crate::combat::blades::blade_for_id;
     use crate::combat::weapon_forge::{GripStyle, WeaponSpec};
+    use crate::engine::state::AppState;
     use crate::spaceship_forge::{SpacecraftClass, SpacecraftSpec};
     use crate::vehicle_forge::{VehicleClass, VehicleSpec};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -188,6 +277,106 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn write_craft_generation(root: &std::path::Path) {
+        let generation = "cccccccccccccccc";
+        let directory = root.join("generations").join(generation);
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let mut vehicle = VehicleSpec::preset(VehicleClass::Car);
+        vehicle.content_id = "starfall.vehicle.bootstrap_car".into();
+        let vehicles = [PublishedVehicle {
+            content_id: vehicle.content_id.clone(),
+            spec: vehicle,
+        }];
+        let mut spacecraft = SpacecraftSpec::preset(SpacecraftClass::Fighter);
+        spacecraft.content_id = "starfall.spaceship.bootstrap_fighter".into();
+        let spacecraft = [PublishedSpaceship {
+            content_id: spacecraft.content_id.clone(),
+            spec: spacecraft,
+        }];
+        std::fs::write(
+            directory.join("vehicles.json"),
+            serde_json::to_vec_pretty(&vehicles).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            directory.join("spaceships.json"),
+            serde_json::to_vec_pretty(&spacecraft).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("current.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "generation": generation,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[derive(Resource, Default)]
+    struct CraftBootstrapProbe {
+        entries: usize,
+        vehicles: usize,
+        spacecraft: usize,
+    }
+
+    fn probe_craft_catalogs_on_playing_entry(
+        vehicles: Res<PublishedVehicleCatalog>,
+        spacecraft: Res<PublishedSpacecraftCatalog>,
+        mut probe: ResMut<CraftBootstrapProbe>,
+    ) {
+        probe.entries += 1;
+        probe.vehicles = vehicles.len();
+        probe.spacecraft = spacecraft.len();
+    }
+
+    fn craft_bootstrap_app(root: std::path::PathBuf) -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .init_resource::<ShopCatalog>()
+            .init_resource::<PublishedCreatureCatalog>()
+            .init_resource::<CraftBootstrapProbe>()
+            .add_plugins(PublishedContentPlugin)
+            .insert_resource(PublishedContentRoot(root))
+            .add_systems(
+                OnEnter(AppState::Playing),
+                probe_craft_catalogs_on_playing_entry,
+            );
+        app
+    }
+
+    #[test]
+    fn direct_playing_boot_observes_craft_catalogs_on_first_entry() {
+        let root = test_dir("direct_playing_boot");
+        write_craft_generation(&root);
+        let mut app = craft_bootstrap_app(root.clone());
+        app.insert_state(AppState::Playing);
+        app.update();
+
+        let probe = app.world().resource::<CraftBootstrapProbe>();
+        assert_eq!((probe.entries, probe.vehicles, probe.spacecraft), (1, 1, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn menu_to_playing_uses_the_same_bootstrapped_craft_snapshot() {
+        let root = test_dir("menu_playing_boot");
+        write_craft_generation(&root);
+        let mut app = craft_bootstrap_app(root.clone());
+        app.update();
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Playing);
+        app.update();
+
+        let probe = app.world().resource::<CraftBootstrapProbe>();
+        assert_eq!((probe.entries, probe.vehicles, probe.spacecraft), (1, 1, 1));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

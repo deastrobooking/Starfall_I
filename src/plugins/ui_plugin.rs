@@ -76,6 +76,8 @@ use crate::world::missions::{
     active_custom_mission, chapter_mission, mission_for_travel_anchor, CustomMissionState,
     SPECIAL_MISSION_TRAVEL_POINTS,
 };
+use crate::world::published_content::ReloadPublishedCraftCatalogs;
+use crate::world::published_craft::PublishedFleet;
 use crate::world::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::world::settlement_economy::SettlementEconomy;
 use crate::world::shop_transactions;
@@ -1860,6 +1862,7 @@ fn project_hub_action_system(
     mut next_state: ResMut<NextState<AppState>>,
     mut next_tool_mode: ResMut<NextState<EngineToolMode>>,
     mut hub_status: Query<&mut Text, With<ProjectHubStatusText>>,
+    mut craft_reload: MessageWriter<ReloadPublishedCraftCatalogs>,
 ) {
     for (interaction, button) in interactions.iter() {
         if *interaction != Interaction::Pressed {
@@ -1919,7 +1922,10 @@ fn project_hub_action_system(
             ProjectHubAction::Publish => {
                 let outcome = crate::engine_tools::publish::publish_active_project(&registry);
                 let message = match outcome {
-                    Ok(report) => format!("PUBLISHED ✓  {}", report.summary()),
+                    Ok(report) => {
+                        craft_reload.write(ReloadPublishedCraftCatalogs);
+                        format!("PUBLISHED ✓  {}", report.summary())
+                    }
                     Err(error) => format!("PUBLISH FAILED — {error}"),
                 };
                 info!("{message}");
@@ -8184,7 +8190,14 @@ fn loadout_panel_system(
                 "A selected special replaces RT until PRIMARY FIRE is chosen.".to_string()
             }
             LoadoutTab::Rides => {
-                "Rocket Hoverboard: jump to launch, hold jump for lift, LB to boost.".to_string()
+                if let Some(content_id) = vehicle_state.active_published_content_id.as_deref() {
+                    format!(
+                        "Authored craft {content_id} is active. Use the vehicle input to park it; hold sprint for its tuned turbo."
+                    )
+                } else {
+                    "Walk to a published craft and use the vehicle input to mount it. Rocket Hoverboard remains available from this loadout."
+                        .to_string()
+                }
             }
             LoadoutTab::Relics => relic_detail_text(&progression.upgrades, selected),
         });
@@ -9328,6 +9341,7 @@ fn toggle_command_overlay(
 fn update_command_overlay(
     state: Res<CommandOverlayState>,
     command_registry: Res<CommandRegistry>,
+    published_fleet: Option<Res<PublishedFleet>>,
     site_registry: Res<WorldSiteRegistry>,
     mut text_q: Query<&mut Text, With<CommandOverlayText>>,
 ) {
@@ -9343,7 +9357,17 @@ fn update_command_overlay(
 
     for site in &site_registry.sites {
         let at_site = command_registry.assets_at_site(site.id);
-        if at_site.is_empty() {
+        let published_at_site = published_fleet
+            .as_ref()
+            .map(|fleet| {
+                fleet
+                    .assets
+                    .values()
+                    .filter(|asset| asset.assigned_site == Some(site.id))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if at_site.is_empty() && published_at_site.is_empty() {
             continue;
         }
         lines.push(format!("{} [{:?}]:", site.name, site.state));
@@ -9353,6 +9377,16 @@ fn update_command_overlay(
                 a.kind.label(),
                 a.health,
                 a.readiness
+            ));
+        }
+        for asset in published_at_site {
+            lines.push(format!(
+                "  {} [{}] hp:{} rd:{} def:{}",
+                asset.display_name,
+                asset.role.label(),
+                asset.health,
+                asset.readiness,
+                asset.defense_contribution(),
             ));
         }
     }
@@ -9370,7 +9404,34 @@ fn update_command_overlay(
         }
     }
 
-    if command_registry.assets.is_empty() {
+    let published_reserve = published_fleet
+        .as_ref()
+        .map(|fleet| {
+            fleet
+                .assets
+                .values()
+                .filter(|asset| asset.assigned_site.is_none())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !published_reserve.is_empty() {
+        lines.push("Published reserve:".to_string());
+        for asset in published_reserve {
+            lines.push(format!(
+                "  {} [{}] hp:{} rd:{}",
+                asset.display_name,
+                asset.role.label(),
+                asset.health,
+                asset.readiness,
+            ));
+        }
+    }
+
+    if command_registry.assets.is_empty()
+        && published_fleet
+            .as_ref()
+            .is_none_or(|fleet| fleet.assets.is_empty())
+    {
         lines.push("No command assets yet.".to_string());
     }
 

@@ -33,6 +33,7 @@ pub mod heavy_water;
 pub mod heavy_world_events;
 pub mod missions;
 pub mod published_content;
+pub mod published_craft;
 pub mod raids;
 pub mod robot_pets;
 pub mod settlement_economy;

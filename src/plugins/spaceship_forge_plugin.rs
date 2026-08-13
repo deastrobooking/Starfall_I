@@ -21,8 +21,8 @@ use crate::engine_tools::spaceship_records;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::resources::{AuthoringTextInputCapture, AuthoringUnsavedChanges, GameSettings};
 use crate::spaceship_forge::{
-    spacecraft_preview_scale, spawn_spacecraft, SpacecraftClass, SpacecraftSpec,
-    SpacecraftValidationSeverity,
+    despawn_generated_spacecraft, spacecraft_preview_scale, spawn_spacecraft,
+    GeneratedSpacecraftAssets, SpacecraftClass, SpacecraftSpec, SpacecraftValidationSeverity,
 };
 
 pub struct SpaceshipForgePlugin;
@@ -442,14 +442,29 @@ fn setup_spaceship_forge(
 
 fn teardown_spaceship_forge(
     mut commands: Commands,
-    roots: Query<Entity, Or<(With<SpaceshipForgeRoot>, With<SpaceshipPreviewRoot>)>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    roots: Query<
+        (Entity, Option<&GeneratedSpacecraftAssets>),
+        Or<(With<SpaceshipForgeRoot>, With<SpaceshipPreviewRoot>)>,
+    >,
     mut text_capture: ResMut<AuthoringTextInputCapture>,
     mut unsaved: ResMut<AuthoringUnsavedChanges>,
 ) {
     text_capture.active = false;
     unsaved.active = false;
-    for entity in roots.iter() {
-        commands.entity(entity).despawn();
+    for (entity, generated_assets) in roots.iter() {
+        if generated_assets.is_some() {
+            despawn_generated_spacecraft(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                entity,
+                generated_assets,
+            );
+        } else {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -1098,14 +1113,20 @@ fn spaceship_preview_rebuild_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: ResMut<SpaceshipForgeState>,
-    previews: Query<Entity, With<SpaceshipPreviewRoot>>,
+    previews: Query<(Entity, Option<&GeneratedSpacecraftAssets>), With<SpaceshipPreviewRoot>>,
 ) {
     if !state.dirty {
         return;
     }
     state.dirty = false;
-    for entity in previews.iter() {
-        commands.entity(entity).despawn();
+    for (entity, generated_assets) in previews.iter() {
+        despawn_generated_spacecraft(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            entity,
+            generated_assets,
+        );
     }
     match spawn_spacecraft(
         &mut commands,

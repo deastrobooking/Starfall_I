@@ -10,6 +10,24 @@ const CRASH_LOG_PREFIX: &str = "starfall_crash_";
 const CRASH_LOG_SUFFIX: &str = ".log";
 const MAX_CRASH_LOGS: usize = 5;
 
+/// Runtime asset root. Development keeps the repository `assets/` directory;
+/// packaged builds can place `assets/` beside the executable or inject an
+/// explicit root without retaining the build machine's manifest path.
+pub fn asset_root() -> PathBuf {
+    if let Some(path) = std::env::var_os("STARFALL_ASSET_ROOT").filter(|path| !path.is_empty()) {
+        return PathBuf::from(path);
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            let adjacent = parent.join("assets");
+            if adjacent.is_dir() {
+                return adjacent;
+            }
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
+}
+
 /// Platform-appropriate writable application directory.
 pub fn data_root() -> PathBuf {
     dirs::data_dir()
