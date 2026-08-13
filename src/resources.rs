@@ -68,6 +68,13 @@ pub struct AuthoringTextInputCapture {
     pub active: bool,
 }
 
+/// Authoring screens set this while an unsaved document should intercept the
+/// shared Escape/controller Back action instead of leaving immediately.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct AuthoringUnsavedChanges {
+    pub active: bool,
+}
+
 // ── Game Settings ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ControllerGlyphStyle {

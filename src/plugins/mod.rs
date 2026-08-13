@@ -22,8 +22,12 @@ pub mod player_plugin;
 pub mod radio_plugin;
 pub mod robot_garage_plugin;
 pub mod save_plugin;
+#[cfg(feature = "designer")]
+pub mod spaceship_forge_plugin;
 pub mod ui_foundation;
 pub mod ui_plugin;
+#[cfg(feature = "designer")]
+pub mod vehicle_forge_plugin;
 pub mod vehicle_plugin;
 #[cfg(feature = "designer")]
 pub mod weapon_forge_plugin;
@@ -54,7 +58,11 @@ pub use player_plugin::PlayerPlugin;
 pub use radio_plugin::RadioPlugin;
 pub use robot_garage_plugin::RobotGaragePlugin;
 pub use save_plugin::SavePlugin;
+#[cfg(feature = "designer")]
+pub use spaceship_forge_plugin::SpaceshipForgePlugin;
 pub use ui_plugin::UiPlugin;
+#[cfg(feature = "designer")]
+pub use vehicle_forge_plugin::VehicleForgePlugin;
 pub use vehicle_plugin::VehiclePlugin;
 #[cfg(feature = "designer")]
 pub use weapon_forge_plugin::WeaponForgePlugin;

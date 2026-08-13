@@ -27,6 +27,8 @@ mod engine_tools;
 mod lsystem;
 mod plugins;
 mod robots;
+mod spaceship_forge;
+mod vehicle_forge;
 mod world;
 
 use character::blueprint::{BodyRecipe, CartoonAppearanceRecipe};
@@ -181,6 +183,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         .init_resource::<GameSettings>()
         .init_resource::<resources::UiGameplayCapture>()
         .init_resource::<resources::AuthoringTextInputCapture>()
+        .init_resource::<resources::AuthoringUnsavedChanges>()
         .init_resource::<PlayerScore>()
         .init_resource::<PlaySessionTransition>()
         .init_resource::<LocalPlayerConfig>()
@@ -290,7 +293,12 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
     // A consumer build compiles them out entirely; their AppState variants
     // remain but nothing can enter them.
     #[cfg(feature = "designer")]
-    app.add_plugins((plugins::CreatureForgePlugin, plugins::WeaponForgePlugin));
+    app.add_plugins((
+        plugins::CreatureForgePlugin,
+        plugins::WeaponForgePlugin,
+        plugins::VehicleForgePlugin,
+        plugins::SpaceshipForgePlugin,
+    ));
 }
 
 fn apply_boot_overrides(app: &mut App) {
@@ -304,6 +312,13 @@ fn apply_boot_overrides(app: &mut App) {
     // Boot straight into the modular Weapon Forge for tool iteration.
     if cfg!(feature = "designer") && std::env::var_os("STARFALL_WEAPON_FORGE").is_some() {
         app.insert_state(AppState::WeaponForge);
+    }
+    // Boot straight into either vehicle authoring workspace for tool iteration.
+    if cfg!(feature = "designer") && std::env::var_os("STARFALL_VEHICLE_FORGE").is_some() {
+        app.insert_state(AppState::VehicleForge);
+    }
+    if cfg!(feature = "designer") && std::env::var_os("STARFALL_SPACESHIP_FORGE").is_some() {
+        app.insert_state(AppState::SpaceshipForge);
     }
     // Boot directly into a live chapter with Starfall Forge open for editor
     // smoke tests and rapid tool iteration.
@@ -358,6 +373,13 @@ mod app_smoke_tests {
         assert!(app.is_plugin_added::<HeavyRegionsPlugin>());
         assert!(app.is_plugin_added::<HeavyVehiclePlugin>());
         assert!(app.is_plugin_added::<HeavyWorldEventsPlugin>());
+        #[cfg(feature = "designer")]
+        {
+            assert!(app.is_plugin_added::<plugins::CreatureForgePlugin>());
+            assert!(app.is_plugin_added::<plugins::WeaponForgePlugin>());
+            assert!(app.is_plugin_added::<plugins::VehicleForgePlugin>());
+            assert!(app.is_plugin_added::<plugins::SpaceshipForgePlugin>());
+        }
     }
 
     #[test]

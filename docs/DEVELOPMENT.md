@@ -46,6 +46,9 @@ Environment switches, all optional:
 | `STARFALL_LEGACY_MOTOR=1` | Run the player motor per-frame instead of fixed-tick |
 | `STARFALL_STUDIO=1` | Boot into Character Studio |
 | `STARFALL_EDITOR=1` | Boot into the editor flow |
+| `STARFALL_WEAPON_FORGE=1` | Boot into Weapon Forge (Designer only) |
+| `STARFALL_VEHICLE_FORGE=1` | Boot into Vehicle Forge (Designer only) |
+| `STARFALL_SPACESHIP_FORGE=1` | Boot into Spaceship Forge (Designer only) |
 | `STARFALL_MUSIC_DIR`, `STARFALL_SFX_DIR` | Override audio asset roots |
 
 Useful in-game keys: **F6** music deck, **F8** controller diagnostics,
@@ -138,10 +141,11 @@ first.
 One codebase produces two products (see [PROJECT_PLAN.md](PROJECT_PLAN.md)):
 the default build is the **Designer** edition; `--no-default-features` is the
 consumer **Game** edition. The `designer` cargo feature gates every authoring
-entry point — the Project Hub menu button, the Creature/Weapon Forge plugins,
-the live-editor toggle (Tab / Select+Start), and designer env hooks. When you
-add a tool, gate its entry point the same way; when you add gameplay, never
-reference designer-gated modules from ungated code.
+entry point — the Project Hub menu button, the
+Creature/Weapon/Vehicle/Spaceship Forge plugins, the live-editor toggle (Tab /
+Select+Start), and designer env hooks. When you add a tool, gate its entry point
+the same way; when you add gameplay, never reference designer-gated modules
+from ungated code.
 
 ## The simulation frame
 

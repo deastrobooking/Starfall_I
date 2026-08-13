@@ -3,7 +3,7 @@
 //! Authoring happens in versioned `ForgeProject` stores that consumers never
 //! see. Publishing is the one-way bridge: validate every draft through the
 //! store's own gate (`ForgeProject::publish_drafts`), then bake the published
-//! weapons and creatures into plain JSON under an immutable generation in
+//! weapons, creatures, vehicles, and spacecraft into plain JSON under an immutable generation in
 //! `assets/published/`. A manifest committed last selects the complete
 //! generation. The consumer Game edition loads those files and nothing else;
 //! it has no writer for any of this.
@@ -21,9 +21,13 @@ use super::persistence::{
     ContentCategory, ForgeProject, ProjectIoError, ProjectLoadSource, ProjectStore,
 };
 use super::project_registry::ForgeProjectRegistry;
+use super::spaceship_records;
+use super::vehicle_records;
 use super::weapon_records;
 use crate::combat::weapon_forge::WeaponSpec;
 use crate::robots::creature::CreatureSpec;
+use crate::spaceship_forge::SpacecraftSpec;
+use crate::vehicle_forge::VehicleSpec;
 
 const RECOVERY_LIMIT: usize = 3;
 const PUBLISHED_MANIFEST_SCHEMA: u32 = 1;
@@ -31,6 +35,8 @@ const PUBLISHED_MANIFEST_FILE: &str = "current.json";
 const PUBLISHED_GENERATIONS_DIR: &str = "generations";
 const WEAPONS_FILE: &str = "weapons.json";
 const CREATURES_FILE: &str = "creatures.json";
+const VEHICLES_FILE: &str = "vehicles.json";
+const SPACESHIPS_FILE: &str = "spaceships.json";
 const PUBLISHED_OUTPUT_LOCK_FILE: &str = ".publish.lock";
 
 static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
@@ -100,6 +106,8 @@ struct BakedGeneration {
     generation: String,
     weapons_json: Vec<u8>,
     creatures_json: Vec<u8>,
+    vehicles_json: Vec<u8>,
+    spaceships_json: Vec<u8>,
     manifest_json: Vec<u8>,
     report: PublishReport,
 }
@@ -120,11 +128,27 @@ pub struct PublishedWeapon {
     pub spec: WeaponSpec,
 }
 
+/// A published vehicle recipe paired with its stable project content id.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct PublishedVehicle {
+    pub content_id: String,
+    pub spec: VehicleSpec,
+}
+
+/// A published spacecraft recipe paired with its stable project content id.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct PublishedSpaceship {
+    pub content_id: String,
+    pub spec: SpacecraftSpec,
+}
+
 /// What a publish run produced, for the hub status line.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PublishReport {
     pub weapons: usize,
     pub creatures: usize,
+    pub vehicles: usize,
+    pub spaceships: usize,
     /// Records in categories that have no game-side loader yet.
     pub skipped: usize,
     /// The generation is visible to readers, but the final directory sync
@@ -135,8 +159,8 @@ pub struct PublishReport {
 impl PublishReport {
     pub fn summary(&self) -> String {
         let mut parts = vec![format!(
-            "Published {} weapon(s), {} creature(s)",
-            self.weapons, self.creatures
+            "Published {} weapon(s), {} creature(s), {} vehicle(s), {} spacecraft",
+            self.weapons, self.creatures, self.vehicles, self.spaceships
         )];
         if self.skipped > 0 {
             parts.push(format!("{} record(s) have no loader yet", self.skipped));
@@ -180,6 +204,28 @@ fn bake_creatures(project: &ForgeProject) -> Result<Vec<CreatureSpec>, String> {
     Ok(creatures)
 }
 
+/// Collect every publishable vehicle, sorted by stable content id.
+fn bake_vehicles(project: &ForgeProject) -> Result<Vec<PublishedVehicle>, String> {
+    let mut vehicles = Vec::new();
+    for (content_id, _) in vehicle_records::vehicle_entries(project) {
+        let spec = vehicle_records::load_vehicle(project, &content_id)?;
+        vehicles.push(PublishedVehicle { content_id, spec });
+    }
+    vehicles.sort_by(|a, b| a.content_id.cmp(&b.content_id));
+    Ok(vehicles)
+}
+
+/// Collect every publishable spacecraft, sorted by stable content id.
+fn bake_spaceships(project: &ForgeProject) -> Result<Vec<PublishedSpaceship>, String> {
+    let mut spaceships = Vec::new();
+    for (content_id, _) in spaceship_records::spaceship_entries(project) {
+        let spec = spaceship_records::load_spaceship(project, &content_id)?;
+        spaceships.push(PublishedSpaceship { content_id, spec });
+    }
+    spaceships.sort_by(|a, b| a.content_id.cmp(&b.content_id));
+    Ok(spaceships)
+}
+
 /// Records that exist in the project but have no baked representation yet.
 fn unbaked_record_count(project: &ForgeProject) -> usize {
     project
@@ -188,13 +234,21 @@ fn unbaked_record_count(project: &ForgeProject) -> usize {
         .filter(|record| {
             !matches!(
                 record.category,
-                ContentCategory::Weapon | ContentCategory::Creature
+                ContentCategory::Weapon
+                    | ContentCategory::Creature
+                    | ContentCategory::Vehicle
+                    | ContentCategory::Spaceship
             )
         })
         .count()
 }
 
-fn generation_id(weapons_json: &[u8], creatures_json: &[u8]) -> String {
+fn generation_id(
+    weapons_json: &[u8],
+    creatures_json: &[u8],
+    vehicles_json: &[u8],
+    spaceships_json: &[u8],
+) -> String {
     // Stable FNV-1a rather than DefaultHasher: the id must remain reproducible
     // across processes and Rust releases because it names an immutable output
     // generation checked into source control.
@@ -205,6 +259,10 @@ fn generation_id(weapons_json: &[u8], creatures_json: &[u8]) -> String {
         weapons_json,
         CREATURES_FILE.as_bytes(),
         creatures_json,
+        VEHICLES_FILE.as_bytes(),
+        vehicles_json,
+        SPACESHIPS_FILE.as_bytes(),
+        spaceships_json,
     ] {
         for byte in bytes {
             hash ^= u64::from(*byte);
@@ -215,14 +273,23 @@ fn generation_id(weapons_json: &[u8], creatures_json: &[u8]) -> String {
 }
 
 /// Finish all fallible collection and serialization before touching the
-/// published directory. A malformed weapon/creature therefore cannot disturb
+/// published directory. Any malformed typed recipe therefore cannot disturb
 /// the last committed generation.
 fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String> {
     let weapons = bake_weapons(project)?;
     let creatures = bake_creatures(project)?;
+    let vehicles = bake_vehicles(project)?;
+    let spaceships = bake_spaceships(project)?;
     let weapons_json = serde_json::to_vec_pretty(&weapons).map_err(|e| e.to_string())?;
     let creatures_json = serde_json::to_vec_pretty(&creatures).map_err(|e| e.to_string())?;
-    let generation = generation_id(&weapons_json, &creatures_json);
+    let vehicles_json = serde_json::to_vec_pretty(&vehicles).map_err(|e| e.to_string())?;
+    let spaceships_json = serde_json::to_vec_pretty(&spaceships).map_err(|e| e.to_string())?;
+    let generation = generation_id(
+        &weapons_json,
+        &creatures_json,
+        &vehicles_json,
+        &spaceships_json,
+    );
     let manifest_json = serde_json::to_vec_pretty(&PublishedGenerationManifest {
         schema_version: PUBLISHED_MANIFEST_SCHEMA,
         generation: generation.clone(),
@@ -231,6 +298,8 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
     let report = PublishReport {
         weapons: weapons.len(),
         creatures: creatures.len(),
+        vehicles: vehicles.len(),
+        spaceships: spaceships.len(),
         skipped: unbaked_record_count(project),
         durability_warning: None,
     };
@@ -238,6 +307,8 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
         generation,
         weapons_json,
         creatures_json,
+        vehicles_json,
+        spaceships_json,
         manifest_json,
         report,
     })
@@ -326,7 +397,14 @@ fn generation_matches(path: &Path, baked: &BakedGeneration) -> Result<bool, Stri
         .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
     let creatures = std::fs::read(path.join(CREATURES_FILE))
         .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
-    Ok(weapons == baked.weapons_json && creatures == baked.creatures_json)
+    let vehicles = std::fs::read(path.join(VEHICLES_FILE))
+        .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
+    let spaceships = std::fs::read(path.join(SPACESHIPS_FILE))
+        .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
+    Ok(weapons == baked.weapons_json
+        && creatures == baked.creatures_json
+        && vehicles == baked.vehicles_json
+        && spaceships == baked.spaceships_json)
 }
 
 fn cleanup_staging(path: &Path) {
@@ -384,6 +462,8 @@ fn stage_generation(out_dir: &Path, baked: BakedGeneration) -> Result<StagedGene
     let stage_result = (|| {
         write_synced(&staging_dir.join(WEAPONS_FILE), &baked.weapons_json)?;
         write_synced(&staging_dir.join(CREATURES_FILE), &baked.creatures_json)?;
+        write_synced(&staging_dir.join(VEHICLES_FILE), &baked.vehicles_json)?;
+        write_synced(&staging_dir.join(SPACESHIPS_FILE), &baked.spaceships_json)?;
         File::open(&staging_dir)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| {
@@ -566,7 +646,7 @@ fn bake_project_to_with_promote(
 
 /// Bake a project's publishable content into an immutable generation under
 /// `out_dir`, then atomically commit a manifest that exposes the complete
-/// weapon/creature pair.
+/// complete cross-category content set.
 ///
 /// Separated from the store handling so tests can publish into a temp
 /// directory without touching the repository's real `assets/published/`.
@@ -679,6 +759,8 @@ mod tests {
     use super::*;
     use crate::combat::weapon_forge::{EmitterStyle, GripStyle};
     use crate::engine_tools::persistence::ContentPayload;
+    use crate::spaceship_forge::{SpacecraftClass, SpacecraftSpec};
+    use crate::vehicle_forge::{VehicleClass, VehicleSpec};
     use std::sync::{mpsc, Arc, Barrier};
     use std::thread;
     use std::time::Duration;
@@ -712,14 +794,33 @@ mod tests {
     }
 
     fn complete_project(label: &str) -> ForgeProject {
+        let id_label = label
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
         let mut project = project_with_weapons(&[&format!("{label} Blade")]);
         let creature = CreatureSpec {
-            content_id: format!("starfall.creature.{label}"),
+            content_id: format!("starfall.creature.{id_label}"),
             display_name: format!("{label} Creature"),
             ..Default::default()
         };
         super::super::creature_records::upsert_creature(&mut project, &creature)
             .expect("test creature should save");
+        let mut vehicle = VehicleSpec::preset(VehicleClass::Car);
+        vehicle.display_name = format!("{label} Vehicle");
+        vehicle.content_id = format!("starfall.vehicle.{id_label}");
+        vehicle_records::upsert_vehicle(&mut project, &vehicle).expect("test vehicle should save");
+        let mut spaceship = SpacecraftSpec::preset(SpacecraftClass::Fighter);
+        spaceship.display_name = format!("{label} Spaceship");
+        spaceship.content_id = format!("starfall.spaceship.{id_label}");
+        spaceship_records::upsert_spaceship(&mut project, &spaceship)
+            .expect("test spaceship should save");
         project
     }
 
@@ -736,6 +837,12 @@ mod tests {
         let creatures: Vec<CreatureSpec> =
             serde_json::from_slice(&std::fs::read(generation_dir.join(CREATURES_FILE)).unwrap())
                 .unwrap();
+        let vehicles: Vec<PublishedVehicle> =
+            serde_json::from_slice(&std::fs::read(generation_dir.join(VEHICLES_FILE)).unwrap())
+                .unwrap();
+        let spaceships: Vec<PublishedSpaceship> =
+            serde_json::from_slice(&std::fs::read(generation_dir.join(SPACESHIPS_FILE)).unwrap())
+                .unwrap();
         assert_eq!(weapons.len(), 1);
         assert_eq!(
             weapons[0].content_id,
@@ -745,6 +852,13 @@ mod tests {
         assert_eq!(
             creatures[0].content_id,
             format!("starfall.creature.{label}")
+        );
+        assert_eq!(vehicles.len(), 1);
+        assert_eq!(vehicles[0].content_id, format!("starfall.vehicle.{label}"));
+        assert_eq!(spaceships.len(), 1);
+        assert_eq!(
+            spaceships[0].content_id,
+            format!("starfall.spaceship.{label}")
         );
     }
 
@@ -784,6 +898,16 @@ mod tests {
         )
         .unwrap();
         assert!(creatures.is_empty());
+        let vehicles: Vec<PublishedVehicle> = serde_json::from_str(
+            &std::fs::read_to_string(published_file_in(&dir, VEHICLES_FILE).unwrap()).unwrap(),
+        )
+        .unwrap();
+        let spaceships: Vec<PublishedSpaceship> = serde_json::from_str(
+            &std::fs::read_to_string(published_file_in(&dir, SPACESHIPS_FILE).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert!(vehicles.is_empty());
+        assert!(spaceships.is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -804,6 +928,8 @@ mod tests {
         let mut beta = complete_project("beta");
         store_alpha.save(&mut alpha).unwrap();
         store_beta.save(&mut beta).unwrap();
+        store_alpha.load().expect("alpha fixture must reload");
+        store_beta.load().expect("beta fixture must reload");
 
         let start = Arc::new(Barrier::new(3));
         let alpha_start = Arc::clone(&start);
@@ -1193,6 +1319,8 @@ mod tests {
         let report = PublishReport {
             weapons: 1,
             creatures: 0,
+            vehicles: 0,
+            spaceships: 0,
             skipped: 1,
             durability_warning: None,
         };

@@ -20,6 +20,10 @@ pub enum AppState {
     /// Modular weapon designer — build a sabre from parts and watch the stats
     /// fall out of the physical design.
     WeaponForge,
+    /// Ground-vehicle recipe authoring with a live compiled preview.
+    VehicleForge,
+    /// Spacecraft recipe authoring with a live compiled preview.
+    SpaceshipForge,
     ChapterSelect,
     RobotGarage,
     Playing,

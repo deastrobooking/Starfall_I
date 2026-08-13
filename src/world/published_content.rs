@@ -2,7 +2,8 @@
 //!
 //! Resolves the generation manifest in `assets/published/`, reads its plain
 //! JSON, and makes it playable: published weapons become resolvable blades and
-//! shop stock, published creatures become a spec pool for encounter systems.
+//! shop stock, creatures feed encounter systems, and vehicle/spacecraft recipes
+//! become stable runtime catalogs for gameplay adapters.
 //! This is the *read* half of the pipeline and ships in **both** editions — the
 //! consumer Game edition has no writer, only this.
 //!
@@ -12,17 +13,22 @@
 use bevy::prelude::*;
 
 use crate::engine_tools::publish::{
-    published_dir, published_generation_in, PublishedGenerationSnapshot, PublishedWeapon,
+    published_dir, published_generation_in, PublishedGenerationSnapshot, PublishedSpaceship,
+    PublishedVehicle, PublishedWeapon,
 };
 use crate::engine_tools::PublishedCreatureCatalog;
 use crate::resources::{ShopCatalog, ShopCategory, ShopItem};
 use crate::robots::creature::CreatureSpec;
+use crate::spaceship_forge::PublishedSpacecraftCatalog;
+use crate::vehicle_forge::PublishedVehicleCatalog;
 
 pub struct PublishedContentPlugin;
 
 impl Plugin for PublishedContentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_published_content);
+        app.init_resource::<PublishedVehicleCatalog>()
+            .init_resource::<PublishedSpacecraftCatalog>()
+            .add_systems(Startup, load_published_content);
     }
 }
 
@@ -65,10 +71,12 @@ fn shop_item_for_published(weapon: &PublishedWeapon) -> ShopItem {
 fn load_published_content(
     mut shop: ResMut<ShopCatalog>,
     mut creature_catalog: ResMut<PublishedCreatureCatalog>,
+    mut vehicle_catalog: ResMut<PublishedVehicleCatalog>,
+    mut spacecraft_catalog: ResMut<PublishedSpacecraftCatalog>,
 ) {
     // Keep one immutable manifest resolution for the whole logical load. A
     // publish that commits concurrently is picked up on the next load, never
-    // halfway through this weapon + creature pair.
+    // halfway through this cross-category content set.
     let root = published_dir();
     let snapshot = match published_generation_in(&root) {
         Ok(snapshot) => snapshot,
@@ -108,6 +116,44 @@ fn load_published_content(
             info!("published content: {seeded} creature(s) available to encounters");
         }
     }
+
+    let vehicles: Vec<PublishedVehicle> = read_published(&snapshot, "vehicles.json");
+    if !vehicles.is_empty() {
+        let specs = vehicles.into_iter().filter_map(|published| {
+            if published.spec.content_id != published.content_id {
+                warn!(
+                    "published vehicle {} embeds mismatched id {}; ignoring",
+                    published.content_id, published.spec.content_id
+                );
+                None
+            } else {
+                Some(published.spec)
+            }
+        });
+        let seeded = vehicle_catalog.seed_from_published(specs);
+        if seeded > 0 {
+            info!("published content: {seeded} vehicle design(s) available");
+        }
+    }
+
+    let spaceships: Vec<PublishedSpaceship> = read_published(&snapshot, "spaceships.json");
+    if !spaceships.is_empty() {
+        let specs = spaceships.into_iter().filter_map(|published| {
+            if published.spec.content_id != published.content_id {
+                warn!(
+                    "published spacecraft {} embeds mismatched id {}; ignoring",
+                    published.content_id, published.spec.content_id
+                );
+                None
+            } else {
+                Some(published.spec)
+            }
+        });
+        let seeded = spacecraft_catalog.seed_from_published(specs);
+        if seeded > 0 {
+            info!("published content: {seeded} spacecraft design(s) available");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +161,8 @@ mod tests {
     use super::*;
     use crate::combat::blades::blade_for_id;
     use crate::combat::weapon_forge::{GripStyle, WeaponSpec};
+    use crate::spaceship_forge::{SpacecraftClass, SpacecraftSpec};
+    use crate::vehicle_forge::{VehicleClass, VehicleSpec};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn published(name: &str, id: &str) -> PublishedWeapon {
@@ -253,6 +301,47 @@ mod tests {
         };
         assert_eq!(catalog.seed_from_published(vec![second]), 0);
         assert!(!catalog.contains("starfall.creature.stale"));
+    }
+
+    #[test]
+    fn vehicle_and_spacecraft_catalogs_accept_only_valid_matching_wrappers() {
+        let mut vehicle = VehicleSpec::preset(VehicleClass::Truck);
+        vehicle.content_id = "starfall.vehicle.hauler".into();
+        let good_vehicle = PublishedVehicle {
+            content_id: vehicle.content_id.clone(),
+            spec: vehicle.clone(),
+        };
+        let bad_vehicle = PublishedVehicle {
+            content_id: "starfall.vehicle.impostor".into(),
+            spec: vehicle,
+        };
+        let mut vehicles = PublishedVehicleCatalog::default();
+        let valid_vehicles = [good_vehicle, bad_vehicle]
+            .into_iter()
+            .filter(|published| published.content_id == published.spec.content_id)
+            .map(|published| published.spec);
+        assert_eq!(vehicles.seed_from_published(valid_vehicles), 1);
+        assert!(vehicles.contains("starfall.vehicle.hauler"));
+        assert!(!vehicles.contains("starfall.vehicle.impostor"));
+
+        let mut spacecraft = SpacecraftSpec::preset(SpacecraftClass::Bomber);
+        spacecraft.content_id = "starfall.spaceship.night_bomber".into();
+        let good_spacecraft = PublishedSpaceship {
+            content_id: spacecraft.content_id.clone(),
+            spec: spacecraft.clone(),
+        };
+        let bad_spacecraft = PublishedSpaceship {
+            content_id: "starfall.spaceship.impostor".into(),
+            spec: spacecraft,
+        };
+        let mut spaceships = PublishedSpacecraftCatalog::default();
+        let valid_spacecraft = [good_spacecraft, bad_spacecraft]
+            .into_iter()
+            .filter(|published| published.content_id == published.spec.content_id)
+            .map(|published| published.spec);
+        assert_eq!(spaceships.seed_from_published(valid_spacecraft), 1);
+        assert!(spaceships.get("starfall.spaceship.night_bomber").is_some());
+        assert!(spaceships.get("starfall.spaceship.impostor").is_none());
     }
 
     #[test]

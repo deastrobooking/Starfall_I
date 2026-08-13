@@ -62,11 +62,11 @@ use crate::plugins::input_plugin::{
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
 use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{
-    AuthoringTextInputCapture, ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget,
-    CurrentChapter, DungeonCrawlState, FastTravelDestination, GameSettings,
-    ImportedForgeReturnTarget, LocalPlayerConfig, PlaySessionTransition, PlayerGuidance,
-    PlayerSelectState, ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage, WaveInfo,
-    WorldSiteRegistry, HERO_ROSTER,
+    AuthoringTextInputCapture, AuthoringUnsavedChanges, ChapterProgress, CharacterDesignData,
+    CharacterDesignReturnTarget, CurrentChapter, DungeonCrawlState, FastTravelDestination,
+    GameSettings, ImportedForgeReturnTarget, LocalPlayerConfig, PlaySessionTransition,
+    PlayerGuidance, PlayerSelectState, ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage,
+    WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::world::discussion::DiscussionState;
 use crate::world::heavy_bio::{GrowthStage, GARDEN_PLOT_COUNT};
@@ -479,7 +479,7 @@ struct ProjectHubButton(ProjectHubAction);
 /// outcome where they clicked, not in a log file.
 #[derive(Component)]
 struct ProjectHubStatusText;
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProjectHubAction {
     /// Continue the registry's active project.
     OpenCurrent,
@@ -491,12 +491,49 @@ enum ProjectHubAction {
     CreatureForge,
     /// Open the modular Weapon Forge authoring screen.
     WeaponForge,
+    /// Open the ground-vehicle recipe authoring screen.
+    VehicleForge,
+    /// Open the spacecraft recipe authoring screen.
+    SpaceshipForge,
     /// Validate the active project and bake it to `assets/published/` — the
     /// Designer→Game content bridge (docs/PROJECT_PLAN.md P1).
     Publish,
     /// Open the GLB-based imported character editor.
     ImportedCharacterForge,
     Back,
+}
+
+/// Authoring destinations shown together in the responsive Project Hub. Keep
+/// this one registry as the source for labels, ordering, and state actions so
+/// adding a Forge cannot create a visible button that routes somewhere else.
+fn project_hub_authoring_actions() -> [(&'static str, ProjectHubAction, Color); 5] {
+    [
+        (
+            "CREATURE FORGE",
+            ProjectHubAction::CreatureForge,
+            Color::srgb(0.12, 0.42, 0.28),
+        ),
+        (
+            "WEAPON FORGE",
+            ProjectHubAction::WeaponForge,
+            Color::srgb(0.16, 0.28, 0.52),
+        ),
+        (
+            "VEHICLE FORGE",
+            ProjectHubAction::VehicleForge,
+            Color::srgb(0.42, 0.24, 0.12),
+        ),
+        (
+            "SPACESHIP FORGE",
+            ProjectHubAction::SpaceshipForge,
+            Color::srgb(0.24, 0.18, 0.50),
+        ),
+        (
+            "IMPORTED CHARACTER FORGE",
+            ProjectHubAction::ImportedCharacterForge,
+            Color::srgb(0.12, 0.32, 0.46),
+        ),
+    ]
 }
 
 /// Shared marker applied automatically to every Bevy UI button while a menu is
@@ -1154,6 +1191,7 @@ fn menu_back_navigation(
     native: Res<NativeControllerState>,
     settings: Res<GameSettings>,
     text_input: Res<AuthoringTextInputCapture>,
+    unsaved_changes: Res<AuthoringUnsavedChanges>,
     state: Res<State<AppState>>,
     design_data: Res<CharacterDesignData>,
     imported_forge_return: Res<ImportedForgeReturnTarget>,
@@ -1174,6 +1212,18 @@ fn menu_back_navigation(
     if !back {
         return;
     }
+    if unsaved_changes.active
+        && matches!(
+            state.get(),
+            AppState::VehicleForge | AppState::SpaceshipForge
+        )
+    {
+        return;
+    }
+    if let Some(destination) = forge_back_destination(state.get()) {
+        next_state.set(destination);
+        return;
+    }
 
     match state.get() {
         AppState::MainMenu if main_menu.page == MainMenuPage::Settings => {
@@ -1181,8 +1231,10 @@ fn menu_back_navigation(
         }
         AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
         AppState::ProjectHub => next_state.set(AppState::MainMenu),
-        AppState::CreatureForge => next_state.set(AppState::ProjectHub),
-        AppState::WeaponForge => next_state.set(AppState::ProjectHub),
+        AppState::CreatureForge
+        | AppState::WeaponForge
+        | AppState::VehicleForge
+        | AppState::SpaceshipForge => unreachable!("Forge back routes returned above"),
         AppState::ImportedCharacterForge => next_state.set(match *imported_forge_return {
             ImportedForgeReturnTarget::ProjectHub => AppState::ProjectHub,
             ImportedForgeReturnTarget::PlayerSelect => AppState::PlayerSelect,
@@ -1223,6 +1275,27 @@ fn mapped_menu_face(
         mapped_gamepad_face(bindings, logical),
         mapped_native_face(bindings, logical),
     )
+}
+
+fn project_hub_forge_destination(action: ProjectHubAction) -> Option<AppState> {
+    match action {
+        ProjectHubAction::CreatureForge => Some(AppState::CreatureForge),
+        ProjectHubAction::WeaponForge => Some(AppState::WeaponForge),
+        ProjectHubAction::VehicleForge => Some(AppState::VehicleForge),
+        ProjectHubAction::SpaceshipForge => Some(AppState::SpaceshipForge),
+        _ => None,
+    }
+}
+
+fn forge_back_destination(state: &AppState) -> Option<AppState> {
+    matches!(
+        state,
+        AppState::CreatureForge
+            | AppState::WeaponForge
+            | AppState::VehicleForge
+            | AppState::SpaceshipForge
+    )
+    .then_some(AppState::ProjectHub)
 }
 
 fn default_menu_focus(buttons: &[(Entity, Vec2)]) -> Option<Entity> {
@@ -1712,24 +1785,9 @@ fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>
                 ProjectHubAction::NewProject,
                 Color::srgb(0.14, 0.36, 0.30),
             );
-            spawn_project_hub_button(
-                root,
-                "CREATURE FORGE".to_string(),
-                ProjectHubAction::CreatureForge,
-                Color::srgb(0.12, 0.42, 0.28),
-            );
-            spawn_project_hub_button(
-                root,
-                "WEAPON FORGE".to_string(),
-                ProjectHubAction::WeaponForge,
-                Color::srgb(0.16, 0.28, 0.52),
-            );
-            spawn_project_hub_button(
-                root,
-                "IMPORTED CHARACTER FORGE".to_string(),
-                ProjectHubAction::ImportedCharacterForge,
-                Color::srgb(0.12, 0.32, 0.46),
-            );
+            for (label, action, color) in project_hub_authoring_actions() {
+                spawn_project_hub_button(root, label.to_string(), action, color);
+            }
             spawn_project_hub_button(
                 root,
                 "PUBLISH TO GAME".to_string(),
@@ -1754,14 +1812,7 @@ fn spawn_project_hub_button(
     parent
         .spawn((
             Button,
-            Node {
-                width: Val::Px(310.0),
-                height: Val::Px(52.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
-            },
+            project_hub_button_node(),
             BackgroundColor(color),
             BorderColor::all(Color::srgb(0.62, 0.48, 0.86)),
             ProjectHubButton(action),
@@ -1778,6 +1829,30 @@ fn spawn_project_hub_button(
         });
 }
 
+fn project_hub_requires_active_project(action: ProjectHubAction) -> bool {
+    matches!(
+        action,
+        ProjectHubAction::CreatureForge
+            | ProjectHubAction::WeaponForge
+            | ProjectHubAction::VehicleForge
+            | ProjectHubAction::SpaceshipForge
+            | ProjectHubAction::Publish
+    )
+}
+
+fn project_hub_button_node() -> Node {
+    Node {
+        width: Val::Percent(100.0),
+        max_width: Val::Px(310.0),
+        min_height: Val::Px(52.0),
+        padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        border: UiRect::all(Val::Px(2.0)),
+        ..default()
+    }
+}
+
 fn project_hub_action_system(
     interactions: Query<(&Interaction, &ProjectHubButton), (Changed<Interaction>, With<Button>)>,
     mut registry: ResMut<ForgeProjectRegistry>,
@@ -1788,6 +1863,12 @@ fn project_hub_action_system(
 ) {
     for (interaction, button) in interactions.iter() {
         if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if registry.active.is_none() && project_hub_requires_active_project(button.0) {
+            for mut text in hub_status.iter_mut() {
+                *text = Text::new("Create or open a project before entering an authoring Forge.");
+            }
             continue;
         }
         let enter_editor =
@@ -1823,8 +1904,14 @@ fn project_hub_action_system(
                 }
                 Err(error) => warn!("Could not create a new project: {error}"),
             },
-            ProjectHubAction::CreatureForge => next_state.set(AppState::CreatureForge),
-            ProjectHubAction::WeaponForge => next_state.set(AppState::WeaponForge),
+            ProjectHubAction::CreatureForge
+            | ProjectHubAction::WeaponForge
+            | ProjectHubAction::VehicleForge
+            | ProjectHubAction::SpaceshipForge => {
+                let destination = project_hub_forge_destination(button.0)
+                    .expect("each Forge action has one AppState destination");
+                next_state.set(destination);
+            }
             ProjectHubAction::ImportedCharacterForge => {
                 *imported_forge_return = ImportedForgeReturnTarget::ProjectHub;
                 next_state.set(AppState::ImportedCharacterForge)
@@ -9338,6 +9425,70 @@ mod menu_navigation_tests {
         assert_eq!(node.align_items, AlignItems::Center);
         assert_eq!(node.overflow, Overflow::scroll_y());
         assert!(matches!(node.row_gap, Val::Px(gap) if gap >= 12.0));
+
+        let button = project_hub_button_node();
+        assert_eq!(button.width, Val::Percent(100.0));
+        assert_eq!(button.max_width, Val::Px(310.0));
+        assert!(matches!(button.min_height, Val::Px(height) if height >= 52.0));
+    }
+
+    #[test]
+    fn project_hub_registers_each_forge_once_with_its_exact_label() {
+        let actions = project_hub_authoring_actions();
+        let expected = [
+            ("CREATURE FORGE", ProjectHubAction::CreatureForge),
+            ("WEAPON FORGE", ProjectHubAction::WeaponForge),
+            ("VEHICLE FORGE", ProjectHubAction::VehicleForge),
+            ("SPACESHIP FORGE", ProjectHubAction::SpaceshipForge),
+            (
+                "IMPORTED CHARACTER FORGE",
+                ProjectHubAction::ImportedCharacterForge,
+            ),
+        ];
+
+        assert_eq!(actions.map(|(label, action, _)| (label, action)), expected);
+        for (index, (_, action, _)) in actions.iter().enumerate() {
+            assert!(
+                actions[..index]
+                    .iter()
+                    .all(|(_, previous, _)| previous != action),
+                "each Project Hub destination must have one stable action"
+            );
+        }
+
+        assert_eq!(
+            project_hub_forge_destination(ProjectHubAction::VehicleForge),
+            Some(AppState::VehicleForge)
+        );
+        assert_eq!(
+            project_hub_forge_destination(ProjectHubAction::SpaceshipForge),
+            Some(AppState::SpaceshipForge)
+        );
+        assert_eq!(
+            forge_back_destination(&AppState::VehicleForge),
+            Some(AppState::ProjectHub)
+        );
+        assert_eq!(
+            forge_back_destination(&AppState::SpaceshipForge),
+            Some(AppState::ProjectHub)
+        );
+    }
+
+    #[test]
+    fn project_backed_hub_actions_require_an_active_project() {
+        assert!(project_hub_requires_active_project(
+            ProjectHubAction::VehicleForge
+        ));
+        assert!(project_hub_requires_active_project(
+            ProjectHubAction::SpaceshipForge
+        ));
+        assert!(project_hub_requires_active_project(
+            ProjectHubAction::Publish
+        ));
+        assert!(!project_hub_requires_active_project(
+            ProjectHubAction::NewProject
+        ));
+        assert!(!project_hub_requires_active_project(ProjectHubAction::Back));
     }
 
     #[test]

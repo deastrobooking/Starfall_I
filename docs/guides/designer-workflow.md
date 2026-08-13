@@ -9,10 +9,10 @@ edition's tools. For what the editions *are* and where the boundary sits, read
 ```
 Project Hub → open/create a project
    ↓
-Author (Creature Forge / Weapon Forge / live editor)
+Author (Creature / Weapon / Vehicle / Spaceship Forge / live editor)
    ↓ NAME + SAVE          — versioned records, atomic writes, snapshots
-TEST                       — jump into play holding the design
-   ↓ BACK, tweak, TEST again
+TEST (where supported)     — Creature/Weapon tools can jump into play
+   ↓ BACK, tweak, validate again
 PUBLISH TO GAME            — validate everything, bake assets/published/
    ↓
 cargo build --no-default-features   — the consumer Game edition, content included
@@ -78,6 +78,31 @@ into the same catalog dungeon spawners resolve `CreatureSpawnOverride`
 records through — a published creature id in a spawner override fields your
 creature in a consumer build.
 
+## Vehicle Forge
+
+Reachable from the Project Hub, or directly with
+`STARFALL_VEHICLE_FORGE=1` while iterating on the tool. Start from Boat, Car,
+Truck, or Motorcycle presets, then author the drive/body choices and bounded
+dimensions, wheels, clearance, power, mass, cargo, cabin, aerodynamics,
+suspension, armor, and seats. Derived performance and validation stay beside
+the live procedural preview. SAVE writes the active project through the same
+revision-checked record contract as the other Forges; the library can load or
+delete saved recipes. This first slice authors and publishes vehicle data; it
+does not claim that every recipe already drives a gameplay physics body.
+
+## Spaceship Forge
+
+Reachable from the Project Hub, or directly with
+`STARFALL_SPACESHIP_FORGE=1` during tool development. It follows the same
+project-backed library, validation, shared-window, controller, and live-preview
+contract as Vehicle Forge while keeping spacecraft recipes a distinct content
+type. Fighter, Bomber, Destroyer, Command Ship, and Base presets lead into
+shape, system, and palette controls with derived statistics; the project
+library supports SAVE, LOAD, and DELETE. Vehicle and spacecraft records remain
+separate so ground-vehicle and flight-runtime adapters can evolve without
+ambiguous payloads. This slice does not claim gameplay spawning or flight
+controls for authored spacecraft.
+
 ## Publishing
 
 **PUBLISH TO GAME** in the Project Hub:
@@ -85,14 +110,16 @@ creature in a consumer build.
 1. Runs the store's validate-and-promote gate — one broken record publishes
    nothing.
 2. Persists published hashes into the project.
-3. Bakes weapons and creatures into `assets/published/` as deterministic JSON
-   (sorted by id — republishing without edits is byte-identical).
+3. Bakes weapons, creatures, vehicles, and spacecraft into
+   `assets/published/` as deterministic JSON (sorted by id — republishing
+   without edits is byte-identical).
 
 The result appears in the hub status line. The Game edition loads
 `assets/published/` read-only at startup: published weapons go on sale priced
-by the forge's own derivation; published creatures become spawnable. Missing
-files are a first-class empty state, so a build with no published content is
-simply the base game.
+by the forge's own derivation, published creatures become spawnable, and
+vehicle/spacecraft recipes populate stable catalogs for runtime adapters.
+Missing files are a first-class empty state, so a build with no published
+content is simply the base game.
 
 ## Verifying your content ships
 

@@ -293,8 +293,41 @@ impl ForgeProject {
         else {
             return Err(ProjectValidationError::MissingContent(old_id.into()));
         };
+        let typed_prefix = match record.category {
+            ContentCategory::Vehicle => Some("starfall.vehicle."),
+            ContentCategory::Spaceship => Some("starfall.spaceship."),
+            _ => None,
+        };
+        if typed_prefix
+            .is_some_and(|prefix| !new_id.starts_with(prefix) || new_id.len() == prefix.len())
+        {
+            return Err(ProjectValidationError::InvalidContentId(new_id.into()));
+        }
+        let valid_typed_id = match record.category {
+            ContentCategory::Vehicle => crate::vehicle_forge::valid_content_id(new_id),
+            ContentCategory::Spaceship => crate::spaceship_forge::valid_content_id(new_id),
+            _ => true,
+        };
+        if !valid_typed_id {
+            return Err(ProjectValidationError::InvalidContentId(new_id.into()));
+        }
+        if matches!(
+            new_id,
+            "starfall.vehicle.new_boat"
+                | "starfall.vehicle.new_car"
+                | "starfall.vehicle.new_truck"
+                | "starfall.vehicle.new_motorcycle"
+                | "starfall.spaceship.new_fighter"
+                | "starfall.spaceship.new_bomber"
+                | "starfall.spaceship.new_destroyer"
+                | "starfall.spaceship.new_command_ship"
+                | "starfall.spaceship.new_base"
+        ) {
+            return Err(ProjectValidationError::InvalidContentId(new_id.into()));
+        }
         record.content_id = new_id.into();
-        if let Some(payload) = self.payloads.remove(old_id) {
+        if let Some(mut payload) = self.payloads.remove(old_id) {
+            rewrite_typed_embedded_content_id(&mut payload, new_id);
             self.payloads.insert(new_id.into(), payload);
         }
         for record in &mut self.records {
@@ -394,6 +427,12 @@ impl ForgeProject {
         category: ContentCategory,
         display_name: &str,
     ) -> Result<String, ProjectMutationError> {
+        if matches!(
+            category,
+            ContentCategory::Vehicle | ContentCategory::Spaceship
+        ) {
+            return Err(ProjectMutationError::DedicatedForgeRequired(category));
+        }
         if category == ContentCategory::Scene
             && self
                 .records
@@ -447,26 +486,67 @@ impl ForgeProject {
         if source.category == ContentCategory::Scene {
             return Err(ProjectMutationError::SingleSceneWorkspace);
         }
-        let payload = self
+        let mut payload = self
             .payloads
             .get(content_id)
             .cloned()
             .ok_or_else(|| ProjectMutationError::MissingPayload(content_id.into()))?;
-        let new_id = unique_value(&format!("{content_id}_copy"), |candidate| {
-            self.records
-                .iter()
-                .any(|record| record.content_id == candidate)
-        });
+        let id_limit = match source.category {
+            ContentCategory::Vehicle | ContentCategory::Spaceship => 96,
+            _ => usize::MAX,
+        };
+        let copy_suffix = "_copy";
+        let bounded_id = if content_id.len().saturating_add(copy_suffix.len()) > id_limit {
+            let keep = id_limit.saturating_sub(copy_suffix.len());
+            format!("{}{copy_suffix}", &content_id[..keep])
+        } else {
+            format!("{content_id}{copy_suffix}")
+        };
+        let new_id = if id_limit == usize::MAX {
+            unique_value(&bounded_id, |candidate| {
+                self.records
+                    .iter()
+                    .any(|record| record.content_id == candidate)
+            })
+        } else {
+            (1_u32..)
+                .map(|copy| {
+                    let suffix = if copy == 1 {
+                        "_copy".to_string()
+                    } else {
+                        format!("_copy_{copy}")
+                    };
+                    let keep = id_limit.saturating_sub(suffix.len());
+                    format!("{}{}", &content_id[..content_id.len().min(keep)], suffix)
+                })
+                .find(|candidate| {
+                    !self
+                        .records
+                        .iter()
+                        .any(|record| record.content_id == *candidate)
+                })
+                .unwrap_or_else(|| bounded_id.clone())
+        };
         let source_stem = source.source_path.trim_end_matches(".json");
         let new_path = unique_value(&format!("{source_stem}_copy.json"), |candidate| {
             self.records
                 .iter()
                 .any(|record| record.source_path == candidate)
         });
+        let display_name = if matches!(
+            source.category,
+            ContentCategory::Vehicle | ContentCategory::Spaceship
+        ) {
+            let base = source.display_name.chars().take(59).collect::<String>();
+            format!("{base} Copy")
+        } else {
+            format!("{} Copy", source.display_name)
+        };
+        rewrite_typed_embedded_identity(&mut payload, &new_id, Some(&display_name));
         self.records.push(ContentRecord {
             content_id: new_id.clone(),
             source_path: new_path,
-            display_name: format!("{} Copy", source.display_name),
+            display_name,
             draft_hash: String::new(),
             published_hash: None,
             ..source
@@ -547,6 +627,37 @@ impl ForgeProject {
     }
 }
 
+/// Typed Forge recipes carry their stable identity inside the generic payload
+/// as well as in the project manifest. Registry rename/duplicate operations
+/// must update both halves atomically or a valid design becomes unloadable.
+fn rewrite_typed_embedded_content_id(payload: &mut ContentPayload, content_id: &str) {
+    rewrite_typed_embedded_identity(payload, content_id, None);
+}
+
+fn rewrite_typed_embedded_identity(
+    payload: &mut ContentPayload,
+    content_id: &str,
+    display_name: Option<&str>,
+) {
+    let value = match payload {
+        ContentPayload::Vehicle(recipe) => recipe.fields.get_mut("vehicle_spec"),
+        ContentPayload::Spaceship(recipe) => recipe.fields.get_mut("spaceship_spec"),
+        _ => None,
+    };
+    if let Some(serde_json::Value::Object(spec)) = value {
+        spec.insert(
+            "content_id".to_string(),
+            serde_json::Value::String(content_id.to_string()),
+        );
+        if let Some(display_name) = display_name {
+            spec.insert(
+                "display_name".to_string(),
+                serde_json::Value::String(display_name.to_string()),
+            );
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectMutationError {
     MissingContent(String),
@@ -555,6 +666,7 @@ pub enum ProjectMutationError {
     SingleSceneWorkspace,
     InvalidSourcePath(String),
     SourceAlreadyExists(String),
+    DedicatedForgeRequired(ContentCategory),
     Io(String),
 }
 
@@ -635,6 +747,10 @@ pub enum ContentPayload {
     Material(GenericRecipeDraft),
     Ui(GenericRecipeDraft),
     Weapon(GenericRecipeDraft),
+    /// Road, water, and utility vehicles authored by the Vehicle Forge.
+    Vehicle(GenericRecipeDraft),
+    /// Combat, capital, command, and station designs from the Spaceship Forge.
+    Spaceship(GenericRecipeDraft),
 }
 
 impl ContentPayload {
@@ -645,6 +761,8 @@ impl ContentPayload {
             ContentCategory::Character => Self::Character(recipe),
             ContentCategory::Creature => Self::Creature(recipe),
             ContentCategory::Weapon => Self::Weapon(recipe),
+            ContentCategory::Vehicle => Self::Vehicle(recipe),
+            ContentCategory::Spaceship => Self::Spaceship(recipe),
             ContentCategory::Biome => Self::Biome(ProceduralRecipeDraft::default()),
             ContentCategory::Road => Self::Road(ProceduralRecipeDraft::default()),
             ContentCategory::Building => Self::Building(ProceduralRecipeDraft::default()),
@@ -700,6 +818,8 @@ impl ContentPayload {
             Self::Material(_) => ContentCategory::Material,
             Self::Ui(_) => ContentCategory::Ui,
             Self::Weapon(_) => ContentCategory::Weapon,
+            Self::Vehicle(_) => ContentCategory::Vehicle,
+            Self::Spaceship(_) => ContentCategory::Spaceship,
         }
     }
 
@@ -1092,6 +1212,10 @@ pub enum ContentCategory {
     Ui,
     /// Designs from the modular Weapon Forge.
     Weapon,
+    /// Boats, cars, trucks, and motorcycles from the Vehicle Forge.
+    Vehicle,
+    /// Fighters through command ships and bases from the Spaceship Forge.
+    Spaceship,
 }
 
 impl ContentCategory {
@@ -1108,6 +1232,8 @@ impl ContentCategory {
             Self::Material => "material",
             Self::Ui => "ui",
             Self::Weapon => "weapon",
+            Self::Vehicle => "starfall.vehicle",
+            Self::Spaceship => "starfall.spaceship",
         }
     }
 
@@ -1124,6 +1250,8 @@ impl ContentCategory {
             Self::Material => "materials",
             Self::Ui => "ui",
             Self::Weapon => "weapons",
+            Self::Vehicle => "vehicles",
+            Self::Spaceship => "spaceships",
         }
     }
 }
@@ -1379,7 +1507,16 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
     let mut content_ids = BTreeSet::new();
     let mut source_paths = BTreeSet::new();
     for record in &project.records {
-        if record.content_id.trim().is_empty() {
+        let typed_prefix = match record.category {
+            ContentCategory::Vehicle => Some("starfall.vehicle."),
+            ContentCategory::Spaceship => Some("starfall.spaceship."),
+            _ => None,
+        };
+        if record.content_id.trim().is_empty()
+            || typed_prefix.is_some_and(|prefix| {
+                !record.content_id.starts_with(prefix) || record.content_id.len() == prefix.len()
+            })
+        {
             errors.push(ProjectValidationError::InvalidContentId(
                 record.content_id.clone(),
             ));
@@ -1410,6 +1547,23 @@ pub fn validate_project(project: &ForgeProject) -> Vec<ProjectValidationError> {
         }
         if let Some(ContentPayload::Material(recipe)) = project.payloads.get(&record.content_id) {
             validate_material_recipe(&record.content_id, recipe, &mut errors);
+        }
+        match record.category {
+            ContentCategory::Vehicle => {
+                if let Err(error) =
+                    super::vehicle_records::load_vehicle(project, &record.content_id)
+                {
+                    errors.push(ProjectValidationError::InvalidProceduralRecipe(error));
+                }
+            }
+            ContentCategory::Spaceship => {
+                if let Err(error) =
+                    super::spaceship_records::load_spaceship(project, &record.content_id)
+                {
+                    errors.push(ProjectValidationError::InvalidProceduralRecipe(error));
+                }
+            }
+            _ => {}
         }
         if let Some(recipe) = project
             .payloads
@@ -2133,7 +2287,10 @@ impl ProjectLockDocument {
                         ContentPayload::Character(recipe)
                         | ContentPayload::Creature(recipe)
                         | ContentPayload::Material(recipe)
-                        | ContentPayload::Ui(recipe) => (recipe.schema_version, 0, 0),
+                        | ContentPayload::Ui(recipe)
+                        | ContentPayload::Weapon(recipe)
+                        | ContentPayload::Vehicle(recipe)
+                        | ContentPayload::Spaceship(recipe) => (recipe.schema_version, 0, 0),
                         _ => return None,
                     },
                 };
@@ -4241,6 +4398,108 @@ mod tests {
         project.delete_content(&first).unwrap();
         assert!(!project.payloads.contains_key(&first));
         assert!(project.payloads.contains_key(&duplicate));
+    }
+
+    #[test]
+    fn typed_forge_identity_tracks_registry_duplicate_and_rename() {
+        for (category, field, renamed) in [
+            (
+                ContentCategory::Vehicle,
+                "vehicle_spec",
+                "starfall.vehicle.renamed",
+            ),
+            (
+                ContentCategory::Spaceship,
+                "spaceship_spec",
+                "starfall.spaceship.renamed",
+            ),
+        ] {
+            let mut project = ForgeProject::default();
+            let original = match category {
+                ContentCategory::Vehicle => {
+                    let spec = crate::vehicle_forge::VehicleSpec {
+                        display_name: "Prototype".into(),
+                        ..Default::default()
+                    };
+                    crate::engine_tools::vehicle_records::upsert_vehicle(&mut project, &spec)
+                        .unwrap()
+                }
+                ContentCategory::Spaceship => {
+                    let spec = crate::spaceship_forge::SpacecraftSpec {
+                        display_name: "Prototype".into(),
+                        ..Default::default()
+                    };
+                    crate::engine_tools::spaceship_records::upsert_spaceship(&mut project, &spec)
+                        .unwrap()
+                }
+                _ => unreachable!(),
+            };
+
+            let duplicate = project.duplicate_content(&original).unwrap();
+            let embedded_id = |project: &ForgeProject, id: &str| {
+                let recipe = match project.payloads.get(id).unwrap() {
+                    ContentPayload::Vehicle(recipe) | ContentPayload::Spaceship(recipe) => recipe,
+                    payload => panic!("unexpected typed payload: {payload:?}"),
+                };
+                recipe.fields[field]["content_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            };
+            assert_eq!(embedded_id(&project, &duplicate), duplicate);
+            let duplicate_record = project
+                .records
+                .iter()
+                .find(|record| record.content_id == duplicate)
+                .unwrap();
+            let duplicate_recipe = match project.payloads.get(&duplicate).unwrap() {
+                ContentPayload::Vehicle(recipe) | ContentPayload::Spaceship(recipe) => recipe,
+                payload => panic!("unexpected typed payload: {payload:?}"),
+            };
+            assert_eq!(
+                duplicate_recipe.fields[field]["display_name"].as_str(),
+                Some(duplicate_record.display_name.as_str())
+            );
+
+            project.rename_content(&duplicate, renamed).unwrap();
+            assert_eq!(embedded_id(&project, renamed), renamed);
+        }
+    }
+
+    #[test]
+    fn registry_rename_preserves_the_content_category_namespace() {
+        let mut project = ForgeProject::default();
+        let spec = crate::vehicle_forge::VehicleSpec {
+            display_name: "Runner".into(),
+            ..Default::default()
+        };
+        let vehicle =
+            crate::engine_tools::vehicle_records::upsert_vehicle(&mut project, &spec).unwrap();
+        assert!(matches!(
+            project.rename_content(&vehicle, "spaceship.runner"),
+            Err(ProjectValidationError::InvalidContentId(_))
+        ));
+        assert!(project
+            .records
+            .iter()
+            .any(|record| record.content_id == vehicle));
+    }
+
+    #[test]
+    fn typed_categories_require_their_dedicated_forges() {
+        let mut project = ForgeProject::default();
+        assert!(matches!(
+            project.create_content(ContentCategory::Vehicle, "Runner"),
+            Err(ProjectMutationError::DedicatedForgeRequired(
+                ContentCategory::Vehicle
+            ))
+        ));
+        assert!(matches!(
+            project.create_content(ContentCategory::Spaceship, "Lance"),
+            Err(ProjectMutationError::DedicatedForgeRequired(
+                ContentCategory::Spaceship
+            ))
+        ));
     }
 
     #[test]

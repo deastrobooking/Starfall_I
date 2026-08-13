@@ -5,7 +5,7 @@ This is the living plan for shipping **two products from one codebase**:
 | Edition | Working name | Who it is for | What it is |
 |---|---|---|---|
 | **Game** | *Starfall I* | Players | The consumer game: campaign, combat, traversal, co-op, and the player-facing creators (character design, character studio, GLB import, robot garage). |
-| **Designer** | *Starfall Forge* | Us, and eventually creators | Everything in the Game **plus** the authoring layer: Project Hub, versioned Forge projects, Creature Forge, Weapon Forge, and the live in-world editor. |
+| **Designer** | *Starfall Forge* | Us, and eventually creators | Everything in the Game **plus** the authoring layer: Project Hub, versioned Forge projects, Creature Forge, Weapon Forge, Vehicle Forge, Spaceship Forge, and the live in-world editor. |
 
 The Game is a strict subset of the Designer. One repository, one engine, one
 test suite; the boundary is a cargo feature (`designer`, on by default) so a
@@ -48,7 +48,8 @@ sculpt), Robot Garage (vehicle assembly). These ship to consumers.
 
 **Designer tools** — Project Hub over a versioned `ForgeProject` store (atomic
 writes, recovery snapshots, draft/published hashes), Creature Forge, Weapon
-Forge (derived-stat modular weapon designer), live editor mode
+Forge (derived-stat modular weapon designer), Vehicle Forge, Spaceship Forge,
+live editor mode
 (Tab / Select+Start in play), shared draggable tool windows, env boot hooks
 (`STARFALL_EDITOR`, `STARFALL_WEAPON_FORGE`, …).
 
@@ -70,7 +71,7 @@ boot smokes.
 | Character Design / Studio / GLB import / Garage | ✅ | ✅ | always registered |
 | Main-menu **CREATOR TOOLS** (Project Hub) button | — | ✅ | `cfg!(feature = "designer")` |
 | Project Hub state + project registry UI | inert | ✅ | unreachable without the button |
-| Creature Forge, Weapon Forge plugins | — | ✅ | `#[cfg(feature = "designer")]` registration |
+| Creature, Weapon, Vehicle, Spaceship Forge plugins | — | ✅ | `#[cfg(feature = "designer")]` registration |
 | Live editor toggle (Tab / Select+Start) | — | ✅ | guard in the toggle system |
 | Designer env boot hooks (`STARFALL_EDITOR`, `STARFALL_WEAPON_FORGE`) | — | ✅ | guard in `apply_boot_overrides` |
 | `AppState` / `EngineToolMode` enums, tool-window + engine-tools plugins | present | present | kept in both to avoid `cfg` sprawl through matches; they are inert without their entry points |
@@ -103,7 +104,7 @@ and boot; verification gains a consumer-build check.
 
 ### P1 — Publish pipeline (Designer) → consumable content (Game) *(landed)*
 - **PUBLISH TO GAME** in the Project Hub runs the store's validate-and-promote
-  gate, persists published hashes, and bakes weapons + creatures to
+  gate, persists published hashes, and bakes weapons + creatures + vehicles + spacecraft to
   `assets/published/` as deterministic JSON (sorted, so re-publishing without
   edits is byte-identical). The live editor uses the same publisher. A project
   writer lock spans hash save, generation-manifest promotion, and rollback;
@@ -112,7 +113,9 @@ and boot; verification gains a consumer-build check.
 - Game-side loader (`world::published_content`, both editions): published
   weapons register into the blade resolver and go on sale in the shop priced
   by the forge's own derivation; published creatures load into a
-  `PublishedCreatures` spec pool. Missing files are a first-class empty state.
+  `PublishedCreatures` spec pool; vehicle and spacecraft recipes load into
+  runtime-safe catalogs ready for explicit gameplay adapters. Missing files
+  are a first-class empty state.
 - Covered by determinism, round-trip, missing-file, resolver, and shop-pricing
   tests. Encounters consume published creatures: the baked seed fills the same
   `PublishedCreatureCatalog` the dungeon spawners already resolve overrides

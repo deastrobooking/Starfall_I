@@ -114,8 +114,9 @@ cargo run --features dynamic
 The top-level flow includes the player-facing `MainMenu`, `PlayerSelect`,
 `CharacterDesign`, `CharacterStudio`, `ChapterSelect`, `RobotGarage`, `Playing`,
 `Paused`, `GameOver`, and `Victory` states. The creator path branches from the
-title into `ProjectHub`, which opens `CreatureForge` or the Forge level
-workspace running inside `Playing` with protected editor mode enabled.
+title into `ProjectHub`, which opens `CreatureForge`, `WeaponForge`,
+`VehicleForge`, `SpaceshipForge`, or the Forge level workspace running inside
+`Playing` with protected editor mode enabled.
 
 Chapter select is now the 200 x 200 mile Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the character editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
 

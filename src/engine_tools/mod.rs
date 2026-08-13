@@ -13,13 +13,17 @@ pub mod editable_mesh;
 pub mod forge_widgets;
 pub mod mesh_selection;
 pub mod mesh_uv;
-mod persistence;
+pub(crate) mod persistence;
 mod presets;
 pub mod project_registry;
 /// Designer→Game publish step: bake validated records to assets/published/.
 pub mod publish;
+/// Spaceship Forge saves, routed through the versioned project contract.
+pub mod spaceship_records;
 /// Draggable, minimizable in-game tool windows shared by every editor.
 pub mod tool_windows;
+/// Vehicle Forge saves, routed through the versioned project contract.
+pub mod vehicle_records;
 /// Weapon Forge saves, routed through the versioned project contract.
 pub mod weapon_records;
 
