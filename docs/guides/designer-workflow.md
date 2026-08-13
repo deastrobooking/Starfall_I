@@ -27,11 +27,24 @@ save without an active project, and tell you so.
 
 ## Tool windows
 
-Every authoring screen is built from the same windows. They behave like a DCC
-tool: drag the title bar to move, drag the **◢ corner grip** to resize,
-double-click the title to collapse, and the **—** button minimizes. Windows
-never strand off-screen — shrinking the application window shrinks and
-repositions panels to fit.
+Authoring workspaces use one shared DCC-style window shell: drag the title bar
+to move, drag the **◢ corner grip** to resize, double-click the title to
+collapse, and use the **—** button to minimize. The mouse wheel scrolls the
+topmost panel under the pointer. Grabbing a panel or one of its controls raises
+it above its siblings.
+
+Windows use logical coordinates at every UI scale and fit to their actual
+workspace, so a wrapped toolbar or resized application cannot strand their
+chrome off-screen. A minimized window keeps only its title footprint and hides
+its resize grip, leaving the restore button unobstructed. Pointer input over a
+window belongs to the UI: it cannot also select, sculpt, orbit, or zoom the 3D
+preview behind it.
+
+Dense tools open with the primary task panels expanded and secondary panels
+collapsed. This is intentional progressive disclosure, especially for 720p
+and 140% UI scale; restore any secondary panel when needed. Project Hub and
+Robot Garage remain full-screen workflow surfaces rather than fake floating
+windows, but both scroll and reflow for narrow or short viewports.
 
 ## Weapon Forge
 

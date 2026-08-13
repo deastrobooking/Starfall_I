@@ -59,6 +59,15 @@ pub struct UiGameplayCapture {
     pub owner: Option<u8>,
 }
 
+/// True while an authoring screen owns printable keyboard input. Shared menu
+/// navigation must yield Enter/Space/Escape until that edit is committed or
+/// cancelled, preventing a name field from also activating buttons or leaving
+/// the tool on the same key press.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct AuthoringTextInputCapture {
+    pub active: bool,
+}
+
 // ── Game Settings ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ControllerGlyphStyle {

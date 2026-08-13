@@ -5,7 +5,7 @@ use bevy::window::PrimaryWindow;
 
 use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
 use bevy::input::ButtonState;
-use bevy::ui::InteractionDisabled;
+use bevy::ui::{ComputedStackIndex, InteractionDisabled};
 
 use crate::chapters::{
     all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
@@ -44,6 +44,7 @@ use crate::engine::physics::prelude::{Physics, PhysicsTime};
 use crate::engine::rendering::Camera3dBundle;
 use crate::engine::state::AppState;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
+use crate::engine_tools::tool_windows::{ToolWindow, ToolWindowChromeControl};
 use crate::engine_tools::{
     EngineToolMode, PublishedMapPointKind, PublishedProceduralRecipeCatalog,
 };
@@ -61,10 +62,11 @@ use crate::plugins::input_plugin::{
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
 use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{
-    ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget, CurrentChapter,
-    DungeonCrawlState, FastTravelDestination, GameSettings, ImportedForgeReturnTarget,
-    LocalPlayerConfig, PlaySessionTransition, PlayerGuidance, PlayerSelectState, ShopCatalog,
-    ShopCategory, UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
+    AuthoringTextInputCapture, ChapterProgress, CharacterDesignData, CharacterDesignReturnTarget,
+    CurrentChapter, DungeonCrawlState, FastTravelDestination, GameSettings,
+    ImportedForgeReturnTarget, LocalPlayerConfig, PlaySessionTransition, PlayerGuidance,
+    PlayerSelectState, ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage, WaveInfo,
+    WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::world::discussion::DiscussionState;
 use crate::world::heavy_bio::{GrowthStage, GARDEN_PLOT_COUNT};
@@ -102,6 +104,7 @@ impl Plugin for UiPlugin {
             .init_resource::<PauseMenuState>()
             .init_resource::<MainMenuUiState>()
             .init_resource::<MenuFocus>()
+            .init_resource::<AuthoringTextInputCapture>()
             .init_resource::<ChapterProgressionOwner>()
             .init_resource::<CustomMissionState>()
             .configure_sets(
@@ -808,7 +811,11 @@ fn register_menu_buttons(
     mut commands: Commands,
     buttons: Query<
         (Entity, &BackgroundColor, &BorderColor),
-        (Added<Button>, Without<MenuFocusable>),
+        (
+            Added<Button>,
+            Without<MenuFocusable>,
+            Without<ToolWindowChromeControl>,
+        ),
     >,
 ) {
     for (entity, background, border) in buttons.iter() {
@@ -848,12 +855,18 @@ fn menu_focus_navigation(
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
     settings: Res<GameSettings>,
+    text_input: Res<AuthoringTextInputCapture>,
     mut focus: ResMut<MenuFocus>,
+    parents: Query<&ChildOf>,
+    ui_nodes: Query<&Node>,
+    tool_windows: Query<(&GlobalTransform, &ComputedNode, &ComputedStackIndex), With<ToolWindow>>,
     mut button_set: ParamSet<(
         Query<
             (
                 Entity,
                 &GlobalTransform,
+                &ComputedNode,
+                &ComputedStackIndex,
                 &Interaction,
                 &InheritedVisibility,
                 Option<&MenuButtonDisabled>,
@@ -869,21 +882,44 @@ fn menu_focus_navigation(
         focus.entity = None;
     }
 
-    let direction_input = menu_direction_input(&keyboard, &gamepads, &native);
+    let direction_input = if text_input.active {
+        MenuDirectionInput::default()
+    } else {
+        menu_direction_input(&keyboard, &gamepads, &native)
+    };
     let direction = repeated_menu_direction(&mut focus, direction_input, time.delta_secs());
     let (confirm_gamepad, confirm_native) = mapped_menu_face(&settings.bindings, FaceButton::South);
-    let confirm = keyboard.just_pressed(KeyCode::Enter)
-        || keyboard.just_pressed(KeyCode::NumpadEnter)
-        || keyboard.just_pressed(KeyCode::Space)
-        || gamepads
-            .iter()
-            .any(|gamepad| gamepad.just_pressed(confirm_gamepad))
-        || native.just_pressed(confirm_native);
+    let confirm = !text_input.active
+        && (keyboard.just_pressed(KeyCode::Enter)
+            || keyboard.just_pressed(KeyCode::NumpadEnter)
+            || keyboard.just_pressed(KeyCode::Space)
+            || gamepads
+                .iter()
+                .any(|gamepad| gamepad.just_pressed(confirm_gamepad))
+            || native.just_pressed(confirm_native));
+
+    let window_rects = tool_windows
+        .iter()
+        .filter(|(_, computed, _)| !computed.is_empty())
+        .map(|(transform, computed, stack)| (ui_node_rect(transform, computed), stack.0))
+        .collect::<Vec<_>>();
 
     let mut visible = Vec::new();
     let mut hovered = None;
-    for (entity, transform, interaction, inherited_visibility, disabled) in button_set.p0().iter() {
-        if !inherited_visibility.get() || disabled.is_some() {
+    for (entity, transform, computed, stack, interaction, inherited_visibility, disabled) in
+        button_set.p0().iter()
+    {
+        if !menu_focusable_geometry(
+            entity,
+            transform,
+            computed,
+            inherited_visibility,
+            disabled.is_some(),
+            &parents,
+            &ui_nodes,
+            stack.0,
+            &window_rects,
+        ) {
             continue;
         }
         let translation = transform.translation();
@@ -917,6 +953,79 @@ fn menu_focus_navigation(
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct UiFocusRect {
+    min: Vec2,
+    max: Vec2,
+}
+
+impl UiFocusRect {
+    fn contains(self, point: Vec2) -> bool {
+        point.cmpge(self.min).all() && point.cmple(self.max).all()
+    }
+}
+
+fn ui_node_rect(transform: &GlobalTransform, computed: &ComputedNode) -> UiFocusRect {
+    let center = transform.translation().truncate();
+    let half = computed.size() * 0.5;
+    UiFocusRect {
+        min: center - half,
+        max: center + half,
+    }
+}
+
+fn has_display_none_ancestor(
+    entity: Entity,
+    parents: &Query<&ChildOf>,
+    ui_nodes: &Query<&Node>,
+) -> bool {
+    std::iter::successors(Some(entity), |current| {
+        parents.get(*current).ok().map(ChildOf::parent)
+    })
+    .take(64)
+    .any(|ancestor| {
+        ui_nodes
+            .get(ancestor)
+            .is_ok_and(|node| node.display == Display::None)
+    })
+}
+
+fn center_is_occluded(
+    center: Vec2,
+    element_stack: u32,
+    window_rects: &[(UiFocusRect, u32)],
+) -> bool {
+    window_rects
+        .iter()
+        .any(|(rect, stack)| *stack > element_stack && rect.contains(center))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn menu_focusable_geometry(
+    entity: Entity,
+    transform: &GlobalTransform,
+    computed: &ComputedNode,
+    inherited_visibility: &InheritedVisibility,
+    disabled: bool,
+    parents: &Query<&ChildOf>,
+    ui_nodes: &Query<&Node>,
+    element_stack: u32,
+    window_rects: &[(UiFocusRect, u32)],
+) -> bool {
+    if disabled
+        || !inherited_visibility.get()
+        || computed.is_empty()
+        || has_display_none_ancestor(entity, parents, ui_nodes)
+    {
+        return false;
+    }
+    !center_is_occluded(
+        transform.translation().truncate(),
+        element_stack,
+        window_rects,
+    )
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1044,6 +1153,7 @@ fn menu_back_navigation(
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
     settings: Res<GameSettings>,
+    text_input: Res<AuthoringTextInputCapture>,
     state: Res<State<AppState>>,
     design_data: Res<CharacterDesignData>,
     imported_forge_return: Res<ImportedForgeReturnTarget>,
@@ -1055,11 +1165,12 @@ fn menu_back_navigation(
     victory_q: Query<Entity, With<VictoryRoot>>,
 ) {
     let (back_gamepad, back_native) = mapped_menu_face(&settings.bindings, FaceButton::East);
-    let back = keyboard.just_pressed(KeyCode::Escape)
-        || gamepads
-            .iter()
-            .any(|gamepad| gamepad.just_pressed(back_gamepad))
-        || native.just_pressed(back_native);
+    let back = !text_input.active
+        && (keyboard.just_pressed(KeyCode::Escape)
+            || gamepads
+                .iter()
+                .any(|gamepad| gamepad.just_pressed(back_gamepad))
+            || native.just_pressed(back_native));
     if !back {
         return;
     }
@@ -1517,20 +1628,28 @@ fn update_main_menu_page_visibility(
     }
 }
 
+fn project_hub_root_node() -> Node {
+    Node {
+        width: Val::Percent(100.0),
+        height: Val::Percent(100.0),
+        min_height: Val::Percent(100.0),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::FlexStart,
+        row_gap: Val::Px(12.0),
+        padding: UiRect::axes(Val::Px(24.0), Val::Px(20.0)),
+        overflow: Overflow::scroll_y(),
+        ..default()
+    }
+}
+
 fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>) {
     commands
         .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                row_gap: Val::Px(16.0),
-                padding: UiRect::all(Val::Px(32.0)),
-                ..default()
-            },
+            project_hub_root_node(),
             BackgroundColor(Color::srgba(0.012, 0.014, 0.034, 1.0)),
+            ScrollPosition::default(),
+            MenuScrollPanel,
             ProjectHubRoot,
         ))
         .with_children(|root| {
@@ -9174,6 +9293,52 @@ fn update_command_overlay(
 #[cfg(test)]
 mod menu_navigation_tests {
     use super::*;
+
+    #[test]
+    fn hidden_or_occluded_menu_geometry_is_not_focusable() {
+        let covering_window = UiFocusRect {
+            min: Vec2::new(-50.0, -50.0),
+            max: Vec2::new(50.0, 50.0),
+        };
+        assert!(center_is_occluded(Vec2::ZERO, 3, &[(covering_window, 4)]));
+        assert!(
+            !center_is_occluded(Vec2::ZERO, 4, &[(covering_window, 4)]),
+            "a window cannot occlude its own descendants at the same stack"
+        );
+        assert!(!center_is_occluded(
+            Vec2::new(60.0, 0.0),
+            3,
+            &[(covering_window, 4)]
+        ));
+
+        let mut world = World::new();
+        let hidden = world
+            .spawn(Node {
+                display: Display::None,
+                ..default()
+            })
+            .id();
+        let child = world.spawn(Node::default()).id();
+        world.entity_mut(hidden).add_child(child);
+        let mut parents = world.query::<&ChildOf>();
+        let mut nodes = world.query::<&Node>();
+        assert!(has_display_none_ancestor(
+            child,
+            &parents.query(&world),
+            &nodes.query(&world)
+        ));
+    }
+
+    #[test]
+    fn project_hub_root_is_a_top_aligned_scroll_surface() {
+        let node = project_hub_root_node();
+        assert_eq!(node.width, Val::Percent(100.0));
+        assert_eq!(node.height, Val::Percent(100.0));
+        assert_eq!(node.justify_content, JustifyContent::FlexStart);
+        assert_eq!(node.align_items, AlignItems::Center);
+        assert_eq!(node.overflow, Overflow::scroll_y());
+        assert!(matches!(node.row_gap, Val::Px(gap) if gap >= 12.0));
+    }
 
     #[test]
     fn dungeon_guidance_switches_from_open_to_repeat_entry() {

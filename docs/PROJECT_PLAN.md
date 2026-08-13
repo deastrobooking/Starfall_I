@@ -130,8 +130,19 @@ and boot; verification gains a consumer-build check.
 - ~~Shared forge widgets~~ *(landed: `engine_tools::forge_widgets` — action
   buttons, rows, section labels; Weapon and Creature Forge both build on it)*.
 - ~~Mouse affordances for tool windows~~ *(landed: corner-grip resize with
-  min/viewport clamping, double-click header collapse, and panels that shrink
-  to fit when the application window is resized)*.
+  min/workspace clamping, UI-scale-correct dragging, double-click header
+  collapse, topmost pointer-routed scrolling, panel raise-on-use, and panels
+  that shrink to fit when the application window is resized)*.
+- ~~Creator GUI consistency and viewport safety~~ *(landed: Character Design
+  and Character Studio now use the shared floating shell; dense Forge layouts
+  progressively disclose secondary panels; minimized chrome keeps its restore
+  target clear; hidden/covered controls leave shared controller focus; text
+  entry suppresses global menu shortcuts; and floating/editor chrome captures
+  the pointer so clicks and wheel input do not pass through into 3D tools)*.
+- Remaining UX scale work: persist named workspace layouts with RESET LAYOUT;
+  split the live editor's flat Registry into task groups; expose disabled action
+  reasons and consistent destructive confirmations; add semantic accessibility
+  labels/live status and keyboard move/resize parity for floating windows.
 - ~~A designer manual~~ *(landed: [guides/designer-workflow.md](guides/designer-workflow.md))*.
 
 ### P3 — Game edition polish (walk-away list)

@@ -74,6 +74,19 @@ enum GarageAction {
 
 // ── Setup ──────────────────────────────────────────────────────────────────────
 
+fn garage_columns_node() -> Node {
+    Node {
+        width: Val::Percent(100.0),
+        max_width: Val::Px(1200.0),
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::Wrap,
+        column_gap: Val::Px(24.0),
+        row_gap: Val::Px(18.0),
+        flex_grow: 1.0,
+        ..default()
+    }
+}
+
 fn setup_garage(
     mut commands: Commands,
     mut data: ResMut<GarageData>,
@@ -99,7 +112,7 @@ fn setup_garage(
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::axes(Val::Px(40.0), Val::Px(32.0)),
+                padding: UiRect::axes(Val::Px(24.0), Val::Px(24.0)),
                 row_gap: Val::Px(18.0),
                 overflow: Overflow::scroll_y(),
                 ..default()
@@ -143,17 +156,14 @@ fn setup_garage(
             ));
 
             // Two-column row: pets (left) + form browser (right)
-            root.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(40.0),
-                flex_grow: 1.0,
-                ..default()
-            })
+            root.spawn(garage_columns_node())
             .with_children(|row| {
                 // Left: pet roster
                 row.spawn(Node {
                     flex_direction: FlexDirection::Column,
-                    width: Val::Percent(40.0),
+                    flex_basis: Val::Px(280.0),
+                    flex_grow: 1.0,
+                    min_width: Val::Px(240.0),
                     row_gap: Val::Px(6.0),
                     ..default()
                 })
@@ -180,7 +190,9 @@ fn setup_garage(
                 // Right: form browser
                 row.spawn(Node {
                     flex_direction: FlexDirection::Column,
-                    width: Val::Percent(60.0),
+                    flex_basis: Val::Px(420.0),
+                    flex_grow: 1.0,
+                    min_width: Val::Px(240.0),
                     row_gap: Val::Px(6.0),
                     ..default()
                 })
@@ -604,6 +616,13 @@ fn format_feedback(result: Option<GarageActionResult>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn garage_columns_wrap_instead_of_overflowing_narrow_views() {
+        let root = garage_columns_node();
+        assert_eq!(root.flex_wrap, FlexWrap::Wrap);
+        assert_eq!(root.flex_direction, FlexDirection::Row);
+    }
 
     #[test]
     fn garage_remembers_selected_form_across_screen_reentry() {

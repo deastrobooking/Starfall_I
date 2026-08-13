@@ -31,6 +31,7 @@ use bevy::input::keyboard::Key;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use bevy::time::Virtual;
+use bevy::ui::RelativeCursorPosition;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, Window};
 use serde::{Deserialize, Serialize};
 
@@ -785,6 +786,7 @@ impl Plugin for EngineToolsPlugin {
                     editor_camera_controls,
                 )
                     .chain()
+                    .after(tool_windows::ToolWindowSystemSet::PointerState)
                     .run_if(in_state(EngineToolMode::Editing)),
             );
     }
@@ -1159,6 +1161,11 @@ struct EditorSummaryText;
 #[derive(Component)]
 struct EditorStatusText;
 
+/// Fixed workspace chrome that owns pointer input just like a floating tool
+/// window. Geometry comes from Bevy UI layout, never hard-coded screen bands.
+#[derive(Component)]
+struct EditorChromeSurface;
+
 #[derive(Component)]
 struct EditorSearchText;
 
@@ -1375,7 +1382,7 @@ struct EditorFocus(EditorAction);
 
 impl Default for EditorFocus {
     fn default() -> Self {
-        Self(EditorAction::Exit)
+        Self(EditorAction::SelectNext)
     }
 }
 
@@ -1652,7 +1659,7 @@ fn enter_editor_workspace(
 ) {
     virtual_time.pause();
     physics_time.pause();
-    focus.0 = EditorAction::Exit;
+    focus.0 = EditorAction::SelectNext;
     document.exit_armed = false;
     filter.active = false;
     registry.rename_active = false;
@@ -2968,6 +2975,8 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     flex_wrap: FlexWrap::Wrap,
                     ..default()
                 },
+                EditorChromeSurface,
+                RelativeCursorPosition::default(),
                 BackgroundColor(Color::srgba(0.025, 0.035, 0.065, 0.96)),
                 BorderColor::all(Color::srgb(0.18, 0.78, 0.95)),
             ))
@@ -3432,6 +3441,8 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     align_items: AlignItems::Center,
                     ..default()
                 },
+                EditorChromeSurface,
+                RelativeCursorPosition::default(),
                 BackgroundColor(Color::srgba(0.025, 0.035, 0.065, 0.96)),
             ))
             .with_children(|bar| {
@@ -3919,11 +3930,30 @@ fn editor_focus_reveal_delta(
     }
 }
 
+/// Whether viewport pointer handling may run this frame. Floating tool windows
+/// own fresh pointer gestures under their current, movable geometry; an active
+/// viewport drag keeps ownership until it receives its release/cancel frame.
+fn editor_viewport_pointer_available(
+    editor_ui_captures_pointer: bool,
+    viewport_gesture_active: bool,
+) -> bool {
+    !editor_ui_captures_pointer || viewport_gesture_active
+}
+
+fn editor_ui_captures_pointer(
+    tool_window_captures_pointer: bool,
+    chrome_surfaces: impl IntoIterator<Item = bool>,
+) -> bool {
+    tool_window_captures_pointer || chrome_surfaces.into_iter().any(|cursor_over| cursor_over)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn editor_gizmo_drag(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<EditorCamera>>,
+    tool_window_pointer: Res<tool_windows::ToolWindowPointerState>,
+    chrome_surfaces: Query<&RelativeCursorPosition, With<EditorChromeSurface>>,
     text_capture: Res<EditorTextInputCapture>,
     selection: Res<EditorSelection>,
     settings: Res<EditorGizmoSettings>,
@@ -3938,6 +3968,20 @@ fn editor_gizmo_drag(
     )>,
 ) {
     if text_capture.0 {
+        return;
+    }
+    // Starting a viewport gesture through floating editor chrome is unsafe,
+    // but an in-progress gizmo drag must still receive motion and release if
+    // the pointer crosses a tool window on its way to the final position.
+    if !editor_viewport_pointer_available(
+        editor_ui_captures_pointer(
+            tool_window_pointer.captures_viewport(),
+            chrome_surfaces
+                .iter()
+                .map(RelativeCursorPosition::cursor_over),
+        ),
+        drag_state.0.is_some(),
+    ) {
         return;
     }
     let (Ok(window), Ok((camera, camera_transform))) = (windows.single(), cameras.single()) else {
@@ -4097,6 +4141,8 @@ fn world_kit_topology_gizmo_drag(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<EditorCamera>>,
+    tool_window_pointer: Res<tool_windows::ToolWindowPointerState>,
+    chrome_surfaces: Query<&RelativeCursorPosition, With<EditorChromeSurface>>,
     sandbox_roots: Query<(&WorldKitGeneratedRoot, &GlobalTransform)>,
     filter: Res<EditorOutlinerFilter>,
     text_capture: Res<EditorTextInputCapture>,
@@ -4116,6 +4162,20 @@ fn world_kit_topology_gizmo_drag(
     {
         return;
     }
+    // Match ordinary transform drags: tool windows block a new topology drag,
+    // while an existing drag remains authoritative until release/cancel even
+    // if its pointer crosses editor UI.
+    if !editor_viewport_pointer_available(
+        editor_ui_captures_pointer(
+            tool_window_pointer.captures_viewport(),
+            chrome_surfaces
+                .iter()
+                .map(RelativeCursorPosition::cursor_over),
+        ),
+        drag_state.0.is_some(),
+    ) {
+        return;
+    }
     let (Ok(window), Ok((camera, camera_transform))) = (windows.single(), cameras.single()) else {
         return;
     };
@@ -4123,13 +4183,7 @@ fn world_kit_topology_gizmo_drag(
         return;
     };
 
-    if mouse.just_pressed(MouseButton::Left)
-        && drag_state.0.is_none()
-        && cursor.y >= 126.0
-        && cursor.y <= window.height() - 68.0
-        && cursor.x >= 314.0
-        && cursor.x <= window.width() - 314.0
-    {
+    if mouse.just_pressed(MouseButton::Left) && drag_state.0.is_none() {
         let Some(record) = session.project.records.get(registry.selected) else {
             return;
         };
@@ -4289,6 +4343,8 @@ fn point_segment_distance(point: Vec2, start: Vec2, end: Vec2) -> f32 {
 fn editor_viewport_picking(
     mouse: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    tool_window_pointer: Res<tool_windows::ToolWindowPointerState>,
+    chrome_surfaces: Query<&RelativeCursorPosition, With<EditorChromeSurface>>,
     filter: Res<EditorOutlinerFilter>,
     text_capture: Res<EditorTextInputCapture>,
     drag: Res<EditorDragState>,
@@ -4308,6 +4364,15 @@ fn editor_viewport_picking(
         || text_capture.0
         || drag.0.is_some()
         || topology_drag.0.is_some()
+        || !editor_viewport_pointer_available(
+            editor_ui_captures_pointer(
+                tool_window_pointer.captures_viewport(),
+                chrome_surfaces
+                    .iter()
+                    .map(RelativeCursorPosition::cursor_over),
+            ),
+            false,
+        )
         || !mouse.just_pressed(MouseButton::Left)
     {
         return;
@@ -4318,14 +4383,6 @@ fn editor_viewport_picking(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    // Do not ray-pick through the toolbar, side panels, or status bar.
-    if cursor.y < 126.0
-        || cursor.y > window.height() - 68.0
-        || cursor.x < 314.0
-        || cursor.x > window.width() - 314.0
-    {
-        return;
-    }
     let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
         return;
     };
@@ -8579,6 +8636,8 @@ fn editor_camera_controls(
     mut mouse_wheel: MessageReader<MouseWheel>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
+    tool_window_pointer: Res<tool_windows::ToolWindowPointerState>,
+    chrome_surfaces: Query<&RelativeCursorPosition, With<EditorChromeSurface>>,
     filter: Res<EditorOutlinerFilter>,
     text_capture: Res<EditorTextInputCapture>,
     mut rig: ResMut<EditorCameraRig>,
@@ -8622,7 +8681,13 @@ fn editor_camera_controls(
     } else {
         14.0
     };
-    let mouse_delta = if mouse_buttons.pressed(MouseButton::Right) {
+    let editor_ui_captures_pointer = editor_ui_captures_pointer(
+        tool_window_pointer.captures_viewport(),
+        chrome_surfaces
+            .iter()
+            .map(RelativeCursorPosition::cursor_over),
+    );
+    let mouse_delta = if !editor_ui_captures_pointer && mouse_buttons.pressed(MouseButton::Right) {
         mouse_motion
             .read()
             .fold(Vec2::ZERO, |sum, event| sum + event.delta)
@@ -8630,6 +8695,15 @@ fn editor_camera_controls(
     } else {
         mouse_motion.clear();
         Vec2::ZERO
+    };
+    let mouse_wheel_delta = if editor_ui_captures_pointer {
+        // Message readers are independent; advance this reader even when the
+        // hovered tool window owns wheel input so stale zoom cannot be applied
+        // after the pointer returns to the viewport.
+        mouse_wheel.clear();
+        0.0
+    } else {
+        mouse_wheel.read().map(|event| event.y).sum::<f32>()
     };
     let look_delta = mouse_delta + Vec2::new(stick_look.x, -stick_look.y) * 2.2 * dt;
     match rig.mode {
@@ -8652,9 +8726,9 @@ fn editor_camera_controls(
                 offset = Quat::from_rotation_y(-look_delta.x) * offset;
                 offset = Quat::from_axis_angle(*right, -look_delta.y) * offset;
             }
-            let wheel = mouse_wheel.read().map(|event| event.y).sum::<f32>();
             rig.orbit_distance =
-                (offset.length() - wheel * 1.5 - local_move.z * speed * dt).clamp(1.5, 500.0);
+                (offset.length() - mouse_wheel_delta * 1.5 - local_move.z * speed * dt)
+                    .clamp(1.5, 500.0);
             offset = offset.normalize_or(Vec3::Z) * rig.orbit_distance;
             transform.translation = rig.orbit_target + offset;
             transform.look_at(rig.orbit_target, Vec3::Y);
@@ -8843,6 +8917,11 @@ mod tests {
             app.world().resource::<EditorPendingActions>().0,
             vec![EditorAction::SocketCreate]
         );
+    }
+
+    #[test]
+    fn editor_initial_focus_is_a_harmless_visible_workspace_control() {
+        assert_eq!(EditorFocus::default().0, EditorAction::SelectNext);
     }
 
     #[test]
@@ -10467,6 +10546,25 @@ mod tests {
         assert_eq!(editor_focus_reveal_delta(10.0, 90.0, 30.0, 50.0), 0.0);
         assert_eq!(editor_focus_reveal_delta(10.0, 90.0, -5.0, 15.0), 15.0);
         assert_eq!(editor_focus_reveal_delta(10.0, 90.0, 85.0, 105.0), -15.0);
+    }
+
+    #[test]
+    fn tool_window_capture_blocks_new_viewport_gestures_but_not_active_drags() {
+        assert!(editor_viewport_pointer_available(false, false));
+        assert!(editor_viewport_pointer_available(false, true));
+        assert!(editor_viewport_pointer_available(true, true));
+        assert!(
+            !editor_viewport_pointer_available(true, false),
+            "a movable tool window must own a fresh pointer press under its real geometry"
+        );
+    }
+
+    #[test]
+    fn editor_pointer_capture_combines_floating_windows_and_fixed_chrome() {
+        assert!(!editor_ui_captures_pointer(false, [false, false]));
+        assert!(editor_ui_captures_pointer(true, [false, false]));
+        assert!(editor_ui_captures_pointer(false, [true, false]));
+        assert!(editor_ui_captures_pointer(false, [false, true]));
     }
 
     #[test]

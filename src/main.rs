@@ -180,6 +180,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         .init_resource::<WaveInfo>()
         .init_resource::<GameSettings>()
         .init_resource::<resources::UiGameplayCapture>()
+        .init_resource::<resources::AuthoringTextInputCapture>()
         .init_resource::<PlayerScore>()
         .init_resource::<PlaySessionTransition>()
         .init_resource::<LocalPlayerConfig>()

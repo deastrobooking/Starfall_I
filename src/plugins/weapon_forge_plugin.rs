@@ -26,6 +26,7 @@ use crate::engine_tools::forge_widgets::{action_button, widget_row, ForgeWidgetS
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::engine_tools::weapon_records;
+use crate::resources::{AuthoringTextInputCapture, GameSettings};
 
 /// A design queued for in-game testing. Set by the forge's TEST button and
 /// consumed once by `apply_forge_test_equip` when play begins, so the designer
@@ -39,11 +40,13 @@ impl Plugin for WeaponForgePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WeaponForgeState>()
             .init_resource::<ForgeTestEquip>()
+            .init_resource::<AuthoringTextInputCapture>()
             .add_systems(OnEnter(AppState::WeaponForge), setup_weapon_forge)
             .add_systems(OnExit(AppState::WeaponForge), despawn_weapon_forge)
             .add_systems(
                 Update,
                 (
+                    sync_weapon_name_input_capture,
                     weapon_forge_name_input_system,
                     weapon_forge_action_system,
                     weapon_forge_library_rebuild_system,
@@ -63,6 +66,13 @@ impl Plugin for WeaponForgePlugin {
                 apply_forge_test_equip.run_if(in_state(AppState::Playing)),
             );
     }
+}
+
+fn sync_weapon_name_input_capture(
+    state: Res<WeaponForgeState>,
+    mut capture: ResMut<AuthoringTextInputCapture>,
+) {
+    capture.active = state.naming;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -177,8 +187,10 @@ fn setup_weapon_forge(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut state: ResMut<WeaponForgeState>,
+    mut text_capture: ResMut<AuthoringTextInputCapture>,
     registry: Res<ForgeProjectRegistry>,
 ) {
+    text_capture.active = false;
     state.dirty = true;
     state.labels_dirty = true;
     state.naming = false;
@@ -221,7 +233,9 @@ fn setup_weapon_forge(
 fn despawn_weapon_forge(
     mut commands: Commands,
     roots: Query<Entity, Or<(With<WeaponForgeRoot>, With<WeaponPreviewRoot>)>>,
+    mut text_capture: ResMut<AuthoringTextInputCapture>,
 ) {
+    text_capture.active = false;
     for entity in roots.iter() {
         commands.entity(entity).despawn();
     }
@@ -353,8 +367,12 @@ fn weapon_forge_preview_rebuild_system(
 
 fn weapon_forge_spin_system(
     time: Res<Time>,
+    settings: Res<GameSettings>,
     mut mannequins: Query<&mut Transform, With<ForgeMannequin>>,
 ) {
+    if settings.reduced_ui_motion {
+        return;
+    }
     // The character turns; the weapon rides along in its hand.
     for mut transform in mannequins.iter_mut() {
         transform.rotate_y(time.delta_secs() * 0.6);
@@ -464,10 +482,11 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
                 TextColor(Color::srgb(0.86, 0.82, 0.60)),
             ));
 
-            let style = |height: f32| ToolWindowStyle {
+            let style = |height: f32, initially_minimized: bool| ToolWindowStyle {
                 accent: Color::srgb(0.28, 0.42, 0.72),
-                width: 306.0,
+                width: 270.0,
                 content_height: Val::Px(height),
+                initially_minimized,
                 ..Default::default()
             };
 
@@ -476,7 +495,7 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
                 root,
                 "PARTS",
                 Vec2::new(12.0, 84.0),
-                style(232.0),
+                style(232.0, false),
                 (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     panel.spawn((
@@ -518,8 +537,8 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
             spawn_tool_window(
                 root,
                 "PERFORMANCE",
-                Vec2::new(12.0, 350.0),
-                style(150.0),
+                Vec2::new(12.0, 360.0),
+                style(150.0, true),
                 (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     panel.spawn((
@@ -537,8 +556,8 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
             spawn_tool_window(
                 root,
                 "PRESETS & SAVE",
-                Vec2::new(12.0, 524.0),
-                style(150.0),
+                Vec2::new(12.0, 404.0),
+                style(150.0, true),
                 (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     button_row(panel, |row| {
@@ -565,7 +584,7 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
                 root,
                 "LIBRARY",
                 Vec2::new(340.0, 84.0),
-                style(240.0),
+                style(240.0, false),
                 (
                     WeaponForgeLibraryPanel,
                     MenuScrollPanel,
@@ -631,6 +650,7 @@ fn weapon_forge_name_input_system(
 fn weapon_forge_action_system(
     interactions: Query<(&Interaction, &WeaponForgeButton), (Changed<Interaction>, With<Button>)>,
     mut state: ResMut<WeaponForgeState>,
+    mut text_capture: ResMut<AuthoringTextInputCapture>,
     registry: Res<ForgeProjectRegistry>,
     mut test_equip: ResMut<ForgeTestEquip>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -706,6 +726,7 @@ fn weapon_forge_action_system(
         }
         ForgeAction::NameEdit => {
             state.naming = !state.naming;
+            text_capture.active = state.naming;
             let name = state.spec.name.clone();
             let message = if state.naming {
                 format!("Naming: {name}_  (Enter to finish)")
@@ -804,8 +825,11 @@ NAME it, then SAVE.",
         for (index, (_, name)) in state.library.iter().enumerate() {
             panel
                 .spawn(Node {
+                    width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
                     column_gap: Val::Px(6.0),
+                    row_gap: Val::Px(6.0),
                     align_items: AlignItems::Center,
                     margin: UiRect::bottom(Val::Px(4.0)),
                     ..default()
@@ -938,6 +962,29 @@ fn apply_forge_test_equip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creator_layout_uses_shared_windows_and_progressive_disclosure() {
+        let mut app = App::new();
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            spawn_weapon_forge_ui(&mut commands);
+        }
+        app.world_mut().flush();
+
+        let (window_count, minimized_count) = {
+            let world = app.world_mut();
+            let mut windows = world.query::<&crate::engine_tools::tool_windows::ToolWindow>();
+            windows
+                .iter(world)
+                .fold((0, 0), |(all, minimized), window| {
+                    (all + 1, minimized + usize::from(window.minimized))
+                })
+        };
+        assert_eq!(window_count, 4);
+        assert_eq!(minimized_count, 2);
+    }
 
     /// App with just the asset stores and the preview rebuild system.
     fn preview_app() -> App {

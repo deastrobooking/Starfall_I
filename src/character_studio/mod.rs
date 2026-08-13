@@ -21,7 +21,7 @@ pub mod spec;
 
 use bevy::asset::LoadState;
 use bevy::gltf::GltfAssetLabel;
-use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
@@ -33,6 +33,9 @@ use crate::character::blueprint::{
 use crate::engine::bindings::FaceButton;
 use crate::engine::game_rng::GameRng;
 use crate::engine::state::AppState;
+use crate::engine_tools::tool_windows::{
+    spawn_tool_window, ToolWindowPointerState, ToolWindowStyle, ToolWindowSystemSet,
+};
 use crate::plugins::input_plugin::{
     mapped_gamepad_face, mapped_native_face, NativeButton, NativeControllerState,
 };
@@ -52,6 +55,7 @@ impl Plugin for CharacterStudioPlugin {
             .init_resource::<StudioSliderDrag>()
             .init_resource::<StudioNavRepeat>()
             .init_resource::<SaveLibrary>()
+            .init_resource::<ToolWindowPointerState>()
             .add_systems(OnEnter(AppState::CharacterStudio), setup_studio)
             .add_systems(OnExit(AppState::CharacterStudio), cleanup_studio)
             .add_systems(
@@ -67,7 +71,7 @@ impl Plugin for CharacterStudioPlugin {
                     preview_expression,
                     fallback_failed_rig_preview,
                     refresh_imported_rig_status,
-                    orbit_camera,
+                    orbit_camera.after(ToolWindowSystemSet::PointerState),
                     refresh_labels,
                     refresh_focus_highlight,
                 )
@@ -477,8 +481,21 @@ fn setup_studio(
         Transform::from_xyz(0.0, -0.09, 0.0),
     ));
 
-    spawn_left_panel(&mut commands, &state);
-    spawn_right_panel(&mut commands);
+    commands
+        .spawn((
+            StudioRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|root| {
+            spawn_left_panel(root, &state);
+            spawn_right_panel(root);
+        });
 }
 
 fn text(value: impl Into<String>, size: f32, color: Color) -> (Text, TextFont, TextColor) {
@@ -532,8 +549,8 @@ fn spawn_small_button(
             Button,
             ActionButton { action, row, col },
             Node {
-                width: Val::Px(34.0),
-                height: Val::Px(34.0),
+                width: Val::Px(36.0),
+                height: Val::Px(36.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 margin: UiRect::horizontal(Val::Px(2.0)),
@@ -561,7 +578,7 @@ fn spawn_morph_slider(
             RelativeCursorPosition::default(),
             Node {
                 width: Val::Px(92.0),
-                height: Val::Px(34.0),
+                height: Val::Px(36.0),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::FlexStart,
                 margin: UiRect::horizontal(Val::Px(4.0)),
@@ -610,27 +627,20 @@ fn section_label(parent: &mut ChildSpawnerCommands, label: &str) {
         });
 }
 
-fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
-    commands
-        .spawn((
-            StudioRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(8.0),
-                top: Val::Px(8.0),
-                bottom: Val::Px(8.0),
-                width: Val::Px(340.0),
-                padding: UiRect::all(Val::Px(8.0)),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.90)),
-            ScrollPosition::default(),
-            StudioLeftPanel,
-        ))
-        .with_children(|panel| {
-            panel.spawn(text("CHARACTER STUDIO", 16.0, Color::srgb(0.65, 0.85, 1.0)));
+fn spawn_left_panel(parent: &mut ChildSpawnerCommands, state: &StudioState) {
+    spawn_tool_window(
+        parent,
+        "CHARACTER STUDIO",
+        Vec2::new(8.0, 8.0),
+        ToolWindowStyle {
+            accent: Color::srgb(0.22, 0.56, 0.82),
+            background: Color::srgba(0.02, 0.03, 0.05, 0.94),
+            width: 320.0,
+            content_height: Val::Px(640.0),
+            ..default()
+        },
+        (ScrollPosition::default(), StudioLeftPanel),
+        |panel| {
             {
                 let (t, f, c) = text("", 11.0, Color::srgb(0.95, 0.85, 0.4));
                 panel.spawn((StatusText, t, f, c));
@@ -645,7 +655,10 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                     .spawn((
                         FocusRow(g),
                         Node {
+                            width: Val::Percent(100.0),
                             flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            row_gap: Val::Px(4.0),
                             padding: UiRect::all(Val::Px(1.0)),
                             ..default()
                         },
@@ -665,7 +678,9 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                     .spawn((
                         FocusRow(row_idx),
                         Node {
+                            width: Val::Percent(100.0),
                             flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::SpaceBetween,
                             padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
@@ -683,6 +698,7 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                         });
                         row.spawn(Node {
                             flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
                             align_items: AlignItems::Center,
                             ..default()
                         })
@@ -734,7 +750,9 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                     .spawn((
                         FocusRow(row_idx),
                         Node {
+                            width: Val::Percent(100.0),
                             flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::SpaceBetween,
                             padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
@@ -752,6 +770,7 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                         });
                         row.spawn(Node {
                             flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
                             align_items: AlignItems::Center,
                             ..default()
                         })
@@ -808,34 +827,26 @@ fn spawn_left_panel(commands: &mut Commands, state: &StudioState) {
                         });
                     });
             }
-        });
+        },
+    );
 }
 
-fn spawn_right_panel(commands: &mut Commands) {
-    commands
-        .spawn((
-            StudioRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(8.0),
-                top: Val::Px(8.0),
-                width: Val::Px(250.0),
-                max_height: Val::Percent(85.0),
-                padding: UiRect::all(Val::Px(8.0)),
-                flex_direction: FlexDirection::Column,
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.90)),
-            ScrollPosition::default(),
-            StudioRightPanel,
-        ))
-        .with_children(|panel| {
+fn spawn_right_panel(parent: &mut ChildSpawnerCommands) {
+    spawn_tool_window(
+        parent,
+        "INFO & LIBRARY",
+        Vec2::new(1032.0, 8.0),
+        ToolWindowStyle {
+            accent: Color::srgb(0.38, 0.48, 0.72),
+            background: Color::srgba(0.02, 0.03, 0.05, 0.94),
+            width: 240.0,
+            content_height: Val::Px(520.0),
+            initially_minimized: false,
+        },
+        (ScrollPosition::default(), StudioRightPanel),
+        |panel| {
             panel.spawn(text("MODEL INFO", 14.0, Color::srgb(0.65, 0.85, 1.0)));
-            panel.spawn((
-                ModelInfoText,
-                text("", 11.0, Color::srgb(0.78, 0.84, 0.92)),
-            ));
+            panel.spawn((ModelInfoText, text("", 11.0, Color::srgb(0.78, 0.84, 0.92))));
             panel.spawn(text(
                 "CONTROLS\nD-pad / left stick: select + adjust\nA: activate   X: reset field\nLB/RB: jump sections\nRight stick: orbit   LT/RT: zoom\nMouse: drag sliders, right-drag orbit",
                 10.0,
@@ -850,7 +861,8 @@ fn spawn_right_panel(commands: &mut Commands) {
                     ..default()
                 },
             ));
-        });
+        },
+    );
 }
 
 fn morph_percent_label(v: f32) -> String {
@@ -1356,16 +1368,19 @@ fn studio_controller_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
-    mut wheel: MessageReader<MouseWheel>,
     mut repeat: ResMut<StudioNavRepeat>,
     mut focus: ResMut<StudioFocus>,
     mut state: ResMut<StudioState>,
     mut library: ResMut<SaveLibrary>,
     mut next_state: ResMut<NextState<AppState>>,
     buttons: Query<&ActionButton>,
-    mut left_panel_q: Query<(&mut ScrollPosition, &ComputedNode), With<StudioLeftPanel>>,
+    focus_rows: Query<(&FocusRow, &GlobalTransform, &ComputedNode)>,
+    mut left_panel_q: Query<
+        (&GlobalTransform, &ComputedNode, &mut ScrollPosition),
+        With<StudioLeftPanel>,
+    >,
     mut right_panel_q: Query<
-        (&mut ScrollPosition, &ComputedNode),
+        (&GlobalTransform, &ComputedNode, &mut ScrollPosition),
         (With<StudioRightPanel>, Without<StudioLeftPanel>),
     >,
 ) {
@@ -1421,7 +1436,7 @@ fn studio_controller_navigation(
         };
         focus.row = sections[next];
         focus.col = 0;
-        keep_studio_focus_in_view(&focus, &mut left_panel_q, &mut right_panel_q);
+        keep_studio_focus_in_view(&focus, &focus_rows, &mut left_panel_q, &mut right_panel_q);
     }
 
     if reset_field {
@@ -1498,7 +1513,7 @@ fn studio_controller_navigation(
                 }
             }
         }
-        keep_studio_focus_in_view(&focus, &mut left_panel_q, &mut right_panel_q);
+        keep_studio_focus_in_view(&focus, &focus_rows, &mut left_panel_q, &mut right_panel_q);
     }
 
     if confirm {
@@ -1519,18 +1534,6 @@ fn studio_controller_navigation(
                 &mut next_state,
             );
         }
-    }
-
-    let mut wheel_delta = 0.0;
-    for event in wheel.read() {
-        let scale = match event.unit {
-            MouseScrollUnit::Line => 26.0,
-            MouseScrollUnit::Pixel => 1.0,
-        };
-        wheel_delta -= event.y * scale;
-    }
-    if wheel_delta != 0.0 {
-        scroll_panel_by(&mut left_panel_q, wheel_delta);
     }
 }
 
@@ -1666,45 +1669,55 @@ fn focused_studio_action(
 
 fn keep_studio_focus_in_view(
     focus: &StudioFocus,
-    left_panel_q: &mut Query<(&mut ScrollPosition, &ComputedNode), With<StudioLeftPanel>>,
+    focus_rows: &Query<(&FocusRow, &GlobalTransform, &ComputedNode)>,
+    left_panel_q: &mut Query<
+        (&GlobalTransform, &ComputedNode, &mut ScrollPosition),
+        With<StudioLeftPanel>,
+    >,
     right_panel_q: &mut Query<
-        (&mut ScrollPosition, &ComputedNode),
+        (&GlobalTransform, &ComputedNode, &mut ScrollPosition),
         (With<StudioRightPanel>, Without<StudioLeftPanel>),
     >,
 ) {
-    let target_y = if focus.row >= FILE_ROW_0 {
-        (focus.row - FILE_ROW_0) as f32 * 28.0
-    } else {
-        focus.row as f32 * 28.0
+    let Some((_, row_transform, row_node)) =
+        focus_rows.iter().find(|(row, _, _)| row.0 == focus.row)
+    else {
+        return;
     };
     if focus.row >= FILE_ROW_0 {
-        set_panel_scroll(right_panel_q, target_y);
+        reveal_studio_row(right_panel_q, row_transform, row_node);
     } else {
-        set_panel_scroll(left_panel_q, target_y);
+        reveal_studio_row(left_panel_q, row_transform, row_node);
     }
 }
 
-fn set_panel_scroll<F: bevy::ecs::query::QueryFilter>(
-    panel_q: &mut Query<(&mut ScrollPosition, &ComputedNode), F>,
-    target_y: f32,
+fn reveal_studio_row<F: bevy::ecs::query::QueryFilter>(
+    panel_q: &mut Query<(&GlobalTransform, &ComputedNode, &mut ScrollPosition), F>,
+    row_transform: &GlobalTransform,
+    row_node: &ComputedNode,
 ) {
-    for (mut scroll_position, computed) in panel_q.iter_mut() {
+    for (panel_transform, computed, mut scroll_position) in panel_q.iter_mut() {
         let max_y = ((computed.content_size().y - computed.size().y)
             * computed.inverse_scale_factor())
         .max(0.0);
-        scroll_position.y = target_y.clamp(0.0, max_y);
-    }
-}
-
-fn scroll_panel_by<F: bevy::ecs::query::QueryFilter>(
-    panel_q: &mut Query<(&mut ScrollPosition, &ComputedNode), F>,
-    delta_y: f32,
-) {
-    for (mut scroll_position, computed) in panel_q.iter_mut() {
-        let max_y = ((computed.content_size().y - computed.size().y)
-            * computed.inverse_scale_factor())
-        .max(0.0);
-        scroll_position.y = (scroll_position.y + delta_y).clamp(0.0, max_y);
+        if max_y <= 0.0 {
+            continue;
+        }
+        let margin = 18.0;
+        let panel_center = panel_transform.translation().y;
+        let panel_half = computed.size().y * 0.5;
+        let visible_min = panel_center - panel_half + margin;
+        let visible_max = panel_center + panel_half - margin;
+        let row_center = row_transform.translation().y;
+        let row_half = row_node.size().y * 0.5;
+        let delta = if row_center - row_half < visible_min {
+            visible_min - (row_center - row_half)
+        } else if row_center + row_half > visible_max {
+            visible_max - (row_center + row_half)
+        } else {
+            0.0
+        };
+        scroll_position.y = (scroll_position.y + delta).clamp(0.0, max_y);
     }
 }
 
@@ -1977,6 +1990,7 @@ fn orbit_camera(
     mut wheel: MessageReader<MouseWheel>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
+    tool_windows: Res<ToolWindowPointerState>,
     mut state: ResMut<StudioState>,
     mut cam_q: Query<&mut Transform, With<StudioCamera>>,
 ) {
@@ -1985,13 +1999,13 @@ fn orbit_camera(
     // Right-drag orbits; right-mouse wheel zooms. Plain wheel scrolls the GUI.
     let mut drag = Vec2::ZERO;
     for ev in motion.read() {
-        if mouse_buttons.pressed(MouseButton::Right) {
+        if mouse_buttons.pressed(MouseButton::Right) && !tool_windows.captures_viewport() {
             drag += ev.delta;
         }
     }
     state.yaw -= drag.x * 0.008;
     state.pitch = (state.pitch + drag.y * 0.006).clamp(-0.4, 1.2);
-    if mouse_buttons.pressed(MouseButton::Right) {
+    if mouse_buttons.pressed(MouseButton::Right) && !tool_windows.captures_viewport() {
         for ev in wheel.read() {
             state.distance = (state.distance - ev.y * 0.25).clamp(1.2, 8.0);
         }
@@ -2371,6 +2385,48 @@ mod playable_tests {
         assert_eq!(
             ACTION_SECTION_LABELS[ACTION_SECTION_LABELS.len() - 1],
             Some("PROJECT")
+        );
+    }
+
+    #[test]
+    fn studio_panels_use_shared_floating_window_chrome() {
+        let mut app = App::new();
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            commands.spawn(Node::default()).with_children(|root| {
+                spawn_left_panel(root, &StudioState::default());
+                spawn_right_panel(root);
+            });
+        }
+        app.world_mut().flush();
+
+        let window_count = app
+            .world_mut()
+            .query::<&crate::engine_tools::tool_windows::ToolWindow>()
+            .iter(app.world())
+            .count();
+        assert_eq!(window_count, 2);
+        let minimized_count = app
+            .world_mut()
+            .query::<&crate::engine_tools::tool_windows::ToolWindow>()
+            .iter(app.world())
+            .filter(|window| window.minimized)
+            .count();
+        assert_eq!(minimized_count, 0);
+        assert_eq!(
+            app.world_mut()
+                .query::<&StudioLeftPanel>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&StudioRightPanel>()
+                .iter(app.world())
+                .count(),
+            1
         );
     }
 }

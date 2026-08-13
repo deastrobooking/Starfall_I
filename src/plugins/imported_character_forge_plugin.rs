@@ -23,8 +23,10 @@ use crate::engine_tools::mesh_uv::{
     apply_uv_edit, rasterize_face_paint, selection_boundary_edges, static_mesh_copy,
 };
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
-use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
-use crate::resources::ImportedForgeReturnTarget;
+use crate::engine_tools::tool_windows::{
+    spawn_tool_window, ToolWindowPointerState, ToolWindowStyle, ToolWindowSystemSet,
+};
+use crate::resources::{GameSettings, ImportedForgeReturnTarget};
 
 pub struct ImportedCharacterForgePlugin;
 
@@ -33,6 +35,7 @@ impl Plugin for ImportedCharacterForgePlugin {
         app.add_message::<FileDragAndDrop>()
             .init_resource::<ImportedForgeState>()
             .init_resource::<ImportedForgeReturnTarget>()
+            .init_resource::<ToolWindowPointerState>()
             .add_systems(OnEnter(AppState::ImportedCharacterForge), setup_forge)
             .add_systems(OnExit(AppState::ImportedCharacterForge), cleanup_forge)
             .add_systems(
@@ -41,7 +44,7 @@ impl Plugin for ImportedCharacterForgePlugin {
                     import_dropped_glb,
                     imported_forge_actions,
                     poll_imported_gltf,
-                    pick_imported_face,
+                    pick_imported_face.after(ToolWindowSystemSet::PointerState),
                     rebuild_imported_preview,
                     refresh_imported_labels,
                     spin_imported_preview,
@@ -232,6 +235,10 @@ struct ImportedPreviewRoot;
 struct ImportedPreviewPart;
 #[derive(Component)]
 struct ImportedRuntimeTestRoot;
+
+// Keep the import and selection tasks open; secondary inspectors live on a
+// compact title shelf until the designer asks for them.
+const IMPORTED_WINDOW_START_MINIMIZED: [bool; 7] = [false, true, true, false, true, true, true];
 #[derive(Component, Clone, Copy)]
 struct ImportedPreviewSource {
     mesh_index: usize,
@@ -604,8 +611,9 @@ fn setup_forge(
 
             let style = ToolWindowStyle {
                 accent: Color::srgb(0.12, 0.52, 0.72),
-                width: 320.0,
+                width: 260.0,
                 content_height: Val::Px(260.0),
+                initially_minimized: IMPORTED_WINDOW_START_MINIMIZED[0],
                 ..default()
             };
             spawn_tool_window(
@@ -642,8 +650,9 @@ fn setup_forge(
                 Vec2::new(14.0, 410.0),
                 ToolWindowStyle {
                     accent: Color::srgb(0.48, 0.22, 0.74),
-                    width: 320.0,
+                    width: 280.0,
                     content_height: Val::Px(300.0),
+                    initially_minimized: IMPORTED_WINDOW_START_MINIMIZED[1],
                     ..default()
                 },
                 (MenuScrollPanel, ScrollPosition::default()),
@@ -686,8 +695,9 @@ fn setup_forge(
                 Vec2::new(350.0, 86.0),
                 ToolWindowStyle {
                     accent: Color::srgb(0.18, 0.62, 0.48),
-                    width: 270.0,
+                    width: 260.0,
                     content_height: Val::Px(210.0),
+                    initially_minimized: IMPORTED_WINDOW_START_MINIMIZED[2],
                     ..default()
                 },
                 (),
@@ -721,11 +731,12 @@ fn setup_forge(
             spawn_tool_window(
                 root,
                 "MESH-AWARE SELECTION",
-                Vec2::new(350.0, 330.0),
+                Vec2::new(350.0, 220.0),
                 ToolWindowStyle {
                     accent: Color::srgb(0.92, 0.48, 0.12),
-                    width: 390.0,
-                    content_height: Val::Px(350.0),
+                    width: 280.0,
+                    content_height: Val::Px(260.0),
+                    initially_minimized: IMPORTED_WINDOW_START_MINIMIZED[3],
                     ..default()
                 },
                 (MenuScrollPanel, ScrollPosition::default()),
@@ -776,8 +787,9 @@ fn setup_forge(
                 Vec2::new(756.0, 86.0),
                 ToolWindowStyle {
                     accent: Color::srgb(0.92, 0.18, 0.42),
-                    width: 350.0,
+                    width: 300.0,
                     content_height: Val::Px(300.0),
+                    initially_minimized: IMPORTED_WINDOW_START_MINIMIZED[4],
                     ..default()
                 },
                 (MenuScrollPanel, ScrollPosition::default()),
@@ -816,11 +828,12 @@ fn setup_forge(
             spawn_tool_window(
                 root,
                 "COLOR + TEXTURE",
-                Vec2::new(756.0, 430.0),
+                Vec2::new(756.0, 130.0),
                 ToolWindowStyle {
                     accent: Color::srgb(0.05, 0.78, 0.62),
-                    width: 350.0,
+                    width: 300.0,
                     content_height: Val::Px(290.0),
+                    initially_minimized: IMPORTED_WINDOW_START_MINIMIZED[5],
                     ..default()
                 },
                 (MenuScrollPanel, ScrollPosition::default()),
@@ -865,11 +878,12 @@ fn setup_forge(
             spawn_tool_window(
                 root,
                 "UV + FACE PAINT",
-                Vec2::new(1120.0, 86.0),
+                Vec2::new(14.0, 454.0),
                 ToolWindowStyle {
                     accent: Color::srgb(0.72, 0.36, 0.95),
-                    width: 330.0,
+                    width: 280.0,
                     content_height: Val::Px(310.0),
+                    initially_minimized: IMPORTED_WINDOW_START_MINIMIZED[6],
                     ..default()
                 },
                 (MenuScrollPanel, ScrollPosition::default()),
@@ -2013,6 +2027,7 @@ fn pick_imported_face(
     mouse: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    tool_window_pointer: Res<ToolWindowPointerState>,
     cameras: Query<(&Camera, &GlobalTransform), With<ImportedForgeCamera>>,
     preview_parts: Query<(&ImportedPreviewSource, &GlobalTransform)>,
     gltfs: Res<Assets<Gltf>>,
@@ -2021,7 +2036,7 @@ fn pick_imported_face(
     mut state: ResMut<ImportedForgeState>,
 ) {
     let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
-    if !alt || !mouse.just_pressed(MouseButton::Left) {
+    if !alt || !mouse.just_pressed(MouseButton::Left) || tool_window_pointer.captures_viewport() {
         return;
     }
     let (Ok(window), Ok((camera, camera_transform))) = (windows.single(), cameras.single()) else {
@@ -2520,9 +2535,13 @@ fn refresh_imported_labels(
 
 fn spin_imported_preview(
     time: Res<Time>,
+    settings: Res<GameSettings>,
     mut state: ResMut<ImportedForgeState>,
     mut previews: Query<&mut Transform, With<ImportedPreviewRoot>>,
 ) {
+    if settings.reduced_ui_motion {
+        return;
+    }
     state.spin = (state.spin + time.delta_secs() * 0.22) % std::f32::consts::TAU;
     for mut transform in &mut previews {
         transform.rotation = Quat::from_rotation_y(state.spin);
@@ -2532,6 +2551,20 @@ fn spin_imported_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dense_import_workspace_progressively_discloses_secondary_windows() {
+        assert_eq!(IMPORTED_WINDOW_START_MINIMIZED.len(), 7);
+        assert_eq!(
+            IMPORTED_WINDOW_START_MINIMIZED
+                .into_iter()
+                .filter(|minimized| *minimized)
+                .count(),
+            5
+        );
+        assert!(!IMPORTED_WINDOW_START_MINIMIZED[0]);
+        assert!(!IMPORTED_WINDOW_START_MINIMIZED[3]);
+    }
 
     #[test]
     fn imported_filename_sanitizer_is_path_safe() {

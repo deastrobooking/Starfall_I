@@ -2,8 +2,6 @@ use bevy::prelude::*;
 
 use crate::character::face::{BrowStyle, Expression, EyeStyle, FaceRecipe};
 
-use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
-
 use crate::character::blueprint::{
     BodyRecipe, CartoonAppearanceRecipe, CharacterBlueprint, CharacterPaletteRecipe,
     CHARACTER_BLUEPRINT_SCHEMA_VERSION,
@@ -19,11 +17,12 @@ use crate::character::presets::{
 };
 use crate::components::player::PlayerCamera;
 use crate::engine::state::AppState;
+use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::plugins::ui_plugin::MenuScrollPanel;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     CharacterBaseModel, CharacterDesignData, CharacterDesignReturnTarget, CharacterDesignSnapshot,
-    PlayerPartLoadout, PlayerSelectState,
+    GameSettings, PlayerPartLoadout, PlayerSelectState,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -55,7 +54,6 @@ impl Plugin for CharacterDesignPlugin {
                     human_studio_interaction,
                     prefab_action_interaction,
                     preview_zoom_interaction,
-                    scroll_design_panel,
                     // Grouped: Bevy caps a system tuple at 20 entries.
                     (
                         update_swatch_borders,
@@ -415,9 +413,13 @@ fn cleanup_character_design(
 
 fn spin_preview(
     time: Res<Time>,
+    settings: Res<GameSettings>,
     mut design_data: ResMut<CharacterDesignData>,
     mut preview_q: Query<&mut Transform, With<PreviewRoot>>,
 ) {
+    if settings.reduced_ui_motion {
+        return;
+    }
     design_data.spin_angle += time.delta_secs() * 0.7;
     if let Ok(mut t) = preview_q.single_mut() {
         t.rotation = Quat::from_rotation_y(design_data.spin_angle);
@@ -714,31 +716,6 @@ fn preview_zoom_interaction(
         for mut transform in cam_q.iter_mut() {
             *transform = design_preview_camera_transform(design_data.preview_distance);
         }
-    }
-}
-
-fn scroll_design_panel(
-    mut wheel: MessageReader<MouseWheel>,
-    mut panel_q: Query<(&mut ScrollPosition, &ComputedNode), With<DesignScrollPanel>>,
-) {
-    let mut delta_y = 0.0;
-    for event in wheel.read() {
-        let scale = match event.unit {
-            MouseScrollUnit::Line => 26.0,
-            MouseScrollUnit::Pixel => 1.0,
-        };
-        delta_y -= event.y * scale;
-    }
-
-    if delta_y == 0.0 {
-        return;
-    }
-
-    for (mut scroll_position, computed) in panel_q.iter_mut() {
-        let max_y = ((computed.content_size().y - computed.size().y)
-            * computed.inverse_scale_factor())
-        .max(0.0);
-        scroll_position.y = (scroll_position.y + delta_y).clamp(0.0, max_y);
     }
 }
 
@@ -1066,342 +1043,341 @@ fn spawn_design_ui(
     commands
         .spawn((
             Node {
+                position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
                 ..default()
             },
             DesignUiRoot,
+            Pickable::IGNORE,
         ))
         .with_children(|root| {
-            root.spawn(Node {
-                width: Val::Percent(54.0),
-                height: Val::Percent(100.0),
-                ..default()
-            });
-
-            root.spawn((
-                Node {
-                    width: Val::Percent(46.0),
-                    height: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::axes(Val::Px(28.0), Val::Px(24.0)),
-                    row_gap: Val::Px(10.0),
-                    overflow: Overflow::scroll_y(),
+            spawn_tool_window(
+                root,
+                "ROBOT BUILDER",
+                Vec2::new(900.0, 8.0),
+                ToolWindowStyle {
+                    accent: Color::srgb(0.82, 0.62, 0.32),
+                    background: Color::srgba(0.025, 0.026, 0.030, 0.96),
+                    width: 360.0,
+                    content_height: Val::Px(600.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.025, 0.026, 0.030, 0.96)),
-                ScrollPosition::default(),
-                DesignScrollPanel,
-                MenuScrollPanel,
-            ))
-            .with_children(|panel| {
-                panel.spawn((
-                    Text::new(format!("ROBOT BUILDER\n{}", hero_name.to_uppercase())),
-                    TextFont {
-                        font_size: FontSize::Px(25.0),
+                (
+                    ScrollPosition::default(),
+                    DesignScrollPanel,
+                    MenuScrollPanel,
+                ),
+                |panel| {
+                    panel.spawn((
+                        Text::new(hero_name.to_uppercase()),
+                        TextFont {
+                            font_size: FontSize::Px(25.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.92, 0.76, 0.42)),
+                    ));
+                    spawn_design_navigation_row(panel);
+                    panel.spawn((
+                        Text::new(base_model_status_text(design_data)),
+                        TextFont {
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.72, 0.78, 0.84)),
+                        BaseModelStatusText,
+                    ));
+
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(8.0),
+                            row_gap: Val::Px(8.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            spawn_human_studio_button(row);
+                            spawn_preview_zoom_button(row, "+", -0.25);
+                            spawn_preview_zoom_button(row, "-", 0.25);
+                        });
+
+                    spawn_section_label(panel, "BASE MODEL");
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(7.0),
+                            row_gap: Val::Px(7.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for preset in [
+                                ReferenceDesignPreset::Amp,
+                                ReferenceDesignPreset::Antonio,
+                                ReferenceDesignPreset::Chroma,
+                                ReferenceDesignPreset::Daria,
+                                ReferenceDesignPreset::Vincenzo,
+                            ] {
+                                spawn_design_preset_button(row, preset, design_data);
+                            }
+                        });
+
+                    spawn_section_label(panel, "PREFABS");
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(8.0),
+                            row_gap: Val::Px(8.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            spawn_prefab_button(row, "EXPORT", PrefabAction::Export);
+                            spawn_prefab_button(row, "IMPORT", PrefabAction::Import);
+                        });
+
+                    spawn_section_label(panel, "PALETTE");
+
+                    spawn_swatch_row(
+                        panel,
+                        "SKIN",
+                        SwatchCategory::Skin,
+                        &skins,
+                        design_data.skin_idx,
+                    );
+                    spawn_swatch_row(
+                        panel,
+                        "OUTFIT",
+                        SwatchCategory::Outfit,
+                        &outfits,
+                        design_data.outfit_idx,
+                    );
+                    spawn_swatch_row(
+                        panel,
+                        "ACCENT",
+                        SwatchCategory::Accent,
+                        &accents,
+                        design_data.accent_idx,
+                    );
+                    spawn_swatch_row(
+                        panel,
+                        "HAIR",
+                        SwatchCategory::Hair,
+                        &hairs,
+                        design_data.hair_idx,
+                    );
+                    spawn_swatch_row(
+                        panel,
+                        "EYES",
+                        SwatchCategory::Eye,
+                        &eyes,
+                        design_data.eye_idx,
+                    );
+
+                    spawn_section_label(panel, "BATTLE SILHOUETTE");
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(8.0),
+                            row_gap: Val::Px(8.0),
+                            ..default()
+                        })
+                        .with_children(|grid| {
+                            for (label, slot) in [
+                                ("BODY", DesignerPartSlot::Body),
+                                ("ARMS", DesignerPartSlot::Arms),
+                                ("LEGS", DesignerPartSlot::Legs),
+                                ("SHOULDERS", DesignerPartSlot::Shoulders),
+                                ("HEAD", DesignerPartSlot::Head),
+                            ] {
+                                spawn_part_preset_row(grid, label, slot, design_data);
+                            }
+                        });
+
+                    spawn_section_label(panel, "GEAR");
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(8.0),
+                            row_gap: Val::Px(8.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            spawn_toggle(row, "HOOD", AccessoryToggle::Hood, design_data.has_hood);
+                            spawn_toggle(row, "CAPE", AccessoryToggle::Cape, design_data.has_cape);
+                            spawn_toggle(
+                                row,
+                                "GLOVES",
+                                AccessoryToggle::Gloves,
+                                design_data.has_gloves,
+                            );
+                            spawn_toggle(
+                                row,
+                                "BOOTS",
+                                AccessoryToggle::Boots,
+                                design_data.has_boots,
+                            );
+                            spawn_toggle(
+                                row,
+                                "PADS",
+                                AccessoryToggle::ShoulderPads,
+                                design_data.has_shoulder_pads,
+                            );
+                            spawn_toggle(
+                                row,
+                                "VISOR",
+                                AccessoryToggle::Visor,
+                                design_data.has_visor,
+                            );
+                        });
+
+                    spawn_section_label(panel, "PHYSIQUE ARCHETYPE");
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(7.0),
+                            row_gap: Val::Px(7.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for preset in [
+                                PhysiquePreset::Vanguard,
+                                PhysiquePreset::Duelist,
+                                PhysiquePreset::Arcanist,
+                                PhysiquePreset::Lancer,
+                                PhysiquePreset::Titan,
+                            ] {
+                                spawn_physique_preset_button(row, preset, &design_data.body);
+                            }
+                        });
+
+                    // ── Face ──────────────────────────────────────────────
+                    spawn_section_label(panel, "FACE");
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(7.0),
+                            row_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|grid| {
+                            for (label, cycle) in [
+                                ("EYES", FaceCycle::EyeStyle),
+                                ("BROWS", FaceCycle::BrowStyle),
+                                ("MOOD", FaceCycle::Expression),
+                            ] {
+                                spawn_face_cycle_row(grid, label, cycle, &design_data.face);
+                            }
+                            for (label, field) in [
+                                ("EYE SIZE", FaceField::EyeSize),
+                                ("SPACING", FaceField::EyeSpacing),
+                                ("EYE Y", FaceField::EyeHeight),
+                                ("TILT", FaceField::EyeTilt),
+                                ("PUPIL", FaceField::Pupil),
+                                ("SPARKLE", FaceField::Highlight),
+                                ("LASHES", FaceField::Lash),
+                                ("BROW Y", FaceField::BrowHeight),
+                                ("NOSE", FaceField::Nose),
+                                ("MOUTH", FaceField::MouthWidth),
+                            ] {
+                                spawn_face_row(grid, label, field, &design_data.face);
+                            }
+                        });
+
+                    spawn_section_label(panel, "PROPORTIONS");
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(7.0),
+                            row_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|grid| {
+                            for (label, field) in [
+                                ("HEIGHT", BodyField::Height),
+                                ("SHOULDERS", BodyField::Shoulders),
+                                ("CHEST", BodyField::Chest),
+                                ("ARMS", BodyField::Arms),
+                                ("LEGS", BodyField::Legs),
+                                ("HANDS", BodyField::Hands),
+                                ("FEET", BodyField::Feet),
+                                ("HEAD", BodyField::Head),
+                                ("NECK", BodyField::Neck),
+                                ("HIPS", BodyField::Hips),
+                                ("POSTURE", BodyField::Posture),
+                                ("TORSO", BodyField::TorsoCurve),
+                                ("MASS", BodyField::Mass),
+                                ("MUSCLE", BodyField::Muscle),
+                                ("WEIGHT", BodyField::BodyFat),
+                                ("ASYMM", BodyField::Asymmetry),
+                            ] {
+                                spawn_body_row(grid, label, field, &design_data.body);
+                            }
+                        });
+                },
+            );
+        });
+}
+
+fn spawn_design_navigation_row(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(12.0),
+            ..default()
+        })
+        .with_children(|row| {
+            for (label, background, border, is_confirm) in [
+                (
+                    "BACK",
+                    Color::srgb(0.16, 0.08, 0.07),
+                    Color::srgb(0.42, 0.25, 0.20),
+                    false,
+                ),
+                (
+                    "CONFIRM",
+                    Color::srgb(0.22, 0.17, 0.08),
+                    Color::srgb(0.82, 0.62, 0.32),
+                    true,
+                ),
+            ] {
+                let mut button = row.spawn((
+                    Button,
+                    Node {
+                        min_width: Val::Px(112.0),
+                        min_height: Val::Px(44.0),
+                        flex_grow: 1.0,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(Val::Px(1.0)),
                         ..default()
                     },
-                    TextColor(Color::srgb(0.92, 0.76, 0.42)),
+                    BackgroundColor(background),
+                    BorderColor::all(border),
                 ));
-                panel.spawn((
-                    Text::new(base_model_status_text(design_data)),
-                    TextFont {
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.72, 0.78, 0.84)),
-                    BaseModelStatusText,
-                ));
-
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(8.0),
-                        row_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        spawn_human_studio_button(row);
-                        spawn_preview_zoom_button(row, "+", -0.25);
-                        spawn_preview_zoom_button(row, "-", 0.25);
-                    });
-
-                spawn_section_label(panel, "BASE MODEL");
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(7.0),
-                        row_gap: Val::Px(7.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        for preset in [
-                            ReferenceDesignPreset::Amp,
-                            ReferenceDesignPreset::Antonio,
-                            ReferenceDesignPreset::Chroma,
-                            ReferenceDesignPreset::Daria,
-                            ReferenceDesignPreset::Vincenzo,
-                        ] {
-                            spawn_design_preset_button(row, preset, design_data);
-                        }
-                    });
-
-                spawn_section_label(panel, "PREFABS");
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(8.0),
-                        row_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        spawn_prefab_button(row, "EXPORT", PrefabAction::Export);
-                        spawn_prefab_button(row, "IMPORT", PrefabAction::Import);
-                    });
-
-                spawn_section_label(panel, "PALETTE");
-
-                spawn_swatch_row(
-                    panel,
-                    "SKIN",
-                    SwatchCategory::Skin,
-                    &skins,
-                    design_data.skin_idx,
-                );
-                spawn_swatch_row(
-                    panel,
-                    "OUTFIT",
-                    SwatchCategory::Outfit,
-                    &outfits,
-                    design_data.outfit_idx,
-                );
-                spawn_swatch_row(
-                    panel,
-                    "ACCENT",
-                    SwatchCategory::Accent,
-                    &accents,
-                    design_data.accent_idx,
-                );
-                spawn_swatch_row(
-                    panel,
-                    "HAIR",
-                    SwatchCategory::Hair,
-                    &hairs,
-                    design_data.hair_idx,
-                );
-                spawn_swatch_row(
-                    panel,
-                    "EYES",
-                    SwatchCategory::Eye,
-                    &eyes,
-                    design_data.eye_idx,
-                );
-
-                spawn_section_label(panel, "BATTLE SILHOUETTE");
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(8.0),
-                        row_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|grid| {
-                        for (label, slot) in [
-                            ("BODY", DesignerPartSlot::Body),
-                            ("ARMS", DesignerPartSlot::Arms),
-                            ("LEGS", DesignerPartSlot::Legs),
-                            ("SHOULDERS", DesignerPartSlot::Shoulders),
-                            ("HEAD", DesignerPartSlot::Head),
-                        ] {
-                            spawn_part_preset_row(grid, label, slot, design_data);
-                        }
-                    });
-
-                spawn_section_label(panel, "GEAR");
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(8.0),
-                        row_gap: Val::Px(8.0),
-                        flex_wrap: FlexWrap::Wrap,
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        spawn_toggle(row, "HOOD", AccessoryToggle::Hood, design_data.has_hood);
-                        spawn_toggle(row, "CAPE", AccessoryToggle::Cape, design_data.has_cape);
-                        spawn_toggle(
-                            row,
-                            "GLOVES",
-                            AccessoryToggle::Gloves,
-                            design_data.has_gloves,
-                        );
-                        spawn_toggle(row, "BOOTS", AccessoryToggle::Boots, design_data.has_boots);
-                        spawn_toggle(
-                            row,
-                            "PADS",
-                            AccessoryToggle::ShoulderPads,
-                            design_data.has_shoulder_pads,
-                        );
-                        spawn_toggle(row, "VISOR", AccessoryToggle::Visor, design_data.has_visor);
-                    });
-
-                spawn_section_label(panel, "PHYSIQUE ARCHETYPE");
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(7.0),
-                        row_gap: Val::Px(7.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        for preset in [
-                            PhysiquePreset::Vanguard,
-                            PhysiquePreset::Duelist,
-                            PhysiquePreset::Arcanist,
-                            PhysiquePreset::Lancer,
-                            PhysiquePreset::Titan,
-                        ] {
-                            spawn_physique_preset_button(row, preset, &design_data.body);
-                        }
-                    });
-
-                // ── Face ──────────────────────────────────────────────
-                spawn_section_label(panel, "FACE");
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(7.0),
-                        row_gap: Val::Px(6.0),
-                        ..default()
-                    })
-                    .with_children(|grid| {
-                        for (label, cycle) in [
-                            ("EYES", FaceCycle::EyeStyle),
-                            ("BROWS", FaceCycle::BrowStyle),
-                            ("MOOD", FaceCycle::Expression),
-                        ] {
-                            spawn_face_cycle_row(grid, label, cycle, &design_data.face);
-                        }
-                        for (label, field) in [
-                            ("EYE SIZE", FaceField::EyeSize),
-                            ("SPACING", FaceField::EyeSpacing),
-                            ("EYE Y", FaceField::EyeHeight),
-                            ("TILT", FaceField::EyeTilt),
-                            ("PUPIL", FaceField::Pupil),
-                            ("SPARKLE", FaceField::Highlight),
-                            ("LASHES", FaceField::Lash),
-                            ("BROW Y", FaceField::BrowHeight),
-                            ("NOSE", FaceField::Nose),
-                            ("MOUTH", FaceField::MouthWidth),
-                        ] {
-                            spawn_face_row(grid, label, field, &design_data.face);
-                        }
-                    });
-
-                spawn_section_label(panel, "PROPORTIONS");
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(7.0),
-                        row_gap: Val::Px(6.0),
-                        ..default()
-                    })
-                    .with_children(|grid| {
-                        for (label, field) in [
-                            ("HEIGHT", BodyField::Height),
-                            ("SHOULDERS", BodyField::Shoulders),
-                            ("CHEST", BodyField::Chest),
-                            ("ARMS", BodyField::Arms),
-                            ("LEGS", BodyField::Legs),
-                            ("HANDS", BodyField::Hands),
-                            ("FEET", BodyField::Feet),
-                            ("HEAD", BodyField::Head),
-                            ("NECK", BodyField::Neck),
-                            ("HIPS", BodyField::Hips),
-                            ("POSTURE", BodyField::Posture),
-                            ("TORSO", BodyField::TorsoCurve),
-                            ("MASS", BodyField::Mass),
-                            ("MUSCLE", BodyField::Muscle),
-                            ("WEIGHT", BodyField::BodyFat),
-                            ("ASYMM", BodyField::Asymmetry),
-                        ] {
-                            spawn_body_row(grid, label, field, &design_data.body);
-                        }
-                    });
-
-                // Expand to push buttons to bottom
-                panel.spawn(Node {
-                    flex_grow: 1.0,
-                    ..default()
+                if is_confirm {
+                    button.insert(ConfirmButton);
+                } else {
+                    button.insert(BackButton);
+                }
+                button.with_children(|button| {
+                    button.spawn((
+                        Text::new(label),
+                        TextFont {
+                            font_size: FontSize::Px(16.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
                 });
-
-                // Back / Confirm row
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(12.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        row.spawn((
-                            Button,
-                            Node {
-                                width: Val::Px(112.0),
-                                height: Val::Px(44.0),
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.16, 0.08, 0.07)),
-                            BorderColor::all(Color::srgb(0.42, 0.25, 0.20)),
-                            BackButton,
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("BACK"),
-                                TextFont {
-                                    font_size: FontSize::Px(16.0),
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
-                            ));
-                        });
-
-                        row.spawn((
-                            Button,
-                            Node {
-                                width: Val::Px(112.0),
-                                height: Val::Px(44.0),
-                                align_items: AlignItems::Center,
-                                justify_content: JustifyContent::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.22, 0.17, 0.08)),
-                            BorderColor::all(Color::srgb(0.82, 0.62, 0.32)),
-                            ConfirmButton,
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("CONFIRM"),
-                                TextFont {
-                                    font_size: FontSize::Px(16.0),
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
-                            ));
-                        });
-                    });
-            });
+            }
         });
 }
 
@@ -2353,6 +2329,34 @@ fn physique_matches(body: &BodyRecipe, preset: PhysiquePreset) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn character_designer_uses_the_shared_floating_window_shell() {
+        let mut app = App::new();
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            spawn_design_ui(
+                &mut commands,
+                &PlayerSelectState::default(),
+                &CharacterDesignData::default(),
+            );
+        }
+        app.world_mut().flush();
+
+        let window_count = {
+            let world = app.world_mut();
+            let mut windows = world.query::<&crate::engine_tools::tool_windows::ToolWindow>();
+            windows.iter(world).count()
+        };
+        let scroll_panel_count = {
+            let world = app.world_mut();
+            let mut panels = world.query::<&DesignScrollPanel>();
+            panels.iter(world).count()
+        };
+        assert_eq!(window_count, 1);
+        assert_eq!(scroll_panel_count, 1);
+    }
 
     #[test]
     fn base_model_selection_survives_custom_edits() {

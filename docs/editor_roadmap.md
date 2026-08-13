@@ -108,8 +108,15 @@ default document.
 
 ## M5 — Extensible editor platform and scale
 
+- UX foundation already landed: one shared movable/resizable/minimizable window
+  shell, logical-coordinate fitting, pointer-routed scrolling and viewport
+  capture, responsive full-screen creator surfaces, progressive default layouts,
+  and geometry-aware shared controller focus.
 - Add registries for tools, panels, inspectors, importers, builders, validators,
   commands, shortcuts, and persisted docking/layout.
+- Add named workspace presets/reset, task-grouped Registry navigation, action
+  availability with disabled reasons, consistent destructive confirmations,
+  semantic accessibility labels/live regions, and keyboard window management.
 - Add asset browser, console/profiler, background cancellable work, source-control
   hooks, UI/controller integration tests, and performance budgets.
 - Split remaining `world_plugin.rs` and `ui_plugin.rs` hotspots along the same

@@ -197,9 +197,14 @@ entity — a global resource silently breaks 2–4 player co-op.
 
 UI setup and teardown are anchored to `AppState` via `OnEnter`/`OnExit`, so no
 node hierarchy outlives its state. Panels live in `plugins/ui_plugin.rs` and the
-creator tools in their own plugins; shared draggable tool windows come from
-`engine_tools::tool_windows`. `MenuFocus` provides shared controller menu
-navigation so every screen is playable without a mouse.
+creator tools in their own plugins; shared movable, resizable, minimizable,
+scrollable tool windows come from `engine_tools::tool_windows`. The shell owns
+logical-coordinate drag/resize, z-order, workspace fitting, and pointer capture;
+viewport systems must run after `ToolWindowSystemSet::PointerState` before
+starting a mouse gesture. `MenuFocus` provides shared controller navigation,
+filters hidden or covered controls, and keeps focused controls in their owning
+scroll surface. Full-screen launchers use responsive scroll/reflow rather than
+floating chrome.
 
 ## Saves
 

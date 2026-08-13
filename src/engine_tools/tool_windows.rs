@@ -13,7 +13,9 @@
 //! [`spawn_tool_window`], and any future creator screen can join by spawning
 //! windows under its own UI root.
 
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
+use bevy::ui::{ComputedStackIndex, FocusPolicy, RelativeCursorPosition, UiSystems};
 use bevy::window::PrimaryWindow;
 
 /// Window chrome state. Lives on the window root node.
@@ -66,6 +68,12 @@ pub struct ToolWindowResizeGrip {
     pub window: Entity,
 }
 
+/// Marks pointer-only window chrome that should not participate in generic
+/// keyboard/controller menu focus. The minimize button deliberately does not
+/// carry this marker: it is a meaningful, focusable window action.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ToolWindowChromeControl;
+
 /// Text glyph on the minimize button ("—" open, "▣" minimized).
 #[derive(Component, Debug, Clone, Copy)]
 struct ToolWindowMinimizeGlyph {
@@ -76,19 +84,71 @@ struct ToolWindowMinimizeGlyph {
 #[derive(Resource, Default)]
 struct ToolWindowRaiseOrder(i32);
 
+/// Current pointer ownership for creator windows. Viewport tools should run
+/// after [`ToolWindowSystemSet::PointerState`] and skip pointer-driven actions
+/// while this resource reports capture.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct ToolWindowPointerState {
+    captures_viewport: bool,
+}
+
+impl ToolWindowPointerState {
+    pub fn captures_viewport(&self) -> bool {
+        self.captures_viewport
+    }
+}
+
+/// Public ordering boundary for viewport/editor systems that share pointer
+/// input with floating creator windows.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToolWindowSystemSet {
+    /// Pointer hover/gesture ownership has been refreshed for this frame.
+    PointerState,
+    Interaction,
+    FitAndState,
+}
+
 pub struct ToolWindowsPlugin;
 
 impl Plugin for ToolWindowsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ToolWindowRaiseOrder>().add_systems(
-            Update,
-            (
-                tool_window_drag_system,
-                tool_window_resize_system,
-                tool_window_fit_system,
-                tool_window_minimize_system,
+        app.init_resource::<ToolWindowRaiseOrder>()
+            .init_resource::<ToolWindowPointerState>()
+            .configure_sets(
+                Update,
+                (
+                    ToolWindowSystemSet::PointerState,
+                    ToolWindowSystemSet::Interaction,
+                    ToolWindowSystemSet::FitAndState,
+                )
+                    .chain(),
             )
-                .chain(),
+            .add_systems(
+                Update,
+                tool_window_pointer_state_system.in_set(ToolWindowSystemSet::PointerState),
+            )
+            .add_systems(
+                Update,
+                (
+                    tool_window_raise_system,
+                    tool_window_drag_system,
+                    tool_window_resize_system,
+                    tool_window_scroll_system,
+                    tool_window_minimize_system,
+                )
+                    .chain()
+                    .in_set(ToolWindowSystemSet::Interaction),
+            )
+            .add_systems(
+                Update,
+                tool_window_fit_system.in_set(ToolWindowSystemSet::FitAndState),
+            );
+        // Relative cursor positions and stack indices are finalized after UI
+        // layout. Refresh capture again there so consumers in the next Update
+        // begin from actual, current geometry rather than spawn defaults.
+        app.add_systems(
+            PostUpdate,
+            tool_window_pointer_state_system.after(UiSystems::Stack),
         );
     }
 }
@@ -139,21 +199,107 @@ fn px_or_zero(value: Val) -> f32 {
     }
 }
 
-fn tool_window_drag_system(
+fn tool_window_pointer_state_system(
+    mut pointer_state: ResMut<ToolWindowPointerState>,
+    windows: Query<(&RelativeCursorPosition, &ToolWindow)>,
+) {
+    pointer_state.captures_viewport = windows.iter().any(|(cursor, window)| {
+        cursor.cursor_over() || window.drag.is_some() || window.resize.is_some()
+    });
+}
+
+/// Raise a window when any interactive surface inside it is pressed, including
+/// ordinary content controls. Header/grip gesture systems do not own z-order,
+/// avoiding duplicate increments on a single press.
+fn tool_window_raise_system(
     mut commands: Commands,
-    time: Res<Time>,
     mut raise_order: ResMut<ToolWindowRaiseOrder>,
+    direct_surfaces: Query<
+        (
+            &Interaction,
+            Option<&ToolWindowTitleBar>,
+            Option<&ToolWindowMinimizeButton>,
+            Option<&ToolWindowResizeGrip>,
+            Option<&ToolWindowContent>,
+        ),
+        (
+            Changed<Interaction>,
+            Or<(
+                With<ToolWindowTitleBar>,
+                With<ToolWindowMinimizeButton>,
+                With<ToolWindowResizeGrip>,
+                With<ToolWindowContent>,
+            )>,
+        ),
+    >,
+    content_buttons: Query<
+        (&Interaction, &ChildOf),
+        (
+            With<Button>,
+            Changed<Interaction>,
+            Without<ToolWindowTitleBar>,
+            Without<ToolWindowMinimizeButton>,
+            Without<ToolWindowResizeGrip>,
+            Without<ToolWindowContent>,
+        ),
+    >,
+    parents: Query<&ChildOf>,
+    windows: Query<(), With<ToolWindow>>,
+) {
+    let mut pressed_windows = Vec::new();
+    pressed_windows.extend(direct_surfaces.iter().filter_map(
+        |(interaction, title, minimize, grip, content)| {
+            if *interaction != Interaction::Pressed {
+                return None;
+            }
+            title
+                .map(|marker| marker.window)
+                .or_else(|| minimize.map(|marker| marker.window))
+                .or_else(|| grip.map(|marker| marker.window))
+                .or_else(|| content.map(|marker| marker.window))
+        },
+    ));
+    pressed_windows.extend(content_buttons.iter().filter_map(|(interaction, parent)| {
+        if *interaction != Interaction::Pressed {
+            return None;
+        }
+        std::iter::successors(Some(parent.parent()), |entity| {
+            parents.get(*entity).ok().map(ChildOf::parent)
+        })
+        .take(64)
+        .find(|entity| windows.contains(*entity))
+    }));
+    pressed_windows.sort_unstable();
+    pressed_windows.dedup();
+
+    for window in pressed_windows {
+        raise_order.0 = raise_order.0.saturating_add(1);
+        commands.entity(window).insert(ZIndex(raise_order.0));
+    }
+}
+
+fn tool_window_drag_system(
+    time: Res<Time>,
     primary: Query<&Window, With<PrimaryWindow>>,
+    ui_scale: Option<Res<UiScale>>,
     bars: Query<(&Interaction, &ToolWindowTitleBar), With<Button>>,
     mut windows: Query<(&mut ToolWindow, &mut Node)>,
-    mut contents: Query<(&mut Node, &ToolWindowContent), Without<ToolWindow>>,
+    mut contents: Query<
+        (&mut Node, &ToolWindowContent),
+        (Without<ToolWindow>, Without<ToolWindowResizeGrip>),
+    >,
     mut glyphs: Query<(&mut Text, &ToolWindowMinimizeGlyph)>,
+    mut grips: Query<
+        (&mut Node, &ToolWindowResizeGrip),
+        (Without<ToolWindow>, Without<ToolWindowContent>),
+    >,
 ) {
     let Ok(primary) = primary.single() else {
         return;
     };
-    let cursor = primary.cursor_position();
-    let bounds = Vec2::new(primary.width(), primary.height());
+    let scale = ui_scale.as_deref().map_or(1.0, |scale| scale.0).max(0.01);
+    let cursor = primary.cursor_position().map(|cursor| cursor / scale);
+    let bounds = Vec2::new(primary.width(), primary.height()) / scale;
     for (interaction, bar) in &bars {
         let Ok((mut window, mut node)) = windows.get_mut(bar.window) else {
             continue;
@@ -173,9 +319,6 @@ fn tool_window_drag_system(
                     pointer_start: cursor,
                     window_start: Vec2::new(px_or_zero(node.left), px_or_zero(node.top)),
                 });
-                // Grabbing a window raises it above its sibling windows.
-                raise_order.0 += 1;
-                commands.entity(bar.window).insert(ZIndex(raise_order.0));
                 // Blender-style header double-click: two grabs inside the
                 // window collapse or restore the panel.
                 let now = time.elapsed_secs();
@@ -185,7 +328,13 @@ fn tool_window_drag_system(
                 window.last_title_press = Some(now);
                 if double_click {
                     window.minimized = !window.minimized;
-                    set_window_minimized(bar.window, window.minimized, &mut contents, &mut glyphs);
+                    set_window_minimized(
+                        bar.window,
+                        window.minimized,
+                        &mut contents,
+                        &mut glyphs,
+                        &mut grips,
+                    );
                 }
             }
             Some(drag) => {
@@ -202,13 +351,14 @@ fn tool_window_drag_system(
 /// the viewport, and keeps `requested_size` live so the fit system clamps
 /// against the window's real footprint.
 fn tool_window_resize_system(
-    mut commands: Commands,
-    mut raise_order: ResMut<ToolWindowRaiseOrder>,
     primary: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Option<Res<UiScale>>,
     grips: Query<(&Interaction, &ToolWindowResizeGrip), With<Button>>,
     mut windows: Query<(&mut ToolWindow, &mut Node)>,
-    mut contents: Query<(&mut Node, &ToolWindowContent), Without<ToolWindow>>,
+    mut contents: Query<
+        (&mut Node, &ToolWindowContent),
+        (Without<ToolWindow>, Without<ToolWindowResizeGrip>),
+    >,
 ) {
     let Ok(primary) = primary.single() else {
         return;
@@ -235,8 +385,6 @@ fn tool_window_resize_system(
                     pointer_start: cursor,
                     size_start: window.requested_size,
                 });
-                raise_order.0 += 1;
-                commands.entity(grip.window).insert(ZIndex(raise_order.0));
             }
             Some(resize) => {
                 let target = resize_target(resize.size_start, resize.pointer_start, cursor, bounds);
@@ -247,6 +395,56 @@ fn tool_window_resize_system(
     }
 }
 
+const TOOL_WINDOW_SCROLL_LINE: f32 = 26.0;
+
+fn tool_window_scroll_system(
+    mut wheel: MessageReader<MouseWheel>,
+    mut contents: ParamSet<(
+        Query<
+            (
+                Entity,
+                &RelativeCursorPosition,
+                &ComputedStackIndex,
+                &ComputedNode,
+                &Node,
+            ),
+            With<ToolWindowContent>,
+        >,
+        Query<(&mut ScrollPosition, &ComputedNode), With<ToolWindowContent>>,
+    )>,
+) {
+    let mut delta = 0.0;
+    for event in wheel.read() {
+        let scale = match event.unit {
+            MouseScrollUnit::Line => TOOL_WINDOW_SCROLL_LINE,
+            MouseScrollUnit::Pixel => 1.0,
+        };
+        delta -= event.y * scale;
+    }
+    if delta == 0.0 {
+        return;
+    }
+
+    let topmost = contents
+        .p0()
+        .iter()
+        .filter(|(_, cursor, _, computed, node)| {
+            cursor.cursor_over() && node.display != Display::None && !computed.is_empty()
+        })
+        .max_by_key(|(_, _, stack, _, _)| stack.0)
+        .map(|(entity, _, _, _, _)| entity);
+    let Some(topmost) = topmost else {
+        return;
+    };
+
+    if let Ok((mut scroll, computed)) = contents.p1().get_mut(topmost) {
+        let max_y = ((computed.content_size().y - computed.size().y)
+            * computed.inverse_scale_factor())
+        .max(0.0);
+        scroll.y = (scroll.y + delta).clamp(0.0, max_y);
+    }
+}
+
 /// Write a footprint onto the window root and its content node. The content
 /// carries the height (footprint minus the title bar) so scrolling keeps
 /// working at every size.
@@ -254,7 +452,10 @@ fn apply_window_size(
     window_entity: Entity,
     size: Vec2,
     root_node: &mut Node,
-    contents: &mut Query<(&mut Node, &ToolWindowContent), Without<ToolWindow>>,
+    contents: &mut Query<
+        (&mut Node, &ToolWindowContent),
+        (Without<ToolWindow>, Without<ToolWindowResizeGrip>),
+    >,
 ) {
     root_node.width = Val::Px(size.x);
     for (mut content_node, content) in contents.iter_mut() {
@@ -267,29 +468,64 @@ fn apply_window_size(
 fn tool_window_fit_system(
     primary: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Option<Res<UiScale>>,
+    parents: Query<&ChildOf>,
+    parent_nodes: Query<&ComputedNode, Without<ToolWindow>>,
     mut windows: Query<(Entity, &mut ToolWindow, &mut Node)>,
-    mut contents: Query<(&mut Node, &ToolWindowContent), Without<ToolWindow>>,
+    mut contents: Query<
+        (&mut Node, &ToolWindowContent),
+        (Without<ToolWindow>, Without<ToolWindowResizeGrip>),
+    >,
 ) {
     let Ok(primary) = primary.single() else {
         return;
     };
     let scale = ui_scale.as_deref().map_or(1.0, |scale| scale.0).max(0.01);
-    let logical_bounds = Vec2::new(primary.width(), primary.height()) / scale;
+    let primary_bounds = Vec2::new(primary.width(), primary.height()) / scale;
     for (entity, mut window, mut node) in windows.iter_mut() {
         if window.requested_size == Vec2::ZERO {
             continue;
         }
         // A panel larger than the (possibly just-shrunk) application window
         // shrinks to fit instead of hanging unreachable off-screen.
+        let logical_bounds =
+            tool_window_parent_bounds(entity, primary_bounds, &parents, &parent_nodes);
         let clamped = clamp_size_to_bounds(window.requested_size, logical_bounds);
         if clamped != window.requested_size {
             window.requested_size = clamped;
             apply_window_size(entity, clamped, &mut node, &mut contents);
         }
         let current = Vec2::new(px_or_zero(node.left), px_or_zero(node.top));
-        let fitted = fit_window_origin(current, window.requested_size, logical_bounds);
+        let footprint = if window.minimized {
+            Vec2::new(window.requested_size.x, TITLE_BAR_HEIGHT)
+        } else {
+            window.requested_size
+        };
+        let fitted = fit_window_origin(current, footprint, logical_bounds);
         node.left = Val::Px(fitted.x);
         node.top = Val::Px(fitted.y);
+    }
+}
+
+fn tool_window_parent_bounds(
+    entity: Entity,
+    fallback: Vec2,
+    parents: &Query<&ChildOf>,
+    nodes: &Query<&ComputedNode, Without<ToolWindow>>,
+) -> Vec2 {
+    let Ok(parent) = parents.get(entity) else {
+        return fallback;
+    };
+    let Ok(computed) = nodes.get(parent.parent()) else {
+        return fallback;
+    };
+    logical_node_size(computed, fallback)
+}
+
+fn logical_node_size(computed: &ComputedNode, fallback: Vec2) -> Vec2 {
+    if computed.is_empty() {
+        fallback
+    } else {
+        computed.size() * computed.inverse_scale_factor()
     }
 }
 
@@ -303,8 +539,15 @@ fn fit_window_origin(origin: Vec2, size: Vec2, bounds: Vec2) -> Vec2 {
 fn tool_window_minimize_system(
     buttons: Query<(&Interaction, &ToolWindowMinimizeButton), (Changed<Interaction>, With<Button>)>,
     mut windows: Query<&mut ToolWindow>,
-    mut contents: Query<(&mut Node, &ToolWindowContent), Without<ToolWindow>>,
+    mut contents: Query<
+        (&mut Node, &ToolWindowContent),
+        (Without<ToolWindow>, Without<ToolWindowResizeGrip>),
+    >,
     mut glyphs: Query<(&mut Text, &ToolWindowMinimizeGlyph)>,
+    mut grips: Query<
+        (&mut Node, &ToolWindowResizeGrip),
+        (Without<ToolWindow>, Without<ToolWindowContent>),
+    >,
 ) {
     for (interaction, button) in &buttons {
         if *interaction != Interaction::Pressed {
@@ -314,7 +557,13 @@ fn tool_window_minimize_system(
             continue;
         };
         window.minimized = !window.minimized;
-        set_window_minimized(button.window, window.minimized, &mut contents, &mut glyphs);
+        set_window_minimized(
+            button.window,
+            window.minimized,
+            &mut contents,
+            &mut glyphs,
+            &mut grips,
+        );
     }
 }
 
@@ -323,8 +572,15 @@ fn tool_window_minimize_system(
 fn set_window_minimized(
     window_entity: Entity,
     minimized: bool,
-    contents: &mut Query<(&mut Node, &ToolWindowContent), Without<ToolWindow>>,
+    contents: &mut Query<
+        (&mut Node, &ToolWindowContent),
+        (Without<ToolWindow>, Without<ToolWindowResizeGrip>),
+    >,
     glyphs: &mut Query<(&mut Text, &ToolWindowMinimizeGlyph)>,
+    grips: &mut Query<
+        (&mut Node, &ToolWindowResizeGrip),
+        (Without<ToolWindow>, Without<ToolWindowContent>),
+    >,
 ) {
     for (mut node, content) in contents.iter_mut() {
         if content.window == window_entity {
@@ -340,6 +596,15 @@ fn set_window_minimized(
             *text = Text::new(if minimized { "▣" } else { "—" });
         }
     }
+    for (mut node, grip) in grips.iter_mut() {
+        if grip.window == window_entity {
+            node.display = if minimized {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        }
+    }
 }
 
 /// Visual defaults shared by every tool window.
@@ -348,6 +613,9 @@ pub struct ToolWindowStyle {
     pub background: Color,
     pub width: f32,
     pub content_height: Val,
+    /// Spawn with only the title bar visible. The stored full size is retained
+    /// so restoring returns to the requested dimensions.
+    pub initially_minimized: bool,
 }
 
 impl Default for ToolWindowStyle {
@@ -357,6 +625,7 @@ impl Default for ToolWindowStyle {
             background: Color::srgba(0.035, 0.05, 0.085, 0.94),
             width: 286.0,
             content_height: Val::Px(540.0),
+            initially_minimized: false,
         }
     }
 }
@@ -379,9 +648,11 @@ pub fn spawn_tool_window(
         Val::Px(height) => height,
         _ => 540.0,
     };
+    let initially_minimized = style.initially_minimized;
     parent
         .spawn((
             ToolWindow {
+                minimized: initially_minimized,
                 requested_size: Vec2::new(style.width, content_height + 36.0),
                 ..default()
             },
@@ -396,52 +667,65 @@ pub fn spawn_tool_window(
             },
             BackgroundColor(style.background),
             BorderColor::all(style.accent),
+            RelativeCursorPosition::default(),
         ))
         .with_children(|window| {
             window_entity = window.target_entity();
             window
                 .spawn((
-                    Button,
-                    ToolWindowTitleBar {
-                        window: window_entity,
-                    },
                     Node {
                         width: Val::Percent(100.0),
-                        min_height: Val::Px(36.0),
-                        padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::SpaceBetween,
-                        column_gap: Val::Px(8.0),
+                        min_height: Val::Px(TITLE_BAR_HEIGHT),
+                        align_items: AlignItems::Stretch,
                         ..default()
                     },
                     BackgroundColor(style.accent.with_alpha(0.35)),
                 ))
                 .with_children(|bar| {
                     bar.spawn((
-                        Text::new(title),
-                        TextFont {
-                            font_size: FontSize::Px(16.0),
+                        Button,
+                        ToolWindowChromeControl,
+                        ToolWindowTitleBar {
+                            window: window_entity,
+                        },
+                        Node {
+                            flex_grow: 1.0,
+                            min_height: Val::Px(TITLE_BAR_HEIGHT),
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            align_items: AlignItems::Center,
                             ..default()
                         },
-                        TextColor(Color::srgb(1.0, 0.78, 0.25)),
-                    ));
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|drag_handle| {
+                        drag_handle.spawn((
+                            Text::new(title),
+                            TextFont {
+                                font_size: FontSize::Px(16.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(1.0, 0.78, 0.25)),
+                        ));
+                    });
                     bar.spawn((
                         Button,
                         ToolWindowMinimizeButton {
                             window: window_entity,
                         },
                         Node {
-                            min_width: Val::Px(34.0),
-                            min_height: Val::Px(34.0),
+                            min_width: Val::Px(36.0),
+                            min_height: Val::Px(36.0),
+                            border: UiRect::all(Val::Px(1.0)),
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::Center,
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+                        BorderColor::all(style.accent.with_alpha(0.8)),
                     ))
                     .with_children(|button| {
                         button.spawn((
-                            Text::new("—"),
+                            Text::new(if initially_minimized { "▣" } else { "—" }),
                             TextFont {
                                 font_size: FontSize::Px(14.0),
                                 ..default()
@@ -458,7 +742,15 @@ pub fn spawn_tool_window(
                     ToolWindowContent {
                         window: window_entity,
                     },
+                    Interaction::default(),
+                    FocusPolicy::Block,
+                    RelativeCursorPosition::default(),
                     Node {
+                        display: if initially_minimized {
+                            Display::None
+                        } else {
+                            Display::Flex
+                        },
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(5.0),
                         padding: UiRect::all(Val::Px(12.0)),
@@ -474,15 +766,21 @@ pub fn spawn_tool_window(
             window
                 .spawn((
                     Button,
+                    ToolWindowChromeControl,
                     ToolWindowResizeGrip {
                         window: window_entity,
                     },
                     Node {
+                        display: if initially_minimized {
+                            Display::None
+                        } else {
+                            Display::Flex
+                        },
                         position_type: PositionType::Absolute,
                         right: Val::Px(0.0),
                         bottom: Val::Px(0.0),
-                        min_width: Val::Px(22.0),
-                        min_height: Val::Px(22.0),
+                        min_width: Val::Px(36.0),
+                        min_height: Val::Px(36.0),
                         align_items: AlignItems::FlexEnd,
                         justify_content: JustifyContent::FlexEnd,
                         padding: UiRect::all(Val::Px(3.0)),
@@ -570,6 +868,7 @@ mod tests {
     /// headlessly.
     fn windowed_app() -> App {
         let mut app = App::new();
+        app.add_message::<MouseWheel>();
         app.add_plugins(ToolWindowsPlugin);
         app.init_resource::<Time>();
         app.world_mut().spawn((
@@ -712,6 +1011,13 @@ mod tests {
             .find(|(_, content)| content.window == window_entity)
             .map(|(entity, _)| entity)
             .expect("content exists");
+        let grip_entity = app
+            .world_mut()
+            .query::<(Entity, &ToolWindowResizeGrip)>()
+            .iter(app.world())
+            .find(|(_, grip)| grip.window == window_entity)
+            .map(|(entity, _)| entity)
+            .expect("resize grip exists");
 
         let press = |app: &mut App| {
             *app.world_mut()
@@ -735,6 +1041,11 @@ mod tests {
             app.world().get::<Node>(content_entity).unwrap().display,
             Display::None
         );
+        assert_eq!(
+            app.world().get::<Node>(grip_entity).unwrap().display,
+            Display::None,
+            "the resize grip must not cover the 36px restore target"
+        );
 
         press(&mut app);
         assert!(
@@ -747,5 +1058,329 @@ mod tests {
             app.world().get::<Node>(content_entity).unwrap().display,
             Display::Flex
         );
+        assert_eq!(
+            app.world().get::<Node>(grip_entity).unwrap().display,
+            Display::Flex
+        );
+    }
+
+    #[test]
+    fn dragging_uses_logical_coordinates_at_non_default_ui_scale() {
+        let mut app = windowed_app();
+        app.insert_resource(UiScale(2.0));
+        let mut window_entity = Entity::PLACEHOLDER;
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            commands.spawn(Node::default()).with_children(|parent| {
+                window_entity = spawn_tool_window(
+                    parent,
+                    "SCALED DRAG",
+                    Vec2::new(40.0, 40.0),
+                    ToolWindowStyle {
+                        content_height: Val::Px(120.0),
+                        ..default()
+                    },
+                    (),
+                    |_| {},
+                );
+            });
+        }
+        app.world_mut().flush();
+        app.update();
+
+        let title = app
+            .world_mut()
+            .query::<(Entity, &ToolWindowTitleBar)>()
+            .iter(app.world())
+            .find(|(_, title)| title.window == window_entity)
+            .map(|(entity, _)| entity)
+            .unwrap();
+        set_cursor(&mut app, Vec2::new(100.0, 100.0));
+        *app.world_mut().get_mut::<Interaction>(title).unwrap() = Interaction::Pressed;
+        app.update();
+        set_cursor(&mut app, Vec2::new(200.0, 140.0));
+        app.update();
+
+        let node = app.world().get::<Node>(window_entity).unwrap();
+        assert_eq!(node.left, Val::Px(90.0));
+        assert_eq!(node.top, Val::Px(60.0));
+    }
+
+    #[test]
+    fn wheel_scroll_routes_to_topmost_hovered_content_and_clamps() {
+        use bevy::input::touch::TouchPhase;
+
+        let mut app = App::new();
+        app.add_message::<MouseWheel>();
+        app.add_plugins(ToolWindowsPlugin);
+        app.init_resource::<Time>();
+
+        let spawn_content = |world: &mut World, stack: u32, scroll_y: f32| {
+            world
+                .spawn((
+                    ToolWindowContent {
+                        window: Entity::PLACEHOLDER,
+                    },
+                    RelativeCursorPosition {
+                        cursor_over: true,
+                        normalized: Some(Vec2::ZERO),
+                    },
+                    ComputedStackIndex(stack),
+                    ComputedNode {
+                        size: Vec2::new(100.0, 100.0),
+                        content_size: Vec2::new(100.0, 200.0),
+                        ..default()
+                    },
+                    Node::default(),
+                    ScrollPosition(Vec2::new(0.0, scroll_y)),
+                ))
+                .id()
+        };
+        let lower = spawn_content(app.world_mut(), 2, 0.0);
+        let upper = spawn_content(app.world_mut(), 9, 90.0);
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: -1.0,
+            window: Entity::PLACEHOLDER,
+            phase: TouchPhase::Moved,
+        });
+        app.update();
+
+        assert_eq!(app.world().get::<ScrollPosition>(lower).unwrap().y, 0.0);
+        assert_eq!(
+            app.world().get::<ScrollPosition>(upper).unwrap().y,
+            100.0,
+            "the top surface receives the wheel and clamps at its scroll extent"
+        );
+    }
+
+    #[test]
+    fn pointer_capture_tracks_hover_and_an_owned_drag() {
+        let mut app = App::new();
+        app.add_message::<MouseWheel>();
+        app.add_plugins(ToolWindowsPlugin);
+        app.init_resource::<Time>();
+        let root = app
+            .world_mut()
+            .spawn((
+                ToolWindow::default(),
+                Node::default(),
+                RelativeCursorPosition {
+                    cursor_over: true,
+                    normalized: Some(Vec2::ZERO),
+                },
+            ))
+            .id();
+        app.update();
+        assert!(app
+            .world()
+            .resource::<ToolWindowPointerState>()
+            .captures_viewport());
+
+        app.world_mut()
+            .get_mut::<RelativeCursorPosition>(root)
+            .unwrap()
+            .cursor_over = false;
+        app.world_mut().get_mut::<ToolWindow>(root).unwrap().drag = Some(DragState {
+            pointer_start: Vec2::ZERO,
+            window_start: Vec2::ZERO,
+        });
+        app.update();
+        assert!(app
+            .world()
+            .resource::<ToolWindowPointerState>()
+            .captures_viewport());
+
+        app.world_mut().get_mut::<ToolWindow>(root).unwrap().drag = None;
+        app.update();
+        assert!(!app
+            .world()
+            .resource::<ToolWindowPointerState>()
+            .captures_viewport());
+    }
+
+    #[test]
+    fn initially_minimized_window_fits_title_only_and_restores_grip() {
+        let mut app = windowed_app();
+        let mut window_entity = Entity::PLACEHOLDER;
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            commands.spawn(Node::default()).with_children(|parent| {
+                window_entity = spawn_tool_window(
+                    parent,
+                    "START COLLAPSED",
+                    Vec2::new(100.0, 700.0),
+                    ToolWindowStyle {
+                        width: 300.0,
+                        content_height: Val::Px(400.0),
+                        initially_minimized: true,
+                        ..default()
+                    },
+                    (),
+                    |_| {},
+                );
+            });
+        }
+        app.world_mut().flush();
+        app.update();
+
+        let minimize = app
+            .world_mut()
+            .query::<(Entity, &ToolWindowMinimizeButton)>()
+            .iter(app.world())
+            .find(|(_, button)| button.window == window_entity)
+            .map(|(entity, _)| entity)
+            .unwrap();
+        let content = app
+            .world_mut()
+            .query::<(Entity, &ToolWindowContent)>()
+            .iter(app.world())
+            .find(|(_, content)| content.window == window_entity)
+            .map(|(entity, _)| entity)
+            .unwrap();
+        let grip = app
+            .world_mut()
+            .query::<(Entity, &ToolWindowResizeGrip)>()
+            .iter(app.world())
+            .find(|(_, grip)| grip.window == window_entity)
+            .map(|(entity, _)| entity)
+            .unwrap();
+
+        assert_eq!(
+            app.world().get::<Node>(window_entity).unwrap().top,
+            Val::Px(684.0),
+            "collapsed fitting uses the 36px title footprint"
+        );
+        assert_eq!(
+            app.world().get::<Node>(content).unwrap().display,
+            Display::None
+        );
+        assert_eq!(
+            app.world().get::<Node>(grip).unwrap().display,
+            Display::None
+        );
+
+        *app.world_mut().get_mut::<Interaction>(minimize).unwrap() = Interaction::Pressed;
+        app.update();
+        assert_eq!(
+            app.world().get::<Node>(content).unwrap().display,
+            Display::Flex
+        );
+        assert_eq!(
+            app.world().get::<Node>(grip).unwrap().display,
+            Display::Flex
+        );
+        assert_eq!(
+            app.world().get::<Node>(window_entity).unwrap().top,
+            Val::Px(284.0),
+            "restoring refits the full 436px panel"
+        );
+    }
+
+    #[test]
+    fn fit_prefers_the_actual_parent_workspace_bounds() {
+        let mut app = windowed_app();
+        let mut window_entity = Entity::PLACEHOLDER;
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            commands
+                .spawn((
+                    Node::default(),
+                    ComputedNode {
+                        size: Vec2::new(400.0, 300.0),
+                        content_size: Vec2::new(400.0, 300.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|parent| {
+                    window_entity = spawn_tool_window(
+                        parent,
+                        "WORKSPACE BOUNDS",
+                        Vec2::new(350.0, 250.0),
+                        ToolWindowStyle {
+                            width: 300.0,
+                            content_height: Val::Px(164.0),
+                            ..default()
+                        },
+                        (),
+                        |_| {},
+                    );
+                });
+        }
+        app.world_mut().flush();
+        app.update();
+
+        let node = app.world().get::<Node>(window_entity).unwrap();
+        assert_eq!(node.left, Val::Px(100.0));
+        assert_eq!(node.top, Val::Px(100.0));
+    }
+
+    #[test]
+    fn parent_bounds_are_converted_from_physical_to_logical_units() {
+        let computed = ComputedNode {
+            size: Vec2::new(800.0, 500.0),
+            inverse_scale_factor: 0.5,
+            ..default()
+        };
+        assert_eq!(
+            logical_node_size(&computed, Vec2::new(1_280.0, 720.0)),
+            Vec2::new(400.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn minimize_is_a_focusable_sibling_of_the_drag_handle() {
+        let mut app = windowed_app();
+        let mut window_entity = Entity::PLACEHOLDER;
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            commands.spawn(Node::default()).with_children(|parent| {
+                window_entity = spawn_tool_window(
+                    parent,
+                    "SEMANTIC HEADER",
+                    Vec2::ZERO,
+                    ToolWindowStyle::default(),
+                    (),
+                    |_| {},
+                );
+            });
+        }
+        app.world_mut().flush();
+
+        let title = app
+            .world_mut()
+            .query::<(Entity, &ToolWindowTitleBar)>()
+            .iter(app.world())
+            .find(|(_, marker)| marker.window == window_entity)
+            .map(|(entity, _)| entity)
+            .unwrap();
+        let minimize = app
+            .world_mut()
+            .query::<(Entity, &ToolWindowMinimizeButton)>()
+            .iter(app.world())
+            .find(|(_, marker)| marker.window == window_entity)
+            .map(|(entity, _)| entity)
+            .unwrap();
+
+        assert_eq!(
+            app.world().get::<ChildOf>(title).unwrap().parent(),
+            app.world().get::<ChildOf>(minimize).unwrap().parent(),
+            "drag and minimize must be siblings, never nested buttons"
+        );
+        assert!(app.world().get::<ToolWindowChromeControl>(title).is_some());
+        assert!(app
+            .world()
+            .get::<ToolWindowChromeControl>(minimize)
+            .is_none());
+        assert!(app.world().get::<BackgroundColor>(minimize).is_some());
+        assert!(app.world().get::<BorderColor>(minimize).is_some());
+        let node = app.world().get::<Node>(minimize).unwrap();
+        assert_eq!(node.min_width, Val::Px(36.0));
+        assert_eq!(node.min_height, Val::Px(36.0));
     }
 }

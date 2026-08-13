@@ -16,6 +16,7 @@ use crate::engine_tools::creature_records;
 use crate::engine_tools::forge_widgets::ForgeWidgetStyle;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
+use crate::resources::GameSettings;
 use crate::robots::creature::{
     CreatureFaction, CreatureKind, CreatureRole, CreatureSpec, CreatureSurface, CreatureTopology,
 };
@@ -360,8 +361,11 @@ fn forge_button(parent: &mut ChildSpawnerCommands, label: String, action: ForgeA
 fn forge_row(parent: &mut ChildSpawnerCommands, content: impl FnOnce(&mut ChildSpawnerCommands)) {
     parent
         .spawn(Node {
+            width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
             column_gap: Val::Px(6.0),
+            row_gap: Val::Px(6.0),
             align_items: AlignItems::Center,
             ..default()
         })
@@ -413,10 +417,11 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 TextColor(Color::srgb(0.85, 0.92, 1.0)),
             ));
 
-            let style = |height: f32| ToolWindowStyle {
+            let style = |height: f32, initially_minimized: bool| ToolWindowStyle {
                 accent: Color::srgb(0.16, 0.55, 0.40),
-                width: 300.0,
+                width: 270.0,
                 content_height: Val::Px(height),
+                initially_minimized,
                 ..Default::default()
             };
 
@@ -424,7 +429,7 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 root,
                 "CREATURE",
                 Vec2::new(12.0, 84.0),
-                style(240.0),
+                style(240.0, true),
                 (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     panel.spawn((
@@ -463,8 +468,8 @@ fn spawn_forge_ui(commands: &mut Commands) {
             spawn_tool_window(
                 root,
                 "MORPHOLOGY",
-                Vec2::new(12.0, 380.0),
-                style(300.0),
+                Vec2::new(12.0, 126.0),
+                style(300.0, false),
                 (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     for (index, field) in ForgeField::ALL.iter().enumerate() {
@@ -501,7 +506,7 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 root,
                 "FEATURES & MODIFIERS",
                 Vec2::new(966.0, 84.0),
-                style(240.0),
+                style(240.0, false),
                 (MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     forge_row(panel, |row| {
@@ -535,7 +540,7 @@ fn spawn_forge_ui(commands: &mut Commands) {
                 root,
                 "LIBRARY",
                 Vec2::new(966.0, 380.0),
-                style(300.0),
+                style(300.0, true),
                 (ForgeLibraryList, MenuScrollPanel, ScrollPosition::default()),
                 |panel| {
                     forge_row(panel, |row| {
@@ -861,8 +866,12 @@ fn forge_preview_rebuild_system(
 
 fn forge_preview_spin_system(
     time: Res<Time>,
+    settings: Res<GameSettings>,
     mut previews: Query<&mut Transform, With<ForgePreviewRoot>>,
 ) {
+    if settings.reduced_ui_motion {
+        return;
+    }
     for mut transform in previews.iter_mut() {
         transform.rotate_y(time.delta_secs() * 0.5);
     }
@@ -1002,6 +1011,29 @@ fn load_forge_version(name: &str) -> Result<CreatureSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creator_layout_uses_shared_windows_and_starts_without_panel_collisions() {
+        let mut app = App::new();
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            spawn_forge_ui(&mut commands);
+        }
+        app.world_mut().flush();
+
+        let (window_count, minimized_count) = {
+            let world = app.world_mut();
+            let mut windows = world.query::<&crate::engine_tools::tool_windows::ToolWindow>();
+            windows
+                .iter(world)
+                .fold((0, 0), |(all, minimized), window| {
+                    (all + 1, minimized + usize::from(window.minimized))
+                })
+        };
+        assert_eq!(window_count, 4);
+        assert_eq!(minimized_count, 2);
+    }
 
     #[test]
     fn field_adjustments_clamp_to_safe_ranges() {
