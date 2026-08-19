@@ -193,10 +193,11 @@ together.
 - Player input is controller-first local multiplayer: preserve analog movement
   magnitude, keep circular deadzone remapping, support LT/RT button and axis
   paths, and treat controller smoke testing as required for movement changes.
-  `GamepadAssignments` is the controller ownership authority: Start in Player
-  Select claims the next available `PlayerIndex`, disconnect releases only the
-  device binding, and runtime input/F8 diagnostics must not return to query-order
-  mapping. Save schema v4 stores per-player `PlayerProgression` alongside the
+  `GamepadAssignments` is the controller ownership authority: the first
+  connected controller automatically claims P1, Start in Player Select claims
+  P2–P4, disconnect releases only the device binding, and runtime input/F8
+  diagnostics must not return to query-order mapping. Save schema v4 stores
+  per-player `PlayerProgression` alongside the
   already-individual stats, inventory, shop ownership, loadout, and traversal
   selection. Legacy top-level progression fields remain compatibility mirrors;
   do not restore them as the runtime ownership authority.

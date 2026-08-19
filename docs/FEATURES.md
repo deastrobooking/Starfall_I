@@ -75,17 +75,19 @@ first person (`P` for keyboard P1, Select + D-pad Left for any assigned
 controller). Boss and dungeon party cameras temporarily override the individual
 preference, then restore it when the shared view ends.
 
-**Input assignment:** keyboard/mouse remains available to P1. An unassigned
-controller pressing Start in Player Select claims the next available stable
-`PlayerIndex`; disconnect releases the device binding and reconnect can reclaim
-the joined slot. Gamepad enumeration order is never player identity.
+**Input assignment:** keyboard/mouse remains available to P1. The first
+controller connected at boot or hot-plugged automatically claims P1; an
+additional unassigned controller pressing Start in Player Select claims the
+next available stable P2–P4 `PlayerIndex`. Disconnect releases the device
+binding and reconnect can reclaim the joined slot. Connection events establish
+the automatic P1 binding; gamepad query order is never player identity.
 
 **Character assignment:** each joined slot can cycle through Vincenzo, Antonio,
 Angelo, Joseph, Gabriella, Nova, Aurora, and Fortuna. The default join order
 still starts on the brothers for P1-P4, but the selectable roster is now all
 eight siblings.
 
-**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. `GamepadAssignments` maps controller entities to stable `PlayerIndex` identities after Start-to-join; runtime input no longer depends on gamepad enumeration order. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component, while `PlayerView` owns that player's perspective and character-scaled eye height. Owner-specific avatar render layers hide only the local body in first person without removing it from another split-screen camera. Weapon, movement, camera shake, damage flash, and interaction systems continue to resolve the correct player.
+**Architecture:** Each player entity carries a `PlayerInput` component written by `InputPlugin` each `PreUpdate`. `GamepadAssignments` maps controller entities to stable `PlayerIndex` identities through automatic P1 connection events plus Start-to-join for P2–P4; runtime input never depends on gamepad enumeration order. Each player's camera entity is stored in a `PlayerCameraRef(Entity)` component, while `PlayerView` owns that player's perspective and character-scaled eye height. Owner-specific avatar render layers hide only the local body in first person without removing it from another split-screen camera. Weapon, movement, camera shake, damage flash, and interaction systems continue to resolve the correct player.
 
 **Controller feel:** gamepad movement uses circular deadzone remapping and preserves analog stick magnitude in `PlayerMovement`, so partial tilt produces partial travel speed. Right-stick look uses a quadratic curve for low-deflection precision. LT/RT aim/fire supports both Bevy digital trigger buttons and `LeftZ` / `RightZ` analog trigger axes, with frame-local just-press tracking for single-shot weapons.
 
@@ -1852,22 +1854,29 @@ This document defines local-player identity independently from controller
 connection order. `PlayerIndex` is the stable runtime/save identity; a gamepad
 is a replaceable input device assigned to that identity.
 
-### PO1 — Start-to-join assignment
+### PO1 — Automatic P1 and Start-to-join assignment
 
-- In Player Select, pressing Start on an unassigned controller claims the first
-  joined-but-unassigned slot, then the next open slot.
-- The first claim normally attaches to P1, which remains available to keyboard
-  and mouse. Later claims attach to P2–P4.
+- The first Bevy controller connection automatically claims P1. A native-only
+  macOS controller also claims P1 after a short dual-backend discovery window.
+  When Bevy and GameController discover the lone pad together, the native
+  mapping may overlay its associated Bevy P1 binding; that inferred overlay is
+  disabled as soon as a Bevy controller owns P2-P4. The native backend tracks
+  the stable `GCController` object instance so an aggregate switch while a
+  secondary slot is owned cannot silently replace P1. Keyboard and mouse remain
+  available to P1.
+- In Player Select, pressing Start on an additional unassigned controller
+  claims the first joined-but-unassigned P2–P4 slot, then the next open slot.
 - A controller already assigned to a player cannot claim another slot.
 - Disconnecting releases the device binding but preserves the joined player,
-  character, readiness, and save identity. Pressing Start after reconnect can
-  reclaim that unassigned joined slot.
+  character, readiness, and save identity. A newly connected controller
+  automatically reclaims P1 when it is free; Start reclaims other joined slots.
 - Runtime input and F8 diagnostics resolve through `GamepadAssignments`; they
   must never infer ownership from gamepad query/enumeration order.
-- The native macOS controller fallback may claim a slot only when Bevy did not
-  report a Start press in the same frame. Native and Bevy bindings share one
-  occupancy check, so they cannot claim the same player; native disconnects
-  release their binding for the same Start-to-reclaim flow.
+- Native disconnects release only the fallback side of a paired P1 binding.
+  macOS exposes no shared hardware ID across these two APIs, so the bounded
+  discovery and Start-edge correlation is deliberately conservative rather
+  than a cross-API identity guarantee; multi-pad native fallback remains part
+  of the required physical-controller acceptance matrix.
 
 ### PO2 — Individual save ownership
 

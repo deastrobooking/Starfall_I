@@ -2,8 +2,8 @@
 ///
 /// Each frame `update_player_inputs` writes a `PlayerInput` on every live
 /// player entity:
-///   P1 — keyboard + mouse, plus the controller that claims P1
-///   P2–P4 — controllers explicitly assigned by pressing Start in the lobby
+///   P1 — keyboard + mouse, plus the first controller connected to the game
+///   P2–P4 — additional controllers explicitly assigned by pressing Start in the lobby
 ///
 /// Controller layout (works for Xbox, DualSense, DualShock, 8BitDo, Switch Pro,
 /// Stadia, and any HID-compliant gamepad via Bevy's gilrs backend):
@@ -60,31 +60,40 @@ use crate::resources::{GameSettings, UiGameplayCapture};
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct InputPlugin;
 
+/// Native polling and automatic controller ownership are complete for the
+/// current frame. UI systems that sample `NativeControllerState` order after
+/// this set so they never see a backend one frame late.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ControllerInputSet {
+    Ready,
+}
+
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NativeControllerState>()
             .init_resource::<GamepadAssignments>()
             .add_systems(PreUpdate, poll_native_controllers.after(InputSystems))
+            .add_systems(PreUpdate, sync_gamepad_assignments.after(InputSystems))
             .add_systems(
                 PreUpdate,
-                release_disconnected_native_controller.after(poll_native_controllers),
+                sync_native_controller_assignment
+                    .after(poll_native_controllers)
+                    .after(sync_gamepad_assignments)
+                    .in_set(ControllerInputSet::Ready),
             )
             .add_systems(
                 PreUpdate,
                 update_player_inputs
-                    .after(release_disconnected_native_controller)
+                    .after(ControllerInputSet::Ready)
                     .run_if(in_state(EngineToolMode::Playing)),
             )
             .add_systems(
                 PreUpdate,
                 clear_player_inputs
-                    .after(release_disconnected_native_controller)
+                    .after(ControllerInputSet::Ready)
                     .run_if(in_state(EngineToolMode::Editing)),
             )
-            .add_systems(
-                Update,
-                (log_gamepad_connections, release_disconnected_gamepads),
-            );
+            .add_systems(Update, log_gamepad_connections);
     }
 }
 
@@ -92,7 +101,20 @@ impl Plugin for InputPlugin {
 pub struct GamepadAssignments {
     players: [Option<Entity>; 4],
     native_player: Option<u8>,
+    native_overlay_gamepad: Option<Entity>,
+    native_overlay_suppressed: bool,
+    connected_order: Vec<Entity>,
+    bevy_primary_fresh: u8,
+    native_discovery_grace: u8,
+    native_start_guard_frames: u8,
 }
+
+/// Allow the two macOS controller backends a few frames to report the same
+/// newly connected pad before deciding that a native reading is native-only.
+const NATIVE_DISCOVERY_GRACE_FRAMES: u8 = 4;
+/// Keep a native-only Start edge associated with its delayed Bevy counterpart.
+/// The two macOS backends can report the same physical press on adjacent frames.
+const NATIVE_START_GUARD_FRAMES: u8 = 3;
 
 impl GamepadAssignments {
     fn player_is_unassigned(&self, player_index: usize) -> bool {
@@ -110,42 +132,116 @@ impl GamepadAssignments {
             .map(|index| index as u8)
     }
 
+    /// Claim Player 1 for a newly connected controller without disturbing any
+    /// existing player ownership. Additional controllers still use
+    /// [`Self::assign_next`] from the Player Select lobby.
+    pub(crate) fn assign_primary(&mut self, gamepad: Entity) -> Option<u8> {
+        if let Some(player) = self.player_for_gamepad(gamepad) {
+            return (player == 0).then_some(player);
+        }
+        if !self.player_is_unassigned(0) {
+            return None;
+        }
+        self.players[0] = Some(gamepad);
+        Some(0)
+    }
+
     pub fn assign_next(&mut self, gamepad: Entity, joined: &[bool; 4]) -> Option<u8> {
         if let Some(player) = self.player_for_gamepad(gamepad) {
             return Some(player);
         }
-        let slot = (0..4)
+        // P1 is reserved for automatic connection ownership. Start-to-join is
+        // deliberately limited to couch-player slots P2-P4.
+        let slot = (1..4)
             .find(|index| joined[*index] && self.player_is_unassigned(*index))
-            .or_else(|| (0..4).find(|index| self.player_is_unassigned(*index)))?;
+            .or_else(|| (1..4).find(|index| self.player_is_unassigned(*index)))?;
         self.players[slot] = Some(gamepad);
         Some(slot as u8)
     }
 
-    pub fn assign_native_next(&mut self, joined: &[bool; 4]) -> Option<u8> {
-        if self.native_player.is_some() {
-            return self.native_player;
+    pub(crate) fn assign_native_primary(&mut self) -> Option<u8> {
+        if let Some(player) = self.native_player {
+            return (player == 0).then_some(player);
         }
-        let slot = (0..4)
-            .find(|index| joined[*index] && self.players[*index].is_none())
-            .or_else(|| (0..4).find(|index| self.players[*index].is_none()))?;
-        self.native_player = Some(slot as u8);
-        Some(slot as u8)
+        if self.players[0].is_some() {
+            return None;
+        }
+        self.native_player = Some(0);
+        self.native_overlay_gamepad = None;
+        Some(0)
+    }
+
+    pub(crate) fn assign_native_overlay(&mut self, gamepad: Entity) -> Option<u8> {
+        if self.players[0] != Some(gamepad) {
+            return None;
+        }
+        self.native_player = Some(0);
+        self.native_overlay_gamepad = Some(gamepad);
+        self.native_overlay_suppressed = false;
+        Some(0)
     }
 
     pub fn native_player(&self) -> Option<u8> {
         self.native_player
     }
 
+    pub(crate) fn native_overlay_gamepad(&self) -> Option<Entity> {
+        self.native_overlay_gamepad
+    }
+
+    pub(crate) fn native_start_guard_active(&self) -> bool {
+        self.native_start_guard_frames > 0 && self.players[0].is_none()
+    }
+
     fn release_native(&mut self) {
         self.native_player = None;
+        self.native_overlay_gamepad = None;
     }
 
     fn release(&mut self, gamepad: Entity) {
+        let released_native_overlay = self.native_overlay_gamepad == Some(gamepad);
         for assigned in &mut self.players {
             if *assigned == Some(gamepad) {
                 *assigned = None;
             }
         }
+        if released_native_overlay {
+            self.release_native();
+            self.native_overlay_suppressed = self.players[1..].iter().any(Option::is_some);
+        }
+    }
+
+    fn note_connected(&mut self, gamepad: Entity) {
+        if !self.connected_order.contains(&gamepad) {
+            self.connected_order.push(gamepad);
+        }
+    }
+
+    fn note_disconnected(&mut self, gamepad: Entity) {
+        self.release(gamepad);
+        self.connected_order
+            .retain(|connected| *connected != gamepad);
+    }
+
+    fn has_secondary_bevy_owner(&self) -> bool {
+        self.players[1..].iter().any(Option::is_some)
+    }
+
+    /// Claim the oldest still-connected, currently unassigned Bevy device
+    /// whenever P1 becomes vacant. This preserves connection order without
+    /// ever treating ECS query order as player identity.
+    fn claim_waiting_primary(&mut self) -> Option<Entity> {
+        if !self.player_is_unassigned(0) {
+            return None;
+        }
+        let gamepad = self
+            .connected_order
+            .iter()
+            .copied()
+            .find(|gamepad| self.player_for_gamepad(*gamepad).is_none())?;
+        self.assign_primary(gamepad)?;
+        self.bevy_primary_fresh = NATIVE_DISCOVERY_GRACE_FRAMES;
+        Some(gamepad)
     }
 }
 
@@ -228,6 +324,10 @@ pub struct NativeControllerState {
     pub name: String,
     pub move_axis: Vec2,
     pub look_axis: Vec2,
+    backend_identity: Option<usize>,
+    just_connected: bool,
+    backend_identity_changed: bool,
+    reconnected_after_gap: bool,
     pressed_mask: u32,
     just_pressed_mask: u32,
 }
@@ -239,6 +339,10 @@ impl Default for NativeControllerState {
             name: String::new(),
             move_axis: Vec2::ZERO,
             look_axis: Vec2::ZERO,
+            backend_identity: None,
+            just_connected: false,
+            backend_identity_changed: false,
+            reconnected_after_gap: false,
             pressed_mask: 0,
             just_pressed_mask: 0,
         }
@@ -246,6 +350,24 @@ impl Default for NativeControllerState {
 }
 
 impl NativeControllerState {
+    #[cfg(test)]
+    pub(crate) fn connected_with_just_pressed(button: NativeButton) -> Self {
+        Self {
+            connected: true,
+            pressed_mask: button.mask(),
+            just_pressed_mask: button.mask(),
+            ..default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn connected_without_edges() -> Self {
+        Self {
+            connected: true,
+            ..default()
+        }
+    }
+
     pub fn pressed(&self, button: NativeButton) -> bool {
         self.pressed_mask & button.mask() != 0
     }
@@ -267,21 +389,34 @@ impl NativeControllerState {
         &mut self,
         connected: bool,
         name: String,
+        backend_identity: Option<usize>,
         move_axis: Vec2,
         look_axis: Vec2,
         pressed_mask: u32,
     ) {
         let previous_connected = self.connected;
-        let previous_name = self.name.clone();
+        let previous_identity = self.backend_identity;
         let previous = self.pressed_mask;
+        let backend_identity_changed =
+            connected && previous_identity.is_some() && previous_identity != backend_identity;
+        let reconnected_after_gap = connected && !previous_connected && previous_identity.is_some();
+        let just_connected = connected && (!previous_connected || backend_identity_changed);
         self.connected = connected;
         self.name = name;
+        if connected {
+            // Retain the last concrete object identity across a transient empty
+            // poll so a different controller cannot masquerade as a reconnect.
+            self.backend_identity = backend_identity;
+        }
         self.move_axis = move_axis;
         self.look_axis = look_axis;
+        self.just_connected = just_connected;
+        self.backend_identity_changed = backend_identity_changed;
+        self.reconnected_after_gap = reconnected_after_gap;
         self.pressed_mask = pressed_mask;
         self.just_pressed_mask = pressed_mask & !previous;
 
-        if connected && (!previous_connected || previous_name != self.name) {
+        if just_connected {
             info!("Native macOS controller connected: {}", self.name);
         } else if previous_connected && !connected {
             info!("Native macOS controller disconnected");
@@ -289,7 +424,7 @@ impl NativeControllerState {
     }
 
     fn clear_poll(&mut self) {
-        self.finish_poll(false, String::new(), Vec2::ZERO, Vec2::ZERO, 0);
+        self.finish_poll(false, String::new(), None, Vec2::ZERO, Vec2::ZERO, 0);
     }
 }
 
@@ -297,18 +432,78 @@ fn poll_native_controllers(mut native: ResMut<NativeControllerState>) {
     native_controller_backend::poll(&mut native);
 }
 
-/// Native GameController devices do not emit Bevy's connection messages. Keep
-/// their replaceable device binding subject to the same disconnect/reclaim
-/// contract as normal gamepads.
-fn release_disconnected_native_controller(
+/// Native GameController devices do not emit Bevy's connection messages, so a
+/// native-only controller may automatically claim P1. When both backends first
+/// report a pad together, the native reading overlays Bevy's P1 binding as a
+/// mapping fallback; a native owner established earlier blocks later Bevy
+/// devices from being merged into it.
+pub(crate) fn sync_native_controller_assignment(
     native: Res<NativeControllerState>,
     mut assignments: ResMut<GamepadAssignments>,
-    mut was_connected: Local<bool>,
 ) {
-    if *was_connected && !native.connected {
-        assignments.release_native();
+    if !native.connected {
+        if assignments.native_player().is_some() {
+            assignments.release_native();
+        }
+        assignments.native_discovery_grace = 0;
+        assignments.native_start_guard_frames = 0;
+        assignments.native_overlay_suppressed = assignments.has_secondary_bevy_owner();
+        return;
     }
-    *was_connected = native.connected;
+
+    assignments.native_start_guard_frames = assignments.native_start_guard_frames.saturating_sub(1);
+    if native.just_pressed(NativeButton::Start) && assignments.gamepad_for_player(0).is_none() {
+        assignments.native_start_guard_frames = NATIVE_START_GUARD_FRAMES;
+    }
+
+    if native.just_connected {
+        // A changed native identity replaces only the native side. The Bevy
+        // binding, if any, remains stable while the new reading is correlated.
+        if assignments.native_player().is_some() {
+            assignments.release_native();
+        }
+        if (native.backend_identity_changed || native.reconnected_after_gap)
+            && assignments.has_secondary_bevy_owner()
+        {
+            // The native aggregate likely advanced from a disconnected P1 pad
+            // to a Bevy pad already owned by P2-P4. Do not let that one device
+            // drive two players.
+            assignments.native_overlay_suppressed = true;
+        } else if !native.backend_identity_changed && !native.reconnected_after_gap {
+            assignments.native_overlay_suppressed = false;
+        }
+        assignments.native_discovery_grace = NATIVE_DISCOVERY_GRACE_FRAMES;
+    }
+
+    if assignments.native_player().is_some() {
+        return;
+    }
+
+    if assignments.native_overlay_suppressed {
+        if assignments.has_secondary_bevy_owner() {
+            assignments.native_discovery_grace = 0;
+            return;
+        }
+        assignments.native_overlay_suppressed = false;
+    }
+
+    if let Some(primary) = assignments.gamepad_for_player(0) {
+        let paired_discovery =
+            assignments.bevy_primary_fresh > 0 && assignments.native_discovery_grace > 0;
+        assignments.native_discovery_grace = 0;
+        if paired_discovery && assignments.assign_native_overlay(primary).is_some() {
+            info!("Native controller mapping overlay assigned to Player 1");
+        }
+        return;
+    }
+
+    if assignments.native_discovery_grace > 0 {
+        assignments.native_discovery_grace -= 1;
+        return;
+    }
+    if assignments.assign_native_primary().is_some() {
+        info!("Native controller automatically assigned to Player 1");
+    }
 }
 
 // ── Deadzone — normalized circular remapping ──────────────────────────────────
@@ -346,14 +541,26 @@ fn log_gamepad_connections(mut events: MessageReader<GamepadConnectionEvent>) {
     }
 }
 
-fn release_disconnected_gamepads(
+/// Connection events, rather than gamepad query order, own automatic P1
+/// assignment. This keeps the first controller stable, supports hot-plug and
+/// reconnect, and lets the oldest waiting controller take over if P1's device
+/// disconnects. Every additional controller remains available for Start-to-
+/// join in Player Select.
+fn sync_gamepad_assignments(
     mut events: MessageReader<GamepadConnectionEvent>,
     mut assignments: ResMut<GamepadAssignments>,
 ) {
+    assignments.bevy_primary_fresh = assignments.bevy_primary_fresh.saturating_sub(1);
     for event in events.read() {
-        if matches!(event.connection, GamepadConnection::Disconnected) {
-            assignments.release(event.gamepad);
+        match &event.connection {
+            GamepadConnection::Connected { .. } => {
+                assignments.note_connected(event.gamepad);
+            }
+            GamepadConnection::Disconnected => assignments.note_disconnected(event.gamepad),
         }
+    }
+    if let Some(gamepad) = assignments.claim_waiting_primary() {
+        info!("Gamepad {gamepad:?} automatically assigned to Player 1");
     }
 }
 
@@ -398,11 +605,14 @@ fn update_player_inputs(
         let gp: Option<&Gamepad> =
             gp_entity.and_then(|entity| gamepads.get(entity).ok().map(|v| v.1));
         let is_p1 = i == 0;
-        // On macOS, Bevy can report a controller while its SDL/gilrs button
-        // mapping is still wrong for a specific device. Merge the native
-        // GameController reading for P1 whenever it exists so correctly mapped
-        // native buttons can rescue those cases.
+        // The native macOS backend either owns P1 by itself or overlays the
+        // Bevy binding established in the same discovery frame. Assignment
+        // ordering prevents a later, distinct Bevy pad from being merged into
+        // an already established native P1 owner.
         let use_native = native.connected && assignments.native_player() == Some(idx.0);
+        let native_overlay = use_native
+            && gp_entity.is_some()
+            && assignments.native_overlay_gamepad() == gp_entity;
 
         pi.gamepad_active = gp.is_some() || use_native;
 
@@ -435,27 +645,33 @@ fn update_player_inputs(
         let key_for = |action: KeyAction| bindings.key(action);
 
         // Helper closures — all capture `gp`.
-        let btn_held = |b: GamepadButton| gp.map(|g| g.pressed(remap(b))).unwrap_or(false);
+        let btn_held = |b: GamepadButton| {
+            !native_overlay && gp.map(|g| g.pressed(remap(b))).unwrap_or(false)
+        };
         let event_just = |b: GamepadButton| {
             let physical = remap(b);
-            gp_entity.is_some_and(|entity| {
+            !native_overlay
+                && gp_entity.is_some_and(|entity| {
                 pressed_button_events
                     .iter()
                     .any(|(event_entity, event_button)| {
                         *event_entity == entity && *event_button == physical
                     })
-            })
+                })
         };
         let btn_just = |b: GamepadButton| {
-            gp.map(|g| g.just_pressed(remap(b))).unwrap_or(false) || event_just(b)
+            (!native_overlay && gp.map(|g| g.just_pressed(remap(b))).unwrap_or(false))
+                || event_just(b)
         };
         let axis_val = |a: GamepadAxis| -> f32 { gp.and_then(|g| g.get(a)).unwrap_or(0.0) };
         let native_held =
             |b: NativeButton| -> bool { use_native && native.pressed(remap_native(b)) };
         let native_just =
             |b: NativeButton| -> bool { use_native && native.just_pressed(remap_native(b)) };
-        let left_trigger_axis = axis_pressed(axis_val(GamepadAxis::LeftZ));
-        let right_trigger_axis = axis_pressed(axis_val(GamepadAxis::RightZ));
+        let left_trigger_axis =
+            !native_overlay && axis_pressed(axis_val(GamepadAxis::LeftZ));
+        let right_trigger_axis =
+            !native_overlay && axis_pressed(axis_val(GamepadAxis::RightZ));
         let left_trigger_held = btn_held(GamepadButton::LeftTrigger2)
             || left_trigger_axis
             || native_held(NativeButton::LeftTrigger);
@@ -868,6 +1084,7 @@ pub fn trigger_player_rumble(_player_index: usize, _strength: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::message::Messages;
 
     #[test]
     fn deadzone_remaps_stick_smoothly_from_zero() {
@@ -988,18 +1205,87 @@ mod tests {
     }
 
     #[test]
-    fn start_assigns_controllers_to_next_available_players() {
+    fn automatic_primary_assignment_leaves_extra_controllers_for_start_to_join() {
         let mut world = World::new();
         let first = world.spawn_empty().id();
         let second = world.spawn_empty().id();
         let mut assignments = GamepadAssignments::default();
         let joined = [true, false, false, false];
 
-        assert_eq!(assignments.assign_next(first, &joined), Some(0));
+        assert_eq!(assignments.assign_primary(first), Some(0));
         assert_eq!(assignments.assign_next(second, &joined), Some(1));
         assert_eq!(assignments.gamepad_for_player(0), Some(first));
         assert_eq!(assignments.gamepad_for_player(1), Some(second));
-        assert_eq!(assignments.assign_next(first, &joined), Some(0));
+        assert_eq!(assignments.assign_primary(first), Some(0));
+        assert_eq!(assignments.assign_primary(second), None);
+    }
+
+    #[test]
+    fn connection_and_reconnect_events_automatically_claim_player_one() {
+        let mut app = App::new();
+        app.add_message::<GamepadConnectionEvent>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, sync_gamepad_assignments);
+        let first = app.world_mut().spawn_empty().id();
+        let waiting = app.world_mut().spawn_empty().id();
+        let reconnected = app.world_mut().spawn_empty().id();
+
+        let connected = |gamepad| {
+            GamepadConnectionEvent::new(
+                gamepad,
+                GamepadConnection::Connected {
+                    name: "Test controller".to_string(),
+                    vendor_id: None,
+                    product_id: None,
+                },
+            )
+        };
+        app.world_mut()
+            .resource_mut::<Messages<GamepadConnectionEvent>>()
+            .write(connected(first));
+        app.world_mut()
+            .resource_mut::<Messages<GamepadConnectionEvent>>()
+            .write(connected(waiting));
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(0), Some(first));
+        assert_eq!(assignments.player_for_gamepad(waiting), None);
+
+        app.world_mut()
+            .resource_mut::<Messages<GamepadConnectionEvent>>()
+            .write(GamepadConnectionEvent::new(
+                first,
+                GamepadConnection::Disconnected,
+            ));
+        app.update();
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(0), Some(waiting));
+
+        app.world_mut()
+            .resource_mut::<Messages<GamepadConnectionEvent>>()
+            .write(GamepadConnectionEvent::new(
+                waiting,
+                GamepadConnection::Disconnected,
+            ));
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<GamepadAssignments>()
+                .gamepad_for_player(0),
+            None
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<GamepadConnectionEvent>>()
+            .write(connected(reconnected));
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<GamepadAssignments>()
+                .gamepad_for_player(0),
+            Some(reconnected)
+        );
     }
 
     #[test]
@@ -1010,31 +1296,302 @@ mod tests {
         let mut assignments = GamepadAssignments::default();
         assert_eq!(
             assignments.assign_next(original, &[true, true, false, false]),
-            Some(0)
+            Some(1)
         );
         assignments.release(original);
         assert_eq!(
             assignments.assign_next(reconnected, &[true, true, false, false]),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn native_primary_does_not_merge_a_later_bevy_device() {
+        let mut world = World::new();
+        let primary = world.spawn_empty().id();
+        let second = world.spawn_empty().id();
+        let mut assignments = GamepadAssignments::default();
+
+        assert_eq!(assignments.assign_native_primary(), Some(0));
+        assert_eq!(assignments.assign_primary(primary), None);
+        assert_eq!(
+            assignments.assign_next(primary, &[true, false, false, false]),
+            Some(1)
+        );
+        assert_eq!(
+            assignments.assign_next(second, &[true, false, false, false]),
+            Some(2)
+        );
+        assert_eq!(assignments.native_player(), Some(0));
+        assert_eq!(assignments.gamepad_for_player(0), None);
+        assert_eq!(assignments.gamepad_for_player(1), Some(primary));
+        assert_eq!(assignments.gamepad_for_player(2), Some(second));
+    }
+
+    #[test]
+    fn paired_backend_discovery_enables_the_native_mapping_overlay() {
+        let mut app = App::new();
+        app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, sync_native_controller_assignment);
+        let primary = app.world_mut().spawn_empty().id();
+        {
+            let mut assignments = app.world_mut().resource_mut::<GamepadAssignments>();
+            assignments.note_connected(primary);
+            assert_eq!(assignments.claim_waiting_primary(), Some(primary));
+        }
+        {
+            let mut native = app.world_mut().resource_mut::<NativeControllerState>();
+            native.connected = true;
+            native.just_connected = true;
+        }
+
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(0), Some(primary));
+        assert_eq!(assignments.native_player(), Some(0));
+    }
+
+    #[test]
+    fn late_distinct_native_device_does_not_merge_into_bevy_primary() {
+        let mut app = App::new();
+        app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, sync_native_controller_assignment);
+        let primary = app.world_mut().spawn_empty().id();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_primary(primary),
+            Some(0)
+        );
+        {
+            let mut native = app.world_mut().resource_mut::<NativeControllerState>();
+            native.connected = true;
+            native.just_connected = true;
+        }
+
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(0), Some(primary));
+        assert_eq!(assignments.native_player(), None);
+    }
+
+    #[test]
+    fn native_only_device_claims_primary_after_backend_discovery_grace() {
+        let mut app = App::new();
+        app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, sync_native_controller_assignment);
+        {
+            let mut native = app.world_mut().resource_mut::<NativeControllerState>();
+            native.connected = true;
+            native.just_connected = true;
+        }
+
+        app.update();
+        app.world_mut()
+            .resource_mut::<NativeControllerState>()
+            .just_connected = false;
+        for _ in 1..NATIVE_DISCOVERY_GRACE_FRAMES {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<GamepadAssignments>().native_player(),
+            None
+        );
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<GamepadAssignments>().native_player(),
             Some(0)
         );
     }
 
     #[test]
-    fn native_and_bevy_gamepads_cannot_claim_the_same_player() {
+    fn native_overlay_cannot_switch_from_disconnected_p1_to_bevy_p2() {
+        let mut app = App::new();
+        app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, sync_native_controller_assignment);
+        let primary = app.world_mut().spawn_empty().id();
+        let secondary = app.world_mut().spawn_empty().id();
+        {
+            let mut assignments = app.world_mut().resource_mut::<GamepadAssignments>();
+            assert_eq!(assignments.assign_primary(primary), Some(0));
+            assert_eq!(assignments.assign_native_overlay(primary), Some(0));
+            assert_eq!(
+                assignments.assign_next(secondary, &[true, false, false, false]),
+                Some(1)
+            );
+            assignments.note_disconnected(primary);
+        }
+        app.world_mut()
+            .resource_mut::<NativeControllerState>()
+            .connected = true;
+
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(0), None);
+        assert_eq!(assignments.gamepad_for_player(1), Some(secondary));
+        assert_eq!(assignments.native_player(), None);
+    }
+
+    #[test]
+    fn stable_native_overlay_survives_a_bevy_secondary_join() {
         let mut world = World::new();
-        let gamepad = world.spawn_empty().id();
+        let primary = world.spawn_empty().id();
+        let secondary = world.spawn_empty().id();
         let mut assignments = GamepadAssignments::default();
 
+        assert_eq!(assignments.assign_primary(primary), Some(0));
+        assert_eq!(assignments.assign_native_overlay(primary), Some(0));
         assert_eq!(
-            assignments.assign_native_next(&[true, false, false, false]),
-            Some(0)
-        );
-        assert_eq!(
-            assignments.assign_next(gamepad, &[true, false, false, false]),
+            assignments.assign_next(secondary, &[true, false, false, false]),
             Some(1)
         );
         assert_eq!(assignments.native_player(), Some(0));
-        assert_eq!(assignments.gamepad_for_player(1), Some(gamepad));
+        assert_eq!(assignments.native_overlay_gamepad(), Some(primary));
+    }
+
+    #[test]
+    fn native_device_instance_switch_is_suppressed_while_player_two_is_owned() {
+        let mut app = App::new();
+        app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, sync_native_controller_assignment);
+        let secondary = app.world_mut().spawn_empty().id();
+        {
+            let mut assignments = app.world_mut().resource_mut::<GamepadAssignments>();
+            assert_eq!(assignments.assign_native_primary(), Some(0));
+            assert_eq!(
+                assignments.assign_next(secondary, &[true, false, false, false]),
+                Some(1)
+            );
+        }
+        {
+            let mut native = app.world_mut().resource_mut::<NativeControllerState>();
+            native.finish_poll(
+                true,
+                "Same controller model".to_string(),
+                Some(1),
+                Vec2::ZERO,
+                Vec2::ZERO,
+                0,
+            );
+            native.finish_poll(
+                true,
+                "Same controller model".to_string(),
+                Some(2),
+                Vec2::ZERO,
+                Vec2::ZERO,
+                0,
+            );
+        }
+
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(1), Some(secondary));
+        assert_eq!(assignments.native_player(), None);
+    }
+
+    #[test]
+    fn native_backend_identity_detects_same_model_controller_switches() {
+        let mut native = NativeControllerState::default();
+        native.finish_poll(
+            true,
+            "Same controller model".to_string(),
+            Some(1),
+            Vec2::ZERO,
+            Vec2::ZERO,
+            0,
+        );
+        assert!(native.just_connected);
+        assert!(!native.backend_identity_changed);
+
+        native.finish_poll(
+            true,
+            "Same controller model".to_string(),
+            Some(1),
+            Vec2::ZERO,
+            Vec2::ZERO,
+            0,
+        );
+        assert!(!native.just_connected);
+
+        native.finish_poll(
+            true,
+            "Same controller model".to_string(),
+            Some(2),
+            Vec2::ZERO,
+            Vec2::ZERO,
+            0,
+        );
+        assert!(native.just_connected);
+        assert!(native.backend_identity_changed);
+
+        native.clear_poll();
+        native.finish_poll(
+            true,
+            "Same controller model".to_string(),
+            Some(2),
+            Vec2::ZERO,
+            Vec2::ZERO,
+            0,
+        );
+        assert!(native.just_connected);
+        assert!(native.reconnected_after_gap);
+    }
+
+    #[test]
+    fn native_reconnect_gap_cannot_claim_a_bevy_secondary_as_p1() {
+        let mut app = App::new();
+        app.init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .add_systems(Update, sync_native_controller_assignment);
+        let secondary = app.world_mut().spawn_empty().id();
+        {
+            let mut assignments = app.world_mut().resource_mut::<GamepadAssignments>();
+            assert_eq!(assignments.assign_native_primary(), Some(0));
+            assert_eq!(
+                assignments.assign_next(secondary, &[true, false, false, false]),
+                Some(1)
+            );
+        }
+        {
+            let mut native = app.world_mut().resource_mut::<NativeControllerState>();
+            native.finish_poll(
+                true,
+                "Controller".to_string(),
+                Some(1),
+                Vec2::ZERO,
+                Vec2::ZERO,
+                0,
+            );
+            native.just_connected = false;
+            native.clear_poll();
+        }
+        app.update();
+        {
+            let mut native = app.world_mut().resource_mut::<NativeControllerState>();
+            native.finish_poll(
+                true,
+                "Controller".to_string(),
+                Some(1),
+                Vec2::ZERO,
+                Vec2::ZERO,
+                0,
+            );
+        }
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(1), Some(secondary));
+        assert_eq!(assignments.native_player(), None);
     }
 
     #[test]
@@ -1042,17 +1599,15 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<NativeControllerState>()
             .init_resource::<GamepadAssignments>()
-            .add_systems(Update, release_disconnected_native_controller);
+            .add_systems(Update, sync_native_controller_assignment);
         app.world_mut()
             .resource_mut::<NativeControllerState>()
             .connected = true;
+        app.update();
         assert_eq!(
-            app.world_mut()
-                .resource_mut::<GamepadAssignments>()
-                .assign_native_next(&[true, false, false, false]),
+            app.world().resource::<GamepadAssignments>().native_player(),
             Some(0)
         );
-        app.update();
         app.world_mut()
             .resource_mut::<NativeControllerState>()
             .connected = false;
@@ -1062,7 +1617,7 @@ mod tests {
         assert_eq!(
             app.world_mut()
                 .resource_mut::<GamepadAssignments>()
-                .assign_next(reconnected, &[true, false, false, false]),
+                .assign_primary(reconnected),
             Some(0)
         );
     }
@@ -1192,7 +1747,14 @@ mod native_controller_backend {
             set_button(&mut mask, NativeButton::DPadDown, dpad.y < -0.5);
             set_button(&mut mask, NativeButton::DPadUp, dpad.y > 0.5);
 
-            state.finish_poll(true, name, left, Vec2::new(right.x, -right.y), mask);
+            state.finish_poll(
+                true,
+                name,
+                Some(controller as usize),
+                left,
+                Vec2::new(right.x, -right.y),
+                mask,
+            );
             return;
         }
 

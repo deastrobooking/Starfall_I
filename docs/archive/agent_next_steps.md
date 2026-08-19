@@ -390,10 +390,11 @@ Goal: Pay down technical debt and increase stability for save data, input mappin
   (`dirs::data_dir()/starfall_i`) with a non-destructive first-run migration of
   legacy working-directory files. Covered by tests for interrupted writes,
   corrupt newest slots, generation ordering, legacy v3, and future versions.
-- Explicit `GamepadAssignments` and Start-to-join ownership are delivered;
-  reconnect releases and reclaims the stable player slot rather than assigning
-  gameplay by gamepad query order. The remaining work is four-controller
-  hardware acceptance, not a second assignment implementation.
+- Explicit `GamepadAssignments`, automatic P1 connection/hot-plug ownership,
+  and Start-to-join for P2–P4 are delivered; reconnect releases and reclaims a
+  stable player slot rather than assigning gameplay by gamepad query order. The
+  remaining work is four-controller hardware acceptance, not a second
+  assignment implementation.
 - Reachable production panic audit delivered (July 16, 2026): terrain trimesh
   collider failure now warns with mesh identity and spawns terrain without
   physics instead of crashing; terrain height cache locks recover from poison;

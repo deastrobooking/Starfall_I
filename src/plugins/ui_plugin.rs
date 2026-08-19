@@ -1,11 +1,11 @@
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use bevy::window::{CursorMoved, PrimaryWindow};
 
 use bevy::input::gamepad::{GamepadButton, GamepadButtonStateChangedEvent};
 use bevy::input::ButtonState;
-use bevy::ui::{ComputedStackIndex, InteractionDisabled};
+use bevy::ui::{ComputedStackIndex, InteractionDisabled, UiGlobalTransform, UiSystems};
 
 use crate::chapters::{
     all_chapters, chapter_map_locations, map_settlements, ChapterId, MapSettlementKind,
@@ -56,7 +56,7 @@ use crate::plugins::heavy_economy_plugin::{
     sell_to_vendor_canonical_atomic, unmount_jewel_to_canonical_atomic,
 };
 use crate::plugins::input_plugin::{
-    mapped_gamepad_face, mapped_native_face, GamepadAssignments, NativeButton,
+    mapped_gamepad_face, mapped_native_face, ControllerInputSet, GamepadAssignments, NativeButton,
     NativeControllerState,
 };
 use crate::plugins::save_plugin::{save_current_session, save_settings, SaveParams};
@@ -94,9 +94,23 @@ enum ChapterSelectUiSet {
     LoadingFeedback,
 }
 
+/// Shared menu focus publishes controller-driven `Interaction::Pressed` in
+/// `PreUpdate`, after Bevy's pointer focus pass and before every screen's
+/// `Update` action consumers. The schedule boundary also covers button
+/// consumers registered by the individual forge and designer plugins.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum MenuUiSet {
+    ReleaseActivation,
+    FocusDispatch,
+    ActionConsumers,
+}
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiFoundationPlugin)
+            // Headless builds omit WindowPlugin, but shared focus still drains
+            // this stream. Registration is idempotent in windowed builds.
+            .add_message::<CursorMoved>()
             .init_resource::<UiMessage>()
             .init_resource::<ShopUiState>()
             .init_resource::<PlayerGuidance>()
@@ -106,6 +120,7 @@ impl Plugin for UiPlugin {
             .init_resource::<PauseMenuState>()
             .init_resource::<MainMenuUiState>()
             .init_resource::<MenuFocus>()
+            .init_resource::<GamepadAssignments>()
             .init_resource::<AuthoringTextInputCapture>()
             .init_resource::<ChapterProgressionOwner>()
             .init_resource::<CustomMissionState>()
@@ -117,18 +132,33 @@ impl Plugin for UiPlugin {
                 )
                     .chain(),
             )
+            .configure_sets(
+                PreUpdate,
+                MenuUiSet::ReleaseActivation.before(UiSystems::Focus),
+            )
+            .configure_sets(
+                PreUpdate,
+                MenuUiSet::FocusDispatch
+                    .after(UiSystems::Focus)
+                    .after(ControllerInputSet::Ready),
+            )
+            .configure_sets(Update, MenuUiSet::ActionConsumers)
             .add_systems(Startup, spawn_menu_camera)
             .add_systems(
-                Update,
+                PreUpdate,
+                release_menu_controller_activation.in_set(MenuUiSet::ReleaseActivation),
+            )
+            .add_systems(
+                PreUpdate,
                 (
-                    register_menu_buttons,
+                    register_menu_buttons.run_if(in_menu_state),
                     menu_focus_navigation,
-                    keep_menu_focus_in_view,
+                    keep_menu_focus_in_view.run_if(in_menu_state),
                     menu_back_navigation,
-                    menu_focus_style,
+                    menu_focus_style.run_if(in_menu_state),
                 )
                     .chain()
-                    .run_if(in_menu_state),
+                    .in_set(MenuUiSet::FocusDispatch),
             )
             .add_systems(
                 OnEnter(AppState::MainMenu),
@@ -170,7 +200,12 @@ impl Plugin for UiPlugin {
             )
             .add_systems(OnEnter(AppState::GameOver), setup_game_over)
             .add_systems(OnEnter(AppState::Victory), setup_victory_screen)
-            .add_systems(Update, victory_input.run_if(in_state(AppState::Victory)))
+            .add_systems(
+                Update,
+                victory_input
+                    .in_set(MenuUiSet::ActionConsumers)
+                    .run_if(in_state(AppState::Victory)),
+            )
             .init_resource::<PendingRebind>()
             .add_systems(
                 Update,
@@ -181,13 +216,10 @@ impl Plugin for UiPlugin {
                     // arms would otherwise be eaten as the new binding).
                     settings_rebind_capture_system.after(settings_panel_input_system),
                 )
+                    .in_set(MenuUiSet::ActionConsumers)
                     .run_if(in_state(AppState::Paused).or_else(in_state(AppState::MainMenu))),
             )
-            .add_systems(
-                Update,
-                pause_input_system
-                    .run_if(in_state(AppState::Playing).or_else(in_state(AppState::Paused))),
-            )
+            .add_systems(Update, pause_input_system)
             .add_systems(
                 Update,
                 (
@@ -200,6 +232,7 @@ impl Plugin for UiPlugin {
                     shop_panel_refresh_system.after(shop_action_system),
                     update_pause_menu_page_visibility,
                 )
+                    .in_set(MenuUiSet::ActionConsumers)
                     .run_if(in_state(AppState::Paused)),
             )
             .add_systems(
@@ -280,25 +313,35 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppState::Playing).or_else(in_state(AppState::GameOver))),
             )
-            .add_systems(Update, game_over_input.run_if(in_state(AppState::GameOver)))
+            .add_systems(
+                Update,
+                game_over_input
+                    .in_set(MenuUiSet::ActionConsumers)
+                    .run_if(in_state(AppState::GameOver)),
+            )
             .add_systems(
                 Update,
                 (menu_start_button, update_main_menu_page_visibility)
                     .chain()
+                    .in_set(MenuUiSet::ActionConsumers)
                     .run_if(in_state(AppState::MainMenu)),
             )
             .add_systems(
                 Update,
-                project_hub_action_system.run_if(in_state(AppState::ProjectHub)),
+                project_hub_action_system
+                    .in_set(MenuUiSet::ActionConsumers)
+                    .run_if(in_state(AppState::ProjectHub)),
             )
             .add_systems(
                 Update,
-                (
-                    player_select_controller_join,
-                    sync_player_select_button_availability,
-                    player_select_update,
-                )
+                player_select_controller_join.in_set(MenuUiSet::ActionConsumers),
+            )
+            .add_systems(
+                Update,
+                (sync_player_select_button_availability, player_select_update)
                     .chain()
+                    .after(player_select_controller_join)
+                    .in_set(MenuUiSet::ActionConsumers)
                     .run_if(in_state(AppState::PlayerSelect)),
             )
             .add_systems(
@@ -312,13 +355,14 @@ impl Plugin for UiPlugin {
                     chapter_select_perk_buttons,
                     chapter_select_upgrade_buttons,
                     chapter_select_weapon_rank_buttons,
-                    chapter_select_controller_scroll,
+                    chapter_select_mouse_scroll,
                     chapter_select_perk_panel_update,
                     chapter_select_upgrade_panel_update,
                     chapter_select_weapon_rank_panel_update,
                     chapter_select_economy_panel_update,
                     final_push_unlock_system,
                 )
+                    .in_set(MenuUiSet::ActionConsumers)
                     .run_if(in_state(AppState::ChapterSelect)),
             )
             .add_systems(
@@ -388,6 +432,7 @@ struct PauseMenuState {
     requested_page: Option<PausePage>,
     resume_lockout: f32,
     resume_armed: bool,
+    back_resume_requested: bool,
 }
 
 #[derive(Component, Debug, Clone)]
@@ -403,6 +448,7 @@ impl Default for PauseMenuState {
             requested_page: None,
             resume_lockout: 0.0,
             resume_armed: true,
+            back_resume_requested: false,
         }
     }
 }
@@ -558,12 +604,18 @@ pub(crate) struct MenuButtonDisabled;
 struct MenuButtonPalette {
     background: BackgroundColor,
     border: BorderColor,
+    applied_background: Option<BackgroundColor>,
+    applied_border: Option<BorderColor>,
 }
 
 #[derive(Resource, Default)]
 struct MenuFocus {
     entity: Option<Entity>,
     state: Option<AppState>,
+    controller_activation: Option<Entity>,
+    pointer_active: bool,
+    reveal_requested: bool,
+    layout_reveal_frames: u8,
     repeat_direction: Option<MenuDirection>,
     repeat_timer: f32,
 }
@@ -841,9 +893,13 @@ struct LoadoutPanelState {
 }
 
 fn in_menu_state(state: Res<State<AppState>>) -> bool {
+    is_shared_menu_state(state.get())
+}
+
+fn is_shared_menu_state(state: &AppState) -> bool {
     // CharacterStudio owns a specialized row/field navigator for sliders and
     // viewport controls; do not double-dispatch its controller input here.
-    !matches!(state.get(), AppState::Playing | AppState::CharacterStudio)
+    !matches!(state, AppState::Playing | AppState::CharacterStudio)
 }
 
 fn register_menu_buttons(
@@ -863,6 +919,8 @@ fn register_menu_buttons(
             MenuButtonPalette {
                 background: *background,
                 border: *border,
+                applied_background: None,
+                applied_border: None,
             },
         ));
     }
@@ -879,8 +937,9 @@ enum MenuDirection {
 impl MenuDirection {
     fn vector(self) -> Vec2 {
         match self {
-            Self::Up => Vec2::Y,
-            Self::Down => Vec2::NEG_Y,
+            // Bevy UI coordinates increase downward, unlike world-space Y.
+            Self::Up => Vec2::NEG_Y,
+            Self::Down => Vec2::Y,
             Self::Left => Vec2::NEG_X,
             Self::Right => Vec2::X,
         }
@@ -891,19 +950,24 @@ fn menu_focus_navigation(
     time: Res<Time>,
     state: Res<State<AppState>>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    gamepads: Query<(Entity, &Gamepad)>,
     native: Res<NativeControllerState>,
+    assignments: Res<GamepadAssignments>,
+    windows: Query<Ref<Window>, With<PrimaryWindow>>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
+    mut cursor_events: MessageReader<CursorMoved>,
     settings: Res<GameSettings>,
     text_input: Res<AuthoringTextInputCapture>,
     mut focus: ResMut<MenuFocus>,
     parents: Query<&ChildOf>,
     ui_nodes: Query<&Node>,
-    tool_windows: Query<(&GlobalTransform, &ComputedNode, &ComputedStackIndex), With<ToolWindow>>,
+    tool_windows: Query<(&UiGlobalTransform, &ComputedNode, &ComputedStackIndex), With<ToolWindow>>,
     mut button_set: ParamSet<(
         Query<
             (
                 Entity,
-                &GlobalTransform,
+                &UiGlobalTransform,
                 &ComputedNode,
                 &ComputedStackIndex,
                 &Interaction,
@@ -916,15 +980,48 @@ fn menu_focus_navigation(
     )>,
 ) {
     let current_state = state.get().clone();
+    let pressed_button_events = button_events.read().copied().collect::<Vec<_>>();
+    let ignored_overlay = assignments.native_overlay_gamepad();
+    let pointer_moved = cursor_events.read().count() != 0;
+    let pointer_pressed = mouse_buttons.just_pressed(MouseButton::Left);
+
+    // Keep both message-reader cursors current while gameplay or Character
+    // Studio owns input. Otherwise an old East/Start chord can replay as Back
+    // on the first frame after Pause opens.
+    if !is_shared_menu_state(&current_state) {
+        focus.state = Some(current_state);
+        focus.entity = None;
+        focus.pointer_active = false;
+        focus.reveal_requested = false;
+        focus.layout_reveal_frames = 0;
+        focus.repeat_direction = None;
+        focus.repeat_timer = 0.0;
+        return;
+    }
+
     if focus.state.as_ref() != Some(&current_state) {
         focus.state = Some(current_state);
         focus.entity = None;
     }
+    if focus.entity.is_some()
+        && (settings.is_changed() || windows.iter().any(|window| window.is_changed()))
+    {
+        // The first reveal can still observe the previous frame's layout;
+        // keep one request for the post-layout geometry on the next frame.
+        focus.layout_reveal_frames = 2;
+    }
+    let previous_focus = focus.entity;
 
     let direction_input = if text_input.active {
         MenuDirectionInput::default()
     } else {
-        menu_direction_input(&keyboard, &gamepads, &native)
+        menu_direction_input(
+            &keyboard,
+            &gamepads,
+            &native,
+            &pressed_button_events,
+            ignored_overlay,
+        )
     };
     let direction = repeated_menu_direction(&mut focus, direction_input, time.delta_secs());
     let (confirm_gamepad, confirm_native) = mapped_menu_face(&settings.bindings, FaceButton::South);
@@ -934,8 +1031,20 @@ fn menu_focus_navigation(
             || keyboard.just_pressed(KeyCode::Space)
             || gamepads
                 .iter()
-                .any(|gamepad| gamepad.just_pressed(confirm_gamepad))
+                .any(|(entity, gamepad)| {
+                    Some(entity) != ignored_overlay && gamepad.just_pressed(confirm_gamepad)
+                })
+            || gamepad_button_pressed_in_events(
+                &pressed_button_events,
+                confirm_gamepad,
+                ignored_overlay,
+            )
             || native.just_pressed(confirm_native));
+    if pointer_moved || pointer_pressed {
+        focus.pointer_active = true;
+    } else if direction.is_some() || confirm {
+        focus.pointer_active = false;
+    }
 
     let window_rects = tool_windows
         .iter()
@@ -961,9 +1070,8 @@ fn menu_focus_navigation(
         ) {
             continue;
         }
-        let translation = transform.translation();
-        visible.push((entity, Vec2::new(translation.x, translation.y)));
-        if matches!(interaction, Interaction::Hovered | Interaction::Pressed) {
+        visible.push((entity, transform.affine().translation));
+        if pointer_interaction_claims_focus(*interaction, pointer_moved, pointer_pressed) {
             hovered = Some(entity);
         }
     }
@@ -984,14 +1092,58 @@ fn menu_focus_navigation(
             focus.entity = Some(next);
         }
     }
+    if focus.entity != previous_focus {
+        focus.reveal_requested = true;
+    }
 
     if confirm {
         if let Some(entity) = focus.entity {
             if let Ok(mut interaction) = button_set.p1().get_mut(entity) {
                 *interaction = Interaction::Pressed;
+                focus.controller_activation = Some(entity);
             }
         }
     }
+}
+
+/// Controller activation is a one-frame pulse, not Bevy's mouse-down latch.
+/// Release it before `UiSystems::Focus` so that pass can still publish a real
+/// mouse click occurring on the following frame.
+fn release_menu_controller_activation(
+    mut focus: ResMut<MenuFocus>,
+    mut interactions: Query<&mut Interaction, (With<Button>, With<MenuFocusable>)>,
+) {
+    let Some(entity) = focus.controller_activation.take() else {
+        return;
+    };
+    if let Ok(mut interaction) = interactions.get_mut(entity) {
+        if *interaction == Interaction::Pressed {
+            *interaction = Interaction::None;
+        }
+    }
+}
+
+fn pointer_interaction_claims_focus(
+    interaction: Interaction,
+    pointer_moved: bool,
+    pointer_pressed: bool,
+) -> bool {
+    (pointer_moved && matches!(interaction, Interaction::Hovered | Interaction::Pressed))
+        || (pointer_pressed && interaction == Interaction::Pressed)
+}
+
+fn gamepad_button_pressed_in_events(
+    events: &[GamepadButtonStateChangedEvent],
+    button: GamepadButton,
+    ignored_gamepad: Option<Entity>,
+) -> bool {
+    events
+        .iter()
+        .any(|event| {
+            Some(event.entity) != ignored_gamepad
+                && event.state == ButtonState::Pressed
+                && event.button == button
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1006,8 +1158,8 @@ impl UiFocusRect {
     }
 }
 
-fn ui_node_rect(transform: &GlobalTransform, computed: &ComputedNode) -> UiFocusRect {
-    let center = transform.translation().truncate();
+fn ui_node_rect(transform: &UiGlobalTransform, computed: &ComputedNode) -> UiFocusRect {
+    let center = transform.affine().translation;
     let half = computed.size() * 0.5;
     UiFocusRect {
         min: center - half,
@@ -1044,7 +1196,7 @@ fn center_is_occluded(
 #[allow(clippy::too_many_arguments)]
 fn menu_focusable_geometry(
     entity: Entity,
-    transform: &GlobalTransform,
+    transform: &UiGlobalTransform,
     computed: &ComputedNode,
     inherited_visibility: &InheritedVisibility,
     disabled: bool,
@@ -1060,11 +1212,7 @@ fn menu_focusable_geometry(
     {
         return false;
     }
-    !center_is_occluded(
-        transform.translation().truncate(),
-        element_stack,
-        window_rects,
-    )
+    !center_is_occluded(transform.affine().translation, element_stack, window_rects)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1075,14 +1223,25 @@ struct MenuDirectionInput {
 
 fn menu_direction_input(
     keyboard: &ButtonInput<KeyCode>,
-    gamepads: &Query<&Gamepad>,
+    gamepads: &Query<(Entity, &Gamepad)>,
     native: &NativeControllerState,
+    button_events: &[GamepadButtonStateChangedEvent],
+    ignored_gamepad: Option<Entity>,
 ) -> MenuDirectionInput {
-    let gamepad_just = |button| gamepads.iter().any(|gamepad| gamepad.just_pressed(button));
-    let gamepad_pressed = |button| gamepads.iter().any(|gamepad| gamepad.pressed(button));
+    let gamepad_just = |button| {
+        gamepads.iter().any(|(entity, gamepad)| {
+            Some(entity) != ignored_gamepad && gamepad.just_pressed(button)
+        }) || gamepad_button_pressed_in_events(button_events, button, ignored_gamepad)
+    };
+    let gamepad_pressed = |button| {
+        gamepads.iter().any(|(entity, gamepad)| {
+            Some(entity) != ignored_gamepad && gamepad.pressed(button)
+        })
+    };
     let stick = gamepads
         .iter()
-        .map(|gamepad| {
+        .filter(|(entity, _)| Some(*entity) != ignored_gamepad)
+        .map(|(_, gamepad)| {
             Vec2::new(
                 gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0),
                 gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0),
@@ -1189,8 +1348,10 @@ fn repeated_menu_direction(
 #[allow(clippy::too_many_arguments)]
 fn menu_back_navigation(
     keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
+    gamepads: Query<(Entity, &Gamepad)>,
     native: Res<NativeControllerState>,
+    assignments: Res<GamepadAssignments>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     settings: Res<GameSettings>,
     text_input: Res<AuthoringTextInputCapture>,
     unsaved_changes: Res<AuthoringUnsavedChanges>,
@@ -1199,17 +1360,28 @@ fn menu_back_navigation(
     imported_forge_return: Res<ImportedForgeReturnTarget>,
     mut main_menu: ResMut<MainMenuUiState>,
     mut pause_menu: ResMut<PauseMenuState>,
-    mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
     mut commands: Commands,
     victory_q: Query<Entity, With<VictoryRoot>>,
 ) {
     let (back_gamepad, back_native) = mapped_menu_face(&settings.bindings, FaceButton::East);
+    let pressed_button_events = button_events.read().copied().collect::<Vec<_>>();
+    let ignored_overlay = assignments.native_overlay_gamepad();
+    if !is_shared_menu_state(state.get()) {
+        return;
+    }
     let back = !text_input.active
         && (keyboard.just_pressed(KeyCode::Escape)
             || gamepads
                 .iter()
-                .any(|gamepad| gamepad.just_pressed(back_gamepad))
+                .any(|(entity, gamepad)| {
+                    Some(entity) != ignored_overlay && gamepad.just_pressed(back_gamepad)
+                })
+            || gamepad_button_pressed_in_events(
+                &pressed_button_events,
+                back_gamepad,
+                ignored_overlay,
+            )
             || native.just_pressed(back_native));
     if !back {
         return;
@@ -1250,11 +1422,14 @@ fn menu_back_navigation(
         AppState::RobotGarage => next_state.set(AppState::ChapterSelect),
         AppState::Paused if pause_menu.page != PausePage::Main => {
             pause_menu.page = PausePage::Main;
+            pause_menu.resume_armed = false;
+            pause_menu.back_resume_requested = false;
         }
         AppState::Paused => {
-            transition.pausing = false;
-            transition.resuming_from_pause = true;
-            next_state.set(AppState::Playing);
+            // State transitions are consumed by `pause_input_system` in
+            // Update. Crossing schedules here would let the same Escape edge
+            // resume in PreUpdate and immediately pause again in Update.
+            pause_menu.back_resume_requested = true;
         }
         AppState::GameOver => next_state.set(AppState::MainMenu),
         AppState::Victory => {
@@ -1303,7 +1478,7 @@ fn forge_back_destination(state: &AppState) -> Option<AppState> {
 fn default_menu_focus(buttons: &[(Entity, Vec2)]) -> Option<Entity> {
     buttons
         .iter()
-        .min_by(|(_, a), (_, b)| b.y.total_cmp(&a.y).then_with(|| a.x.total_cmp(&b.x)))
+        .min_by(|(_, a), (_, b)| a.y.total_cmp(&b.y).then_with(|| a.x.total_cmp(&b.x)))
         .map(|(entity, _)| *entity)
 }
 
@@ -1341,7 +1516,7 @@ fn menu_focus_style(
         (
             Entity,
             &Interaction,
-            &MenuButtonPalette,
+            &mut MenuButtonPalette,
             Option<&MenuButtonDisabled>,
             &mut BackgroundColor,
             &mut BorderColor,
@@ -1349,40 +1524,81 @@ fn menu_focus_style(
         (With<Button>, With<MenuFocusable>),
     >,
 ) {
-    for (entity, interaction, palette, disabled, mut background, mut border) in buttons.iter_mut() {
-        if disabled.is_some() {
-            *background = BackgroundColor(Color::srgb(0.07, 0.08, 0.11));
-            *border = BorderColor::all(Color::srgb(0.28, 0.30, 0.36));
-        } else if *interaction == Interaction::Pressed {
-            *background = BackgroundColor(Color::srgb(0.98, 0.62, 0.14));
-            *border = BorderColor::all(Color::WHITE);
-        } else if focus.entity == Some(entity) || *interaction == Interaction::Hovered {
-            *background = BackgroundColor(if settings.high_contrast_ui {
-                Color::BLACK
-            } else {
-                Color::srgb(0.12, 0.48, 0.82)
-            });
-            *border = BorderColor::all(if settings.high_contrast_ui {
-                Color::WHITE
-            } else {
-                Color::srgb(1.0, 0.9, 0.34)
-            });
-        } else {
-            *background = palette.background;
-            *border = palette.border;
+    for (entity, interaction, mut palette, disabled, mut background, mut border) in
+        buttons.iter_mut()
+    {
+        if palette
+            .applied_background
+            .is_none_or(|applied| applied != *background)
+        {
+            palette.background = *background;
         }
+        if palette
+            .applied_border
+            .is_none_or(|applied| applied != *border)
+        {
+            palette.border = *border;
+        }
+
+        let (styled_background, styled_border) = if disabled.is_some() {
+            (
+                BackgroundColor(Color::srgb(0.07, 0.08, 0.11)),
+                BorderColor::all(Color::srgb(0.28, 0.30, 0.36)),
+            )
+        } else if *interaction == Interaction::Pressed {
+            (
+                BackgroundColor(Color::srgb(0.98, 0.62, 0.14)),
+                BorderColor::all(Color::WHITE),
+            )
+        } else if focus.entity == Some(entity)
+            || (focus.pointer_active && *interaction == Interaction::Hovered)
+        {
+            (
+                BackgroundColor(if settings.high_contrast_ui {
+                    Color::BLACK
+                } else {
+                    Color::srgb(0.12, 0.48, 0.82)
+                }),
+                BorderColor::all(if settings.high_contrast_ui {
+                    Color::WHITE
+                } else {
+                    Color::srgb(1.0, 0.9, 0.34)
+                }),
+            )
+        } else {
+            (palette.background, palette.border)
+        };
+
+        *background = styled_background;
+        *border = styled_border;
+        palette.applied_background =
+            (styled_background != palette.background).then_some(styled_background);
+        palette.applied_border = (styled_border != palette.border).then_some(styled_border);
     }
 }
 
 fn keep_menu_focus_in_view(
-    focus: Res<MenuFocus>,
-    focused_q: Query<(&GlobalTransform, &ComputedNode), With<MenuFocusable>>,
+    mut focus: ResMut<MenuFocus>,
+    focused_q: Query<(&UiGlobalTransform, &ComputedNode), With<MenuFocusable>>,
     parents: Query<&ChildOf>,
     mut panel_q: Query<
-        (Entity, &GlobalTransform, &ComputedNode, &mut ScrollPosition),
+        (
+            Entity,
+            &UiGlobalTransform,
+            &ComputedNode,
+            &mut ScrollPosition,
+        ),
         With<MenuScrollPanel>,
     >,
 ) {
+    if focus.layout_reveal_frames > 0 {
+        focus.layout_reveal_frames -= 1;
+        focus.reveal_requested = true;
+    }
+    if !focus.reveal_requested {
+        return;
+    }
+    focus.reveal_requested = false;
     let Some(entity) = focus.entity else {
         return;
     };
@@ -1390,35 +1606,35 @@ fn keep_menu_focus_in_view(
         return;
     };
 
-    for (panel_entity, panel_transform, panel_node, mut scroll) in panel_q.iter_mut() {
-        // Only the panel that actually contains the focused button may
-        // scroll; with several scrollable tool windows on screen the others
-        // must hold still.
-        let contains_focus = std::iter::successors(Some(entity), |current| {
-            parents.get(*current).ok().map(|child_of| child_of.parent())
-        })
-        .take(64)
-        .any(|ancestor| ancestor == panel_entity);
-        if !contains_focus {
-            continue;
-        }
-        let max_y = menu_scroll_max(panel_node);
-        if max_y <= 0.0 {
-            continue;
-        }
-        let panel_center = panel_transform.translation().y;
-        let button_center = button_transform.translation().y;
-        let panel_half = panel_node.size().y * 0.5;
-        let button_half = button_node.size().y * 0.5;
-        let margin = 18.0;
-        let panel_min = panel_center - panel_half + margin;
-        let panel_max = panel_center + panel_half - margin;
-        let button_min = button_center - button_half;
-        let button_max = button_center + button_half;
-
-        let delta = focus_reveal_scroll_delta(panel_min, panel_max, button_min, button_max);
-        scroll.y = (scroll.y + delta).clamp(0.0, max_y);
+    // Scroll only the nearest owning surface. Nested pages (for example Pause
+    // Settings inside the full-screen pause scroller) must not move twice.
+    let Some(panel_entity) = std::iter::successors(Some(entity), |current| {
+        parents.get(*current).ok().map(|child_of| child_of.parent())
+    })
+    .take(64)
+    .find(|ancestor| panel_q.contains(*ancestor)) else {
+        return;
+    };
+    let Ok((_, panel_transform, panel_node, mut scroll)) = panel_q.get_mut(panel_entity) else {
+        return;
+    };
+    let max_y = menu_scroll_max(panel_node);
+    if max_y <= 0.0 {
+        return;
     }
+    let panel_center = panel_transform.affine().translation.y;
+    let button_center = button_transform.affine().translation.y;
+    let panel_half = panel_node.size().y * 0.5;
+    let button_half = button_node.size().y * 0.5;
+    let margin = 18.0;
+    let panel_min = panel_center - panel_half + margin;
+    let panel_max = panel_center + panel_half - margin;
+    let button_min = button_center - button_half;
+    let button_max = button_center + button_half;
+
+    let delta = focus_reveal_scroll_delta(panel_min, panel_max, button_min, button_max)
+        * panel_node.inverse_scale_factor();
+    scroll.y = (scroll.y + delta).clamp(0.0, max_y);
 }
 
 fn menu_scroll_max(computed: &ComputedNode) -> f32 {
@@ -1432,9 +1648,9 @@ fn focus_reveal_scroll_delta(
     item_max: f32,
 ) -> f32 {
     if item_min < viewport_min {
-        viewport_min - item_min
+        item_min - viewport_min
     } else if item_max > viewport_max {
-        viewport_max - item_max
+        item_max - viewport_max
     } else {
         0.0
     }
@@ -1689,17 +1905,19 @@ fn menu_start_button(
 
 fn update_main_menu_page_visibility(
     menu: Res<MainMenuUiState>,
-    mut panels: Query<(&MainMenuPagePanel, &mut Visibility)>,
+    mut panels: Query<(&MainMenuPagePanel, &mut Visibility, &mut Node)>,
 ) {
     if !menu.is_changed() {
         return;
     }
-    for (panel, mut visibility) in panels.iter_mut() {
-        *visibility = if panel.0 == menu.page {
+    for (panel, mut visibility, mut node) in panels.iter_mut() {
+        let active = panel.0 == menu.page;
+        *visibility = if active {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+        node.display = if active { Display::Flex } else { Display::None };
     }
 }
 
@@ -1957,6 +2175,7 @@ fn setup_pause_menu(
     menu.page = menu.requested_page.take().unwrap_or(PausePage::Main);
     menu.resume_lockout = 0.20;
     menu.resume_armed = false;
+    menu.back_resume_requested = false;
     let chapters = all_chapters();
     let mut player_positions = player_q
         .iter()
@@ -1971,12 +2190,15 @@ fn setup_pause_menu(
                 position_type: PositionType::Absolute,
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                justify_content: JustifyContent::FlexStart,
                 row_gap: Val::Px(12.0),
                 padding: UiRect::all(Val::Px(34.0)),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
+            ScrollPosition::default(),
+            MenuScrollPanel,
             PauseRoot,
         ))
         .with_children(|root| {
@@ -2915,8 +3137,9 @@ fn resume_physics_after_pause(mut physics_time: ResMut<Time<Physics>>) {
 fn pause_input_system(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
+    gamepads: Query<(Entity, &Gamepad)>,
     native: Res<NativeControllerState>,
+    assignments: Res<GamepadAssignments>,
     mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     input_q: Query<&PlayerInput, With<Player>>,
     capture: Res<UiGameplayCapture>,
@@ -2925,11 +3148,28 @@ fn pause_input_system(
     mut transition: ResMut<PlaySessionTransition>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
+    let ignored_overlay = assignments.native_overlay_gamepad();
+    let assigned_bevy = |entity: Entity| {
+        Some(entity) != ignored_overlay && assignments.player_for_gamepad(entity).is_some()
+    };
+    let native_active = assignments.native_player().is_some();
+    let raw_event_pause_pressed = button_events
+        .read()
+        .filter(|event| {
+            assigned_bevy(event.entity)
+                && event.state == ButtonState::Pressed
+                && event.button == GamepadButton::Start
+        })
+        .count()
+        != 0;
     // Select + Start belongs to the level-editor workspace. Do not also open
     // the pause menu on the frame that chord changes tool mode.
-    let editor_chord = gamepads.iter().any(|gamepad| {
-        gamepad.pressed(GamepadButton::Select) && gamepad.just_pressed(GamepadButton::Start)
-    }) || (native.pressed(NativeButton::Select)
+    let editor_chord = gamepads.iter().any(|(entity, gamepad)| {
+        assigned_bevy(entity)
+            && gamepad.pressed(GamepadButton::Select)
+            && gamepad.just_pressed(GamepadButton::Start)
+    }) || (native_active
+        && native.pressed(NativeButton::Select)
         && native.just_pressed(NativeButton::Start));
     if editor_chord {
         return;
@@ -2937,17 +3177,20 @@ fn pause_input_system(
     let raw_pause_pressed = keyboard.just_pressed(KeyCode::Escape)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.just_pressed(GamepadButton::Start))
-        || native.just_pressed(NativeButton::Start)
-        || button_events.read().any(|event| {
-            event.state == ButtonState::Pressed && event.button == GamepadButton::Start
-        });
+            .any(|(entity, gamepad)| {
+                assigned_bevy(entity) && gamepad.just_pressed(GamepadButton::Start)
+            })
+        || (native_active && native.just_pressed(NativeButton::Start))
+        || raw_event_pause_pressed;
     let pause_held = keyboard.pressed(KeyCode::Escape)
         || gamepads
             .iter()
-            .any(|gamepad| gamepad.pressed(GamepadButton::Start))
-        || native.pressed(NativeButton::Start);
+            .any(|(entity, gamepad)| {
+                assigned_bevy(entity) && gamepad.pressed(GamepadButton::Start)
+            })
+        || (native_active && native.pressed(NativeButton::Start));
     let player_pause_pressed = input_q.iter().any(|input| input.pause);
+    let back_resume_requested = std::mem::take(&mut menu.back_resume_requested);
 
     if matches!(state.get(), AppState::Paused) {
         menu.resume_lockout = (menu.resume_lockout - time.delta_secs()).max(0.0);
@@ -2972,6 +3215,15 @@ fn pause_input_system(
             menu.resume_lockout = 0.20;
             menu.resume_armed = false;
             next_state.set(AppState::Paused);
+        }
+        AppState::Paused
+            if menu.resume_armed
+                && (raw_pause_pressed || player_pause_pressed || back_resume_requested) =>
+        {
+            transition.pausing = false;
+            transition.resuming_from_pause = true;
+            menu.resume_armed = false;
+            next_state.set(AppState::Playing);
         }
         AppState::Paused => {}
         _ => {}
@@ -4645,10 +4897,7 @@ fn editor_fast_travel_buttons(
     });
 }
 
-fn chapter_select_controller_scroll(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
-    native: Res<NativeControllerState>,
+fn chapter_select_mouse_scroll(
     mut wheel: MessageReader<MouseWheel>,
     mut scroll_q: Query<(&mut ScrollPosition, &ComputedNode), With<ChapterSelectScrollPanel>>,
 ) {
@@ -4659,29 +4908,6 @@ fn chapter_select_controller_scroll(
             MouseScrollUnit::Pixel => 1.0,
         };
         delta_y -= event.y * scale;
-    }
-
-    let down = keyboard.pressed(KeyCode::ArrowDown)
-        || keyboard.pressed(KeyCode::KeyS)
-        || gamepads.iter().any(|gamepad| {
-            gamepad.pressed(GamepadButton::DPadDown)
-                || gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0) < -0.6
-        })
-        || native.pressed(NativeButton::DPadDown)
-        || native.move_axis.y < -0.6;
-    let up = keyboard.pressed(KeyCode::ArrowUp)
-        || keyboard.pressed(KeyCode::KeyW)
-        || gamepads.iter().any(|gamepad| {
-            gamepad.pressed(GamepadButton::DPadUp)
-                || gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0) > 0.6
-        })
-        || native.pressed(NativeButton::DPadUp)
-        || native.move_axis.y > 0.6;
-
-    if down {
-        delta_y += 22.0;
-    } else if up {
-        delta_y -= 22.0;
     }
 
     if delta_y == 0.0 {
@@ -5120,11 +5346,15 @@ fn setup_player_select(
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                justify_content: JustifyContent::FlexStart,
                 row_gap: Val::Px(28.0),
+                padding: UiRect::all(Val::Px(24.0)),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.01, 0.01, 0.05, 1.0)),
+            ScrollPosition::default(),
+            MenuScrollPanel,
             PlayerSelectRoot,
         ))
         .with_children(|root| {
@@ -5573,45 +5803,108 @@ fn player_select_update(
     }
 }
 
+/// Wait briefly before assigning a Bevy-only lobby Start while native-only P1
+/// is active. Either backend may publish the same physical press first.
+const NATIVE_JOIN_CORRELATION_FRAMES: u8 = 3;
+
+fn assign_player_select_gamepad(
+    gamepad: Entity,
+    assignments: &mut GamepadAssignments,
+    select: &mut PlayerSelectState,
+) {
+    let joined = std::array::from_fn(|index| select.slots[index].joined);
+    if let Some(player_index) = assignments.assign_next(gamepad, &joined) {
+        let slot = &mut select.slots[player_index as usize];
+        if !slot.joined {
+            slot.joined = true;
+            slot.character_index = player_index as usize % HERO_ROSTER.len();
+            slot.ready = false;
+        }
+    }
+}
+
 fn player_select_controller_join(
+    state: Res<State<AppState>>,
     gamepads: Query<(Entity, &Gamepad)>,
-    native: Res<NativeControllerState>,
+    mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     mut assignments: ResMut<GamepadAssignments>,
     mut select: ResMut<PlayerSelectState>,
+    mut pending_native_joins: Local<Vec<(Entity, u8)>>,
 ) {
+    let raw_start_presses = button_events
+        .read()
+        .filter(|event| {
+            event.state == ButtonState::Pressed
+                && event.button == GamepadButton::Start
+                && gamepads.get(event.entity).is_ok()
+        })
+        .map(|event| event.entity)
+        .collect::<Vec<_>>();
+    if *state.get() != AppState::PlayerSelect {
+        pending_native_joins.clear();
+        return;
+    }
+
     select.slots[0].joined = true;
+
+    if assignments.native_start_guard_active() {
+        pending_native_joins.clear();
+    } else {
+        let mut matured = Vec::new();
+        let mut index = 0;
+        while index < pending_native_joins.len() {
+            pending_native_joins[index].1 = pending_native_joins[index].1.saturating_sub(1);
+            if pending_native_joins[index].1 == 0 {
+                matured.push(pending_native_joins.remove(index).0);
+            } else {
+                index += 1;
+            }
+        }
+        for gamepad in matured {
+            if gamepads.get(gamepad).is_ok() && assignments.player_for_gamepad(gamepad).is_none() {
+                assign_player_select_gamepad(gamepad, &mut assignments, &mut select);
+            }
+        }
+    }
+
     let mut pressed: Vec<Entity> = gamepads
         .iter()
         .filter_map(|(entity, gamepad)| {
             gamepad.just_pressed(GamepadButton::Start).then_some(entity)
         })
         .collect();
+    pressed.extend(raw_start_presses);
     pressed.sort_by_key(|entity| entity.index());
+    pressed.dedup();
 
     for gamepad in pressed.iter().copied() {
-        let joined = std::array::from_fn(|index| select.slots[index].joined);
-        if let Some(player_index) = assignments.assign_next(gamepad, &joined) {
-            let slot = &mut select.slots[player_index as usize];
-            if !slot.joined {
-                slot.joined = true;
-                slot.character_index = player_index as usize % HERO_ROSTER.len();
-                slot.ready = false;
-            }
+        if assignments.player_for_gamepad(gamepad).is_some() {
+            continue;
         }
+
+        // With no cross-backend hardware ID, native + Bevy Start edges close
+        // together are ambiguous: they are usually one dual-exposed P1 pad.
+        // Delay a Bevy-first edge long enough for its native half to arrive;
+        // a genuinely separate controller joins automatically after the wait.
+        let native_only_primary =
+            assignments.native_player() == Some(0) && assignments.gamepad_for_player(0).is_none();
+        if native_only_primary && !assignments.native_start_guard_active() {
+            if !pending_native_joins
+                .iter()
+                .any(|(candidate, _)| *candidate == gamepad)
+            {
+                pending_native_joins.push((gamepad, NATIVE_JOIN_CORRELATION_FRAMES));
+            }
+            continue;
+        }
+        if assignments.native_start_guard_active() {
+            continue;
+        }
+        assign_player_select_gamepad(gamepad, &mut assignments, &mut select);
     }
 
-    // The macOS native fallback can rescue controllers whose Bevy mapping does
-    // not report Start. Do not claim it separately when Bevy handled a Start in
-    // the same frame (both readings may describe the same physical device).
-    if pressed.is_empty() && native.just_pressed(NativeButton::Start) {
-        let joined = std::array::from_fn(|index| select.slots[index].joined);
-        if let Some(player_index) = assignments.assign_native_next(&joined) {
-            let slot = &mut select.slots[player_index as usize];
-            slot.joined = true;
-            slot.character_index = player_index as usize % HERO_ROSTER.len();
-            slot.ready = false;
-        }
-    }
+    // Native GameController is P1-only and is synchronized in PreUpdate after
+    // the short dual-backend discovery window. It never consumes a lobby slot.
 }
 
 // ── HUD Setup ─────────────────────────────────────────────────────────────────
@@ -9478,6 +9771,514 @@ mod menu_navigation_tests {
     }
 
     #[test]
+    fn production_buttons_expose_ui_geometry_to_menu_navigation() {
+        let mut world = World::new();
+        let button = world.spawn((Button, MenuFocusable)).id();
+
+        assert!(world.entity(button).contains::<UiGlobalTransform>());
+        assert!(
+            !world.entity(button).contains::<GlobalTransform>(),
+            "Bevy UI buttons do not carry the 3D transform used by world entities"
+        );
+
+        world.entity_mut(button).insert((
+            UiGlobalTransform::from_xy(120.0, 80.0),
+            ComputedNode {
+                size: Vec2::new(60.0, 20.0),
+                ..default()
+            },
+        ));
+        let mut geometry = world.query::<(&UiGlobalTransform, &ComputedNode)>();
+        let (transform, computed) = geometry.get(&world, button).unwrap();
+
+        assert_eq!(
+            ui_node_rect(transform, computed),
+            UiFocusRect {
+                min: Vec2::new(90.0, 70.0),
+                max: Vec2::new(150.0, 90.0),
+            }
+        );
+    }
+
+    #[test]
+    fn controller_confirm_drives_a_real_start_button_in_one_frame() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .add_message::<CursorMoved>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<GameSettings>()
+            .init_resource::<AuthoringTextInputCapture>()
+            .init_resource::<MenuFocus>()
+            .init_resource::<MainMenuUiState>()
+            .configure_sets(
+                PreUpdate,
+                (MenuUiSet::ReleaseActivation, MenuUiSet::FocusDispatch).chain(),
+            )
+            .configure_sets(Update, MenuUiSet::ActionConsumers)
+            .add_systems(
+                PreUpdate,
+                release_menu_controller_activation.in_set(MenuUiSet::ReleaseActivation),
+            )
+            .add_systems(
+                PreUpdate,
+                (register_menu_buttons, menu_focus_navigation)
+                    .chain()
+                    .in_set(MenuUiSet::FocusDispatch),
+            )
+            .add_systems(Update, menu_start_button.in_set(MenuUiSet::ActionConsumers));
+
+        let button = app
+            .world_mut()
+            .spawn((
+                Button,
+                StartButton,
+                ComputedNode {
+                    size: Vec2::new(260.0, 58.0),
+                    ..default()
+                },
+                UiGlobalTransform::from_xy(0.0, 0.0),
+                InheritedVisibility::VISIBLE,
+            ))
+            .id();
+        let gamepad = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                gamepad,
+                GamepadButton::South,
+                ButtonState::Pressed,
+            ));
+
+        app.update();
+
+        assert_eq!(app.world().resource::<MenuFocus>().entity, Some(button));
+        assert_eq!(
+            app.world().get::<Interaction>(button),
+            Some(&Interaction::Pressed)
+        );
+        assert!(matches!(
+            app.world().resource::<NextState<AppState>>(),
+            NextState::Pending(AppState::PlayerSelect)
+        ));
+
+        app.update();
+        assert_eq!(
+            app.world().get::<Interaction>(button),
+            Some(&Interaction::None),
+            "controller activation must release before the next pointer pass"
+        );
+    }
+
+    #[test]
+    fn gameplay_direction_event_is_not_replayed_when_pause_opens() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::Playing)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .add_message::<CursorMoved>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<GameSettings>()
+            .init_resource::<AuthoringTextInputCapture>()
+            .init_resource::<MenuFocus>()
+            .add_systems(PreUpdate, menu_focus_navigation);
+
+        let top = app
+            .world_mut()
+            .spawn((
+                Button,
+                MenuFocusable,
+                ComputedNode {
+                    size: Vec2::new(120.0, 40.0),
+                    ..default()
+                },
+                UiGlobalTransform::from_xy(0.0, -20.0),
+                InheritedVisibility::VISIBLE,
+            ))
+            .id();
+        app.world_mut().spawn((
+            Button,
+            MenuFocusable,
+            ComputedNode {
+                size: Vec2::new(120.0, 40.0),
+                ..default()
+            },
+            UiGlobalTransform::from_xy(0.0, 20.0),
+            InheritedVisibility::VISIBLE,
+        ));
+        let gamepad = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                gamepad,
+                GamepadButton::DPadDown,
+                ButtonState::Pressed,
+            ));
+
+        app.update();
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Paused);
+        app.update();
+        // StateTransition runs after PreUpdate in Bevy 0.19, so navigation
+        // sees the newly entered menu on the following frame.
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<MenuFocus>().entity,
+            Some(top),
+            "gameplay input must be drained instead of moving the first pause-menu focus"
+        );
+    }
+
+    #[test]
+    fn raw_start_event_opens_pause_without_a_gamepad_component() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::Playing)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<UiGameplayCapture>()
+            .init_resource::<PauseMenuState>()
+            .init_resource::<PlaySessionTransition>()
+            .add_systems(Update, pause_input_system);
+
+        let gamepad = app.world_mut().spawn_empty().id();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_next(gamepad, &[true, false, false, false]),
+            Some(1)
+        );
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                gamepad,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+
+        app.update();
+
+        assert!(matches!(
+            app.world().resource::<NextState<AppState>>(),
+            NextState::Pending(AppState::Paused)
+        ));
+        let transition = app.world().resource::<PlaySessionTransition>();
+        assert!(transition.pausing);
+        assert!(!transition.resuming_from_pause);
+        let menu = app.world().resource::<PauseMenuState>();
+        assert!(!menu.resume_armed);
+        assert_eq!(menu.resume_lockout, 0.20);
+    }
+
+    #[test]
+    fn raw_start_event_resumes_an_armed_pause_menu() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::Paused)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<UiGameplayCapture>()
+            .init_resource::<PauseMenuState>()
+            .init_resource::<PlaySessionTransition>()
+            .add_systems(Update, pause_input_system);
+        app.world_mut()
+            .resource_mut::<PauseMenuState>()
+            .resume_armed = true;
+        let gamepad = app.world_mut().spawn_empty().id();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_next(gamepad, &[true, false, false, false]),
+            Some(1)
+        );
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                gamepad,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+
+        app.update();
+
+        assert!(matches!(
+            app.world().resource::<NextState<AppState>>(),
+            NextState::Pending(AppState::Playing)
+        ));
+        let transition = app.world().resource::<PlaySessionTransition>();
+        assert!(!transition.pausing);
+        assert!(transition.resuming_from_pause);
+        assert!(!app.world().resource::<PauseMenuState>().resume_armed);
+    }
+
+    #[test]
+    fn adjacent_overlay_start_edges_do_not_resume_then_repause() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::Paused)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(NativeControllerState::connected_with_just_pressed(
+                NativeButton::Start,
+            ))
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<UiGameplayCapture>()
+            .init_resource::<PauseMenuState>()
+            .init_resource::<PlaySessionTransition>()
+            .add_systems(Update, pause_input_system);
+        let overlay = app.world_mut().spawn_empty().id();
+        {
+            let mut assignments = app.world_mut().resource_mut::<GamepadAssignments>();
+            assert_eq!(assignments.assign_primary(overlay), Some(0));
+            assert_eq!(assignments.assign_native_overlay(overlay), Some(0));
+        }
+        app.world_mut()
+            .resource_mut::<PauseMenuState>()
+            .resume_armed = true;
+
+        // Native reports Start first and resumes. The Bevy half of the same
+        // physical edge arrives after the state transition on the next frame.
+        app.update();
+        app.insert_resource(NativeControllerState::connected_without_edges());
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                overlay,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+        app.update();
+
+        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::Playing);
+        assert!(!matches!(
+            app.world().resource::<NextState<AppState>>(),
+            NextState::Pending(AppState::Paused)
+        ));
+    }
+
+    #[test]
+    fn escape_back_and_pause_toggle_share_one_resume_transition() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::Paused)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<GameSettings>()
+            .init_resource::<AuthoringTextInputCapture>()
+            .init_resource::<AuthoringUnsavedChanges>()
+            .init_resource::<CharacterDesignData>()
+            .init_resource::<ImportedForgeReturnTarget>()
+            .init_resource::<MainMenuUiState>()
+            .init_resource::<PauseMenuState>()
+            .init_resource::<UiGameplayCapture>()
+            .init_resource::<PlaySessionTransition>()
+            .add_systems(PreUpdate, menu_back_navigation)
+            .add_systems(Update, pause_input_system);
+        app.world_mut()
+            .resource_mut::<PauseMenuState>()
+            .resume_armed = true;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+
+        app.update();
+
+        assert!(matches!(
+            app.world().resource::<NextState<AppState>>(),
+            NextState::Pending(AppState::Playing)
+        ));
+        let transition = app.world().resource::<PlaySessionTransition>();
+        assert!(!transition.pausing);
+        assert!(transition.resuming_from_pause);
+    }
+
+    #[test]
+    fn lobby_join_reader_discards_start_pressed_before_player_select() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<PlayerSelectState>()
+            .add_systems(Update, player_select_controller_join);
+        let gamepad = app.world_mut().spawn(Gamepad::default()).id();
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                gamepad,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+
+        app.update();
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::PlayerSelect);
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.player_for_gamepad(gamepad), None);
+        assert!(!app.world().resource::<PlayerSelectState>().slots[1].joined);
+    }
+
+    #[test]
+    fn disconnected_start_event_cannot_rebind_a_missing_gamepad() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::PlayerSelect)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .init_resource::<NativeControllerState>()
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<PlayerSelectState>()
+            .add_systems(Update, player_select_controller_join);
+        let disconnected = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                disconnected,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<GamepadAssignments>()
+                .player_for_gamepad(disconnected),
+            None
+        );
+    }
+
+    #[test]
+    fn adjacent_native_and_bevy_start_does_not_join_the_same_pad_as_p2() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::PlayerSelect)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .insert_resource(NativeControllerState::connected_with_just_pressed(
+                NativeButton::Start,
+            ))
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<PlayerSelectState>()
+            .add_systems(
+                PreUpdate,
+                crate::plugins::input_plugin::sync_native_controller_assignment,
+            )
+            .add_systems(Update, player_select_controller_join);
+        let bevy_half = app.world_mut().spawn(Gamepad::default()).id();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_native_primary(),
+            Some(0)
+        );
+
+        // The native backend reports Start first. The Bevy event for that
+        // physical press follows one frame later.
+        app.update();
+        app.insert_resource(NativeControllerState::connected_without_edges());
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                bevy_half,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(0), None);
+        assert_eq!(assignments.player_for_gamepad(bevy_half), None);
+        assert!(!app.world().resource::<PlayerSelectState>().slots[1].joined);
+    }
+
+    #[test]
+    fn bevy_start_waits_for_an_adjacent_native_edge_before_joining_p2() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::PlayerSelect)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .insert_resource(NativeControllerState::connected_without_edges())
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<PlayerSelectState>()
+            .add_systems(
+                PreUpdate,
+                crate::plugins::input_plugin::sync_native_controller_assignment,
+            )
+            .add_systems(Update, player_select_controller_join);
+        let bevy_half = app.world_mut().spawn(Gamepad::default()).id();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_native_primary(),
+            Some(0)
+        );
+
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                bevy_half,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+        app.update();
+        app.insert_resource(NativeControllerState::connected_with_just_pressed(
+            NativeButton::Start,
+        ));
+        app.update();
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.player_for_gamepad(bevy_half), None);
+        assert!(!app.world().resource::<PlayerSelectState>().slots[1].joined);
+    }
+
+    #[test]
+    fn distinct_bevy_controller_joins_after_native_correlation_wait() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(AppState::PlayerSelect)
+            .add_message::<GamepadButtonStateChangedEvent>()
+            .insert_resource(NativeControllerState::connected_without_edges())
+            .init_resource::<GamepadAssignments>()
+            .init_resource::<PlayerSelectState>()
+            .add_systems(
+                PreUpdate,
+                crate::plugins::input_plugin::sync_native_controller_assignment,
+            )
+            .add_systems(Update, player_select_controller_join);
+        let second_controller = app.world_mut().spawn(Gamepad::default()).id();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<GamepadAssignments>()
+                .assign_native_primary(),
+            Some(0)
+        );
+
+        app.world_mut()
+            .write_message(GamepadButtonStateChangedEvent::new(
+                second_controller,
+                GamepadButton::Start,
+                ButtonState::Pressed,
+            ));
+        app.update();
+        for _ in 0..NATIVE_JOIN_CORRELATION_FRAMES {
+            app.update();
+        }
+
+        let assignments = app.world().resource::<GamepadAssignments>();
+        assert_eq!(assignments.gamepad_for_player(1), Some(second_controller));
+        assert!(app.world().resource::<PlayerSelectState>().slots[1].joined);
+    }
+
+    #[test]
     fn project_hub_root_is_a_top_aligned_scroll_surface() {
         let node = project_hub_root_node();
         assert_eq!(node.width, Val::Percent(100.0));
@@ -9565,10 +10366,10 @@ mod menu_navigation_tests {
         let bottom_left = world.spawn_empty().id();
         let bottom_right = world.spawn_empty().id();
         let buttons = vec![
-            (top_left, Vec2::new(-10.0, 10.0)),
-            (top_right, Vec2::new(10.0, 10.0)),
-            (bottom_left, Vec2::new(-10.0, -10.0)),
-            (bottom_right, Vec2::new(10.0, -10.0)),
+            (top_left, Vec2::new(-10.0, -10.0)),
+            (top_right, Vec2::new(10.0, -10.0)),
+            (bottom_left, Vec2::new(-10.0, 10.0)),
+            (bottom_right, Vec2::new(10.0, 10.0)),
         ];
         (world, buttons)
     }
@@ -9577,6 +10378,117 @@ mod menu_navigation_tests {
     fn default_focus_starts_at_top_left() {
         let (_world, buttons) = four_button_grid();
         assert_eq!(default_menu_focus(&buttons), Some(buttons[0].0));
+    }
+
+    #[test]
+    fn pointer_focus_changes_only_after_real_pointer_activity() {
+        assert!(pointer_interaction_claims_focus(
+            Interaction::Hovered,
+            true,
+            false
+        ));
+        assert!(pointer_interaction_claims_focus(
+            Interaction::Pressed,
+            false,
+            true
+        ));
+        assert!(!pointer_interaction_claims_focus(
+            Interaction::Hovered,
+            false,
+            false
+        ));
+        assert!(!pointer_interaction_claims_focus(
+            Interaction::Pressed,
+            false,
+            false
+        ));
+        assert!(!pointer_interaction_claims_focus(
+            Interaction::None,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn focus_styling_preserves_runtime_selection_colors() {
+        let mut app = App::new();
+        app.init_resource::<MenuFocus>()
+            .init_resource::<GameSettings>()
+            .add_systems(Update, menu_focus_style);
+        let base_background = BackgroundColor(Color::srgb(0.08, 0.09, 0.10));
+        let selected_background = BackgroundColor(Color::srgb(0.32, 0.18, 0.08));
+        let base_border = BorderColor::all(Color::srgb(0.20, 0.22, 0.24));
+        let button = app
+            .world_mut()
+            .spawn((
+                Button,
+                MenuFocusable,
+                MenuButtonPalette {
+                    background: base_background,
+                    border: base_border,
+                    applied_background: None,
+                    applied_border: None,
+                },
+                base_background,
+                base_border,
+            ))
+            .id();
+        app.world_mut().resource_mut::<MenuFocus>().entity = Some(button);
+        app.update();
+
+        // A screen-specific action changes only its semantic background while
+        // the shared focus highlight is active.
+        *app.world_mut()
+            .entity_mut(button)
+            .get_mut::<BackgroundColor>()
+            .unwrap() = selected_background;
+        app.world_mut().resource_mut::<MenuFocus>().entity = None;
+        app.update();
+
+        assert_eq!(
+            app.world().get::<BackgroundColor>(button),
+            Some(&selected_background)
+        );
+        assert_eq!(app.world().get::<BorderColor>(button), Some(&base_border));
+    }
+
+    #[test]
+    fn gamepad_button_event_fallback_requires_a_matching_press() {
+        let mut world = World::new();
+        let gamepad = world.spawn_empty().id();
+        let events = [
+            GamepadButtonStateChangedEvent::new(
+                gamepad,
+                GamepadButton::DPadDown,
+                ButtonState::Released,
+            ),
+            GamepadButtonStateChangedEvent::new(
+                gamepad,
+                GamepadButton::South,
+                ButtonState::Pressed,
+            ),
+        ];
+
+        assert!(gamepad_button_pressed_in_events(
+            &events,
+            GamepadButton::South,
+            None,
+        ));
+        assert!(!gamepad_button_pressed_in_events(
+            &events,
+            GamepadButton::DPadDown,
+            None,
+        ));
+        assert!(!gamepad_button_pressed_in_events(
+            &events,
+            GamepadButton::Start,
+            None,
+        ));
+        assert!(!gamepad_button_pressed_in_events(
+            &events,
+            GamepadButton::South,
+            Some(gamepad),
+        ));
     }
 
     #[test]
@@ -9691,8 +10603,8 @@ mod menu_navigation_tests {
     #[test]
     fn focused_item_scrolls_only_when_outside_viewport() {
         assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, 20.0, 40.0), 0.0);
-        assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, -5.0, 5.0), 15.0);
-        assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, 95.0, 105.0), -15.0);
+        assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, -5.0, 5.0), -15.0);
+        assert_eq!(focus_reveal_scroll_delta(10.0, 90.0, 95.0, 105.0), 15.0);
     }
 
     #[test]

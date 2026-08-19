@@ -21,8 +21,16 @@
 
 ## Delivered foundations
 
-- Start-to-join assigns controllers to stable `PlayerIndex` slots; reconnects
-  reclaim a free joined slot without using gamepad enumeration order.
+- The first controller connected at boot or hot-plugged automatically claims
+  P1; additional controllers use Start-to-join for stable P2–P4 slots.
+  Disconnect/reconnect changes only the device binding, and Bevy connection
+  events (or native macOS connected state) rather than gamepad query order
+  decide the automatic P1 claim. A short macOS discovery window associates the
+  native fallback with a lone Bevy P1 binding; that inferred overlay is
+  suppressed once a Bevy controller owns P2-P4. Stable native controller-object
+  identity detects aggregate device switching while a secondary slot is owned.
+  The two APIs expose no shared hardware ID, so macOS multi-pad fallback still
+  requires physical acceptance.
 - `PlayerProgression` owns each player's perks, upgrades, weapon ranks, and
   shop ownership. Stats, inventory, loot, quick item, loadout, traversal,
   character recipes, HUD, and feedback are also per-player. Chapters, world
@@ -195,7 +203,12 @@
   device-aware prompt rendering. Shared help copy follows the last-used
   keyboard or gamepad across menus and common in-game panels, with persisted
   Auto/Xbox/PlayStation/Nintendo controller glyph selection and vendor-aware
-  Auto detection. Settings now persist four complete face-button layouts,
+  Auto detection. Shared menu focus now accepts processed gamepad-button events,
+  lets pointer movement or a click reclaim focus while a stationary cursor
+  yields to controller navigation, and dispatches controller activation before
+  screen action handlers; this keeps both Title and Pause controller-navigable
+  when the cursor rests on a button. Settings now persist four complete
+  face-button layouts,
   thirteen discrete Player 1 keyboard bindings, and combined mouse/stick
   invert-look Y. Both controller backends remap face buttons at the source so
   chords follow the selected layout; LB, Select, D-pad modifiers, and movement

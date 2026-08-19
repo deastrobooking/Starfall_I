@@ -66,7 +66,7 @@ In progress:
 - Per-player perks are functional and saved, with clickable chapter-select rows and shared controller focus navigation; four-pad hardware/TV acceptance remains.
 - `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
 - Character design is the single playable-character editor, with GLB-inspired base models, modular silhouette presets, armor layers, and saved per-slot loadouts.
-- Menu actions are rendered as clearly named Bevy buttons across the main flow; action-critical controls avoid icon-only font glyphs. The shared focus layer supplies deterministic initial focus, spatial arrows/WASD/D-pad/left-stick navigation with held repeat, mouse-hover synchronization, focused/pressed/disabled styling, Enter/Space/controller-South activation, and Escape/controller-East Back routing. Character Studio retains its specialized field navigator.
+- Menu actions are rendered as clearly named Bevy buttons across the main flow; action-critical controls avoid icon-only font glyphs. The shared focus layer supplies deterministic initial focus, spatial arrows/WASD/D-pad/left-stick navigation with held repeat, mouse-hover synchronization on real pointer movement or clicks, focused/pressed/disabled styling, Enter/Space/controller-South activation, and Escape/controller-East Back routing. Character Studio retains its specialized field navigator.
 - Heavy Water continuation boundaries remain explicit: current vehicle bodies follow the authoritative player/mode and are not independently colliding, world-mountable, damageable, or destructible vehicles. Physical legacy-region/world-prop mounting, the build/companion/full-Dex/live-map panels, and authoritative online play remain unported; online remains a separate secure-server program.
 
 ## Cast
@@ -219,6 +219,10 @@ Pause menu shortcuts:
 | `F5` | Save |
 
 Controller:
+
+The first controller connected before launch or hot-plugged while the game is
+running automatically binds to Player 1. Additional controllers press Start in
+Player Select to join as Players 2–4; keyboard and mouse remain available to P1.
 
 | Input | Action |
 |---|---|

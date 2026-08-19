@@ -191,11 +191,12 @@ a `cancel_after` window for chaining. Star Sabre slashes use the same machine.
 ## Local multiplayer and ownership
 
 `PlayerIndex` is the stable runtime and save identity; a gamepad is a
-*replaceable device* bound to that identity, never the identity itself. Pressing
-Start on an unassigned controller claims the next open slot; disconnecting
-releases the device but preserves the player. Every per-player system must key
-off `PlayerIndex`, and per-player state belongs in components on the player
-entity — a global resource silently breaks 2–4 player co-op.
+*replaceable device* bound to that identity, never the identity itself. The
+first connected or hot-plugged controller automatically binds P1. Pressing
+Start on an additional unassigned controller claims the next open P2–P4 slot;
+disconnecting releases the device but preserves the player. Every per-player
+system must key off `PlayerIndex`, and per-player state belongs in components on
+the player entity — a global resource silently breaks 2–4 player co-op.
 
 ## UI architecture
 
