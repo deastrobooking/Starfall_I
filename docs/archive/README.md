@@ -2,8 +2,9 @@
 
 Point-in-time documents kept for provenance: how decisions were reached, what a
 review found, what a milestone delivered. **None of it is current instruction.**
-When one of these disagrees with [FEATURES.md](../FEATURES.md) or
-[DEVELOPMENT.md](../DEVELOPMENT.md), the active document wins.
+When one of these disagrees with [MASTER_FEATURES.md](../MASTER_FEATURES.md),
+[PROJECT_PLAN.md](../PROJECT_PLAN.md), or [DEVELOPMENT.md](../DEVELOPMENT.md),
+the active document wins.
 
 | Document | What it recorded |
 |---|---|

@@ -1145,13 +1145,11 @@ fn gamepad_button_pressed_in_events(
     button: GamepadButton,
     ignored_gamepad: Option<Entity>,
 ) -> bool {
-    events
-        .iter()
-        .any(|event| {
-            Some(event.entity) != ignored_gamepad
-                && event.state == ButtonState::Pressed
-                && event.button == button
-        })
+    events.iter().any(|event| {
+        Some(event.entity) != ignored_gamepad
+            && event.state == ButtonState::Pressed
+            && event.button == button
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1242,9 +1240,9 @@ fn menu_direction_input(
         }) || gamepad_button_pressed_in_events(button_events, button, ignored_gamepad)
     };
     let gamepad_pressed = |button| {
-        gamepads.iter().any(|(entity, gamepad)| {
-            Some(entity) != ignored_gamepad && gamepad.pressed(button)
-        })
+        gamepads
+            .iter()
+            .any(|(entity, gamepad)| Some(entity) != ignored_gamepad && gamepad.pressed(button))
     };
     let stick = gamepads
         .iter()
@@ -1380,11 +1378,9 @@ fn menu_back_navigation(
     }
     let back = !text_input.active
         && (keyboard.just_pressed(KeyCode::Escape)
-            || gamepads
-                .iter()
-                .any(|(entity, gamepad)| {
-                    Some(entity) != ignored_overlay && gamepad.just_pressed(back_gamepad)
-                })
+            || gamepads.iter().any(|(entity, gamepad)| {
+                Some(entity) != ignored_overlay && gamepad.just_pressed(back_gamepad)
+            })
             || gamepad_button_pressed_in_events(
                 &pressed_button_events,
                 back_gamepad,
@@ -3183,19 +3179,15 @@ fn pause_input_system(
         return;
     }
     let raw_pause_pressed = keyboard.just_pressed(KeyCode::Escape)
-        || gamepads
-            .iter()
-            .any(|(entity, gamepad)| {
-                assigned_bevy(entity) && gamepad.just_pressed(GamepadButton::Start)
-            })
+        || gamepads.iter().any(|(entity, gamepad)| {
+            assigned_bevy(entity) && gamepad.just_pressed(GamepadButton::Start)
+        })
         || (native_active && native.just_pressed(NativeButton::Start))
         || raw_event_pause_pressed;
     let pause_held = keyboard.pressed(KeyCode::Escape)
-        || gamepads
-            .iter()
-            .any(|(entity, gamepad)| {
-                assigned_bevy(entity) && gamepad.pressed(GamepadButton::Start)
-            })
+        || gamepads.iter().any(|(entity, gamepad)| {
+            assigned_bevy(entity) && gamepad.pressed(GamepadButton::Start)
+        })
         || (native_active && native.pressed(NativeButton::Start));
     let player_pause_pressed = input_q.iter().any(|input| input.pause);
     let back_resume_requested = std::mem::take(&mut menu.back_resume_requested);
@@ -10065,7 +10057,10 @@ mod menu_navigation_tests {
             ));
         app.update();
 
-        assert_eq!(*app.world().resource::<State<AppState>>().get(), AppState::Playing);
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Playing
+        );
         assert!(!matches!(
             app.world().resource::<NextState<AppState>>(),
             NextState::Pending(AppState::Paused)

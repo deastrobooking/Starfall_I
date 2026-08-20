@@ -130,7 +130,7 @@ Chapter select is now the 200 x 200 mile Everest Range fast-travel map. It uses 
 
 Character design supports GLB-inspired base model buttons, visible prefab export/import, outfit/accent/hair swatches, accessory toggles, and body-shape controls for height, shoulders, chest, arms, legs, hands, feet, head, and mass. The advanced Character Studio is an RPG-maker-style modeling workspace with an expressive 1980s-anime face treatment, nine hairstyles, twelve tops/jackets, eight bottoms, nine shoe/boot styles, coverage-safe clothing layers, and distinct cloth/denim/leather/metal materials. Named seeds include Star Hero, Shadow Raider, Mana Adventurer, Street Runner, and Mecha Robot. Twenty-six body/face morphs include chest shape, face length, eye shape/spacing/tilt/depth, brow angle, nose bridge/tip, chin width, and lip fullness. Parametric almond-eye surfaces, fitted eyelids, cheek planes, restrained lips, and tagged eyes/brows/mouth support a cleaner cartoon-anime read plus runtime blinking and pose-driven expressions. Soft, Heroic, Chibi, and Rival face seeds provide quick starting points without replacing the current body or outfit. Non-destructive Neutral, Joy, Determined, and Surprised previews test the authored face without entering gameplay or altering saved values. Six fantasy-flair choices add star/moon gems, a royal mantle, arcane halo, or mecha wings, while Crystal and Dragon mecha suites extend the original armor silhouette. It also provides clearly labeled workflow sections, draggable morph sliders, precise steppers, reset/undo, named color swatches, model measurements, front/profile/back views, and full-body/face framing. `SAVE VERSION` writes a reusable library preset; `USE IN GAME` assigns the exact advanced recipe to the selected local-player slot and returns to player select with a `STUDIO CUSTOM` label. Studio recipes persist in campaign saves and spawn through the runtime procedural mesh builder. The custom mesh animation bridge drives region-aware idle, walk, run, sprint, jump, fall, shooting, Sabre, hover, glide, flight, and air-dash motion from the same authoritative player pose state as stock heroes.
 
-The studio also includes a guarded external-rig diagnostic backend. It maps the skinned AMP GLB onto Starfall's canonical 17-joint humanoid contract and automatically falls back to the generated model if loading fails. Production Blender assets must add the documented 26 named shape keys before external rigs become the editable default; see `docs/FEATURES.md`.
+The studio also includes a guarded external-rig diagnostic backend. It maps the skinned AMP GLB onto Starfall's canonical 17-joint humanoid contract and automatically falls back to the generated model if loading fails. Production Blender assets must add the documented 26 named shape keys before external rigs become the editable default; see the [Character Studio pipeline](docs/guides/character-studio-pipeline.md).
 
 The Game Maker toolchain includes a playable GM2 Creature Forge reached from
 Project Hub. Serializable `CreatureSpec` assets wrap the existing robot geometry
@@ -290,20 +290,21 @@ faster forward boost. Fuel uses the existing per-player jet gauge.
 
 ## Documentation
 
-- **[Current State](docs/archive/current_state.md)** — canonical verified baseline and next production order for agents
+- **[Master Features](docs/MASTER_FEATURES.md)** — canonical current feature baseline and maturity boundaries
+- **[Project Plan](docs/PROJECT_PLAN.md)** — active production order and next workstreams
 - **[Heavy Water Port Ledger](docs/HEAVY_WATER_PORT.md)** — verified sequel-continuity parity and explicit remaining boundaries
 - **[Documentation Map](docs/README.md)** — what every doc is for, living vs. snapshot
 - **[Developer Guides](docs/guides/README.md)** — process how-tos: [verification gates](docs/guides/verification.md), [fixed-tick motor](docs/guides/fixed-tick-motor.md), [combat feel](docs/guides/combat-feel.md), [character-studio pipeline](docs/guides/character-studio-pipeline.md)
 - [Engine Core Roadmap](docs/engine_roadmap.md) — `EC#` fixed-tick/combat/profiling substrate track
 - [Architecture Overview](docs/DEVELOPMENT.md)
-- [Gameplay Systems Reference](docs/FEATURES.md)
+- [Gameplay Systems Reference](docs/MASTER_FEATURES.md)
 - [Improvement Notes](docs/archive/improvements.md) — historical May snapshot, not the active backlog
 - [July 2026 Gameplay Review](docs/archive/game_review_2026-07.md)
 - [Motion Mechanics Roadmap](docs/archive/playerengine.md)
 - [Naming Guide](docs/naming.md)
-- [Agent Next Steps](docs/archive/agent_next_steps.md)
+- [Historical Agent Next Steps](docs/archive/agent_next_steps.md) — dated delivery evidence, not the active backlog
 - [Engine Upgrade Milestones](docs/archive/engine_upgrade_milestones.md) — campaign/engine milestones `M#`; also defines the `MM#` / `AI#` naming convention
-- [Game Maker Toolchain](docs/FEATURES.md) — shared recipe, generator, validator, and scene-composer architecture
+- [Game Maker Toolchain](docs/MASTER_FEATURES.md) — current creator-tool inventory and maturity boundaries
 - [Engine Tools Multistage Pass](docs/archive/engine_tools_multistage_pass.md) — Blender capability triage and ET1–ET11 implementation program
 - [Parallel Review Triage — July 2026](docs/archive/parallel_review_triage_2026-07.md) — evidence-based disposition of the external 156-item suggestion inventory
 

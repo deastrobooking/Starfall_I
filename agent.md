@@ -1,11 +1,11 @@
 # Starfall I Agent Guide
 
 This file is the concise handoff for future Codex/agent work on Starfall I.
-Read `docs/archive/current_state.md` first for the reconciled baseline and production
-order. For detailed next steps, use `docs/archive/agent_next_steps.md`. For the
-detailed engine upgrade and milestone process, use
-`docs/archive/engine_upgrade_milestones.md`. The active Forge architecture plan
-is `docs/editor_roadmap.md`.
+Read `docs/README.md` first for the documentation authority map. The current
+game-facing baseline is `docs/MASTER_FEATURES.md`, the active production order
+is `docs/PROJECT_PLAN.md`, and the Forge architecture plan is
+`docs/editor_roadmap.md`. Files under `docs/archive/` are dated evidence only;
+consult them for history, not current priorities.
 
 ## Project North Star
 
@@ -225,16 +225,15 @@ together.
   `Playing`, `Paused`, `GameOver`, and `Victory`.
   `CharacterDesign` and `RobotGarage` are both entered from `ChapterSelect`
   via [E] and [G] and return to `ChapterSelect`.
-- The documentation authority map is `docs/README.md`; the canonical current
-  handoff is `docs/archive/current_state.md`. `docs/archive/improvements.md` and dated reviews
-  are historical snapshots, not active backlogs. The current PX#/PM# player
-  experience and repeatable
-  creator-workflow plan is `docs/archive/player_creator_experience_plan.md`; PX1
-  authoritative per-player aiming and the PM1 Start Editor / Project Hub shell
-  plus the PM1 multi-project registry, PX3 shop transaction flow, PM2 lock and
-  preset records, and PM3 multi-level/playtest slices are delivered. Manual
-  four-pad acceptance and the remaining creator gaps are recorded in
-  `docs/archive/current_state.md`.
+- The documentation authority map is `docs/README.md`;
+  `docs/MASTER_FEATURES.md` owns the current feature baseline and
+  `docs/PROJECT_PLAN.md` owns production priorities. Archived PX#/PM# plans and
+  `docs/archive/current_state.md` remain useful delivery evidence, but they are
+  not active backlogs. PX1 authoritative per-player aiming and the PM1 Start
+  Editor / Project Hub shell plus the PM1 multi-project registry, PX3 shop
+  transaction flow, PM2 lock and preset records, and PM3 multi-level/playtest
+  slices are delivered. Manual four-pad acceptance remains an open verification
+  item in the active project plan's controller and validation workstreams.
   The evidence-based memory for the external 156-item
   review is `docs/parallel_review_triage_2026-07.md`; do not treat its raw idea
   inventory as verified defects or implicit product commitments. Its July 15

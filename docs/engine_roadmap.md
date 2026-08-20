@@ -1,6 +1,6 @@
 # Starfall Engine Core Roadmap (`EC#`)
 
-Current cross-roadmap order is in `docs/archive/current_state.md`; the July menu, road,
+Current cross-roadmap order is in `docs/PROJECT_PLAN.md`; the July menu, road,
 movement, and weapon audit remains in `docs/archive/game_review_2026-07.md`.
 
 > **Track prefix:** `EC#` — *Engine Core*. The substrate that makes the game feel

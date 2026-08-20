@@ -610,9 +610,8 @@ fn update_player_inputs(
         // ordering prevents a later, distinct Bevy pad from being merged into
         // an already established native P1 owner.
         let use_native = native.connected && assignments.native_player() == Some(idx.0);
-        let native_overlay = use_native
-            && gp_entity.is_some()
-            && assignments.native_overlay_gamepad() == gp_entity;
+        let native_overlay =
+            use_native && gp_entity.is_some() && assignments.native_overlay_gamepad() == gp_entity;
 
         pi.gamepad_active = gp.is_some() || use_native;
 
@@ -645,18 +644,17 @@ fn update_player_inputs(
         let key_for = |action: KeyAction| bindings.key(action);
 
         // Helper closures — all capture `gp`.
-        let btn_held = |b: GamepadButton| {
-            !native_overlay && gp.map(|g| g.pressed(remap(b))).unwrap_or(false)
-        };
+        let btn_held =
+            |b: GamepadButton| !native_overlay && gp.map(|g| g.pressed(remap(b))).unwrap_or(false);
         let event_just = |b: GamepadButton| {
             let physical = remap(b);
             !native_overlay
                 && gp_entity.is_some_and(|entity| {
-                pressed_button_events
-                    .iter()
-                    .any(|(event_entity, event_button)| {
-                        *event_entity == entity && *event_button == physical
-                    })
+                    pressed_button_events
+                        .iter()
+                        .any(|(event_entity, event_button)| {
+                            *event_entity == entity && *event_button == physical
+                        })
                 })
         };
         let btn_just = |b: GamepadButton| {
@@ -668,10 +666,8 @@ fn update_player_inputs(
             |b: NativeButton| -> bool { use_native && native.pressed(remap_native(b)) };
         let native_just =
             |b: NativeButton| -> bool { use_native && native.just_pressed(remap_native(b)) };
-        let left_trigger_axis =
-            !native_overlay && axis_pressed(axis_val(GamepadAxis::LeftZ));
-        let right_trigger_axis =
-            !native_overlay && axis_pressed(axis_val(GamepadAxis::RightZ));
+        let left_trigger_axis = !native_overlay && axis_pressed(axis_val(GamepadAxis::LeftZ));
+        let right_trigger_axis = !native_overlay && axis_pressed(axis_val(GamepadAxis::RightZ));
         let left_trigger_held = btn_held(GamepadButton::LeftTrigger2)
             || left_trigger_axis
             || native_held(NativeButton::LeftTrigger);

@@ -265,8 +265,8 @@ older spellings when changing them would cause save or API churn.
 - **Game:** `Starfall I` (short: `Starfall`); first chapter,
   `Invasion of the Scallarians`
 - **Wizard Scientists:** Giacoma, Giovanni, Gabrio
-- **Hero Brothers:** Vincenzo (oldest), and siblings — see the cast section of
-  [FEATURES.md](FEATURES.md)
+- **Hero Brothers:** Vincenzo (oldest), and siblings — see
+  [naming.md](naming.md)
 - **Antagonists:** the Scallarians
 
 The full cast, place-name, and terminology list is preserved in
