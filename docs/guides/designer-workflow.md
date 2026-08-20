@@ -39,6 +39,13 @@ primitive kinds survive project round trips; their meshes are regenerated from
 recipes rather than embedded in the project document. New level templates seed
 small examples appropriate to their setting.
 
+Immediate playtest uses the same runtime components as existing world courses:
+moving platforms carry riders, Pulse Springs launch each local player with an
+independent cooldown, rotating bridges turn in place, flip panels respond to a
+nearby jump, collapse bridges warn/drop/reset, and spike bridges route contact
+damage through the normal player-defense pipeline. Leaving the editor refreshes
+these adapters from the instance's latest transform before simulation resumes.
+
 For a readable route, introduce one prefab in a safe context, repeat it with a
 clear variation, combine it with one second mechanic, and only then build the
 culminating sequence. Always provide a visible recovery route for aerial or

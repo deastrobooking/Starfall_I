@@ -2272,30 +2272,36 @@ fn flip_platform_system(
 ) {
     let dt = time.delta_secs();
     for (mut transform, mut panel) in &mut panel_q {
-        panel.cooldown_timer = (panel.cooldown_timer - dt).max(0.0);
-        if panel.cooldown_timer <= 0.0
-            && player_q.iter().any(|(player_transform, input)| {
-                let offset = player_transform.translation - transform.translation;
-                input.jump
-                    && offset.with_y(0.0).length() <= panel.trigger_radius
-                    && offset.y.abs() <= 3.2
-            })
-        {
-            panel.flipped = !panel.flipped;
-            panel.cooldown_timer = panel.cooldown;
-        }
-
-        let target = if panel.flipped { 1.0 } else { 0.0 };
-        let step = dt / panel.turn_seconds.max(0.05);
-        panel.progress = if panel.progress < target {
-            (panel.progress + step).min(target)
-        } else {
-            (panel.progress - step).max(target)
-        };
-        let eased = panel.progress * panel.progress * (3.0 - 2.0 * panel.progress);
-        transform.rotation =
-            panel.base_rotation * Quat::from_rotation_x(std::f32::consts::PI * eased);
+        let triggered = player_q.iter().any(|(player_transform, input)| {
+            let offset = player_transform.translation - transform.translation;
+            input.jump
+                && offset.with_y(0.0).length() <= panel.trigger_radius
+                && offset.y.abs() <= 3.2
+        });
+        advance_flip_platform(&mut panel, &mut transform, triggered, dt);
     }
+}
+
+fn advance_flip_platform(
+    panel: &mut FlipPlatform,
+    transform: &mut Transform,
+    triggered: bool,
+    dt: f32,
+) {
+    panel.cooldown_timer = (panel.cooldown_timer - dt).max(0.0);
+    if triggered && panel.cooldown_timer <= 0.0 {
+        panel.flipped = !panel.flipped;
+        panel.cooldown_timer = panel.cooldown;
+    }
+    let target = if panel.flipped { 1.0 } else { 0.0 };
+    let step = dt / panel.turn_seconds.max(0.05);
+    panel.progress = if panel.progress < target {
+        (panel.progress + step).min(target)
+    } else {
+        (panel.progress - step).max(target)
+    };
+    let eased = panel.progress * panel.progress * (3.0 - 2.0 * panel.progress);
+    transform.rotation = panel.base_rotation * Quat::from_rotation_x(std::f32::consts::PI * eased);
 }
 
 fn player_supported_by_platform(
@@ -2402,8 +2408,6 @@ fn spike_platform_hazard_system(
         for timer in &mut hazard.cooldown_timers {
             *timer = (*timer - dt).max(0.0);
         }
-        let half = hazard.size * 0.5;
-        let spike_top = hazard_transform.translation.y + hazard.size.y * 0.72;
         for (index, player_transform, mut health, mut damageable, mut stats, mut parry, armor) in
             &mut player_q
         {
@@ -2411,13 +2415,11 @@ fn spike_platform_hazard_system(
             if slot >= hazard.cooldown_timers.len() || hazard.cooldown_timers[slot] > 0.0 {
                 continue;
             }
-            let relative = player_transform.translation - hazard_transform.translation;
-            let feet_y = player_transform.translation.y - 0.95;
-            let touching = relative.x.abs() <= half.x
-                && relative.z.abs() <= half.z
-                && feet_y >= spike_top - 0.42
-                && feet_y <= spike_top + 0.48;
-            if !touching {
+            if !spike_platform_contact(
+                player_transform.translation,
+                hazard_transform.translation,
+                hazard.size,
+            ) {
                 continue;
             }
             crate::plugins::player_plugin::damage_player(
@@ -2436,6 +2438,17 @@ fn spike_platform_hazard_system(
             hazard.cooldown_timers[slot] = hazard.cooldown;
         }
     }
+}
+
+fn spike_platform_contact(player_position: Vec3, hazard_position: Vec3, size: Vec3) -> bool {
+    let relative = player_position - hazard_position;
+    let half = size * 0.5;
+    let feet_y = player_position.y - 0.95;
+    let spike_top = hazard_position.y + size.y * 0.72;
+    relative.x.abs() <= half.x
+        && relative.z.abs() <= half.z
+        && feet_y >= spike_top - 0.42
+        && feet_y <= spike_top + 0.48
 }
 
 fn sling_shot_system(
@@ -23750,6 +23763,49 @@ mod tests {
             supported_player + Vec3::X * 8.0,
             &grounded,
             platform,
+            size
+        ));
+    }
+
+    #[test]
+    fn flip_platform_debounces_jump_input_and_reaches_opposite_face() {
+        let base_rotation = Quat::from_rotation_y(0.4);
+        let mut panel = FlipPlatform {
+            base_rotation,
+            flipped: false,
+            progress: 0.0,
+            turn_seconds: 0.25,
+            trigger_radius: 3.0,
+            cooldown: 0.3,
+            cooldown_timer: 0.0,
+        };
+        let mut transform = Transform::from_rotation(base_rotation);
+
+        advance_flip_platform(&mut panel, &mut transform, true, 0.05);
+        assert!(panel.flipped);
+        advance_flip_platform(&mut panel, &mut transform, true, 0.05);
+        assert!(panel.flipped, "held jump must not immediately toggle back");
+        advance_flip_platform(&mut panel, &mut transform, false, 0.3);
+        assert_eq!(panel.progress, 1.0);
+        let expected = base_rotation * Quat::from_rotation_x(std::f32::consts::PI);
+        assert!(transform.rotation.angle_between(expected) < 0.0001);
+    }
+
+    #[test]
+    fn spike_contact_uses_bridge_footprint_and_player_feet() {
+        let hazard = Vec3::new(2.0, 4.0, -3.0);
+        let size = Vec3::new(12.0, 1.1, 3.2);
+        let on_spikes = hazard + Vec3::new(0.0, size.y * 0.72 + 0.95, 0.0);
+
+        assert!(spike_platform_contact(on_spikes, hazard, size));
+        assert!(!spike_platform_contact(
+            on_spikes + Vec3::X * 7.0,
+            hazard,
+            size
+        ));
+        assert!(!spike_platform_contact(
+            on_spikes + Vec3::Y * 2.0,
+            hazard,
             size
         ));
     }

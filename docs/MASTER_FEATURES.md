@@ -193,8 +193,11 @@ Current maturity boundary:
 - all prefab collision is derived from the same geometry as its render mesh;
   moving platforms, Pulse Springs, and rotating bridges compile into the
   existing co-op-aware gameplay adapters
-- flip, collapse, and spike behavior intent is data, but their trigger/damage
-  state machines are not complete runtime adapters yet
+- flip panels debounce nearby jump input and animate to the opposite face;
+  collapse bridges warn, fall, and restore without transform drift; spike
+  bridges use per-player cooldowns and the canonical armor/parry/damage path
+- leaving the editor refreshes runtime origins, path axes, sizes, and rotations
+  from the latest authored transforms before immediate playtesting
 - authored scenes still need a consumer-side scene/prefab loader before these
   prefabs can ship from Designer projects into the Game edition without Rust
 

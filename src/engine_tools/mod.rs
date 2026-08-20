@@ -773,7 +773,10 @@ impl Plugin for EngineToolsPlugin {
                 )
                     .chain(),
             )
-            .add_systems(OnExit(EngineToolMode::Editing), exit_editor_workspace)
+            .add_systems(
+                OnExit(EngineToolMode::Editing),
+                (refresh_platformer_runtime_adapters, exit_editor_workspace).chain(),
+            )
             .add_systems(Update, resolve_procedural_material_bindings)
             .add_systems(
                 Update,
@@ -2889,6 +2892,78 @@ fn exit_editor_workspace(
     if let Ok(mut cursor) = cursors.single_mut() {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn refresh_platformer_runtime_adapters(
+    mut prefabs: Query<(
+        &EditorPrimitive,
+        &Transform,
+        Option<&mut MovingPlatform>,
+        Option<&mut RotatingElevator>,
+        Option<&mut SpringJumpPad>,
+        Option<&mut FlipPlatform>,
+        Option<&mut CollapsePlatform>,
+        Option<&mut SpikePlatformHazard>,
+    )>,
+) {
+    for (primitive, transform, moving, rotating, spring, flip, collapse, spikes) in &mut prefabs {
+        let Some(kind) = editor_platformer_kind(*primitive) else {
+            continue;
+        };
+        let design = platformer_prefabs::PlatformerPrefabDesign::stock(kind);
+        let size = design.size * transform.scale.abs();
+        match kind.behavior() {
+            platformer_prefabs::PlatformerBehavior::Oscillate { distance, seconds } => {
+                if let Some(mut moving) = moving {
+                    let half_travel = transform.rotation * Vec3::X * (distance * 0.5);
+                    moving.start = transform.translation - half_travel;
+                    moving.end = transform.translation + half_travel;
+                    moving.speed = std::f32::consts::TAU * distance / seconds.max(0.1);
+                    moving.size = size;
+                }
+            }
+            platformer_prefabs::PlatformerBehavior::Rotate { degrees_per_second } => {
+                if let Some(mut rotating) = rotating {
+                    rotating.center = transform.translation;
+                    rotating.angular_speed = degrees_per_second.to_radians();
+                    rotating.size = size;
+                }
+            }
+            platformer_prefabs::PlatformerBehavior::Bounce { launch_speed } => {
+                if let Some(mut spring) = spring {
+                    spring.launch_velocity = Vec3::Y * launch_speed;
+                    spring.radius = size.x.min(size.z) * 0.48;
+                    spring.cooldown_timers = [0.0; 4];
+                }
+            }
+            platformer_prefabs::PlatformerBehavior::FlipOnJump => {
+                if let Some(mut flip) = flip {
+                    flip.base_rotation = transform.rotation;
+                    flip.flipped = false;
+                    flip.progress = 0.0;
+                    flip.cooldown_timer = 0.0;
+                }
+            }
+            platformer_prefabs::PlatformerBehavior::Collapse { warning_seconds } => {
+                if let Some(mut collapse) = collapse {
+                    collapse.origin = transform.translation;
+                    collapse.size = size;
+                    collapse.warning_seconds = warning_seconds;
+                    collapse.timer = 0.0;
+                    collapse.state = CollapsePlatformState::Armed;
+                }
+            }
+            platformer_prefabs::PlatformerBehavior::Hazard => {
+                if let Some(mut spikes) = spikes {
+                    spikes.size = size;
+                    spikes.cooldown_timers = [0.0; 4];
+                }
+            }
+            platformer_prefabs::PlatformerBehavior::StaticTraversal
+            | platformer_prefabs::PlatformerBehavior::Climbable => {}
+        }
     }
 }
 
@@ -9586,6 +9661,25 @@ mod tests {
             world.get::<crate::engine::physics::prelude::RigidBody>(moving),
             Some(&crate::engine::physics::prelude::RigidBody::KinematicPositionBased)
         );
+
+        let edited = Transform::from_xyz(40.0, 9.0, -12.0)
+            .with_rotation(Quat::from_rotation_y(0.5))
+            .with_scale(Vec3::new(1.5, 1.0, 0.8));
+        *world.get_mut::<Transform>(moving).unwrap() = edited;
+        *world.get_mut::<Transform>(collapse).unwrap() = edited;
+        let mut refresh = Schedule::default();
+        refresh.add_systems(refresh_platformer_runtime_adapters);
+        refresh.run(&mut world);
+
+        let moving_adapter = world.get::<MovingPlatform>(moving).unwrap();
+        assert_eq!(
+            (moving_adapter.start + moving_adapter.end) * 0.5,
+            edited.translation
+        );
+        assert_eq!(moving_adapter.size, Vec3::new(7.5, 0.6, 3.2));
+        let collapse_adapter = world.get::<CollapsePlatform>(collapse).unwrap();
+        assert_eq!(collapse_adapter.origin, edited.translation);
+        assert_eq!(collapse_adapter.state, CollapsePlatformState::Armed);
         let _ = std::fs::remove_dir_all(root);
     }
 
