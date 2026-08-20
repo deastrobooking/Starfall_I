@@ -1,12 +1,15 @@
-# Starfall I — Master Feature Reference
+# Starfall I — Legacy Feature Notes
 
-The single authoritative description of **what the game does**. For *how the
-code is organized and how to work on it*, see [DEVELOPMENT.md](DEVELOPMENT.md).
-Forward-looking engine work lives in [engine_roadmap.md](engine_roadmap.md);
-task-focused how-tos live in [guides/](guides/); superseded reviews, audits, and
-dated plans are preserved under [archive/](archive/). Sequel-continuity parity
-and its explicit remaining boundaries live in
-[HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md).
+This file is retained as a historical reference and does not represent the
+current active feature source of truth. The current master feature catalog is
+[MASTER_FEATURES.md](MASTER_FEATURES.md).
+
+For *how the code is organized and how to work on it*, see
+[DEVELOPMENT.md](DEVELOPMENT.md). Forward-looking engine work lives in
+[engine_roadmap.md](engine_roadmap.md); task-focused how-tos live in
+[guides/](guides/README.md); superseded reviews, audits, and dated plans are
+preserved under [archive/](archive/README.md). Sequel-continuity parity and its
+explicit remaining boundaries live in [HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md).
 
 Runtime state ownership worth knowing up front: `MenuFocus` supplies shared
 controller menu navigation, `PlatformerMoveState` owns roll/stomp tuning,

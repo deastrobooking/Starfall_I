@@ -1,7 +1,8 @@
 # Starfall I — Developer Documentation
 
 Everything needed to build, navigate, change, and verify the codebase. For
-*what the game does*, see [FEATURES.md](FEATURES.md).
+*what the game does*, see [MASTER_FEATURES.md](MASTER_FEATURES.md). The older
+[FEATURES.md](FEATURES.md) is retained as a historical reference only.
 
 ## Contents
 

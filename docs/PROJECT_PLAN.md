@@ -1,193 +1,135 @@
-# Starfall — Project Plan: Two Editions
+# Starfall I — Project Plan
 
-This is the living plan for shipping **two products from one codebase**:
+This project is built around two connected editions of the same codebase:
 
-| Edition | Working name | Who it is for | What it is |
-|---|---|---|---|
-| **Game** | *Starfall I* | Players | The consumer game: campaign, combat, traversal, co-op, and the player-facing creators (character design, character studio, GLB import, robot garage). |
-| **Designer** | *Starfall Forge* | Us, and eventually creators | Everything in the Game **plus** the authoring layer: Project Hub, versioned Forge projects, Creature Forge, Weapon Forge, Vehicle Forge, Spaceship Forge, and the live in-world editor. |
+| Edition | Audience | Scope |
+|---|---|---|
+| Game | Players | Campaign, combat, traversal, co-op, save flow, and player-facing creation tools such as character design and garage-style content. |
+| Designer | Creators | Everything in the Game plus the authoring layer: Project Hub, Forge tools, live editing, published content pipelines, and versioned design records. |
 
-The Game is a strict subset of the Designer. One repository, one engine, one
-test suite; the boundary is a cargo feature (`designer`, on by default) so a
-consumer build is produced by *removing* the authoring layer, never by
-maintaining a fork.
+The product boundary is intentionally simple: the Game is the consumer subset, and the Designer edition adds creation and authoring tools without creating a second product tree. The repository continues to use a single cargo workspace and a single engine stack, with the `designer` feature gating tool entry points.
 
-```
-cargo build                            # Designer edition (default)
-cargo build --no-default-features      # Game edition (consumer)
-```
+## Current state
 
-A player-facing creator is **game content** (players designing characters is
-part of this game's identity). A tool is **designer-only** when it authors
-versioned project records or edits the world live. That is the whole test for
-which side of the line something lands on.
+The project is strong enough to be called a real prototype-to-production game, but it still contains areas where scope, ownership, and architecture are wider than the current team structure. The game already has meaningful movement, combat, world exploration, and co-op foundations; the next work should reduce risk instead of simply adding more feature surface area.
 
----
+The active feature inventory lives in [MASTER_FEATURES.md](MASTER_FEATURES.md). The active engine and editor strategy lives in [engine_roadmap.md](engine_roadmap.md) and [editor_roadmap.md](editor_roadmap.md). The historical milestone material remains in [archive/](archive/README.md) for reference only.
 
-## 1. Where the codebase stands (review, 2026-07)
+## Product strategy
 
-Full detail lives in [FEATURES.md](FEATURES.md); this is the shape of it.
+1. Keep the Game edition compact and stable.
+2. Keep the Designer edition authoritative for authored content and validation.
+3. Treat the Game and Designer editions as one product family, not two divergent codebases.
+4. Make the next milestone work about clarity and integration, not about adding every remaining idea.
 
-**Engine core (shared)** — Bevy 0.19 + Avian 0.7 behind a compat shim;
-fixed-tick motor (64 Hz) with carry-smoothed delivery; `GameSet` ordering;
-deterministic RNG streams; per-player input edge buffer; procedural audio bus;
-spatial LOD; v5 atomic saves with durable Heavy Water continuation state. The EC# track in
-[engine_roadmap.md](engine_roadmap.md) continues independently of the edition
-split.
+## Next workstreams
 
-**Game systems** — 30+ campaign milestones: chapters, world sites/routes,
-raids, hacking, settlements, secret caves, temple subquests, relic puzzles,
-perk/tech progression, companions, vehicles, shop. Combat is data-driven
-(`assets/combat/*.json`): melee phase machines, the Star Sabre line (blades,
-hilt-in-hand, techniques, forgeable), tracking blasters with universal charge,
-telegraphed enemies, hoverboard trick system with revert chaining.
+### 1. Architecture and ownership cleanup
 
-**Player-facing creators (game)** — Character Design (player select),
-Character Studio (human generator), Imported Character Forge (GLB import +
-sculpt), Robot Garage (vehicle assembly). These ship to consumers.
+Priority: reduce ambiguity before broadening scope.
 
-**Designer tools** — Project Hub over a versioned `ForgeProject` store (atomic
-writes, recovery snapshots, draft/published hashes), Creature Forge, Weapon
-Forge (derived-stat modular weapon designer), Vehicle Forge, Spaceship Forge,
-live editor mode
-(Tab / Select+Start in play), shared draggable tool windows, env boot hooks
-(`STARFALL_EDITOR`, `STARFALL_WEAPON_FORGE`, …).
+Work:
+- keep ownership explicit for players, rewards, vehicles, and shared world state
+- reduce plugin-level overloading in the largest gameplay systems
+- improve domain boundaries between world logic, UI logic, and player simulation
+- continue the editor/game separation work started in [editor_roadmap.md](editor_roadmap.md)
 
-**Control system** — one layout across keyboard and every HID pad, per-player
-ownership for 4-way co-op: bare D-pad swaps what RT fires (L/R primaries,
-U/D specials), Select+D-pad is utility, LB is the global modifier (LB+D-pad =
-traversal mode), RB is the melee/sabre attack. Context claims prevent
-double-fire (drawn sabre claims heavy/dodge; the hoverboard claims all four
-trick buttons). Verified by a 616+ test suite, clippy-clean, with scripted
-boot smokes.
+Deliverables:
+- clearer ownership rules
+- fewer giant system hotspots
+- simpler debugging and validation loops
 
----
+### 2. Controller-first UX and menu quality
 
-## 2. The edition boundary
+Priority: make the product feel consistent in local multiplayer.
 
-| Surface | Game | Designer | Mechanism |
-|---|---|---|---|
-| Campaign, combat, traversal, co-op | ✅ | ✅ | always registered |
-| Character Design / Studio / GLB import / Garage | ✅ | ✅ | always registered |
-| Main-menu **CREATOR TOOLS** (Project Hub) button | — | ✅ | `cfg!(feature = "designer")` |
-| Project Hub state + project registry UI | inert | ✅ | unreachable without the button |
-| Creature, Weapon, Vehicle, Spaceship Forge plugins | — | ✅ | `#[cfg(feature = "designer")]` registration |
-| Live editor toggle (Tab / Select+Start) | — | ✅ | guard in the toggle system |
-| Designer env boot hooks (`STARFALL_EDITOR`, `STARFALL_WEAPON_FORGE`) | — | ✅ | guard in `apply_boot_overrides` |
-| `AppState` / `EngineToolMode` enums, tool-window + engine-tools plugins | present | present | kept in both to avoid `cfg` sprawl through matches; they are inert without their entry points |
+Work:
+- finalize the remaining controller-only flows
+- reduce hidden assumptions in menu focus, pause, and player-select screens
+- improve per-player interactions in loadout, crafting, and reward systems
+- ensure the UI handles 1–4 players without cross-player leakage
 
-Phase 0 (this commit) gates **entry points**, which is what "walk away with a
-consumer build" needs. Phase 2 below shrinks the consumer binary by gating
-modules, which is an optimization, not a correctness requirement.
+Deliverables:
+- consistent controller navigation
+- reliable co-op menu ownership
+- clearer input feedback and accessibility
 
-## 3. Content pipeline between the editions
+### 3. World and content integration
 
-Designer authors content into **ForgeProject records** (creatures, weapons,
-scenes…). Consumers must never depend on a project store existing.
+Priority: make the current campaign feel coherent rather than just large.
 
-1. **Author** (Designer): tools write draft records through the versioned
-   store — atomic writes, recovery snapshots, draft hashes.
-2. **Publish** (Designer): a publish step validates every record and
-   bakes the published set into an immutable generation under
-   `assets/published/`; an atomically promoted `current.json` selects the
-   complete read-only generation.
-3. **Ship** (Game): the consumer build loads baked assets only; it has no
-   writer for project stores. Player saves (v4) stay completely separate from
-   authored content.
+Work:
+- tighten the most important world loops: chapter flow, dungeon states, map readability, settlements, and route flow
+- validate world density and performance before adding more content breadth
+- ensure the strongest systems are fully legible in play, not just technically present
 
-## 4. Roadmap
+Deliverables:
+- stronger chapter and dungeon identity
+- improved world readability
+- better performance-aware content decisions
 
-### P0 — Edition skeleton *(landed with this plan)*
-`designer` cargo feature (default on); consumer build hides the hub button,
-forge plugins, editor toggle, and designer env hooks. Both editions compile
-and boot; verification gains a consumer-build check.
+### 4. Core quality of combat and movement
 
-### P1 — Publish pipeline (Designer) → consumable content (Game) *(landed)*
-- **PUBLISH TO GAME** in the Project Hub runs the store's validate-and-promote
-  gate, persists published hashes, and bakes weapons + creatures + vehicles + spacecraft to
-  `assets/published/` as deterministic JSON (sorted, so re-publishing without
-  edits is byte-identical). The live editor uses the same publisher. A project
-  writer lock spans hash save, generation-manifest promotion, and rollback;
-  consumers resolve that manifest once per catalog load. Results land in the
-  active tool's status line.
-- Game-side loader (`world::published_content`, both editions): published
-  weapons register into the blade resolver and go on sale in the shop priced
-  by the forge's own derivation; published creatures load into a
-  `PublishedCreatures` spec pool. Vehicle recipes compile into mountable
-  ground rides or authored boat-route visuals; fighter and bomber recipes use
-  the existing flight motor, and all five spacecraft roles project into the
-  liberated-site strategic fleet and raid-defense score. Catalog bootstrap
-  runs before the initial state transition, and a successful in-process
-  publish refreshes both craft catalogs without restarting. Missing files are
-  a first-class empty state.
-- Covered by determinism, round-trip, missing-file, resolver, and shop-pricing
-  tests. Encounters consume published creatures: the baked seed fills the same
-  `PublishedCreatureCatalog` the dungeon spawners already resolve overrides
-  through, and only fills an *empty* catalog so a Designer session's live
-  project store (drafts included) stays authoritative.
+Priority: keep the action feel strong and understandable.
 
-### P2 — Designer UX pass
-- ~~Weapon Forge: load/rename/delete existing designs~~ *(landed: LIBRARY
-  panel with LOAD/DEL, NAME field with editor-style key capture)*.
-- ~~Equip-to-test~~ *(landed: TEST jumps into play with every player holding
-  the design; the blade registry upserts so iteration always takes effect)*.
-- ~~Character-holding preview~~ *(landed: a real modular character mannequin
-  holds the design in its right hand at true scale; the character turns and
-  the weapon rides along, and grip-length edits re-centre the palm grip)*.
-- ~~Shared forge widgets~~ *(landed: `engine_tools::forge_widgets` — action
-  buttons, rows, section labels; Weapon and Creature Forge both build on it)*.
-- ~~Mouse affordances for tool windows~~ *(landed: corner-grip resize with
-  min/workspace clamping, UI-scale-correct dragging, double-click header
-  collapse, topmost pointer-routed scrolling, panel raise-on-use, and panels
-  that shrink to fit when the application window is resized)*.
-- ~~Creator GUI consistency and viewport safety~~ *(landed: Character Design
-  and Character Studio now use the shared floating shell; dense Forge layouts
-  progressively disclose secondary panels; minimized chrome keeps its restore
-  target clear; hidden/covered controls leave shared controller focus; text
-  entry suppresses global menu shortcuts; and floating/editor chrome captures
-  the pointer so clicks and wheel input do not pass through into 3D tools)*.
-- Remaining UX scale work: persist named workspace layouts with RESET LAYOUT;
-  split the live editor's flat Registry into task groups; expose disabled action
-  reasons and consistent destructive confirmations; add semantic accessibility
-  labels/live status and keyboard move/resize parity for floating windows.
-- ~~A designer manual~~ *(landed: [guides/designer-workflow.md](guides/designer-workflow.md))*.
+Work:
+- continue tuning movement and combat feel as data rather than code hardening
+- validate boss pacing, attack readability, and counterplay
+- keep the fixed-tick and response model consistent with the game’s design philosophy
 
-### P3 — Game edition polish (walk-away list)
-- ~~Perf overlays and diag toggles behind `designer`~~ *(landed: F8 controller
-  diag, F9 collider debug, F10 motor escape hatch, F11 perf overlay are all
-  Designer-only)*. Still open: first-run flow review of the remaining menus.
-- ~~Configurable controls UI~~ *(landed: thirteen discrete Player 1 keyboard
-  actions, four complete controller face-layout presets, combined mouse/stick
-  invert-look Y, conflict/reserved-key feedback, reset-to-defaults, and
-  settings persistence. Structural LB/Select/D-pad chords remain fixed so no
-  configuration can strand an action)*.
-- Onboarding: the guidance HUD covers systems; add a first-session tutorial
-  route.
-- Balance/feel passes driven by play: sabre timings, tracking strengths, trick
-  scores — all already data-tunable without recompiling.
+Deliverables:
+- clearer combat readability
+- more stable boss loops
+- better player-feedback fidelity
 
-### P4 — Packaging
-- `cargo build --release --no-default-features` produced per-platform with
-  baked assets; the Designer edition ships as the default build.
-- Version/branding split (window title, main-menu badge) driven by the same
-  feature flag.
-- ~~CI matrix: default and `--no-default-features`, suite + clippy on both~~
-  *(landed: one format gate plus independent Designer/Game all-target check,
-  strict Clippy, and test jobs; the first hosted run remains the remote
-  acceptance gate)*.
+### 5. Editor and content pipeline discipline
 
-## 5. Walk-away criteria
+Priority: enforce the product boundary and make authoring reliable.
 
-**Game edition is done when:** a release consumer build boots to the menu with
-no authoring entry points, plays the full campaign in 1–4 player co-op from
-baked assets, saves/restores cleanly, and passes suite + clippy + boot smoke in
-CI on both feature sets.
+Work:
+- keep Game edition free from editor dependencies
+- continue the publish and runtime catalog boundary work
+- protect authored project content with validation and stable revision behavior
 
-**Designer edition is done when:** every shipped content type (creature,
-weapon, scene, biome, road, building, …) can be authored, validated,
-published, and then played in a consumer build **without touching Rust**.
+Deliverables:
+- clean runtime/editor separation
+- reliable content publication flow
+- less risk of editor changes breaking Player builds
 
----
+### 6. Performance and validation gates
 
-*Keep this document honest the same way FEATURES.md is kept honest: when the
-boundary or the roadmap changes in code, change it here in the same commit.*
+Priority: protect the large world from silent performance regressions.
+
+Work:
+- define a small set of concrete performance gates for terrain, world scale, and split-screen play
+- run the relevant validation before major content additions
+- keep the build/test loop reliable for both Designer and Game editions
+
+Deliverables:
+- measured performance floor
+- fewer silent world regressions
+- stronger release confidence
+
+## Current working target
+
+The next milestone should focus on a small set of integrated improvements, in roughly this order:
+
+1. ownership and architecture clarity
+2. menu and controller consistency
+3. world and content integration quality
+4. editor/game separation and content pipeline hygiene
+5. performance validation before deeper content expansion
+
+This is the preferred sequence because it reduces the chance that new content makes the existing systems harder to reason about.
+
+## Definition of done for the next plan cycle
+
+The next milestone is successful when:
+
+- the project’s major systems are easier to understand and debug
+- local multiplayer remains coherent across menus and play
+- the core campaign loop feels intentional and readable
+- the editor/game boundary is more explicit and better enforced
+- the repository documentation matches the codebase more closely than it does today
+
+At that point the team can confidently expand content without adding new architecture chaos.

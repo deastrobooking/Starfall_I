@@ -14,6 +14,8 @@ pub mod forge_widgets;
 pub mod mesh_selection;
 pub mod mesh_uv;
 pub(crate) mod persistence;
+/// Reusable structural and kinetic platforming prefab recipes.
+pub mod platformer_prefabs;
 mod presets;
 pub mod project_registry;
 /// Designer→Game publish step: bake validated records to assets/published/.
@@ -1133,6 +1135,17 @@ enum EditorPrimitive {
     Cube,
     Pillar,
     Beacon,
+    Ladder,
+    Stairs,
+    Tower,
+    Castle,
+    FloatingIsland,
+    MovingPlatform,
+    SpringPlatform,
+    FlipPanel,
+    RotatingBridge,
+    CollapseBridge,
+    SpikeBridge,
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1247,6 +1260,17 @@ define_editor_controls! {
     CreateCube => Some(EditorPanelKind::Outliner),
     CreatePillar => Some(EditorPanelKind::Outliner),
     CreateBeacon => Some(EditorPanelKind::Outliner),
+    CreateLadder => Some(EditorPanelKind::Outliner),
+    CreateStairs => Some(EditorPanelKind::Outliner),
+    CreateTower => Some(EditorPanelKind::Outliner),
+    CreateCastle => Some(EditorPanelKind::Outliner),
+    CreateFloatingIsland => Some(EditorPanelKind::Outliner),
+    CreateMovingPlatform => Some(EditorPanelKind::Outliner),
+    CreateSpringPlatform => Some(EditorPanelKind::Outliner),
+    CreateFlipPanel => Some(EditorPanelKind::Outliner),
+    CreateRotatingBridge => Some(EditorPanelKind::Outliner),
+    CreateCollapseBridge => Some(EditorPanelKind::Outliner),
+    CreateSpikeBridge => Some(EditorPanelKind::Outliner),
 
     // Inspector.
     Duplicate => Some(EditorPanelKind::Inspector),
@@ -2379,11 +2403,15 @@ fn apply_catalog_material(world: &mut World, entity: Entity, content_id: &str) -
 }
 
 fn primitive_standard_color(primitive: EditorPrimitive) -> Color {
+    if let Some(kind) = editor_platformer_kind(primitive) {
+        return kind.accent_color();
+    }
     match primitive {
         EditorPrimitive::Empty => Color::WHITE,
         EditorPrimitive::Cube => Color::srgb(0.15, 0.68, 0.94),
         EditorPrimitive::Pillar => Color::srgb(0.92, 0.52, 0.14),
         EditorPrimitive::Beacon => Color::srgb(0.35, 1.0, 0.58),
+        _ => unreachable!("platformer prefabs returned above"),
     }
 }
 
@@ -3083,6 +3111,37 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     spawn_editor_button(panel, EditorAction::CreateCube, "+ BLOCK");
                     spawn_editor_button(panel, EditorAction::CreatePillar, "+ PILLAR");
                     spawn_editor_button(panel, EditorAction::CreateBeacon, "+ BEACON");
+                    spawn_editor_button(panel, EditorAction::CreateLadder, "+ LADDER");
+                    spawn_editor_button(panel, EditorAction::CreateStairs, "+ STAIRS");
+                    spawn_editor_button(panel, EditorAction::CreateTower, "+ STAR TOWER");
+                    spawn_editor_button(panel, EditorAction::CreateCastle, "+ STAR CASTLE");
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::CreateFloatingIsland,
+                        "+ FLOATING ISLAND",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::CreateMovingPlatform,
+                        "+ MOVING PLATFORM",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::CreateSpringPlatform,
+                        "+ PULSE SPRING",
+                    );
+                    spawn_editor_button(panel, EditorAction::CreateFlipPanel, "+ FLIP PANEL");
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::CreateRotatingBridge,
+                        "+ ROTATING BRIDGE",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::CreateCollapseBridge,
+                        "+ COLLAPSE BRIDGE",
+                    );
+                    spawn_editor_button(panel, EditorAction::CreateSpikeBridge, "+ SPIKE BRIDGE");
                 });
 
                 spawn_editor_panel(body, EditorPanelKind::Inspector, "INSPECTOR", |panel| {
@@ -6107,6 +6166,29 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
         EditorAction::CreateCube => spawn_editor_primitive(world, EditorPrimitive::Cube),
         EditorAction::CreatePillar => spawn_editor_primitive(world, EditorPrimitive::Pillar),
         EditorAction::CreateBeacon => spawn_editor_primitive(world, EditorPrimitive::Beacon),
+        EditorAction::CreateLadder => spawn_editor_primitive(world, EditorPrimitive::Ladder),
+        EditorAction::CreateStairs => spawn_editor_primitive(world, EditorPrimitive::Stairs),
+        EditorAction::CreateTower => spawn_editor_primitive(world, EditorPrimitive::Tower),
+        EditorAction::CreateCastle => spawn_editor_primitive(world, EditorPrimitive::Castle),
+        EditorAction::CreateFloatingIsland => {
+            spawn_editor_primitive(world, EditorPrimitive::FloatingIsland)
+        }
+        EditorAction::CreateMovingPlatform => {
+            spawn_editor_primitive(world, EditorPrimitive::MovingPlatform)
+        }
+        EditorAction::CreateSpringPlatform => {
+            spawn_editor_primitive(world, EditorPrimitive::SpringPlatform)
+        }
+        EditorAction::CreateFlipPanel => spawn_editor_primitive(world, EditorPrimitive::FlipPanel),
+        EditorAction::CreateRotatingBridge => {
+            spawn_editor_primitive(world, EditorPrimitive::RotatingBridge)
+        }
+        EditorAction::CreateCollapseBridge => {
+            spawn_editor_primitive(world, EditorPrimitive::CollapseBridge)
+        }
+        EditorAction::CreateSpikeBridge => {
+            spawn_editor_primitive(world, EditorPrimitive::SpikeBridge)
+        }
         EditorAction::Duplicate => duplicate_active(world),
         EditorAction::Delete => delete_selection(world),
         EditorAction::MoveXNegative => transform_selection(
@@ -7187,6 +7269,17 @@ impl From<EditorPrimitive> for DraftPrimitive {
             EditorPrimitive::Cube => Self::Cube,
             EditorPrimitive::Pillar => Self::Pillar,
             EditorPrimitive::Beacon => Self::Beacon,
+            EditorPrimitive::Ladder => Self::Ladder,
+            EditorPrimitive::Stairs => Self::Stairs,
+            EditorPrimitive::Tower => Self::Tower,
+            EditorPrimitive::Castle => Self::Castle,
+            EditorPrimitive::FloatingIsland => Self::FloatingIsland,
+            EditorPrimitive::MovingPlatform => Self::MovingPlatform,
+            EditorPrimitive::SpringPlatform => Self::SpringPlatform,
+            EditorPrimitive::FlipPanel => Self::FlipPanel,
+            EditorPrimitive::RotatingBridge => Self::RotatingBridge,
+            EditorPrimitive::CollapseBridge => Self::CollapseBridge,
+            EditorPrimitive::SpikeBridge => Self::SpikeBridge,
         }
     }
 }
@@ -7198,8 +7291,39 @@ impl From<DraftPrimitive> for EditorPrimitive {
             DraftPrimitive::Cube => Self::Cube,
             DraftPrimitive::Pillar => Self::Pillar,
             DraftPrimitive::Beacon => Self::Beacon,
+            DraftPrimitive::Ladder => Self::Ladder,
+            DraftPrimitive::Stairs => Self::Stairs,
+            DraftPrimitive::Tower => Self::Tower,
+            DraftPrimitive::Castle => Self::Castle,
+            DraftPrimitive::FloatingIsland => Self::FloatingIsland,
+            DraftPrimitive::MovingPlatform => Self::MovingPlatform,
+            DraftPrimitive::SpringPlatform => Self::SpringPlatform,
+            DraftPrimitive::FlipPanel => Self::FlipPanel,
+            DraftPrimitive::RotatingBridge => Self::RotatingBridge,
+            DraftPrimitive::CollapseBridge => Self::CollapseBridge,
+            DraftPrimitive::SpikeBridge => Self::SpikeBridge,
         }
     }
+}
+
+fn editor_platformer_kind(
+    primitive: EditorPrimitive,
+) -> Option<platformer_prefabs::PlatformerPrefabKind> {
+    use platformer_prefabs::PlatformerPrefabKind as Kind;
+    Some(match primitive {
+        EditorPrimitive::Ladder => Kind::Ladder,
+        EditorPrimitive::Stairs => Kind::Stairs,
+        EditorPrimitive::Tower => Kind::Tower,
+        EditorPrimitive::Castle => Kind::Castle,
+        EditorPrimitive::FloatingIsland => Kind::FloatingIsland,
+        EditorPrimitive::MovingPlatform => Kind::MovingPlatform,
+        EditorPrimitive::SpringPlatform => Kind::SpringPlatform,
+        EditorPrimitive::FlipPanel => Kind::FlipPanel,
+        EditorPrimitive::RotatingBridge => Kind::RotatingBridge,
+        EditorPrimitive::CollapseBridge => Kind::CollapseBridge,
+        EditorPrimitive::SpikeBridge => Kind::SpikeBridge,
+        _ => return None,
+    })
 }
 
 impl From<&Transform> for TransformDraft {
@@ -7696,11 +7820,15 @@ fn spawn_editor_primitive(world: &mut World, primitive: EditorPrimitive) {
 
 /// Base mesh for a primitive, matching the sizes used at spawn time.
 fn editor_primitive_base_mesh(primitive: EditorPrimitive) -> Option<Mesh> {
+    if let Some(kind) = editor_platformer_kind(primitive) {
+        return Some(platformer_prefabs::PlatformerPrefabDesign::stock(kind).mesh());
+    }
     match primitive {
         EditorPrimitive::Empty => None,
         EditorPrimitive::Cube => Some(Cuboid::new(2.5, 2.5, 2.5).into()),
         EditorPrimitive::Pillar => Some(Cylinder::new(1.15, 5.0).into()),
         EditorPrimitive::Beacon => Some(Sphere::new(1.0).into()),
+        _ => unreachable!("platformer prefabs returned above"),
     }
 }
 
@@ -7764,11 +7892,15 @@ fn find_render_mesh_entity(world: &mut World, entity: Entity) -> Option<Entity> 
 }
 
 fn primitive_label(primitive: EditorPrimitive) -> &'static str {
+    if let Some(kind) = editor_platformer_kind(primitive) {
+        return kind.label();
+    }
     match primitive {
         EditorPrimitive::Empty => "Anchor",
         EditorPrimitive::Cube => "Block",
         EditorPrimitive::Pillar => "Pillar",
         EditorPrimitive::Beacon => "Beacon",
+        _ => unreachable!("platformer prefabs returned above"),
     }
 }
 
@@ -7779,6 +7911,8 @@ fn spawn_editor_primitive_record(
     name: String,
     transform: Transform,
 ) -> Entity {
+    let prefab =
+        editor_platformer_kind(primitive).map(platformer_prefabs::PlatformerPrefabDesign::stock);
     let (radius, mesh, color) = match primitive {
         EditorPrimitive::Empty => (0.55, None, Color::WHITE),
         EditorPrimitive::Cube => (
@@ -7804,6 +7938,14 @@ fn spawn_editor_primitive_record(
             Some(world.resource_mut::<Assets<Mesh>>().add(Sphere::new(1.0))),
             primitive_standard_color(primitive),
         ),
+        _ => {
+            let design = prefab.expect("non-core primitive has a prefab recipe");
+            (
+                design.selection_radius(),
+                Some(world.resource_mut::<Assets<Mesh>>().add(design.mesh())),
+                primitive_standard_color(primitive),
+            )
+        }
     };
 
     let render_parts = mesh.map(|mesh| {

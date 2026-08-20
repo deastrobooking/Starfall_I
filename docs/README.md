@@ -1,35 +1,23 @@
 # Starfall I — Documentation
 
-The active documents are listed below. Everything else is either a task-focused
-guide or a preserved historical record.
+This repository has a single active source of truth per concern. The top-level docs are intentionally narrow and specific so the project can stay understandable without reading every old milestone log.
 
-| Document | Read it when you want… |
+| Document | Purpose |
 |---|---|
-| **[PROJECT_PLAN.md](PROJECT_PLAN.md)** | …the **two-edition plan**: what ships to players (Game) versus what ships to creators (Designer), the boundary between them, and the roadmap to walking away with each. |
-| **[FEATURES.md](FEATURES.md)** | …to know **what the game does**. The master feature reference: every system, from movement and combat to settlements, raids, creation tools, and audio. |
-| **[DEVELOPMENT.md](DEVELOPMENT.md)** | …to **work on the code**. Build and run, repository layout, architectural rules, the simulation frame, data-driven combat, verification, conventions. |
-| **[engine_roadmap.md](engine_roadmap.md)** | …to see **where the engine is going**. The EC# track: phases, acceptance criteria, and what has landed. |
-| **[editor_roadmap.md](editor_roadmap.md)** | …the **Forge editor upgrade plan**: target dependency boundaries, delivered M0 hardening, and the M1–M5 path toward isolated Edit/Simulate/PIE and extensible tools. |
-| **[naming.md](naming.md)** | …the canonical cast, place, and terminology list for player-facing text. |
-| **[HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md)** | …the evidence-backed **Heavy Water parity ledger**: what Starfall supersedes, what this continuation ports, and what remains staged. |
-| **[guides/](guides/README.md)** | …a focused how-to: fixed-tick motor, combat feel, spatial LOD, Character Studio pipeline, verification procedure. |
+| **[MASTER_FEATURES.md](MASTER_FEATURES.md)** | The master feature catalog: what the game does, what is stable, and what is still in progress. This is the main reference for game scope, systems, and feature maturity. |
+| **[PROJECT_PLAN.md](PROJECT_PLAN.md)** | The current product plan and next-step priorities for the next milestone cycle. |
+| **[DEVELOPMENT.md](DEVELOPMENT.md)** | Build, run, architecture, conventions, verification, and implementation rules. |
+| **[engine_roadmap.md](engine_roadmap.md)** | The engine-core roadmap, covering fixed-tick simulation, combat substrate, and technical engine milestones. |
+| **[editor_roadmap.md](editor_roadmap.md)** | The Forge/editor roadmap and dependency-separation strategy. |
+| **[naming.md](naming.md)** | Canonical names for game-facing cast, places, and terminology. |
+| **[HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md)** | The evidence-backed continuity ledger for Heavy Water and what remains staged. |
+| **[guides/README.md](guides/README.md)** | Focused how-to guides for major systems and workflows. |
 
-The repository-level `README.md` is the player/developer overview; `agent.md` is
-the compact operating contract and points here rather than maintaining a
-competing list. Asset-folder READMEs under `assets/` are user-facing drop-in
-instructions.
+The repository-level [README.md](../README.md) remains the high-level project overview. The docs under [archive/](archive/README.md) preserve historical reviews, audits, and milestone logs; they are evidence, not active instruction.
 
-## Archive
+## Documentation rule
 
-[archive/](archive/README.md) preserves dated reviews, audits, triage passes,
-milestone logs (`M#`, `MM#`, `ET#`, `PX#`), and superseded plans. They are
-evidence of how the project got here, not current instruction — **prefer the
-active documents above** when they disagree.
-
-## Keeping docs honest
-
-- A feature is not done until FEATURES.md describes it.
-- If a doc and the code disagree, the code wins — fix the doc in the same change
-  that caused the drift.
-- Point-in-time documents (reviews, audits, dated plans) belong in `archive/`
-  from the day they are written; they should never accumulate in the root.
+- If a feature is major enough to matter, it should be described in [MASTER_FEATURES.md](MASTER_FEATURES.md).
+- If a roadmap item is next in priority, it should live in [PROJECT_PLAN.md](PROJECT_PLAN.md).
+- If a doc and the code disagree, the code wins; update the doc in the same work that caused the drift.
+- Old dated plans stay in [archive/](archive/README.md), not in the active root docs.

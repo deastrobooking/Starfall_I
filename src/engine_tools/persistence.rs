@@ -1334,6 +1334,9 @@ impl LevelTemplate {
                 place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0),
                 place(1, DraftPrimitive::Beacon, 0.0, 1.0, -40.0),
                 place(2, DraftPrimitive::Beacon, 40.0, 1.0, 0.0),
+                place(3, DraftPrimitive::FloatingIsland, 14.0, 7.0, -18.0),
+                place(4, DraftPrimitive::SpringPlatform, 8.0, 1.0, -12.0),
+                place(5, DraftPrimitive::Tower, 28.0, 6.0, -28.0),
             ],
             Self::Dungeon => vec![
                 place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0),
@@ -1342,24 +1345,35 @@ impl LevelTemplate {
                 place(3, DraftPrimitive::Pillar, -4.0, 2.5, -14.0),
                 place(4, DraftPrimitive::Pillar, 4.0, 2.5, -14.0),
                 place(5, DraftPrimitive::Beacon, 0.0, 1.0, -20.0),
+                place(6, DraftPrimitive::Stairs, 0.0, 1.6, -9.0),
+                place(7, DraftPrimitive::Ladder, 5.0, 3.0, -17.0),
+                place(8, DraftPrimitive::FlipPanel, -5.0, 0.3, -17.0),
             ],
             Self::Airship => vec![
                 place(0, DraftPrimitive::Empty, 0.0, 8.0, 0.0),
                 place(1, DraftPrimitive::Cube, 0.0, 6.0, -6.0),
                 place(2, DraftPrimitive::Cube, 0.0, 6.0, 6.0),
                 place(3, DraftPrimitive::Beacon, 0.0, 9.0, 0.0),
+                place(4, DraftPrimitive::MovingPlatform, 8.0, 8.0, 0.0),
+                place(5, DraftPrimitive::RotatingBridge, -9.0, 8.0, 0.0),
+                place(6, DraftPrimitive::CollapseBridge, 0.0, 8.0, -14.0),
             ],
             Self::BossArena => vec![
                 place(0, DraftPrimitive::Empty, 0.0, 0.0, 12.0),
                 place(1, DraftPrimitive::Pillar, -10.0, 2.5, 0.0),
                 place(2, DraftPrimitive::Pillar, 10.0, 2.5, 0.0),
                 place(3, DraftPrimitive::Beacon, 0.0, 1.0, -12.0),
+                place(4, DraftPrimitive::Castle, 0.0, 4.5, -28.0),
+                place(5, DraftPrimitive::SpikeBridge, 0.0, 0.6, -17.0),
             ],
             Self::RacingCourse => vec![
                 place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0),
                 place(1, DraftPrimitive::Beacon, 0.0, 1.0, -30.0),
                 place(2, DraftPrimitive::Beacon, 20.0, 1.0, -60.0),
                 place(3, DraftPrimitive::Beacon, 40.0, 1.0, -90.0),
+                place(4, DraftPrimitive::RotatingBridge, 10.0, 2.0, -45.0),
+                place(5, DraftPrimitive::SpringPlatform, 28.0, 1.0, -72.0),
+                place(6, DraftPrimitive::MovingPlatform, 36.0, 4.0, -82.0),
             ],
             Self::SettlementHub => vec![
                 place(0, DraftPrimitive::Empty, 0.0, 0.0, 8.0),
@@ -1367,6 +1381,9 @@ impl LevelTemplate {
                 place(2, DraftPrimitive::Cube, 6.0, 1.25, 0.0),
                 place(3, DraftPrimitive::Cube, 0.0, 1.25, -8.0),
                 place(4, DraftPrimitive::Beacon, 0.0, 1.0, 0.0),
+                place(5, DraftPrimitive::Stairs, 0.0, 1.6, -14.0),
+                place(6, DraftPrimitive::Tower, -18.0, 6.0, -18.0),
+                place(7, DraftPrimitive::Castle, 20.0, 4.5, -24.0),
             ],
         };
         EditorSceneDraft {
@@ -1408,6 +1425,17 @@ pub enum DraftPrimitive {
     Cube,
     Pillar,
     Beacon,
+    Ladder,
+    Stairs,
+    Tower,
+    Castle,
+    FloatingIsland,
+    MovingPlatform,
+    SpringPlatform,
+    FlipPanel,
+    RotatingBridge,
+    CollapseBridge,
+    SpikeBridge,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -3589,6 +3617,30 @@ mod tests {
                 template.label()
             );
             assert!(scene.objects.iter().all(|object| object.editor_id >= 100));
+        }
+    }
+
+    #[test]
+    fn level_templates_collectively_seed_every_platformer_prefab() {
+        let seeded = LevelTemplate::ALL
+            .into_iter()
+            .flat_map(|template| template.seed_scene(1).objects)
+            .map(|object| object.primitive)
+            .collect::<Vec<_>>();
+        for expected in [
+            DraftPrimitive::Ladder,
+            DraftPrimitive::Stairs,
+            DraftPrimitive::Tower,
+            DraftPrimitive::Castle,
+            DraftPrimitive::FloatingIsland,
+            DraftPrimitive::MovingPlatform,
+            DraftPrimitive::SpringPlatform,
+            DraftPrimitive::FlipPanel,
+            DraftPrimitive::RotatingBridge,
+            DraftPrimitive::CollapseBridge,
+            DraftPrimitive::SpikeBridge,
+        ] {
+            assert!(seeded.contains(&expected), "missing seeded {expected:?}");
         }
     }
 
