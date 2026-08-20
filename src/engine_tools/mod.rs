@@ -43,8 +43,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::player::{Player, PlayerCamera, PlayerInput};
 use crate::components::world::{
-    DungeonCrawlGate, EnterableBuilding, SettlementBuildTerminal, SpeedLoopGuide, WorldAnchor,
-    WorldRouteMarker,
+    CollapsePlatform, CollapsePlatformState, DungeonCrawlGate, EnterableBuilding, FlipPlatform,
+    MovingPlatform, RotatingElevator, SettlementBuildTerminal, SpeedLoopGuide, SpikePlatformHazard,
+    SpringJumpPad, WalkableSurface, WorldAnchor, WorldRouteMarker,
 };
 use crate::engine::bindings::FaceButton;
 use crate::engine::physics::prelude::{Physics, PhysicsTime};
@@ -7913,8 +7914,8 @@ fn spawn_editor_primitive_record(
 ) -> Entity {
     let prefab =
         editor_platformer_kind(primitive).map(platformer_prefabs::PlatformerPrefabDesign::stock);
-    let (radius, mesh, color) = match primitive {
-        EditorPrimitive::Empty => (0.55, None, Color::WHITE),
+    let (radius, mesh, color, collider) = match primitive {
+        EditorPrimitive::Empty => (0.55, None, Color::WHITE, None),
         EditorPrimitive::Cube => (
             1.75,
             Some(
@@ -7923,6 +7924,7 @@ fn spawn_editor_primitive_record(
                     .add(Cuboid::new(2.5, 2.5, 2.5)),
             ),
             primitive_standard_color(primitive),
+            None,
         ),
         EditorPrimitive::Pillar => (
             2.7,
@@ -7932,18 +7934,25 @@ fn spawn_editor_primitive_record(
                     .add(Cylinder::new(1.15, 5.0)),
             ),
             primitive_standard_color(primitive),
+            None,
         ),
         EditorPrimitive::Beacon => (
             1.4,
             Some(world.resource_mut::<Assets<Mesh>>().add(Sphere::new(1.0))),
             primitive_standard_color(primitive),
+            None,
         ),
         _ => {
             let design = prefab.expect("non-core primitive has a prefab recipe");
+            let generated = design.mesh();
+            let (vertices, triangles) = design.collider_geometry();
+            let collider =
+                crate::engine::physics::prelude::Collider::trimesh(vertices, triangles).ok();
             (
                 design.selection_radius(),
-                Some(world.resource_mut::<Assets<Mesh>>().add(design.mesh())),
+                Some(world.resource_mut::<Assets<Mesh>>().add(generated)),
                 primitive_standard_color(primitive),
+                collider,
             )
         }
     };
@@ -7972,7 +7981,113 @@ fn spawn_editor_primitive_record(
     if let Some(render_parts) = render_parts {
         entity.insert(render_parts);
     }
-    entity.id()
+    let entity = entity.id();
+    if let (Some(design), Some(collider)) = (prefab, collider) {
+        insert_platformer_runtime_adapter(world, entity, design, transform, collider);
+    }
+    entity
+}
+
+/// Compile a Forge prefab recipe into the existing gameplay traversal
+/// vocabulary. Reusing `MovingPlatform`, `RotatingElevator`, and
+/// `SpringJumpPad` keeps player carrying, co-op cooldowns, and launch-state
+/// transitions authoritative in WorldPlugin rather than cloning those rules
+/// into the editor.
+fn insert_platformer_runtime_adapter(
+    world: &mut World,
+    entity: Entity,
+    design: platformer_prefabs::PlatformerPrefabDesign,
+    transform: Transform,
+    collider: crate::engine::physics::prelude::Collider,
+) {
+    use crate::engine::physics::prelude::RigidBody;
+    use platformer_prefabs::PlatformerBehavior;
+
+    let mut target = world.entity_mut(entity);
+    target.insert((collider, WalkableSurface));
+    match design.kind.behavior() {
+        PlatformerBehavior::Oscillate { distance, seconds } => {
+            let half_travel = transform.rotation * Vec3::X * (distance * 0.5);
+            target.insert((
+                RigidBody::KinematicPositionBased,
+                MovingPlatform {
+                    start: transform.translation - half_travel,
+                    end: transform.translation + half_travel,
+                    speed: std::f32::consts::TAU * distance / seconds.max(0.1),
+                    phase: 0.0,
+                    size: design.size * transform.scale.abs(),
+                },
+            ));
+        }
+        PlatformerBehavior::Bounce { launch_speed } => {
+            target.insert((
+                RigidBody::Fixed,
+                SpringJumpPad {
+                    launch_velocity: Vec3::Y * launch_speed,
+                    radius: design.size.x.min(design.size.z) * 0.48,
+                    cooldown: 0.22,
+                    cooldown_timers: [0.0; 4],
+                    force_hoverboard: false,
+                },
+            ));
+        }
+        PlatformerBehavior::Rotate { degrees_per_second } => {
+            target.insert((
+                RigidBody::KinematicPositionBased,
+                RotatingElevator {
+                    center: transform.translation,
+                    radius: 0.0,
+                    angular_speed: degrees_per_second.to_radians(),
+                    vertical_amplitude: 0.0,
+                    vertical_speed: 0.0,
+                    phase: 0.0,
+                    size: design.size * transform.scale.abs(),
+                },
+            ));
+        }
+        PlatformerBehavior::FlipOnJump => {
+            target.insert((
+                RigidBody::KinematicPositionBased,
+                FlipPlatform {
+                    base_rotation: transform.rotation,
+                    flipped: false,
+                    progress: 0.0,
+                    turn_seconds: 0.28,
+                    trigger_radius: design.size.x.max(design.size.z) * 0.8,
+                    cooldown: 0.32,
+                    cooldown_timer: 0.0,
+                },
+            ));
+        }
+        PlatformerBehavior::Collapse { warning_seconds } => {
+            target.insert((
+                RigidBody::KinematicPositionBased,
+                CollapsePlatform {
+                    origin: transform.translation,
+                    size: design.size * transform.scale.abs(),
+                    warning_seconds,
+                    fallen_seconds: 1.8,
+                    drop_distance: 7.0,
+                    timer: 0.0,
+                    state: CollapsePlatformState::Armed,
+                },
+            ));
+        }
+        PlatformerBehavior::Hazard => {
+            target.insert((
+                RigidBody::Fixed,
+                SpikePlatformHazard {
+                    size: design.size * transform.scale.abs(),
+                    damage: 22.0,
+                    cooldown: 0.8,
+                    cooldown_timers: [0.0; 4],
+                },
+            ));
+        }
+        PlatformerBehavior::StaticTraversal | PlatformerBehavior::Climbable => {
+            target.insert(RigidBody::Fixed);
+        }
+    }
 }
 
 fn duplicate_active(world: &mut World) {
@@ -9405,6 +9520,71 @@ mod tests {
         assert_eq!(
             world.resource_mut::<EditorIdAllocator>().allocate(),
             EditorEntityId(72)
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn platformer_prefabs_compile_into_existing_runtime_adapters() {
+        let (mut world, root) = persistence_test_world("platformer_runtime_adapters");
+        let moving = spawn_editor_primitive_record(
+            &mut world,
+            EditorEntityId(201),
+            EditorPrimitive::MovingPlatform,
+            "Moving route".into(),
+            Transform::from_xyz(4.0, 6.0, -8.0),
+        );
+        let spring = spawn_editor_primitive_record(
+            &mut world,
+            EditorEntityId(202),
+            EditorPrimitive::SpringPlatform,
+            "Pulse spring".into(),
+            Transform::from_xyz(8.0, 2.0, -8.0),
+        );
+        let rotating = spawn_editor_primitive_record(
+            &mut world,
+            EditorEntityId(203),
+            EditorPrimitive::RotatingBridge,
+            "Rotating route".into(),
+            Transform::from_xyz(12.0, 6.0, -8.0),
+        );
+        let flip = spawn_editor_primitive_record(
+            &mut world,
+            EditorEntityId(204),
+            EditorPrimitive::FlipPanel,
+            "Flip route".into(),
+            Transform::from_xyz(16.0, 4.0, -8.0),
+        );
+        let collapse = spawn_editor_primitive_record(
+            &mut world,
+            EditorEntityId(205),
+            EditorPrimitive::CollapseBridge,
+            "Collapse route".into(),
+            Transform::from_xyz(22.0, 5.0, -8.0),
+        );
+        let spikes = spawn_editor_primitive_record(
+            &mut world,
+            EditorEntityId(206),
+            EditorPrimitive::SpikeBridge,
+            "Spike route".into(),
+            Transform::from_xyz(30.0, 5.0, -8.0),
+        );
+
+        for entity in [moving, spring, rotating, flip, collapse, spikes] {
+            assert!(world
+                .get::<crate::engine::physics::prelude::Collider>(entity)
+                .is_some());
+            assert!(world.get::<WalkableSurface>(entity).is_some());
+        }
+        assert!(world.get::<MovingPlatform>(moving).is_some());
+        assert!(world.get::<SpringJumpPad>(spring).is_some());
+        assert!(world.get::<RotatingElevator>(rotating).is_some());
+        assert!(world.get::<FlipPlatform>(flip).is_some());
+        assert!(world.get::<CollapsePlatform>(collapse).is_some());
+        assert!(world.get::<SpikePlatformHazard>(spikes).is_some());
+        assert_eq!(
+            world.get::<crate::engine::physics::prelude::RigidBody>(moving),
+            Some(&crate::engine::physics::prelude::RigidBody::KinematicPositionBased)
         );
         let _ = std::fs::remove_dir_all(root);
     }

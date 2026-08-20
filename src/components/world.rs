@@ -184,6 +184,51 @@ pub struct SpringJumpPad {
     pub force_hoverboard: bool,
 }
 
+/// Jump-triggered panel that rotates to its opposite traversal face. The
+/// authored transform remains the stable base so repeated toggles never drift.
+#[derive(Component, Debug, Clone)]
+pub struct FlipPlatform {
+    pub base_rotation: Quat,
+    pub flipped: bool,
+    pub progress: f32,
+    pub turn_seconds: f32,
+    pub trigger_radius: f32,
+    pub cooldown: f32,
+    pub cooldown_timer: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CollapsePlatformState {
+    #[default]
+    Armed,
+    Warning,
+    Fallen,
+    Resetting,
+}
+
+/// Timed bridge that warns, drops out, and restores itself. State is shared by
+/// the platform while contact tests are per player, preventing co-op riders
+/// from racing independent copies of the same bridge state.
+#[derive(Component, Debug, Clone)]
+pub struct CollapsePlatform {
+    pub origin: Vec3,
+    pub size: Vec3,
+    pub warning_seconds: f32,
+    pub fallen_seconds: f32,
+    pub drop_distance: f32,
+    pub timer: f32,
+    pub state: CollapsePlatformState,
+}
+
+/// Environmental contact hazard with independent retrigger timers for P1–P4.
+#[derive(Component, Debug, Clone)]
+pub struct SpikePlatformHazard {
+    pub size: Vec3,
+    pub damage: f32,
+    pub cooldown: f32,
+    pub cooldown_timers: [f32; 4],
+}
+
 /// An authored grind line. Players and hoverboards snap to the line when they
 /// land close to it, travel independently, and receive an exit impulse.
 #[derive(Component, Debug, Clone, Copy)]

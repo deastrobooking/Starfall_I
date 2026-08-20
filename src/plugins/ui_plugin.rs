@@ -1,4 +1,5 @@
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::{CursorMoved, PrimaryWindow};
@@ -946,19 +947,27 @@ impl MenuDirection {
     }
 }
 
+/// Read-only input and state used by shared menu focus navigation. Grouping
+/// these related parameters keeps the system below Bevy's direct-parameter
+/// limit and gives future input sources one clear integration boundary.
+#[derive(SystemParam)]
+struct MenuFocusInputs<'w> {
+    time: Res<'w, Time>,
+    state: Res<'w, State<AppState>>,
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    mouse_buttons: Res<'w, ButtonInput<MouseButton>>,
+    native: Res<'w, NativeControllerState>,
+    assignments: Res<'w, GamepadAssignments>,
+    settings: Res<'w, GameSettings>,
+    text_input: Res<'w, AuthoringTextInputCapture>,
+}
+
 fn menu_focus_navigation(
-    time: Res<Time>,
-    state: Res<State<AppState>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    inputs: MenuFocusInputs,
     gamepads: Query<(Entity, &Gamepad)>,
-    native: Res<NativeControllerState>,
-    assignments: Res<GamepadAssignments>,
     windows: Query<Ref<Window>, With<PrimaryWindow>>,
     mut button_events: MessageReader<GamepadButtonStateChangedEvent>,
     mut cursor_events: MessageReader<CursorMoved>,
-    settings: Res<GameSettings>,
-    text_input: Res<AuthoringTextInputCapture>,
     mut focus: ResMut<MenuFocus>,
     parents: Query<&ChildOf>,
     ui_nodes: Query<&Node>,
@@ -979,11 +988,11 @@ fn menu_focus_navigation(
         Query<&mut Interaction, (With<Button>, With<MenuFocusable>)>,
     )>,
 ) {
-    let current_state = state.get().clone();
+    let current_state = inputs.state.get().clone();
     let pressed_button_events = button_events.read().copied().collect::<Vec<_>>();
-    let ignored_overlay = assignments.native_overlay_gamepad();
+    let ignored_overlay = inputs.assignments.native_overlay_gamepad();
     let pointer_moved = cursor_events.read().count() != 0;
-    let pointer_pressed = mouse_buttons.just_pressed(MouseButton::Left);
+    let pointer_pressed = inputs.mouse_buttons.just_pressed(MouseButton::Left);
 
     // Keep both message-reader cursors current while gameplay or Character
     // Studio owns input. Otherwise an old East/Start chord can replay as Back
@@ -1004,7 +1013,7 @@ fn menu_focus_navigation(
         focus.entity = None;
     }
     if focus.entity.is_some()
-        && (settings.is_changed() || windows.iter().any(|window| window.is_changed()))
+        && (inputs.settings.is_changed() || windows.iter().any(|window| window.is_changed()))
     {
         // The first reveal can still observe the previous frame's layout;
         // keep one request for the post-layout geometry on the next frame.
@@ -1012,34 +1021,33 @@ fn menu_focus_navigation(
     }
     let previous_focus = focus.entity;
 
-    let direction_input = if text_input.active {
+    let direction_input = if inputs.text_input.active {
         MenuDirectionInput::default()
     } else {
         menu_direction_input(
-            &keyboard,
+            &inputs.keyboard,
             &gamepads,
-            &native,
+            &inputs.native,
             &pressed_button_events,
             ignored_overlay,
         )
     };
-    let direction = repeated_menu_direction(&mut focus, direction_input, time.delta_secs());
-    let (confirm_gamepad, confirm_native) = mapped_menu_face(&settings.bindings, FaceButton::South);
-    let confirm = !text_input.active
-        && (keyboard.just_pressed(KeyCode::Enter)
-            || keyboard.just_pressed(KeyCode::NumpadEnter)
-            || keyboard.just_pressed(KeyCode::Space)
-            || gamepads
-                .iter()
-                .any(|(entity, gamepad)| {
-                    Some(entity) != ignored_overlay && gamepad.just_pressed(confirm_gamepad)
-                })
+    let direction = repeated_menu_direction(&mut focus, direction_input, inputs.time.delta_secs());
+    let (confirm_gamepad, confirm_native) =
+        mapped_menu_face(&inputs.settings.bindings, FaceButton::South);
+    let confirm = !inputs.text_input.active
+        && (inputs.keyboard.just_pressed(KeyCode::Enter)
+            || inputs.keyboard.just_pressed(KeyCode::NumpadEnter)
+            || inputs.keyboard.just_pressed(KeyCode::Space)
+            || gamepads.iter().any(|(entity, gamepad)| {
+                Some(entity) != ignored_overlay && gamepad.just_pressed(confirm_gamepad)
+            })
             || gamepad_button_pressed_in_events(
                 &pressed_button_events,
                 confirm_gamepad,
                 ignored_overlay,
             )
-            || native.just_pressed(confirm_native));
+            || inputs.native.just_pressed(confirm_native));
     if pointer_moved || pointer_pressed {
         focus.pointer_active = true;
     } else if direction.is_some() || confirm {

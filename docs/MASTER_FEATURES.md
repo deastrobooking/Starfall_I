@@ -170,6 +170,37 @@ Current strength:
 Current risk:
 - more of the system is spread across multiple gameplay plugins and states than ideal for long-term maintenance
 
+#### Authored platformer prefab library
+
+Starfall Forge exposes an original, recipe-driven platformer kit rather than
+requiring designers to assemble every route from generic blocks. The palette
+contains ladders, stairs, Star Towers, Star Castles, floating islands, moving
+platforms, Pulse Springs, flip panels, rotating bridges, collapse bridges, and
+spike bridges.
+
+Each prefab has:
+- a stable serialized primitive identity
+- generated geometry with an editable transform and material
+- a stock size and repeat/detail count in its designer recipe
+- explicit gameplay intent (`climbable`, `static traversal`, `oscillate`,
+  `bounce`, `flip on jump`, `rotate`, `collapse`, or `hazard`)
+- representative placement in the open-world, dungeon, airship, boss, racing,
+  and settlement level templates
+
+Current maturity boundary:
+- authoring, save/load, duplication, material application, mesh generation, and
+  template seeding are active
+- all prefab collision is derived from the same geometry as its render mesh;
+  moving platforms, Pulse Springs, and rotating bridges compile into the
+  existing co-op-aware gameplay adapters
+- flip, collapse, and spike behavior intent is data, but their trigger/damage
+  state machines are not complete runtime adapters yet
+- authored scenes still need a consumer-side scene/prefab loader before these
+  prefabs can ship from Designer projects into the Game edition without Rust
+
+Templates should introduce one traversal verb safely, develop it with a clear
+variation, add a twist, and only then combine it into a culminating sequence.
+
 ### 3.3 Combat systems
 
 Combat is robust and increasingly data-driven.
@@ -258,6 +289,8 @@ Included features:
 - draft/publish workflows
 - manifest-based content bootstrapping
 - deterministic game-side content consumption
+- a modular platformer prefab palette with generated meshes and semantic
+  behavior tags
 
 Current strength:
 - the intended separation between game and designer edition is already conceptually sound

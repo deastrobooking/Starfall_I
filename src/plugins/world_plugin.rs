@@ -432,6 +432,15 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 Update,
+                (
+                    flip_platform_system,
+                    collapse_platform_system,
+                    spike_platform_hazard_system,
+                )
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                Update,
                 wasteland_drone_patrol_system.run_if(in_state(AppState::Playing)),
             )
             .add_systems(
@@ -2252,6 +2261,179 @@ fn rotating_elevator_system(
             if horizontally_on_platform && (vertically_supported || landing_on_platform) {
                 player_transform.translation += delta;
             }
+        }
+    }
+}
+
+fn flip_platform_system(
+    time: Res<Time>,
+    mut panel_q: Query<(&mut Transform, &mut FlipPlatform)>,
+    player_q: Query<(&Transform, &PlayerInput), (With<Player>, Without<FlipPlatform>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut panel) in &mut panel_q {
+        panel.cooldown_timer = (panel.cooldown_timer - dt).max(0.0);
+        if panel.cooldown_timer <= 0.0
+            && player_q.iter().any(|(player_transform, input)| {
+                let offset = player_transform.translation - transform.translation;
+                input.jump
+                    && offset.with_y(0.0).length() <= panel.trigger_radius
+                    && offset.y.abs() <= 3.2
+            })
+        {
+            panel.flipped = !panel.flipped;
+            panel.cooldown_timer = panel.cooldown;
+        }
+
+        let target = if panel.flipped { 1.0 } else { 0.0 };
+        let step = dt / panel.turn_seconds.max(0.05);
+        panel.progress = if panel.progress < target {
+            (panel.progress + step).min(target)
+        } else {
+            (panel.progress - step).max(target)
+        };
+        let eased = panel.progress * panel.progress * (3.0 - 2.0 * panel.progress);
+        transform.rotation =
+            panel.base_rotation * Quat::from_rotation_x(std::f32::consts::PI * eased);
+    }
+}
+
+fn player_supported_by_platform(
+    player_position: Vec3,
+    movement: &PlayerMovement,
+    platform_position: Vec3,
+    size: Vec3,
+) -> bool {
+    let relative = player_position - platform_position;
+    let half = size * 0.5;
+    let feet_y = player_position.y - 0.95;
+    relative.x.abs() <= half.x + 0.55
+        && relative.z.abs() <= half.z + 0.55
+        && movement.is_grounded
+        && feet_y >= platform_position.y + half.y - 0.38
+        && feet_y <= platform_position.y + half.y + 0.68
+}
+
+fn advance_collapse_platform(
+    platform: &mut CollapsePlatform,
+    transform: &mut Transform,
+    occupied: bool,
+    dt: f32,
+) {
+    match platform.state {
+        CollapsePlatformState::Armed if occupied => {
+            platform.state = CollapsePlatformState::Warning;
+            platform.timer = 0.0;
+        }
+        CollapsePlatformState::Warning => {
+            platform.timer += dt;
+            let shake = (platform.timer * 48.0).sin() * 0.07;
+            transform.translation = platform.origin + Vec3::X * shake;
+            if platform.timer >= platform.warning_seconds {
+                platform.state = CollapsePlatformState::Fallen;
+                platform.timer = 0.0;
+            }
+        }
+        CollapsePlatformState::Fallen => {
+            platform.timer += dt;
+            let drop = (platform.timer * 8.0).min(platform.drop_distance);
+            transform.translation = platform.origin - Vec3::Y * drop;
+            if platform.timer >= platform.fallen_seconds {
+                platform.state = CollapsePlatformState::Resetting;
+                platform.timer = 0.0;
+            }
+        }
+        CollapsePlatformState::Resetting => {
+            platform.timer += dt;
+            let progress = (platform.timer / 0.45).clamp(0.0, 1.0);
+            let eased = progress * progress * (3.0 - 2.0 * progress);
+            transform.translation =
+                (platform.origin - Vec3::Y * platform.drop_distance).lerp(platform.origin, eased);
+            if progress >= 1.0 {
+                transform.translation = platform.origin;
+                platform.state = CollapsePlatformState::Armed;
+                platform.timer = 0.0;
+            }
+        }
+        CollapsePlatformState::Armed => {}
+    }
+}
+
+fn collapse_platform_system(
+    time: Res<Time>,
+    mut platform_q: Query<(&mut Transform, &mut CollapsePlatform)>,
+    player_q: Query<(&Transform, &PlayerMovement), (With<Player>, Without<CollapsePlatform>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut transform, mut platform) in &mut platform_q {
+        let occupied = platform.state == CollapsePlatformState::Armed
+            && player_q.iter().any(|(player_transform, movement)| {
+                player_supported_by_platform(
+                    player_transform.translation,
+                    movement,
+                    transform.translation,
+                    platform.size,
+                )
+            });
+        advance_collapse_platform(&mut platform, &mut transform, occupied, dt);
+    }
+}
+
+fn spike_platform_hazard_system(
+    time: Res<Time>,
+    mut hazard_q: Query<(&Transform, &mut SpikePlatformHazard)>,
+    mut player_q: Query<
+        (
+            &PlayerIndex,
+            &Transform,
+            &mut Health,
+            &mut Damageable,
+            &mut PlayerStats,
+            &mut ParryState,
+            &ArmorSet,
+        ),
+        With<Player>,
+    >,
+    mut damaged_ev: MessageWriter<PlayerDamagedEvent>,
+    mut parry_ev: MessageWriter<PlayerParryEvent>,
+) {
+    let dt = time.delta_secs();
+    for (hazard_transform, mut hazard) in &mut hazard_q {
+        for timer in &mut hazard.cooldown_timers {
+            *timer = (*timer - dt).max(0.0);
+        }
+        let half = hazard.size * 0.5;
+        let spike_top = hazard_transform.translation.y + hazard.size.y * 0.72;
+        for (index, player_transform, mut health, mut damageable, mut stats, mut parry, armor) in
+            &mut player_q
+        {
+            let slot = index.0 as usize;
+            if slot >= hazard.cooldown_timers.len() || hazard.cooldown_timers[slot] > 0.0 {
+                continue;
+            }
+            let relative = player_transform.translation - hazard_transform.translation;
+            let feet_y = player_transform.translation.y - 0.95;
+            let touching = relative.x.abs() <= half.x
+                && relative.z.abs() <= half.z
+                && feet_y >= spike_top - 0.42
+                && feet_y <= spike_top + 0.48;
+            if !touching {
+                continue;
+            }
+            crate::plugins::player_plugin::damage_player(
+                Some(index.0),
+                &mut health,
+                &mut damageable,
+                &mut stats,
+                &mut parry,
+                armor,
+                &DamageInfo::new(hazard.damage, DamageType::Collision)
+                    .with_knockback(1.4)
+                    .with_hit_direction(Vec3::Y),
+                &mut damaged_ev,
+                &mut parry_ev,
+            );
+            hazard.cooldown_timers[slot] = hazard.cooldown;
         }
     }
 }
@@ -23511,5 +23693,64 @@ mod tests {
                 "patrol at {position:?} intrudes on the protected start"
             );
         }
+    }
+
+    #[test]
+    fn collapse_platform_warns_falls_and_resets_without_drift() {
+        let origin = Vec3::new(4.0, 8.0, -3.0);
+        let mut platform = CollapsePlatform {
+            origin,
+            size: Vec3::new(8.0, 0.5, 3.0),
+            warning_seconds: 0.5,
+            fallen_seconds: 0.8,
+            drop_distance: 6.0,
+            timer: 0.0,
+            state: CollapsePlatformState::Armed,
+        };
+        let mut transform = Transform::from_translation(origin);
+
+        advance_collapse_platform(&mut platform, &mut transform, true, 0.01);
+        assert_eq!(platform.state, CollapsePlatformState::Warning);
+        advance_collapse_platform(&mut platform, &mut transform, false, 0.6);
+        assert_eq!(platform.state, CollapsePlatformState::Fallen);
+        advance_collapse_platform(&mut platform, &mut transform, false, 0.9);
+        assert_eq!(platform.state, CollapsePlatformState::Resetting);
+        advance_collapse_platform(&mut platform, &mut transform, false, 0.5);
+        assert_eq!(platform.state, CollapsePlatformState::Armed);
+        assert_eq!(transform.translation, origin);
+    }
+
+    #[test]
+    fn collapse_contact_requires_grounded_feet_on_the_deck() {
+        let platform = Vec3::new(0.0, 4.0, 0.0);
+        let size = Vec3::new(8.0, 0.5, 3.0);
+        let grounded = PlayerMovement {
+            is_grounded: true,
+            ..default()
+        };
+        let airborne = PlayerMovement {
+            is_grounded: false,
+            ..default()
+        };
+        let supported_player = Vec3::new(0.0, platform.y + size.y * 0.5 + 0.95, 0.0);
+
+        assert!(player_supported_by_platform(
+            supported_player,
+            &grounded,
+            platform,
+            size
+        ));
+        assert!(!player_supported_by_platform(
+            supported_player,
+            &airborne,
+            platform,
+            size
+        ));
+        assert!(!player_supported_by_platform(
+            supported_player + Vec3::X * 8.0,
+            &grounded,
+            platform,
+            size
+        ));
     }
 }

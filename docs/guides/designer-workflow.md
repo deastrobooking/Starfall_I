@@ -25,6 +25,25 @@ atomic writes, recovery snapshots, and draft/published hashes. Open or create
 one from the main menu's **CREATOR TOOLS** (the Project Hub). Tools refuse to
 save without an active project, and tell you so.
 
+## Level workspace and platformer prefabs
+
+Open the live level workspace with `Tab` (or boot with
+`STARFALL_EDITOR=1`). The Outliner creation palette includes structural
+prefabs—Ladder, Stairs, Star Tower, Star Castle, and Floating Island—and
+kinetic/hazard prefabs—Moving Platform, Pulse Spring, Flip Panel, Rotating
+Bridge, Collapse Bridge, and Spike Bridge.
+
+Prefab instances use the ordinary level-object workflow: select, move, rotate,
+scale, duplicate, apply a published material, validate, and save. Their stable
+primitive kinds survive project round trips; their meshes are regenerated from
+recipes rather than embedded in the project document. New level templates seed
+small examples appropriate to their setting.
+
+For a readable route, introduce one prefab in a safe context, repeat it with a
+clear variation, combine it with one second mechanic, and only then build the
+culminating sequence. Always provide a visible recovery route for aerial or
+timed challenges.
+
 ## Tool windows
 
 Authoring workspaces use one shared DCC-style window shell: drag the title bar

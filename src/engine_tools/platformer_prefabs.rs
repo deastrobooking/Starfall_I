@@ -147,7 +147,14 @@ impl PlatformerPrefabDesign {
     }
 
     pub fn mesh(self) -> Mesh {
-        build_mesh(self.validated())
+        build_geometry(self.validated()).finish()
+    }
+
+    /// Collision geometry derived from the exact same recipe as the render
+    /// mesh. Keeping this extraction here prevents preview and traversal shapes
+    /// from drifting as prefab designs evolve.
+    pub fn collider_geometry(self) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+        build_geometry(self.validated()).collision_data()
     }
 
     pub fn selection_radius(self) -> f32 {
@@ -276,9 +283,19 @@ impl MeshBuilder {
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
     }
+
+    fn collision_data(self) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+        let vertices = self.positions.into_iter().map(Vec3::from_array).collect();
+        let triangles = self
+            .indices
+            .chunks_exact(3)
+            .map(|triangle| [triangle[0], triangle[1], triangle[2]])
+            .collect();
+        (vertices, triangles)
+    }
 }
 
-fn build_mesh(design: PlatformerPrefabDesign) -> Mesh {
+fn build_geometry(design: PlatformerPrefabDesign) -> MeshBuilder {
     let mut out = MeshBuilder::default();
     let s = design.size;
     let n = usize::from(design.detail_count);
@@ -412,7 +429,7 @@ fn build_mesh(design: PlatformerPrefabDesign) -> Mesh {
             }
         }
     }
-    out.finish()
+    out
 }
 
 #[cfg(test)]
@@ -425,6 +442,17 @@ mod tests {
             let mesh = PlatformerPrefabDesign::stock(kind).mesh();
             assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
             assert!(mesh.count_vertices() > 0, "{} was empty", kind.label());
+        }
+    }
+
+    #[test]
+    fn render_and_collision_geometry_share_the_same_vertex_source() {
+        for kind in PlatformerPrefabKind::ALL {
+            let design = PlatformerPrefabDesign::stock(kind);
+            let render_vertices = design.mesh().count_vertices();
+            let (collision_vertices, collision_triangles) = design.collider_geometry();
+            assert_eq!(render_vertices, collision_vertices.len());
+            assert!(!collision_triangles.is_empty());
         }
     }
 

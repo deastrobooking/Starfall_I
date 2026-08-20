@@ -60,11 +60,15 @@ Priority: make the current campaign feel coherent rather than just large.
 
 Work:
 - tighten the most important world loops: chapter flow, dungeon states, map readability, settlements, and route flow
+- turn authored platformer prefab behavior tags into shared runtime adapters,
+  then build short introduction → development → twist → culmination routes
 - validate world density and performance before adding more content breadth
 - ensure the strongest systems are fully legible in play, not just technically present
 
 Deliverables:
 - stronger chapter and dungeon identity
+- playable ladder, spring, moving/rotating platform, flip, collapse, and hazard
+  prefab behavior with readable reset paths
 - improved world readability
 - better performance-aware content decisions
 
@@ -89,11 +93,14 @@ Priority: enforce the product boundary and make authoring reliable.
 Work:
 - keep Game edition free from editor dependencies
 - continue the publish and runtime catalog boundary work
+- bake level scenes and platformer prefab recipes into the published generation
+  and load them without a Forge project store
 - protect authored project content with validation and stable revision behavior
 
 Deliverables:
 - clean runtime/editor separation
 - reliable content publication flow
+- Designer-authored platformer routes that run in the consumer Game edition
 - less risk of editor changes breaking Player builds
 
 ### 6. Performance and validation gates

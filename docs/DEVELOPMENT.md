@@ -105,6 +105,8 @@ src/
   chapters/      The 14 chapter scripts and biome palettes.
   character_studio/, engine_tools/, robots/, lsystem/
                  In-game creation tools and their shared services.
+                 `engine_tools::platformer_prefabs` owns the traversal
+                 palette's recipe and generated-mesh source.
 ```
 
 Two rules keep this honest:
@@ -136,6 +138,11 @@ predicate rather than relying on system order — see `sabre_claims_heavy_input`
 and `hoverboard_claims_trick_input`. Those predicates are deliberately
 independent of cooldowns so behaviour can never depend on which system ran
 first.
+
+**Prefab behavior is semantic.** Platformer meshes do not define gameplay by
+shape or display name. `PlatformerPrefabKind::behavior()` is the stable intent
+boundary. Runtime adapters consume that intent; project files keep stable
+prefab identities and never serialize Bevy entities or asset handles.
 
 ## Editions
 
