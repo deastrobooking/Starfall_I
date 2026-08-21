@@ -297,7 +297,7 @@ impl CreatureSpec {
                 style.has_backpack = true;
             }
         }
-        style.validate();
+        style.apply_semantic_style();
         style
     }
 }

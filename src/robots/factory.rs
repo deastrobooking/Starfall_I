@@ -6,6 +6,9 @@ use super::creature::{
 use super::designer::{HeadShape, LegStyle, RobotStyle, VisorStyle};
 use bevy::prelude::*;
 
+use crate::character::procedural_meshes::{
+    bezier_sweep_mesh, CubicBezier3, CubicBezierRadii, SweepMeshSettings,
+};
 use crate::engine::rendering::{PbrBundle, SpatialBundle};
 
 /// Procedurally generate a robot mesh hierarchy at the given world position.
@@ -519,35 +522,52 @@ fn spawn_robot_with_material_response(
         }
     }
 
-    // ── Tail: Capsule3d segments tapering toward tip ───────────────────────────
+    // ── Tail: continuous Bézier sweep with parallel-transport frames ──────────
     if style.has_tail {
         let tl = style.tail_length * s;
-        let seg = style.tail_segments;
-        let seg_len = tl / seg as f32;
-        let mut tail_z = -td * 0.5;
-        for i in 0..seg {
-            let t = i as f32 / seg as f32;
-            let radius = ((0.07 - t * 0.05) * tl).max(0.012 * tl);
-            let segment = commands
-                .spawn(PbrBundle {
-                    mesh: Mesh3d(add_part(
-                        meshes,
-                        &style.modifiers,
-                        Capsule3d::new(radius, seg_len * 0.82),
-                    )),
-                    material: MeshMaterial3d(secondary_mat.clone()),
-                    transform: Transform::from_xyz(
-                        0.0,
-                        th * 0.3 - t * th * 0.4,
-                        tail_z - seg_len * 0.5,
-                    )
-                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                    ..default()
-                })
-                .id();
-            commands.entity(root).add_child(segment);
-            tail_z -= seg_len;
-        }
+        let semantic = style.style_vector.smoothed();
+        let lateral_bend = tl * (0.08 + semantic.creature * 0.08);
+        let tail = commands
+            .spawn(PbrBundle {
+                mesh: Mesh3d(add_part(
+                    meshes,
+                    &style.modifiers,
+                    bezier_sweep_mesh(
+                        CubicBezier3 {
+                            start: Vec3::new(0.0, th * 0.30, -td * 0.50),
+                            control_start: Vec3::new(
+                                lateral_bend,
+                                th * 0.20,
+                                -td * 0.50 - tl * 0.24,
+                            ),
+                            control_end: Vec3::new(
+                                -lateral_bend * 0.55,
+                                -th * 0.02,
+                                -td * 0.50 - tl * 0.72,
+                            ),
+                            end: Vec3::new(lateral_bend * 0.22, -th * 0.12, -td * 0.50 - tl),
+                        },
+                        CubicBezierRadii {
+                            start: Vec2::splat((tl * 0.07).max(0.012)),
+                            control_start: Vec2::new(tl * 0.060, tl * 0.056),
+                            control_end: Vec2::new(tl * 0.030, tl * 0.026),
+                            end: Vec2::splat((tl * 0.010).max(0.004)),
+                        },
+                        SweepMeshSettings {
+                            rings: (style.tail_segments as usize * 3).max(8),
+                            sectors: 12,
+                            profile_exponent: (1.85 - semantic.mechanical * 0.72
+                                + semantic.creature * 0.10)
+                                .clamp(0.75, 2.0),
+                            cap_ends: true,
+                        },
+                    ),
+                )),
+                material: MeshMaterial3d(secondary_mat.clone()),
+                ..default()
+            })
+            .id();
+        commands.entity(root).add_child(tail);
     }
 
     // ── Antennae: thin Capsule3d + Sphere glow tip ────────────────────────────

@@ -112,6 +112,10 @@ pub fn build_starfall_app(mode: StarfallAppMode) -> App {
                     .set(ImagePlugin::default_nearest())
                     .set(production_asset_plugin()),
             );
+            app.add_plugins((
+                bevy::dev_tools::infinite_grid::InfiniteGridPlugin,
+                bevy::gizmos::prelude::TransformGizmoPlugin,
+            ));
         }
         StarfallAppMode::Headless => {
             app.add_plugins((

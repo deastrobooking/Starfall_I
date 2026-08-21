@@ -588,6 +588,10 @@ pub struct CharacterSpec {
     pub body: BodySpec,
     pub face: FaceSpec,
     pub style: StyleSpec,
+    /// Semantic geometry coordinates shared with the creature/enemy Forge.
+    /// They drive generated proportions without exposing anonymous vertices.
+    #[serde(default)]
+    pub style_vector: crate::character::style_space::CharacterStyleVector,
     /// Blender-style non-destructive modifier slots applied to every generated
     /// body-part mesh (fixed size keeps the spec `Copy`; `None` slots are
     /// skipped).
@@ -599,6 +603,11 @@ pub struct CharacterSpec {
 /// list; generators translate each into a named morph in the patch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MorphField {
+    Fantasy,
+    Cute,
+    Heroic,
+    Mechanical,
+    Creature,
     Height,
     Muscle,
     Weight,
@@ -628,7 +637,12 @@ pub enum MorphField {
 }
 
 impl MorphField {
-    pub const ALL: [MorphField; 26] = [
+    pub const ALL: [MorphField; 31] = [
+        MorphField::Fantasy,
+        MorphField::Cute,
+        MorphField::Heroic,
+        MorphField::Mechanical,
+        MorphField::Creature,
         MorphField::Height,
         MorphField::Muscle,
         MorphField::Weight,
@@ -659,6 +673,11 @@ impl MorphField {
 
     pub fn label(self) -> &'static str {
         match self {
+            MorphField::Fantasy => "Fantasy",
+            MorphField::Cute => "Cute / Chibi",
+            MorphField::Heroic => "Heroic",
+            MorphField::Mechanical => "Mechanical",
+            MorphField::Creature => "Creature",
             MorphField::Height => "Height",
             MorphField::Muscle => "Muscle",
             MorphField::Weight => "Weight",
@@ -690,6 +709,11 @@ impl MorphField {
 
     pub fn get(self, spec: &CharacterSpec) -> f32 {
         match self {
+            MorphField::Fantasy => spec.style_vector.fantasy,
+            MorphField::Cute => spec.style_vector.cute,
+            MorphField::Heroic => spec.style_vector.heroic,
+            MorphField::Mechanical => spec.style_vector.mechanical,
+            MorphField::Creature => spec.style_vector.creature,
             MorphField::Height => spec.body.height,
             MorphField::Muscle => spec.body.muscle,
             MorphField::Weight => spec.body.weight,
@@ -722,6 +746,11 @@ impl MorphField {
     pub fn set(self, spec: &mut CharacterSpec, value: f32) {
         let v = value.clamp(0.0, 1.0);
         match self {
+            MorphField::Fantasy => spec.style_vector.fantasy = v,
+            MorphField::Cute => spec.style_vector.cute = v,
+            MorphField::Heroic => spec.style_vector.heroic = v,
+            MorphField::Mechanical => spec.style_vector.mechanical = v,
+            MorphField::Creature => spec.style_vector.creature = v,
             MorphField::Height => spec.body.height = v,
             MorphField::Muscle => spec.body.muscle = v,
             MorphField::Weight => spec.body.weight = v,
@@ -797,6 +826,10 @@ mod tests {
         assert_eq!(old.face.lip_fullness, 0.5);
         assert_eq!(old.body.chest_shape, 0.5);
         assert_eq!(old.style.flair, FlairStyle::None);
+        assert_eq!(
+            old.style_vector,
+            crate::character::style_space::CharacterStyleVector::default()
+        );
 
         let mut modern = old;
         modern.style.hair = HairStyle::Feathered;

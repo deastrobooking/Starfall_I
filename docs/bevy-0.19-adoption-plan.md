@@ -69,7 +69,7 @@ Acceptance: all automated gates pass; the main menu, player lobby, one-player
 camera, four-player camera, Forge entry/exit, and one combat encounter pass a
 manual smoke test.
 
-### B19-1 — Forge viewport foundation
+### B19-1 — Forge viewport foundation *(core landed 2026-08-21)*
 
 - Add `InfiniteGridPlugin` only while Forge is active. Configure per-camera
   colors, major-axis emphasis, line scale, and fade distance to match the
@@ -85,6 +85,44 @@ manual smoke test.
 Acceptance: mouse and controller can select and transform the same objects;
 undo/redo creates one transaction per drag; grid and handles remain readable at
 near, city, and world scales.
+
+Status: the production Designer now enables Bevy's `InfiniteGridPlugin` and
+`TransformGizmoPlugin`. Forge maps its persistent active selection, tool mode,
+world/local space, translation/rotation/scale snapping, and undo transaction
+boundary through a Starfall adapter. The original finite grid and transform
+implementation remain available to reduced/headless plugin harnesses. Manual
+Metal readability and pointer-over-window smoke testing remains; semantic text
+labels are the next contained viewport addition.
+
+### B19-1.5 — Semantic character geometry *(foundation landed 2026-08-21)*
+
+- Share a serializable five-axis style vector across Character Studio and
+  Creature Forge: Fantasy, Cute/Chibi, Heroic, Mechanical, and Creature.
+- Project style intent into generator-specific anatomy rather than directly
+  editing vertices. Human preview geometry, playable `BodyRecipe` output, and
+  compiled creature/enemy geometry all consume the same coordinates.
+- Keep style projection non-destructive: saved base dimensions remain stable,
+  compilation works from a clone, smoothstep interpolation avoids slider kinks,
+  and old files deserialize to a neutral vector.
+- Reusable cubic Bézier paths, Bézier radius profiles, capped stable-topology
+  sweeps, superellipse cross-sections, and parallel-transport frames landed in
+  the shared character module. Character Studio side ponytails, playable hero
+  hair locks, and compiled enemy tails consume the same primitive; tail segment
+  count now controls continuous sweep tessellation instead of disconnected
+  capsules, while existing modifier stacks remain downstream-compatible.
+- Continue extraction in this order: shared lofted torso/limb topology;
+  dependency-scoped regeneration; generated skin weights; then morph-target
+  authoring.
+
+Acceptance: both editors expose all five axes; presets establish distinct
+style-space positions; Character Studio exports the visible proportions into
+playable characters; Creature Forge compilation never compounds dimensions;
+legacy recipes load unchanged.
+
+Sweep-slice acceptance: curve edits retain vertex/index counts at a fixed
+tessellation; generated positions and normals remain finite; neighboring
+parallel-transport frames do not flip; player and enemy runtime generators both
+consume the shared primitive without a recipe migration.
 
 ### B19-2 — Editor UI and settings pilot
 

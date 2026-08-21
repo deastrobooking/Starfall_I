@@ -31,7 +31,13 @@ pub mod weapon_records;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use bevy::dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridSettings};
 use bevy::ecs::system::SystemParam;
+use bevy::gizmos::prelude::{
+    TransformGizmoCamera, TransformGizmoFocus, TransformGizmoMode as BevyTransformGizmoMode,
+    TransformGizmoSettings as BevyTransformGizmoSettings,
+    TransformGizmoSpace as BevyTransformGizmoSpace, TransformGizmoState, TransformGizmoSystems,
+};
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
 use bevy::input::keyboard::Key;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
@@ -736,6 +742,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorCameraRig>()
             .init_resource::<EditorGizmoSettings>()
             .init_resource::<EditorDragState>()
+            .init_resource::<BevyTransformGizmoAdapterDrag>()
             .init_resource::<WorldKitTopologyDragState>()
             .init_resource::<EditorPendingTransactions>()
             .init_resource::<EditorAdapterBaselines>()
@@ -758,6 +765,12 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorArmedLevelTemplate>()
             .init_resource::<EditorLevelDeleteArm>()
             .register_type::<EditorEntityId>()
+            .configure_sets(
+                PostUpdate,
+                TransformGizmoSystems
+                    .run_if(in_state(EngineToolMode::Editing))
+                    .run_if(bevy_transform_gizmo_pointer_available),
+            )
             .add_systems(Startup, bootstrap_published_content_catalogs)
             .add_systems(
                 Update,
@@ -786,6 +799,7 @@ impl Plugin for EngineToolsPlugin {
                     editor_search_input,
                     editor_controller_navigation,
                     keep_editor_focus_in_view,
+                    sync_bevy_transform_gizmo,
                     editor_gizmo_drag,
                     world_kit_topology_gizmo_drag,
                     editor_viewport_picking,
@@ -801,6 +815,12 @@ impl Plugin for EngineToolsPlugin {
                 )
                     .chain()
                     .after(tool_windows::ToolWindowSystemSet::PointerState)
+                    .run_if(in_state(EngineToolMode::Editing)),
+            )
+            .add_systems(
+                PostUpdate,
+                record_bevy_transform_gizmo_transaction
+                    .after(TransformGizmoSystems)
                     .run_if(in_state(EngineToolMode::Editing)),
             );
     }
@@ -1181,6 +1201,9 @@ struct EditorWorkspaceRoot;
 struct EditorCamera;
 
 #[derive(Component)]
+struct EditorInfiniteGrid;
+
+#[derive(Component)]
 struct EditorSummaryText;
 
 #[derive(Component)]
@@ -1513,6 +1536,9 @@ struct ActiveEditorDrag {
 #[derive(Resource, Default)]
 struct EditorDragState(Option<ActiveEditorDrag>);
 
+#[derive(Resource, Default)]
+struct BevyTransformGizmoAdapterDrag(Option<(EditorEntityId, Transform)>);
+
 #[derive(Debug, Clone)]
 struct ActiveTopologyDrag {
     content_id: String,
@@ -1692,6 +1718,7 @@ fn enter_editor_workspace(
     mut registry: ResMut<EditorRegistryState>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut material_assets: ForgeMaterialAssets,
+    bevy_gizmo: Option<Res<BevyTransformGizmoSettings>>,
 ) {
     virtual_time.pause();
     physics_time.pause();
@@ -1721,9 +1748,13 @@ fn enter_editor_workspace(
 
     commands.spawn((
         EditorCamera,
+        TransformGizmoCamera,
         Camera3d::default(),
         Camera {
-            order: 100,
+            // Bevy's transform-gizmo overlay camera renders at order 1.
+            // Player cameras are inactive in Forge, so order 0 keeps the
+            // editor view below that overlay without sacrificing UI.
+            order: 0,
             ..default()
         },
         Projection::Perspective(PerspectiveProjection {
@@ -1733,6 +1764,24 @@ fn enter_editor_workspace(
         all_gameplay_render_layers(),
         camera_transform,
     ));
+
+    if bevy_gizmo.is_some() {
+        commands.spawn((
+            EditorWorkspaceRoot,
+            EditorInfiniteGrid,
+            Name::new("Forge Infinite Grid"),
+            InfiniteGrid,
+            InfiniteGridSettings {
+                x_axis_color: Color::srgb(1.0, 0.18, 0.58),
+                z_axis_color: Color::srgb(0.10, 0.68, 1.0),
+                minor_line_color: Color::srgba(0.12, 0.30, 0.42, 0.44),
+                major_line_color: Color::srgba(0.22, 0.68, 0.78, 0.62),
+                fadeout_distance: 600.0,
+                dot_fadeout_strength: 0.34,
+                scale: 1.0,
+            },
+        ));
+    }
 
     let preview_center = camera_transform.translation + camera_transform.forward() * 5.0;
     let preview_right = Vec3::from(camera_transform.right());
@@ -2860,12 +2909,14 @@ fn exit_editor_workspace(
     mut commands: Commands,
     roots: Query<Entity, With<EditorWorkspaceRoot>>,
     editor_cameras: Query<Entity, With<EditorCamera>>,
+    focused: Query<Entity, With<TransformGizmoFocus>>,
     mut player_cameras: Query<&mut Camera, With<PlayerCamera>>,
     mut players: Query<&mut PlayerInput, With<Player>>,
     mut virtual_time: ResMut<Time<Virtual>>,
     mut physics_time: ResMut<Time<Physics>>,
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut topology_drag: ResMut<WorldKitTopologyDragState>,
+    mut bevy_drag: ResMut<BevyTransformGizmoAdapterDrag>,
     mut session: ResMut<EditorProjectSession>,
 ) {
     if let Some(drag) = topology_drag.0.take() {
@@ -2881,6 +2932,10 @@ fn exit_editor_workspace(
     for entity in roots.iter().chain(editor_cameras.iter()) {
         commands.entity(entity).despawn();
     }
+    for entity in &focused {
+        commands.entity(entity).remove::<TransformGizmoFocus>();
+    }
+    bevy_drag.0 = None;
     for mut camera in &mut player_cameras {
         camera.is_active = true;
     }
@@ -4118,6 +4173,120 @@ fn editor_ui_captures_pointer(
     tool_window_captures_pointer || chrome_surfaces.into_iter().any(|cursor_over| cursor_over)
 }
 
+/// Prevents the upstream transform gizmo from beginning a drag through Forge's
+/// floating chrome. Once Bevy owns a drag, it keeps receiving updates until
+/// release even if the pointer crosses a panel.
+fn bevy_transform_gizmo_pointer_available(
+    tool_window_pointer: Option<Res<tool_windows::ToolWindowPointerState>>,
+    chrome_surfaces: Query<&RelativeCursorPosition, With<EditorChromeSurface>>,
+    bevy_state: Option<Res<TransformGizmoState>>,
+) -> bool {
+    editor_viewport_pointer_available(
+        editor_ui_captures_pointer(
+            tool_window_pointer.is_some_and(|pointer| pointer.captures_viewport()),
+            chrome_surfaces
+                .iter()
+                .map(RelativeCursorPosition::cursor_over),
+        ),
+        bevy_state.is_some_and(|state| state.active),
+    )
+}
+
+/// Maps Starfall's persistent selection and controller-friendly tool settings
+/// onto Bevy 0.19's viewport gizmo. Persistent IDs and undo remain owned by
+/// Forge; the upstream gizmo only performs the pointer-space manipulation.
+fn sync_bevy_transform_gizmo(
+    mut commands: Commands,
+    selection: Res<EditorSelection>,
+    settings: Res<EditorGizmoSettings>,
+    mut bevy_settings: Option<ResMut<BevyTransformGizmoSettings>>,
+    authorables: Query<
+        (
+            Entity,
+            &EditorEntityId,
+            &EditorAccess,
+            Has<TransformGizmoFocus>,
+        ),
+        With<Authorable>,
+    >,
+) {
+    if let Some(bevy_settings) = bevy_settings.as_deref_mut() {
+        bevy_settings.mode = match settings.mode {
+            EditorGizmoMode::Translate => BevyTransformGizmoMode::Translate,
+            EditorGizmoMode::Rotate => BevyTransformGizmoMode::Rotate,
+            EditorGizmoMode::Scale => BevyTransformGizmoMode::Scale,
+        };
+        bevy_settings.space = match settings.space {
+            EditorTransformSpace::World => BevyTransformGizmoSpace::World,
+            EditorTransformSpace::Local => BevyTransformGizmoSpace::Local,
+        };
+        bevy_settings.snap_translate = Some(settings.translation_snap());
+        bevy_settings.snap_rotate = Some(15.0_f32.to_radians());
+        bevy_settings.snap_scale = Some(0.1);
+        bevy_settings.axis_length = 1.25;
+        bevy_settings.rotate_ring_radius = 1.15;
+        bevy_settings.screen_scale_factor = 0.105;
+    }
+
+    let active = selection.active();
+    for (entity, id, access, focused) in &authorables {
+        let should_focus = Some(*id) == active && *access == EditorAccess::Editable;
+        match (focused, should_focus) {
+            (false, true) => {
+                commands.entity(entity).insert(TransformGizmoFocus);
+            }
+            (true, false) => {
+                commands.entity(entity).remove::<TransformGizmoFocus>();
+            }
+            _ => {}
+        }
+    }
+}
+
+fn record_bevy_transform_gizmo_transaction(
+    bevy_state: Option<Res<TransformGizmoState>>,
+    mut adapter: ResMut<BevyTransformGizmoAdapterDrag>,
+    authorables: Query<(&EditorEntityId, &Transform), With<Authorable>>,
+    mut pending: ResMut<EditorPendingTransactions>,
+    mut status: ResMut<EditorRuntimeStatus>,
+) {
+    let Some(bevy_state) = bevy_state else {
+        adapter.0 = None;
+        return;
+    };
+    if bevy_state.active {
+        if adapter.0.is_none() {
+            if let Some(entity) = bevy_state.entity {
+                if let Ok((id, _)) = authorables.get(entity) {
+                    adapter.0 = Some((*id, bevy_state.start_transform));
+                    status.message = format!("Dragging {:?} with Bevy gizmo", bevy_state.axis);
+                }
+            }
+        }
+        return;
+    }
+
+    let Some((id, before)) = adapter.0.take() else {
+        return;
+    };
+    let Some((_, after)) = authorables.iter().find(|(candidate, _)| **candidate == id) else {
+        status.message = "Transform drag cancelled because its object disappeared".into();
+        return;
+    };
+    if *after == before {
+        status.message = "Transform drag cancelled".into();
+        return;
+    }
+    pending.0.push(EditorTransaction {
+        description: "Bevy transform gizmo drag".into(),
+        commands: vec![EditorCommand::SetTransform {
+            id,
+            before,
+            after: *after,
+        }],
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn editor_gizmo_drag(
     mouse: Res<ButtonInput<MouseButton>>,
@@ -4137,7 +4306,13 @@ fn editor_gizmo_drag(
         &GlobalTransform,
         &EditorAccess,
     )>,
+    bevy_gizmo: Option<Res<BevyTransformGizmoSettings>>,
 ) {
+    // Production uses Bevy 0.19's precise ray/axis implementation. Headless
+    // and reduced plugin harnesses retain the proven Starfall fallback.
+    if bevy_gizmo.is_some() {
+        return;
+    }
     if text_capture.0 {
         return;
     }
@@ -8786,6 +8961,8 @@ fn draw_editor_gizmos(
     settings: Res<EditorGizmoSettings>,
     session: Res<EditorProjectSession>,
     registry: Res<EditorRegistryState>,
+    infinite_grids: Query<(), With<EditorInfiniteGrid>>,
+    bevy_gizmo: Option<Res<BevyTransformGizmoSettings>>,
     sandbox_roots: Query<(&WorldKitGeneratedRoot, &GlobalTransform)>,
     authorables: Query<
         (
@@ -8797,19 +8974,23 @@ fn draw_editor_gizmos(
         With<Authorable>,
     >,
 ) {
-    let grid_color = Color::srgba(0.18, 0.32, 0.42, 0.35);
-    for step in -20..=20 {
-        let coordinate = step as f32;
-        gizmos.line(
-            Vec3::new(coordinate, 0.02, -20.0),
-            Vec3::new(coordinate, 0.02, 20.0),
-            grid_color,
-        );
-        gizmos.line(
-            Vec3::new(-20.0, 0.02, coordinate),
-            Vec3::new(20.0, 0.02, coordinate),
-            grid_color,
-        );
+    // Reduced/headless plugin harnesses keep the finite immediate-mode grid.
+    // Production Forge uses Bevy's anti-aliased, distance-fading grid shader.
+    if infinite_grids.is_empty() {
+        let grid_color = Color::srgba(0.18, 0.32, 0.42, 0.35);
+        for step in -20..=20 {
+            let coordinate = step as f32;
+            gizmos.line(
+                Vec3::new(coordinate, 0.02, -20.0),
+                Vec3::new(coordinate, 0.02, 20.0),
+                grid_color,
+            );
+            gizmos.line(
+                Vec3::new(-20.0, 0.02, coordinate),
+                Vec3::new(20.0, 0.02, coordinate),
+                grid_color,
+            );
+        }
     }
 
     if let Some(record) = session.project.records.get(registry.selected) {
@@ -8964,7 +9145,7 @@ fn draw_editor_gizmos(
             Color::srgb(0.25, 1.0, 0.35),
             Color::srgb(0.22, 0.55, 1.0),
         ];
-        if *access == EditorAccess::Editable {
+        if *access == EditorAccess::Editable && bevy_gizmo.is_none() {
             match settings.mode {
                 EditorGizmoMode::Translate | EditorGizmoMode::Scale => {
                     for (axis, color) in axes.into_iter().zip(colors) {

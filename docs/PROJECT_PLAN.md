@@ -107,6 +107,16 @@ Priority: enforce the product boundary and make authoring reliable.
 Work:
 - keep Game edition free from editor dependencies
 - continue the publish and runtime catalog boundary work
+- complete the Bevy 0.19 Forge viewport rollout: the technicolor infinite grid
+  and selection/space/snap/undo transform-gizmo adapter are active; next add
+  semantic socket, spawn, route, water-flow, and mode-boundary text labels
+- extend the shared semantic character geometry foundation now used by both
+  Character Studio and Creature Forge: five style coordinates drive preview,
+  playable player recipes, and compiled enemy geometry; reusable cubic Bézier
+  paths, Bézier radius profiles, stable sweep topology, and parallel-transport
+  frames now drive Studio hair, playable hero locks, and continuous enemy
+  tails; next extract shared lofted torso/limb topology and dependency-scoped
+  regeneration before generated skin weights and morph targets
 - bake level scenes and platformer prefab recipes into the published generation
   and load them without a Forge project store
 - protect authored project content with validation and stable revision behavior
@@ -114,6 +124,8 @@ Work:
 Deliverables:
 - clean runtime/editor separation
 - reliable content publication flow
+- one semantic player/enemy character vocabulary without duplicated generator
+  controls or anonymous-vertex source data
 - Designer-authored platformer routes that run in the consumer Game edition
 - less risk of editor changes breaking Player builds
 

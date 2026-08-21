@@ -175,6 +175,12 @@ impl PresetGenerator for BodyGenerator {
         patch.morphs.insert("hips_wide", b.hip_width);
         patch.morphs.insert("limb_length", b.limb_length);
         patch.morphs.insert("body_chest_shape", b.chest_shape);
+        let style = spec.style_vector.validated();
+        patch.morphs.insert("style_fantasy", style.fantasy);
+        patch.morphs.insert("style_cute", style.cute);
+        patch.morphs.insert("style_heroic", style.heroic);
+        patch.morphs.insert("style_mechanical", style.mechanical);
+        patch.morphs.insert("style_creature", style.creature);
     }
 }
 
@@ -368,6 +374,7 @@ pub fn preset_female() -> CharacterSpec {
 /// and saturated 1970s space-opera colours.
 pub fn preset_star_hero() -> CharacterSpec {
     let mut spec = preset_male();
+    spec.style_vector = crate::character::style_space::CharacterStyleVector::STARFALL_HERO;
     spec.body.height = 0.46;
     spec.body.muscle = 0.62;
     spec.body.limb_length = 0.44;
@@ -399,6 +406,9 @@ pub fn preset_star_hero() -> CharacterSpec {
 /// and crimson eyes. It remains fully editable after applying the preset.
 pub fn preset_shadow_raider() -> CharacterSpec {
     let mut spec = preset_male();
+    spec.style_vector.fantasy = 0.46;
+    spec.style_vector.heroic = 0.66;
+    spec.style_vector.mechanical = 0.22;
     spec.body.height = 0.62;
     spec.body.muscle = 0.70;
     spec.face.jaw_width = 0.66;
@@ -434,6 +444,9 @@ pub fn preset_shadow_raider() -> CharacterSpec {
 /// camera and top-down cave levels.
 pub fn preset_mana_adventurer() -> CharacterSpec {
     let mut spec = preset_female();
+    spec.style_vector.fantasy = 0.88;
+    spec.style_vector.cute = 0.56;
+    spec.style_vector.heroic = 0.32;
     spec.body.height = 0.35;
     spec.body.limb_length = 0.38;
     spec.face.eye_size = 0.76;
@@ -464,6 +477,9 @@ pub fn preset_mana_adventurer() -> CharacterSpec {
 /// Contemporary street-clothes seed for city characters and civilians.
 pub fn preset_street_runner() -> CharacterSpec {
     let mut spec = preset_female();
+    spec.style_vector.cute = 0.16;
+    spec.style_vector.heroic = 0.42;
+    spec.style_vector.mechanical = 0.18;
     spec.body.muscle = 0.58;
     spec.body.limb_length = 0.58;
     spec.face.eye_size = 0.62;
@@ -487,6 +503,8 @@ pub fn preset_street_runner() -> CharacterSpec {
 /// named preset rather than leaving it hidden in the armor style selector.
 pub fn preset_mecha_robot() -> CharacterSpec {
     let mut spec = preset_male();
+    spec.style_vector.heroic = 0.72;
+    spec.style_vector.mechanical = 0.95;
     spec.body.height = 0.52;
     spec.body.muscle = 0.82;
     spec.body.shoulder_width = 0.76;
@@ -710,6 +728,18 @@ mod tests {
         assert_eq!(patch.morph("face_brow_angle"), 0.81);
         assert_eq!(patch.morph("face_lip_full"), 0.63);
         assert_eq!(patch.morph("body_chest_shape"), 0.69);
+    }
+
+    #[test]
+    fn semantic_style_coordinates_reach_the_geometry_patch() {
+        let mut spec = CharacterSpec::default();
+        spec.style_vector.fantasy = 0.77;
+        spec.style_vector.cute = 0.32;
+        spec.style_vector.mechanical = 0.91;
+        let patch = build_character_patch(&spec);
+        assert_eq!(patch.morph("style_fantasy"), 0.77);
+        assert_eq!(patch.morph("style_cute"), 0.32);
+        assert_eq!(patch.morph("style_mechanical"), 0.91);
     }
 
     #[test]

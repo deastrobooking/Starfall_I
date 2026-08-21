@@ -5,7 +5,9 @@ use crate::character::face::FaceSide;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
-use crate::character::procedural_meshes::superellipsoid_mesh;
+use crate::character::procedural_meshes::{
+    bezier_sweep_mesh, superellipsoid_mesh, CubicBezier3, CubicBezierRadii, SweepMeshSettings,
+};
 use crate::components::character::{
     default_joint_for_part, CartoonPart, CartoonPartKind, JointKind,
 };
@@ -3994,6 +3996,35 @@ fn spawn_head_open_face(
             hair_mat.clone(),
             Transform::from_xyz(sign * 0.22 * s, head_y + 0.02 * s, 0.05 * s)
                 .with_scale(Vec3::new(0.52, 0.72, 0.80)),
+            PartSlotTag::Head,
+        );
+    }
+    // Continuous side locks introduce the same curve-based silhouette used by
+    // Character Studio. Unlike stacked capsules, the strand bends without
+    // seams and retains stable topology as proportions change.
+    for sign in [-1.0_f32, 1.0_f32] {
+        spawn_part(
+            commands,
+            meshes,
+            root,
+            CartoonPartKind::Hair,
+            bezier_sweep_mesh(
+                CubicBezier3 {
+                    start: Vec3::new(sign * 0.245 * s, head_y + 0.12 * s, 0.12 * s),
+                    control_start: Vec3::new(sign * 0.31 * s, head_y - 0.02 * s, 0.16 * s),
+                    control_end: Vec3::new(sign * 0.30 * s, head_y - 0.27 * s, 0.18 * s),
+                    end: Vec3::new(sign * 0.20 * s, head_y - 0.43 * s, 0.14 * s),
+                },
+                CubicBezierRadii::tapered(Vec2::new(0.065 * s, 0.050 * s), Vec2::splat(0.012 * s)),
+                SweepMeshSettings {
+                    rings: 8,
+                    sectors: 8,
+                    profile_exponent: 1.65,
+                    cap_ends: true,
+                },
+            ),
+            hair_mat.clone(),
+            Transform::IDENTITY,
             PartSlotTag::Head,
         );
     }

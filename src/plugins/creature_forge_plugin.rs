@@ -132,6 +132,11 @@ enum ForgeAction {
 /// Continuous morphology fields editable with −/+ buttons.
 #[derive(Clone, Copy, PartialEq)]
 enum ForgeField {
+    Fantasy,
+    Cute,
+    Heroic,
+    Mechanical,
+    Creature,
     Scale,
     TorsoWidth,
     TorsoHeight,
@@ -146,7 +151,12 @@ enum ForgeField {
 }
 
 impl ForgeField {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 16] = [
+        Self::Fantasy,
+        Self::Cute,
+        Self::Heroic,
+        Self::Mechanical,
+        Self::Creature,
         Self::Scale,
         Self::TorsoWidth,
         Self::TorsoHeight,
@@ -162,6 +172,11 @@ impl ForgeField {
 
     fn label(self) -> &'static str {
         match self {
+            Self::Fantasy => "Fantasy",
+            Self::Cute => "Cute / Chibi",
+            Self::Heroic => "Heroic",
+            Self::Mechanical => "Mechanical",
+            Self::Creature => "Creature",
             Self::Scale => "Scale",
             Self::TorsoWidth => "Torso Width",
             Self::TorsoHeight => "Torso Height",
@@ -178,7 +193,12 @@ impl ForgeField {
 
     fn step(self) -> f32 {
         match self {
-            Self::Scale => 0.1,
+            Self::Fantasy
+            | Self::Cute
+            | Self::Heroic
+            | Self::Mechanical
+            | Self::Creature
+            | Self::Scale => 0.1,
             _ => 2.0,
         }
     }
@@ -186,6 +206,11 @@ impl ForgeField {
     fn read(self, spec: &CreatureSpec) -> f32 {
         let style = &spec.style;
         match self {
+            Self::Fantasy => style.style_vector.fantasy,
+            Self::Cute => style.style_vector.cute,
+            Self::Heroic => style.style_vector.heroic,
+            Self::Mechanical => style.style_vector.mechanical,
+            Self::Creature => style.style_vector.creature,
             Self::Scale => style.scale,
             Self::TorsoWidth => style.torso_width,
             Self::TorsoHeight => style.torso_height,
@@ -203,6 +228,11 @@ impl ForgeField {
     fn write(self, spec: &mut CreatureSpec, value: f32) {
         let style = &mut spec.style;
         match self {
+            Self::Fantasy => style.style_vector.fantasy = value.clamp(0.0, 1.0),
+            Self::Cute => style.style_vector.cute = value.clamp(0.0, 1.0),
+            Self::Heroic => style.style_vector.heroic = value.clamp(0.0, 1.0),
+            Self::Mechanical => style.style_vector.mechanical = value.clamp(0.0, 1.0),
+            Self::Creature => style.style_vector.creature = value.clamp(0.0, 1.0),
             Self::Scale => style.scale = value.clamp(0.2, 4.0),
             Self::TorsoWidth => style.torso_width = value.clamp(6.0, 60.0),
             Self::TorsoHeight => style.torso_height = value.clamp(10.0, 90.0),
@@ -1042,6 +1072,10 @@ mod tests {
         assert_eq!(ForgeField::Scale.read(&spec), 4.0);
         ForgeField::TorsoWidth.write(&mut spec, -50.0);
         assert_eq!(ForgeField::TorsoWidth.read(&spec), 6.0);
+        ForgeField::Mechanical.write(&mut spec, 4.0);
+        ForgeField::Creature.write(&mut spec, -3.0);
+        assert_eq!(ForgeField::Mechanical.read(&spec), 1.0);
+        assert_eq!(ForgeField::Creature.read(&spec), 0.0);
     }
 
     #[test]

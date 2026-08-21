@@ -122,6 +122,10 @@ pub struct RobotStyle {
     pub extra_plating: u32,
     pub asymmetry: f32,
 
+    /// Shared semantic coordinates used by both human and enemy generators.
+    /// Creature Forge edits these non-destructively before topology compiles.
+    pub style_vector: crate::character::style_space::CharacterStyleVector,
+
     // Colors
     #[serde(with = "color_serde")]
     pub primary: Color,
@@ -194,6 +198,7 @@ impl Default for RobotStyle {
             shield_size: 30.0,
             extra_plating: 0,
             asymmetry: 0.0,
+            style_vector: crate::character::style_space::CharacterStyleVector::default(),
             primary: Color::srgb(0.3, 0.5, 0.8),
             secondary: Color::srgb(0.15, 0.25, 0.4),
             emissive: Color::srgb(0.0, 0.8, 1.0),
@@ -291,6 +296,7 @@ impl RobotStyle {
 
     /// Clamp all numeric values to valid ranges.
     pub fn validate(&mut self) {
+        self.style_vector.validate();
         self.scale = self.scale.clamp(0.3, 3.0);
         self.torso_width = self.torso_width.clamp(10.0, 50.0);
         self.torso_height = self.torso_height.clamp(20.0, 70.0);
@@ -313,5 +319,49 @@ impl RobotStyle {
         self.shield_size = self.shield_size.clamp(15.0, 55.0);
         self.extra_plating = self.extra_plating.min(3);
         self.asymmetry = self.asymmetry.clamp(0.0, 1.0);
+    }
+
+    /// Project semantic style coordinates into this generator's mechanical
+    /// dimensions. Call on a cloned recipe so sliders never compound edits.
+    pub fn apply_semantic_style(&mut self) {
+        let style = self.style_vector.smoothed();
+        self.torso_width *= 1.0 + style.heroic * 0.22 + style.mechanical * 0.12;
+        self.torso_height *= 1.0 - style.cute * 0.16 + style.heroic * 0.08;
+        self.torso_depth *= 1.0 + style.mechanical * 0.20 + style.creature * 0.14;
+        self.head_size *= 1.0 + style.fantasy * 0.08 + style.cute * 0.34 + style.creature * 0.12;
+        self.arm_length *= 1.0 + style.heroic * 0.12 + style.creature * 0.16;
+        self.arm_thickness *= 1.0 + style.heroic * 0.15 + style.mechanical * 0.12;
+        self.leg_length *= 1.0 - style.cute * 0.12 + style.heroic * 0.10 + style.creature * 0.14;
+        self.leg_thickness *= 1.0 + style.mechanical * 0.12 + style.creature * 0.18;
+        self.shoulder_pad_size *= 1.0 + style.fantasy * 0.12 + style.heroic * 0.20;
+        self.hip_pad_size *= 1.0 + style.mechanical * 0.16;
+        self.horn_length *= 1.0 + style.fantasy * 0.24 + style.creature * 0.30;
+        self.tail_length *= 1.0 + style.fantasy * 0.12 + style.creature * 0.28;
+        self.wing_span *= 1.0 + style.fantasy * 0.16 + style.creature * 0.18;
+        self.extra_plating = self
+            .extra_plating
+            .saturating_add((style.mechanical * 2.0).round() as u32)
+            .min(3);
+        self.validate();
+    }
+}
+
+#[cfg(test)]
+mod style_space_tests {
+    use super::*;
+
+    #[test]
+    fn semantic_style_projection_is_non_compounding_on_recipe_clones() {
+        let mut recipe = RobotStyle::default();
+        recipe.style_vector.heroic = 1.0;
+        recipe.style_vector.cute = 0.5;
+        let mut first = recipe.clone();
+        let mut second = recipe.clone();
+        first.apply_semantic_style();
+        second.apply_semantic_style();
+        assert_eq!(first.torso_width, second.torso_width);
+        assert_eq!(first.head_size, second.head_size);
+        assert!(first.torso_width > recipe.torso_width);
+        assert!(first.head_size > recipe.head_size);
     }
 }

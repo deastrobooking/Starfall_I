@@ -16,7 +16,10 @@ use std::f32::consts::TAU;
 
 use super::generators::{CharacterPatch, CharacterSlot, SlotContent};
 use super::spec::{ArmorStyle, BottomStyle, FlairStyle, FootStyle, HairStyle, Sex, TopStyle};
-use crate::character::procedural_meshes::{anime_eye_mesh, superellipsoid_mesh};
+use crate::character::procedural_meshes::{
+    anime_eye_mesh, bezier_sweep_mesh, superellipsoid_mesh, CubicBezier3, CubicBezierRadii,
+    SweepMeshSettings,
+};
 
 // ── Lofted column primitive ───────────────────────────────────────────────────
 
@@ -128,6 +131,10 @@ struct Proportions {
     weight: f32,
     chest_shape: f32,
     head_r: f32,
+    hand_scale: f32,
+    foot_scale: f32,
+    mechanical: f32,
+    creature: f32,
     female: bool,
 }
 
@@ -148,7 +155,14 @@ impl Proportions {
         let muscle = m(patch, "body_muscle");
         let weight = m(patch, "body_weight");
         let chest_shape = m(patch, "body_chest_shape");
-        let limb = spread(m(patch, "limb_length"), 1.0, 0.07);
+        let smooth = crate::character::style_space::CharacterStyleVector::smooth;
+        let fantasy = smooth(m(patch, "style_fantasy"));
+        let cute = smooth(m(patch, "style_cute"));
+        let heroic = smooth(m(patch, "style_heroic"));
+        let mechanical = smooth(m(patch, "style_mechanical"));
+        let creature = smooth(m(patch, "style_creature"));
+        let limb = spread(m(patch, "limb_length"), 1.0, 0.07)
+            * (1.0 + heroic * 0.07 + creature * 0.11 - cute * 0.05);
 
         let shoulder_base = if female { 0.108 } else { 0.125 };
         let hip_base = if female { 0.101 } else { 0.088 };
@@ -165,10 +179,14 @@ impl Proportions {
             head_c_y: 0.928 * h,
             knee_y: 0.285 * h,
             ankle_y: 0.042 * h,
-            shoulder_hw: spread(m(patch, "shoulders_wide"), shoulder_base, 0.020) * h * bulk,
+            shoulder_hw: spread(m(patch, "shoulders_wide"), shoulder_base, 0.020)
+                * h
+                * bulk
+                * (1.0 + heroic * 0.13 + mechanical * 0.10),
             waist_hw: spread(m(patch, "waist_width"), waist_base, 0.020)
                 * h
-                * (1.0 + (weight - 0.5) * 0.55),
+                * (1.0 + (weight - 0.5) * 0.55)
+                * (1.0 - fantasy * 0.06 - heroic * 0.05),
             hip_hw: spread(m(patch, "hips_wide"), hip_base, 0.018)
                 * h
                 * (1.0 + (weight - 0.5) * 0.30),
@@ -183,7 +201,14 @@ impl Proportions {
             chest_shape,
             // Slightly larger head and shorter facial mass create the readable
             // heroic proportions common to hand-drawn 1980s anime casts.
-            head_r: 0.0735 * h * if female { 0.98 } else { 1.0 },
+            head_r: 0.0735
+                * h
+                * (1.0 + fantasy * 0.07 + cute * 0.30 + creature * 0.12)
+                * if female { 0.98 } else { 1.0 },
+            hand_scale: 1.0 + fantasy * 0.08 + cute * 0.20 + heroic * 0.12 + creature * 0.10,
+            foot_scale: 1.0 + fantasy * 0.12 + cute * 0.24 + heroic * 0.10 + mechanical * 0.16,
+            mechanical,
+            creature,
             female,
         }
     }
@@ -192,6 +217,7 @@ impl Proportions {
         base_frac
             * self.h
             * (1.0 + (self.muscle - 0.5) * 0.34 + (self.weight - 0.5) * 0.22)
+            * (1.0 + self.mechanical * 0.08 + self.creature * 0.12)
             * if self.female { 0.90 } else { 1.0 }
     }
 }
@@ -752,7 +778,7 @@ pub fn spawn_human(
                 Transform::from_xyz(x, wrist_y + fore_len * 0.12, 0.0),
             );
         }
-        let hand_scale = if mecha { 1.6 } else { 1.0 };
+        let hand_scale = (if mecha { 1.6 } else { 1.0 }) * p.hand_scale;
         spawn_hand(
             &mut part,
             &p,
@@ -814,7 +840,7 @@ pub fn spawn_human(
         // Foot / footwear (wardrobe-aware; armor overrides).
         let armor = patch.wardrobe.armor;
         let feet_style = patch.wardrobe.feet;
-        let (foot_mat, foot_scale) = match (armor, feet_style) {
+        let (foot_mat, authored_foot_scale) = match (armor, feet_style) {
             (ArmorStyle::MechaArmor | ArmorStyle::CrystalMecha | ArmorStyle::DragonMecha, _) => {
                 (&mats.metal, 1.9)
             }
@@ -830,6 +856,7 @@ pub fn spawn_human(
                 | FootStyle::HeeledBoots,
             ) => (&mats.leather, 1.18),
         };
+        let foot_scale = authored_foot_scale * p.foot_scale;
         part(
             ovoid(
                 Vec3::new(
@@ -1426,18 +1453,28 @@ fn spawn_head(
                 Transform::from_translation(head_c + Vec3::new(0.0, hr * 0.40, hr * 0.08)),
             );
             part(
-                lofted_column(
-                    Vec2::splat(hr * 0.14),
-                    Vec2::splat(hr * 0.27),
-                    hr * 1.8,
-                    0.04,
-                    1.7,
-                    5,
-                    12,
+                bezier_sweep_mesh(
+                    CubicBezier3 {
+                        start: Vec3::ZERO,
+                        control_start: Vec3::new(hr * 0.22, -hr * 0.42, hr * 0.08),
+                        control_end: Vec3::new(hr * 0.30, -hr * 1.20, hr * 0.28),
+                        end: Vec3::new(hr * 0.08, -hr * 1.80, hr * 0.40),
+                    },
+                    CubicBezierRadii {
+                        start: Vec2::splat(hr * 0.27),
+                        control_start: Vec2::new(hr * 0.25, hr * 0.22),
+                        control_end: Vec2::new(hr * 0.13, hr * 0.11),
+                        end: Vec2::splat(hr * 0.035),
+                    },
+                    SweepMeshSettings {
+                        rings: 12,
+                        sectors: 12,
+                        profile_exponent: 1.7,
+                        cap_ends: true,
+                    },
                 ),
                 &mats.hair,
-                Transform::from_translation(head_c + Vec3::new(hr * 0.82, -hr * 0.16, hr * 0.38))
-                    .with_rotation(Quat::from_rotation_z(-0.22)),
+                Transform::from_translation(head_c + Vec3::new(hr * 0.82, hr * 0.54, hr * 0.38)),
             );
         }
     }

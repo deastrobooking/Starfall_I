@@ -30,3 +30,4 @@ pub mod parts;
 pub mod player_mesh;
 pub mod presets;
 pub mod procedural_meshes;
+pub mod style_space;

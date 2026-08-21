@@ -902,20 +902,30 @@ fn cleanup_studio(
 }
 
 pub fn studio_spec_to_blueprint(name: &str, spec: CharacterSpec) -> CharacterBlueprint {
+    let style = spec.style_vector.smoothed();
     let body = BodyRecipe {
-        height: 0.82 + spec.body.height * 0.42,
-        shoulder_width: 0.76 + spec.body.shoulder_width * 0.54,
+        height: (0.82 + spec.body.height * 0.42) * (1.0 - style.cute * 0.05),
+        shoulder_width: (0.76 + spec.body.shoulder_width * 0.54)
+            * (1.0 + style.heroic * 0.10 + style.mechanical * 0.07),
         chest_size: 0.74
             + spec.body.muscle * 0.26
             + spec.body.weight * 0.12
-            + spec.body.chest_shape * 0.18,
-        arm_length: 0.78 + spec.body.limb_length * 0.48,
-        leg_length: 0.82 + spec.body.limb_length * 0.55,
-        hand_size: 0.88 + spec.body.muscle * 0.22,
-        foot_size: 0.90 + spec.body.weight * 0.20,
-        head_size: 0.88 + spec.face.eye_size * 0.22,
+            + spec.body.chest_shape * 0.18
+            + style.heroic * 0.08
+            + style.mechanical * 0.06,
+        arm_length: (0.78 + spec.body.limb_length * 0.48)
+            * (1.0 + style.heroic * 0.06 + style.creature * 0.10),
+        leg_length: (0.82 + spec.body.limb_length * 0.55)
+            * (1.0 - style.cute * 0.05 + style.heroic * 0.05 + style.creature * 0.08),
+        hand_size: (0.88 + spec.body.muscle * 0.22)
+            * (1.0 + style.fantasy * 0.06 + style.cute * 0.16 + style.heroic * 0.08),
+        foot_size: (0.90 + spec.body.weight * 0.20)
+            * (1.0 + style.fantasy * 0.08 + style.cute * 0.18 + style.mechanical * 0.10),
+        head_size: (0.88 + spec.face.eye_size * 0.22)
+            * (1.0 + style.fantasy * 0.05 + style.cute * 0.18 + style.creature * 0.08),
         neck_length: 0.84 + spec.body.limb_length * 0.24,
-        torso_curve: (spec.body.waist_width - 0.5) * 0.34,
+        torso_curve: (spec.body.waist_width - 0.5) * 0.34 - style.fantasy * 0.04
+            + style.creature * 0.05,
         hip_width: 0.78 + spec.body.hip_width * 0.48,
         spine_posture: 0.0,
         mass: 0.74 + spec.body.weight * 0.66,
@@ -2356,6 +2366,21 @@ mod playable_tests {
         assert!(blueprint.body.height > 1.0);
         assert!(blueprint.body.leg_length > 1.0);
         assert_eq!(blueprint.animation_profile.states.len(), 9);
+    }
+
+    #[test]
+    fn semantic_style_survives_into_the_playable_body_recipe() {
+        let neutral = studio_spec_to_blueprint("Neutral", CharacterSpec::default());
+        let styled = CharacterSpec {
+            style_vector: crate::character::style_space::CharacterStyleVector::STARFALL_HERO,
+            ..default()
+        };
+        let styled = studio_spec_to_blueprint("Styled", styled);
+
+        assert!(styled.body.shoulder_width > neutral.body.shoulder_width);
+        assert!(styled.body.hand_size > neutral.body.hand_size);
+        assert!(styled.body.foot_size > neutral.body.foot_size);
+        assert!(styled.body.head_size > neutral.body.head_size);
     }
 
     #[test]

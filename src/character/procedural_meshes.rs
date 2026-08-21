@@ -7,6 +7,230 @@ fn signed_pow(value: f32, exponent: f32) -> f32 {
     value.signum() * value.abs().powf(exponent)
 }
 
+/// A cubic Bézier path used by semantic character parts such as hair, horns,
+/// tails, cables, and future limbs. Keeping the curve in generator space makes
+/// it cheap to regenerate a single part when an authored control changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicBezier3 {
+    pub start: Vec3,
+    pub control_start: Vec3,
+    pub control_end: Vec3,
+    pub end: Vec3,
+}
+
+impl CubicBezier3 {
+    pub fn sample(self, t: f32) -> Vec3 {
+        let t = t.clamp(0.0, 1.0);
+        let one_minus_t = 1.0 - t;
+        self.start * one_minus_t.powi(3)
+            + self.control_start * (3.0 * one_minus_t.powi(2) * t)
+            + self.control_end * (3.0 * one_minus_t * t * t)
+            + self.end * t.powi(3)
+    }
+
+    pub fn tangent(self, t: f32) -> Vec3 {
+        let t = t.clamp(0.0, 1.0);
+        let one_minus_t = 1.0 - t;
+        ((self.control_start - self.start) * (3.0 * one_minus_t.powi(2))
+            + (self.control_end - self.control_start) * (6.0 * one_minus_t * t)
+            + (self.end - self.control_end) * (3.0 * t * t))
+            .try_normalize()
+            .unwrap_or_else(|| (self.end - self.start).try_normalize().unwrap_or(Vec3::Y))
+    }
+}
+
+/// Cubic Bézier interpolation for the two radii of an elliptical or
+/// superelliptical sweep profile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicBezierRadii {
+    pub start: Vec2,
+    pub control_start: Vec2,
+    pub control_end: Vec2,
+    pub end: Vec2,
+}
+
+impl CubicBezierRadii {
+    pub fn tapered(start: Vec2, end: Vec2) -> Self {
+        Self {
+            start,
+            control_start: start.lerp(end, 0.28),
+            control_end: start.lerp(end, 0.72),
+            end,
+        }
+    }
+
+    pub fn sample(self, t: f32) -> Vec2 {
+        let t = t.clamp(0.0, 1.0);
+        let one_minus_t = 1.0 - t;
+        (self.start * one_minus_t.powi(3)
+            + self.control_start * (3.0 * one_minus_t.powi(2) * t)
+            + self.control_end * (3.0 * one_minus_t * t * t)
+            + self.end * t.powi(3))
+        .max(Vec2::splat(0.001))
+    }
+}
+
+/// Tessellation and silhouette controls for [`bezier_sweep_mesh`]. Vertex
+/// counts remain stable while the path and radius control points change.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SweepMeshSettings {
+    pub rings: usize,
+    pub sectors: usize,
+    /// `2.0` is elliptical; lower values produce boxier sci-fi profiles.
+    pub profile_exponent: f32,
+    pub cap_ends: bool,
+}
+
+impl Default for SweepMeshSettings {
+    fn default() -> Self {
+        Self {
+            rings: 10,
+            sectors: 12,
+            profile_exponent: 2.0,
+            cap_ends: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SweepFrame {
+    tangent: Vec3,
+    normal: Vec3,
+    binormal: Vec3,
+}
+
+fn initial_sweep_frame(tangent: Vec3) -> SweepFrame {
+    let tangent = tangent.try_normalize().unwrap_or(Vec3::Y);
+    let reference = if tangent.dot(Vec3::Y).abs() < 0.9 {
+        Vec3::Y
+    } else {
+        Vec3::X
+    };
+    let normal = tangent.cross(reference).normalize_or_zero();
+    let binormal = tangent.cross(normal).normalize_or_zero();
+    SweepFrame {
+        tangent,
+        normal,
+        binormal,
+    }
+}
+
+fn transport_sweep_frame(previous: SweepFrame, tangent: Vec3) -> SweepFrame {
+    let tangent = tangent.try_normalize().unwrap_or(previous.tangent);
+    let cross = previous.tangent.cross(tangent);
+    let dot = previous.tangent.dot(tangent).clamp(-1.0, 1.0);
+    let mut normal = if cross.length_squared() > 1.0e-10 {
+        let rotation = Quat::from_axis_angle(cross.normalize(), cross.length().atan2(dot));
+        rotation * previous.normal
+    } else if dot < 0.0 {
+        Quat::from_axis_angle(previous.binormal, PI) * previous.normal
+    } else {
+        previous.normal
+    };
+    normal = (normal - tangent * normal.dot(tangent))
+        .try_normalize()
+        .unwrap_or(previous.normal);
+    let binormal = tangent
+        .cross(normal)
+        .try_normalize()
+        .unwrap_or(previous.binormal);
+    SweepFrame {
+        tangent,
+        normal,
+        binormal,
+    }
+}
+
+/// Sweeps a tapered superellipse along a cubic Bézier path. Cross-sections use
+/// parallel-transport frames, avoiding the sudden twisting that Frenet frames
+/// produce around shallow or inflecting cartoon curves.
+pub fn bezier_sweep_mesh(
+    path: CubicBezier3,
+    radii: CubicBezierRadii,
+    settings: SweepMeshSettings,
+) -> Mesh {
+    let rings = settings.rings.max(2);
+    let sectors = settings.sectors.max(6);
+    let profile_power = 2.0 / settings.profile_exponent.max(0.2);
+    let cap_vertices = usize::from(settings.cap_ends) * 2;
+    let mut positions = Vec::with_capacity((rings + 1) * (sectors + 1) + cap_vertices);
+    let mut normals = Vec::with_capacity(positions.capacity());
+    let mut uvs = Vec::with_capacity(positions.capacity());
+    let mut indices =
+        Vec::with_capacity(rings * sectors * 6 + usize::from(settings.cap_ends) * sectors * 6);
+
+    let mut frame = initial_sweep_frame(path.tangent(0.0));
+    for ring in 0..=rings {
+        let v = ring as f32 / rings as f32;
+        if ring > 0 {
+            frame = transport_sweep_frame(frame, path.tangent(v));
+        }
+        let center = path.sample(v);
+        let radius = radii.sample(v);
+        for sector in 0..=sectors {
+            let u = sector as f32 / sectors as f32;
+            let angle = u * TAU;
+            let (sin_angle, cos_angle) = angle.sin_cos();
+            let x = radius.x * signed_pow(cos_angle, profile_power);
+            let y = radius.y * signed_pow(sin_angle, profile_power);
+            let position = center + frame.normal * x + frame.binormal * y;
+            let normal = (frame.normal * (x / radius.x.powi(2))
+                + frame.binormal * (y / radius.y.powi(2)))
+            .try_normalize()
+            .unwrap_or(frame.normal);
+            positions.push(position.to_array());
+            normals.push(normal.to_array());
+            uvs.push([u, v]);
+        }
+    }
+
+    let stride = (sectors + 1) as u32;
+    for ring in 0..rings as u32 {
+        for sector in 0..sectors as u32 {
+            let a = ring * stride + sector;
+            let b = a + stride;
+            indices.extend_from_slice(&[a, b, a + 1, b, b + 1, a + 1]);
+        }
+    }
+
+    if settings.cap_ends {
+        for (ring, center, normal, flip) in [
+            (
+                0_u32,
+                path.start,
+                -initial_sweep_frame(path.tangent(0.0)).tangent,
+                true,
+            ),
+            (rings as u32, path.end, frame.tangent, false),
+        ] {
+            let center_index = positions.len() as u32;
+            positions.push(center.to_array());
+            normals.push(normal.to_array());
+            uvs.push([0.5, if flip { 0.0 } else { 1.0 }]);
+            let ring_start = ring * stride;
+            for sector in 0..sectors as u32 {
+                let a = ring_start + sector;
+                let b = a + 1;
+                if flip {
+                    indices.extend_from_slice(&[center_index, b, a]);
+                } else {
+                    indices.extend_from_slice(&[center_index, a, b]);
+                }
+            }
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 /// Generates a smooth puffy ellipsoid. Exponents below 1.0 create the rounded,
 /// slightly boxy silhouette used by cartoon gloves and shoes.
 pub fn superellipsoid_mesh(
@@ -193,5 +417,54 @@ mod tests {
             .expect("anime eye normals should be float3");
         assert!(normals[0][2] < -0.99);
         assert_eq!(mesh.indices().expect("eye indices").len(), 672);
+    }
+
+    #[test]
+    fn bezier_sweep_has_stable_topology_and_finite_attributes() {
+        let path = CubicBezier3 {
+            start: Vec3::ZERO,
+            control_start: Vec3::new(0.2, 0.8, 0.1),
+            control_end: Vec3::new(-0.3, 1.4, 0.6),
+            end: Vec3::new(0.1, 2.0, 1.0),
+        };
+        let mesh = bezier_sweep_mesh(
+            path,
+            CubicBezierRadii::tapered(Vec2::splat(0.3), Vec2::splat(0.05)),
+            SweepMeshSettings {
+                rings: 8,
+                sectors: 10,
+                ..default()
+            },
+        );
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|attribute| attribute.as_float3())
+            .expect("sweep positions should be float3");
+        let normals = mesh
+            .attribute(Mesh::ATTRIBUTE_NORMAL)
+            .and_then(|attribute| attribute.as_float3())
+            .expect("sweep normals should be float3");
+        assert_eq!(positions.len(), 101);
+        assert_eq!(normals.len(), positions.len());
+        assert_eq!(mesh.indices().expect("sweep indices").len(), 540);
+        assert!(positions.iter().flatten().all(|value| value.is_finite()));
+        assert!(normals.iter().flatten().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn parallel_transport_keeps_neighboring_frames_aligned() {
+        let path = CubicBezier3 {
+            start: Vec3::ZERO,
+            control_start: Vec3::new(0.0, 0.7, 0.4),
+            control_end: Vec3::new(0.0, 1.3, -0.4),
+            end: Vec3::new(0.0, 2.0, 0.0),
+        };
+        let mut frame = initial_sweep_frame(path.tangent(0.0));
+        for ring in 1..=24 {
+            let next = transport_sweep_frame(frame, path.tangent(ring as f32 / 24.0));
+            assert!(frame.normal.dot(next.normal) > 0.0);
+            assert!(next.tangent.dot(next.normal).abs() < 1.0e-4);
+            frame = next;
+        }
     }
 }

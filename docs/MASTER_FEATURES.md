@@ -289,8 +289,15 @@ The game contains a strong player-facing character creation stack.
 Included features:
 - Character Design flow
 - Character Studio with parametric body and face editing
+- shared Fantasy, Cute/Chibi, Heroic, Mechanical, and Creature style-space
+  controls with smooth, non-destructive projection into player and enemy forms
 - preset-based and morph-based authoring
 - procedural humanoid generator and mesh assembly
+- shared cubic Bézier sweep geometry with authored radius profiles,
+  stable topology, and parallel-transport frames for seamless player hair and
+  enemy tails
+- style-aware runtime blueprint export so the playable character retains the
+  proportions shown in Character Studio
 - GLB export and rig import diagnostics
 - modular body part and material logic
 - generated character animation support
@@ -308,7 +315,11 @@ The project’s editor/product boundary is strong in concept and already well-do
 Included features:
 - Project Hub and project registry
 - creature, weapon, vehicle, and spaceship tools
+- Creature Forge style-space controls compiled from stable saved dimensions,
+  preventing repeated preview rebuilds from compounding morphology
 - live editor foundations
+- Bevy 0.19 infinite editor grid and transform handles integrated with Forge
+  selection, world/local space, snapping, controller actions, and undo
 - draft/publish workflows
 - manifest-based content bootstrapping
 - deterministic game-side content consumption
