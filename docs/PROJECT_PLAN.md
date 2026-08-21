@@ -61,15 +61,16 @@ Priority: make the current campaign feel coherent rather than just large.
 Work:
 - tighten the most important world loops: chapter flow, dungeon states, map readability, settlements, and route flow
 - shared runtime adapters for every authored platformer behavior are active;
-  next, build and playtest short introduction → development → twist →
-  culmination routes
+  the Designer now seeds a dedicated introduction → development → twist →
+  culmination showcase with a parallel recovery lane; next, playtest and tune
+  its spacing/reset timing with the shipping movement controller
 - validate world density and performance before adding more content breadth
 - ensure the strongest systems are fully legible in play, not just technically present
 
 Deliverables:
 - stronger chapter and dungeon identity
-- tune the playable ladder, spring, moving/rotating platform, flip, collapse,
-  and hazard prefab behavior with readable reset paths
+- tune the showcase ladder, spring, moving/rotating platform, flip, collapse,
+  and hazard beats while preserving its readable bypass/reset path
 - improved world readability
 - better performance-aware content decisions
 

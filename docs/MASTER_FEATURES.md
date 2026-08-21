@@ -185,7 +185,7 @@ Each prefab has:
 - explicit gameplay intent (`climbable`, `static traversal`, `oscillate`,
   `bounce`, `flip on jump`, `rotate`, `collapse`, or `hazard`)
 - representative placement in the open-world, dungeon, airship, boss, racing,
-  and settlement level templates
+  and settlement level templates, plus a dedicated Platformer Showcase route
 
 Current maturity boundary:
 - authoring, save/load, duplication, material application, mesh generation, and
@@ -198,11 +198,17 @@ Current maturity boundary:
   bridges use per-player cooldowns and the canonical armor/parry/damage path
 - leaving the editor refreshes runtime origins, path axes, sizes, and rotations
   from the latest authored transforms before immediate playtesting
+- the Platformer Showcase template authors an introduction → development →
+  twist → culmination route, gives editor objects semantic stage names, aligns
+  long bridges with the forward line, and runs a visible static-island recovery
+  lane beside every consequence verb
 - authored scenes still need a consumer-side scene/prefab loader before these
   prefabs can ship from Designer projects into the Game edition without Rust
 
-Templates should introduce one traversal verb safely, develop it with a clear
-variation, add a twist, and only then combine it into a culminating sequence.
+The showcase is the reference composition for new routes: introduce one
+traversal verb safely, develop it with a clear variation, add a twist, and only
+then combine it into a culminating sequence. Exact spacing and behavior tuning
+still require hands-on playtests with the shipping movement controller.
 
 ### 3.3 Combat systems
 

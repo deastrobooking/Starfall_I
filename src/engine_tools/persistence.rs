@@ -1264,7 +1264,7 @@ pub struct EditorSceneDraft {
     pub adapter_overrides: Vec<AdapterOverrideDraft>,
 }
 
-/// PM3: the seven starting level templates. Each seeds a small recognizable
+/// PM3: the eight starting level templates. Each seeds a small recognizable
 /// arrangement of editor primitives so a new level opens composed, not blank.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1276,10 +1276,11 @@ pub enum LevelTemplate {
     BossArena,
     RacingCourse,
     SettlementHub,
+    PlatformerShowcase,
 }
 
 impl LevelTemplate {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::EmptyTestArena,
         Self::OpenWorldChapter,
         Self::Dungeon,
@@ -1287,6 +1288,7 @@ impl LevelTemplate {
         Self::BossArena,
         Self::RacingCourse,
         Self::SettlementHub,
+        Self::PlatformerShowcase,
     ];
 
     pub fn label(self) -> &'static str {
@@ -1298,6 +1300,7 @@ impl LevelTemplate {
             Self::BossArena => "Boss Arena",
             Self::RacingCourse => "Racing Course",
             Self::SettlementHub => "Settlement Hub",
+            Self::PlatformerShowcase => "Platformer Showcase",
         }
     }
 
@@ -1310,6 +1313,7 @@ impl LevelTemplate {
             Self::BossArena => "boss-arena",
             Self::RacingCourse => "racing-course",
             Self::SettlementHub => "settlement-hub",
+            Self::PlatformerShowcase => "platformer-showcase",
         }
     }
 
@@ -1328,6 +1332,28 @@ impl LevelTemplate {
                 material_id: None,
                 modifiers: Vec::new(),
             };
+        let showcase_place = |offset: u64,
+                              name: &str,
+                              primitive: DraftPrimitive,
+                              x: f32,
+                              y: f32,
+                              z: f32,
+                              yaw_degrees: f32,
+                              scale: [f32; 3]| {
+            let half_yaw = yaw_degrees.to_radians() * 0.5;
+            SceneObjectDraft {
+                editor_id: first_editor_id + offset,
+                name: name.into(),
+                primitive,
+                transform: TransformDraft {
+                    translation: [x, y, z],
+                    rotation_xyzw: [0.0, half_yaw.sin(), 0.0, half_yaw.cos()],
+                    scale,
+                },
+                material_id: None,
+                modifiers: Vec::new(),
+            }
+        };
         let objects = match self {
             Self::EmptyTestArena => vec![place(0, DraftPrimitive::Empty, 0.0, 0.0, 0.0)],
             Self::OpenWorldChapter => vec![
@@ -1384,6 +1410,226 @@ impl LevelTemplate {
                 place(5, DraftPrimitive::Stairs, 0.0, 1.6, -14.0),
                 place(6, DraftPrimitive::Tower, -18.0, 6.0, -18.0),
                 place(7, DraftPrimitive::Castle, 20.0, 4.5, -24.0),
+            ],
+            Self::PlatformerShowcase => vec![
+                // Introduction: a grounded ascent and an optional, forgiving
+                // ladder/tower pocket establish the traversal language.
+                showcase_place(
+                    0,
+                    "Showcase · Start Anchor",
+                    DraftPrimitive::Empty,
+                    0.0,
+                    0.0,
+                    5.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    1,
+                    "INTRO · Follow the Star Steps",
+                    DraftPrimitive::Beacon,
+                    0.0,
+                    2.4,
+                    2.0,
+                    0.0,
+                    [1.25; 3],
+                ),
+                showcase_place(
+                    2,
+                    "INTRO · Safe Stairs",
+                    DraftPrimitive::Stairs,
+                    0.0,
+                    1.6,
+                    -4.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    3,
+                    "INTRO · Rest Island",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    0.0,
+                    -11.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    4,
+                    "INTRO · Climb Practice Tower",
+                    DraftPrimitive::Tower,
+                    -7.0,
+                    1.8,
+                    -17.0,
+                    0.0,
+                    [1.0, 0.3, 1.0],
+                ),
+                showcase_place(
+                    5,
+                    "INTRO · Forgiving Ladder",
+                    DraftPrimitive::Ladder,
+                    -7.0,
+                    1.8,
+                    -13.9,
+                    0.0,
+                    [1.0, 0.6, 1.0],
+                ),
+                // Development: timing first, with a broad static landing on
+                // both sides of the moving-platform beat.
+                showcase_place(
+                    6,
+                    "DEVELOP · Pulse Spring",
+                    DraftPrimitive::SpringPlatform,
+                    0.0,
+                    1.0,
+                    -17.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    7,
+                    "DEVELOP · Moving Platform",
+                    DraftPrimitive::MovingPlatform,
+                    0.0,
+                    1.3,
+                    -23.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    8,
+                    "DEVELOP · Timing Landing",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    0.0,
+                    -29.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                // Twist: active surfaces combine, while the cyan-star side
+                // lane remains a visible static recovery route.
+                showcase_place(
+                    9,
+                    "TWIST · Flip Panel",
+                    DraftPrimitive::FlipPanel,
+                    0.0,
+                    1.4,
+                    -35.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    10,
+                    "RECOVERY · Flip Bypass",
+                    DraftPrimitive::FloatingIsland,
+                    7.0,
+                    0.0,
+                    -35.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    11,
+                    "TWIST · Rotating Bridge",
+                    DraftPrimitive::RotatingBridge,
+                    0.0,
+                    1.275,
+                    -43.0,
+                    90.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    12,
+                    "RECOVERY · Rotation Bypass",
+                    DraftPrimitive::FloatingIsland,
+                    7.0,
+                    0.0,
+                    -44.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    13,
+                    "TWIST · Reset Island",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    0.0,
+                    -51.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                // Culmination: consequence verbs in series, still paired
+                // with a lower-pressure route so a miss never ends discovery.
+                showcase_place(
+                    14,
+                    "CULMINATION · Collapse Bridge",
+                    DraftPrimitive::CollapseBridge,
+                    0.0,
+                    1.6,
+                    -61.0,
+                    90.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    15,
+                    "RECOVERY · Collapse Bypass",
+                    DraftPrimitive::FloatingIsland,
+                    7.0,
+                    0.0,
+                    -62.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    16,
+                    "RECOVERY · Midway Link",
+                    DraftPrimitive::FloatingIsland,
+                    7.0,
+                    0.0,
+                    -53.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    17,
+                    "CULMINATION · Spike Bridge",
+                    DraftPrimitive::SpikeBridge,
+                    0.0,
+                    1.6,
+                    -74.0,
+                    90.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    18,
+                    "RECOVERY · Hazard Bypass",
+                    DraftPrimitive::FloatingIsland,
+                    7.0,
+                    0.0,
+                    -72.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    19,
+                    "CULMINATION · Finish Star",
+                    DraftPrimitive::Beacon,
+                    0.0,
+                    2.4,
+                    -81.0,
+                    0.0,
+                    [1.4; 3],
+                ),
+                showcase_place(
+                    20,
+                    "CULMINATION · Star Castle",
+                    DraftPrimitive::Castle,
+                    0.0,
+                    4.5,
+                    -88.0,
+                    0.0,
+                    [1.0; 3],
+                ),
             ],
         };
         EditorSceneDraft {
@@ -3641,6 +3887,106 @@ mod tests {
             DraftPrimitive::SpikeBridge,
         ] {
             assert!(seeded.contains(&expected), "missing seeded {expected:?}");
+        }
+    }
+
+    #[test]
+    fn platformer_showcase_teaches_every_verb_in_staged_route_order() {
+        let scene = LevelTemplate::PlatformerShowcase.seed_scene(500);
+        let seeded = scene
+            .objects
+            .iter()
+            .map(|object| object.primitive)
+            .collect::<Vec<_>>();
+        for expected in [
+            DraftPrimitive::Ladder,
+            DraftPrimitive::Stairs,
+            DraftPrimitive::Tower,
+            DraftPrimitive::Castle,
+            DraftPrimitive::FloatingIsland,
+            DraftPrimitive::MovingPlatform,
+            DraftPrimitive::SpringPlatform,
+            DraftPrimitive::FlipPanel,
+            DraftPrimitive::RotatingBridge,
+            DraftPrimitive::CollapseBridge,
+            DraftPrimitive::SpikeBridge,
+        ] {
+            assert!(seeded.contains(&expected), "showcase missing {expected:?}");
+        }
+
+        let average_z = |prefix: &str| {
+            let positions = scene
+                .objects
+                .iter()
+                .filter(|object| object.name.starts_with(prefix))
+                .map(|object| object.transform.translation[2])
+                .collect::<Vec<_>>();
+            assert!(!positions.is_empty(), "missing {prefix} stage");
+            positions.iter().sum::<f32>() / positions.len() as f32
+        };
+        let intro = average_z("INTRO");
+        let development = average_z("DEVELOP");
+        let twist = average_z("TWIST");
+        let culmination = average_z("CULMINATION");
+        assert!(intro > development);
+        assert!(development > twist);
+        assert!(twist > culmination);
+    }
+
+    #[test]
+    fn platformer_showcase_pairs_consequence_verbs_with_visible_recovery_lane() {
+        let scene = LevelTemplate::PlatformerShowcase.seed_scene(1);
+        let recovery = scene
+            .objects
+            .iter()
+            .filter(|object| object.name.starts_with("RECOVERY"))
+            .collect::<Vec<_>>();
+        assert_eq!(recovery.len(), 5);
+        assert!(recovery.iter().all(|object| {
+            object.primitive == DraftPrimitive::FloatingIsland
+                && object.transform.translation[0] > 0.0
+        }));
+        let mut recovery_z = recovery
+            .iter()
+            .map(|object| object.transform.translation[2])
+            .collect::<Vec<_>>();
+        recovery_z.sort_by(|a, b| b.total_cmp(a));
+        assert!(recovery_z.windows(2).all(|pair| pair[0] - pair[1] <= 10.0));
+
+        for main_name in [
+            "TWIST · Flip Panel",
+            "TWIST · Rotating Bridge",
+            "CULMINATION · Collapse Bridge",
+            "CULMINATION · Spike Bridge",
+        ] {
+            let main = scene
+                .objects
+                .iter()
+                .find(|object| object.name == main_name)
+                .expect("named consequence verb");
+            assert!(recovery.iter().any(|safe| {
+                (safe.transform.translation[2] - main.transform.translation[2]).abs() <= 2.0
+            }));
+        }
+    }
+
+    #[test]
+    fn platformer_showcase_aligns_long_bridges_with_its_forward_route() {
+        let scene = LevelTemplate::PlatformerShowcase.seed_scene(1);
+        for primitive in [
+            DraftPrimitive::RotatingBridge,
+            DraftPrimitive::CollapseBridge,
+            DraftPrimitive::SpikeBridge,
+        ] {
+            let bridge = scene
+                .objects
+                .iter()
+                .find(|object| object.primitive == primitive)
+                .expect("showcase bridge");
+            let [x, y, z, w] = bridge.transform.rotation_xyzw;
+            assert!(x.abs() < 0.001 && z.abs() < 0.001);
+            assert!((y.abs() - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.001);
+            assert!((w.abs() - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.001);
         }
     }
 

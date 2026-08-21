@@ -37,7 +37,10 @@ Prefab instances use the ordinary level-object workflow: select, move, rotate,
 scale, duplicate, apply a published material, validate, and save. Their stable
 primitive kinds survive project round trips; their meshes are regenerated from
 recipes rather than embedded in the project document. New level templates seed
-small examples appropriate to their setting.
+small examples appropriate to their setting. Choose **Platformer Showcase** for
+the full reference route: its Outliner names mark INTRO, DEVELOP, TWIST,
+CULMINATION, and RECOVERY objects so the composition remains understandable
+while you remix it.
 
 Immediate playtest uses the same runtime components as existing world courses:
 moving platforms carry riders, Pulse Springs launch each local player with an
@@ -50,6 +53,12 @@ For a readable route, introduce one prefab in a safe context, repeat it with a
 clear variation, combine it with one second mechanic, and only then build the
 culminating sequence. Always provide a visible recovery route for aerial or
 timed challenges.
+
+The showcase's main line places spring/moving timing before flip/rotation and
+reserves collapse/spike bridges for the culmination. Long bridges are already
+turned along the route axis. A parallel chain of floating islands bypasses the
+four consequence beats; keep that lane—or replace it with an equally legible
+reset path—when adapting the template.
 
 ## Tool windows
 
