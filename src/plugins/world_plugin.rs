@@ -55,10 +55,15 @@ use crate::plugins::enemy_plugin::{spawn_drone_variant_entity, spawn_enemy_entit
 use crate::plugins::vehicle_plugin::{VehicleSet, VehicleState};
 use crate::resources::{
     initial_world_routes, initial_world_sites, ChapterProgress, CurrentChapter, DungeonCrawlState,
-    DungeonRoomState, GameSettings, PlaySessionTransition, WorldRouteRegistry, WorldRouteState,
-    WorldSiteRegistry, WorldSiteState,
+    DungeonRoomState, GameSettings, PlayExperience, PlaySessionTransition, WorldRouteRegistry,
+    WorldRouteState, WorldSiteRegistry, WorldSiteState,
 };
 use crate::world::arcade_dungeon::{spawn_arcade_prototype_dungeon, ArcadeDungeonPortal};
+use crate::world::co_op_platformer::{
+    platformer_checkpoint_and_reward_system, platformer_encounter_system,
+    platformer_party_boundary_and_bubble_system, platformer_pressure_gate_system,
+    spawn_shared_platformer_stage, PlatformerWorkshopProgress,
+};
 use crate::world::discussion::{
     discussion_script, settlement_discussion_id, settlement_guardian_role, DiscussionState,
 };
@@ -392,18 +397,33 @@ impl Plugin for WorldPlugin {
             .init_resource::<WorldRouteRegistry>()
             .init_resource::<RaidRegistry>()
             .init_resource::<DiscussionState>()
+            .init_resource::<PlatformerWorkshopProgress>()
             .add_plugins(GrassPlugin)
             .add_plugins(MaterialPlugin::<TerrainMaterial>::default())
             .add_systems(
                 OnEnter(AppState::Playing),
-                (
-                    generate_city,
-                    build_city_rooftop_routes,
-                    build_building_cluster_lods,
-                )
-                    .chain(),
+                reset_platformer_progress.before(generate_city),
+            )
+            .add_systems(OnEnter(AppState::Playing), generate_city)
+            .add_systems(
+                OnEnter(AppState::Playing),
+                (build_city_rooftop_routes, build_building_cluster_lods)
+                    .chain()
+                    .run_if(campaign_experience)
+                    .after(generate_city),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
+            .add_systems(
+                Update,
+                (
+                    platformer_party_boundary_and_bubble_system,
+                    platformer_checkpoint_and_reward_system,
+                    platformer_pressure_gate_system,
+                    platformer_encounter_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            )
             .add_systems(
                 Update,
                 (
@@ -540,6 +560,20 @@ impl Plugin for WorldPlugin {
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(OnExit(AppState::Playing), cleanup_world);
+    }
+}
+
+fn campaign_experience(experience: Res<PlayExperience>) -> bool {
+    *experience == PlayExperience::Campaign
+}
+
+fn reset_platformer_progress(
+    transition: Res<PlaySessionTransition>,
+    experience: Res<PlayExperience>,
+    mut progress: ResMut<PlatformerWorkshopProgress>,
+) {
+    if !transition.resuming_from_pause && *experience == PlayExperience::SharedPlatformer {
+        *progress = PlatformerWorkshopProgress::default();
     }
 }
 
@@ -3957,7 +3991,7 @@ fn generate_city(
     mut water_mats: ResMut<Assets<WaterMaterial>>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
     asset_server: Res<AssetServer>,
-    transition: Res<PlaySessionTransition>,
+    session: (Res<PlaySessionTransition>, Res<PlayExperience>),
     settings: Res<GameSettings>,
     current: Res<CurrentChapter>,
     economy: Res<SettlementEconomy>,
@@ -3965,7 +3999,12 @@ fn generate_city(
     mut world_site_registry: ResMut<WorldSiteRegistry>,
     mut world_route_registry: ResMut<WorldRouteRegistry>,
 ) {
-    if transition.resuming_from_pause || !existing_world.is_empty() {
+    if session.0.resuming_from_pause || !existing_world.is_empty() {
+        return;
+    }
+
+    if *session.1 == PlayExperience::SharedPlatformer {
+        spawn_shared_platformer_stage(&mut commands, &mut meshes, &mut mats);
         return;
     }
 

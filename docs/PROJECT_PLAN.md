@@ -64,6 +64,12 @@ Work:
   (entrance → traversal → mob pit → elite reliquary), ordered waves, encounter
   seals, and one-time party recovery/reward caches; next, tune enemy mixes,
   timings, room dressing, and additional authored dungeon definitions
+- the first bounded shared-screen platformer course is now selectable directly
+  from the title screen and reuses the production movement/combat stack with a
+  P1-led side camera, automatic catch-up bubbles, strict depth/end boundaries,
+  checkpoints, co-op switches, mini battles, and workshop-part reward tiers;
+  next, conduct four-pad camera/bubble tuning and promote the reward tiers into
+  persistent authored prefab/vehicle/weapon/armor/pet unlock records
 - shared runtime adapters for every authored platformer behavior are active;
   the Designer now seeds a dedicated introduction → development → twist →
   culmination showcase with a parallel recovery lane; next, playtest and tune

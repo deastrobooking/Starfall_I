@@ -237,6 +237,17 @@ pub struct PlaySessionTransition {
     pub resuming_from_pause: bool,
 }
 
+// ── Play Experience ─────────────────────────────────────────────────────────
+/// Front-door gameplay format selected on the title screen. Campaign remains
+/// the default; the bounded platformer is a deliberately separate ruleset so
+/// its shared camera and catch-up rules cannot leak into the open world.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum PlayExperience {
+    #[default]
+    Campaign,
+    SharedPlatformer,
+}
+
 /// Optional non-chapter anchor selected from the world map. Chapter startup
 /// consumes this once world anchors exist, then clears it.
 #[derive(Resource, Debug, Default, Clone)]
@@ -370,6 +381,9 @@ pub struct DungeonCrawlState {
     /// Isolated arcade stage: party is teleported and open-world traversal
     /// toys (jetpack/grapple/hoverboard) are suppressed.
     pub arcade_rules: bool,
+    /// Side-progressing shared-screen course. It keeps the arcade traversal
+    /// lock while selecting a P1-led platformer camera and bubble recovery.
+    pub platformer_rules: bool,
     pub chapter: Option<ChapterId>,
     pub label: String,
     pub focus: Vec3,
@@ -384,6 +398,7 @@ impl Default for DungeonCrawlState {
             gate_id: None,
             exit_armed: false,
             arcade_rules: false,
+            platformer_rules: false,
             chapter: None,
             label: String::new(),
             focus: Vec3::ZERO,
@@ -418,6 +433,19 @@ impl DungeonCrawlState {
         self.activate_with_rules(gate_id, chapter, label, focus, anchor, radius, true);
     }
 
+    pub fn activate_platformer(
+        &mut self,
+        gate_id: &'static str,
+        chapter: ChapterId,
+        label: impl Into<String>,
+        focus: Vec3,
+        anchor: Vec3,
+        radius: f32,
+    ) {
+        self.activate_with_rules(gate_id, chapter, label, focus, anchor, radius, true);
+        self.platformer_rules = true;
+    }
+
     fn activate_with_rules(
         &mut self,
         gate_id: &'static str,
@@ -432,6 +460,7 @@ impl DungeonCrawlState {
         self.gate_id = Some(gate_id);
         self.exit_armed = false;
         self.arcade_rules = arcade_rules;
+        self.platformer_rules = false;
         self.chapter = Some(chapter);
         self.label = label.into();
         self.focus = focus;
@@ -444,6 +473,7 @@ impl DungeonCrawlState {
         self.gate_id = None;
         self.exit_armed = false;
         self.arcade_rules = false;
+        self.platformer_rules = false;
         self.chapter = None;
         self.label.clear();
         self.focus = Vec3::ZERO;

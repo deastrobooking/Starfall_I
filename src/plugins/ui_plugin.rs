@@ -65,9 +65,9 @@ use crate::plugins::vehicle_plugin::VehicleState;
 use crate::resources::{
     AuthoringTextInputCapture, AuthoringUnsavedChanges, ChapterProgress, CharacterDesignData,
     CharacterDesignReturnTarget, CurrentChapter, DungeonCrawlState, FastTravelDestination,
-    GameSettings, ImportedForgeReturnTarget, LocalPlayerConfig, PlaySessionTransition,
-    PlayerGuidance, PlayerSelectState, ShopCatalog, ShopCategory, UiGameplayCapture, UiMessage,
-    WaveInfo, WorldSiteRegistry, HERO_ROSTER,
+    GameSettings, ImportedForgeReturnTarget, LocalPlayerConfig, PlayExperience,
+    PlaySessionTransition, PlayerGuidance, PlayerSelectState, ShopCatalog, ShopCategory,
+    UiGameplayCapture, UiMessage, WaveInfo, WorldSiteRegistry, HERO_ROSTER,
 };
 use crate::world::discussion::DiscussionState;
 use crate::world::heavy_bio::{GrowthStage, GARDEN_PLOT_COUNT};
@@ -515,6 +515,8 @@ struct AccessibilitySettingsText;
 struct FinalPushText;
 #[derive(Component)]
 struct StartButton;
+#[derive(Component)]
+struct PlatformerStartButton;
 #[derive(Component)]
 struct EditorStartButton;
 #[derive(Component)]
@@ -1763,6 +1765,13 @@ fn setup_main_menu(
                     theme.player_accent(0),
                     StartButton,
                 );
+                spawn_main_menu_button(
+                    page,
+                    "STARBOUND CO-OP PLATFORMER",
+                    Color::srgb(0.42, 0.10, 0.58),
+                    theme.energy,
+                    PlatformerStartButton,
+                );
                 // The Project Hub is the Designer edition's front door; a
                 // consumer build has no authoring entry points at all.
                 if cfg!(feature = "designer") {
@@ -1855,12 +1864,21 @@ fn spawn_main_menu_button(
 
 fn menu_start_button(
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
+    platformer_q: Query<
+        &Interaction,
+        (
+            Changed<Interaction>,
+            With<PlatformerStartButton>,
+            Without<StartButton>,
+        ),
+    >,
     editor_q: Query<
         &Interaction,
         (
             Changed<Interaction>,
             With<EditorStartButton>,
             Without<StartButton>,
+            Without<PlatformerStartButton>,
         ),
     >,
     settings_q: Query<
@@ -1869,6 +1887,7 @@ fn menu_start_button(
             Changed<Interaction>,
             With<MainMenuSettingsButton>,
             Without<StartButton>,
+            Without<PlatformerStartButton>,
             Without<EditorStartButton>,
         ),
     >,
@@ -1878,15 +1897,24 @@ fn menu_start_button(
             Changed<Interaction>,
             With<MainMenuSettingsBackButton>,
             Without<StartButton>,
+            Without<PlatformerStartButton>,
             Without<EditorStartButton>,
             Without<MainMenuSettingsButton>,
         ),
     >,
     mut menu: ResMut<MainMenuUiState>,
+    mut experience: ResMut<PlayExperience>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     for interaction in interaction_q.iter() {
         if *interaction == Interaction::Pressed {
+            *experience = PlayExperience::Campaign;
+            next_state.set(AppState::PlayerSelect);
+        }
+    }
+    for interaction in platformer_q.iter() {
+        if *interaction == Interaction::Pressed {
+            *experience = PlayExperience::SharedPlatformer;
             next_state.set(AppState::PlayerSelect);
         }
     }
@@ -5307,6 +5335,7 @@ fn setup_player_select(
     mut commands: Commands,
     mut select: ResMut<PlayerSelectState>,
     theme: Res<UiTheme>,
+    experience: Res<PlayExperience>,
 ) {
     // P1 is always present. Preserve saved/customized blueprints when this
     // screen is re-entered from the in-game character designer.
@@ -5360,7 +5389,11 @@ fn setup_player_select(
         .with_children(|root| {
             // Title
             root.spawn((
-                Text::new("SELECT YOUR CREW"),
+                Text::new(if *experience == PlayExperience::SharedPlatformer {
+                    "SELECT YOUR PLATFORM CREW"
+                } else {
+                    "SELECT YOUR CREW"
+                }),
                 TextFont {
                     font_size: FontSize::Px(54.0),
                     ..default()
@@ -5536,7 +5569,17 @@ fn setup_player_select(
             })
             .with_children(|row| {
                 spawn_player_select_button(row, "BACK", 0, PlayerSelectAction::Back, 120.0);
-                spawn_player_select_button(row, "BEGIN GAME", 0, PlayerSelectAction::Begin, 170.0);
+                spawn_player_select_button(
+                    row,
+                    if *experience == PlayExperience::SharedPlatformer {
+                        "BEGIN PLATFORM RUN"
+                    } else {
+                        "BEGIN GAME"
+                    },
+                    0,
+                    PlayerSelectAction::Begin,
+                    190.0,
+                );
             });
         });
 }
@@ -5618,6 +5661,7 @@ fn player_select_update(
     mut config: ResMut<LocalPlayerConfig>,
     mut design_data: ResMut<CharacterDesignData>,
     mut imported_forge_return: ResMut<ImportedForgeReturnTarget>,
+    experience: Res<PlayExperience>,
     mut next_state: ResMut<NextState<AppState>>,
     // Text queries — each set is disjoint via Without<> guards
     mut char_q: Query<
@@ -5671,7 +5715,11 @@ fn player_select_update(
             PlayerSelectAction::Begin => {
                 if select.all_ready() {
                     config.active = select.active_count().max(1);
-                    next_state.set(AppState::ChapterSelect);
+                    next_state.set(if *experience == PlayExperience::SharedPlatformer {
+                        AppState::Playing
+                    } else {
+                        AppState::ChapterSelect
+                    });
                     return;
                 }
             }
@@ -9812,6 +9860,7 @@ mod menu_navigation_tests {
             .init_resource::<NativeControllerState>()
             .init_resource::<GamepadAssignments>()
             .init_resource::<GameSettings>()
+            .init_resource::<PlayExperience>()
             .init_resource::<AuthoringTextInputCapture>()
             .init_resource::<MenuFocus>()
             .init_resource::<MainMenuUiState>()

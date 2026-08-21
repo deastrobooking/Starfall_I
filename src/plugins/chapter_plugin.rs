@@ -26,7 +26,10 @@ use crate::plugins::enemy_plugin::{random_spawn_pos, spawn_enemy_entity, spawn_n
 use crate::plugins::world_plugin::terrain_surface_y;
 use crate::resources::{
     BiomePalette, ChapterProgress, CurrentChapter, DungeonCrawlState, FastTravelDestination,
-    GameSettings, PlaySessionTransition, WaveInfo,
+    GameSettings, PlayExperience, PlaySessionTransition, WaveInfo,
+};
+use crate::world::co_op_platformer::{
+    PLATFORMER_STAGE_ID, PLATFORMER_STAGE_LABEL, PLATFORMER_STAGE_ORIGIN,
 };
 use crate::world::missions::dungeon_destination;
 
@@ -71,6 +74,7 @@ fn start_chapter(
     mut current: ResMut<CurrentChapter>,
     mut palette: ResMut<BiomePalette>,
     transition: Res<PlaySessionTransition>,
+    experience: Res<PlayExperience>,
     mut started_ev: MessageWriter<ChapterStartedEvent>,
     mut wave: ResMut<WaveInfo>,
     mut pending_travel: ResMut<PendingChapterTravel>,
@@ -84,6 +88,28 @@ fn start_chapter(
 
     for entity in airship_q.iter() {
         commands.entity(entity).despawn();
+    }
+
+    if *experience == PlayExperience::SharedPlatformer {
+        current.started = false;
+        current.completed = false;
+        current.awaiting_kills = 0;
+        current.awaiting_puzzle = false;
+        *wave = WaveInfo::new();
+        pending_travel.chapter = None;
+        pending_travel.world_anchor = None;
+        pending_travel.world_label = None;
+        pending_travel.enter_dungeon = false;
+        fast_travel.clear();
+        dungeon.activate_platformer(
+            PLATFORMER_STAGE_ID,
+            current.id,
+            PLATFORMER_STAGE_LABEL,
+            PLATFORMER_STAGE_ORIGIN + Vec3::new(106.0, 5.0, 0.0),
+            PLATFORMER_STAGE_ORIGIN,
+            118.0,
+        );
+        return;
     }
 
     let Some(def) = get_chapter(current.id) else {

@@ -60,7 +60,7 @@ promise first:
 - **Track current stable Bevy deliberately.** In open source, staying close to
   the active engine release keeps us near docs, examples, bug fixes, community
   answers, and plugin momentum.
-- Current local engine branch baseline is Bevy `0.19.0` + Avian `0.7`. Local
+- Current local engine branch baseline is Bevy `0.19.1` + Avian `0.7`. Local
   compile, strict clippy, and automated test gates pass; manual macOS
   controller/play smoke is still required before merging the engine branch.
 - The first `N11` large-world upgrades are active: Starfall-owned hierarchical
@@ -139,7 +139,7 @@ playable Starfall loop.
 **Acceptance:** `cargo check`, strict clippy, targeted road/terrain/controller
 tests, full `cargo test`, and a manual macOS smoke route pass. Main stays on the
 last green engine baseline until the branch passes.
-**Status:** local compile, clippy, and test gates pass on Bevy `0.19.0` + Avian
+**Status:** local compile, clippy, and test gates pass on Bevy `0.19.1` + Avian
 `0.7`; manual smoke remains before merge.
 
 ### EC1 — Fixed-tick simulation core *(the keystone)*

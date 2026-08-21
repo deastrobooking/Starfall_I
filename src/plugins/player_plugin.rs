@@ -52,9 +52,10 @@ use crate::plugins::world_plugin::terrain_surface_y;
 use crate::resources::{
     is_stale_reference_blueprint, reference_appearance_recipe, reference_body_recipe,
     ChapterProgress, CurrentChapter, DungeonCrawlState, GameSettings, LocalPlayerConfig,
-    PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
+    PlayExperience, PlaySessionTransition, PlayerPartLoadout, PlayerSelectState, PlayerSlotConfig,
     WorldRouteRegistry, WorldRouteState,
 };
+use crate::world::co_op_platformer::{platformer_spawn, CoopBubbleState};
 use crate::world::robot_pets::RobotPetCollection;
 
 /// Route the player's visual through the new native modular humanoid
@@ -546,7 +547,11 @@ fn player_spawn_position(
     index: u8,
     current: &CurrentChapter,
     anchor_q: &Query<(&WorldAnchor, &Transform)>,
+    experience: PlayExperience,
 ) -> Vec3 {
+    if experience == PlayExperience::SharedPlatformer {
+        return platformer_spawn(index);
+    }
     if let Some(location) = chapter_map_location(current.id) {
         if let Some((_, anchor_transform)) = anchor_q
             .iter()
@@ -754,6 +759,7 @@ fn spawn_players(
     config: Res<LocalPlayerConfig>,
     select: Res<PlayerSelectState>,
     current: Res<CurrentChapter>,
+    experience: Res<PlayExperience>,
     progress: Res<ChapterProgress>,
     robot_pets: Res<RobotPetCollection>,
     part_loadout: Res<PlayerPartLoadout>,
@@ -813,7 +819,7 @@ fn spawn_players(
     });
 
     for i in 0..active {
-        let spawn_pos = player_spawn_position(i, &current, &chapter_anchor_q);
+        let spawn_pos = player_spawn_position(i, &current, &chapter_anchor_q, *experience);
         let slot = &select.slots[i as usize];
         let character_name = select.character_name(i as usize);
         let runtime_blueprint = slot
@@ -917,6 +923,7 @@ fn spawn_players(
                 player_stats.clone(),
                 player_movement,
             ))
+            .insert(CoopBubbleState::default())
             .insert(CollisionProfile::Player)
             .insert(player_base_stats)
             .insert(player_progression)
@@ -1617,7 +1624,13 @@ fn player_camera_follow_system(
     let s = 3.0 * p * p - 2.0 * p * p * p; // Smoothstep S-curve
 
     // Compute target single screen/unified shared viewport transform
-    let shared_target_transform = if transition.last_was_dungeon {
+    let shared_target_transform = if dungeon.platformer_rules {
+        let party = player_q
+            .iter()
+            .map(|(index, transform, _, _, _, _, _, _)| (index.0, transform.translation))
+            .collect::<Vec<_>>();
+        shared_platformer_camera_transform(&party)
+    } else if transition.last_was_dungeon {
         let party_focus = average_positions(
             &player_q
                 .iter()
@@ -1923,6 +1936,28 @@ fn dungeon_crawl_camera_transform(focus: Vec3, radius: f32) -> Transform {
     Transform::from_translation(translation).looking_at(focus + Vec3::Y * 1.0, Vec3::Y)
 }
 
+fn shared_platformer_camera_transform(players: &[(u8, Vec3)]) -> Transform {
+    let leader = players
+        .iter()
+        .find(|(index, _)| *index == 0)
+        .map(|(_, position)| *position)
+        .or_else(|| players.first().map(|(_, position)| *position))
+        .unwrap_or(Vec3::ZERO);
+    let min_x = players.iter().map(|(_, p)| p.x).fold(leader.x, f32::min);
+    let max_x = players.iter().map(|(_, p)| p.x).fold(leader.x, f32::max);
+    let min_y = players.iter().map(|(_, p)| p.y).fold(leader.y, f32::min);
+    let max_y = players.iter().map(|(_, p)| p.y).fold(leader.y, f32::max);
+    let spread = (max_x - min_x).max((max_y - min_y) * 1.35);
+    let focus = Vec3::new(
+        leader.x + 6.5,
+        (leader.y + 3.0).max((min_y + max_y) * 0.5 + 1.5),
+        0.0,
+    );
+    let distance = (34.0 + spread * 0.42).clamp(34.0, 52.0);
+    Transform::from_translation(focus + Vec3::new(0.0, 9.0 + distance * 0.12, distance))
+        .looking_at(focus + Vec3::Y * 0.6, Vec3::Y)
+}
+
 fn clamp_to_dungeon_focus(position: Vec3, center: Vec3, radius: f32) -> Vec3 {
     let offset = (position - center).with_y(0.0);
     if offset.length() <= radius {
@@ -2144,7 +2179,7 @@ fn dungeon_crawl_party_pull_system(
         With<Player>,
     >,
 ) {
-    if !dungeon.active {
+    if !dungeon.active || dungeon.platformer_rules {
         return;
     }
 
@@ -5592,6 +5627,22 @@ mod tests {
             player_camera_render_layers(1, CameraPerspective::FirstPerson, 1.0)
                 .intersects(&p2_layer)
         );
+    }
+
+    #[test]
+    fn shared_platformer_camera_leads_p1_and_zooms_for_party_spread() {
+        let compact = shared_platformer_camera_transform(&[
+            (0, Vec3::new(10.0, 2.0, 0.0)),
+            (1, Vec3::new(8.0, 2.0, 1.0)),
+        ]);
+        let spread = shared_platformer_camera_transform(&[
+            (0, Vec3::new(10.0, 2.0, 0.0)),
+            (1, Vec3::new(-12.0, 12.0, 1.0)),
+        ]);
+
+        assert!(compact.translation.x > 10.0);
+        assert!(spread.translation.z > compact.translation.z);
+        assert!(compact.translation.z > 34.0 && compact.translation.z < 36.0);
     }
 
     #[test]

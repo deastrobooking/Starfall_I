@@ -249,6 +249,12 @@ Included features:
 - hard-boundary top-down arcade dungeons with room-linked shared cameras,
   traversal-kit limits, ordered encounter waves, sealing combat thresholds,
   elite culmination rooms, and one-time party relic caches
+- a title-screen **Starbound Co-op Platformer** alternative for 1–4 players:
+  bounded side-progressing 3D stages, a P1-led shared camera, catch-up bubbles,
+  checkpoints, stair/climb towers, moving lifts, pulse springs, collapse-panel
+  timing, simultaneous pressure plates, compact mini battles, and a workshop
+  part loop that awards each player arena-ready credits and experience while
+  exposing prefab → weapon → armor → pet/vehicle build tiers
 - temple subquests and exploration rewards
 - world map, routes, and travel anchors
 

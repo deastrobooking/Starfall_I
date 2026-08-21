@@ -52,8 +52,8 @@ use plugins::{
 };
 use resources::{
     CharacterBaseModel, CharacterBaseModelCatalog, CharacterDesignData, CharacterDesignSnapshot,
-    GameSettings, LocalPlayerConfig, PlaySessionTransition, PlayerPartLoadout, PlayerScore,
-    PlayerSelectState, ShopCatalog, WaveInfo, WorldRouteRegistry, WorldSiteRegistry,
+    GameSettings, LocalPlayerConfig, PlayExperience, PlaySessionTransition, PlayerPartLoadout,
+    PlayerScore, PlayerSelectState, ShopCatalog, WaveInfo, WorldRouteRegistry, WorldSiteRegistry,
 };
 use world::final_war::FinalWarRegistry;
 use world::hacking::HackingRegistry;
@@ -189,6 +189,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         .init_resource::<resources::AuthoringUnsavedChanges>()
         .init_resource::<PlayerScore>()
         .init_resource::<PlaySessionTransition>()
+        .init_resource::<PlayExperience>()
         .init_resource::<LocalPlayerConfig>()
         .init_resource::<PlayerSelectState>()
         .init_resource::<CharacterDesignData>()
@@ -445,6 +446,47 @@ mod app_smoke_tests {
         assert_eq!(
             app.world().resource::<State<AppState>>().get(),
             &AppState::MainMenu
+        );
+    }
+
+    #[test]
+    fn headless_app_launches_bounded_platformer_as_a_direct_play_session() {
+        let mut app = build_headless_app();
+        *app.world_mut().resource_mut::<PlayExperience>() = PlayExperience::SharedPlatformer;
+        // Presentation plugins normally provide these in production. The
+        // headless harness supplies their CPU-side values so gameplay Update
+        // systems can exercise a direct Playing session without a renderer.
+        app.insert_resource(ClearColor::default());
+        app.insert_resource(GlobalAmbientLight::default());
+        app.insert_state(AppState::Playing);
+        app.finish();
+        app.cleanup();
+        app.update();
+        app.update();
+
+        let world = app.world_mut();
+        assert_eq!(
+            world.resource::<State<AppState>>().get(),
+            &AppState::Playing
+        );
+        assert!(
+            world
+                .resource::<resources::DungeonCrawlState>()
+                .platformer_rules
+        );
+        assert_eq!(
+            world
+                .query::<&world::co_op_platformer::PlatformerStageRoot>()
+                .iter(world)
+                .count(),
+            1
+        );
+        assert_eq!(
+            world
+                .query::<&components::player::Player>()
+                .iter(world)
+                .count(),
+            1
         );
     }
 }

@@ -21,6 +21,7 @@
 //! folder holds the data and rules those systems consult.
 
 pub mod arcade_dungeon;
+pub mod co_op_platformer;
 pub mod discussion;
 pub mod final_war;
 pub mod hacking;
