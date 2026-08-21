@@ -223,6 +223,11 @@ Included features:
 - flinch and impact responses
 - boss behavior variation across dragons, mechs, and Scallarian threats
 - damage, armor, and knockback systems
+- third-person open-world soft targeting with a narrow camera-circle acquire
+  threshold, wider sticky release threshold, line-of-sight checks, and no
+  teammate occlusion; first-person hip fire remains manual
+- drone hurtboxes backed by both their authored physics cuboids and a bounded
+  logical wing/body sweep for fast projectiles and melee/saber attacks
 
 Current strength:
 - combat is more readable and coherent than earlier iterations
@@ -241,6 +246,9 @@ Included features:
 - settlements and buildable economies
 - raids and defense loops
 - secret caves, dragon lairs, and boss spaces
+- hard-boundary top-down arcade dungeons with room-linked shared cameras,
+  traversal-kit limits, ordered encounter waves, sealing combat thresholds,
+  elite culmination rooms, and one-time party relic caches
 - temple subquests and exploration rewards
 - world map, routes, and travel anchors
 

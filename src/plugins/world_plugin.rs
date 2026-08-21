@@ -498,6 +498,7 @@ impl Plugin for WorldPlugin {
                     dungeon_enemy_spawner_system,
                     ApplyDeferred,
                     dungeon_encounter_progress_system,
+                    dungeon_reward_pickup_system,
                 )
                     .chain()
                     .run_if(in_state(AppState::Playing)),
@@ -1377,6 +1378,7 @@ fn dungeon_enemy_spawner_system(
         &mut DungeonEnemySpawner,
         Option<&CreatureSpawnOverride>,
     )>,
+    encounter_enemy_q: Query<&DungeonEncounterEnemy>,
     player_q: Query<&Transform, With<Player>>,
     creature_catalog: Res<crate::engine_tools::PublishedCreatureCatalog>,
     mut commands: Commands,
@@ -1397,9 +1399,24 @@ fn dungeon_enemy_spawner_system(
             Faction::DragonRoyalty
         })
     });
+    let wave_states = spawner_q
+        .iter_mut()
+        .map(|(_, spawner, _)| (spawner.encounter, spawner.wave_index, spawner.spawned))
+        .collect::<Vec<_>>();
     for (spawner_xf, mut spawner, creature_override) in spawner_q.iter_mut() {
         if spawner.spawned {
             continue;
+        }
+        if let Some(encounter) = spawner.encounter.filter(|_| spawner.wave_index > 0) {
+            let live_enemies = encounter_enemy_q.iter().copied().collect::<Vec<_>>();
+            if !ordered_dungeon_wave_ready(
+                encounter,
+                spawner.wave_index,
+                &wave_states,
+                &live_enemies,
+            ) {
+                continue;
+            }
         }
         let any_near = player_q
             .iter()
@@ -1443,14 +1460,51 @@ fn dungeon_enemy_spawner_system(
                 commands.entity(enemy).insert(DungeonEncounterEnemy {
                     gate_id,
                     room_index,
+                    wave_index: spawner.wave_index,
                 });
             }
         }
         msg_ev.write(UiMessageEvent {
-            text: "Enemies appear!".to_string(),
+            text: if spawner.encounter.is_some() {
+                format!(
+                    "Encounter wave {} — enemies appear!",
+                    spawner.wave_index + 1
+                )
+            } else {
+                "Enemies appear!".to_string()
+            },
             duration: 1.8,
         });
     }
+}
+
+fn ordered_dungeon_wave_ready(
+    encounter: (&'static str, u8),
+    wave_index: u8,
+    wave_states: &[(Option<(&'static str, u8)>, u8, bool)],
+    live_enemies: &[DungeonEncounterEnemy],
+) -> bool {
+    if wave_index == 0 {
+        return true;
+    }
+    let has_previous_wave = wave_states
+        .iter()
+        .any(|(other, wave, _)| *other == Some(encounter) && *wave < wave_index);
+    let previous_waves_spawned = wave_states
+        .iter()
+        .all(|(other, wave, spawned)| *other != Some(encounter) || *wave >= wave_index || *spawned);
+    let previous_enemy_alive = live_enemies.iter().any(|enemy| {
+        (enemy.gate_id, enemy.room_index) == encounter && enemy.wave_index < wave_index
+    });
+    has_previous_wave && previous_waves_spawned && !previous_enemy_alive
+}
+
+fn dungeon_encounter_door_should_close(
+    prerequisite_met: bool,
+    encounter_started: bool,
+    encounter_cleared: bool,
+) -> bool {
+    !prerequisite_met || encounter_started && !encounter_cleared
 }
 
 fn dungeon_encounter_progress_system(
@@ -1467,17 +1521,21 @@ fn dungeon_encounter_progress_system(
     let dt = time.delta_secs();
 
     for (mut transform, door) in door_q.iter_mut() {
+        let encounter_spawners = spawner_q
+            .iter()
+            .filter(|spawner| spawner.encounter == Some((door.gate_id, door.room_index)))
+            .collect::<Vec<_>>();
         let started = active_gate == Some(door.gate_id)
-            && spawner_q.iter().any(|spawner| {
-                spawner.encounter == Some((door.gate_id, door.room_index)) && spawner.spawned
-            });
+            && encounter_spawners.iter().any(|spawner| spawner.spawned);
+        let all_waves_spawned = !encounter_spawners.is_empty()
+            && encounter_spawners.iter().all(|spawner| spawner.spawned);
         let enemies_alive = enemy_q
             .iter()
             .any(|enemy| enemy.gate_id == door.gate_id && enemy.room_index == door.room_index);
         let was_cleared = room_state
             .cleared_rooms
             .contains(&(door.gate_id, door.room_index));
-        if started && !enemies_alive && !was_cleared {
+        if started && all_waves_spawned && !enemies_alive && !was_cleared {
             room_state.mark_cleared(door.gate_id, door.room_index);
             msg_ev.write(UiMessageEvent {
                 text: "Star Chamber cleared — ancient seals released and reward awakened!"
@@ -1489,7 +1547,10 @@ fn dungeon_encounter_progress_system(
             || room_state
                 .cleared_rooms
                 .contains(&(door.gate_id, door.room_index));
-        let target = if started && !cleared {
+        let prerequisite_met = door
+            .requires_room_clear
+            .is_none_or(|required| room_state.cleared_rooms.contains(&(door.gate_id, required)));
+        let target = if dungeon_encounter_door_should_close(prerequisite_met, started, cleared) {
             door.closed
         } else {
             door.open
@@ -1499,14 +1560,56 @@ fn dungeon_encounter_progress_system(
     }
 
     for (reward, mut visibility) in reward_q.iter_mut() {
-        *visibility = if room_state
-            .cleared_rooms
-            .contains(&(reward.gate_id, reward.room_index))
+        *visibility = if !reward.claimed
+            && room_state
+                .cleared_rooms
+                .contains(&(reward.gate_id, reward.room_index))
         {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+fn dungeon_reward_pickup_system(
+    dungeon: Res<DungeonCrawlState>,
+    room_state: Res<DungeonRoomState>,
+    mut reward_q: Query<(&Transform, &mut DungeonEncounterReward, &mut Visibility)>,
+    mut player_q: Query<(&Transform, &mut Health, &mut PlayerStats), With<Player>>,
+    mut msg_ev: MessageWriter<UiMessageEvent>,
+) {
+    let Some(active_gate) = dungeon.gate_id.filter(|_| dungeon.active) else {
+        return;
+    };
+    for (reward_transform, mut reward, mut visibility) in reward_q.iter_mut() {
+        if reward.claimed
+            || reward.gate_id != active_gate
+            || !room_state
+                .cleared_rooms
+                .contains(&(reward.gate_id, reward.room_index))
+        {
+            continue;
+        }
+        let claimed = player_q.iter_mut().any(|(transform, _, _)| {
+            transform.translation.distance(reward_transform.translation) <= 3.2
+        });
+        if !claimed {
+            continue;
+        }
+        reward.claimed = true;
+        *visibility = Visibility::Hidden;
+        for (_, mut health, mut stats) in player_q.iter_mut() {
+            health.heal(reward.healing);
+            stats.credits = stats.credits.saturating_add(reward.credits);
+        }
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "Relic cache claimed — party restored, +{} credits each!",
+                reward.credits
+            ),
+            duration: 3.0,
+        });
     }
 }
 
@@ -6697,6 +6800,7 @@ fn spawn_secret_cave_system(
         DungeonEncounterDoor {
             gate_id: spec.anchor_id,
             room_index: 2,
+            requires_room_clear: None,
             closed: encounter_closed,
             open: encounter_open,
         },
@@ -6717,6 +6821,9 @@ fn spawn_secret_cave_system(
         DungeonEncounterReward {
             gate_id: spec.anchor_id,
             room_index: 2,
+            credits: 120 + u32::from(spec.chapter.0) * 20,
+            healing: 30.0,
+            claimed: false,
         },
         WorldGeometry,
     ));
@@ -6949,6 +7056,7 @@ fn spawn_secret_cave_system(
             DungeonEnemySpawner {
                 chapter,
                 encounter: (index == 1).then_some((spec.anchor_id, 2)),
+                wave_index: 0,
                 enemy_type: if index == 0 {
                     EnemyType::Soldier
                 } else if chapter >= 8 {
@@ -7920,6 +8028,7 @@ fn spawn_ch6_crown_dungeon_extras(
             DungeonEnemySpawner {
                 chapter: 6,
                 encounter: None,
+                wave_index: 0,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -8006,6 +8115,7 @@ fn spawn_ch7_ember_dungeon_extras(
             DungeonEnemySpawner {
                 chapter: 7,
                 encounter: None,
+                wave_index: 0,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -8092,6 +8202,7 @@ fn spawn_ch8_fangroot_dungeon_extras(
             DungeonEnemySpawner {
                 chapter: 8,
                 encounter: None,
+                wave_index: 0,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -8178,6 +8289,7 @@ fn spawn_ch9_garden_dungeon_extras(
             DungeonEnemySpawner {
                 chapter: 9,
                 encounter: None,
+                wave_index: 0,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -8264,6 +8376,7 @@ fn spawn_ch10_granite_dungeon_extras(
             DungeonEnemySpawner {
                 chapter: 10,
                 encounter: None,
+                wave_index: 0,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -8350,6 +8463,7 @@ fn spawn_ch11_icebreaker_dungeon_extras(
             DungeonEnemySpawner {
                 chapter: 11,
                 encounter: None,
+                wave_index: 0,
                 enemy_type,
                 count,
                 trigger_radius: 24.0,
@@ -22071,17 +22185,32 @@ mod tests {
         app.world_mut().spawn(DungeonEnemySpawner {
             chapter: 1,
             encounter: Some(("encounter_test", 2)),
+            wave_index: 0,
             enemy_type: EnemyType::Soldier,
             count: 1,
             trigger_radius: 10.0,
             difficulty: 1.0,
             spawned: true,
         });
+        let second_spawner = app
+            .world_mut()
+            .spawn(DungeonEnemySpawner {
+                chapter: 1,
+                encounter: Some(("encounter_test", 2)),
+                wave_index: 1,
+                enemy_type: EnemyType::Heavy,
+                count: 1,
+                trigger_radius: 10.0,
+                difficulty: 1.1,
+                spawned: false,
+            })
+            .id();
         let enemy = app
             .world_mut()
             .spawn(DungeonEncounterEnemy {
                 gate_id: "encounter_test",
                 room_index: 2,
+                wave_index: 0,
             })
             .id();
         app.world_mut().spawn((
@@ -22089,6 +22218,7 @@ mod tests {
             DungeonEncounterDoor {
                 gate_id: "encounter_test",
                 room_index: 2,
+                requires_room_clear: None,
                 closed: Vec3::ZERO,
                 open: Vec3::Y * 8.0,
             },
@@ -22099,6 +22229,9 @@ mod tests {
                 DungeonEncounterReward {
                     gate_id: "encounter_test",
                     room_index: 2,
+                    credits: 100,
+                    healing: 25.0,
+                    claimed: false,
                 },
                 Visibility::Hidden,
             ))
@@ -22117,6 +22250,32 @@ mod tests {
 
         app.world_mut().entity_mut(enemy).despawn();
         app.update();
+        assert!(!app
+            .world()
+            .resource::<DungeonRoomState>()
+            .cleared_rooms
+            .contains(&("encounter_test", 2)));
+
+        app.world_mut()
+            .get_mut::<DungeonEnemySpawner>(second_spawner)
+            .unwrap()
+            .spawned = true;
+        let final_enemy = app
+            .world_mut()
+            .spawn(DungeonEncounterEnemy {
+                gate_id: "encounter_test",
+                room_index: 2,
+                wave_index: 1,
+            })
+            .id();
+        app.update();
+        assert!(!app
+            .world()
+            .resource::<DungeonRoomState>()
+            .cleared_rooms
+            .contains(&("encounter_test", 2)));
+        app.world_mut().entity_mut(final_enemy).despawn();
+        app.update();
         assert!(app
             .world()
             .resource::<DungeonRoomState>()
@@ -22126,6 +22285,110 @@ mod tests {
             app.world().get::<Visibility>(reward),
             Some(&Visibility::Visible)
         );
+    }
+
+    #[test]
+    fn ordered_dungeon_waves_wait_for_spawn_and_clear_of_previous_beat() {
+        let encounter = ("wave_test", 3);
+        let mut states = vec![(Some(encounter), 0, false), (Some(encounter), 1, false)];
+        assert!(!ordered_dungeon_wave_ready(encounter, 1, &states, &[]));
+
+        states[0].2 = true;
+        let living_first_wave = [DungeonEncounterEnemy {
+            gate_id: encounter.0,
+            room_index: encounter.1,
+            wave_index: 0,
+        }];
+        assert!(!ordered_dungeon_wave_ready(
+            encounter,
+            1,
+            &states,
+            &living_first_wave
+        ));
+        assert!(ordered_dungeon_wave_ready(encounter, 1, &states, &[]));
+        assert!(!ordered_dungeon_wave_ready(
+            ("unrelated", 3),
+            1,
+            &states,
+            &[]
+        ));
+        assert!(dungeon_encounter_door_should_close(false, false, false));
+        assert!(dungeon_encounter_door_should_close(true, true, false));
+        assert!(!dungeon_encounter_door_should_close(true, false, false));
+        assert!(!dungeon_encounter_door_should_close(true, true, true));
+    }
+
+    #[test]
+    fn cleared_dungeon_relic_cache_restores_and_rewards_every_player_once() {
+        let mut app = App::new();
+        app.add_message::<UiMessageEvent>();
+        let mut dungeon = DungeonCrawlState::default();
+        dungeon.activate_arcade(
+            "reward_test",
+            crate::chapters::ChapterId(1),
+            "Reward Test",
+            Vec3::ZERO,
+            Vec3::ZERO,
+            32.0,
+        );
+        app.insert_resource(dungeon);
+        let mut rooms = DungeonRoomState::default();
+        rooms.mark_cleared("reward_test", 3);
+        app.insert_resource(rooms);
+        app.add_systems(Update, dungeon_reward_pickup_system);
+
+        let reward = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                DungeonEncounterReward {
+                    gate_id: "reward_test",
+                    room_index: 3,
+                    credits: 75,
+                    healing: 30.0,
+                    claimed: false,
+                },
+                Visibility::Visible,
+            ))
+            .id();
+        let players = (0..2)
+            .map(|index| {
+                app.world_mut()
+                    .spawn((
+                        Player,
+                        Transform::from_xyz(index as f32, 0.0, 0.0),
+                        Health {
+                            current: 40.0,
+                            max: 100.0,
+                        },
+                        PlayerStats {
+                            credits: 5,
+                            ..default()
+                        },
+                    ))
+                    .id()
+            })
+            .collect::<Vec<_>>();
+
+        app.update();
+        assert!(app
+            .world()
+            .get::<DungeonEncounterReward>(reward)
+            .is_some_and(|reward| reward.claimed));
+        assert_eq!(
+            app.world().get::<Visibility>(reward),
+            Some(&Visibility::Hidden)
+        );
+        for player in &players {
+            assert_eq!(app.world().get::<Health>(*player).unwrap().current, 70.0);
+            assert_eq!(app.world().get::<PlayerStats>(*player).unwrap().credits, 80);
+        }
+
+        app.update();
+        for player in players {
+            assert_eq!(app.world().get::<Health>(player).unwrap().current, 70.0);
+            assert_eq!(app.world().get::<PlayerStats>(player).unwrap().credits, 80);
+        }
     }
 
     #[test]

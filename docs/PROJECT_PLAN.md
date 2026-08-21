@@ -60,6 +60,10 @@ Priority: make the current campaign feel coherent rather than just large.
 
 Work:
 - tighten the most important world loops: chapter flow, dungeon states, map readability, settlements, and route flow
+- the top-down arcade reference dungeon now uses a four-room RPG cadence
+  (entrance → traversal → mob pit → elite reliquary), ordered waves, encounter
+  seals, and one-time party recovery/reward caches; next, tune enemy mixes,
+  timings, room dressing, and additional authored dungeon definitions
 - shared runtime adapters for every authored platformer behavior are active;
   the Designer now seeds a dedicated introduction → development → twist →
   culmination showcase with a parallel recovery lane; next, playtest and tune
@@ -69,6 +73,8 @@ Work:
 
 Deliverables:
 - stronger chapter and dungeon identity
+- playtest third-person soft-lock acquire/release angles and top-down
+  move/facing-based target choice against ground and aerial enemy groups
 - tune the showcase ladder, spring, moving/rotating platform, flip, collapse,
   and hazard beats while preserving its readable bypass/reset path
 - improved world readability

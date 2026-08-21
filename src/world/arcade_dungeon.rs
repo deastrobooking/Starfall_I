@@ -75,6 +75,7 @@ pub struct ArcadeRoomDef {
 #[derive(Debug, Clone, Copy)]
 pub struct ArcadeWaveDef {
     pub room_index: u8,
+    pub wave_index: u8,
     pub local_position: Vec3,
     pub enemy_type: EnemyType,
     pub count: u8,
@@ -121,13 +122,22 @@ pub const ARCADE_PROTOTYPE_ROOMS: &[ArcadeRoomDef] = &[
         camera_radius: 34.0,
         floor_half: Vec2::new(14.0, 13.0),
     },
+    ArcadeRoomDef {
+        room_index: 3,
+        label: "Neon Reliquary",
+        kind: DungeonRoomKind::Combat,
+        local_focus: Vec3::new(0.0, 1.0, 75.0),
+        camera_radius: 36.0,
+        floor_half: Vec2::new(15.0, 14.0),
+    },
 ];
 
-pub const ARCADE_PROTOTYPE_PORTALS: &[(u8, u8)] = &[(0, 1), (1, 2)];
+pub const ARCADE_PROTOTYPE_PORTALS: &[(u8, u8)] = &[(0, 1), (1, 2), (2, 3)];
 
 pub const ARCADE_PROTOTYPE_WAVES: &[ArcadeWaveDef] = &[
     ArcadeWaveDef {
         room_index: 1,
+        wave_index: 0,
         local_position: Vec3::new(0.0, 1.2, 16.0),
         enemy_type: EnemyType::Soldier,
         count: 3,
@@ -137,6 +147,7 @@ pub const ARCADE_PROTOTYPE_WAVES: &[ArcadeWaveDef] = &[
     },
     ArcadeWaveDef {
         room_index: 2,
+        wave_index: 0,
         local_position: Vec3::new(-4.0, 1.2, 44.0),
         enemy_type: EnemyType::SpikeAlien,
         count: 4,
@@ -146,11 +157,32 @@ pub const ARCADE_PROTOTYPE_WAVES: &[ArcadeWaveDef] = &[
     },
     ArcadeWaveDef {
         room_index: 2,
+        wave_index: 1,
         local_position: Vec3::new(4.5, 1.2, 50.0),
         enemy_type: EnemyType::Soldier,
         count: 3,
         difficulty: 1.1,
         trigger_radius: 12.0,
+        encounter_owned: true,
+    },
+    ArcadeWaveDef {
+        room_index: 3,
+        wave_index: 0,
+        local_position: Vec3::new(-4.5, 1.2, 72.0),
+        enemy_type: EnemyType::Heavy,
+        count: 2,
+        difficulty: 1.15,
+        trigger_radius: 14.0,
+        encounter_owned: true,
+    },
+    ArcadeWaveDef {
+        room_index: 3,
+        wave_index: 1,
+        local_position: Vec3::new(3.5, 1.2, 80.0),
+        enemy_type: EnemyType::Hybrid,
+        count: 1,
+        difficulty: 1.25,
+        trigger_radius: 15.0,
         encounter_owned: true,
     },
 ];
@@ -198,7 +230,13 @@ pub fn validate_arcade_def(def: &ArcadeDungeonDef) -> Result<(), String> {
         return Err("arcade dungeon needs at least one room".into());
     }
     let mut seen = [false; 16];
-    for room in def.rooms {
+    for (expected_index, room) in def.rooms.iter().enumerate() {
+        if room.room_index != expected_index as u8 {
+            return Err(format!(
+                "room chain expected index {expected_index}, found {}",
+                room.room_index
+            ));
+        }
         if room.room_index as usize >= seen.len() {
             return Err(format!(
                 "room_index {} out of prototype range",
@@ -213,6 +251,18 @@ pub fn validate_arcade_def(def: &ArcadeDungeonDef) -> Result<(), String> {
             return Err(format!(
                 "room {} camera_radius too tight for 4-player readability",
                 room.room_index
+            ));
+        }
+    }
+    for pair in def.rooms.windows(2) {
+        if !def
+            .portals
+            .iter()
+            .any(|&(a, b)| a == pair[0].room_index && b == pair[1].room_index)
+        {
+            return Err(format!(
+                "missing forward portal {}-{}",
+                pair[0].room_index, pair[1].room_index
             ));
         }
     }
@@ -236,6 +286,49 @@ pub fn validate_arcade_def(def: &ArcadeDungeonDef) -> Result<(), String> {
         }
         if wave.count == 0 {
             return Err("wave count must be > 0".into());
+        }
+        if wave.trigger_radius < 6.0 || wave.difficulty <= 0.0 {
+            return Err(format!(
+                "room {} wave {} has unsafe trigger/tuning",
+                wave.room_index, wave.wave_index
+            ));
+        }
+        if def.waves.iter().any(|other| {
+            !std::ptr::eq(other, wave)
+                && other.room_index == wave.room_index
+                && other.wave_index == wave.wave_index
+                && other.encounter_owned == wave.encounter_owned
+        }) {
+            return Err(format!(
+                "duplicate room {} wave_index {}",
+                wave.room_index, wave.wave_index
+            ));
+        }
+        if wave.wave_index > 0
+            && !def.waves.iter().any(|previous| {
+                previous.room_index == wave.room_index
+                    && previous.wave_index + 1 == wave.wave_index
+                    && previous.encounter_owned == wave.encounter_owned
+            })
+        {
+            return Err(format!(
+                "room {} wave {} has no preceding beat",
+                wave.room_index, wave.wave_index
+            ));
+        }
+    }
+    for room in def
+        .rooms
+        .iter()
+        .filter(|room| room.kind == DungeonRoomKind::Combat)
+    {
+        if !def.waves.iter().any(|wave| {
+            wave.room_index == room.room_index && wave.wave_index == 0 && wave.encounter_owned
+        }) {
+            return Err(format!(
+                "combat room {} needs an encounter-owned opening wave",
+                room.room_index
+            ));
         }
     }
     Ok(())
@@ -426,13 +519,13 @@ fn spawn_stage_shell(
         parent.spawn((
             Name::new("Arcade Stage Underplate"),
             PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::new(42.0, 2.0, 78.0))),
+                mesh: Mesh3d(meshes.add(Cuboid::new(42.0, 2.0, 112.0))),
                 material: MeshMaterial3d(wall_mat.clone()),
-                transform: Transform::from_translation(Vec3::new(0.0, -1.4, 18.0)),
+                transform: Transform::from_translation(Vec3::new(0.0, -1.4, 35.0)),
                 ..default()
             },
             RigidBody::Fixed,
-            Collider::cuboid(21.0, 1.0, 39.0),
+            Collider::cuboid(21.0, 1.0, 56.0),
             WorldGeometry,
         ));
     });
@@ -526,40 +619,50 @@ fn spawn_stage_shell(
         WorldGeometry,
     ));
 
-    // Combat seal between rooms 1 and 2.
-    let seal_closed = def.stage_origin + Vec3::new(0.0, 2.8, 35.5);
-    let seal_open = seal_closed + Vec3::Y * 8.5;
-    commands.spawn((
-        Name::new("Arcade Pizza Pit Seal"),
-        PbrBundle {
-            mesh: Mesh3d(meshes.add(Cuboid::new(18.0, 5.5, 0.7))),
-            material: MeshMaterial3d(hazard_mat),
-            transform: Transform::from_translation(seal_open),
-            ..default()
-        },
-        DungeonEncounterDoor {
-            gate_id: def.gate_id,
-            room_index: 2,
-            closed: seal_closed,
-            open: seal_open,
-        },
-        RigidBody::KinematicPositionBased,
-        Collider::cuboid(9.0, 2.75, 0.35),
-        WorldGeometry,
-    ));
+    // Each combat room seals behind the party, runs its ordered waves, then
+    // permanently releases. This is the classic room-clear dungeon cadence.
+    for (room_index, local_z, label) in [
+        (2, 35.5, "Arcade Pizza Pit Seal"),
+        (3, 60.0, "Arcade Reliquary Seal"),
+    ] {
+        let seal_closed = def.stage_origin + Vec3::new(0.0, 2.8, local_z);
+        let seal_open = seal_closed + Vec3::Y * 8.5;
+        commands.spawn((
+            Name::new(label),
+            PbrBundle {
+                mesh: Mesh3d(meshes.add(Cuboid::new(18.0, 5.5, 0.7))),
+                material: MeshMaterial3d(hazard_mat.clone()),
+                transform: Transform::from_translation(seal_open),
+                ..default()
+            },
+            DungeonEncounterDoor {
+                gate_id: def.gate_id,
+                room_index,
+                requires_room_clear: (room_index > 2).then_some(room_index - 1),
+                closed: seal_closed,
+                open: seal_open,
+            },
+            RigidBody::KinematicPositionBased,
+            Collider::cuboid(9.0, 2.75, 0.35),
+            WorldGeometry,
+        ));
+    }
 
     commands.spawn((
         Name::new("Arcade Chamber Reward"),
         PbrBundle {
             mesh: Mesh3d(meshes.add(Sphere::new(1.1))),
             material: MeshMaterial3d(accent_mat.clone()),
-            transform: Transform::from_translation(def.stage_origin + Vec3::new(0.0, 2.4, 54.0)),
+            transform: Transform::from_translation(def.stage_origin + Vec3::new(0.0, 2.4, 84.0)),
             visibility: Visibility::Hidden,
             ..default()
         },
         DungeonEncounterReward {
             gate_id: def.gate_id,
-            room_index: 2,
+            room_index: 3,
+            credits: 240,
+            healing: 45.0,
+            claimed: false,
         },
         WorldGeometry,
     ));
@@ -577,6 +680,7 @@ fn spawn_stage_shell(
                 encounter: wave
                     .encounter_owned
                     .then_some((def.gate_id, wave.room_index)),
+                wave_index: wave.wave_index,
                 enemy_type: wave.enemy_type,
                 count: wave.count,
                 trigger_radius: wave.trigger_radius,
@@ -597,7 +701,7 @@ fn spawn_stage_shell(
                 shadow_maps_enabled: false,
                 ..default()
             },
-            transform: Transform::from_translation(def.stage_origin + Vec3::new(0.0, 14.0, 24.0)),
+            transform: Transform::from_translation(def.stage_origin + Vec3::new(0.0, 14.0, 48.0)),
             ..default()
         },
         WorldGeometry,
@@ -605,7 +709,7 @@ fn spawn_stage_shell(
 
     commands.spawn((
         Name::new("Arcade Stage Anchor"),
-        Transform::from_translation(def.stage_origin + Vec3::new(0.0, 2.0, 46.0)),
+        Transform::from_translation(def.stage_origin + Vec3::new(0.0, 2.0, 75.0)),
         GlobalTransform::default(),
         WorldAnchor { id: def.anchor_id },
         WorldGeometry,
@@ -669,7 +773,13 @@ fn spawn_arcade_room(
     }
 
     // End caps only on the true entrance back wall and final arena far wall.
-    if room.room_index == 0 || room.room_index == 2 {
+    let final_room = def
+        .rooms
+        .iter()
+        .map(|candidate| candidate.room_index)
+        .max()
+        .unwrap_or(room.room_index);
+    if room.room_index == 0 || room.room_index == final_room {
         let z_sign = if room.room_index == 0 { -1.0 } else { 1.0 };
         let local = Vec3::new(0.0, wall_h * 0.5, z_sign * half_z);
         let size = Vec3::new(floor_size.x, wall_h, thickness);
@@ -732,12 +842,12 @@ mod tests {
     #[test]
     fn arcade_prototype_def_is_valid_and_chained() {
         validate_arcade_def(&ARCADE_PROTOTYPE_DEF).unwrap();
-        assert_eq!(ARCADE_PROTOTYPE_DEF.rooms.len(), 3);
-        assert_eq!(ARCADE_PROTOTYPE_DEF.portals, &[(0, 1), (1, 2)]);
+        assert_eq!(ARCADE_PROTOTYPE_DEF.rooms.len(), 4);
+        assert_eq!(ARCADE_PROTOTYPE_DEF.portals, &[(0, 1), (1, 2), (2, 3)]);
         assert!(ARCADE_PROTOTYPE_DEF
             .waves
             .iter()
-            .any(|wave| wave.encounter_owned && wave.room_index == 2));
+            .any(|wave| wave.encounter_owned && wave.room_index == 3 && wave.wave_index == 1));
     }
 
     #[test]

@@ -348,6 +348,10 @@ fn assign_projectile_collision_profiles(
 }
 
 const AIM_MAX_DISTANCE: f32 = 120.0;
+const OPEN_WORLD_SOFT_LOCK_COS: f32 = 0.94;
+const OPEN_WORLD_SOFT_LOCK_RETAIN_COS: f32 = 0.87;
+const DUNGEON_SOFT_LOCK_RANGE: f32 = 34.0;
+const DUNGEON_SOFT_LOCK_COS: f32 = 0.35;
 
 fn direction_to_aim_point(muzzle: Vec3, aim_point: Vec3, fallback: Vec3) -> Vec3 {
     let direction = (aim_point - muzzle).normalize_or_zero();
@@ -363,21 +367,67 @@ fn aim_assist_target(root: Vec3, airborne: bool) -> Vec3 {
 }
 
 fn aim_assist_cone_cos(base_cone_cos: f32, airborne: bool) -> f32 {
-    if airborne {
-        (base_cone_cos - 0.10).max(0.58)
+    if base_cone_cos > 1.0 {
+        base_cone_cos
+    } else if airborne {
+        (base_cone_cos - 0.06).max(0.58)
     } else {
         base_cone_cos
     }
 }
 
+fn top_down_aim_forward(player: &GlobalTransform, input: &PlayerInput) -> Vec3 {
+    let input_direction = Vec3::new(input.move_axis.x, 0.0, -input.move_axis.y).normalize_or_zero();
+    if input_direction.length_squared() > 0.01 {
+        input_direction
+    } else {
+        player
+            .forward()
+            .as_vec3()
+            .with_y(0.0)
+            .normalize_or(Vec3::NEG_Z)
+    }
+}
+
+fn aim_assist_cone(
+    input_aiming: bool,
+    third_person_open_world: bool,
+    dungeon_active: bool,
+    retaining_target: bool,
+    upgrade_relax: f32,
+) -> f32 {
+    let base = if dungeon_active {
+        DUNGEON_SOFT_LOCK_COS
+    } else if third_person_open_world {
+        if retaining_target {
+            OPEN_WORLD_SOFT_LOCK_RETAIN_COS
+        } else if input_aiming {
+            0.88
+        } else {
+            OPEN_WORLD_SOFT_LOCK_COS
+        }
+    } else if input_aiming {
+        0.92
+    } else {
+        1.01 // first-person hip fire stays truly manual
+    };
+    if base > 1.0 {
+        base
+    } else {
+        (base - upgrade_relax).clamp(0.25, 1.0)
+    }
+}
+
 fn update_aim_solution_system(
     spatial_query: SpatialQuery,
+    dungeon: Res<DungeonCrawlState>,
     mut player_q: Query<
         (
             Entity,
             &GlobalTransform,
             &PlayerInput,
             &PlayerCameraRef,
+            Option<&PlayerView>,
             &PlayerProgression,
             &mut AimSolution,
         ),
@@ -395,7 +445,7 @@ fn update_aim_solution_system(
         (With<Enemy>, Without<DeadEnemy>, Without<HackedUnit>),
     >,
 ) {
-    for (player_entity, player_transform, input, camera_ref, progression, mut aim) in
+    for (player_entity, player_transform, input, camera_ref, view, progression, mut aim) in
         player_q.iter_mut()
     {
         let upgrades = &progression.upgrades;
@@ -408,7 +458,24 @@ fn update_aim_solution_system(
             .as_vec3()
             .normalize_or(Vec3::NEG_Z);
         let muzzle_origin = star_muzzle_origin(player_transform, camera_forward);
-        let filter = SpatialQueryFilter::from_excluded_entities([player_entity]);
+        let third_person_open_world = !dungeon.active
+            && view.is_none_or(|view| view.perspective == CameraPerspective::ThirdPerson);
+        let assist_origin = if dungeon.active {
+            muzzle_origin
+        } else {
+            camera_origin
+        };
+        let assist_forward = if dungeon.active {
+            top_down_aim_forward(player_transform, input)
+        } else {
+            camera_forward
+        };
+        // Other local players are not cover. Restrict camera acquisition to
+        // world geometry and enemy hurtboxes so split-screen/co-op formations
+        // cannot make the soft lock flicker as teammates cross the reticle.
+        let filter =
+            SpatialQueryFilter::from_mask([GameCollisionLayer::World, GameCollisionLayer::Enemy])
+                .with_excluded_entities([player_entity]);
         let world_hit = Dir3::new(camera_forward).ok().and_then(|direction| {
             spatial_query.cast_ray(camera_origin, direction, AIM_MAX_DISTANCE, false, &filter)
         });
@@ -417,9 +484,12 @@ fn update_aim_solution_system(
             .map(|hit| hit.distance)
             .unwrap_or(AIM_MAX_DISTANCE);
 
-        let range = AIM_MAX_DISTANCE + upgrades.gauntlet_aim_range_bonus();
-        let base_cone = if input.aim { 0.78 } else { 0.90 };
-        let cone_cos = (base_cone - upgrades.gauntlet_aim_cone_relax()).clamp(0.62, 0.96);
+        let range = if dungeon.active {
+            DUNGEON_SOFT_LOCK_RANGE
+        } else {
+            AIM_MAX_DISTANCE + upgrades.gauntlet_aim_range_bonus()
+        };
+        let previous_target = aim.target;
         let mut best: Option<(f32, Entity, Vec3)> = None;
         for (entity, transform, health, drone, city_spy) in enemy_q.iter() {
             if !health.is_alive() {
@@ -430,14 +500,21 @@ fn update_aim_solution_system(
             // families are rooted at the center of their hurtbox. A torso
             // offset put spy-drone assist just above its shallow collider.
             let target_point = aim_assist_target(transform.translation(), airborne);
-            let offset = target_point - camera_origin;
+            let offset = target_point - assist_origin;
             let distance = offset.length();
             if distance <= 0.01 || distance > range {
                 continue;
             }
-            let dot = offset.normalize_or_zero().dot(camera_forward);
+            let dot = offset.normalize_or_zero().dot(assist_forward);
             // Fast, elevated targets get modest extra magnetism without
             // changing acquisition for grounded combatants.
+            let cone_cos = aim_assist_cone(
+                input.aim,
+                third_person_open_world,
+                dungeon.active,
+                previous_target == Some(entity),
+                upgrades.gauntlet_aim_cone_relax(),
+            );
             let target_cone_cos = aim_assist_cone_cos(cone_cos, airborne);
             if dot < target_cone_cos {
                 continue;
@@ -445,13 +522,18 @@ fn update_aim_solution_system(
             let target_direction = Dir3::new(offset.normalize_or_zero()).ok();
             let visible = target_direction.is_some_and(|direction| {
                 spatial_query
-                    .cast_ray(camera_origin, direction, distance + 0.75, false, &filter)
+                    .cast_ray(assist_origin, direction, distance + 0.75, false, &filter)
                     .is_none_or(|hit| hit.entity == entity || hit.distance + 0.75 >= distance)
             });
             if !visible {
                 continue;
             }
-            let score = dot * 3.0 - distance / range;
+            let retained_bonus = if previous_target == Some(entity) {
+                0.42
+            } else {
+                0.0
+            };
+            let score = dot * 3.0 - distance / range + retained_bonus;
             if best.is_none_or(|(best_score, _, _)| score > best_score) {
                 best = Some((score, entity, target_point));
             }
@@ -459,6 +541,12 @@ fn update_aim_solution_system(
 
         let (target, aim_point, obstructed) = if let Some((_, entity, point)) = best {
             (Some(entity), point, false)
+        } else if dungeon.active {
+            (
+                None,
+                muzzle_origin + assist_forward * DUNGEON_SOFT_LOCK_RANGE,
+                false,
+            )
         } else if let Some(hit) = world_hit {
             (
                 None,
@@ -3173,10 +3261,31 @@ fn segment_sphere_hit_fraction(start: Vec3, end: Vec3, center: Vec3, radius: f32
 
 fn drone_damage_proxy_radius(enemy_type: EnemyType) -> Option<f32> {
     match enemy_type {
-        EnemyType::Drone => Some(2.8),
-        EnemyType::SpyDrone => Some(3.6),
+        // Logical fallback encloses the whole visible silhouette, including
+        // wing tips. The ordinary Avian cuboid remains the primary hurtbox.
+        EnemyType::Drone => Some(4.1),
+        EnemyType::SpyDrone => Some(4.0),
         _ => None,
     }
+}
+
+fn logical_drone_melee_overlap(
+    origin: Vec3,
+    forward: Vec3,
+    target: Vec3,
+    enemy_type: EnemyType,
+    radius: f32,
+    offset: f32,
+    arc_cos: f32,
+) -> bool {
+    let Some(proxy) = drone_damage_proxy_radius(enemy_type) else {
+        return false;
+    };
+    let delta = target - origin;
+    let horizontal = delta.with_y(0.0);
+    delta.y.abs() <= radius + proxy
+        && horizontal.length() <= radius + offset.abs() + proxy
+        && horizontal.normalize_or_zero().dot(forward) >= arc_cos
 }
 
 // ── Projectile Update ─────────────────────────────────────────────────────────
@@ -4069,6 +4178,26 @@ fn execute_melee_hit(
     let filter = SpatialQueryFilter::from_mask(hitbox_layers.filters);
     let mut candidates =
         spatial_query.shape_intersections(&hitbox, origin, Quat::IDENTITY, &filter);
+    // Aerial units move kinematically between physics synchronization points.
+    // Add their authored logical volume as a fallback so a visible wing/body
+    // overlap cannot lose a melee or saber strike for one frame.
+    candidates.extend(
+        enemy_q
+            .iter_mut()
+            .filter_map(|(entity, transform, health, _, enemy)| {
+                (health.is_alive()
+                    && logical_drone_melee_overlap(
+                        origin,
+                        forward,
+                        transform.translation,
+                        enemy.enemy_type,
+                        radius,
+                        offset,
+                        arc_cos,
+                    ))
+                .then_some(entity)
+            }),
+    );
     candidates.sort_by_key(|entity| entity.to_bits());
     candidates.dedup();
 
@@ -4090,7 +4219,17 @@ fn execute_melee_hit(
         let to_enemy = (e_transform.translation - origin).with_y(0.0);
         let in_arc = to_enemy.length() <= radius + offset
             && to_enemy.normalize_or_zero().dot(forward) >= arc_cos;
-        let within_hitbox = in_arc || hit_center.distance(e_transform.translation) <= radius;
+        let logical_drone_hit = logical_drone_melee_overlap(
+            origin,
+            forward,
+            e_transform.translation,
+            enemy.enemy_type,
+            radius,
+            offset,
+            arc_cos,
+        );
+        let within_hitbox =
+            in_arc || hit_center.distance(e_transform.translation) <= radius || logical_drone_hit;
         let unobstructed = world_line_of_sight(
             spatial_query,
             origin,
@@ -5394,6 +5533,36 @@ mod tracking_missile_tests {
     }
 
     #[test]
+    fn third_person_soft_lock_acquires_narrow_and_releases_wide() {
+        let acquire = aim_assist_cone(false, true, false, false, 0.0);
+        let retain = aim_assist_cone(false, true, false, true, 0.0);
+        assert_eq!(acquire, OPEN_WORLD_SOFT_LOCK_COS);
+        assert_eq!(retain, OPEN_WORLD_SOFT_LOCK_RETAIN_COS);
+        assert!(retain < acquire, "retention cone must be wider");
+        assert!(aim_assist_cone(false, false, false, false, 0.0) > 1.0);
+        assert!(aim_assist_cone(false, false, false, false, 0.2) > 1.0);
+        assert!(aim_assist_cone(true, false, false, false, 0.0) < 1.0);
+    }
+
+    #[test]
+    fn top_down_soft_lock_uses_move_direction_then_character_facing() {
+        let player = GlobalTransform::from(Transform::IDENTITY);
+        let moving = PlayerInput {
+            move_axis: Vec2::new(1.0, 0.0),
+            ..default()
+        };
+        assert_eq!(top_down_aim_forward(&player, &moving), Vec3::X);
+        assert_eq!(
+            top_down_aim_forward(&player, &PlayerInput::default()),
+            Vec3::NEG_Z
+        );
+        assert_eq!(
+            aim_assist_cone(false, true, true, false, 0.0),
+            DUNGEON_SOFT_LOCK_COS
+        );
+    }
+
+    #[test]
     fn unlimited_weapons_ignore_stale_zero_ammo_counts() {
         let mut primary = Weapon::new(WeaponType::Pistol);
         primary.ammo = 0;
@@ -6588,9 +6757,40 @@ mod move_def_wiring_tests {
             1.0,
         )
         .is_none());
-        assert_eq!(drone_damage_proxy_radius(EnemyType::Drone), Some(2.8));
-        assert_eq!(drone_damage_proxy_radius(EnemyType::SpyDrone), Some(3.6));
+        assert_eq!(drone_damage_proxy_radius(EnemyType::Drone), Some(4.1));
+        assert_eq!(drone_damage_proxy_radius(EnemyType::SpyDrone), Some(4.0));
         assert_eq!(drone_damage_proxy_radius(EnemyType::Soldier), None);
+    }
+
+    #[test]
+    fn visible_drone_wings_have_a_logical_melee_damage_fallback() {
+        assert!(logical_drone_melee_overlap(
+            Vec3::ZERO,
+            Vec3::Z,
+            Vec3::new(3.8, 2.0, 3.0),
+            EnemyType::Drone,
+            3.0,
+            0.15,
+            0.15,
+        ));
+        assert!(!logical_drone_melee_overlap(
+            Vec3::ZERO,
+            Vec3::Z,
+            Vec3::new(0.0, 12.0, 3.0),
+            EnemyType::Drone,
+            3.0,
+            0.15,
+            0.15,
+        ));
+        assert!(!logical_drone_melee_overlap(
+            Vec3::ZERO,
+            Vec3::Z,
+            Vec3::new(0.0, 0.0, -5.0),
+            EnemyType::Drone,
+            3.0,
+            0.15,
+            0.15,
+        ));
     }
 
     #[test]

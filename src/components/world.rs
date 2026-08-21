@@ -442,6 +442,9 @@ pub struct CreatureSpawnOverride(pub String);
 pub struct DungeonEnemySpawner {
     pub chapter: u8,
     pub encounter: Option<(&'static str, u8)>,
+    /// Ordered encounter beat. Wave N waits until every lower wave has
+    /// spawned and its owned enemies have been defeated.
+    pub wave_index: u8,
     pub enemy_type: crate::components::enemy::EnemyType,
     pub count: u8,
     pub trigger_radius: f32,
@@ -522,6 +525,7 @@ pub struct DungeonRoomPortal {
 pub struct DungeonEncounterEnemy {
     pub gate_id: &'static str,
     pub room_index: u8,
+    pub wave_index: u8,
 }
 
 /// A physical doorway that seals while its room encounter is active and
@@ -530,15 +534,20 @@ pub struct DungeonEncounterEnemy {
 pub struct DungeonEncounterDoor {
     pub gate_id: &'static str,
     pub room_index: u8,
+    /// Optional prior room that must be cleared before this threshold opens.
+    pub requires_room_clear: Option<u8>,
     pub closed: Vec3,
     pub open: Vec3,
 }
 
 /// A chamber reward that becomes visible when its encounter is cleared.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct DungeonEncounterReward {
     pub gate_id: &'static str,
     pub room_index: u8,
+    pub credits: u32,
+    pub healing: f32,
+    pub claimed: bool,
 }
 
 impl DungeonRoomPortal {
