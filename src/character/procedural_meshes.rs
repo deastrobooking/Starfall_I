@@ -231,6 +231,93 @@ pub fn bezier_sweep_mesh(
     mesh
 }
 
+/// Generates a straight, stable-topology loft between two superellipse
+/// profiles. This is the shared torso/limb primitive for player and enemy
+/// generators; a later rigging stage can therefore rely on consistent ring and
+/// sector correspondence instead of generator-private vertex layouts.
+pub fn lofted_superellipse_mesh(
+    bottom: Vec2,
+    top: Vec2,
+    height: f32,
+    bulge: f32,
+    profile_exponent: f32,
+    rings: usize,
+    sectors: usize,
+) -> Mesh {
+    let rings = rings.max(3);
+    let sectors = sectors.max(8);
+    let height = height.max(0.001);
+    let bottom = bottom.max(Vec2::splat(0.001));
+    let top = top.max(Vec2::splat(0.001));
+    let profile_power = 2.0 / profile_exponent.max(0.2);
+
+    let mut positions = Vec::with_capacity((rings + 1) * (sectors + 1) + 2);
+    let mut normals = Vec::with_capacity(positions.capacity());
+    let mut uvs = Vec::with_capacity(positions.capacity());
+    let mut indices = Vec::with_capacity(rings * sectors * 6 + sectors * 6);
+
+    for ring in 0..=rings {
+        let v = ring as f32 / rings as f32;
+        let y = height * (v - 0.5);
+        let smooth_v = v * v * (3.0 - 2.0 * v);
+        let base = bottom.lerp(top, smooth_v);
+        let swell = 1.0 + bulge * (v * PI).sin();
+        let radii = (base * swell).max(Vec2::splat(0.001));
+        for sector in 0..=sectors {
+            let u = sector as f32 / sectors as f32;
+            let angle = u * TAU;
+            let (sin_angle, cos_angle) = angle.sin_cos();
+            let x = radii.x * signed_pow(cos_angle, profile_power);
+            let z = radii.y * signed_pow(sin_angle, profile_power);
+            let normal = Vec3::new(x / radii.x.powi(2), 0.0, z / radii.y.powi(2))
+                .try_normalize()
+                .unwrap_or(Vec3::X);
+            positions.push([x, y, z]);
+            normals.push(normal.to_array());
+            uvs.push([u, v]);
+        }
+    }
+
+    let stride = (sectors + 1) as u32;
+    for ring in 0..rings as u32 {
+        for sector in 0..sectors as u32 {
+            let a = ring * stride + sector;
+            let b = a + stride;
+            indices.extend_from_slice(&[a, b, a + 1, b, b + 1, a + 1]);
+        }
+    }
+
+    for (ring, y, normal, flip) in [
+        (0_u32, -height * 0.5, Vec3::NEG_Y, true),
+        (rings as u32, height * 0.5, Vec3::Y, false),
+    ] {
+        let center = positions.len() as u32;
+        positions.push([0.0, y, 0.0]);
+        normals.push(normal.to_array());
+        uvs.push([0.5, if flip { 0.0 } else { 1.0 }]);
+        let ring_start = ring * stride;
+        for sector in 0..sectors as u32 {
+            let a = ring_start + sector;
+            let b = a + 1;
+            if flip {
+                indices.extend_from_slice(&[center, b, a]);
+            } else {
+                indices.extend_from_slice(&[center, a, b]);
+            }
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 /// Generates a smooth puffy ellipsoid. Exponents below 1.0 create the rounded,
 /// slightly boxy silhouette used by cartoon gloves and shoes.
 pub fn superellipsoid_mesh(
@@ -466,5 +553,25 @@ mod tests {
             assert!(next.tangent.dot(next.normal).abs() < 1.0e-4);
             frame = next;
         }
+    }
+
+    #[test]
+    fn shared_loft_has_stable_ring_topology_and_caps() {
+        let mesh = lofted_superellipse_mesh(
+            Vec2::new(0.4, 0.3),
+            Vec2::new(0.2, 0.25),
+            1.5,
+            0.12,
+            1.6,
+            5,
+            10,
+        );
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|attribute| attribute.as_float3())
+            .expect("loft positions should be float3");
+        assert_eq!(positions.len(), 68);
+        assert_eq!(mesh.indices().expect("loft indices").len(), 360);
+        assert!(positions.iter().flatten().all(|value| value.is_finite()));
     }
 }

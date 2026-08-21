@@ -294,7 +294,7 @@ pub struct WardrobeSpec {
     pub armor: ArmorStyle,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BodySpec {
     pub height: f32,
@@ -322,7 +322,7 @@ impl Default for BodySpec {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FaceSpec {
     pub face_length: f32,
@@ -370,7 +370,7 @@ impl Default for FaceSpec {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StyleSpec {
     /// Index into the studio skin-tone palette.
@@ -582,7 +582,7 @@ impl StyleField {
 }
 
 /// The whole character. Serialize THIS, never the generated meshes.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CharacterSpec {
     pub sex: Sex,
     pub body: BodySpec,
@@ -597,6 +597,96 @@ pub struct CharacterSpec {
     /// skipped).
     #[serde(default)]
     pub modifiers: [Option<crate::character::mesh_modifiers::MeshModifier>; 4],
+}
+
+/// Semantic invalidation mask for generated character content. It describes
+/// dependencies, not anonymous mesh ranges, so it remains stable as topology
+/// improves and can later route work to separate asynchronous generators.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CharacterGeometryScope(u8);
+
+impl CharacterGeometryScope {
+    pub const NONE: Self = Self(0);
+    pub const BODY: Self = Self(1 << 0);
+    pub const FACE: Self = Self(1 << 1);
+    pub const HAIR: Self = Self(1 << 2);
+    pub const WARDROBE: Self = Self(1 << 3);
+    pub const MATERIALS: Self = Self(1 << 4);
+    pub const MODIFIERS: Self = Self(1 << 5);
+    pub const ALL: Self = Self((1 << 6) - 1);
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Body proportions reposition every attached visual group; global mesh
+    /// modifiers likewise rederive every generated part.
+    pub const fn requires_full_hierarchy_rebuild(self) -> bool {
+        self.0 & (Self::BODY.0 | Self::MODIFIERS.0) != 0
+    }
+
+    pub fn between(before: &CharacterSpec, after: &CharacterSpec) -> Self {
+        let mut scope = Self::NONE;
+        if before.sex != after.sex
+            || before.body != after.body
+            || before.style_vector != after.style_vector
+        {
+            scope = scope
+                .union(Self::BODY)
+                .union(Self::FACE)
+                .union(Self::HAIR)
+                .union(Self::WARDROBE);
+        }
+        if before.face != after.face {
+            scope = scope.union(Self::FACE);
+        }
+        if before.style.hair != after.style.hair {
+            scope = scope.union(Self::HAIR);
+        }
+        if before.style.wardrobe != after.style.wardrobe || before.style.flair != after.style.flair
+        {
+            scope = scope.union(Self::WARDROBE);
+        }
+        if before.style.skin_tone != after.style.skin_tone
+            || before.style.eye_color != after.style.eye_color
+            || before.style.hair_color != after.style.hair_color
+            || before.style.primary_color != after.style.primary_color
+            || before.style.secondary_color != after.style.secondary_color
+        {
+            scope = scope.union(Self::MATERIALS);
+        }
+        if before.modifiers != after.modifiers {
+            scope = scope.union(Self::MODIFIERS);
+        }
+        scope
+    }
+
+    pub fn summary(self) -> String {
+        if self.is_empty() {
+            return "none".into();
+        }
+        let labels = [
+            (Self::BODY, "body"),
+            (Self::FACE, "face"),
+            (Self::HAIR, "hair"),
+            (Self::WARDROBE, "wardrobe"),
+            (Self::MATERIALS, "materials"),
+            (Self::MODIFIERS, "modifiers"),
+        ];
+        labels
+            .into_iter()
+            .filter_map(|(scope, label)| self.contains(scope).then_some(label))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    }
 }
 
 /// Every editable scalar morph, in UI order. The editor cursor walks this
@@ -857,5 +947,46 @@ mod tests {
         assert_eq!(StyleField::PrimaryColor.value_label(&spec), "Tan");
         StyleField::PrimaryColor.cycle(&mut spec, 1);
         assert_eq!(spec.style.primary_color, 0);
+    }
+
+    #[test]
+    fn dependency_scope_distinguishes_face_hair_material_and_body_edits() {
+        let base = CharacterSpec::default();
+
+        let mut face = base;
+        face.face.eye_size = 0.8;
+        assert_eq!(
+            CharacterGeometryScope::between(&base, &face),
+            CharacterGeometryScope::FACE
+        );
+
+        let mut hair = base;
+        hair.style.hair = HairStyle::Ponytail;
+        assert_eq!(
+            CharacterGeometryScope::between(&base, &hair),
+            CharacterGeometryScope::HAIR
+        );
+
+        let mut material = base;
+        material.style.primary_color = 4;
+        assert_eq!(
+            CharacterGeometryScope::between(&base, &material),
+            CharacterGeometryScope::MATERIALS
+        );
+
+        let mut body = base;
+        body.body.height = 0.8;
+        let scope = CharacterGeometryScope::between(&base, &body);
+        assert!(scope.contains(CharacterGeometryScope::BODY));
+        assert!(scope.contains(CharacterGeometryScope::FACE));
+        assert!(scope.contains(CharacterGeometryScope::HAIR));
+        assert!(scope.contains(CharacterGeometryScope::WARDROBE));
+        assert!(scope.requires_full_hierarchy_rebuild());
+    }
+
+    #[test]
+    fn unchanged_specs_produce_no_regeneration_work() {
+        let spec = CharacterSpec::default();
+        assert!(CharacterGeometryScope::between(&spec, &spec).is_empty());
     }
 }

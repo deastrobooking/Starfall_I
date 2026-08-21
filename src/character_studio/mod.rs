@@ -44,7 +44,7 @@ use crate::resources::{
 };
 use generators::build_character_patch;
 use rig_bridge::{ImportedHumanoidRig, ImportedRigStatus};
-use spec::{CharacterSpec, MorphField, StyleField};
+use spec::{CharacterGeometryScope, CharacterSpec, MorphField, StyleField};
 
 pub struct CharacterStudioPlugin;
 
@@ -256,6 +256,9 @@ pub struct StudioState {
     pub spec: CharacterSpec,
     undo: Vec<CharacterSpec>,
     dirty: bool,
+    dirty_scope: CharacterGeometryScope,
+    last_rebuild_scope: CharacterGeometryScope,
+    generation_revision: u64,
     labels_dirty: bool,
     yaw: f32,
     pitch: f32,
@@ -276,6 +279,9 @@ impl Default for StudioState {
             spec: generators::preset_male(),
             undo: Vec::new(),
             dirty: true,
+            dirty_scope: CharacterGeometryScope::ALL,
+            last_rebuild_scope: CharacterGeometryScope::NONE,
+            generation_revision: 0,
             labels_dirty: true,
             // Generated humans face -Z, so PI is the true front view.
             yaw: std::f32::consts::PI,
@@ -426,6 +432,7 @@ fn setup_studio(
     state.preview_expression = StudioExpression::Neutral;
     state.apply_requested = false;
     state.dirty = true;
+    state.dirty_scope = CharacterGeometryScope::ALL;
     state.labels_dirty = true;
     if std::env::var_os("STARFALL_STUDIO_RIG").is_some() {
         state.preview_backend = StudioPreviewBackend::RiggedAmp;
@@ -1005,8 +1012,8 @@ fn apply_action(
     game_rng: &mut GameRng,
     next_state: &mut NextState<AppState>,
 ) {
+    let before = state.spec;
     let mark = |state: &mut StudioState, msg: String| {
-        state.dirty = true;
         state.labels_dirty = true;
         state.status = msg;
     };
@@ -1183,6 +1190,7 @@ fn apply_action(
             if state.preview_backend != StudioPreviewBackend::Procedural {
                 state.preview_backend = StudioPreviewBackend::Procedural;
                 state.dirty = true;
+                state.dirty_scope = state.dirty_scope.union(CharacterGeometryScope::ALL);
             }
             let label = match state.preview_expression {
                 StudioExpression::Neutral => "Neutral",
@@ -1195,10 +1203,14 @@ fn apply_action(
         }
         StudioAction::PreviewProcedural => {
             state.preview_backend = StudioPreviewBackend::Procedural;
+            state.dirty = true;
+            state.dirty_scope = state.dirty_scope.union(CharacterGeometryScope::ALL);
             mark(state, "Generated editable preview active".into());
         }
         StudioAction::PreviewRigged => {
             state.preview_backend = StudioPreviewBackend::RiggedAmp;
+            state.dirty = true;
+            state.dirty_scope = state.dirty_scope.union(CharacterGeometryScope::ALL);
             mark(
                 state,
                 "AMP rig test: 17 joints mapped; shape keys not present".into(),
@@ -1293,6 +1305,12 @@ fn apply_action(
             }
         }
     }
+
+    let changed_scope = CharacterGeometryScope::between(&before, &state.spec);
+    if !changed_scope.is_empty() {
+        state.dirty = true;
+        state.dirty_scope = state.dirty_scope.union(changed_scope);
+    }
 }
 
 // ── Mouse ─────────────────────────────────────────────────────────────────────
@@ -1363,7 +1381,11 @@ fn morph_slider_interaction(
             continue;
         }
 
+        let before = state.spec;
         field.set(&mut state.spec, next_value);
+        state.dirty_scope = state
+            .dirty_scope
+            .union(CharacterGeometryScope::between(&before, &state.spec));
         state.dirty = true;
         state.labels_dirty = true;
         state.status = format!("{} = {:.2}", field.label(), field.get(&state.spec));
@@ -1839,7 +1861,16 @@ fn rebuild_preview(
     if !state.dirty {
         return;
     }
+    let rebuild_scope = if state.dirty_scope.is_empty() {
+        CharacterGeometryScope::ALL
+    } else {
+        state.dirty_scope
+    };
     state.dirty = false;
+    state.dirty_scope = CharacterGeometryScope::NONE;
+    state.last_rebuild_scope = rebuild_scope;
+    state.generation_revision = state.generation_revision.saturating_add(1);
+    state.labels_dirty = true;
     for e in previews.iter() {
         commands.entity(e).despawn();
     }
@@ -1960,6 +1991,7 @@ fn fallback_failed_rig_preview(
     if failed {
         state.preview_backend = StudioPreviewBackend::Procedural;
         state.dirty = true;
+        state.dirty_scope = state.dirty_scope.union(CharacterGeometryScope::ALL);
         state.labels_dirty = true;
         state.status = "Rig asset failed to load; generated fallback restored".into();
     }
@@ -2115,21 +2147,39 @@ fn refresh_labels(
         background.0 = style_swatch_color(StyleField::ALL[marker.0], &state.spec);
     }
     for mut text in model_info_q.iter_mut() {
-        *text = Text::new(model_info_label(&state.spec, state.preview_backend));
+        *text = Text::new(model_info_label(
+            &state.spec,
+            state.preview_backend,
+            state.generation_revision,
+            state.last_rebuild_scope,
+        ));
     }
     for mut text in status_q.iter_mut() {
         *text = Text::new(state.status.clone());
     }
 }
 
-fn model_info_label(spec: &CharacterSpec, backend: StudioPreviewBackend) -> String {
+fn model_info_label(
+    spec: &CharacterSpec,
+    backend: StudioPreviewBackend,
+    generation_revision: u64,
+    rebuild_scope: CharacterGeometryScope,
+) -> String {
     let meters = estimated_height(spec);
+    let dependency_kind = if rebuild_scope.requires_full_hierarchy_rebuild() {
+        "full-layout dependency"
+    } else {
+        "isolated dependency"
+    };
     format!(
-        "Backend: {}\nHeight: {:.2} m / {:.0} in\nBuild: muscle {}  mass {}\nFace: jaw {}  eyes {}\nOutfit: {} + {}\nArmor: {}",
+        "Backend: {}\nGeneration: {} • {} ({})\nHeight: {:.2} m / {:.0} in\nBuild: muscle {}  mass {}\nFace: jaw {}  eyes {}\nOutfit: {} + {}\nArmor: {}",
         match backend {
             StudioPreviewBackend::Procedural => "Generated / fully editable",
             StudioPreviewBackend::RiggedAmp => "AMP rig diagnostic",
         },
+        generation_revision,
+        rebuild_scope.summary(),
+        dependency_kind,
         meters,
         meters * 39.3701,
         morph_percent_label(spec.body.muscle),

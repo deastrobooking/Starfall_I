@@ -110,9 +110,17 @@ labels are the next contained viewport addition.
   hair locks, and compiled enemy tails consume the same primitive; tail segment
   count now controls continuous sweep tessellation instead of disconnected
   capsules, while existing modifier stacks remain downstream-compatible.
-- Continue extraction in this order: shared lofted torso/limb topology;
-  dependency-scoped regeneration; generated skin weights; then morph-target
-  authoring.
+- A shared stable-ring superellipse loft now owns the torso/limb topology used
+  by every Character Studio column and by compiled enemy torsos and arms.
+  Profile changes preserve ring correspondence for later generated weights.
+- Character Studio now classifies edits into body, face, hair, wardrobe,
+  material, and modifier dependencies. It coalesces masks across a frame,
+  suppresses unchanged-spec rebuilds, and exposes the last regeneration scope
+  and revision in the preview diagnostics. Body/style and modifier edits are
+  explicitly recognized as full-layout dependencies.
+- Continue in this order: split the currently interleaved head and wardrobe
+  generators into independently replaceable preview subgraphs; generated skin
+  weights; then morph-target authoring.
 
 Acceptance: both editors expose all five axes; presets establish distinct
 style-space positions; Character Studio exports the visible proportions into
@@ -123,6 +131,12 @@ Sweep-slice acceptance: curve edits retain vertex/index counts at a fixed
 tessellation; generated positions and normals remain finite; neighboring
 parallel-transport frames do not flip; player and enemy runtime generators both
 consume the shared primitive without a recipe migration.
+
+Loft/dependency acceptance: player and enemy generators consume one loft
+implementation; fixed ring/sector settings preserve topology; isolated face,
+hair, material, and wardrobe edits produce distinct dependency masks; body and
+modifier edits request full-layout regeneration; identical specs request no
+work.
 
 ### B19-2 — Editor UI and settings pilot
 

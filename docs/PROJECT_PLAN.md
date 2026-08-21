@@ -115,8 +115,12 @@ Work:
   playable player recipes, and compiled enemy geometry; reusable cubic Bézier
   paths, Bézier radius profiles, stable sweep topology, and parallel-transport
   frames now drive Studio hair, playable hero locks, and continuous enemy
-  tails; next extract shared lofted torso/limb topology and dependency-scoped
-  regeneration before generated skin weights and morph targets
+  tails; shared stable-ring lofts now drive all Studio columns plus compiled
+  enemy torsos and arms, and Studio edits carry body/face/hair/wardrobe/material
+  dependency masks with no-op rebuild suppression and visible generation
+  diagnostics; next split the interleaved head and wardrobe spawners into
+  independently replaceable subgraphs, then generate skin weights and morph
+  targets
 - bake level scenes and platformer prefab recipes into the published generation
   and load them without a Forge project store
 - protect authored project content with validation and stable revision behavior

@@ -296,6 +296,8 @@ Included features:
 - shared cubic Bézier sweep geometry with authored radius profiles,
   stable topology, and parallel-transport frames for seamless player hair and
   enemy tails
+- shared stable-ring torso/limb lofts across Character Studio and compiled
+  enemies, plus dependency-classified Studio regeneration diagnostics
 - style-aware runtime blueprint export so the playable character retains the
   proportions shown in Character Studio
 - GLB export and rig import diagnostics

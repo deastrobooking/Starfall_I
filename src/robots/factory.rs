@@ -7,7 +7,7 @@ use super::designer::{HeadShape, LegStyle, RobotStyle, VisorStyle};
 use bevy::prelude::*;
 
 use crate::character::procedural_meshes::{
-    bezier_sweep_mesh, CubicBezier3, CubicBezierRadii, SweepMeshSettings,
+    bezier_sweep_mesh, lofted_superellipse_mesh, CubicBezier3, CubicBezierRadii, SweepMeshSettings,
 };
 use crate::engine::rendering::{PbrBundle, SpatialBundle};
 
@@ -130,21 +130,28 @@ fn spawn_robot_with_material_response(
     let tw = style.torso_width * s;
     let th = style.torso_height * s;
     let td = style.torso_depth * s;
+    let semantic = style.style_vector.smoothed();
+    let loft_exponent =
+        (1.90 - semantic.mechanical * 0.82 + semantic.creature * 0.12).clamp(0.75, 2.0);
 
-    // ── Torso: Capsule3d main body ─────────────────────────────────────────────
+    // ── Torso: shared stable-ring loft ─────────────────────────────────────────
     let torso = commands
         .spawn(PbrBundle {
             mesh: Mesh3d(add_part(
                 meshes,
                 &style.modifiers,
-                Capsule3d::new(tw * 0.46, th * 0.55),
+                lofted_superellipse_mesh(
+                    Vec2::new(tw * 0.38, td * 0.42),
+                    Vec2::new(tw * 0.50, td * 0.50),
+                    th,
+                    0.05 + semantic.heroic * 0.08,
+                    loft_exponent,
+                    6,
+                    16,
+                ),
             )),
             material: MeshMaterial3d(primary_mat.clone()),
-            transform: Transform::from_xyz(0.0, th * 0.5, 0.0).with_scale(Vec3::new(
-                1.0,
-                1.0,
-                td / (tw * 0.92),
-            )),
+            transform: Transform::from_xyz(0.0, th * 0.5, 0.0),
             ..default()
         })
         .id();
@@ -252,13 +259,21 @@ fn spawn_robot_with_material_response(
             .id();
         commands.entity(root).add_child(sball);
 
-        // Upper arm capsule
+        // Upper arm shares ring correspondence with generated humanoid limbs.
         let arm = commands
             .spawn(PbrBundle {
                 mesh: Mesh3d(add_part(
                     meshes,
                     &style.modifiers,
-                    Capsule3d::new(at * 0.46, al * 0.44),
+                    lofted_superellipse_mesh(
+                        Vec2::splat(at * 0.36),
+                        Vec2::new(at * 0.52, at * 0.46),
+                        al * 0.46,
+                        0.05,
+                        loft_exponent,
+                        4,
+                        12,
+                    ),
                 )),
                 material: MeshMaterial3d(primary_mat.clone()),
                 transform: Transform::from_xyz(arm_x, th * 0.65, 0.0),
@@ -278,13 +293,21 @@ fn spawn_robot_with_material_response(
             .id();
         commands.entity(root).add_child(elbow);
 
-        // Forearm capsule
+        // Forearm tapers toward the wrist without changing topology.
         let forearm = commands
             .spawn(PbrBundle {
                 mesh: Mesh3d(add_part(
                     meshes,
                     &style.modifiers,
-                    Capsule3d::new(at * 0.40, al * 0.44),
+                    lofted_superellipse_mesh(
+                        Vec2::splat(at * 0.28),
+                        Vec2::new(at * 0.44, at * 0.40),
+                        al * 0.46,
+                        0.04,
+                        loft_exponent,
+                        4,
+                        12,
+                    ),
                 )),
                 material: MeshMaterial3d(primary_mat.clone()),
                 transform: Transform::from_xyz(arm_x, th * 0.65 - al * 0.48, 0.0),
@@ -525,7 +548,6 @@ fn spawn_robot_with_material_response(
     // ── Tail: continuous Bézier sweep with parallel-transport frames ──────────
     if style.has_tail {
         let tl = style.tail_length * s;
-        let semantic = style.style_vector.smoothed();
         let lateral_bend = tl * (0.08 + semantic.creature * 0.08);
         let tail = commands
             .spawn(PbrBundle {

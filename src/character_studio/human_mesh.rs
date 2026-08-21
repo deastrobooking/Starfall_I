@@ -8,8 +8,6 @@
 //! hip 0.52 · waist 0.615 · chest 0.72 · shoulder 0.815 · head centre 0.925.
 //! Sex, morphs and outfit layers perturb this base skeleton of proportions.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use std::cell::Cell;
 use std::f32::consts::TAU;
@@ -17,8 +15,8 @@ use std::f32::consts::TAU;
 use super::generators::{CharacterPatch, CharacterSlot, SlotContent};
 use super::spec::{ArmorStyle, BottomStyle, FlairStyle, FootStyle, HairStyle, Sex, TopStyle};
 use crate::character::procedural_meshes::{
-    anime_eye_mesh, bezier_sweep_mesh, superellipsoid_mesh, CubicBezier3, CubicBezierRadii,
-    SweepMeshSettings,
+    anime_eye_mesh, bezier_sweep_mesh, lofted_superellipse_mesh, superellipsoid_mesh, CubicBezier3,
+    CubicBezierRadii, SweepMeshSettings,
 };
 
 // ── Lofted column primitive ───────────────────────────────────────────────────
@@ -35,75 +33,7 @@ fn lofted_column(
     rings: usize,
     sectors: usize,
 ) -> Mesh {
-    let rings = rings.max(3);
-    let sectors = sectors.max(8);
-    let e = 2.0 / exponent.max(0.2);
-
-    let mut positions = Vec::with_capacity((rings + 1) * (sectors + 1) + 2);
-    let mut normals = Vec::with_capacity(positions.capacity());
-    let mut uvs = Vec::with_capacity(positions.capacity());
-    let mut indices: Vec<u32> = Vec::new();
-
-    for ring in 0..=rings {
-        let v = ring as f32 / rings as f32;
-        let y = height * (v - 0.5);
-        // Smooth radius blend + sine bulge peaking mid-column.
-        let base = bottom.lerp(top, v * v * (3.0 - 2.0 * v));
-        let swell = 1.0 + bulge * (v * std::f32::consts::PI).sin();
-        let radii = base * swell;
-        for s in 0..=sectors {
-            let u = s as f32 / sectors as f32;
-            let a = u * TAU;
-            let (sa, ca) = a.sin_cos();
-            let px = radii.x * ca.signum() * ca.abs().powf(e);
-            let pz = radii.y * sa.signum() * sa.abs().powf(e);
-            positions.push([px, y, pz]);
-            let n = Vec3::new(
-                if radii.x > 0.001 { px / radii.x } else { 0.0 },
-                0.0,
-                if radii.y > 0.001 { pz / radii.y } else { 0.0 },
-            )
-            .normalize_or_zero();
-            normals.push([n.x, n.y, n.z]);
-            uvs.push([u, v]);
-        }
-    }
-    let stride = (sectors + 1) as u32;
-    for ring in 0..rings as u32 {
-        for s in 0..sectors as u32 {
-            let a = ring * stride + s;
-            let b = a + stride;
-            indices.extend_from_slice(&[a, b, a + 1, b, b + 1, a + 1]);
-        }
-    }
-
-    // End caps (fan to centre points).
-    for (ring_v, y, flip) in [(0.0f32, -height * 0.5, true), (1.0, height * 0.5, false)] {
-        let centre = positions.len() as u32;
-        positions.push([0.0, y, 0.0]);
-        normals.push([0.0, if flip { -1.0 } else { 1.0 }, 0.0]);
-        uvs.push([0.5, ring_v]);
-        let ring_start = if flip { 0 } else { rings as u32 * stride };
-        for s in 0..sectors as u32 {
-            let a = ring_start + s;
-            let b = ring_start + s + 1;
-            if flip {
-                indices.extend_from_slice(&[centre, b, a]);
-            } else {
-                indices.extend_from_slice(&[centre, a, b]);
-            }
-        }
-    }
-
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
+    lofted_superellipse_mesh(bottom, top, height, bulge, exponent, rings, sectors)
 }
 
 fn ovoid(radii: Vec3, exponent: f32) -> Mesh {
