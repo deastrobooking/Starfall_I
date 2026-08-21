@@ -322,6 +322,9 @@ Included features:
 - live editor foundations
 - Bevy 0.19 infinite editor grid and transform handles integrated with Forge
   selection, world/local space, snapping, controller actions, and undo
+- Bevy 0.19 billboarded stroke-text annotations for sockets, spawn points,
+  routes, water flow, and gameplay-mode boundaries, with editor-only visibility
+  and clutter budgets
 - draft/publish workflows
 - manifest-based content bootstrapping
 - deterministic game-side content consumption

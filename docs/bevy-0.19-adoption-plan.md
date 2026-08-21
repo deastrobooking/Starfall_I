@@ -91,8 +91,12 @@ Status: the production Designer now enables Bevy's `InfiniteGridPlugin` and
 world/local space, translation/rotation/scale snapping, and undo transaction
 boundary through a Starfall adapter. The original finite grid and transform
 implementation remain available to reduced/headless plugin harnesses. Manual
-Metal readability and pointer-over-window smoke testing remains; semantic text
-labels are the next contained viewport addition.
+Metal readability and pointer-over-window smoke testing remains. Bevy 0.19
+stroke-text gizmos now provide billboarded semantic viewport labels for
+authored sockets, spawn/fast-travel nodes, road routes, river/waterfall flow,
+and gameplay-mode boundaries. Labels are editor-only, ASCII-sanitized,
+distance-capped, count-capped, and controller/toggle accessible; they create no
+runtime entities or publish dependencies.
 
 ### B19-1.5 — Semantic character geometry *(foundation landed 2026-08-21)*
 

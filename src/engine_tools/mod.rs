@@ -51,7 +51,7 @@ use crate::components::player::{Player, PlayerCamera, PlayerInput};
 use crate::components::world::{
     CollapsePlatform, CollapsePlatformState, DungeonCrawlGate, EnterableBuilding, FlipPlatform,
     MovingPlatform, RotatingElevator, SettlementBuildTerminal, SpeedLoopGuide, SpikePlatformHazard,
-    SpringJumpPad, WalkableSurface, WorldAnchor, WorldRouteMarker,
+    SpringJumpPad, WalkableSurface, WaterBody, WaterBodyKind, WorldAnchor, WorldRouteMarker,
 };
 use crate::engine::bindings::FaceButton;
 use crate::engine::physics::prelude::{Physics, PhysicsTime};
@@ -741,6 +741,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorOutlinerFilter>()
             .init_resource::<EditorCameraRig>()
             .init_resource::<EditorGizmoSettings>()
+            .init_resource::<EditorSemanticLabelSettings>()
             .init_resource::<EditorDragState>()
             .init_resource::<BevyTransformGizmoAdapterDrag>()
             .init_resource::<WorldKitTopologyDragState>()
@@ -811,6 +812,7 @@ impl Plugin for EngineToolsPlugin {
                     update_editor_workspace_text,
                     update_editor_button_style,
                     draw_editor_gizmos,
+                    draw_semantic_editor_labels,
                     editor_camera_controls,
                 )
                     .chain()
@@ -1278,6 +1280,7 @@ define_editor_controls! {
     GizmoScale => None,
     ToggleTransformSpace => None,
     CycleSnap => None,
+    ToggleSemanticLabels => None,
 
     // Outliner.
     FocusSearch => Some(EditorPanelKind::Outliner),
@@ -1522,6 +1525,25 @@ impl EditorGizmoSettings {
 
     fn translation_snap(&self) -> f32 {
         Self::TRANSLATION_SNAPS[self.snap_index % Self::TRANSLATION_SNAPS.len()]
+    }
+}
+
+/// Editor-only 3D annotation policy. Labels are immediate Bevy gizmos, so no
+/// text entities, font assets, or published runtime content are introduced.
+#[derive(Resource, Debug)]
+struct EditorSemanticLabelSettings {
+    visible: bool,
+    max_distance: f32,
+    max_labels: usize,
+}
+
+impl Default for EditorSemanticLabelSettings {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            max_distance: 260.0,
+            max_labels: 72,
+        }
     }
 }
 
@@ -3206,6 +3228,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                 spawn_editor_button(bar, EditorAction::GizmoScale, "SCALE [S]");
                 spawn_editor_button(bar, EditorAction::ToggleTransformSpace, "WORLD/LOCAL");
                 spawn_editor_button(bar, EditorAction::CycleSnap, "SNAP");
+                spawn_editor_button(bar, EditorAction::ToggleSemanticLabels, "LABELS [V]");
             });
 
             root.spawn(Node {
@@ -4000,6 +4023,9 @@ fn editor_controller_navigation(
     }
     if keyboard.just_pressed(KeyCode::BracketRight) {
         pending.0.push(EditorAction::CycleSnap);
+    }
+    if keyboard.just_pressed(KeyCode::KeyV) {
+        pending.0.push(EditorAction::ToggleSemanticLabels);
     }
 
     let previous = keyboard.just_pressed(KeyCode::ArrowUp)
@@ -6531,6 +6557,21 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             };
             set_editor_status(world, format!("Translation snap: {snap:.2} m"));
         }
+        EditorAction::ToggleSemanticLabels => {
+            let visible = {
+                let mut labels = world.resource_mut::<EditorSemanticLabelSettings>();
+                labels.visible = !labels.visible;
+                labels.visible
+            };
+            set_editor_status(
+                world,
+                if visible {
+                    "Semantic viewport labels: visible"
+                } else {
+                    "Semantic viewport labels: hidden"
+                },
+            );
+        }
         EditorAction::SaveProject => {
             save_editor_project(world, false);
         }
@@ -8952,6 +8993,229 @@ fn update_editor_button_style(
         } else {
             Color::srgb(0.18, 0.42, 0.62)
         });
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticViewportLabelKind {
+    Socket,
+    Spawn,
+    Route,
+    WaterFlow,
+    ModeBoundary,
+}
+
+impl SemanticViewportLabelKind {
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Socket => "SOCKET",
+            Self::Spawn => "SPAWN",
+            Self::Route => "ROUTE",
+            Self::WaterFlow => "FLOW",
+            Self::ModeBoundary => "MODE",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            Self::Socket => Color::srgb(1.0, 0.48, 0.12),
+            Self::Spawn => Color::srgb(0.30, 1.0, 0.58),
+            Self::Route => Color::srgb(1.0, 0.24, 0.82),
+            Self::WaterFlow => Color::srgb(0.16, 0.86, 1.0),
+            Self::ModeBoundary => Color::srgb(1.0, 0.78, 0.18),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SemanticViewportLabel {
+    kind: SemanticViewportLabelKind,
+    text: String,
+    position: Vec3,
+    direction: Option<Vec3>,
+}
+
+fn semantic_label_text(kind: SemanticViewportLabelKind, value: &str) -> String {
+    let value = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_graphic() || character == ' ' {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    format!("{}: {}", kind.prefix(), value.trim())
+}
+
+fn authorable_semantic_kind(kind: EditorAdapterKind) -> Option<SemanticViewportLabelKind> {
+    match kind {
+        EditorAdapterKind::WorldAnchor => Some(SemanticViewportLabelKind::Spawn),
+        EditorAdapterKind::RouteMarker | EditorAdapterKind::RoadLoop => {
+            Some(SemanticViewportLabelKind::Route)
+        }
+        EditorAdapterKind::CaveGate | EditorAdapterKind::Building => {
+            Some(SemanticViewportLabelKind::ModeBoundary)
+        }
+        EditorAdapterKind::SettlementTerminal => None,
+    }
+}
+
+fn topology_node_semantic_kind(kind: WorldTopologyNodeKind) -> Option<SemanticViewportLabelKind> {
+    match kind {
+        WorldTopologyNodeKind::FastTravel => Some(SemanticViewportLabelKind::Spawn),
+        WorldTopologyNodeKind::Entrance | WorldTopologyNodeKind::Zone => {
+            Some(SemanticViewportLabelKind::ModeBoundary)
+        }
+        WorldTopologyNodeKind::Room | WorldTopologyNodeKind::Landmark => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_semantic_editor_labels(
+    mut gizmos: Gizmos,
+    settings: Res<EditorSemanticLabelSettings>,
+    session: Res<EditorProjectSession>,
+    registry: Res<EditorRegistryState>,
+    cameras: Query<&GlobalTransform, With<EditorCamera>>,
+    sandbox_roots: Query<(&WorldKitGeneratedRoot, &GlobalTransform)>,
+    authorables: Query<(&GlobalTransform, Option<&Name>, &EditorWorldAdapter), With<Authorable>>,
+    waters: Query<(&GlobalTransform, &WaterBody)>,
+) {
+    if !settings.visible {
+        return;
+    }
+    let Ok(camera) = cameras.single() else {
+        return;
+    };
+    let camera_position = camera.translation();
+    let camera_rotation = camera.rotation();
+    let mut labels = Vec::new();
+
+    for (transform, name, adapter) in &authorables {
+        let Some(kind) = authorable_semantic_kind(adapter.kind) else {
+            continue;
+        };
+        let value = name.map(Name::as_str).unwrap_or("unnamed");
+        labels.push(SemanticViewportLabel {
+            kind,
+            text: semantic_label_text(kind, value),
+            position: transform.translation(),
+            direction: None,
+        });
+    }
+
+    if let Some(record) = session.project.records.get(registry.selected) {
+        if let (Some(recipe), Some((_, root_transform))) = (
+            session
+                .project
+                .payloads
+                .get(&record.content_id)
+                .and_then(persistence::ContentPayload::procedural_recipe),
+            sandbox_roots
+                .iter()
+                .find(|(root, _)| root.content_id == record.content_id),
+        ) {
+            if record.category == persistence::ContentCategory::Road {
+                for (index, point) in recipe.spline_points.iter().enumerate() {
+                    let kind = SemanticViewportLabelKind::Route;
+                    let local = Vec3::from_array(point.position);
+                    let tangent = Vec3::from_array(persistence::resolved_road_tangent(
+                        &recipe.spline_points,
+                        index,
+                    ))
+                    .normalize_or_zero();
+                    labels.push(SemanticViewportLabel {
+                        kind,
+                        text: semantic_label_text(kind, &point.point_id),
+                        position: root_transform.transform_point(local),
+                        direction: (tangent != Vec3::ZERO)
+                            .then_some(root_transform.rotation() * tangent),
+                    });
+                }
+            }
+
+            for node in &recipe.topology_nodes {
+                let Some(kind) = topology_node_semantic_kind(node.kind) else {
+                    continue;
+                };
+                labels.push(SemanticViewportLabel {
+                    kind,
+                    text: semantic_label_text(kind, &node.node_id),
+                    position: root_transform.transform_point(Vec3::from_array(node.position)),
+                    direction: None,
+                });
+            }
+            for socket in &recipe.topology_sockets {
+                let Some(node) = recipe
+                    .topology_nodes
+                    .iter()
+                    .find(|node| node.node_id == socket.node_id)
+                else {
+                    continue;
+                };
+                let kind = SemanticViewportLabelKind::Socket;
+                let local =
+                    Vec3::from_array(node.position) + Vec3::from_array(socket.local_position);
+                let facing = Vec3::from_array(socket.facing).normalize_or_zero();
+                labels.push(SemanticViewportLabel {
+                    kind,
+                    text: semantic_label_text(
+                        kind,
+                        &format!("{} {:?}", socket.socket_id, socket.kind),
+                    ),
+                    position: root_transform.transform_point(local),
+                    direction: (facing != Vec3::ZERO).then_some(root_transform.rotation() * facing),
+                });
+            }
+        }
+    }
+
+    for (transform, water) in &waters {
+        let direction = match water.kind {
+            WaterBodyKind::River => transform.rotation() * Vec3::Z,
+            WaterBodyKind::Waterfall => Vec3::NEG_Y,
+            WaterBodyKind::Ocean | WaterBodyKind::Lake => continue,
+        }
+        .normalize_or_zero();
+        let kind = SemanticViewportLabelKind::WaterFlow;
+        labels.push(SemanticViewportLabel {
+            kind,
+            text: semantic_label_text(kind, &format!("{:?}", water.kind)),
+            position: transform.translation(),
+            direction: (direction != Vec3::ZERO).then_some(direction),
+        });
+    }
+
+    labels.retain(|label| {
+        label.position.distance_squared(camera_position) <= settings.max_distance.powi(2)
+    });
+    labels.sort_by(|left, right| {
+        left.position
+            .distance_squared(camera_position)
+            .total_cmp(&right.position.distance_squared(camera_position))
+    });
+    labels.truncate(settings.max_labels);
+
+    for label in labels {
+        let distance = label.position.distance(camera_position);
+        let font_size = (distance * 0.025).clamp(0.32, 3.0);
+        let lift = (font_size * 1.25).max(0.55);
+        let text_position = label.position + Vec3::Y * lift;
+        let color = label.kind.color();
+        gizmos.line(label.position, text_position, color);
+        if let Some(direction) = label.direction {
+            let length = (font_size * 2.0).clamp(1.0, 8.0);
+            gizmos.arrow(label.position, label.position + direction * length, color);
+        }
+        gizmos.text(
+            Isometry3d::new(text_position, camera_rotation),
+            &label.text,
+            font_size,
+            Vec2::new(-0.5, -0.5),
+            color,
+        );
     }
 }
 
@@ -11760,5 +12024,38 @@ mod tests {
             0
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn semantic_label_kinds_cover_required_editor_domains() {
+        assert_eq!(
+            authorable_semantic_kind(EditorAdapterKind::WorldAnchor),
+            Some(SemanticViewportLabelKind::Spawn)
+        );
+        assert_eq!(
+            authorable_semantic_kind(EditorAdapterKind::RouteMarker),
+            Some(SemanticViewportLabelKind::Route)
+        );
+        assert_eq!(
+            authorable_semantic_kind(EditorAdapterKind::CaveGate),
+            Some(SemanticViewportLabelKind::ModeBoundary)
+        );
+        assert_eq!(
+            topology_node_semantic_kind(WorldTopologyNodeKind::FastTravel),
+            Some(SemanticViewportLabelKind::Spawn)
+        );
+        assert_eq!(
+            topology_node_semantic_kind(WorldTopologyNodeKind::Entrance),
+            Some(SemanticViewportLabelKind::ModeBoundary)
+        );
+    }
+
+    #[test]
+    fn semantic_labels_are_ascii_for_bevy_stroke_text() {
+        assert_eq!(
+            semantic_label_text(SemanticViewportLabelKind::ModeBoundary, "Cave • Δ"),
+            "MODE: Cave"
+        );
+        assert!(EditorSemanticLabelSettings::default().visible);
     }
 }
