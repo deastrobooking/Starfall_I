@@ -325,6 +325,9 @@ Included features:
 - Bevy 0.19 billboarded stroke-text annotations for sockets, spawn points,
   routes, water flow, and gameplay-mode boundaries, with editor-only visibility
   and clutter budgets
+- Bevy 0.19 machine-local Forge preferences, with a controller-navigable panel
+  for grid/label budgets and bounded shadow quality; campaign and character
+  data remain in Starfall's versioned save contract
 - draft/publish workflows
 - manifest-based content bootstrapping
 - deterministic game-side content consumption

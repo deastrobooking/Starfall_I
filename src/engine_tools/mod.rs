@@ -30,6 +30,7 @@ pub mod vehicle_records;
 pub mod weapon_records;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
 
 use bevy::dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridSettings};
 use bevy::ecs::system::SystemParam;
@@ -42,6 +43,7 @@ use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
 use bevy::input::keyboard::Key;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
+use bevy::settings::SaveSettingsDeferred;
 use bevy::time::Virtual;
 use bevy::ui::RelativeCursorPosition;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, Window};
@@ -54,6 +56,7 @@ use crate::components::world::{
     SpringJumpPad, WalkableSurface, WaterBody, WaterBodyKind, WorldAnchor, WorldRouteMarker,
 };
 use crate::engine::bindings::FaceButton;
+use crate::engine::machine_settings::{EditorPreferences, RenderQualitySettings};
 use crate::engine::physics::prelude::{Physics, PhysicsTime};
 use crate::engine::rendering::{
     all_gameplay_render_layers, EnergyMaterial, EnergyMaterialUniform, IceMaterial,
@@ -83,6 +86,13 @@ struct ForgeMaterialAssets<'w> {
     shield: ResMut<'w, Assets<ShieldMaterial>>,
     ice: ResMut<'w, Assets<IceMaterial>>,
     lava: ResMut<'w, Assets<LavaMaterial>>,
+}
+
+#[derive(SystemParam)]
+struct ForgeMachinePreferences<'w> {
+    gizmo: ResMut<'w, EditorGizmoSettings>,
+    editor: ResMut<'w, EditorPreferences>,
+    render: Res<'w, RenderQualitySettings>,
 }
 
 #[derive(SystemParam)]
@@ -741,7 +751,8 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorOutlinerFilter>()
             .init_resource::<EditorCameraRig>()
             .init_resource::<EditorGizmoSettings>()
-            .init_resource::<EditorSemanticLabelSettings>()
+            .init_resource::<EditorPreferences>()
+            .init_resource::<RenderQualitySettings>()
             .init_resource::<EditorDragState>()
             .init_resource::<BevyTransformGizmoAdapterDrag>()
             .init_resource::<WorldKitTopologyDragState>()
@@ -792,6 +803,7 @@ impl Plugin for EngineToolsPlugin {
                 (refresh_platformer_runtime_adapters, exit_editor_workspace).chain(),
             )
             .add_systems(Update, resolve_procedural_material_bindings)
+            .add_systems(Update, sync_machine_render_settings)
             .add_systems(
                 Update,
                 (
@@ -1222,6 +1234,9 @@ struct EditorSearchText;
 #[derive(Component)]
 struct EditorRegistryText;
 
+#[derive(Component)]
+struct EditorSettingsText;
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum EditorPanelKind {
     Outliner,
@@ -1321,6 +1336,14 @@ define_editor_controls! {
     RotateYPositive => Some(EditorPanelKind::Inspector),
     ScaleDown => Some(EditorPanelKind::Inspector),
     ScaleUp => Some(EditorPanelKind::Inspector),
+    ToggleGrid => Some(EditorPanelKind::Inspector),
+    LabelsDistanceDecrease => Some(EditorPanelKind::Inspector),
+    LabelsDistanceIncrease => Some(EditorPanelKind::Inspector),
+    LabelsBudgetDecrease => Some(EditorPanelKind::Inspector),
+    LabelsBudgetIncrease => Some(EditorPanelKind::Inspector),
+    ToggleShadowMaps => Some(EditorPanelKind::Inspector),
+    CycleShadowMapSize => Some(EditorPanelKind::Inspector),
+    ToggleForgeContactShadows => Some(EditorPanelKind::Inspector),
 
     // Content Registry / World Kit.
     RegistryPrevious => Some(EditorPanelKind::Registry),
@@ -1528,25 +1551,6 @@ impl EditorGizmoSettings {
     }
 }
 
-/// Editor-only 3D annotation policy. Labels are immediate Bevy gizmos, so no
-/// text entities, font assets, or published runtime content are introduced.
-#[derive(Resource, Debug)]
-struct EditorSemanticLabelSettings {
-    visible: bool,
-    max_distance: f32,
-    max_labels: usize,
-}
-
-impl Default for EditorSemanticLabelSettings {
-    fn default() -> Self {
-        Self {
-            visible: true,
-            max_distance: 260.0,
-            max_labels: 72,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct ActiveEditorDrag {
     axis: Vec3,
@@ -1737,6 +1741,7 @@ fn enter_editor_workspace(
     mut document: ResMut<EditorDocumentState>,
     mut filter: ResMut<EditorOutlinerFilter>,
     mut camera_rig: ResMut<EditorCameraRig>,
+    mut machine_preferences: ForgeMachinePreferences,
     mut registry: ResMut<EditorRegistryState>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut material_assets: ForgeMaterialAssets,
@@ -1767,8 +1772,11 @@ fn enter_editor_workspace(
     camera_rig.mode = EditorCameraMode::Fly;
     camera_rig.orbit_target = camera_transform.translation + camera_transform.forward() * 12.0;
     camera_rig.orbit_distance = 12.0;
+    machine_preferences.editor.sanitize();
+    machine_preferences.gizmo.snap_index =
+        usize::from(machine_preferences.editor.translation_snap_index);
 
-    commands.spawn((
+    let mut editor_camera = commands.spawn((
         EditorCamera,
         TransformGizmoCamera,
         Camera3d::default(),
@@ -1786,6 +1794,13 @@ fn enter_editor_workspace(
         all_gameplay_render_layers(),
         camera_transform,
     ));
+    if machine_preferences.render.forge_contact_shadows {
+        editor_camera.insert((
+            bevy::camera::Hdr,
+            Msaa::Off,
+            bevy::pbr::ContactShadows::default(),
+        ));
+    }
 
     if bevy_gizmo.is_some() {
         commands.spawn((
@@ -1798,9 +1813,14 @@ fn enter_editor_workspace(
                 z_axis_color: Color::srgb(0.10, 0.68, 1.0),
                 minor_line_color: Color::srgba(0.12, 0.30, 0.42, 0.44),
                 major_line_color: Color::srgba(0.22, 0.68, 0.78, 0.62),
-                fadeout_distance: 600.0,
+                fadeout_distance: machine_preferences.editor.infinite_grid_fade_distance,
                 dot_fadeout_strength: 0.34,
                 scale: 1.0,
+            },
+            if machine_preferences.editor.infinite_grid_visible {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
             },
         ));
     }
@@ -2940,6 +2960,7 @@ fn exit_editor_workspace(
     mut topology_drag: ResMut<WorldKitTopologyDragState>,
     mut bevy_drag: ResMut<BevyTransformGizmoAdapterDrag>,
     mut session: ResMut<EditorProjectSession>,
+    mut directional_lights: Query<&mut DirectionalLight>,
 ) {
     if let Some(drag) = topology_drag.0.take() {
         if let Some(recipe) = session
@@ -2958,6 +2979,9 @@ fn exit_editor_workspace(
         commands.entity(entity).remove::<TransformGizmoFocus>();
     }
     bevy_drag.0 = None;
+    for mut light in &mut directional_lights {
+        light.contact_shadows_enabled = false;
+    }
     for mut camera in &mut player_cameras {
         camera.is_active = true;
     }
@@ -3327,6 +3351,43 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                     spawn_editor_button(panel, EditorAction::RotateYPositive, "ROTATE Y  +15°");
                     spawn_editor_button(panel, EditorAction::ScaleDown, "SCALE  −10%");
                     spawn_editor_button(panel, EditorAction::ScaleUp, "SCALE  +10%");
+                    panel.spawn((
+                        EditorSettingsText,
+                        Text::new("Loading machine preferences…"),
+                        TextFont {
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.70, 0.90, 1.0)),
+                    ));
+                    spawn_editor_button(panel, EditorAction::ToggleGrid, "TOGGLE GRID");
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::LabelsDistanceDecrease,
+                        "LABEL RANGE −",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::LabelsDistanceIncrease,
+                        "LABEL RANGE +",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::LabelsBudgetDecrease,
+                        "LABEL BUDGET −",
+                    );
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::LabelsBudgetIncrease,
+                        "LABEL BUDGET +",
+                    );
+                    spawn_editor_button(panel, EditorAction::ToggleShadowMaps, "TOGGLE SHADOWS");
+                    spawn_editor_button(panel, EditorAction::CycleShadowMapSize, "SHADOW QUALITY");
+                    spawn_editor_button(
+                        panel,
+                        EditorAction::ToggleForgeContactShadows,
+                        "CONTACT SHADOWS",
+                    );
                 });
 
                 spawn_editor_panel(
@@ -6555,14 +6616,20 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     (gizmo.snap_index + 1) % EditorGizmoSettings::TRANSLATION_SNAPS.len();
                 gizmo.translation_snap()
             };
+            let snap_index = world.resource::<EditorGizmoSettings>().snap_index as u8;
+            world
+                .resource_mut::<EditorPreferences>()
+                .translation_snap_index = snap_index;
+            queue_machine_settings_save(world);
             set_editor_status(world, format!("Translation snap: {snap:.2} m"));
         }
         EditorAction::ToggleSemanticLabels => {
             let visible = {
-                let mut labels = world.resource_mut::<EditorSemanticLabelSettings>();
-                labels.visible = !labels.visible;
-                labels.visible
+                let mut preferences = world.resource_mut::<EditorPreferences>();
+                preferences.semantic_labels_visible = !preferences.semantic_labels_visible;
+                preferences.semantic_labels_visible
             };
+            queue_machine_settings_save(world);
             set_editor_status(
                 world,
                 if visible {
@@ -6571,6 +6638,98 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                     "Semantic viewport labels: hidden"
                 },
             );
+        }
+        EditorAction::ToggleGrid => {
+            let visible = {
+                let mut preferences = world.resource_mut::<EditorPreferences>();
+                preferences.infinite_grid_visible = !preferences.infinite_grid_visible;
+                preferences.infinite_grid_visible
+            };
+            let mut grids = world.query_filtered::<&mut Visibility, With<EditorInfiniteGrid>>();
+            for mut visibility in grids.iter_mut(world) {
+                *visibility = if visible {
+                    Visibility::Visible
+                } else {
+                    Visibility::Hidden
+                };
+            }
+            queue_machine_settings_save(world);
+            set_editor_status(world, format!("Infinite grid: {}", on_off(visible)));
+        }
+        EditorAction::LabelsDistanceDecrease | EditorAction::LabelsDistanceIncrease => {
+            let distance = {
+                let mut preferences = world.resource_mut::<EditorPreferences>();
+                let delta = if action == EditorAction::LabelsDistanceIncrease {
+                    EditorPreferences::LABEL_DISTANCE_STEP
+                } else {
+                    -EditorPreferences::LABEL_DISTANCE_STEP
+                };
+                preferences.semantic_label_distance += delta;
+                preferences.sanitize();
+                preferences.semantic_label_distance
+            };
+            queue_machine_settings_save(world);
+            set_editor_status(world, format!("Semantic label range: {distance:.0} m"));
+        }
+        EditorAction::LabelsBudgetDecrease | EditorAction::LabelsBudgetIncrease => {
+            let budget = {
+                let mut preferences = world.resource_mut::<EditorPreferences>();
+                if action == EditorAction::LabelsBudgetIncrease {
+                    preferences.semantic_label_budget = preferences
+                        .semantic_label_budget
+                        .saturating_add(EditorPreferences::LABEL_BUDGET_STEP);
+                } else {
+                    preferences.semantic_label_budget = preferences
+                        .semantic_label_budget
+                        .saturating_sub(EditorPreferences::LABEL_BUDGET_STEP);
+                }
+                preferences.sanitize();
+                preferences.semantic_label_budget
+            };
+            queue_machine_settings_save(world);
+            set_editor_status(world, format!("Semantic label budget: {budget}"));
+        }
+        EditorAction::ToggleShadowMaps => {
+            let enabled = {
+                let mut quality = world.resource_mut::<RenderQualitySettings>();
+                quality.shadow_maps_enabled = !quality.shadow_maps_enabled;
+                quality.shadow_maps_enabled
+            };
+            queue_machine_settings_save(world);
+            set_editor_status(world, format!("Shadow maps: {}", on_off(enabled)));
+        }
+        EditorAction::CycleShadowMapSize => {
+            let size = world
+                .resource_mut::<RenderQualitySettings>()
+                .cycle_shadow_map_size();
+            queue_machine_settings_save(world);
+            set_editor_status(world, format!("Directional shadow map: {size}px"));
+        }
+        EditorAction::ToggleForgeContactShadows => {
+            let enabled = {
+                let mut quality = world.resource_mut::<RenderQualitySettings>();
+                quality.forge_contact_shadows = !quality.forge_contact_shadows;
+                quality.forge_contact_shadows
+            };
+            let cameras = world
+                .query_filtered::<Entity, With<EditorCamera>>()
+                .iter(world)
+                .collect::<Vec<_>>();
+            for camera in cameras {
+                if enabled {
+                    world.entity_mut(camera).insert((
+                        bevy::camera::Hdr,
+                        Msaa::Off,
+                        bevy::pbr::ContactShadows::default(),
+                    ));
+                } else {
+                    world
+                        .entity_mut(camera)
+                        .remove::<bevy::pbr::ContactShadows>();
+                }
+            }
+            queue_machine_settings_save(world);
+            set_editor_status(world, format!("Forge contact shadows: {}", on_off(enabled)));
         }
         EditorAction::SaveProject => {
             save_editor_project(world, false);
@@ -8614,6 +8773,20 @@ fn set_editor_status(world: &mut World, message: impl Into<String>) {
     world.resource_mut::<EditorRuntimeStatus>().message = message.into();
 }
 
+fn queue_machine_settings_save(world: &mut World) {
+    world
+        .commands()
+        .queue(SaveSettingsDeferred(Duration::from_millis(250)));
+}
+
+fn on_off(enabled: bool) -> &'static str {
+    if enabled {
+        "ON"
+    } else {
+        "OFF"
+    }
+}
+
 fn collect_project_diagnostics(session: &EditorProjectSession) -> Vec<String> {
     validate_project(&session.project)
         .into_iter()
@@ -8630,6 +8803,8 @@ fn update_editor_workspace_text(
     filter: Res<EditorOutlinerFilter>,
     camera_rig: Res<EditorCameraRig>,
     gizmo: Res<EditorGizmoSettings>,
+    editor_preferences: Res<EditorPreferences>,
+    render_quality: Res<RenderQualitySettings>,
     session: Res<EditorProjectSession>,
     catalog: Res<PublishedMaterialCatalog>,
     procedural_catalog: Res<PublishedProceduralRecipeCatalog>,
@@ -8649,6 +8824,7 @@ fn update_editor_workspace_text(
         Query<&mut Text, With<EditorStatusText>>,
         Query<&mut Text, With<EditorSearchText>>,
         Query<&mut Text, With<EditorRegistryText>>,
+        Query<&mut Text, With<EditorSettingsText>>,
     )>,
 ) {
     let count = authorables.iter().count();
@@ -8739,6 +8915,18 @@ fn update_editor_workspace_text(
     };
     for mut text in &mut text_queries.p2() {
         *text = Text::new(filter_label.clone());
+    }
+    for mut text in &mut text_queries.p4() {
+        *text = Text::new(format!(
+            "\nMACHINE / VIEWPORT\nGrid: {} • Labels: {}\nLabel range: {:.0}m • budget {}\nShadows: {} • {}px\nForge contact shadows: {}",
+            on_off(editor_preferences.infinite_grid_visible),
+            on_off(editor_preferences.semantic_labels_visible),
+            editor_preferences.semantic_label_distance,
+            editor_preferences.semantic_label_budget,
+            on_off(render_quality.shadow_maps_enabled),
+            render_quality.directional_shadow_map_size,
+            on_off(render_quality.forge_contact_shadows),
+        ));
     }
 
     let records = &session.project.records;
@@ -9075,7 +9263,7 @@ fn topology_node_semantic_kind(kind: WorldTopologyNodeKind) -> Option<SemanticVi
 #[allow(clippy::too_many_arguments)]
 fn draw_semantic_editor_labels(
     mut gizmos: Gizmos,
-    settings: Res<EditorSemanticLabelSettings>,
+    settings: Res<EditorPreferences>,
     session: Res<EditorProjectSession>,
     registry: Res<EditorRegistryState>,
     cameras: Query<&GlobalTransform, With<EditorCamera>>,
@@ -9083,7 +9271,7 @@ fn draw_semantic_editor_labels(
     authorables: Query<(&GlobalTransform, Option<&Name>, &EditorWorldAdapter), With<Authorable>>,
     waters: Query<(&GlobalTransform, &WaterBody)>,
 ) {
-    if !settings.visible {
+    if !settings.semantic_labels_visible {
         return;
     }
     let Ok(camera) = cameras.single() else {
@@ -9189,14 +9377,14 @@ fn draw_semantic_editor_labels(
     }
 
     labels.retain(|label| {
-        label.position.distance_squared(camera_position) <= settings.max_distance.powi(2)
+        label.position.distance_squared(camera_position) <= settings.semantic_label_distance.powi(2)
     });
     labels.sort_by(|left, right| {
         left.position
             .distance_squared(camera_position)
             .total_cmp(&right.position.distance_squared(camera_position))
     });
-    labels.truncate(settings.max_labels);
+    labels.truncate(settings.semantic_label_budget as usize);
 
     for label in labels {
         let distance = label.position.distance(camera_position);
@@ -9219,10 +9407,40 @@ fn draw_semantic_editor_labels(
     }
 }
 
+fn sync_machine_render_settings(
+    quality: Res<RenderQualitySettings>,
+    mode: Res<State<EngineToolMode>>,
+    shadow_map: Option<ResMut<bevy::light::DirectionalLightShadowMap>>,
+    mut lights: Query<(Entity, &mut DirectionalLight)>,
+) {
+    if let Some(mut shadow_map) = shadow_map {
+        let requested_size = quality.directional_shadow_map_size as usize;
+        if shadow_map.size != requested_size {
+            shadow_map.size = requested_size;
+        }
+    }
+
+    // Contact shadows are deliberately restricted to one key light. This is
+    // especially important before the effect is considered for four cameras.
+    let key_light =
+        (quality.forge_contact_shadows && *mode.get() == EngineToolMode::Editing).then(|| {
+            lights
+                .iter()
+                .max_by(|(_, left), (_, right)| left.illuminance.total_cmp(&right.illuminance))
+                .map(|(entity, _)| entity)
+        });
+    let key_light = key_light.flatten();
+    for (entity, mut light) in &mut lights {
+        light.shadow_maps_enabled = quality.shadow_maps_enabled;
+        light.contact_shadows_enabled = Some(entity) == key_light;
+    }
+}
+
 fn draw_editor_gizmos(
     mut gizmos: Gizmos,
     selection: Res<EditorSelection>,
     settings: Res<EditorGizmoSettings>,
+    editor_preferences: Res<EditorPreferences>,
     session: Res<EditorProjectSession>,
     registry: Res<EditorRegistryState>,
     infinite_grids: Query<(), With<EditorInfiniteGrid>>,
@@ -9240,7 +9458,7 @@ fn draw_editor_gizmos(
 ) {
     // Reduced/headless plugin harnesses keep the finite immediate-mode grid.
     // Production Forge uses Bevy's anti-aliased, distance-fading grid shader.
-    if infinite_grids.is_empty() {
+    if editor_preferences.infinite_grid_visible && infinite_grids.is_empty() {
         let grid_color = Color::srgba(0.18, 0.32, 0.42, 0.35);
         for step in -20..=20 {
             let coordinate = step as f32;
@@ -9589,6 +9807,8 @@ mod tests {
         world.init_resource::<EditorValidationCache>();
         world.init_resource::<EditorRegistryState>();
         world.init_resource::<EditorGizmoSettings>();
+        world.init_resource::<EditorPreferences>();
+        world.init_resource::<RenderQualitySettings>();
         world.insert_resource(EditorRuntimeStatus {
             message: String::new(),
         });
@@ -12056,6 +12276,6 @@ mod tests {
             semantic_label_text(SemanticViewportLabelKind::ModeBoundary, "Cave • Δ"),
             "MODE: Cave"
         );
-        assert!(EditorSemanticLabelSettings::default().visible);
+        assert!(EditorPreferences::default().semantic_labels_visible);
     }
 }

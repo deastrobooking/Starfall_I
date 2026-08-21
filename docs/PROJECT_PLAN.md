@@ -110,8 +110,10 @@ Work:
 - complete the Bevy 0.19 Forge viewport rollout: the technicolor infinite grid
   and selection/space/snap/undo transform-gizmo adapter are active; native 3D
   stroke labels now identify sockets, spawns, routes, water flow, and gameplay
-  boundaries with distance/count budgets and a controller-accessible toggle;
-  next begin the contained editor UI/settings pilot
+  boundaries; the contained, controller-navigable Inspector settings panel now
+  persists grid, label range/budget, shadow, and Forge key-light contact-shadow
+  preferences through Bevy 0.19 machine-local settings; next pilot Feathers and
+  `EditableText` on prefab search/project metadata
 - extend the shared semantic character geometry foundation now used by both
   Character Studio and Creature Forge: five style coordinates drive preview,
   playable player recipes, and compiled enemy geometry; reusable cubic Bézier

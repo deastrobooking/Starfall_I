@@ -19,11 +19,13 @@
 //! | [`game_rng`] | Seeded RNG streams (replay/determinism seam) |
 //! | [`state`] | `AppState` — the top-level screen/mode machine |
 //! | [`platform_paths`] | OS-specific save/config/crash locations |
+//! | [`machine_settings`] | Machine-local Forge and render preferences |
 
 pub mod bindings;
 pub mod game_loop;
 pub mod game_rng;
 pub mod input_buffer;
+pub mod machine_settings;
 pub mod physics;
 pub mod platform_paths;
 pub mod rendering;

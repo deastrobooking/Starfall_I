@@ -39,6 +39,7 @@ use character::parts::{
 use combat::perks::PerkTree;
 use combat::upgrades::UpgradeLedger;
 use commands::{CommandOverlayState, CommandRegistry};
+use engine::machine_settings::{EditorPreferences, RenderQualitySettings};
 use engine::state::AppState;
 use engine_tools::{EngineToolMode, EngineToolsPlugin};
 use events::EventsPlugin;
@@ -132,6 +133,16 @@ pub fn build_starfall_app(mode: StarfallAppMode) -> App {
             ));
             register_headless_asset_stores(&mut app);
         }
+    }
+
+    // SettingsPlugin discovers reflected groups when it is added, so register
+    // them first. Headless apps keep the defaults without touching user files.
+    app.register_type::<EditorPreferences>()
+        .register_type::<RenderQualitySettings>()
+        .init_resource::<EditorPreferences>()
+        .init_resource::<RenderQualitySettings>();
+    if mode == StarfallAppMode::Production {
+        app.add_plugins(bevy::settings::SettingsPlugin::new("com.starfall-i.game"));
     }
 
     // The authored world routinely has enough visible lights to exceed Bevy's

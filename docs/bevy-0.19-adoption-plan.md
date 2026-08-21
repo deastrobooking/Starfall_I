@@ -144,16 +144,21 @@ work.
 
 ### B19-2 — Editor UI and settings pilot
 
-- Pilot `EditableText` and Feathers on one contained Forge panel: prefab search,
-  property editing, or project metadata. Preserve controller focus and existing
+- **Landed:** Bevy's `SettingsPlugin` now owns separate reflected
+  `RenderQualitySettings` and `EditorPreferences` groups in machine-local TOML.
+  The contained Inspector panel exposes grid, semantic-label range/budget,
+  directional-shadow quality, and Forge contact-shadow controls through the
+  same controller focus registry as every other editor action.
+- **Next contained trial:** adopt `EditableText` and Feathers for prefab search
+  or project metadata without replacing the proven controller navigation and
   accessibility styles.
-- Create separate settings groups for `RenderQualitySettings`,
-  `EditorPreferences`, and per-slot `PlayerControlPreferences`.
+- **Next settings group:** add per-slot `PlayerControlPreferences` after its
+  ownership boundary with the existing `GameSettings` JSON is specified.
 - Keep campaign progress, character data, authored projects, and world state in
   Starfall's save system. Migrate existing machine settings once, then continue
   reading old JSON fields for backward compatibility.
-- Save deliberately on Apply/exit using Bevy's save commands; do not assume the
-  settings plugin automatically writes changed values.
+- Settings actions now explicitly queue Bevy's delayed save command; the plugin
+  is never assumed to write changed resources automatically.
 
 Acceptance: preferences survive restart, corrupt settings recover safely,
 controller-only navigation remains complete, and old settings files load.
