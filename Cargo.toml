@@ -9,7 +9,7 @@ name = "starfall-i"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { version = "0.19.1", features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings"] }
+bevy = { version = "0.19.1", features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings", "bevy_feathers"] }
 # Same decoder Bevy plays audio with (version-locked through the workspace):
 # used at import time so any file we accept cannot panic at playback time.
 rodio = { version = "0.22", default-features = false, features = ["mp3"] }

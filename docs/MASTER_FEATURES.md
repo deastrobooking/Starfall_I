@@ -328,6 +328,9 @@ Included features:
 - Bevy 0.19 machine-local Forge preferences, with a controller-navigable panel
   for grid/label budgets and bounded shadow quality; campaign and character
   data remain in Starfall's versioned save contract
+- contained Feathers/`EditableText` Outliner search with native selection,
+  clipboard, IME, paste sanitization, controller apply/clear, and a headless
+  deterministic-input fallback
 - draft/publish workflows
 - manifest-based content bootstrapping
 - deterministic game-side content consumption

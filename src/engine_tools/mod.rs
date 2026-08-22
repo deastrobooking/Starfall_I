@@ -34,6 +34,8 @@ use std::time::Duration;
 
 use bevy::dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridSettings};
 use bevy::ecs::system::SystemParam;
+use bevy::feathers::controls::{FeathersTextInput, FeathersTextInputContainer};
+use bevy::feathers::theme::UiTheme;
 use bevy::gizmos::prelude::{
     TransformGizmoCamera, TransformGizmoFocus, TransformGizmoMode as BevyTransformGizmoMode,
     TransformGizmoSettings as BevyTransformGizmoSettings,
@@ -42,8 +44,10 @@ use bevy::gizmos::prelude::{
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
 use bevy::input::keyboard::Key;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
+use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::settings::SaveSettingsDeferred;
+use bevy::text::{EditableText, EditableTextSystems};
 use bevy::time::Virtual;
 use bevy::ui::RelativeCursorPosition;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, Window};
@@ -771,6 +775,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<WorldKitSandboxState>()
             .init_resource::<WorldKitSandboxAssets>()
             .init_resource::<EditorTextInputCapture>()
+            .init_resource::<InputFocus>()
             .init_resource::<EditorPresetLibrary>()
             .init_resource::<EditorArmedModifier>()
             .init_resource::<EditorModifierParamCursor>()
@@ -793,6 +798,7 @@ impl Plugin for EngineToolsPlugin {
                 (
                     sync_active_project_session,
                     enter_editor_workspace,
+                    spawn_forge_editable_fields,
                     adapt_world_authorables,
                     apply_active_project_scene_adapters,
                 )
@@ -833,8 +839,10 @@ impl Plugin for EngineToolsPlugin {
             )
             .add_systems(
                 PostUpdate,
-                record_bevy_transform_gizmo_transaction
-                    .after(TransformGizmoSystems)
+                (
+                    record_bevy_transform_gizmo_transaction.after(TransformGizmoSystems),
+                    sync_native_outliner_filter.after(EditableTextSystems),
+                )
                     .run_if(in_state(EngineToolMode::Editing)),
             );
     }
@@ -1230,6 +1238,9 @@ struct EditorChromeSurface;
 
 #[derive(Component)]
 struct EditorSearchText;
+
+#[derive(Component, Default, Clone)]
+struct EditorOutlinerFilterInput;
 
 #[derive(Component)]
 struct EditorRegistryText;
@@ -2961,6 +2972,7 @@ fn exit_editor_workspace(
     mut bevy_drag: ResMut<BevyTransformGizmoAdapterDrag>,
     mut session: ResMut<EditorProjectSession>,
     mut directional_lights: Query<&mut DirectionalLight>,
+    mut input_focus: ResMut<InputFocus>,
 ) {
     if let Some(drag) = topology_drag.0.take() {
         if let Some(recipe) = session
@@ -2979,6 +2991,7 @@ fn exit_editor_workspace(
         commands.entity(entity).remove::<TransformGizmoFocus>();
     }
     bevy_drag.0 = None;
+    input_focus.clear();
     for mut light in &mut directional_lights {
         light.contact_shadows_enabled = false;
     }
@@ -3779,6 +3792,42 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
         });
 }
 
+/// Adds one native Bevy 0.19 text-editing field without converting the whole
+/// Starfall editor UI to experimental Feathers widgets. Reduced/headless apps
+/// do not install the Feathers theme, so they retain the deterministic manual
+/// keyboard-input fallback used by editor unit tests.
+fn spawn_forge_editable_fields(
+    mut commands: Commands,
+    theme: Option<Res<UiTheme>>,
+    panels: Query<(Entity, &EditorPanelKind)>,
+) {
+    if theme.is_none() {
+        return;
+    }
+    let Some(outliner) = panels
+        .iter()
+        .find_map(|(entity, kind)| (*kind == EditorPanelKind::Outliner).then_some(entity))
+    else {
+        return;
+    };
+
+    let field = commands
+        .spawn_scene(bsn! {
+            @FeathersTextInputContainer
+            Name("Forge Outliner Native Search")
+            Children [
+                (
+                    @FeathersTextInput
+                    EditorOutlinerFilterInput
+                )
+            ]
+        })
+        .id();
+    // Summary and the static filter caption remain first; the actual native
+    // field is inserted before the controller activation button.
+    commands.entity(outliner).insert_children(2, &[field]);
+}
+
 fn spawn_editor_panel(
     parent: &mut ChildSpawnerCommands,
     kind: EditorPanelKind,
@@ -3860,6 +3909,8 @@ fn editor_search_input(
     mut document: ResMut<EditorDocumentState>,
     mut status: ResMut<EditorRuntimeStatus>,
     mut capture: ResMut<EditorTextInputCapture>,
+    mut input_focus: ResMut<InputFocus>,
+    mut native_filter: Query<(Entity, &mut EditableText), With<EditorOutlinerFilterInput>>,
 ) {
     capture.0 = filter.active || registry.rename_active || registry.search_active;
     if !filter.active && !registry.rename_active && !registry.search_active {
@@ -3973,6 +4024,27 @@ fn editor_search_input(
         return;
     }
 
+    if let Ok((entity, mut input)) = native_filter.single_mut() {
+        if input_focus.get() != Some(entity) {
+            input_focus.set(entity, FocusCause::Navigated);
+        }
+        if controller_clear || keys.just_pressed(Key::Escape) {
+            input.editor_mut().set_text("");
+            filter.text.clear();
+            filter.active = false;
+            input_focus.clear();
+            status.message = "Outliner filter cleared".into();
+        } else if controller_accept || keys.just_pressed(Key::Enter) {
+            filter.active = false;
+            input_focus.clear();
+            status.message = "Outliner filter applied".into();
+        }
+        // Bevy's EditableTextInputPlugin owns character, selection, clipboard,
+        // and IME events for the native field. Manual key editing below is the
+        // deterministic fallback for reduced/headless editor harnesses.
+        return;
+    }
+
     if controller_clear {
         filter.text.clear();
         filter.active = false;
@@ -4010,6 +4082,45 @@ fn editor_search_input(
             }
             _ => {}
         }
+    }
+}
+
+fn sanitize_outliner_filter(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric() || matches!(character, ' ' | '_' | '-'))
+        .flat_map(char::to_lowercase)
+        .take(32)
+        .collect()
+}
+
+fn sync_native_outliner_filter(
+    input_focus: Res<InputFocus>,
+    mut inputs: Query<(Entity, &mut EditableText), With<EditorOutlinerFilterInput>>,
+    mut filter: ResMut<EditorOutlinerFilter>,
+    mut capture: ResMut<EditorTextInputCapture>,
+) {
+    let Ok((entity, mut input)) = inputs.single_mut() else {
+        return;
+    };
+    if input.max_characters != Some(32) {
+        input.max_characters = Some(32);
+    }
+    if input.visible_width != Some(25.0) {
+        input.visible_width = Some(25.0);
+    }
+    let focused = input_focus.get() == Some(entity);
+    if focused {
+        filter.active = true;
+    }
+    if filter.active || focused {
+        let raw = input.value().to_string();
+        let sanitized = sanitize_outliner_filter(&raw);
+        if sanitized != raw {
+            input.editor_mut().set_text(&sanitized);
+        }
+        filter.text = sanitized;
+        capture.0 = true;
     }
 }
 
@@ -6491,9 +6602,29 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 registry.rename_active = false;
                 registry.search_active = false;
             }
-            let mut filter = world.resource_mut::<EditorOutlinerFilter>();
-            filter.active = !filter.active;
-            let message = if filter.active {
+            let active = {
+                let mut filter = world.resource_mut::<EditorOutlinerFilter>();
+                filter.active = !filter.active;
+                filter.active
+            };
+            let native_field = world
+                .query_filtered::<Entity, With<EditorOutlinerFilterInput>>()
+                .iter(world)
+                .next();
+            if let Some(field) = native_field {
+                if active {
+                    let value = world.resource::<EditorOutlinerFilter>().text.clone();
+                    if let Some(mut input) = world.get_mut::<EditableText>(field) {
+                        input.editor_mut().set_text(&value);
+                    }
+                    world
+                        .resource_mut::<InputFocus>()
+                        .set(field, FocusCause::Navigated);
+                } else if world.resource::<InputFocus>().get() == Some(field) {
+                    world.resource_mut::<InputFocus>().clear();
+                }
+            }
+            let message = if active {
                 "Type an object name; Enter applies, Escape/B clears"
             } else {
                 "Outliner filter applied"
@@ -12277,5 +12408,14 @@ mod tests {
             "MODE: Cave"
         );
         assert!(EditorPreferences::default().semantic_labels_visible);
+    }
+
+    #[test]
+    fn native_outliner_filter_normalizes_and_bounds_pasted_text() {
+        assert_eq!(
+            sanitize_outliner_filter("  Sky.Castle/Δ-ONE_2!  "),
+            "  skycastleδ-one_2  "
+        );
+        assert_eq!(sanitize_outliner_filter(&"A".repeat(80)).len(), 32);
     }
 }

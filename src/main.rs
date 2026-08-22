@@ -116,6 +116,7 @@ pub fn build_starfall_app(mode: StarfallAppMode) -> App {
             app.add_plugins((
                 bevy::dev_tools::infinite_grid::InfiniteGridPlugin,
                 bevy::gizmos::prelude::TransformGizmoPlugin,
+                bevy::feathers::FeathersPlugins,
             ));
         }
         StarfallAppMode::Headless => {

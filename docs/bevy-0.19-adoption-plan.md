@@ -149,9 +149,14 @@ work.
   The contained Inspector panel exposes grid, semantic-label range/budget,
   directional-shadow quality, and Forge contact-shadow controls through the
   same controller focus registry as every other editor action.
-- **Next contained trial:** adopt `EditableText` and Feathers for prefab search
-  or project metadata without replacing the proven controller navigation and
-  accessibility styles.
+- **Landed:** the Outliner filter is the contained `EditableText` + Feathers
+  trial. Production gets native selection, clipboard, and IME behavior inside
+  a themed field; A/Enter applies and B/Escape clears through the existing
+  controller contract. Reduced/headless harnesses retain the deterministic
+  manual text fallback.
+- **Next UI trial:** apply the proven field adapter to project metadata and
+  registry rename/search, then extract a reusable Forge text-field component
+  before converting any larger panel.
 - **Next settings group:** add per-slot `PlayerControlPreferences` after its
   ownership boundary with the existing `GameSettings` JSON is specified.
 - Keep campaign progress, character data, authored projects, and world state in

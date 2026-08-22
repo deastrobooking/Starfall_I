@@ -112,8 +112,10 @@ Work:
   stroke labels now identify sockets, spawns, routes, water flow, and gameplay
   boundaries; the contained, controller-navigable Inspector settings panel now
   persists grid, label range/budget, shadow, and Forge key-light contact-shadow
-  preferences through Bevy 0.19 machine-local settings; next pilot Feathers and
-  `EditableText` on prefab search/project metadata
+  preferences through Bevy 0.19 machine-local settings; the Outliner filter now
+  pilots a Feathers-themed native `EditableText` field with clipboard/IME and
+  controller apply/clear while headless tools keep their manual fallback; next
+  extract that adapter for registry search/rename and project metadata
 - extend the shared semantic character geometry foundation now used by both
   Character Studio and Creature Forge: five style coordinates drive preview,
   playable player recipes, and compiled enemy geometry; reusable cubic Bézier
