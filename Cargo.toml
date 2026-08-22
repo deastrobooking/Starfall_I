@@ -13,6 +13,9 @@ bevy = { version = "0.19.1", features = ["jpeg", "wav", "mp3", "bevy_dev_tools",
 # Same decoder Bevy plays audio with (version-locked through the workspace):
 # used at import time so any file we accept cannot panic at playback time.
 rodio = { version = "0.22", default-features = false, features = ["mp3"] }
+# Designer-only microphone capture uses the same native audio backend already
+# present through Bevy/rodio. Capture is opt-in from the Dialogue Forge.
+cpal = "0.17"
 avian3d = "0.7"
 rand = "0.8"
 noise = "0.8"

@@ -121,6 +121,12 @@ The project places strong value on readable and immediately distinct presentatio
 Key features:
 - deterministic procedural SFX synthesizer
 - separate music deck and action-audio selection system
+- Dialogue Forge records with stable graph nodes, branching choices, voice-clip
+  metadata, and one ordered cue timeline shared by ordinary gameplay dialogue
+  and skippable/pausing cutscenes
+- opt-in project-local microphone recording to bounded mono PCM WAV takes;
+  animation, camera, audio, visibility, and gameplay-signal cues can be authored
+  against stable actor/content IDs without serializing runtime ECS entities
 - gameplay-driven sound mapping
 - per-player UI and HUD behaviors
 - stylized cartoon visuals with energy-driven materials and effects
@@ -328,9 +334,10 @@ Included features:
 - Bevy 0.19 machine-local Forge preferences, with a controller-navigable panel
   for grid/label budgets and bounded shadow quality; campaign and character
   data remain in Starfall's versioned save contract
-- contained Feathers/`EditableText` Outliner search with native selection,
-  clipboard, IME, paste sanitization, controller apply/clear, and a headless
-  deterministic-input fallback
+- reusable Feathers/`EditableText` fields for Outliner/Registry search,
+  content-ID rename, project name, and active-level name, with native selection,
+  clipboard/IME, paste sanitization, controller apply/cancel, headless fallback,
+  validation, and transactional undo/redo
 - draft/publish workflows
 - manifest-based content bootstrapping
 - deterministic game-side content consumption

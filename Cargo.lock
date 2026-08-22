@@ -5593,6 +5593,7 @@ version = "0.2.0"
 dependencies = [
  "avian3d",
  "bevy",
+ "cpal",
  "dirs",
  "image",
  "noise",

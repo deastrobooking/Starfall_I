@@ -149,14 +149,14 @@ work.
   The contained Inspector panel exposes grid, semantic-label range/budget,
   directional-shadow quality, and Forge contact-shadow controls through the
   same controller focus registry as every other editor action.
-- **Landed:** the Outliner filter is the contained `EditableText` + Feathers
-  trial. Production gets native selection, clipboard, and IME behavior inside
-  a themed field; A/Enter applies and B/Escape clears through the existing
-  controller contract. Reduced/headless harnesses retain the deterministic
-  manual text fallback.
-- **Next UI trial:** apply the proven field adapter to project metadata and
-  registry rename/search, then extract a reusable Forge text-field component
-  before converting any larger panel.
+- **Landed:** one reusable Feathers/`EditableText` adapter now drives Outliner
+  filtering, Registry search, content-ID rename, project name, and active-level
+  name. Production gets native selection, clipboard, and IME behavior; A/Enter
+  applies and B/Escape cancels/clears. Reduced/headless harnesses retain the
+  deterministic manual fallback. Metadata and content-ID changes use Forge's
+  atomic undo/redo transactions with preflight validation.
+- **Next UI trial:** add project description/tags through the same adapter,
+  then evaluate a Feathers property row before converting any larger panel.
 - **Next settings group:** add per-slot `PlayerControlPreferences` after its
   ownership boundary with the existing `GameSettings` JSON is specified.
 - Keep campaign progress, character data, authored projects, and world state in
@@ -201,6 +201,26 @@ overridden, saved, loaded, and upgraded without losing stable editor IDs.
 Acceptance: automated transition tests cover every style pair that the shipped
 game uses; four players retain identity, loadout, health/progression policy, and
 controller ownership across transitions.
+
+### B19-4a — Dialogue, voice, and animation timeline
+
+- The first durable graph contract is implemented in Dialogue Forge: stable
+  nodes and choices, resumable stable-ID cursors, gameplay/cutscene policies,
+  voice metadata, and ordered animation, camera, audio, visibility, input-wait,
+  and gameplay-signal cues.
+- Registry controls can create a sequence, switch its playback policy, append a
+  linked node, add an animation cue, and start/stop a native microphone take.
+  Capture is opt-in, capped, mixed to mono, atomically written beneath the
+  active project's assets directory, and attached through undoable graph data.
+- Next build Feathers node/choice property rows, a zoomable controller-friendly
+  timeline and waveform/take strip, then publish graphs into a runtime director
+  that bridges the existing discussion/radio UI, character animation graph,
+  camera rigs, audio player, and gameplay event systems.
+
+Acceptance: a creator can author and publish the same conversation as
+non-blocking gameplay chatter or a skippable cutscene; recorded voice,
+subtitles, camera shots, and character animation cues remain synchronized after
+save/load and no authored record contains an ECS `Entity`.
 
 ### B19-5 — Lighting, shadows, and reflections
 

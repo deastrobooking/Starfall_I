@@ -113,9 +113,20 @@ Work:
   boundaries; the contained, controller-navigable Inspector settings panel now
   persists grid, label range/budget, shadow, and Forge key-light contact-shadow
   preferences through Bevy 0.19 machine-local settings; the Outliner filter now
-  pilots a Feathers-themed native `EditableText` field with clipboard/IME and
-  controller apply/clear while headless tools keep their manual fallback; next
-  extract that adapter for registry search/rename and project metadata
+  shares a reusable Feathers-themed `EditableText` adapter with Registry search,
+  content-ID rename, project name, and active-level name; clipboard/IME,
+  controller apply/cancel, headless fallback, validation, and transactional
+  undo/redo are preserved; next extend metadata with description/tags and pilot
+  one Feathers property row
+- the first Dialogue Forge production slice now stores typed modular graphs in
+  versioned project records: linked/branching dialogue nodes, stable runtime
+  cursors, gameplay versus cutscene policy, and ordered animation/camera/audio/
+  visibility/gameplay-signal cues share one format; the Registry can create a
+  graph, append nodes and animation cues, switch modes, and record/attach a
+  bounded project-local mono WAV voice take with undo-safe metadata; next add
+  node/choice property rows, a visual timeline, waveform trim/take selection,
+  and a runtime director that adapts published graphs into the existing
+  discussion, radio, camera, and animation systems
 - extend the shared semantic character geometry foundation now used by both
   Character Studio and Creature Forge: five style coordinates drive preview,
   playable player recipes, and compiled enemy geometry; reusable cubic Bézier

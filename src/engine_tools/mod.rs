@@ -8,6 +8,8 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 pub mod character_records;
 pub mod creature_records;
+/// Dialogue graphs, cutscene/gameplay animation cues, and voice capture.
+pub mod dialogue_records;
 pub mod editable_mesh;
 /// Shared button/row/label widgets for Forge authoring screens.
 pub mod forge_widgets;
@@ -781,6 +783,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<EditorModifierParamCursor>()
             .init_resource::<EditorArmedLevelTemplate>()
             .init_resource::<EditorLevelDeleteArm>()
+            .insert_non_send(DialogueVoiceCapture::default())
             .register_type::<EditorEntityId>()
             .configure_sets(
                 PostUpdate,
@@ -841,7 +844,7 @@ impl Plugin for EngineToolsPlugin {
                 PostUpdate,
                 (
                     record_bevy_transform_gizmo_transaction.after(TransformGizmoSystems),
-                    sync_native_outliner_filter.after(EditableTextSystems),
+                    sync_native_forge_fields.after(EditableTextSystems),
                 )
                     .run_if(in_state(EngineToolMode::Editing)),
             );
@@ -948,6 +951,8 @@ pub enum EditorCommandError {
     MissingEntity(EditorEntityId),
     MissingTransform(EditorEntityId),
     MissingRecipe(String),
+    MissingLevel(String),
+    ProjectMutation(String),
     EmptyTransaction,
 }
 
@@ -965,27 +970,85 @@ pub enum EditorCommand {
         before: Box<ProceduralRecipeDraft>,
         after: Box<ProceduralRecipeDraft>,
     },
+    RenameContent {
+        before: String,
+        after: String,
+    },
+    SetProjectDisplayName {
+        before: String,
+        after: String,
+    },
+    SetLevelDisplayName {
+        level_id: String,
+        before: String,
+        after: String,
+    },
+    SetDialogueGraph {
+        content_id: String,
+        before: Box<dialogue_records::DialogueGraph>,
+        after: Box<dialogue_records::DialogueGraph>,
+    },
 }
 
 impl EditorCommand {
     fn target(&self) -> EditorEntityId {
         match self {
             Self::SetTransform { id, .. } => *id,
-            Self::SetProceduralRecipe { .. } => EditorEntityId(0),
+            Self::SetProceduralRecipe { .. }
+            | Self::RenameContent { .. }
+            | Self::SetProjectDisplayName { .. }
+            | Self::SetLevelDisplayName { .. }
+            | Self::SetDialogueGraph { .. } => EditorEntityId(0),
         }
     }
 
-    fn preflight(&self, world: &mut World) -> Result<(), EditorCommandError> {
-        if let Self::SetProceduralRecipe { content_id, .. } = self {
-            let exists = world
-                .resource::<EditorProjectSession>()
-                .project
-                .payloads
-                .get(content_id)
-                .is_some_and(|payload| payload.procedural_recipe().is_some());
-            return exists
-                .then_some(())
-                .ok_or_else(|| EditorCommandError::MissingRecipe(content_id.clone()));
+    fn preflight(&self, world: &mut World, undo: bool) -> Result<(), EditorCommandError> {
+        match self {
+            Self::SetProceduralRecipe { content_id, .. } => {
+                let exists = world
+                    .resource::<EditorProjectSession>()
+                    .project
+                    .payloads
+                    .get(content_id)
+                    .is_some_and(|payload| payload.procedural_recipe().is_some());
+                return exists
+                    .then_some(())
+                    .ok_or_else(|| EditorCommandError::MissingRecipe(content_id.clone()));
+            }
+            Self::RenameContent { before, after } => {
+                let (source, destination) = if undo {
+                    (after.as_str(), before.as_str())
+                } else {
+                    (before.as_str(), after.as_str())
+                };
+                let mut candidate = world.resource::<EditorProjectSession>().project.clone();
+                return candidate
+                    .rename_content(source, destination)
+                    .map_err(|error| EditorCommandError::ProjectMutation(format!("{error:?}")));
+            }
+            Self::SetLevelDisplayName { level_id, .. } => {
+                let exists = world
+                    .resource::<EditorProjectSession>()
+                    .project
+                    .levels
+                    .iter()
+                    .any(|level| level.level_id == *level_id);
+                return exists
+                    .then_some(())
+                    .ok_or_else(|| EditorCommandError::MissingLevel(level_id.clone()));
+            }
+            Self::SetProjectDisplayName { .. } => return Ok(()),
+            Self::SetDialogueGraph {
+                content_id,
+                before,
+                after,
+            } => {
+                let graph = if undo { before } else { after };
+                let mut candidate = world.resource::<EditorProjectSession>().project.clone();
+                return dialogue_records::save_dialogue(&mut candidate, content_id, graph)
+                    .map_err(|error| EditorCommandError::ProjectMutation(format!("{error:?}")));
+            }
+            Self::SetTransform { .. } => {}
         }
         let id = self.target();
         let entity =
@@ -1002,6 +1065,16 @@ impl EditorCommand {
             Self::SetProceduralRecipe {
                 content_id, after, ..
             } => set_procedural_recipe(world, content_id, (**after).clone()),
+            Self::RenameContent { before, after } => rename_project_content(world, before, after),
+            Self::SetProjectDisplayName { after, .. } => {
+                set_project_display_name(world, after.clone())
+            }
+            Self::SetLevelDisplayName {
+                level_id, after, ..
+            } => set_level_display_name(world, level_id, after.clone()),
+            Self::SetDialogueGraph {
+                content_id, after, ..
+            } => set_dialogue_graph(world, content_id, (**after).clone()),
         }
     }
 
@@ -1011,6 +1084,16 @@ impl EditorCommand {
             Self::SetProceduralRecipe {
                 content_id, before, ..
             } => set_procedural_recipe(world, content_id, (**before).clone()),
+            Self::RenameContent { before, after } => rename_project_content(world, after, before),
+            Self::SetProjectDisplayName { before, .. } => {
+                set_project_display_name(world, before.clone())
+            }
+            Self::SetLevelDisplayName {
+                level_id, before, ..
+            } => set_level_display_name(world, level_id, before.clone()),
+            Self::SetDialogueGraph {
+                content_id, before, ..
+            } => set_dialogue_graph(world, content_id, (**before).clone()),
         }
     }
 }
@@ -1041,7 +1124,7 @@ impl EditorTransaction {
             return Err(EditorCommandError::EmptyTransaction);
         }
         for command in &self.commands {
-            command.preflight(world)?;
+            command.preflight(world, false)?;
         }
         for command in &self.commands {
             command.execute(world)?;
@@ -1051,7 +1134,7 @@ impl EditorTransaction {
 
     fn undo(&self, world: &mut World) -> Result<(), EditorCommandError> {
         for command in &self.commands {
-            command.preflight(world)?;
+            command.preflight(world, true)?;
         }
         for command in self.commands.iter().rev() {
             command.undo(world)?;
@@ -1167,6 +1250,55 @@ fn set_procedural_recipe(
     Ok(())
 }
 
+fn rename_project_content(
+    world: &mut World,
+    before: &str,
+    after: &str,
+) -> Result<(), EditorCommandError> {
+    world
+        .resource_mut::<EditorProjectSession>()
+        .project
+        .rename_content(before, after)
+        .map_err(|error| EditorCommandError::ProjectMutation(format!("{error:?}")))
+}
+
+fn set_project_display_name(world: &mut World, value: String) -> Result<(), EditorCommandError> {
+    world
+        .resource_mut::<EditorProjectSession>()
+        .project
+        .display_name = value;
+    Ok(())
+}
+
+fn set_level_display_name(
+    world: &mut World,
+    level_id: &str,
+    value: String,
+) -> Result<(), EditorCommandError> {
+    let mut session = world.resource_mut::<EditorProjectSession>();
+    let level = session
+        .project
+        .levels
+        .iter_mut()
+        .find(|level| level.level_id == level_id)
+        .ok_or_else(|| EditorCommandError::MissingLevel(level_id.into()))?;
+    level.display_name = value;
+    Ok(())
+}
+
+fn set_dialogue_graph(
+    world: &mut World,
+    content_id: &str,
+    value: dialogue_records::DialogueGraph,
+) -> Result<(), EditorCommandError> {
+    dialogue_records::save_dialogue(
+        &mut world.resource_mut::<EditorProjectSession>().project,
+        content_id,
+        &value,
+    )
+    .map_err(|error| EditorCommandError::ProjectMutation(format!("{error:?}")))
+}
+
 // ── ET2: safe editor workspace shell ─────────────────────────────────────────
 
 #[derive(Component)]
@@ -1239,8 +1371,20 @@ struct EditorChromeSurface;
 #[derive(Component)]
 struct EditorSearchText;
 
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum ForgeTextField {
+    #[default]
+    OutlinerFilter,
+    RegistrySearch,
+    ContentId,
+    ProjectName,
+    LevelName,
+}
+
 #[derive(Component, Default, Clone)]
-struct EditorOutlinerFilterInput;
+struct ForgeTextFieldMarker {
+    kind: ForgeTextField,
+}
 
 #[derive(Component)]
 struct EditorRegistryText;
@@ -1360,6 +1504,13 @@ define_editor_controls! {
     RegistryPrevious => Some(EditorPanelKind::Registry),
     RegistryNext => Some(EditorPanelKind::Registry),
     RegistryRename => Some(EditorPanelKind::Registry),
+    EditProjectName => Some(EditorPanelKind::Registry),
+    EditLevelName => Some(EditorPanelKind::Registry),
+    CreateDialogueGraph => Some(EditorPanelKind::Registry),
+    DialogueCycleMode => Some(EditorPanelKind::Registry),
+    DialogueAddNode => Some(EditorPanelKind::Registry),
+    DialogueAddAnimationCue => Some(EditorPanelKind::Registry),
+    DialogueRecordVoice => Some(EditorPanelKind::Registry),
     ValidateProject => Some(EditorPanelKind::Registry),
     CreateMaterialRecord => Some(EditorPanelKind::Registry),
     DuplicateRecord => Some(EditorPanelKind::Registry),
@@ -1627,6 +1778,10 @@ struct EditorRegistryState {
     rename_buffer: String,
     search_active: bool,
     search_text: String,
+    project_name_active: bool,
+    project_name_buffer: String,
+    level_name_active: bool,
+    level_name_buffer: String,
     material_parameter: usize,
     recipe_kind: usize,
     recipe_slot: usize,
@@ -1641,6 +1796,14 @@ struct EditorRegistryState {
     road_junction_start: Option<String>,
     road_junction_kind: usize,
     material_clipboard: Option<String>,
+}
+
+#[derive(Default)]
+struct DialogueVoiceCapture {
+    recorder: Option<dialogue_records::VoiceRecorder>,
+    content_id: String,
+    node_id: String,
+    take: u16,
 }
 
 #[derive(Resource, Default)]
@@ -1765,6 +1928,8 @@ fn enter_editor_workspace(
     filter.active = false;
     registry.rename_active = false;
     registry.search_active = false;
+    registry.project_name_active = false;
+    registry.level_name_active = false;
     status.message = "Simulation paused; gameplay input captured by editor".into();
 
     if let Ok(mut cursor) = cursors.single_mut() {
@@ -3430,6 +3595,37 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                         );
                         spawn_editor_button(
                             panel,
+                            EditorAction::EditProjectName,
+                            "EDIT PROJECT NAME",
+                        );
+                        spawn_editor_button(panel, EditorAction::EditLevelName, "EDIT LEVEL NAME");
+                        spawn_editor_button(
+                            panel,
+                            EditorAction::CreateDialogueGraph,
+                            "+ DIALOGUE / CUTSCENE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            EditorAction::DialogueCycleMode,
+                            "GAMEPLAY / CUTSCENE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            EditorAction::DialogueAddNode,
+                            "+ DIALOGUE NODE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            EditorAction::DialogueAddAnimationCue,
+                            "+ ANIMATION CUE",
+                        );
+                        spawn_editor_button(
+                            panel,
+                            EditorAction::DialogueRecordVoice,
+                            "START / STOP VOICE TAKE",
+                        );
+                        spawn_editor_button(
+                            panel,
                             EditorAction::ValidateProject,
                             "VALIDATE PROJECT",
                         );
@@ -3792,10 +3988,9 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
         });
 }
 
-/// Adds one native Bevy 0.19 text-editing field without converting the whole
-/// Starfall editor UI to experimental Feathers widgets. Reduced/headless apps
-/// do not install the Feathers theme, so they retain the deterministic manual
-/// keyboard-input fallback used by editor unit tests.
+/// Adds native Bevy 0.19 text fields through one reusable Feathers scene
+/// adapter. Reduced/headless apps do not install the Feathers theme, so they
+/// retain the deterministic manual keyboard-input fallback used by tests.
 fn spawn_forge_editable_fields(
     mut commands: Commands,
     theme: Option<Res<UiTheme>>,
@@ -3804,28 +3999,86 @@ fn spawn_forge_editable_fields(
     if theme.is_none() {
         return;
     }
-    let Some(outliner) = panels
+    let outliner = panels
         .iter()
-        .find_map(|(entity, kind)| (*kind == EditorPanelKind::Outliner).then_some(entity))
-    else {
+        .find_map(|(entity, kind)| (*kind == EditorPanelKind::Outliner).then_some(entity));
+    let registry = panels
+        .iter()
+        .find_map(|(entity, kind)| (*kind == EditorPanelKind::Registry).then_some(entity));
+    let (Some(outliner), Some(registry)) = (outliner, registry) else {
         return;
     };
 
-    let field = commands
+    let outliner_field = spawn_forge_text_field(
+        &mut commands,
+        ForgeTextField::OutlinerFilter,
+        "Forge Outliner Search",
+    );
+    // Summary and the static filter caption remain first; the actual native
+    // field is inserted before the controller activation button.
+    commands
+        .entity(outliner)
+        .insert_children(2, &[outliner_field]);
+
+    let registry_fields = [
+        spawn_forge_text_field(
+            &mut commands,
+            ForgeTextField::ProjectName,
+            "Forge Project Name",
+        ),
+        spawn_forge_text_field(
+            &mut commands,
+            ForgeTextField::LevelName,
+            "Forge Active Level Name",
+        ),
+        spawn_forge_text_field(
+            &mut commands,
+            ForgeTextField::RegistrySearch,
+            "Forge Registry Search",
+        ),
+        spawn_forge_text_field(&mut commands, ForgeTextField::ContentId, "Forge Content ID"),
+    ];
+    commands
+        .entity(registry)
+        .insert_children(1, &registry_fields);
+}
+
+fn spawn_forge_text_field(
+    commands: &mut Commands,
+    kind: ForgeTextField,
+    name: &'static str,
+) -> Entity {
+    let root = commands
         .spawn_scene(bsn! {
             @FeathersTextInputContainer
-            Name("Forge Outliner Native Search")
+            Name(name)
             Children [
                 (
                     @FeathersTextInput
-                    EditorOutlinerFilterInput
+                    ForgeTextFieldMarker { kind }
                 )
             ]
         })
         .id();
-    // Summary and the static filter caption remain first; the actual native
-    // field is inserted before the controller activation button.
-    commands.entity(outliner).insert_children(2, &[field]);
+    let label = match kind {
+        ForgeTextField::OutlinerFilter => "OBJECT FILTER",
+        ForgeTextField::RegistrySearch => "REGISTRY SEARCH",
+        ForgeTextField::ContentId => "CONTENT ID",
+        ForgeTextField::ProjectName => "PROJECT NAME",
+        ForgeTextField::LevelName => "ACTIVE LEVEL NAME",
+    };
+    let label_entity = commands
+        .spawn((
+            Text::new(label),
+            TextFont {
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::srgb(0.48, 0.84, 1.0)),
+        ))
+        .id();
+    commands.entity(root).insert_children(0, &[label_entity]);
+    root
 }
 
 fn spawn_editor_panel(
@@ -3889,9 +4142,13 @@ fn editor_button_interactions(
     mut interactions: Query<(&Interaction, &EditorButton), Changed<Interaction>>,
     mut pending: ResMut<EditorPendingActions>,
     mut focus: ResMut<EditorFocus>,
+    mut input_focus: Option<ResMut<InputFocus>>,
 ) {
     for (interaction, button) in &mut interactions {
         if *interaction == Interaction::Pressed {
+            if let Some(input_focus) = input_focus.as_deref_mut() {
+                input_focus.clear();
+            }
             focus.0 = button.control;
             pending.0.push(button.control);
         }
@@ -3905,15 +4162,19 @@ fn editor_search_input(
     settings: Res<GameSettings>,
     mut filter: ResMut<EditorOutlinerFilter>,
     mut registry: ResMut<EditorRegistryState>,
-    mut session: ResMut<EditorProjectSession>,
-    mut document: ResMut<EditorDocumentState>,
+    session: Res<EditorProjectSession>,
     mut status: ResMut<EditorRuntimeStatus>,
     mut capture: ResMut<EditorTextInputCapture>,
     mut input_focus: ResMut<InputFocus>,
-    mut native_filter: Query<(Entity, &mut EditableText), With<EditorOutlinerFilterInput>>,
+    mut native_fields: Query<(Entity, &ForgeTextFieldMarker, &mut EditableText)>,
+    mut pending: ResMut<EditorPendingTransactions>,
 ) {
-    capture.0 = filter.active || registry.rename_active || registry.search_active;
-    if !filter.active && !registry.rename_active && !registry.search_active {
+    capture.0 = filter.active
+        || registry.rename_active
+        || registry.search_active
+        || registry.project_name_active
+        || registry.level_name_active;
+    if !capture.0 {
         return;
     }
 
@@ -3926,74 +4187,164 @@ fn editor_search_input(
     }) || native
         .just_pressed(mapped_native_face(&settings.bindings, FaceButton::East));
 
-    if registry.search_active {
-        if controller_clear {
-            registry.search_text.clear();
-            registry.search_active = false;
-            status.message = "Registry search cleared".into();
-            return;
-        }
-        if controller_accept {
-            registry.search_active = false;
-            status.message = "Registry search applied".into();
-            return;
-        }
-        for key in keys.get_just_pressed() {
-            match key {
-                Key::Character(value) => {
-                    for character in value.chars() {
-                        if (character.is_alphanumeric()
-                            || matches!(character, ' ' | '.' | '_' | '-'))
-                            && registry.search_text.len() < 48
-                        {
-                            registry.search_text.extend(character.to_lowercase());
-                        }
+    let keyboard_accept = keys.just_pressed(Key::Enter);
+    let keyboard_cancel = keys.just_pressed(Key::Escape);
+
+    if registry.project_name_active {
+        let native = native_fields
+            .iter()
+            .any(|(_, field, _)| field.kind == ForgeTextField::ProjectName);
+        let completion = if native {
+            field_completion(
+                controller_accept || keyboard_accept,
+                controller_clear || keyboard_cancel,
+            )
+        } else {
+            manual_text_edit(
+                &keys,
+                &mut registry.project_name_buffer,
+                ForgeTextField::ProjectName,
+                controller_accept,
+                controller_clear,
+            )
+        };
+        if completion == TextFieldCompletion::Cancel {
+            registry.project_name_active = false;
+            input_focus.clear();
+            status.message = "Project-name edit cancelled".into();
+        } else if completion == TextFieldCompletion::Accept {
+            match validated_display_name(&registry.project_name_buffer) {
+                Ok(after) => {
+                    let before = session.project.display_name.clone();
+                    registry.project_name_active = false;
+                    input_focus.clear();
+                    if before == after {
+                        status.message = "Project name unchanged".into();
+                    } else {
+                        pending.0.push(EditorTransaction {
+                            description: format!("Rename project to {after}"),
+                            commands: vec![EditorCommand::SetProjectDisplayName { before, after }],
+                        });
                     }
                 }
-                Key::Backspace => {
-                    registry.search_text.pop();
-                }
-                Key::Enter => {
-                    registry.search_active = false;
-                    status.message = "Registry search applied".into();
-                }
-                Key::Escape => {
-                    registry.search_text.clear();
-                    registry.search_active = false;
-                    status.message = "Registry search cleared".into();
-                }
-                _ => {}
+                Err(message) => status.message = message.into(),
             }
         }
         return;
     }
 
-    if registry.rename_active {
-        let mut accept = controller_accept;
-        let mut cancel = controller_clear;
-        for key in keys.get_just_pressed() {
-            match key {
-                Key::Character(value) => {
-                    for character in value.chars() {
-                        if (character.is_alphanumeric() || matches!(character, '.' | '_' | '-'))
-                            && registry.rename_buffer.len() < 64
-                        {
-                            registry.rename_buffer.extend(character.to_lowercase());
-                        }
+    if registry.level_name_active {
+        let native = native_fields
+            .iter()
+            .any(|(_, field, _)| field.kind == ForgeTextField::LevelName);
+        let completion = if native {
+            field_completion(
+                controller_accept || keyboard_accept,
+                controller_clear || keyboard_cancel,
+            )
+        } else {
+            manual_text_edit(
+                &keys,
+                &mut registry.level_name_buffer,
+                ForgeTextField::LevelName,
+                controller_accept,
+                controller_clear,
+            )
+        };
+        if completion == TextFieldCompletion::Cancel {
+            registry.level_name_active = false;
+            input_focus.clear();
+            status.message = "Level-name edit cancelled".into();
+        } else if completion == TextFieldCompletion::Accept {
+            let active_level = session
+                .project
+                .active_level()
+                .map(|level| (level.level_id.clone(), level.display_name.clone()));
+            match (
+                active_level,
+                validated_display_name(&registry.level_name_buffer),
+            ) {
+                (Some((level_id, before)), Ok(after)) => {
+                    registry.level_name_active = false;
+                    input_focus.clear();
+                    if before == after {
+                        status.message = "Level name unchanged".into();
+                    } else {
+                        pending.0.push(EditorTransaction {
+                            description: format!("Rename level to {after}"),
+                            commands: vec![EditorCommand::SetLevelDisplayName {
+                                level_id,
+                                before,
+                                after,
+                            }],
+                        });
                     }
                 }
-                Key::Backspace => {
-                    registry.rename_buffer.pop();
+                (None, _) => {
+                    registry.level_name_active = false;
+                    status.message = "No active level to rename".into();
                 }
-                Key::Enter => accept = true,
-                Key::Escape => cancel = true,
-                _ => {}
+                (_, Err(message)) => status.message = message.into(),
             }
         }
-        if cancel {
+        return;
+    }
+
+    if registry.search_active {
+        let native = native_fields
+            .iter()
+            .any(|(_, field, _)| field.kind == ForgeTextField::RegistrySearch);
+        let completion = if native {
+            field_completion(
+                controller_accept || keyboard_accept,
+                controller_clear || keyboard_cancel,
+            )
+        } else {
+            manual_text_edit(
+                &keys,
+                &mut registry.search_text,
+                ForgeTextField::RegistrySearch,
+                controller_accept,
+                controller_clear,
+            )
+        };
+        if completion == TextFieldCompletion::Cancel {
+            registry.search_text.clear();
+            registry.search_active = false;
+            clear_native_field(&mut native_fields, ForgeTextField::RegistrySearch);
+            input_focus.clear();
+            status.message = "Registry search cleared".into();
+        } else if completion == TextFieldCompletion::Accept {
+            registry.search_active = false;
+            input_focus.clear();
+            status.message = "Registry search applied".into();
+        }
+        return;
+    }
+
+    if registry.rename_active {
+        let native = native_fields
+            .iter()
+            .any(|(_, field, _)| field.kind == ForgeTextField::ContentId);
+        let completion = if native {
+            field_completion(
+                controller_accept || keyboard_accept,
+                controller_clear || keyboard_cancel,
+            )
+        } else {
+            manual_text_edit(
+                &keys,
+                &mut registry.rename_buffer,
+                ForgeTextField::ContentId,
+                controller_accept,
+                controller_clear,
+            )
+        };
+        if completion == TextFieldCompletion::Cancel {
             registry.rename_active = false;
+            input_focus.clear();
             status.message = "Content rename cancelled".into();
-        } else if accept {
+        } else if completion == TextFieldCompletion::Accept {
             let old_id = session
                 .project
                 .records
@@ -4003,18 +4354,28 @@ fn editor_search_input(
             match old_id {
                 Some(old_id) if old_id == new_id => {
                     registry.rename_active = false;
+                    input_focus.clear();
                     status.message = "Content ID unchanged".into();
                 }
-                Some(old_id) => match session.project.rename_content(&old_id, &new_id) {
-                    Ok(()) => {
-                        registry.rename_active = false;
-                        document.dirty = true;
-                        status.message = format!("Renamed {old_id} to {new_id}");
+                Some(old_id) => {
+                    let mut candidate = session.project.clone();
+                    match candidate.rename_content(&old_id, &new_id) {
+                        Ok(()) => {
+                            registry.rename_active = false;
+                            input_focus.clear();
+                            pending.0.push(EditorTransaction {
+                                description: format!("Rename {old_id} to {new_id}"),
+                                commands: vec![EditorCommand::RenameContent {
+                                    before: old_id,
+                                    after: new_id,
+                                }],
+                            });
+                        }
+                        Err(error) => {
+                            status.message = format!("Rename rejected: {error:?}");
+                        }
                     }
-                    Err(error) => {
-                        status.message = format!("Rename rejected: {error:?}");
-                    }
-                },
+                }
                 None => {
                     registry.rename_active = false;
                     status.message = "No registry record selected".into();
@@ -4024,12 +4385,15 @@ fn editor_search_input(
         return;
     }
 
-    if let Ok((entity, mut input)) = native_filter.single_mut() {
+    let native_outliner = native_fields.iter().find_map(|(entity, field, _)| {
+        (field.kind == ForgeTextField::OutlinerFilter).then_some(entity)
+    });
+    if let Some(entity) = native_outliner {
         if input_focus.get() != Some(entity) {
             input_focus.set(entity, FocusCause::Navigated);
         }
         if controller_clear || keys.just_pressed(Key::Escape) {
-            input.editor_mut().set_text("");
+            clear_native_field(&mut native_fields, ForgeTextField::OutlinerFilter);
             filter.text.clear();
             filter.active = false;
             input_focus.clear();
@@ -4085,43 +4449,191 @@ fn editor_search_input(
     }
 }
 
-fn sanitize_outliner_filter(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_alphanumeric() || matches!(character, ' ' | '_' | '-'))
-        .flat_map(char::to_lowercase)
-        .take(32)
-        .collect()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextFieldCompletion {
+    Continue,
+    Accept,
+    Cancel,
 }
 
-fn sync_native_outliner_filter(
+fn field_completion(accept: bool, cancel: bool) -> TextFieldCompletion {
+    if cancel {
+        TextFieldCompletion::Cancel
+    } else if accept {
+        TextFieldCompletion::Accept
+    } else {
+        TextFieldCompletion::Continue
+    }
+}
+
+fn manual_text_edit(
+    keys: &ButtonInput<Key>,
+    buffer: &mut String,
+    kind: ForgeTextField,
+    controller_accept: bool,
+    controller_cancel: bool,
+) -> TextFieldCompletion {
+    let mut completion = field_completion(controller_accept, controller_cancel);
+    for key in keys.get_just_pressed() {
+        match key {
+            Key::Character(value) => {
+                buffer.push_str(value);
+                *buffer = sanitize_forge_text(kind, buffer);
+            }
+            Key::Backspace => {
+                buffer.pop();
+            }
+            Key::Enter => completion = TextFieldCompletion::Accept,
+            Key::Escape => completion = TextFieldCompletion::Cancel,
+            _ => {}
+        }
+    }
+    completion
+}
+
+fn sanitize_forge_text(kind: ForgeTextField, value: &str) -> String {
+    let (max_characters, lowercase) = match kind {
+        ForgeTextField::OutlinerFilter => (32, true),
+        ForgeTextField::RegistrySearch => (48, true),
+        ForgeTextField::ContentId => (64, true),
+        ForgeTextField::ProjectName | ForgeTextField::LevelName => (64, false),
+    };
+    let characters = value.chars().filter(|character| match kind {
+        ForgeTextField::OutlinerFilter => {
+            character.is_alphanumeric() || matches!(character, ' ' | '_' | '-')
+        }
+        ForgeTextField::RegistrySearch => {
+            character.is_alphanumeric() || matches!(character, ' ' | '.' | '_' | '-')
+        }
+        ForgeTextField::ContentId => {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        }
+        ForgeTextField::ProjectName | ForgeTextField::LevelName => {
+            !character.is_control() && *character != '\n' && *character != '\r'
+        }
+    });
+    if lowercase {
+        characters
+            .flat_map(char::to_lowercase)
+            .take(max_characters)
+            .collect()
+    } else {
+        characters.take(max_characters).collect()
+    }
+}
+
+fn validated_display_name(value: &str) -> Result<String, &'static str> {
+    let value = value.trim();
+    if value.is_empty() {
+        Err("Name cannot be empty")
+    } else if value.chars().count() > 64 {
+        Err("Name must be 64 characters or fewer")
+    } else {
+        Ok(value.to_owned())
+    }
+}
+
+fn clear_native_field(
+    fields: &mut Query<(Entity, &ForgeTextFieldMarker, &mut EditableText)>,
+    target: ForgeTextField,
+) {
+    for (_, field, mut input) in fields.iter_mut() {
+        if field.kind == target {
+            input.editor_mut().set_text("");
+            break;
+        }
+    }
+}
+
+fn sync_native_forge_fields(
     input_focus: Res<InputFocus>,
-    mut inputs: Query<(Entity, &mut EditableText), With<EditorOutlinerFilterInput>>,
+    mut inputs: Query<(Entity, &ForgeTextFieldMarker, &mut EditableText)>,
     mut filter: ResMut<EditorOutlinerFilter>,
+    mut registry: ResMut<EditorRegistryState>,
+    session: Res<EditorProjectSession>,
     mut capture: ResMut<EditorTextInputCapture>,
 ) {
-    let Ok((entity, mut input)) = inputs.single_mut() else {
-        return;
-    };
-    if input.max_characters != Some(32) {
-        input.max_characters = Some(32);
+    let focused_kind = input_focus.get().and_then(|focused| {
+        inputs
+            .iter()
+            .find_map(|(entity, field, _)| (entity == focused).then_some(field.kind))
+    });
+    if let Some(kind) = focused_kind {
+        filter.active = kind == ForgeTextField::OutlinerFilter;
+        registry.search_active = kind == ForgeTextField::RegistrySearch;
+        registry.rename_active = kind == ForgeTextField::ContentId;
+        registry.project_name_active = kind == ForgeTextField::ProjectName;
+        registry.level_name_active = kind == ForgeTextField::LevelName;
     }
-    if input.visible_width != Some(25.0) {
-        input.visible_width = Some(25.0);
-    }
-    let focused = input_focus.get() == Some(entity);
-    if focused {
-        filter.active = true;
-    }
-    if filter.active || focused {
-        let raw = input.value().to_string();
-        let sanitized = sanitize_outliner_filter(&raw);
-        if sanitized != raw {
-            input.editor_mut().set_text(&sanitized);
+
+    for (_, field, mut input) in &mut inputs {
+        let kind = field.kind;
+        let max_characters = match kind {
+            ForgeTextField::OutlinerFilter => 32,
+            ForgeTextField::RegistrySearch => 48,
+            ForgeTextField::ContentId | ForgeTextField::ProjectName | ForgeTextField::LevelName => {
+                64
+            }
+        };
+        if input.max_characters != Some(max_characters) {
+            input.max_characters = Some(max_characters);
         }
-        filter.text = sanitized;
-        capture.0 = true;
+        if input.visible_width != Some(25.0) {
+            input.visible_width = Some(25.0);
+        }
+        let active = match kind {
+            ForgeTextField::OutlinerFilter => filter.active,
+            ForgeTextField::RegistrySearch => registry.search_active,
+            ForgeTextField::ContentId => registry.rename_active,
+            ForgeTextField::ProjectName => registry.project_name_active,
+            ForgeTextField::LevelName => registry.level_name_active,
+        };
+        let desired = match kind {
+            ForgeTextField::OutlinerFilter => filter.text.clone(),
+            ForgeTextField::RegistrySearch => registry.search_text.clone(),
+            ForgeTextField::ContentId if registry.rename_active => registry.rename_buffer.clone(),
+            ForgeTextField::ContentId => session
+                .project
+                .records
+                .get(registry.selected)
+                .map(|record| record.content_id.clone())
+                .unwrap_or_default(),
+            ForgeTextField::ProjectName if registry.project_name_active => {
+                registry.project_name_buffer.clone()
+            }
+            ForgeTextField::ProjectName => session.project.display_name.clone(),
+            ForgeTextField::LevelName if registry.level_name_active => {
+                registry.level_name_buffer.clone()
+            }
+            ForgeTextField::LevelName => session
+                .project
+                .active_level()
+                .map(|level| level.display_name.clone())
+                .unwrap_or_default(),
+        };
+
+        if active {
+            let raw = input.value().to_string();
+            let sanitized = sanitize_forge_text(kind, &raw);
+            if sanitized != raw {
+                input.editor_mut().set_text(&sanitized);
+            }
+            match kind {
+                ForgeTextField::OutlinerFilter => filter.text = sanitized,
+                ForgeTextField::RegistrySearch => registry.search_text = sanitized,
+                ForgeTextField::ContentId => registry.rename_buffer = sanitized,
+                ForgeTextField::ProjectName => registry.project_name_buffer = sanitized,
+                ForgeTextField::LevelName => registry.level_name_buffer = sanitized,
+            }
+        } else if input.value().to_string() != desired {
+            input.editor_mut().set_text(&desired);
+        }
     }
+    capture.0 = filter.active
+        || registry.rename_active
+        || registry.search_active
+        || registry.project_name_active
+        || registry.level_name_active;
 }
 
 fn editor_controller_navigation(
@@ -6537,7 +7049,140 @@ fn clear_selected_object_material(world: &mut World) {
     }
 }
 
+fn selected_dialogue_graph(
+    world: &World,
+) -> Result<(String, dialogue_records::DialogueGraph), String> {
+    let selected = world.resource::<EditorRegistryState>().selected;
+    let session = world.resource::<EditorProjectSession>();
+    let content_id = session
+        .project
+        .records
+        .get(selected)
+        .map(|record| record.content_id.clone())
+        .ok_or_else(|| "No registry record selected".to_owned())?;
+    let graph = dialogue_records::load_dialogue(&session.project, &content_id)
+        .map_err(|_| "Select a Dialogue Forge record first".to_owned())?;
+    Ok((content_id, graph))
+}
+
+fn queue_dialogue_graph_edit(
+    world: &mut World,
+    content_id: String,
+    before: dialogue_records::DialogueGraph,
+    after: dialogue_records::DialogueGraph,
+    description: impl Into<String>,
+) {
+    world
+        .resource_mut::<EditorPendingTransactions>()
+        .0
+        .push(EditorTransaction {
+            description: description.into(),
+            commands: vec![EditorCommand::SetDialogueGraph {
+                content_id,
+                before: Box::new(before),
+                after: Box::new(after),
+            }],
+        });
+}
+
+fn toggle_dialogue_voice_recording(world: &mut World) {
+    let active = world
+        .get_non_send::<DialogueVoiceCapture>()
+        .is_some_and(|capture| capture.recorder.is_some());
+    if active {
+        let (recorder, content_id, node_id, take) = {
+            let mut capture = world.non_send_mut::<DialogueVoiceCapture>();
+            (
+                capture
+                    .recorder
+                    .take()
+                    .expect("active capture has a recorder"),
+                std::mem::take(&mut capture.content_id),
+                std::mem::take(&mut capture.node_id),
+                capture.take,
+            )
+        };
+        let project_root = world
+            .resource::<EditorProjectSession>()
+            .store
+            .path()
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf();
+        let safe_graph = content_id.replace(['.', '/'], "_");
+        let safe_node = node_id.replace(['.', '/'], "_");
+        let asset_path = format!("voice/dialogue/{safe_graph}/{safe_node}_take_{take}.wav");
+        match recorder.finish(&project_root, &asset_path, take) {
+            Ok(clip) => {
+                let Ok((selected_id, before)) = selected_dialogue_graph(world) else {
+                    set_editor_status(world, "Recording saved, but its dialogue selection changed");
+                    return;
+                };
+                if selected_id != content_id {
+                    set_editor_status(world, "Recording saved, but its dialogue selection changed");
+                    return;
+                }
+                let mut after = before.clone();
+                let Some(node) = after.nodes.iter_mut().find(|node| node.node_id == node_id) else {
+                    set_editor_status(world, "Recording saved, but its dialogue node is missing");
+                    return;
+                };
+                let duration = clip.duration_seconds;
+                node.voice = Some(clip);
+                queue_dialogue_graph_edit(world, content_id, before, after, "Attach voice take");
+                set_editor_status(
+                    world,
+                    format!("Voice take {take} captured ({duration:.1}s) • Enter Undo to detach"),
+                );
+            }
+            Err(error) => set_editor_status(world, format!("Voice take rejected: {error}")),
+        }
+        return;
+    }
+
+    let Ok((content_id, graph)) = selected_dialogue_graph(world) else {
+        set_editor_status(world, "Select a Dialogue Forge record before recording");
+        return;
+    };
+    let Some(node) = graph.nodes.last() else {
+        set_editor_status(world, "Add a dialogue node before recording");
+        return;
+    };
+    let take = node
+        .voice
+        .as_ref()
+        .map_or(1, |voice| voice.take.saturating_add(1));
+    match dialogue_records::VoiceRecorder::start() {
+        Ok(recorder) => {
+            let channels = recorder.input_channels();
+            let node_id = node.node_id.clone();
+            let mut capture = world.non_send_mut::<DialogueVoiceCapture>();
+            capture.recorder = Some(recorder);
+            capture.content_id = content_id;
+            capture.node_id = node_id.clone();
+            capture.take = take;
+            set_editor_status(
+                world,
+                format!(
+                    "RECORDING node {node_id} • take {take} • {channels}-channel input → mono WAV"
+                ),
+            );
+        }
+        Err(error) => set_editor_status(world, format!("Could not start voice recording: {error}")),
+    }
+}
+
 fn apply_editor_action(world: &mut World, action: EditorAction) {
+    if !matches!(
+        action,
+        EditorAction::FocusSearch
+            | EditorAction::RegistryRename
+            | EditorAction::SearchRegistry
+            | EditorAction::EditProjectName
+            | EditorAction::EditLevelName
+    ) {
+        deactivate_forge_text_fields(world);
+    }
     if action != EditorAction::Exit {
         world.resource_mut::<EditorDocumentState>().exit_armed = false;
     }
@@ -6597,33 +7242,14 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             set_editor_status(world, format!("Selected object #{}", ids[index].0));
         }
         EditorAction::FocusSearch => {
-            {
-                let mut registry = world.resource_mut::<EditorRegistryState>();
-                registry.rename_active = false;
-                registry.search_active = false;
-            }
+            deactivate_forge_text_fields(world);
             let active = {
                 let mut filter = world.resource_mut::<EditorOutlinerFilter>();
-                filter.active = !filter.active;
+                filter.active = true;
                 filter.active
             };
-            let native_field = world
-                .query_filtered::<Entity, With<EditorOutlinerFilterInput>>()
-                .iter(world)
-                .next();
-            if let Some(field) = native_field {
-                if active {
-                    let value = world.resource::<EditorOutlinerFilter>().text.clone();
-                    if let Some(mut input) = world.get_mut::<EditableText>(field) {
-                        input.editor_mut().set_text(&value);
-                    }
-                    world
-                        .resource_mut::<InputFocus>()
-                        .set(field, FocusCause::Navigated);
-                } else if world.resource::<InputFocus>().get() == Some(field) {
-                    world.resource_mut::<InputFocus>().clear();
-                }
-            }
+            let value = world.resource::<EditorOutlinerFilter>().text.clone();
+            focus_forge_text_field(world, ForgeTextField::OutlinerFilter, &value);
             let message = if active {
                 "Type an object name; Enter applies, Escape/B clears"
             } else {
@@ -6912,11 +7538,13 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 .get(selected)
                 .map(|record| record.content_id.clone());
             if let Some(content_id) = content_id {
-                world.resource_mut::<EditorOutlinerFilter>().active = false;
-                let mut registry = world.resource_mut::<EditorRegistryState>();
-                registry.search_active = false;
-                registry.rename_buffer = content_id;
-                registry.rename_active = true;
+                deactivate_forge_text_fields(world);
+                {
+                    let mut registry = world.resource_mut::<EditorRegistryState>();
+                    registry.rename_buffer = content_id.clone();
+                    registry.rename_active = true;
+                }
+                focus_forge_text_field(world, ForgeTextField::ContentId, &content_id);
                 set_editor_status(
                     world,
                     "Edit the content ID; Enter/A accepts and Escape/B cancels",
@@ -6925,6 +7553,149 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
                 set_editor_status(world, "No registry record selected");
             }
         }
+        EditorAction::EditProjectName => {
+            let value = world
+                .resource::<EditorProjectSession>()
+                .project
+                .display_name
+                .clone();
+            deactivate_forge_text_fields(world);
+            {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.project_name_buffer = value.clone();
+                registry.project_name_active = true;
+            }
+            focus_forge_text_field(world, ForgeTextField::ProjectName, &value);
+            set_editor_status(
+                world,
+                "Edit project name; Enter/A accepts and Escape/B cancels",
+            );
+        }
+        EditorAction::EditLevelName => {
+            let value = world
+                .resource::<EditorProjectSession>()
+                .project
+                .active_level()
+                .map(|level| level.display_name.clone());
+            let Some(value) = value else {
+                set_editor_status(world, "No active level to rename");
+                return;
+            };
+            deactivate_forge_text_fields(world);
+            {
+                let mut registry = world.resource_mut::<EditorRegistryState>();
+                registry.level_name_buffer = value.clone();
+                registry.level_name_active = true;
+            }
+            focus_forge_text_field(world, ForgeTextField::LevelName, &value);
+            set_editor_status(
+                world,
+                "Edit level name; Enter/A accepts and Escape/B cancels",
+            );
+        }
+        EditorAction::CreateDialogueGraph => {
+            let result = dialogue_records::create_dialogue(
+                &mut world.resource_mut::<EditorProjectSession>().project,
+                "New Dialogue Sequence",
+            );
+            match result {
+                Ok(content_id) => {
+                    let index = world
+                        .resource::<EditorProjectSession>()
+                        .project
+                        .records
+                        .iter()
+                        .position(|record| record.content_id == content_id)
+                        .unwrap_or(0);
+                    world.resource_mut::<EditorRegistryState>().selected = index;
+                    world.resource_mut::<EditorDocumentState>().dirty = true;
+                    set_editor_status(
+                        world,
+                        format!("Created modular dialogue graph {content_id}"),
+                    );
+                }
+                Err(error) => set_editor_status(world, format!("Create rejected: {error:?}")),
+            }
+        }
+        EditorAction::DialogueCycleMode => {
+            let Ok((content_id, before)) = selected_dialogue_graph(world) else {
+                set_editor_status(world, "Select a Dialogue Forge record first");
+                return;
+            };
+            let mut after = before.clone();
+            after.mode = match after.mode {
+                dialogue_records::DialoguePlaybackMode::Gameplay => {
+                    after.pause_gameplay = true;
+                    dialogue_records::DialoguePlaybackMode::Cutscene
+                }
+                dialogue_records::DialoguePlaybackMode::Cutscene => {
+                    after.pause_gameplay = false;
+                    dialogue_records::DialoguePlaybackMode::Gameplay
+                }
+            };
+            let mode = after.mode;
+            queue_dialogue_graph_edit(world, content_id, before, after, "Change dialogue mode");
+            set_editor_status(world, format!("Dialogue playback mode: {mode:?}"));
+        }
+        EditorAction::DialogueAddNode => {
+            let Ok((content_id, before)) = selected_dialogue_graph(world) else {
+                set_editor_status(world, "Select a Dialogue Forge record first");
+                return;
+            };
+            if before.nodes.len() >= dialogue_records::MAX_DIALOGUE_NODES {
+                set_editor_status(world, "Dialogue node limit reached");
+                return;
+            }
+            let mut after = before.clone();
+            let node_id = (after.nodes.len() + 1..)
+                .map(|number| format!("line_{number}"))
+                .find(|candidate| !after.nodes.iter().any(|node| node.node_id == *candidate))
+                .expect("unbounded numbering finds a dialogue node id");
+            if let Some(previous) = after.nodes.last_mut() {
+                if previous.next_node.is_none() && previous.choices.is_empty() {
+                    previous.next_node = Some(node_id.clone());
+                }
+            }
+            after.nodes.push(dialogue_records::DialogueNode::speech(
+                &node_id,
+                "Speaker",
+                "New dialogue line.",
+            ));
+            queue_dialogue_graph_edit(world, content_id, before, after, "Add dialogue node");
+            set_editor_status(world, format!("Added modular dialogue node {node_id}"));
+        }
+        EditorAction::DialogueAddAnimationCue => {
+            let Ok((content_id, before)) = selected_dialogue_graph(world) else {
+                set_editor_status(world, "Select a Dialogue Forge record first");
+                return;
+            };
+            let mut after = before.clone();
+            let Some(node) = after.nodes.last_mut() else {
+                set_editor_status(world, "Add a dialogue node first");
+                return;
+            };
+            if node.timeline.len() >= dialogue_records::MAX_TIMELINE_CUES {
+                set_editor_status(world, "Timeline cue limit reached");
+                return;
+            }
+            node.timeline.push(dialogue_records::TimelineCue {
+                at_seconds: node.minimum_hold_seconds.max(0.0),
+                action: dialogue_records::TimelineAction::PlayAnimation {
+                    actor: node.speaker.clone(),
+                    clip: "talk_gesture".into(),
+                    speed: 1.0,
+                    looping: false,
+                    blend_seconds: 0.15,
+                },
+            });
+            let node_id = node.node_id.clone();
+            queue_dialogue_graph_edit(world, content_id, before, after, "Add animation cue");
+            set_editor_status(
+                world,
+                format!("Added gameplay/cutscene animation cue to {node_id}"),
+            );
+        }
+        EditorAction::DialogueRecordVoice => toggle_dialogue_voice_recording(world),
         EditorAction::ValidateProject => {
             let issues = {
                 let session = world.resource::<EditorProjectSession>();
@@ -7549,20 +8320,16 @@ fn apply_editor_action(world: &mut World, action: EditorAction) {
             );
         }
         EditorAction::SearchRegistry => {
-            world.resource_mut::<EditorOutlinerFilter>().active = false;
-            let active = {
+            let value = world.resource::<EditorRegistryState>().search_text.clone();
+            deactivate_forge_text_fields(world);
+            {
                 let mut registry = world.resource_mut::<EditorRegistryState>();
-                registry.rename_active = false;
-                registry.search_active = !registry.search_active;
-                registry.search_active
-            };
+                registry.search_active = true;
+            }
+            focus_forge_text_field(world, ForgeTextField::RegistrySearch, &value);
             set_editor_status(
                 world,
-                if active {
-                    "Type a record ID, name, or category; Enter/A applies, Escape/B clears"
-                } else {
-                    "Registry search applied"
-                },
+                "Type a record ID, name, or category; Enter/A applies, Escape/B clears",
             );
         }
         EditorAction::MaterialCycleFamily => {
@@ -8904,6 +9671,33 @@ fn set_editor_status(world: &mut World, message: impl Into<String>) {
     world.resource_mut::<EditorRuntimeStatus>().message = message.into();
 }
 
+fn deactivate_forge_text_fields(world: &mut World) {
+    world.resource_mut::<InputFocus>().clear();
+    world.resource_mut::<EditorOutlinerFilter>().active = false;
+    let mut registry = world.resource_mut::<EditorRegistryState>();
+    registry.rename_active = false;
+    registry.search_active = false;
+    registry.project_name_active = false;
+    registry.level_name_active = false;
+}
+
+fn focus_forge_text_field(world: &mut World, kind: ForgeTextField, value: &str) -> bool {
+    let entity = world
+        .query::<(Entity, &ForgeTextFieldMarker)>()
+        .iter(world)
+        .find_map(|(entity, field)| (field.kind == kind).then_some(entity));
+    let Some(entity) = entity else {
+        return false;
+    };
+    if let Some(mut input) = world.get_mut::<EditableText>(entity) {
+        input.editor_mut().set_text(value);
+    }
+    world
+        .resource_mut::<InputFocus>()
+        .set(entity, FocusCause::Navigated);
+    true
+}
+
 fn queue_machine_settings_save(world: &mut World) {
     world
         .commands()
@@ -8922,6 +9716,9 @@ fn collect_project_diagnostics(session: &EditorProjectSession) -> Vec<String> {
     validate_project(&session.project)
         .into_iter()
         .map(|error| format!("{error:?}"))
+        .chain(dialogue_records::validate_dialogue_records(
+            &session.project,
+        ))
         .chain(session.store.source_diagnostics(&session.project))
         .collect()
 }
@@ -9102,6 +9899,36 @@ fn update_editor_workspace_text(
                         parameter.min,
                         parameter.max,
                     )
+                }
+                Some(persistence::ContentPayload::Ui(_)) => {
+                    dialogue_records::load_dialogue(&session.project, &record.content_id)
+                        .map(|graph| {
+                            let cues = graph
+                                .nodes
+                                .iter()
+                                .map(|node| node.timeline.len())
+                                .sum::<usize>();
+                            let voiced = graph
+                                .nodes
+                                .iter()
+                                .filter(|node| node.voice.is_some())
+                                .count();
+                            let selected_node = graph.nodes.last().map_or("—", |node| {
+                                node.node_id.as_str()
+                            });
+                            format!(
+                                "\nDIALOGUE FORGE: {:?} • {}\nNodes: {} • cues: {} • voiced: {}\nActive authoring node: {}\nSkippable: {} • pauses gameplay: {}",
+                                graph.mode,
+                                graph.entry_node,
+                                graph.nodes.len(),
+                                cues,
+                                voiced,
+                                selected_node,
+                                on_off(graph.skippable),
+                                on_off(graph.pause_gameplay),
+                            )
+                        })
+                        .unwrap_or_default()
                 }
                 Some(payload) if payload.procedural_recipe().is_some() => {
                     let recipe = payload.procedural_recipe().unwrap();
@@ -9937,6 +10764,8 @@ mod tests {
         world.init_resource::<EditorDocumentState>();
         world.init_resource::<EditorValidationCache>();
         world.init_resource::<EditorRegistryState>();
+        world.init_resource::<EditorOutlinerFilter>();
+        world.init_resource::<InputFocus>();
         world.init_resource::<EditorGizmoSettings>();
         world.init_resource::<EditorPreferences>();
         world.init_resource::<RenderQualitySettings>();
@@ -12413,9 +13242,184 @@ mod tests {
     #[test]
     fn native_outliner_filter_normalizes_and_bounds_pasted_text() {
         assert_eq!(
-            sanitize_outliner_filter("  Sky.Castle/Δ-ONE_2!  "),
+            sanitize_forge_text(ForgeTextField::OutlinerFilter, "  Sky.Castle/Δ-ONE_2!  "),
             "  skycastleδ-one_2  "
         );
-        assert_eq!(sanitize_outliner_filter(&"A".repeat(80)).len(), 32);
+        assert_eq!(
+            sanitize_forge_text(ForgeTextField::OutlinerFilter, &"A".repeat(80)).len(),
+            32
+        );
+        assert_eq!(
+            sanitize_forge_text(ForgeTextField::ContentId, "Road.New Δ/LOOP"),
+            "road.newloop"
+        );
+        assert_eq!(
+            validated_display_name("  Sky Castle  "),
+            Ok("Sky Castle".into())
+        );
+        assert!(validated_display_name("   ").is_err());
+    }
+
+    #[test]
+    fn metadata_and_content_id_transactions_undo_and_redo_atomically() {
+        let (mut world, root) = persistence_test_world("metadata_undo");
+        let (level_id, old_level_name, old_project_name, old_content_id) = {
+            let project = &world.resource::<EditorProjectSession>().project;
+            let level = project.active_level().expect("normalized active level");
+            (
+                level.level_id.clone(),
+                level.display_name.clone(),
+                project.display_name.clone(),
+                project.records[0].content_id.clone(),
+            )
+        };
+        let new_content_id = "scene.metadata_undo".to_owned();
+        let transaction = EditorTransaction {
+            description: "Edit Forge metadata".into(),
+            commands: vec![
+                EditorCommand::SetProjectDisplayName {
+                    before: old_project_name.clone(),
+                    after: "Technicolor Project".into(),
+                },
+                EditorCommand::SetLevelDisplayName {
+                    level_id: level_id.clone(),
+                    before: old_level_name.clone(),
+                    after: "Prism Harbor".into(),
+                },
+                EditorCommand::RenameContent {
+                    before: old_content_id.clone(),
+                    after: new_content_id.clone(),
+                },
+            ],
+        };
+
+        world
+            .resource_scope(|world, mut stack: Mut<EditorUndoStack>| {
+                stack.execute(world, transaction)
+            })
+            .unwrap();
+        {
+            let project = &world.resource::<EditorProjectSession>().project;
+            assert_eq!(project.display_name, "Technicolor Project");
+            assert_eq!(project.active_level().unwrap().display_name, "Prism Harbor");
+            assert!(project
+                .records
+                .iter()
+                .any(|record| record.content_id == new_content_id));
+        }
+
+        assert!(world
+            .resource_scope(|world, mut stack: Mut<EditorUndoStack>| stack.undo(world))
+            .unwrap());
+        {
+            let project = &world.resource::<EditorProjectSession>().project;
+            assert_eq!(project.display_name, old_project_name);
+            assert_eq!(project.active_level().unwrap().display_name, old_level_name);
+            assert!(project
+                .records
+                .iter()
+                .any(|record| record.content_id == old_content_id));
+        }
+
+        assert!(world
+            .resource_scope(|world, mut stack: Mut<EditorUndoStack>| stack.redo(world))
+            .unwrap());
+        assert_eq!(
+            world
+                .resource::<EditorProjectSession>()
+                .project
+                .active_level()
+                .unwrap()
+                .display_name,
+            "Prism Harbor"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn registry_rename_action_focuses_the_reusable_native_field() {
+        let (mut world, root) = persistence_test_world("native_registry_focus");
+        let field = world
+            .spawn((
+                ForgeTextFieldMarker {
+                    kind: ForgeTextField::ContentId,
+                },
+                EditableText::default(),
+            ))
+            .id();
+        let content_id = world.resource::<EditorProjectSession>().project.records[0]
+            .content_id
+            .clone();
+
+        apply_editor_action(&mut world, EditorAction::RegistryRename);
+
+        assert!(world.resource::<EditorRegistryState>().rename_active);
+        assert_eq!(world.resource::<InputFocus>().get(), Some(field));
+        assert_eq!(
+            world
+                .get::<EditableText>(field)
+                .unwrap()
+                .value()
+                .to_string(),
+            content_id
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dialogue_editor_actions_create_and_undo_modular_nodes() {
+        let (mut world, root) = persistence_test_world("dialogue_actions");
+        world.init_resource::<EditorPendingTransactions>();
+        apply_editor_action(&mut world, EditorAction::CreateDialogueGraph);
+        let selected = world.resource::<EditorRegistryState>().selected;
+        let content_id = world.resource::<EditorProjectSession>().project.records[selected]
+            .content_id
+            .clone();
+        assert_eq!(
+            dialogue_records::load_dialogue(
+                &world.resource::<EditorProjectSession>().project,
+                &content_id,
+            )
+            .unwrap()
+            .nodes
+            .len(),
+            1
+        );
+
+        apply_editor_action(&mut world, EditorAction::DialogueAddNode);
+        let transaction = world
+            .resource_mut::<EditorPendingTransactions>()
+            .0
+            .pop()
+            .expect("add node should queue one transaction");
+        world
+            .resource_scope(|world, mut stack: Mut<EditorUndoStack>| {
+                stack.execute(world, transaction)
+            })
+            .unwrap();
+        assert_eq!(
+            dialogue_records::load_dialogue(
+                &world.resource::<EditorProjectSession>().project,
+                &content_id,
+            )
+            .unwrap()
+            .nodes
+            .len(),
+            2
+        );
+        assert!(world
+            .resource_scope(|world, mut stack: Mut<EditorUndoStack>| stack.undo(world))
+            .unwrap());
+        assert_eq!(
+            dialogue_records::load_dialogue(
+                &world.resource::<EditorProjectSession>().project,
+                &content_id,
+            )
+            .unwrap()
+            .nodes
+            .len(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
