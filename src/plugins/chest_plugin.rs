@@ -5,7 +5,7 @@ use rand::Rng;
 
 use crate::combat::damage::Health;
 use crate::components::inventory::{max_stack_for, Inventory};
-use crate::components::player::{Player, PlayerProgression, PlayerStats};
+use crate::components::player::{Player, PlayerIndex, PlayerProgression, PlayerStats};
 use crate::components::weapon::{WeaponInventory, WeaponType, MAX_WEAPON_RANK};
 use crate::components::world::{Chest, LootType};
 use crate::engine::rendering::PbrBundle;
@@ -124,7 +124,7 @@ fn cleanup_chests_for_menu(mut commands: Commands, chest_q: Query<Entity, With<C
 }
 
 fn chest_proximity_system(
-    player_q: Query<(Entity, &Transform), With<Player>>,
+    player_q: Query<(Entity, &PlayerIndex, &Transform), With<Player>>,
     mut player_loot_q: Query<
         (
             &mut PlayerStats,
@@ -146,23 +146,23 @@ fn chest_proximity_system(
             continue;
         }
 
-        let Some((player_entity, _)) = player_q
+        let Some((player_entity, player_index, _)) = player_q
             .iter()
-            .filter_map(|(player_entity, player_transform)| {
+            .filter_map(|(player_entity, player_index, player_transform)| {
                 let dist = player_transform
                     .translation
                     .distance(chest_transform.translation);
-                (dist <= 2.0).then_some((player_entity, dist))
+                (dist <= 2.0).then_some((player_entity, player_index.0, dist))
             })
-            .min_by(|(_, left_dist), (_, right_dist)| left_dist.total_cmp(right_dist))
+            .min_by(|(_, _, left_dist), (_, _, right_dist)| left_dist.total_cmp(right_dist))
         else {
             continue;
         };
 
         // Open the chest
         chest.is_open = true;
-        score.chests_opened += 1;
-        chest_ev.write(ChestOpenedEvent);
+        score.record_chest(player_index);
+        chest_ev.write(ChestOpenedEvent { player_index });
 
         let amount = chest.loot_amount;
         match chest.loot_type {
@@ -306,5 +306,38 @@ mod tests {
         progression.weapon_ranks.ranks[4] = MAX_WEAPON_RANK;
         assert!(!upgrade_active_weapon(&mut progression, &mut weapons));
         assert_eq!(progression.weapon_ranks.ranks[4], MAX_WEAPON_RANK);
+    }
+
+    #[test]
+    fn nearest_player_owns_chest_score_and_event() {
+        let mut app = App::new();
+        app.init_resource::<PlayerScore>()
+            .add_message::<LootCollectedEvent>()
+            .add_message::<ChestOpenedEvent>()
+            .add_message::<InventoryChangedEvent>()
+            .add_systems(Update, chest_proximity_system);
+        app.world_mut().spawn((
+            Player,
+            PlayerIndex(3),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            PlayerStats::default(),
+            Inventory::default(),
+            WeaponInventory::default(),
+            PlayerProgression::default(),
+            Health::new(100.0),
+        ));
+        app.world_mut().spawn((
+            Transform::from_xyz(0.5, 0.0, 0.0),
+            Chest::new(LootType::Credits, 25),
+        ));
+
+        app.update();
+
+        let score = app.world().resource::<PlayerScore>();
+        assert_eq!(score.player(0).unwrap().chests_opened, 0);
+        assert_eq!(score.player(3).unwrap().chests_opened, 1);
+        let messages = app.world().resource::<Messages<ChestOpenedEvent>>();
+        let mut cursor = messages.get_cursor();
+        assert_eq!(cursor.read(messages).next().unwrap().player_index, 3);
     }
 }

@@ -255,12 +255,84 @@ impl PlayerGuidance {
 }
 
 // ── Player Score ──────────────────────────────────────────────────────────────
-#[derive(Resource, Debug, Default)]
-pub struct PlayerScore {
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PlayerScoreEntry {
     pub kills: u32,
     pub total_damage_dealt: f32,
     pub chests_opened: u32,
     pub waves_survived: u32,
+}
+
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct PlayerScore {
+    players: [PlayerScoreEntry; 4],
+}
+
+impl PlayerScore {
+    pub fn player(&self, player_index: u8) -> Option<&PlayerScoreEntry> {
+        self.players.get(usize::from(player_index))
+    }
+
+    pub fn players(&self) -> &[PlayerScoreEntry; 4] {
+        &self.players
+    }
+
+    pub fn party_total(&self) -> PlayerScoreEntry {
+        self.players
+            .iter()
+            .fold(PlayerScoreEntry::default(), |mut total, player| {
+                total.kills = total.kills.saturating_add(player.kills);
+                total.total_damage_dealt = finite_score(
+                    total.total_damage_dealt + finite_score(player.total_damage_dealt),
+                );
+                total.chests_opened = total.chests_opened.saturating_add(player.chests_opened);
+                total.waves_survived = total.waves_survived.saturating_add(player.waves_survived);
+                total
+            })
+    }
+
+    pub fn record_kill(&mut self, player_index: u8) -> bool {
+        self.mutate(player_index, |score| {
+            score.kills = score.kills.saturating_add(1);
+        })
+    }
+
+    pub fn record_damage(&mut self, player_index: u8, damage: f32) -> bool {
+        if !damage.is_finite() || damage <= 0.0 {
+            return false;
+        }
+        self.mutate(player_index, |score| {
+            score.total_damage_dealt = finite_score(score.total_damage_dealt + damage);
+        })
+    }
+
+    pub fn record_chest(&mut self, player_index: u8) -> bool {
+        self.mutate(player_index, |score| {
+            score.chests_opened = score.chests_opened.saturating_add(1);
+        })
+    }
+
+    pub fn record_wave(&mut self, player_index: u8) -> bool {
+        self.mutate(player_index, |score| {
+            score.waves_survived = score.waves_survived.saturating_add(1);
+        })
+    }
+
+    fn mutate(&mut self, player_index: u8, update: impl FnOnce(&mut PlayerScoreEntry)) -> bool {
+        let Some(score) = self.players.get_mut(usize::from(player_index)) else {
+            return false;
+        };
+        update(score);
+        true
+    }
+}
+
+fn finite_score(value: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        f32::MAX
+    }
 }
 
 // ── Play Session Transitions ─────────────────────────────────────────────────
@@ -2133,6 +2205,36 @@ mod tests {
         let mut config = LocalPlayerConfig::default();
         config.set_active(usize::MAX);
         assert_eq!(config.active, 4);
+    }
+
+    #[test]
+    fn player_score_is_owner_scoped_with_computed_party_totals() {
+        let mut score = PlayerScore::default();
+        assert!(score.record_chest(2));
+        assert!(score.record_kill(2));
+        assert!(score.record_damage(2, 14.5));
+        assert!(score.record_wave(2));
+        assert!(score.record_chest(0));
+
+        assert_eq!(score.player(0).unwrap().chests_opened, 1);
+        assert_eq!(score.player(1), Some(&PlayerScoreEntry::default()));
+        assert_eq!(score.player(2).unwrap().kills, 1);
+        assert_eq!(score.player(2).unwrap().total_damage_dealt, 14.5);
+        let total = score.party_total();
+        assert_eq!(total.kills, 1);
+        assert_eq!(total.chests_opened, 2);
+        assert_eq!(total.waves_survived, 1);
+        assert_eq!(total.total_damage_dealt, 14.5);
+    }
+
+    #[test]
+    fn player_score_rejects_unknown_owners_and_invalid_damage() {
+        let mut score = PlayerScore::default();
+        assert!(!score.record_chest(4));
+        assert!(!score.record_kill(u8::MAX));
+        assert!(!score.record_damage(0, f32::NAN));
+        assert!(!score.record_damage(0, -5.0));
+        assert_eq!(score.party_total(), PlayerScoreEntry::default());
     }
 
     #[test]

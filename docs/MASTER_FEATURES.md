@@ -149,6 +149,8 @@ Included features:
 - per-player input ownership and control capture
 - owner-scoped loadout and inventory interactions
 - party-shared vehicle state with explicit driver/passenger rules
+- per-player score slots with computed party aggregates; chest-open scoring and
+  events preserve the nearest player's stable local index
 
 Current strength:
 - ownership boundaries are already much clearer than a typical prototype

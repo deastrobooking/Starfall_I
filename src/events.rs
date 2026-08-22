@@ -102,8 +102,10 @@ pub struct LootCollectedEvent {
     pub amount: u32,
 }
 
-#[derive(Message, Debug)]
-pub struct ChestOpenedEvent;
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChestOpenedEvent {
+    pub player_index: u8,
+}
 
 // ── Waves ─────────────────────────────────────────────────────────────────────
 #[derive(Message, Debug)]

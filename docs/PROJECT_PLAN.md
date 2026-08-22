@@ -36,6 +36,12 @@ Work:
   unknown, or duplicate world save records individually with diagnostics;
   fast-travel requests now own their anchor/label strings so published Forge
   content is not restricted to compile-time string literals
+- `PlayerScore` is now four explicit owner slots with bounded APIs and computed
+  party totals; chest proximity resolves the actual nearest `PlayerIndex`,
+  updates only that player's score, and emits owner-bearing chest events. Kill
+  and damage scoring remain disabled until enemy damage/lifecycle events carry
+  an authoritative player source; adding that attribution is the next score
+  ownership step
 - reduce plugin-level overloading in the largest gameplay systems
 - improve domain boundaries between world logic, UI logic, and player simulation
 - continue the editor/game separation work started in [editor_roadmap.md](editor_roadmap.md)
