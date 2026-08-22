@@ -210,7 +210,7 @@ controller ownership across transitions.
   and gameplay-signal cues.
 - Registry controls can create a sequence, switch its playback policy, append a
   linked node, add an animation cue, and start/stop a native microphone take.
-  Capture is opt-in, capped, mixed to mono, atomically written beneath the
+  Capture is opt-in, capped, mixed to 96-kbps mono MP3, atomically written beneath the
   active project's assets directory, and attached through undoable graph data.
 - Next build Feathers node/choice property rows, a zoomable controller-friendly
   timeline and waveform/take strip, then publish graphs into a runtime director

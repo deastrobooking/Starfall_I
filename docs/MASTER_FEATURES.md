@@ -124,7 +124,7 @@ Key features:
 - Dialogue Forge records with stable graph nodes, branching choices, voice-clip
   metadata, and one ordered cue timeline shared by ordinary gameplay dialogue
   and skippable/pausing cutscenes
-- opt-in project-local microphone recording to bounded mono PCM WAV takes;
+- opt-in project-local microphone recording to bounded 96-kbps mono MP3 takes;
   animation, camera, audio, visibility, and gameplay-signal cues can be authored
   against stable actor/content IDs without serializing runtime ECS entities
 - gameplay-driven sound mapping

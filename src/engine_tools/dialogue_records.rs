@@ -6,7 +6,9 @@
 
 use std::{
     fs,
+    io::Write,
     path::Path,
+    process::{Command, Stdio},
     sync::{Arc, Mutex},
 };
 
@@ -167,7 +169,7 @@ impl DialogueCursor {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VoiceClip {
-    /// Asset-relative path, normally `voice/dialogue/<graph>/<take>.wav`.
+    /// Asset-relative path, normally `voice/dialogue/<graph>/<take>.mp3`.
     pub asset_path: String,
     pub duration_seconds: f32,
     pub sample_rate: u32,
@@ -490,8 +492,13 @@ impl VoiceRecorder {
         asset_path: &str,
         take: u16,
     ) -> Result<VoiceClip, String> {
-        if !safe_asset_path(asset_path) {
-            return Err("Voice output must be a safe WAV asset path".into());
+        if !safe_asset_path(asset_path)
+            || Path::new(asset_path)
+                .extension()
+                .and_then(|value| value.to_str())
+                != Some("mp3")
+        {
+            return Err("Recorded voice output must be a safe MP3 asset path".into());
         }
         drop(self.stream);
         let samples = Arc::try_unwrap(self.samples)
@@ -506,7 +513,7 @@ impl VoiceRecorder {
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        write_pcm16_wav(&output, self.sample_rate, &samples)?;
+        encode_pcm16_mp3(&output, self.sample_rate, &samples)?;
         Ok(VoiceClip {
             asset_path: asset_path.into(),
             duration_seconds,
@@ -534,25 +541,119 @@ fn push_mono(samples: impl Iterator<Item = f32>, channels: u16, sink: &Arc<Mutex
     }
 }
 
-fn write_pcm16_wav(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<(), String> {
-    let data_len =
-        u32::try_from(samples.len().saturating_mul(2)).map_err(|_| "Recording is too large")?;
-    let mut bytes = Vec::with_capacity(44 + data_len as usize);
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16_u32.to_le_bytes());
-    bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&1_u16.to_le_bytes());
-    bytes.extend_from_slice(&sample_rate.to_le_bytes());
-    bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes());
-    bytes.extend_from_slice(&2_u16.to_le_bytes());
-    bytes.extend_from_slice(&16_u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&data_len.to_le_bytes());
+fn pcm16_bytes(samples: &[f32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(samples.len().saturating_mul(2));
     for sample in samples {
         let pcm = ((*sample).clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
         bytes.extend_from_slice(&pcm.to_le_bytes());
+    }
+    bytes
+}
+
+/// Encode a compact 96-kbps mono MP3 without retaining an intermediate WAV.
+/// Forge accepts a bundled/system LAME or FFmpeg executable and reports a
+/// clear error if neither production encoder is installed.
+fn encode_pcm16_mp3(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<(), String> {
+    let parent = path.parent().ok_or("MP3 output has no parent directory")?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("MP3 output file name is invalid")?;
+    let temporary = parent.join(format!(".{file_name}.recording.tmp.mp3"));
+    let pcm = pcm16_bytes(samples);
+    let rate = sample_rate.to_string();
+    let rate_khz = format!("{:.3}", sample_rate as f32 / 1000.0);
+    let mut attempts = 0;
+
+    for executable in ["/opt/homebrew/bin/lame", "/usr/local/bin/lame", "lame"] {
+        attempts += 1;
+        let args = [
+            "--silent",
+            "-r",
+            "-s",
+            rate_khz.as_str(),
+            "--bitwidth",
+            "16",
+            "--signed",
+            "--little-endian",
+            "-m",
+            "m",
+            "-b",
+            "96",
+            "-",
+        ];
+        if run_encoder(executable, &args, &temporary, &pcm).is_ok() {
+            return promote_encoded_mp3(&temporary, path);
+        }
+    }
+
+    for executable in [
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "ffmpeg",
+    ] {
+        attempts += 1;
+        let args = [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "s16le",
+            "-ar",
+            rate.as_str(),
+            "-ac",
+            "1",
+            "-i",
+            "pipe:0",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "96k",
+        ];
+        if run_encoder(executable, &args, &temporary, &pcm).is_ok() {
+            return promote_encoded_mp3(&temporary, path);
+        }
+    }
+    let _ = fs::remove_file(&temporary);
+    Err(format!(
+        "MP3 encoding requires LAME or FFmpeg ({attempts} encoder attempts failed)"
+    ))
+}
+
+fn run_encoder(executable: &str, args: &[&str], output: &Path, pcm: &[u8]) -> Result<(), String> {
+    let _ = fs::remove_file(output);
+    let mut child = Command::new(executable)
+        .args(args)
+        .arg(output)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{executable}: {error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| format!("{executable}: encoder stdin unavailable"))?
+        .write_all(pcm)
+        .map_err(|error| format!("{executable}: {error}"))?;
+    let output_status = child
+        .wait_with_output()
+        .map_err(|error| format!("{executable}: {error}"))?;
+    if output_status.status.success() && output.exists() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{executable}: {}",
+            String::from_utf8_lossy(&output_status.stderr).trim()
+        ))
+    }
+}
+
+fn promote_encoded_mp3(temporary: &Path, path: &Path) -> Result<(), String> {
+    let bytes = fs::read(temporary).map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(temporary);
+    if bytes.len() < 4 {
+        return Err("MP3 encoder produced an empty take".into());
     }
     super::persistence::atomic_write(path, &bytes).map_err(|error| format!("{error:?}"))
 }
@@ -611,17 +712,18 @@ mod tests {
     }
 
     #[test]
-    fn wav_encoder_writes_a_valid_mono_pcm_header() {
-        let path = std::env::temp_dir().join(format!("starfall_voice_{}.wav", std::process::id()));
-        write_pcm16_wav(&path, 48_000, &[0.0, 0.5, -0.5]).unwrap();
+    fn mp3_encoder_writes_a_compact_playable_take() {
+        let path = std::env::temp_dir().join(format!("starfall_voice_{}.mp3", std::process::id()));
+        let samples = (0..48_000)
+            .map(|index| ((index as f32 / 48_000.0) * std::f32::consts::TAU * 220.0).sin() * 0.2)
+            .collect::<Vec<_>>();
+        encode_pcm16_mp3(&path, 48_000, &samples).unwrap();
         let bytes = fs::read(&path).unwrap();
-        assert_eq!(&bytes[0..4], b"RIFF");
-        assert_eq!(&bytes[8..12], b"WAVE");
-        assert_eq!(
-            u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
-            48_000
+        assert!(bytes.starts_with(b"ID3") || bytes.windows(2).any(|frame| frame == [0xff, 0xfb]));
+        assert!(
+            bytes.len() < 20_000,
+            "one second voice take should remain compact"
         );
-        assert_eq!(bytes.len(), 50);
         let _ = fs::remove_file(path);
     }
 

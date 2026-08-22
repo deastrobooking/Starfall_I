@@ -123,7 +123,9 @@ Work:
   cursors, gameplay versus cutscene policy, and ordered animation/camera/audio/
   visibility/gameplay-signal cues share one format; the Registry can create a
   graph, append nodes and animation cues, switch modes, and record/attach a
-  bounded project-local mono WAV voice take with undo-safe metadata; next add
+  bounded project-local 96-kbps mono MP3 voice take with undo-safe metadata;
+  Forge uses LAME or FFmpeg for production encoding and retains no PCM/WAV take;
+  next add
   node/choice property rows, a visual timeline, waveform trim/take selection,
   and a runtime director that adapts published graphs into the existing
   discussion, radio, camera, and animation systems

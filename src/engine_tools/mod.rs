@@ -7111,7 +7111,7 @@ fn toggle_dialogue_voice_recording(world: &mut World) {
             .to_path_buf();
         let safe_graph = content_id.replace(['.', '/'], "_");
         let safe_node = node_id.replace(['.', '/'], "_");
-        let asset_path = format!("voice/dialogue/{safe_graph}/{safe_node}_take_{take}.wav");
+        let asset_path = format!("voice/dialogue/{safe_graph}/{safe_node}_take_{take}.mp3");
         match recorder.finish(&project_root, &asset_path, take) {
             Ok(clip) => {
                 let Ok((selected_id, before)) = selected_dialogue_graph(world) else {
@@ -7164,7 +7164,7 @@ fn toggle_dialogue_voice_recording(world: &mut World) {
             set_editor_status(
                 world,
                 format!(
-                    "RECORDING node {node_id} • take {take} • {channels}-channel input → mono WAV"
+                    "RECORDING node {node_id} • take {take} • {channels}-channel input → 96-kbps mono MP3"
                 ),
             );
         }
