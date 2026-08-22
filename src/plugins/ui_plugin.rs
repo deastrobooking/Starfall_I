@@ -5714,7 +5714,7 @@ fn player_select_update(
             }
             PlayerSelectAction::Begin => {
                 if select.all_ready() {
-                    config.active = select.active_count().max(1);
+                    config.set_active(usize::from(select.active_count()));
                     next_state.set(if *experience == PlayExperience::SharedPlatformer {
                         AppState::Playing
                     } else {

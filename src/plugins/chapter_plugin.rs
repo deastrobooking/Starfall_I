@@ -31,7 +31,7 @@ use crate::resources::{
 use crate::world::co_op_platformer::{
     PLATFORMER_STAGE_ID, PLATFORMER_STAGE_LABEL, PLATFORMER_STAGE_ORIGIN,
 };
-use crate::world::missions::dungeon_destination;
+use crate::world::missions::{dungeon_destination, mission_for_travel_anchor};
 
 pub struct ChapterPlugin;
 
@@ -41,8 +41,8 @@ struct AirshipLevelPiece;
 #[derive(Resource, Default)]
 struct PendingChapterTravel {
     chapter: Option<ChapterId>,
-    world_anchor: Option<&'static str>,
-    world_label: Option<&'static str>,
+    world_anchor: Option<String>,
+    world_label: Option<String>,
     enter_dungeon: bool,
 }
 
@@ -133,7 +133,7 @@ fn start_chapter(
     *wave = WaveInfo::new();
     wave.wave_number = current.id.0 as u32;
     dungeon.clear();
-    if let (Some(anchor), Some(label)) = (fast_travel.anchor_id, fast_travel.label) {
+    if let (Some(anchor), Some(label)) = (fast_travel.anchor_id.take(), fast_travel.label.take()) {
         pending_travel.chapter = None;
         pending_travel.world_anchor = Some(anchor);
         pending_travel.world_label = Some(label);
@@ -157,7 +157,7 @@ fn apply_pending_chapter_travel(
     anchor_q: Query<(&WorldAnchor, &Transform), Without<Player>>,
     mut dungeon: ResMut<DungeonCrawlState>,
 ) {
-    if let Some(anchor_id) = pending_travel.world_anchor {
+    if let Some(anchor_id) = pending_travel.world_anchor.as_deref() {
         let Some(anchor) = resolve_anchor_position(&anchor_q, anchor_id) else {
             return;
         };
@@ -165,16 +165,24 @@ fn apply_pending_chapter_travel(
             let Some((chapter, default_label)) = dungeon_destination(anchor_id) else {
                 return;
             };
-            Some((chapter, default_label))
+            let Some(canonical_anchor) =
+                mission_for_travel_anchor(anchor_id).and_then(|mission| mission.travel_anchor)
+            else {
+                return;
+            };
+            Some((canonical_anchor, chapter, default_label))
         } else {
             None
         };
         move_players_to_world_anchor(&mut commands, &mut player_q, anchor);
-        if let Some((chapter, default_label)) = dungeon_target {
+        if let Some((canonical_anchor, chapter, default_label)) = dungeon_target {
             dungeon.activate(
-                anchor_id,
+                canonical_anchor,
                 chapter,
-                pending_travel.world_label.unwrap_or(default_label),
+                pending_travel
+                    .world_label
+                    .as_deref()
+                    .unwrap_or(default_label),
                 anchor,
                 anchor,
                 64.0,
@@ -677,7 +685,7 @@ fn chapter_director_system(
 
 fn resolve_anchor_position<AnchorFilter: bevy::ecs::query::QueryFilter>(
     anchor_q: &Query<(&WorldAnchor, &Transform), AnchorFilter>,
-    anchor_id: &'static str,
+    anchor_id: &str,
 ) -> Option<Vec3> {
     anchor_q
         .iter()

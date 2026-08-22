@@ -159,22 +159,24 @@ impl Default for BodyRecipe {
 
 impl BodyRecipe {
     pub fn validate(&mut self) {
-        self.height = self.height.clamp(0.78, 1.28);
-        self.shoulder_width = self.shoulder_width.clamp(0.72, 1.34);
-        self.chest_size = self.chest_size.clamp(0.74, 1.30);
-        self.arm_length = self.arm_length.clamp(0.72, 1.30);
-        self.leg_length = self.leg_length.clamp(0.74, 1.45);
-        self.hand_size = self.hand_size.clamp(0.70, 1.32);
-        self.foot_size = self.foot_size.clamp(0.72, 1.36);
-        self.head_size = self.head_size.clamp(0.76, 1.24);
-        self.neck_length = self.neck_length.clamp(0.70, 1.25);
-        self.torso_curve = self.torso_curve.clamp(-0.35, 0.35);
-        self.hip_width = self.hip_width.clamp(0.74, 1.28);
-        self.spine_posture = self.spine_posture.clamp(-0.35, 0.35);
-        self.mass = self.mass.clamp(0.70, 1.45);
-        self.muscle = self.muscle.clamp(0.70, 1.40);
-        self.body_fat = self.body_fat.clamp(0.70, 1.40);
-        self.asymmetry = self.asymmetry.clamp(0.0, 0.35);
+        let defaults = Self::default();
+        self.height = finite_clamp(self.height, 0.78, 1.28, defaults.height);
+        self.shoulder_width =
+            finite_clamp(self.shoulder_width, 0.72, 1.34, defaults.shoulder_width);
+        self.chest_size = finite_clamp(self.chest_size, 0.74, 1.30, defaults.chest_size);
+        self.arm_length = finite_clamp(self.arm_length, 0.72, 1.30, defaults.arm_length);
+        self.leg_length = finite_clamp(self.leg_length, 0.74, 1.45, defaults.leg_length);
+        self.hand_size = finite_clamp(self.hand_size, 0.70, 1.32, defaults.hand_size);
+        self.foot_size = finite_clamp(self.foot_size, 0.72, 1.36, defaults.foot_size);
+        self.head_size = finite_clamp(self.head_size, 0.76, 1.24, defaults.head_size);
+        self.neck_length = finite_clamp(self.neck_length, 0.70, 1.25, defaults.neck_length);
+        self.torso_curve = finite_clamp(self.torso_curve, -0.35, 0.35, defaults.torso_curve);
+        self.hip_width = finite_clamp(self.hip_width, 0.74, 1.28, defaults.hip_width);
+        self.spine_posture = finite_clamp(self.spine_posture, -0.35, 0.35, defaults.spine_posture);
+        self.mass = finite_clamp(self.mass, 0.70, 1.45, defaults.mass);
+        self.muscle = finite_clamp(self.muscle, 0.70, 1.40, defaults.muscle);
+        self.body_fat = finite_clamp(self.body_fat, 0.70, 1.40, defaults.body_fat);
+        self.asymmetry = finite_clamp(self.asymmetry, 0.0, 0.35, defaults.asymmetry);
     }
 
     pub fn validated(mut self) -> Self {
@@ -204,6 +206,14 @@ impl BodyRecipe {
 
     pub fn knockback_resistance_multiplier(&self) -> f32 {
         (self.mass * 0.65 + self.muscle * 0.25 + self.foot_size * 0.10).clamp(0.75, 1.55)
+    }
+}
+
+fn finite_clamp(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(min, max)
+    } else {
+        fallback
     }
 }
 

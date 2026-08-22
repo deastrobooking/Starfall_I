@@ -10,7 +10,7 @@ consult them for history, not current priorities.
 ## Project North Star
 
 Starfall I is a family-friendly cartoon action platformer RPG built in Rust with
-Bevy `0.19.0` and Avian `0.7`. The fantasy is 1-4 local players controlling a
+Bevy `0.19.1` and Avian `0.7`. The fantasy is 1-4 local players controlling a
 family of star-powered heroes through open 3D
 chapters, secret caves, dragon domains, airship rematches, RPG loot, crafting,
 companions, vehicles, and expressive star-beam combat.
@@ -22,7 +22,7 @@ together.
 
 ## Current Baseline
 
-- Current local engine baseline: Bevy `0.19.0`, Avian `0.7`, Rust 2021.
+- Current local engine baseline: Bevy `0.19.1`, Avian `0.7`, Rust 2021.
 - Starfall Forge ET1–ET5d first-slice work lives in `src/engine_tools/mod.rs` and
   `src/engine_tools/persistence.rs`: independent safe
   tool mode, stable IDs, selection, transactional undo/redo, controller UI,

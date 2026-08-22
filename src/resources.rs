@@ -1,4 +1,6 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
+use std::collections::BTreeSet;
+
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +10,7 @@ use crate::character::hero_roster::HERO_NAMES;
 use crate::character::parts::{
     ArmPreset, BodyPreset, CharacterLoadout, HeadPreset, LegPreset, ShoulderPreset,
 };
+use crate::character::presets::normalize_color_preset_index;
 use crate::character_studio::spec::CharacterSpec;
 use crate::components::player::PlayerProgression;
 use crate::robots::designer::RobotStyle;
@@ -106,7 +109,7 @@ impl ControllerGlyphStyle {
     }
 }
 
-#[derive(Resource, Debug, Serialize, Deserialize)]
+#[derive(Resource, Debug, Clone, Serialize, Deserialize)]
 pub struct GameSettings {
     pub mouse_sensitivity: f32,
     pub master_volume: f32,
@@ -182,6 +185,38 @@ impl Default for GameSettings {
     }
 }
 
+impl GameSettings {
+    /// Repair settings loaded from hand-edited, legacy, or malformed JSON.
+    /// Non-finite values use shipped defaults; finite values are clamped to
+    /// the same ranges exposed by the settings UI.
+    pub fn sanitize(&mut self) {
+        let defaults = Self::default();
+        self.mouse_sensitivity =
+            finite_or(self.mouse_sensitivity, defaults.mouse_sensitivity).clamp(0.0001, 0.01);
+        self.master_volume = finite_or(self.master_volume, defaults.master_volume).clamp(0.0, 1.0);
+        self.difficulty_scale =
+            finite_or(self.difficulty_scale, defaults.difficulty_scale).clamp(0.5, 2.0);
+        self.music_volume = finite_or(self.music_volume, defaults.music_volume).clamp(0.0, 1.0);
+        self.sfx_volume = finite_or(self.sfx_volume, defaults.sfx_volume).clamp(0.0, 1.0);
+        self.ui_scale = finite_or(self.ui_scale, defaults.ui_scale).clamp(0.8, 1.4);
+        self.safe_area_fraction =
+            finite_or(self.safe_area_fraction, defaults.safe_area_fraction).clamp(0.0, 0.08);
+    }
+
+    pub fn validated(mut self) -> Self {
+        self.sanitize();
+        self
+    }
+}
+
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        fallback
+    }
+}
+
 // ── UI Message Queue ──────────────────────────────────────────────────────────
 #[derive(Resource, Debug, Default)]
 pub struct UiMessage {
@@ -252,21 +287,21 @@ pub enum PlayExperience {
 /// consumes this once world anchors exist, then clears it.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct FastTravelDestination {
-    pub anchor_id: Option<&'static str>,
-    pub label: Option<&'static str>,
+    pub anchor_id: Option<String>,
+    pub label: Option<String>,
     pub enter_dungeon: bool,
 }
 
 impl FastTravelDestination {
-    pub fn cave(&mut self, anchor_id: &'static str, label: &'static str) {
-        self.anchor_id = Some(anchor_id);
-        self.label = Some(label);
+    pub fn cave(&mut self, anchor_id: impl Into<String>, label: impl Into<String>) {
+        self.anchor_id = Some(anchor_id.into());
+        self.label = Some(label.into());
         self.enter_dungeon = true;
     }
 
-    pub fn world_anchor(&mut self, anchor_id: &'static str, label: &'static str) {
-        self.anchor_id = Some(anchor_id);
-        self.label = Some(label);
+    pub fn world_anchor(&mut self, anchor_id: impl Into<String>, label: impl Into<String>) {
+        self.anchor_id = Some(anchor_id.into());
+        self.label = Some(label.into());
         self.enter_dungeon = false;
     }
 
@@ -288,6 +323,27 @@ pub struct LocalPlayerConfig {
 impl Default for LocalPlayerConfig {
     fn default() -> Self {
         Self { active: 1 }
+    }
+}
+
+impl LocalPlayerConfig {
+    pub const MIN_PLAYERS: u8 = 1;
+    pub const MAX_PLAYERS: u8 = 4;
+
+    pub fn new(active: u8) -> Self {
+        Self {
+            active: active.clamp(Self::MIN_PLAYERS, Self::MAX_PLAYERS),
+        }
+    }
+
+    pub fn set_active(&mut self, active: usize) {
+        self.active = u8::try_from(active)
+            .unwrap_or(Self::MAX_PLAYERS)
+            .clamp(Self::MIN_PLAYERS, Self::MAX_PLAYERS);
+    }
+
+    pub fn active_count(&self) -> usize {
+        usize::from(self.active.clamp(Self::MIN_PLAYERS, Self::MAX_PLAYERS))
     }
 }
 
@@ -1348,29 +1404,47 @@ impl CharacterDesignSnapshot {
     }
 
     pub fn apply_to_design_data(&self, data: &mut CharacterDesignData) {
-        data.player_index = self.player_index;
-        if self.schema_version >= CHARACTER_DESIGN_SNAPSHOT_VERSION {
-            data.face = self.face.sanitized();
+        let snapshot = self.clone().validated();
+        data.player_index = snapshot.player_index;
+        if snapshot.schema_version >= CHARACTER_DESIGN_SNAPSHOT_VERSION {
+            data.face = snapshot.face;
         }
-        data.base_model = self.base_model;
-        data.skin_idx = self.skin_idx;
-        data.outfit_idx = self.outfit_idx;
-        data.accent_idx = self.accent_idx;
-        data.hair_idx = self.hair_idx;
-        data.eye_idx = self.eye_idx;
-        data.body_preset = self.part_loadout.body;
-        data.arm_preset = self.part_loadout.arms;
-        data.leg_preset = self.part_loadout.legs;
-        data.shoulder_preset = self.part_loadout.shoulders;
-        data.head_preset = self.part_loadout.head;
-        data.body = self.body.validated();
-        data.has_hood = self.appearance.has_hood;
-        data.has_cape = self.appearance.has_cape;
-        data.has_gloves = self.appearance.has_gloves;
-        data.has_boots = self.appearance.has_boots;
-        data.has_shoulder_pads = self.appearance.has_shoulder_pads;
-        data.has_visor = self.appearance.has_visor;
+        data.base_model = snapshot.base_model;
+        data.skin_idx = snapshot.skin_idx;
+        data.outfit_idx = snapshot.outfit_idx;
+        data.accent_idx = snapshot.accent_idx;
+        data.hair_idx = snapshot.hair_idx;
+        data.eye_idx = snapshot.eye_idx;
+        data.body_preset = snapshot.part_loadout.body;
+        data.arm_preset = snapshot.part_loadout.arms;
+        data.leg_preset = snapshot.part_loadout.legs;
+        data.shoulder_preset = snapshot.part_loadout.shoulders;
+        data.head_preset = snapshot.part_loadout.head;
+        data.body = snapshot.body;
+        data.has_hood = snapshot.appearance.has_hood;
+        data.has_cape = snapshot.appearance.has_cape;
+        data.has_gloves = snapshot.appearance.has_gloves;
+        data.has_boots = snapshot.appearance.has_boots;
+        data.has_shoulder_pads = snapshot.appearance.has_shoulder_pads;
+        data.has_visor = snapshot.appearance.has_visor;
         data.dirty = true;
+    }
+
+    /// Normalize imported/editor snapshots before they reach palette lookup or
+    /// local-player selection. Unknown future schemas retain their durable
+    /// fields but cannot create out-of-bounds runtime indices.
+    pub fn validated(mut self) -> Self {
+        self.player_index = self
+            .player_index
+            .min(LocalPlayerConfig::MAX_PLAYERS as usize - 1);
+        self.face = self.face.sanitized();
+        self.skin_idx = normalize_color_preset_index(self.skin_idx);
+        self.outfit_idx = normalize_color_preset_index(self.outfit_idx);
+        self.accent_idx = normalize_color_preset_index(self.accent_idx);
+        self.hair_idx = normalize_color_preset_index(self.hair_idx);
+        self.eye_idx = normalize_color_preset_index(self.eye_idx);
+        self.body = self.body.validated();
+        self
     }
 }
 
@@ -1570,6 +1644,22 @@ pub struct WorldSiteSaveRecord {
     pub enemies_defeated: u8,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SaveRecordApplyReport {
+    pub applied: usize,
+    pub unknown_ids: Vec<u16>,
+    pub duplicate_ids: Vec<u16>,
+    pub invalid_records: Vec<String>,
+}
+
+impl SaveRecordApplyReport {
+    pub fn is_clean(&self) -> bool {
+        self.unknown_ids.is_empty()
+            && self.duplicate_ids.is_empty()
+            && self.invalid_records.is_empty()
+    }
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct WorldSiteRegistry {
     pub sites: Vec<WorldSite>,
@@ -1604,14 +1694,69 @@ impl WorldSiteRegistry {
             .collect()
     }
 
-    pub fn apply_save_records(&mut self, records: &[WorldSiteSaveRecord]) {
+    pub fn apply_save_records_checked(
+        &mut self,
+        records: &[WorldSiteSaveRecord],
+    ) -> SaveRecordApplyReport {
+        let mut report = SaveRecordApplyReport::default();
+        let mut seen = BTreeSet::new();
         for record in records {
-            if let Some(site) = self.get_mut(WorldSiteId(record.id)) {
-                site.state = record.state;
-                site.owner = record.owner;
-                site.enemies_defeated = record.enemies_defeated;
+            if !seen.insert(record.id) {
+                report.duplicate_ids.push(record.id);
+                continue;
+            }
+            let Some(site) = self.get_mut(WorldSiteId(record.id)) else {
+                report.unknown_ids.push(record.id);
+                continue;
+            };
+            let completed_state = matches!(
+                record.state,
+                WorldSiteState::Liberated | WorldSiteState::Building | WorldSiteState::Shielded
+            );
+            let held_state = matches!(
+                record.state,
+                WorldSiteState::EnemyHeld | WorldSiteState::OccupiedAgain
+            );
+            let count_invalid = record.enemies_defeated > site.enemy_count_to_liberate
+                || (site.enemy_count_to_liberate > 0
+                    && ((completed_state
+                        && record.enemies_defeated < site.enemy_count_to_liberate)
+                        || (held_state
+                            && record.enemies_defeated >= site.enemy_count_to_liberate)));
+            if count_invalid {
+                report.invalid_records.push(format!(
+                    "site {} state {:?} has {}/{} defeated",
+                    record.id, record.state, record.enemies_defeated, site.enemy_count_to_liberate
+                ));
+                continue;
+            }
+            site.state = record.state;
+            site.owner = record.owner;
+            site.enemies_defeated = record.enemies_defeated;
+            report.applied += 1;
+        }
+        report
+    }
+
+    pub fn apply_save_records(&mut self, records: &[WorldSiteSaveRecord]) {
+        let _ = self.apply_save_records_checked(records);
+    }
+
+    pub fn validate_catalog(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        let mut ids = BTreeSet::new();
+        for site in &self.sites {
+            if !ids.insert(site.id.0) {
+                errors.push(format!("duplicate world site id {}", site.id.0));
+            }
+            if site.state == WorldSiteState::EnemyHeld && site.enemy_count_to_liberate == 0 {
+                errors.push(format!("enemy-held site {} has no defenders", site.id.0));
+            }
+            if site.enemies_defeated > site.enemy_count_to_liberate {
+                errors.push(format!("site {} exceeds its defender count", site.id.0));
             }
         }
+        errors
     }
 }
 
@@ -1805,12 +1950,68 @@ impl WorldRouteRegistry {
             })
             .collect()
     }
-    pub fn apply_save_records(&mut self, records: &[WorldRouteSaveRecord]) {
+    pub fn apply_save_records_checked(
+        &mut self,
+        records: &[WorldRouteSaveRecord],
+    ) -> SaveRecordApplyReport {
+        let mut report = SaveRecordApplyReport::default();
+        let mut seen = BTreeSet::new();
         for record in records {
-            if let Some(route) = self.routes.iter_mut().find(|r| r.id.0 == record.id) {
-                route.state = record.state;
+            if !seen.insert(record.id) {
+                report.duplicate_ids.push(record.id);
+                continue;
+            }
+            let Some(route) = self.routes.iter_mut().find(|route| route.id.0 == record.id) else {
+                report.unknown_ids.push(record.id);
+                continue;
+            };
+            route.state = record.state;
+            report.applied += 1;
+        }
+        report
+    }
+
+    pub fn apply_save_records(&mut self, records: &[WorldRouteSaveRecord]) {
+        let _ = self.apply_save_records_checked(records);
+    }
+
+    pub fn validate_catalog(&self, sites: &WorldSiteRegistry) -> Vec<String> {
+        let mut errors = Vec::new();
+        let mut ids = BTreeSet::new();
+        for route in &self.routes {
+            if !ids.insert(route.id.0) {
+                errors.push(format!("duplicate world route id {}", route.id.0));
+            }
+            if route.from_site == route.to_site {
+                errors.push(format!("route {} connects a site to itself", route.id.0));
+            }
+            for (role, site_id) in [
+                ("from", route.from_site),
+                ("to", route.to_site),
+                ("required", route.required_site),
+            ] {
+                if sites.get(site_id).is_none() {
+                    errors.push(format!(
+                        "route {} has unknown {role} site {}",
+                        route.id.0, site_id.0
+                    ));
+                }
             }
         }
+        errors
+    }
+}
+
+pub fn validate_world_registry_catalogs(
+    sites: Res<WorldSiteRegistry>,
+    routes: Res<WorldRouteRegistry>,
+) {
+    for error in sites
+        .validate_catalog()
+        .into_iter()
+        .chain(routes.validate_catalog(&sites))
+    {
+        error!("Invalid built-in world registry: {error}");
     }
 }
 
@@ -1898,6 +2099,40 @@ mod tests {
         assert!(!settings.reduced_ui_motion);
         assert!(settings.subtitles_enabled);
         assert_eq!(settings.controller_glyph_style, ControllerGlyphStyle::Auto);
+    }
+
+    #[test]
+    fn malformed_settings_are_repaired_at_the_resource_boundary() {
+        let mut settings = GameSettings {
+            mouse_sensitivity: f32::NAN,
+            master_volume: -4.0,
+            difficulty_scale: f32::INFINITY,
+            music_volume: 12.0,
+            sfx_volume: -1.0,
+            ui_scale: 99.0,
+            safe_area_fraction: f32::NEG_INFINITY,
+            ..GameSettings::default()
+        };
+        settings.sanitize();
+        assert_eq!(
+            settings.mouse_sensitivity,
+            GameSettings::default().mouse_sensitivity
+        );
+        assert_eq!(settings.master_volume, 0.0);
+        assert_eq!(settings.difficulty_scale, 1.0);
+        assert_eq!(settings.music_volume, 1.0);
+        assert_eq!(settings.sfx_volume, 0.0);
+        assert_eq!(settings.ui_scale, 1.4);
+        assert_eq!(settings.safe_area_fraction, 0.025);
+    }
+
+    #[test]
+    fn local_player_config_never_exposes_an_invalid_party_size() {
+        assert_eq!(LocalPlayerConfig::new(0).active_count(), 1);
+        assert_eq!(LocalPlayerConfig::new(9).active_count(), 4);
+        let mut config = LocalPlayerConfig::default();
+        config.set_active(usize::MAX);
+        assert_eq!(config.active, 4);
     }
 
     #[test]
@@ -2109,6 +2344,31 @@ mod tests {
     }
 
     #[test]
+    fn malformed_character_snapshot_indices_are_normalized_before_application() {
+        let mut snapshot =
+            CharacterDesignSnapshot::from_design_data(&CharacterDesignData::default());
+        snapshot.player_index = usize::MAX;
+        snapshot.skin_idx = usize::MAX;
+        snapshot.outfit_idx = usize::MAX;
+        snapshot.accent_idx = usize::MAX;
+        snapshot.hair_idx = usize::MAX;
+        snapshot.eye_idx = usize::MAX;
+        snapshot.body.height = f32::NAN;
+        let validated = snapshot.validated();
+        assert_eq!(validated.player_index, 3);
+        for index in [
+            validated.skin_idx,
+            validated.outfit_idx,
+            validated.accent_idx,
+            validated.hair_idx,
+            validated.eye_idx,
+        ] {
+            assert!(index < crate::character::presets::COLOR_PRESET_COUNT);
+        }
+        assert!(validated.body.height.is_finite());
+    }
+
+    #[test]
     fn legacy_character_snapshot_does_not_erase_the_current_authored_face() {
         let mut current = CharacterDesignData {
             face: crate::character::face::FaceRecipe {
@@ -2244,15 +2504,90 @@ mod tests {
     }
 
     #[test]
+    fn checked_world_record_hydration_skips_only_bad_records() {
+        let mut sites = WorldSiteRegistry::default();
+        let site_report = sites.apply_save_records_checked(&[
+            WorldSiteSaveRecord {
+                id: 1,
+                state: WorldSiteState::Contested,
+                owner: WorldSiteOwner::Scallarian,
+                enemies_defeated: 2,
+            },
+            WorldSiteSaveRecord {
+                id: 1,
+                state: WorldSiteState::Liberated,
+                owner: WorldSiteOwner::PlayerAlliance,
+                enemies_defeated: 5,
+            },
+            WorldSiteSaveRecord {
+                id: 65_000,
+                state: WorldSiteState::Hidden,
+                owner: WorldSiteOwner::Neutral,
+                enemies_defeated: 0,
+            },
+            WorldSiteSaveRecord {
+                id: 2,
+                state: WorldSiteState::EnemyHeld,
+                owner: WorldSiteOwner::Scallarian,
+                enemies_defeated: u8::MAX,
+            },
+        ]);
+        assert_eq!(site_report.applied, 1);
+        assert_eq!(site_report.duplicate_ids, vec![1]);
+        assert_eq!(site_report.unknown_ids, vec![65_000]);
+        assert_eq!(site_report.invalid_records.len(), 1);
+        assert_eq!(sites.get(WorldSiteId(1)).unwrap().enemies_defeated, 2);
+        assert_eq!(sites.get(WorldSiteId(2)).unwrap().enemies_defeated, 0);
+
+        let mut routes = WorldRouteRegistry {
+            routes: initial_world_routes(),
+        };
+        let route_report = routes.apply_save_records_checked(&[
+            WorldRouteSaveRecord {
+                id: 1,
+                state: WorldRouteState::Open,
+            },
+            WorldRouteSaveRecord {
+                id: 1,
+                state: WorldRouteState::Blocked,
+            },
+            WorldRouteSaveRecord {
+                id: 60_000,
+                state: WorldRouteState::Open,
+            },
+        ]);
+        assert_eq!(route_report.applied, 1);
+        assert_eq!(route_report.duplicate_ids, vec![1]);
+        assert_eq!(route_report.unknown_ids, vec![60_000]);
+        assert_eq!(
+            routes.get(WorldRouteId(1)).unwrap().state,
+            WorldRouteState::Open
+        );
+    }
+
+    #[test]
+    fn built_in_world_registry_ids_and_endpoints_validate() {
+        let sites = WorldSiteRegistry::default();
+        let routes = WorldRouteRegistry {
+            routes: initial_world_routes(),
+        };
+        assert!(sites.validate_catalog().is_empty());
+        assert!(routes.validate_catalog(&sites).is_empty());
+    }
+
+    #[test]
     fn cave_fast_travel_destination_is_one_shot_and_clearable() {
         let mut destination = FastTravelDestination::default();
         destination.cave("secret_cave_ch03", "Sister Starwell Cave");
-        assert_eq!(destination.anchor_id, Some("secret_cave_ch03"));
-        assert_eq!(destination.label, Some("Sister Starwell Cave"));
+        assert_eq!(destination.anchor_id.as_deref(), Some("secret_cave_ch03"));
+        assert_eq!(destination.label.as_deref(), Some("Sister Starwell Cave"));
         assert!(destination.enter_dungeon);
         destination.world_anchor("race_region_north_gate", "Grand Raceway");
-        assert_eq!(destination.anchor_id, Some("race_region_north_gate"));
-        assert_eq!(destination.label, Some("Grand Raceway"));
+        assert_eq!(
+            destination.anchor_id.as_deref(),
+            Some("race_region_north_gate")
+        );
+        assert_eq!(destination.label.as_deref(), Some("Grand Raceway"));
         assert!(!destination.enter_dungeon);
         destination.clear();
         assert!(destination.anchor_id.is_none());

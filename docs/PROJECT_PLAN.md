@@ -30,6 +30,12 @@ Priority: reduce ambiguity before broadening scope.
 
 Work:
 - keep ownership explicit for players, rewards, vehicles, and shared world state
+- runtime/save validation now repairs non-finite or out-of-range settings and
+  character body/palette data, clamps local parties to 1–4, validates built-in
+  site/route identity and endpoints after world setup, and skips malformed,
+  unknown, or duplicate world save records individually with diagnostics;
+  fast-travel requests now own their anchor/label strings so published Forge
+  content is not restricted to compile-time string literals
 - reduce plugin-level overloading in the largest gameplay systems
 - improve domain boundaries between world logic, UI logic, and player simulation
 - continue the editor/game separation work started in [editor_roadmap.md](editor_roadmap.md)
@@ -38,6 +44,14 @@ Deliverables:
 - clearer ownership rules
 - fewer giant system hotspots
 - simpler debugging and validation loops
+
+Review disposition for the August resource audit: the README authority map and
+archived-document boundary were already current; `Cargo.toml`, lockfile, and the
+Bevy adoption plan were already on 0.19.1, while two stale `agent.md` references
+were corrected. A physical `resources.rs` split, per-player score migration,
+dungeon save-policy redesign, fixed-tick expansion, neutral schema extraction,
+and the published-level consumer test remain separate behavior/architecture
+slices and should not be mixed into the validation pass.
 
 ### 2. Controller-first UX and menu quality
 

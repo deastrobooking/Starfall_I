@@ -655,7 +655,8 @@ fn settings_path() -> PathBuf {
 }
 
 pub fn save_settings(settings: &GameSettings) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    let json =
+        serde_json::to_string_pretty(&settings.clone().validated()).map_err(|e| e.to_string())?;
     write_atomic(&settings_path(), &json)
 }
 
@@ -671,8 +672,8 @@ pub fn load_settings() -> Option<GameSettings> {
             return None;
         }
     };
-    match serde_json::from_str(&json) {
-        Ok(settings) => Some(settings),
+    match serde_json::from_str::<GameSettings>(&json) {
+        Ok(settings) => Some(settings.validated()),
         Err(e) => {
             warn!("Ignoring corrupt settings file {}: {}", path.display(), e);
             None
@@ -683,6 +684,22 @@ pub fn load_settings() -> Option<GameSettings> {
 fn load_settings_on_startup(mut settings: ResMut<GameSettings>) {
     if let Some(loaded) = load_settings() {
         *settings = loaded;
+    }
+}
+
+fn apply_checked_world_records(
+    sites: &mut WorldSiteRegistry,
+    site_records: &[WorldSiteSaveRecord],
+    routes: &mut WorldRouteRegistry,
+    route_records: &[WorldRouteSaveRecord],
+) {
+    let site_report = sites.apply_save_records_checked(site_records);
+    if !site_report.is_clean() {
+        warn!("Skipped malformed world-site save records: {site_report:?}");
+    }
+    let route_report = routes.apply_save_records_checked(route_records);
+    if !route_report.is_clean() {
+        warn!("Skipped malformed world-route save records: {route_report:?}");
     }
 }
 
@@ -1187,11 +1204,15 @@ fn hydrate_progress_from_disk(
         if world_site_registry.sites.is_empty() {
             world_site_registry.sites = initial_world_sites();
         }
-        world_site_registry.apply_save_records(&data.world_sites);
         if world_route_registry.routes.is_empty() {
             world_route_registry.routes = initial_world_routes();
         }
-        world_route_registry.apply_save_records(&data.world_routes);
+        apply_checked_world_records(
+            &mut world_site_registry,
+            &data.world_sites,
+            &mut world_route_registry,
+            &data.world_routes,
+        );
         regs.raid_registry.apply_save_records(data.raids);
         if regs.command_registry.assets.is_empty() {
             regs.command_registry.assets = initial_command_assets();
@@ -1315,11 +1336,15 @@ fn load_save_on_enter(
             if world_site_registry.sites.is_empty() {
                 world_site_registry.sites = initial_world_sites();
             }
-            world_site_registry.apply_save_records(&data.world_sites);
             if world_route_registry.routes.is_empty() {
                 world_route_registry.routes = initial_world_routes();
             }
-            world_route_registry.apply_save_records(&data.world_routes);
+            apply_checked_world_records(
+                &mut world_site_registry,
+                &data.world_sites,
+                &mut world_route_registry,
+                &data.world_routes,
+            );
             regs.raid_registry.apply_save_records(data.raids);
             if regs.command_registry.assets.is_empty() {
                 regs.command_registry.assets = initial_command_assets();

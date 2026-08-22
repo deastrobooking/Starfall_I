@@ -152,6 +152,9 @@ Included features:
 
 Current strength:
 - ownership boundaries are already much clearer than a typical prototype
+- malformed settings and character snapshots are normalized before runtime
+  use; world-site/route hydration applies valid records independently while
+  reporting duplicate, unknown, and internally inconsistent records
 
 Current risk:
 - some reward, feedback, and menu flows still assume a single owner or a party-shared flow too often

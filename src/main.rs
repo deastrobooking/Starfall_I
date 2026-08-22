@@ -218,6 +218,7 @@ fn configure_starfall_app(app: &mut App, add_render_materials: bool) {
         .init_resource::<ShopCatalog>()
         .init_resource::<WorldSiteRegistry>()
         .init_resource::<WorldRouteRegistry>()
+        .add_systems(PostStartup, resources::validate_world_registry_catalogs)
         .init_resource::<RaidRegistry>()
         .init_resource::<CommandRegistry>()
         .init_resource::<CommandOverlayState>()
