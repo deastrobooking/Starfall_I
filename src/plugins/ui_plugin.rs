@@ -163,7 +163,12 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 OnEnter(AppState::MainMenu),
-                (cleanup_play_ui_for_menu, setup_main_menu),
+                (
+                    reset_play_experience_for_main_menu,
+                    cleanup_play_ui_for_menu,
+                    setup_main_menu,
+                )
+                    .chain(),
             )
             .add_systems(
                 OnEnter(AppState::ProjectHub),
@@ -1703,6 +1708,18 @@ fn cleanup_play_ui_for_menu(
     }
 }
 
+/// The title screen is a neutral front door, not a continuation of whichever
+/// ruleset happened to run last. Reset both the selected experience and the
+/// temporary shared-camera/dungeon state before rebuilding its buttons so a
+/// platformer or dungeon session cannot leak into the next campaign launch.
+fn reset_play_experience_for_main_menu(
+    mut experience: ResMut<PlayExperience>,
+    mut dungeon: ResMut<DungeonCrawlState>,
+) {
+    *experience = PlayExperience::Campaign;
+    dungeon.clear();
+}
+
 fn setup_main_menu(
     mut commands: Commands,
     theme: Res<UiTheme>,
@@ -1767,7 +1784,7 @@ fn setup_main_menu(
                 );
                 spawn_main_menu_button(
                     page,
-                    "STARBOUND CO-OP PLATFORMER",
+                    "SHARED-SCREEN CO-OP PLATFORMER",
                     Color::srgb(0.42, 0.10, 0.58),
                     theme.energy,
                     PlatformerStartButton,

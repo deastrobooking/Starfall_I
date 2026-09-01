@@ -92,7 +92,7 @@ fn english_text(key: UiTextKey) -> &'static str {
     match key {
         UiTextKey::GameTitle => "STARFALL I",
         UiTextKey::GameSubtitle => "Everest Range",
-        UiTextKey::StartGame => "START GAME",
+        UiTextKey::StartGame => "ORIGINAL 3D CAMPAIGN",
         UiTextKey::StartEditor => "START EDITOR",
         UiTextKey::Settings => "SETTINGS",
         UiTextKey::SettingsAccessibility => "SETTINGS & ACCESSIBILITY",
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn text_catalog_falls_back_to_complete_english_copy() {
         let mut catalog = UiTextCatalog::default();
-        assert_eq!(catalog.text(UiTextKey::StartGame), "START GAME");
+        assert_eq!(catalog.text(UiTextKey::StartGame), "ORIGINAL 3D CAMPAIGN");
         catalog.set_override(UiTextKey::StartGame, "COMMENCER");
         assert_eq!(catalog.text(UiTextKey::StartGame), "COMMENCER");
         assert_eq!(catalog.text(UiTextKey::Back), "BACK");

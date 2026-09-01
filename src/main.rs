@@ -506,4 +506,92 @@ mod app_smoke_tests {
             1
         );
     }
+
+    #[test]
+    fn returning_from_platformer_to_title_restores_campaign_front_door() {
+        let mut app = build_headless_app();
+        *app.world_mut().resource_mut::<PlayExperience>() = PlayExperience::SharedPlatformer;
+        // Campaign world generation allocates texture handles even though this
+        // transition smoke never renders them. Production gets this from the
+        // render plugins; the headless harness registers the CPU asset type.
+        app.init_asset::<Image>();
+        app.insert_resource(ClearColor::default());
+        app.insert_resource(GlobalAmbientLight::default());
+        app.insert_state(AppState::Playing);
+        app.finish();
+        app.cleanup();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<PlayExperience>(),
+            PlayExperience::SharedPlatformer
+        );
+        assert!(
+            app.world()
+                .resource::<resources::DungeonCrawlState>()
+                .platformer_rules
+        );
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::MainMenu);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<State<AppState>>().get(),
+            &AppState::MainMenu
+        );
+        assert_eq!(
+            *app.world().resource::<PlayExperience>(),
+            PlayExperience::Campaign
+        );
+        let dungeon = app.world().resource::<resources::DungeonCrawlState>();
+        assert!(!dungeon.active);
+        assert!(!dungeon.arcade_rules);
+        assert!(!dungeon.platformer_rules);
+        assert_eq!(
+            app.world_mut()
+                .query::<&world::co_op_platformer::PlatformerStageRoot>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Playing);
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<State<AppState>>().get(),
+            &AppState::Playing
+        );
+        assert_eq!(
+            *app.world().resource::<PlayExperience>(),
+            PlayExperience::Campaign
+        );
+        assert!(app.world().resource::<resources::CurrentChapter>().started);
+        assert!(
+            !app.world()
+                .resource::<resources::DungeonCrawlState>()
+                .active
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&world::co_op_platformer::PlatformerStageRoot>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&components::player::Player>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+    }
 }
