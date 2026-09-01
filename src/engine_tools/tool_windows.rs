@@ -74,7 +74,7 @@ pub struct ToolWindowResizeGrip {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ToolWindowChromeControl;
 
-/// Text glyph on the minimize button ("—" open, "▣" minimized).
+/// Text label on the minimize button ("MINIMIZE" open, "RESTORE" minimized).
 #[derive(Component, Debug, Clone, Copy)]
 struct ToolWindowMinimizeGlyph {
     window: Entity,
@@ -593,7 +593,7 @@ fn set_window_minimized(
     }
     for (mut text, glyph) in glyphs.iter_mut() {
         if glyph.window == window_entity {
-            *text = Text::new(if minimized { "▣" } else { "—" });
+            *text = Text::new(if minimized { "RESTORE" } else { "MINIMIZE" });
         }
     }
     for (mut node, grip) in grips.iter_mut() {
@@ -713,7 +713,7 @@ pub fn spawn_tool_window(
                             window: window_entity,
                         },
                         Node {
-                            min_width: Val::Px(36.0),
+                            min_width: Val::Px(82.0),
                             min_height: Val::Px(36.0),
                             border: UiRect::all(Val::Px(1.0)),
                             align_items: AlignItems::Center,
@@ -725,9 +725,13 @@ pub fn spawn_tool_window(
                     ))
                     .with_children(|button| {
                         button.spawn((
-                            Text::new(if initially_minimized { "▣" } else { "—" }),
+                            Text::new(if initially_minimized {
+                                "RESTORE"
+                            } else {
+                                "MINIMIZE"
+                            }),
                             TextFont {
-                                font_size: FontSize::Px(14.0),
+                                font_size: FontSize::Px(11.0),
                                 ..default()
                             },
                             TextColor(Color::WHITE),
@@ -1380,7 +1384,7 @@ mod tests {
         assert!(app.world().get::<BackgroundColor>(minimize).is_some());
         assert!(app.world().get::<BorderColor>(minimize).is_some());
         let node = app.world().get::<Node>(minimize).unwrap();
-        assert_eq!(node.min_width, Val::Px(36.0));
+        assert_eq!(node.min_width, Val::Px(82.0));
         assert_eq!(node.min_height, Val::Px(36.0));
     }
 }

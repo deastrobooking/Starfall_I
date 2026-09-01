@@ -52,7 +52,7 @@ use bevy::settings::SaveSettingsDeferred;
 use bevy::text::{EditableText, EditableTextSystems};
 use bevy::time::Virtual;
 use bevy::ui::RelativeCursorPosition;
-use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, Window};
+use bevy::window::{CursorGrabMode, CursorMoved, CursorOptions, PrimaryWindow, Window};
 use serde::{Deserialize, Serialize};
 
 use crate::components::player::{Player, PlayerCamera, PlayerInput};
@@ -777,6 +777,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<WorldKitSandboxState>()
             .init_resource::<WorldKitSandboxAssets>()
             .init_resource::<EditorTextInputCapture>()
+            .init_resource::<EditorInputOwnership>()
             .init_resource::<InputFocus>()
             .init_resource::<EditorPresetLibrary>()
             .init_resource::<EditorArmedModifier>()
@@ -817,6 +818,7 @@ impl Plugin for EngineToolsPlugin {
                 Update,
                 (
                     adapt_world_authorables,
+                    editor_input_takeover,
                     editor_button_interactions,
                     editor_search_input,
                     editor_controller_navigation,
@@ -1633,6 +1635,21 @@ impl Default for EditorFocus {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum EditorInputOwner {
+    Pointer,
+    #[default]
+    Navigation,
+}
+
+/// The most recently active Designer input family. Pointer activity takes
+/// immediate ownership so a connected controller cannot keep moving focus or
+/// the camera while the author is using the mouse.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+struct EditorInputOwnership {
+    owner: EditorInputOwner,
+}
+
 #[derive(Resource, Default)]
 struct EditorPendingActions(Vec<EditorAction>);
 
@@ -1911,6 +1928,7 @@ fn enter_editor_workspace(
     mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut player_cameras: Query<(&Transform, &mut Camera), With<PlayerCamera>>,
     mut focus: ResMut<EditorFocus>,
+    mut input_ownership: ResMut<EditorInputOwnership>,
     mut status: ResMut<EditorRuntimeStatus>,
     mut document: ResMut<EditorDocumentState>,
     mut filter: ResMut<EditorOutlinerFilter>,
@@ -1924,6 +1942,7 @@ fn enter_editor_workspace(
     virtual_time.pause();
     physics_time.pause();
     focus.0 = EditorAction::SelectNext;
+    input_ownership.owner = EditorInputOwner::Navigation;
     document.exit_armed = false;
     filter.active = false;
     registry.rename_active = false;
@@ -3976,7 +3995,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
                 ));
                 bar.spawn((
                     Text::new(
-                        "Click objects • WASD/QE fly • RMB orbit/look • D-pad focus • A select",
+                        "Mouse move/click takes over • WASD/QE fly • RMB orbit/look • D-pad/Enter restores navigation",
                     ),
                     TextFont {
                         font_size: FontSize::Px(13.0),
@@ -4136,6 +4155,68 @@ fn spawn_editor_button(parent: &mut ChildSpawnerCommands, control: EditorAction,
                 TextColor(Color::WHITE),
             ));
         });
+}
+
+fn editor_input_owner_after_activity(
+    current: EditorInputOwner,
+    pointer_active: bool,
+    navigation_active: bool,
+) -> EditorInputOwner {
+    if pointer_active {
+        EditorInputOwner::Pointer
+    } else if navigation_active {
+        EditorInputOwner::Navigation
+    } else {
+        current
+    }
+}
+
+/// Let the most recently deliberate device own Designer focus and camera
+/// input. Pointer input wins ties so moving onto a control and clicking it can
+/// never be overridden by a controller event from the same frame.
+fn editor_input_takeover(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    gamepads: Query<&Gamepad>,
+    native: Res<NativeControllerState>,
+    mut cursor_events: MessageReader<CursorMoved>,
+    mut ownership: ResMut<EditorInputOwnership>,
+) {
+    let pointer_active = cursor_events.read().next().is_some()
+        || mouse_buttons.just_pressed(MouseButton::Left)
+        || mouse_buttons.just_pressed(MouseButton::Right)
+        || mouse_buttons.just_pressed(MouseButton::Middle);
+    let keyboard_navigation = keyboard.just_pressed(KeyCode::ArrowUp)
+        || keyboard.just_pressed(KeyCode::ArrowDown)
+        || keyboard.just_pressed(KeyCode::ArrowLeft)
+        || keyboard.just_pressed(KeyCode::ArrowRight)
+        || keyboard.just_pressed(KeyCode::Enter)
+        || keyboard.just_pressed(KeyCode::NumpadEnter);
+    let gamepad_navigation = gamepads.iter().any(|gamepad| {
+        let left = Vec2::new(
+            gamepad.get(GamepadAxis::LeftStickX).unwrap_or(0.0),
+            gamepad.get(GamepadAxis::LeftStickY).unwrap_or(0.0),
+        );
+        let right = Vec2::new(
+            gamepad.get(GamepadAxis::RightStickX).unwrap_or(0.0),
+            gamepad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
+        );
+        left.length_squared() > 0.09
+            || right.length_squared() > 0.09
+            || gamepad.get_just_pressed().next().is_some()
+    });
+    let native_navigation = native.move_axis.length_squared() > 0.09
+        || native.look_axis.length_squared() > 0.09
+        || native.start_or_confirm_just_pressed()
+        || native.just_pressed(NativeButton::DPadUp)
+        || native.just_pressed(NativeButton::DPadDown)
+        || native.just_pressed(NativeButton::DPadLeft)
+        || native.just_pressed(NativeButton::DPadRight);
+    ownership.owner = editor_input_owner_after_activity(
+        ownership.owner,
+        pointer_active,
+        keyboard_navigation || gamepad_navigation || native_navigation,
+    );
 }
 
 fn editor_button_interactions(
@@ -4809,6 +4890,7 @@ fn move_editor_focus(
 
 fn keep_editor_focus_in_view(
     focus: Res<EditorFocus>,
+    input_ownership: Res<EditorInputOwnership>,
     buttons: Query<(&EditorButton, &GlobalTransform, &ComputedNode)>,
     mut panels: Query<(
         &EditorPanelKind,
@@ -4817,6 +4899,9 @@ fn keep_editor_focus_in_view(
         &mut ScrollPosition,
     )>,
 ) {
+    if input_ownership.owner == EditorInputOwner::Pointer {
+        return;
+    }
     let Some((button, button_transform, button_node)) = buttons
         .iter()
         .find(|(button, _, _)| button.control == focus.0)
@@ -10115,6 +10200,7 @@ fn update_editor_workspace_text(
 
 fn update_editor_button_style(
     focus: Res<EditorFocus>,
+    input_ownership: Res<EditorInputOwnership>,
     mut buttons: Query<
         (
             &EditorButton,
@@ -10126,7 +10212,8 @@ fn update_editor_button_style(
     >,
 ) {
     for (button, interaction, mut background, mut border) in &mut buttons {
-        let focused = button.control == focus.0;
+        let focused =
+            input_ownership.owner == EditorInputOwner::Navigation && button.control == focus.0;
         *background = if *interaction == Interaction::Pressed {
             BackgroundColor(Color::srgb(0.9, 0.46, 0.08))
         } else if focused || *interaction == Interaction::Hovered {
@@ -10625,6 +10712,7 @@ fn editor_camera_controls(
     mut mouse_wheel: MessageReader<MouseWheel>,
     gamepads: Query<&Gamepad>,
     native: Res<NativeControllerState>,
+    input_ownership: Res<EditorInputOwnership>,
     tool_window_pointer: Res<tool_windows::ToolWindowPointerState>,
     chrome_surfaces: Query<&RelativeCursorPosition, With<EditorChromeSurface>>,
     filter: Res<EditorOutlinerFilter>,
@@ -10641,7 +10729,8 @@ fn editor_camera_controls(
         return;
     }
     let dt = real_time.delta_secs();
-    let gamepad = gamepads.iter().next();
+    let controller_active = input_ownership.owner == EditorInputOwner::Navigation;
+    let gamepad = controller_active.then(|| gamepads.iter().next()).flatten();
     let stick_move = gamepad
         .map(|pad| {
             Vec2::new(
@@ -10649,7 +10738,13 @@ fn editor_camera_controls(
                 pad.get(GamepadAxis::LeftStickY).unwrap_or(0.0),
             )
         })
-        .unwrap_or(native.move_axis);
+        .unwrap_or_else(|| {
+            if controller_active {
+                native.move_axis
+            } else {
+                Vec2::ZERO
+            }
+        });
     let stick_look = gamepad
         .map(|pad| {
             Vec2::new(
@@ -10657,7 +10752,13 @@ fn editor_camera_controls(
                 pad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
             )
         })
-        .unwrap_or(native.look_axis);
+        .unwrap_or_else(|| {
+            if controller_active {
+                native.look_axis
+            } else {
+                Vec2::ZERO
+            }
+        });
 
     let keyboard_move = Vec3::new(
         (keyboard.pressed(KeyCode::KeyD) as i8 - keyboard.pressed(KeyCode::KeyA) as i8) as f32,
@@ -10835,6 +10936,63 @@ mod tests {
             assert_eq!(button.panel, spec.panel);
             assert_eq!(ancestor_editor_panel(&world, *entity), spec.panel);
         }
+
+        let panels = world
+            .query::<(
+                &EditorPanelKind,
+                &crate::engine_tools::tool_windows::ToolWindowContent,
+            )>()
+            .iter(&world)
+            .map(|(kind, content)| (*kind, content.window))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            panels.len(),
+            3,
+            "every level-design panel must be a tool window"
+        );
+        for expected in [
+            EditorPanelKind::Outliner,
+            EditorPanelKind::Inspector,
+            EditorPanelKind::Registry,
+        ] {
+            let window = panels
+                .iter()
+                .find_map(|(kind, window)| (*kind == expected).then_some(*window))
+                .expect("each level-design panel must be present");
+            assert!(
+                world
+                    .get::<crate::engine_tools::tool_windows::ToolWindow>(window)
+                    .is_some(),
+                "{expected:?} must use shared minimizable window chrome"
+            );
+            assert!(
+                world
+                    .query::<&crate::engine_tools::tool_windows::ToolWindowMinimizeButton>()
+                    .iter(&world)
+                    .any(|button| button.window == window),
+                "{expected:?} must expose its own minimize/restore control"
+            );
+        }
+    }
+
+    #[test]
+    fn mouse_activity_takes_designer_ownership_until_navigation_resumes() {
+        let owner = editor_input_owner_after_activity(EditorInputOwner::Navigation, true, false);
+        assert_eq!(owner, EditorInputOwner::Pointer);
+        assert_eq!(
+            editor_input_owner_after_activity(owner, false, false),
+            EditorInputOwner::Pointer,
+            "idle frames must not steal mouse ownership"
+        );
+        assert_eq!(
+            editor_input_owner_after_activity(owner, false, true),
+            EditorInputOwner::Navigation
+        );
+        assert_eq!(
+            editor_input_owner_after_activity(EditorInputOwner::Navigation, true, true),
+            EditorInputOwner::Pointer,
+            "a real pointer event wins same-frame ownership ties"
+        );
     }
 
     #[test]
