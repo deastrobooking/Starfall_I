@@ -1264,7 +1264,7 @@ pub struct EditorSceneDraft {
     pub adapter_overrides: Vec<AdapterOverrideDraft>,
 }
 
-/// PM3: the eight starting level templates. Each seeds a small recognizable
+/// PM3: starting level templates. Each seeds a small recognizable
 /// arrangement of editor primitives so a new level opens composed, not blank.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1276,11 +1276,14 @@ pub enum LevelTemplate {
     BossArena,
     RacingCourse,
     SettlementHub,
+    SharedScreenBasics,
+    SharedScreenJumps,
+    SharedScreenTeamwork,
     PlatformerShowcase,
 }
 
 impl LevelTemplate {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 11] = [
         Self::EmptyTestArena,
         Self::OpenWorldChapter,
         Self::Dungeon,
@@ -1288,6 +1291,9 @@ impl LevelTemplate {
         Self::BossArena,
         Self::RacingCourse,
         Self::SettlementHub,
+        Self::SharedScreenBasics,
+        Self::SharedScreenJumps,
+        Self::SharedScreenTeamwork,
         Self::PlatformerShowcase,
     ];
 
@@ -1300,6 +1306,9 @@ impl LevelTemplate {
             Self::BossArena => "Boss Arena",
             Self::RacingCourse => "Racing Course",
             Self::SettlementHub => "Settlement Hub",
+            Self::SharedScreenBasics => "Shared Screen · Star Steps",
+            Self::SharedScreenJumps => "Shared Screen · Cloud Hops",
+            Self::SharedScreenTeamwork => "Shared Screen · Moving Day",
             Self::PlatformerShowcase => "Platformer Showcase",
         }
     }
@@ -1313,6 +1322,9 @@ impl LevelTemplate {
             Self::BossArena => "boss-arena",
             Self::RacingCourse => "racing-course",
             Self::SettlementHub => "settlement-hub",
+            Self::SharedScreenBasics => "shared-screen-basics",
+            Self::SharedScreenJumps => "shared-screen-jumps",
+            Self::SharedScreenTeamwork => "shared-screen-teamwork",
             Self::PlatformerShowcase => "platformer-showcase",
         }
     }
@@ -1410,6 +1422,192 @@ impl LevelTemplate {
                 place(5, DraftPrimitive::Stairs, 0.0, 1.6, -14.0),
                 place(6, DraftPrimitive::Tower, -18.0, 6.0, -18.0),
                 place(7, DraftPrimitive::Castle, 20.0, 4.5, -24.0),
+            ],
+            Self::SharedScreenBasics => vec![
+                showcase_place(
+                    0,
+                    "1-1 · Party Start",
+                    DraftPrimitive::Empty,
+                    0.0,
+                    0.0,
+                    5.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    1,
+                    "1-1 · Wide Runway",
+                    DraftPrimitive::Cube,
+                    0.0,
+                    -0.5,
+                    -2.0,
+                    0.0,
+                    [6.0, 0.4, 4.0],
+                ),
+                showcase_place(
+                    2,
+                    "1-1 · Star Steps",
+                    DraftPrimitive::Stairs,
+                    0.0,
+                    1.6,
+                    -12.0,
+                    0.0,
+                    [1.4, 1.0, 1.4],
+                ),
+                showcase_place(
+                    3,
+                    "1-1 · Group Landing",
+                    DraftPrimitive::Cube,
+                    0.0,
+                    2.7,
+                    -20.0,
+                    0.0,
+                    [5.0, 0.4, 4.0],
+                ),
+                showcase_place(
+                    4,
+                    "1-1 · Finish Star",
+                    DraftPrimitive::Beacon,
+                    0.0,
+                    4.2,
+                    -23.0,
+                    0.0,
+                    [1.3; 3],
+                ),
+            ],
+            Self::SharedScreenJumps => vec![
+                showcase_place(
+                    0,
+                    "1-2 · Party Start",
+                    DraftPrimitive::Empty,
+                    0.0,
+                    0.0,
+                    5.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    1,
+                    "1-2 · Launch Island",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    [1.35, 0.7, 1.35],
+                ),
+                showcase_place(
+                    2,
+                    "1-2 · Low Hop",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    0.8,
+                    -8.0,
+                    0.0,
+                    [1.2, 0.7, 1.35],
+                ),
+                showcase_place(
+                    3,
+                    "1-2 · High Hop",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    1.6,
+                    -16.0,
+                    0.0,
+                    [1.2, 0.7, 1.35],
+                ),
+                showcase_place(
+                    4,
+                    "1-2 · Recovery Landing",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    0.8,
+                    -24.0,
+                    0.0,
+                    [1.4, 0.7, 1.5],
+                ),
+                showcase_place(
+                    5,
+                    "1-2 · Finish Star",
+                    DraftPrimitive::Beacon,
+                    0.0,
+                    3.0,
+                    -25.0,
+                    0.0,
+                    [1.3; 3],
+                ),
+            ],
+            Self::SharedScreenTeamwork => vec![
+                showcase_place(
+                    0,
+                    "1-3 · Party Start",
+                    DraftPrimitive::Empty,
+                    0.0,
+                    0.0,
+                    5.0,
+                    0.0,
+                    [1.0; 3],
+                ),
+                showcase_place(
+                    1,
+                    "1-3 · Waiting Deck",
+                    DraftPrimitive::Cube,
+                    0.0,
+                    -0.5,
+                    0.0,
+                    0.0,
+                    [4.0, 0.4, 4.0],
+                ),
+                showcase_place(
+                    2,
+                    "1-3 · Four-Player Lift",
+                    DraftPrimitive::MovingPlatform,
+                    0.0,
+                    1.0,
+                    -9.0,
+                    0.0,
+                    [1.6, 1.0, 1.8],
+                ),
+                showcase_place(
+                    3,
+                    "1-3 · Lift Landing",
+                    DraftPrimitive::FloatingIsland,
+                    0.0,
+                    1.2,
+                    -17.0,
+                    0.0,
+                    [1.4, 0.7, 1.5],
+                ),
+                showcase_place(
+                    4,
+                    "1-3 · Party Pulse Spring",
+                    DraftPrimitive::SpringPlatform,
+                    0.0,
+                    1.0,
+                    -24.0,
+                    0.0,
+                    [1.3; 3],
+                ),
+                showcase_place(
+                    5,
+                    "1-3 · Finish Deck",
+                    DraftPrimitive::Cube,
+                    0.0,
+                    1.2,
+                    -32.0,
+                    0.0,
+                    [5.0, 0.4, 4.0],
+                ),
+                showcase_place(
+                    6,
+                    "1-3 · Finish Star",
+                    DraftPrimitive::Beacon,
+                    0.0,
+                    3.0,
+                    -34.0,
+                    0.0,
+                    [1.4; 3],
+                ),
             ],
             Self::PlatformerShowcase => vec![
                 // Introduction: a grounded ascent and an optional, forgiving
@@ -3887,6 +4085,43 @@ mod tests {
             DraftPrimitive::SpikeBridge,
         ] {
             assert!(seeded.contains(&expected), "missing seeded {expected:?}");
+        }
+    }
+
+    #[test]
+    fn shared_screen_templates_seed_three_small_single_lesson_levels() {
+        let cases = [
+            (
+                LevelTemplate::SharedScreenBasics,
+                DraftPrimitive::Stairs,
+                "1-1",
+            ),
+            (
+                LevelTemplate::SharedScreenJumps,
+                DraftPrimitive::FloatingIsland,
+                "1-2",
+            ),
+            (
+                LevelTemplate::SharedScreenTeamwork,
+                DraftPrimitive::MovingPlatform,
+                "1-3",
+            ),
+        ];
+        for (template, lesson_primitive, name_prefix) in cases {
+            let scene = template.seed_scene(100);
+            assert!((5..=7).contains(&scene.objects.len()));
+            assert!(scene
+                .objects
+                .iter()
+                .all(|object| object.name.starts_with(name_prefix)));
+            assert!(scene
+                .objects
+                .iter()
+                .any(|object| object.primitive == lesson_primitive));
+            assert!(scene
+                .objects
+                .iter()
+                .any(|object| object.primitive == DraftPrimitive::Beacon));
         }
     }
 

@@ -29,7 +29,8 @@ use crate::resources::{
     GameSettings, PlayExperience, PlaySessionTransition, WaveInfo,
 };
 use crate::world::co_op_platformer::{
-    PLATFORMER_STAGE_ID, PLATFORMER_STAGE_LABEL, PLATFORMER_STAGE_ORIGIN,
+    PLATFORMER_CAMERA_FOCUS, PLATFORMER_CAMERA_RADIUS, PLATFORMER_STAGE_ID, PLATFORMER_STAGE_LABEL,
+    PLATFORMER_STAGE_ORIGIN,
 };
 use crate::world::missions::{dungeon_destination, mission_for_travel_anchor};
 
@@ -105,9 +106,9 @@ fn start_chapter(
             PLATFORMER_STAGE_ID,
             current.id,
             PLATFORMER_STAGE_LABEL,
-            PLATFORMER_STAGE_ORIGIN + Vec3::new(106.0, 5.0, 0.0),
+            PLATFORMER_STAGE_ORIGIN + PLATFORMER_CAMERA_FOCUS,
             PLATFORMER_STAGE_ORIGIN,
-            118.0,
+            PLATFORMER_CAMERA_RADIUS,
         );
         return;
     }

@@ -10867,6 +10867,7 @@ mod tests {
         world.init_resource::<EditorRegistryState>();
         world.init_resource::<EditorOutlinerFilter>();
         world.init_resource::<InputFocus>();
+        world.init_resource::<EditorInputOwnership>();
         world.init_resource::<EditorGizmoSettings>();
         world.init_resource::<EditorPreferences>();
         world.init_resource::<RenderQualitySettings>();
