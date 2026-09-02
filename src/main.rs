@@ -471,6 +471,92 @@ mod app_smoke_tests {
         );
     }
 
+    /// A campaign session must actually let the party walk.
+    ///
+    /// Added after a report of being "trapped in one location": world
+    /// generation succeeding says nothing about whether the motor moves
+    /// anyone, so this drives real input through the real systems and asserts
+    /// the player's transform responds.
+    #[test]
+    fn a_campaign_player_moves_when_input_is_applied() {
+        use components::player::{Player, PlayerInput};
+
+        let mut app = build_headless_app();
+        app.insert_resource(ClearColor::default());
+        app.insert_resource(GlobalAmbientLight::default());
+        // Campaign world generation allocates image handles that the renderer
+        // would normally register.
+        app.init_asset::<Image>();
+        app.insert_state(AppState::Playing);
+        app.finish();
+        app.cleanup();
+        // Let world generation and player spawn settle.
+        for _ in 0..8 {
+            app.update();
+        }
+
+        let world = app.world_mut();
+        let player = world
+            .query_filtered::<Entity, With<Player>>()
+            .iter(world)
+            .next()
+            .expect("a campaign session must spawn a player");
+        let start = world
+            .get::<Transform>(player)
+            .expect("player has a transform")
+            .translation;
+
+        // Drive the real key, not the PlayerInput component: the input layer
+        // rewrites PlayerInput every frame, so injecting there would measure
+        // nothing. Pressing W exercises binding lookup, input assembly, and the
+        // motor exactly as a player does.
+        // Lift the party clear of any geometry they may have spawned inside,
+        // so this measures the motor rather than a spawn-point collision.
+        if let Some(mut transform) = app.world_mut().get_mut::<Transform>(player) {
+            transform.translation.y += 40.0;
+        }
+        for _ in 0..10 {
+            app.update();
+        }
+        let start = app.world().get::<Transform>(player).unwrap().translation;
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        let mut moved_axis = false;
+        for _ in 0..90 {
+            app.update();
+            if let Some(input) = app.world().get::<PlayerInput>(player) {
+                if input.move_axis.length_squared() > 0.01 {
+                    moved_axis = true;
+                }
+            }
+        }
+        assert!(
+            moved_axis,
+            "holding W never reached PlayerInput — the input layer is not seeing the key"
+        );
+
+        // Diagnostics for the gates that can silently freeze the motor.
+        let hitstop = app.world().resource::<combat::hitstop::HitstopState>().remaining;
+        let tool_mode = *app.world().resource::<State<EngineToolMode>>().get();
+        let movement = app.world().get::<components::player::PlayerMovement>(player).unwrap();
+        let diag = format!(
+            "hitstop={hitstop:.3} tool_mode={tool_mode:?} grounded={} vel={:?} accum={:?} carry={:?}",
+            movement.is_grounded, movement.velocity, movement.motor_accum, movement.motor_carry
+        );
+        let end = app
+            .world()
+            .get::<Transform>(player)
+            .expect("player still exists")
+            .translation;
+        let travelled = start.distance(end);
+        assert!(
+            travelled > 1.0,
+            "player did not move with sustained input (from {start:?} to {end:?}, {travelled:.3}m) [{diag}]"
+        );
+    }
+
     #[test]
     fn headless_app_launches_bounded_platformer_as_a_direct_play_session() {
         let mut app = build_headless_app();

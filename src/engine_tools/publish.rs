@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
+use super::dialogue_records;
 use super::persistence::{
     ContentCategory, ForgeProject, ProjectIoError, ProjectLoadSource, ProjectStore,
 };
@@ -37,6 +38,7 @@ const WEAPONS_FILE: &str = "weapons.json";
 const CREATURES_FILE: &str = "creatures.json";
 const VEHICLES_FILE: &str = "vehicles.json";
 const SPACESHIPS_FILE: &str = "spaceships.json";
+const DIALOGUES_FILE: &str = "dialogues.json";
 const PUBLISHED_OUTPUT_LOCK_FILE: &str = ".publish.lock";
 
 static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
@@ -108,6 +110,7 @@ struct BakedGeneration {
     creatures_json: Vec<u8>,
     vehicles_json: Vec<u8>,
     spaceships_json: Vec<u8>,
+    dialogues_json: Vec<u8>,
     manifest_json: Vec<u8>,
     report: PublishReport,
 }
@@ -142,6 +145,14 @@ pub struct PublishedSpaceship {
     pub spec: SpacecraftSpec,
 }
 
+/// One published dialogue graph: the validated conversation plus the stable
+/// id NPCs, chapter scripts, and gameplay signals reference it by.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct PublishedDialogue {
+    pub content_id: String,
+    pub graph: dialogue_records::DialogueGraph,
+}
+
 /// What a publish run produced, for the hub status line.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PublishReport {
@@ -149,6 +160,7 @@ pub struct PublishReport {
     pub creatures: usize,
     pub vehicles: usize,
     pub spaceships: usize,
+    pub dialogues: usize,
     /// Records in categories that have no game-side loader yet.
     pub skipped: usize,
     /// The generation is visible to readers, but the final directory sync
@@ -159,8 +171,8 @@ pub struct PublishReport {
 impl PublishReport {
     pub fn summary(&self) -> String {
         let mut parts = vec![format!(
-            "Published {} weapon(s), {} creature(s), {} vehicle(s), {} spacecraft",
-            self.weapons, self.creatures, self.vehicles, self.spaceships
+            "Published {} weapon(s), {} creature(s), {} vehicle(s), {} spacecraft, {} dialogue(s)",
+            self.weapons, self.creatures, self.vehicles, self.spaceships, self.dialogues
         )];
         if self.skipped > 0 {
             parts.push(format!("{} record(s) have no loader yet", self.skipped));
@@ -224,8 +236,26 @@ fn bake_spaceships(project: &ForgeProject) -> Result<Vec<PublishedSpaceship>, St
     Ok(spaceships)
 }
 
+/// Collect every publishable dialogue graph, sorted by stable content id.
+/// Invalid graphs fail the whole bake before any output is staged; a broken
+/// draft can never reach the consumer half-published.
+fn bake_dialogues(project: &ForgeProject) -> Result<Vec<PublishedDialogue>, String> {
+    let mut dialogues = Vec::new();
+    for (content_id, _) in dialogue_records::dialogue_entries(project) {
+        let graph = dialogue_records::load_dialogue(project, &content_id)
+            .map_err(|error| format!("{content_id}: {error:?}"))?;
+        dialogues.push(PublishedDialogue { content_id, graph });
+    }
+    dialogues.sort_by(|a, b| a.content_id.cmp(&b.content_id));
+    Ok(dialogues)
+}
+
 /// Records that exist in the project but have no baked representation yet.
 fn unbaked_record_count(project: &ForgeProject) -> usize {
+    let dialogue_ids = dialogue_records::dialogue_entries(project)
+        .into_iter()
+        .map(|(content_id, _)| content_id)
+        .collect::<std::collections::BTreeSet<_>>();
     project
         .records
         .iter()
@@ -236,7 +266,7 @@ fn unbaked_record_count(project: &ForgeProject) -> usize {
                     | ContentCategory::Creature
                     | ContentCategory::Vehicle
                     | ContentCategory::Spaceship
-            )
+            ) && !dialogue_ids.contains(&record.content_id)
         })
         .count()
 }
@@ -246,6 +276,7 @@ fn generation_id(
     creatures_json: &[u8],
     vehicles_json: &[u8],
     spaceships_json: &[u8],
+    dialogues_json: &[u8],
 ) -> String {
     // Stable FNV-1a rather than DefaultHasher: the id must remain reproducible
     // across processes and Rust releases because it names an immutable output
@@ -261,6 +292,8 @@ fn generation_id(
         vehicles_json,
         SPACESHIPS_FILE.as_bytes(),
         spaceships_json,
+        DIALOGUES_FILE.as_bytes(),
+        dialogues_json,
     ] {
         for byte in bytes {
             hash ^= u64::from(*byte);
@@ -278,15 +311,18 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
     let creatures = bake_creatures(project)?;
     let vehicles = bake_vehicles(project)?;
     let spaceships = bake_spaceships(project)?;
+    let dialogues = bake_dialogues(project)?;
     let weapons_json = serde_json::to_vec_pretty(&weapons).map_err(|e| e.to_string())?;
     let creatures_json = serde_json::to_vec_pretty(&creatures).map_err(|e| e.to_string())?;
     let vehicles_json = serde_json::to_vec_pretty(&vehicles).map_err(|e| e.to_string())?;
     let spaceships_json = serde_json::to_vec_pretty(&spaceships).map_err(|e| e.to_string())?;
+    let dialogues_json = serde_json::to_vec_pretty(&dialogues).map_err(|e| e.to_string())?;
     let generation = generation_id(
         &weapons_json,
         &creatures_json,
         &vehicles_json,
         &spaceships_json,
+        &dialogues_json,
     );
     let manifest_json = serde_json::to_vec_pretty(&PublishedGenerationManifest {
         schema_version: PUBLISHED_MANIFEST_SCHEMA,
@@ -298,6 +334,7 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
         creatures: creatures.len(),
         vehicles: vehicles.len(),
         spaceships: spaceships.len(),
+        dialogues: dialogues.len(),
         skipped: unbaked_record_count(project),
         durability_warning: None,
     };
@@ -307,6 +344,7 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
         creatures_json,
         vehicles_json,
         spaceships_json,
+        dialogues_json,
         manifest_json,
         report,
     })
@@ -399,10 +437,13 @@ fn generation_matches(path: &Path, baked: &BakedGeneration) -> Result<bool, Stri
         .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
     let spaceships = std::fs::read(path.join(SPACESHIPS_FILE))
         .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
+    let dialogues = std::fs::read(path.join(DIALOGUES_FILE))
+        .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
     Ok(weapons == baked.weapons_json
         && creatures == baked.creatures_json
         && vehicles == baked.vehicles_json
-        && spaceships == baked.spaceships_json)
+        && spaceships == baked.spaceships_json
+        && dialogues == baked.dialogues_json)
 }
 
 fn cleanup_staging(path: &Path) {
@@ -462,6 +503,7 @@ fn stage_generation(out_dir: &Path, baked: BakedGeneration) -> Result<StagedGene
         write_synced(&staging_dir.join(CREATURES_FILE), &baked.creatures_json)?;
         write_synced(&staging_dir.join(VEHICLES_FILE), &baked.vehicles_json)?;
         write_synced(&staging_dir.join(SPACESHIPS_FILE), &baked.spaceships_json)?;
+        write_synced(&staging_dir.join(DIALOGUES_FILE), &baked.dialogues_json)?;
         File::open(&staging_dir)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| {
@@ -911,6 +953,63 @@ mod tests {
     }
 
     #[test]
+    fn dialogue_records_bake_into_the_generation() {
+        let dir = test_dir("dialogues");
+        let mut project = ForgeProject::default();
+        // A default project may seed non-loader records of its own; measure
+        // the delta rather than assuming a clean slate.
+        let baseline_skipped = unbaked_record_count(&project);
+        let content_id = dialogue_records::create_dialogue(&mut project, "Opening Banter")
+            .expect("dialogue record should save");
+        // The dialogue now has a loader, so it must not count as skipped.
+        assert_eq!(unbaked_record_count(&project), baseline_skipped);
+
+        let report = bake_project_to(&project, &dir).expect("bake succeeds");
+        assert_eq!(report.dialogues, 1);
+        assert_eq!(report.skipped, baseline_skipped);
+        assert!(report.summary().contains("1 dialogue(s)"));
+
+        // The game-side reader gets back exactly the authored graph.
+        let dialogues_path = published_file_in(&dir, DIALOGUES_FILE).unwrap();
+        assert!(dialogues_path.starts_with(dir.join(PUBLISHED_GENERATIONS_DIR)));
+        let dialogues: Vec<PublishedDialogue> =
+            serde_json::from_str(&std::fs::read_to_string(dialogues_path).unwrap()).unwrap();
+        assert_eq!(dialogues.len(), 1);
+        assert_eq!(dialogues[0].content_id, content_id);
+        assert_eq!(dialogues[0].graph.entry_node, "opening");
+        assert_eq!(dialogues[0].graph.nodes.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_invalid_dialogue_fails_the_whole_bake() {
+        let dir = test_dir("invalid_dialogue");
+        let mut project = ForgeProject::default();
+        let content_id = dialogue_records::create_dialogue(&mut project, "Broken Banter")
+            .expect("dialogue record should save");
+        // Corrupt the graph in place: a choice targeting a missing node must
+        // refuse publication rather than ship a broken conversation.
+        let mut graph = dialogue_records::load_dialogue(&project, &content_id)
+            .expect("stored dialogue should load");
+        graph.nodes[0]
+            .choices
+            .push(dialogue_records::DialogueChoice {
+                label: "Leave".into(),
+                target_node: "missing_node".into(),
+                required_flag: None,
+                set_flag: None,
+            });
+        let save_result = dialogue_records::save_dialogue(&mut project, &content_id, &graph);
+        assert!(
+            save_result.is_err(),
+            "validation must reject the corrupt graph at save time"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn concurrent_projects_publish_one_complete_generation_and_valid_manifest() {
         let root = test_dir("concurrent_projects");
         let published = root.join("published");
@@ -1319,6 +1418,7 @@ mod tests {
             creatures: 0,
             vehicles: 0,
             spaceships: 0,
+            dialogues: 0,
             skipped: 1,
             durability_warning: None,
         };

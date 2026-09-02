@@ -381,20 +381,37 @@ pub fn validate_dialogue_records(project: &ForgeProject) -> Vec<String> {
     project
         .records
         .iter()
-        .filter(|record| {
-            record.category == ContentCategory::Ui
-                && matches!(
-                    project.payloads.get(&record.content_id),
-                    Some(ContentPayload::Ui(recipe))
-                        if recipe.fields.get(RECORD_KIND_FIELD).and_then(serde_json::Value::as_str)
-                            == Some(RECORD_KIND)
-                )
-        })
+        .filter(|record| is_dialogue_record(project, record))
         .flat_map(|record| match load_dialogue(project, &record.content_id) {
             Ok(_) => Vec::new(),
             Err(error) => vec![format!("{}: {error:?}", record.content_id)],
         })
         .collect()
+}
+
+/// A Ui-category record only counts as dialogue when its payload carries the
+/// typed graph marker; ordinary Ui recipes stay with the UI pipeline.
+fn is_dialogue_record(project: &ForgeProject, record: &super::persistence::ContentRecord) -> bool {
+    record.category == ContentCategory::Ui
+        && matches!(
+            project.payloads.get(&record.content_id),
+            Some(ContentPayload::Ui(recipe))
+                if recipe.fields.get(RECORD_KIND_FIELD).and_then(serde_json::Value::as_str)
+                    == Some(RECORD_KIND)
+        )
+}
+
+/// Every dialogue record in the project as `(content_id, display_name)`,
+/// sorted by content id for deterministic publish output.
+pub fn dialogue_entries(project: &ForgeProject) -> Vec<(String, String)> {
+    let mut entries = project
+        .records
+        .iter()
+        .filter(|record| is_dialogue_record(project, record))
+        .map(|record| (record.content_id.clone(), record.display_name.clone()))
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
 }
 
 fn safe_asset_path(path: &str) -> bool {

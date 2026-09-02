@@ -16,10 +16,10 @@ use bevy::prelude::*;
 use std::path::PathBuf;
 
 use crate::engine_tools::publish::{
-    published_dir, published_generation_in, PublishedGenerationSnapshot, PublishedSpaceship,
-    PublishedVehicle, PublishedWeapon,
+    published_dir, published_generation_in, PublishedDialogue, PublishedGenerationSnapshot,
+    PublishedSpaceship, PublishedVehicle, PublishedWeapon,
 };
-use crate::engine_tools::PublishedCreatureCatalog;
+use crate::engine_tools::{PublishedCreatureCatalog, PublishedDialogueCatalog};
 use crate::resources::{ShopCatalog, ShopCategory, ShopItem};
 use crate::robots::creature::CreatureSpec;
 use crate::spaceship_forge::PublishedSpacecraftCatalog;
@@ -160,6 +160,7 @@ fn load_published_content(
     root: Res<PublishedContentRoot>,
     mut shop: ResMut<ShopCatalog>,
     mut creature_catalog: ResMut<PublishedCreatureCatalog>,
+    mut dialogue_catalog: ResMut<PublishedDialogueCatalog>,
     mut vehicle_catalog: ResMut<PublishedVehicleCatalog>,
     mut spacecraft_catalog: ResMut<PublishedSpacecraftCatalog>,
 ) {
@@ -202,6 +203,30 @@ fn load_published_content(
         let seeded = creature_catalog.seed_from_published(specs);
         if seeded > 0 {
             info!("published content: {seeded} creature(s) available to encounters");
+        }
+    }
+
+    // Dialogue graphs feed the runtime director. Each graph is re-validated
+    // on the consumer side: a hand-edited or corrupt published file degrades
+    // to a skipped conversation, never a runtime panic.
+    let dialogues: Vec<PublishedDialogue> = read_published(&snapshot, "dialogues.json");
+    if !dialogues.is_empty() {
+        let valid = dialogues.into_iter().filter_map(|published| {
+            let errors = crate::engine_tools::dialogue_records::validate_dialogue(&published.graph);
+            if errors.is_empty() {
+                Some((published.content_id.clone(), published.graph))
+            } else {
+                warn!(
+                    "published dialogue {} failed validation ({}); ignoring",
+                    published.content_id,
+                    errors.join("; ")
+                );
+                None
+            }
+        });
+        let seeded = dialogue_catalog.seed_from_published(valid);
+        if seeded > 0 {
+            info!("published content: {seeded} dialogue graph(s) available");
         }
     }
 
@@ -340,6 +365,7 @@ mod tests {
             .init_state::<AppState>()
             .init_resource::<ShopCatalog>()
             .init_resource::<PublishedCreatureCatalog>()
+            .init_resource::<PublishedDialogueCatalog>()
             .init_resource::<CraftBootstrapProbe>()
             .add_plugins(PublishedContentPlugin)
             .insert_resource(PublishedContentRoot(root))
@@ -376,6 +402,72 @@ mod tests {
 
         let probe = app.world().resource::<CraftBootstrapProbe>();
         assert_eq!((probe.entries, probe.vehicles, probe.spacecraft), (1, 1, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn published_dialogues_seed_the_catalog_and_invalid_graphs_are_skipped() {
+        use crate::engine_tools::dialogue_records::{DialogueChoice, DialogueGraph, DialogueNode};
+
+        let root = test_dir("dialogue_bootstrap");
+        let generation = "dddddddddddddddd";
+        let directory = root.join("generations").join(generation);
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let mut broken = DialogueGraph::default();
+        broken.nodes[0].choices.push(DialogueChoice {
+            label: "Leave".into(),
+            target_node: "missing_node".into(),
+            required_flag: None,
+            set_flag: None,
+        });
+        let mut branched = DialogueGraph {
+            entry_node: "opening".into(),
+            ..DialogueGraph::default()
+        };
+        branched.nodes[0].next_node = Some("farewell".into());
+        branched.nodes.push(DialogueNode::speech(
+            "farewell",
+            "Narrator",
+            "Safe travels.",
+        ));
+        let dialogues = vec![
+            PublishedDialogue {
+                content_id: "starfall.dialogue.broken".into(),
+                graph: broken,
+            },
+            PublishedDialogue {
+                content_id: "starfall.dialogue.branched".into(),
+                graph: branched,
+            },
+        ];
+        std::fs::write(
+            directory.join("dialogues.json"),
+            serde_json::to_vec_pretty(&dialogues).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("current.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "generation": generation,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut app = craft_bootstrap_app(root.clone());
+        app.insert_state(AppState::Playing);
+        app.update();
+
+        let catalog = app.world().resource::<PublishedDialogueCatalog>();
+        assert_eq!(catalog.len(), 1, "only the valid graph may seed");
+        let graph = catalog
+            .get("starfall.dialogue.branched")
+            .expect("valid dialogue must resolve by content id");
+        assert_eq!(graph.nodes.len(), 2);
+        assert!(!catalog.contains("starfall.dialogue.broken"));
+
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -31,10 +31,7 @@ struct ThemeMaterials {
     scenery: Handle<StandardMaterial>,
 }
 
-fn theme_materials(
-    theme: ChunkTheme,
-    materials: &mut Assets<StandardMaterial>,
-) -> ThemeMaterials {
+fn theme_materials(theme: ChunkTheme, materials: &mut Assets<StandardMaterial>) -> ThemeMaterials {
     let stone = theme.stone_color();
     let accent = theme.accent_color();
     ThemeMaterials {
@@ -96,8 +93,8 @@ fn spawn_prefab(
 ) {
     let design = PlatformerPrefabDesign::stock(kind);
     let size = design.size;
-    let transform =
-        Transform::from_translation(center).with_rotation(Quat::from_rotation_y(yaw_degrees.to_radians()));
+    let transform = Transform::from_translation(center)
+        .with_rotation(Quat::from_rotation_y(yaw_degrees.to_radians()));
     let mut entity = commands.spawn((
         PbrBundle {
             mesh: Mesh3d(meshes.add(design.mesh())),
@@ -274,7 +271,10 @@ mod tests {
                 .sum::<usize>();
 
         let spawned = build(&mut app, "route_castle_stairwell");
-        assert_eq!(spawned, expected, "every authored piece must reach the world");
+        assert_eq!(
+            spawned, expected,
+            "every authored piece must reach the world"
+        );
 
         let mut geometry = app.world_mut().query::<&RouteGeometry>();
         assert_eq!(geometry.iter(app.world()).count(), expected);
@@ -316,7 +316,9 @@ mod tests {
         let mut app = spawn_app();
         build(&mut app, "route_castle_stairwell");
 
-        let mut walkable = app.world_mut().query::<(&WalkableSurface, &RouteGeometry)>();
+        let mut walkable = app
+            .world_mut()
+            .query::<(&WalkableSurface, &RouteGeometry)>();
         let walkable_count = walkable.iter(app.world()).count();
         let mut all = app.world_mut().query::<&RouteGeometry>();
         let total = all.iter(app.world()).count();
@@ -332,17 +334,23 @@ mod tests {
     fn building_by_progression_index_reports_what_it_made() {
         let mut app = spawn_app();
         let world = app.world_mut();
-        let built = world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
-            world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
-                let mut queue = bevy::ecs::world::CommandQueue::default();
-                let mut commands = Commands::new(&mut queue, world);
-                let built =
-                    spawn_route_by_index(&mut commands, &mut meshes, &mut materials, 0, Vec3::ZERO);
-                queue.apply(world);
-                built
+        let built = world
+            .resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+                world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
+                    let mut queue = bevy::ecs::world::CommandQueue::default();
+                    let mut commands = Commands::new(&mut queue, world);
+                    let built = spawn_route_by_index(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        0,
+                        Vec3::ZERO,
+                    );
+                    queue.apply(world);
+                    built
+                })
             })
-        })
-        .expect("the first route builds");
+            .expect("the first route builds");
 
         assert_eq!(built.id, "route_city_rooftops");
         assert!(built.pieces > 0);

@@ -42,9 +42,14 @@ pub enum RouteProblem {
     /// The route just stops; nothing marks it finished.
     NoDestination,
     /// A chunk inside the route failed its own validation.
-    BadChunk { id: String, problem: ChunkProblem },
+    BadChunk {
+        id: String,
+        problem: ChunkProblem,
+    },
     /// An arrival appears after the opening, which reads as a false start.
-    ArrivalMidRoute { id: String },
+    ArrivalMidRoute {
+        id: String,
+    },
 }
 
 impl RouteProblem {
@@ -278,7 +283,9 @@ mod tests {
             theme: ChunkTheme::Castle,
             chunks: &["castle_gate_arrival", "castle_rampart_traverse"],
         };
-        assert!(no_end.validate(envelope).contains(&RouteProblem::NoDestination));
+        assert!(no_end
+            .validate(envelope)
+            .contains(&RouteProblem::NoDestination));
 
         // A typo in a chunk id is caught by name rather than silently dropped.
         let typo = RouteDef {

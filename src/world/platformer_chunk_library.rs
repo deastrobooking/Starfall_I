@@ -64,8 +64,14 @@ pub fn city_rooftop_arrival() -> ChunkDef {
         pieces: vec![
             floor(13.0, 26.0, 0.0),
             // Parapet rails read the edges at a glance on a shared screen.
-            trim(Vec3::new(13.0, 0.6, DEPTH * 0.5 - 0.4), Vec3::new(26.0, 1.2, 0.8)),
-            trim(Vec3::new(13.0, 0.6, -DEPTH * 0.5 + 0.4), Vec3::new(26.0, 1.2, 0.8)),
+            trim(
+                Vec3::new(13.0, 0.6, DEPTH * 0.5 - 0.4),
+                Vec3::new(26.0, 1.2, 0.8),
+            ),
+            trim(
+                Vec3::new(13.0, 0.6, -DEPTH * 0.5 + 0.4),
+                Vec3::new(26.0, 1.2, 0.8),
+            ),
             trim(Vec3::new(1.0, 1.6, 0.0), Vec3::new(1.2, 3.2, 3.0)),
         ],
     }
@@ -141,7 +147,10 @@ pub fn mountain_shelf_arrival() -> ChunkDef {
         pieces: vec![
             floor(14.0, 28.0, 0.0),
             // Rock mass behind the shelf gives the screen a solid backdrop.
-            scenery(Vec3::new(14.0, 6.0, -DEPTH * 0.5 - 3.0), Vec3::new(28.0, 14.0, 8.0)),
+            scenery(
+                Vec3::new(14.0, 6.0, -DEPTH * 0.5 - 3.0),
+                Vec3::new(28.0, 14.0, 8.0),
+            ),
             block(Vec3::new(3.0, 2.0, 4.0), Vec3::new(4.0, 4.0, 4.0)),
         ],
     }
@@ -161,7 +170,10 @@ pub fn mountain_ledge_traverse() -> ChunkDef {
             floor(24.0, 12.0, 0.0),
             floor(44.0, 10.0, 0.0),
             floor(53.0, 8.0, 0.0),
-            scenery(Vec3::new(28.0, 8.0, -DEPTH * 0.5 - 2.0), Vec3::new(56.0, 18.0, 6.0)),
+            scenery(
+                Vec3::new(28.0, 8.0, -DEPTH * 0.5 - 2.0),
+                Vec3::new(56.0, 18.0, 6.0),
+            ),
         ],
     }
 }
@@ -181,7 +193,10 @@ pub fn mountain_switchback_ascent() -> ChunkDef {
             floor(30.0, 12.0, 8.0),
             floor(36.0, 12.0, 12.0),
             floor(40.0, 12.0, 16.0),
-            scenery(Vec3::new(20.0, 10.0, -DEPTH * 0.5 - 3.0), Vec3::new(40.0, 26.0, 8.0)),
+            scenery(
+                Vec3::new(20.0, 10.0, -DEPTH * 0.5 - 3.0),
+                Vec3::new(40.0, 26.0, 8.0),
+            ),
         ],
     }
 }
@@ -199,7 +214,10 @@ pub fn mountain_spire_crossing() -> ChunkDef {
             floor(7.0, 14.0, 0.0),
             floor(57.0, 14.0, 0.0),
             // A long span the party crosses on a carried platform.
-            prefab(PlatformerPrefabKind::MovingPlatform, Vec3::new(32.0, 0.5, 0.0)),
+            prefab(
+                PlatformerPrefabKind::MovingPlatform,
+                Vec3::new(32.0, 0.5, 0.0),
+            ),
             scenery(Vec3::new(7.0, -8.0, 0.0), Vec3::new(10.0, 16.0, 10.0)),
             scenery(Vec3::new(57.0, -8.0, 0.0), Vec3::new(10.0, 16.0, 10.0)),
         ],
@@ -220,8 +238,14 @@ pub fn castle_gate_arrival() -> ChunkDef {
         pieces: vec![
             floor(15.0, 30.0, 0.0),
             // Gate towers frame the entrance and read as an arrival.
-            scenery(Vec3::new(6.0, 7.0, DEPTH * 0.5 - 2.0), Vec3::new(5.0, 16.0, 5.0)),
-            scenery(Vec3::new(6.0, 7.0, -DEPTH * 0.5 + 2.0), Vec3::new(5.0, 16.0, 5.0)),
+            scenery(
+                Vec3::new(6.0, 7.0, DEPTH * 0.5 - 2.0),
+                Vec3::new(5.0, 16.0, 5.0),
+            ),
+            scenery(
+                Vec3::new(6.0, 7.0, -DEPTH * 0.5 + 2.0),
+                Vec3::new(5.0, 16.0, 5.0),
+            ),
             trim(Vec3::new(6.0, 14.0, 0.0), Vec3::new(5.0, 2.0, DEPTH)),
         ],
     }
@@ -240,9 +264,18 @@ pub fn castle_rampart_traverse() -> ChunkDef {
             floor(12.0, 24.0, 0.0),
             floor(40.0, 16.0, 0.0),
             // Crenellations along both sides.
-            trim(Vec3::new(12.0, 1.4, DEPTH * 0.5 - 0.6), Vec3::new(24.0, 2.8, 1.2)),
-            trim(Vec3::new(40.0, 1.4, DEPTH * 0.5 - 0.6), Vec3::new(16.0, 2.8, 1.2)),
-            prefab(PlatformerPrefabKind::RotatingBridge, Vec3::new(30.0, 0.4, 0.0)),
+            trim(
+                Vec3::new(12.0, 1.4, DEPTH * 0.5 - 0.6),
+                Vec3::new(24.0, 2.8, 1.2),
+            ),
+            trim(
+                Vec3::new(40.0, 1.4, DEPTH * 0.5 - 0.6),
+                Vec3::new(16.0, 2.8, 1.2),
+            ),
+            prefab(
+                PlatformerPrefabKind::RotatingBridge,
+                Vec3::new(30.0, 0.4, 0.0),
+            ),
         ],
     }
 }
@@ -270,8 +303,14 @@ pub fn castle_stairwell_ascent() -> ChunkDef {
             floor(38.0, 10.0, 16.0),
             floor(43.0, 14.0, 20.0),
             // Enclosing walls keep the fight readable on a shared screen.
-            scenery(Vec3::new(22.0, 12.0, -DEPTH * 0.5 - 1.5), Vec3::new(44.0, 30.0, 3.0)),
-            scenery(Vec3::new(22.0, 12.0, DEPTH * 0.5 + 1.5), Vec3::new(44.0, 30.0, 3.0)),
+            scenery(
+                Vec3::new(22.0, 12.0, -DEPTH * 0.5 - 1.5),
+                Vec3::new(44.0, 30.0, 3.0),
+            ),
+            scenery(
+                Vec3::new(22.0, 12.0, DEPTH * 0.5 + 1.5),
+                Vec3::new(44.0, 30.0, 3.0),
+            ),
             trim(Vec3::new(26.0, 8.4, 0.0), Vec3::new(14.0, 0.4, DEPTH)),
         ],
     }
@@ -311,8 +350,14 @@ pub fn castle_throne_boss() -> ChunkDef {
             // A raised dais the boss holds; the party has to take the height.
             block(Vec3::new(38.0, 1.5, 0.0), Vec3::new(12.0, 3.0, 12.0)),
             trim(Vec3::new(38.0, 5.0, -4.0), Vec3::new(4.0, 7.0, 1.5)),
-            scenery(Vec3::new(23.0, 9.0, -DEPTH * 0.5 - 1.5), Vec3::new(46.0, 24.0, 3.0)),
-            scenery(Vec3::new(23.0, 9.0, DEPTH * 0.5 + 1.5), Vec3::new(46.0, 24.0, 3.0)),
+            scenery(
+                Vec3::new(23.0, 9.0, -DEPTH * 0.5 - 1.5),
+                Vec3::new(46.0, 24.0, 3.0),
+            ),
+            scenery(
+                Vec3::new(23.0, 9.0, DEPTH * 0.5 + 1.5),
+                Vec3::new(46.0, 24.0, 3.0),
+            ),
         ],
     }
 }
@@ -330,7 +375,10 @@ pub fn cavern_mouth_arrival() -> ChunkDef {
         exit: ChunkSocket::new(24.0, 0.0, 0.0),
         pieces: vec![
             floor(12.0, 24.0, 0.0),
-            scenery(Vec3::new(12.0, 12.0, 0.0), Vec3::new(24.0, 4.0, DEPTH + 6.0)),
+            scenery(
+                Vec3::new(12.0, 12.0, 0.0),
+                Vec3::new(24.0, 4.0, DEPTH + 6.0),
+            ),
             scenery(Vec3::new(4.0, 3.0, 7.0), Vec3::new(3.0, 6.0, 3.0)),
         ],
     }
@@ -352,7 +400,10 @@ pub fn cavern_formation_traverse() -> ChunkDef {
             // Hanging formations above, for silhouette rather than footing.
             trim(Vec3::new(16.0, 11.0, 3.0), Vec3::new(2.0, 6.0, 2.0)),
             trim(Vec3::new(36.0, 11.0, -3.0), Vec3::new(2.0, 6.0, 2.0)),
-            scenery(Vec3::new(26.0, 14.0, 0.0), Vec3::new(52.0, 4.0, DEPTH + 6.0)),
+            scenery(
+                Vec3::new(26.0, 14.0, 0.0),
+                Vec3::new(52.0, 4.0, DEPTH + 6.0),
+            ),
         ],
     }
 }
@@ -372,7 +423,10 @@ pub fn cavern_chimney_ascent() -> ChunkDef {
             floor(20.0, 8.0, 10.0),
             floor(25.0, 10.0, 14.0),
             floor(26.0, 10.0, 18.0),
-            prefab(PlatformerPrefabKind::SpringPlatform, Vec3::new(10.0, 0.6, 0.0)),
+            prefab(
+                PlatformerPrefabKind::SpringPlatform,
+                Vec3::new(10.0, 0.6, 0.0),
+            ),
         ],
     }
 }
@@ -504,7 +558,10 @@ mod tests {
             .iter()
             .find(|chunk| chunk.id == "castle_stairwell_ascent")
             .expect("castle has a stairwell");
-        assert!(stairwell.rise() >= 15.0, "a stairwell should gain real height");
+        assert!(
+            stairwell.rise() >= 15.0,
+            "a stairwell should gain real height"
+        );
         // Its landings are wide enough to stop and fight on.
         let wide_landings = stairwell
             .pieces

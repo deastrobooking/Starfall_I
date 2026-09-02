@@ -276,15 +276,29 @@ impl JumpEnvelope {
 pub enum ChunkProblem {
     NoPieces,
     /// A traverse or arena chunk that changes height.
-    UnexpectedClimb { rise: f32 },
+    UnexpectedClimb {
+        rise: f32,
+    },
     /// A gap wider than a comfortable running jump.
-    GapTooWide { after_x: f32, gap: f32, limit: f32 },
+    GapTooWide {
+        after_x: f32,
+        gap: f32,
+        limit: f32,
+    },
     /// A step up taller than a comfortable jump.
-    StepTooHigh { at_x: f32, step: f32, limit: f32 },
+    StepTooHigh {
+        at_x: f32,
+        step: f32,
+        limit: f32,
+    },
     /// A combat room without space to fight.
-    ArenaTooSmall { width: f32 },
+    ArenaTooSmall {
+        width: f32,
+    },
     /// A socket that does not sit on the chunk's own geometry.
-    SocketAdrift { entry: bool },
+    SocketAdrift {
+        entry: bool,
+    },
 }
 
 impl ChunkProblem {
@@ -294,7 +308,11 @@ impl ChunkProblem {
             ChunkProblem::UnexpectedClimb { rise } => {
                 format!("{rise:.1}m of climb in a chunk whose role must stay level")
             }
-            ChunkProblem::GapTooWide { after_x, gap, limit } => format!(
+            ChunkProblem::GapTooWide {
+                after_x,
+                gap,
+                limit,
+            } => format!(
                 "gap of {gap:.1}m after x={after_x:.1} exceeds the comfortable jump ({limit:.1}m)"
             ),
             ChunkProblem::StepTooHigh { at_x, step, limit } => format!(
@@ -519,7 +537,10 @@ mod tests {
         let envelope = JumpEnvelope::standard();
         // Sanity: a player can clear a few metres up and a useful run across.
         assert!(envelope.rise > 4.0, "rise {}", envelope.rise);
-        assert!(envelope.run > envelope.rise, "a jump goes further than high");
+        assert!(
+            envelope.run > envelope.rise,
+            "a jump goes further than high"
+        );
 
         // Retuning movement retunes validation — the whole point of deriving
         // rather than hardcoding.
@@ -643,7 +664,10 @@ mod tests {
                 },
             ],
         };
-        assert!(!chunk.validate(envelope).is_empty(), "unbridged should fail");
+        assert!(
+            !chunk.validate(envelope).is_empty(),
+            "unbridged should fail"
+        );
 
         // A moving platform spanning the gap makes it a designed crossing.
         chunk.pieces.push(ChunkPiece::Prefab {
@@ -728,6 +752,9 @@ mod tests {
             pieces: Vec::new(),
             ..flat_pad("void", ChunkRole::Traverse, 10.0)
         };
-        assert_eq!(empty.validate(JumpEnvelope::standard()), vec![ChunkProblem::NoPieces]);
+        assert_eq!(
+            empty.validate(JumpEnvelope::standard()),
+            vec![ChunkProblem::NoPieces]
+        );
     }
 }

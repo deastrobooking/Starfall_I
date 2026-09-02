@@ -22,6 +22,7 @@
 
 pub mod arcade_dungeon;
 pub mod co_op_platformer;
+pub mod dialogue_director;
 pub mod discussion;
 pub mod final_war;
 pub mod hacking;

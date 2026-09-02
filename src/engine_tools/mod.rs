@@ -319,6 +319,52 @@ impl PublishedCreatureCatalog {
     }
 }
 
+/// Published Dialogue Forge graphs keyed by stable content id. The runtime
+/// dialogue director resolves conversations through this catalog so gameplay
+/// only ever consumes published (validated) records, never project drafts.
+#[derive(Resource, Default)]
+pub struct PublishedDialogueCatalog {
+    entries: BTreeMap<String, dialogue_records::DialogueGraph>,
+}
+
+impl PublishedDialogueCatalog {
+    pub fn contains(&self, content_id: &str) -> bool {
+        self.entries.contains_key(content_id)
+    }
+
+    pub fn get(&self, content_id: &str) -> Option<&dialogue_records::DialogueGraph> {
+        self.entries.get(content_id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn content_ids(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
+    }
+
+    /// Seed the catalog from baked `assets/published/` content at startup.
+    /// Like the creature catalog, this only fills an empty catalog so a live
+    /// Designer workspace remains the authority.
+    pub fn seed_from_published(
+        &mut self,
+        dialogues: impl IntoIterator<Item = (String, dialogue_records::DialogueGraph)>,
+    ) -> usize {
+        if !self.entries.is_empty() {
+            return 0;
+        }
+        for (content_id, graph) in dialogues {
+            self.entries.insert(content_id, graph);
+        }
+        self.entries.len()
+    }
+}
+
 /// Published deterministic generator inputs keyed by stable Forge content ID.
 /// The catalog contains source data only; generated ECS entities remain
 /// disposable and can be rebuilt without changing authored identity.
@@ -769,6 +815,7 @@ impl Plugin for EngineToolsPlugin {
             .init_resource::<PublishedMaterialCatalog>()
             .init_resource::<PublishedProceduralRecipeCatalog>()
             .init_resource::<PublishedCreatureCatalog>()
+            .init_resource::<PublishedDialogueCatalog>()
             .init_resource::<PublishedVehicleCatalog>()
             .init_resource::<PublishedSpacecraftCatalog>()
             .init_resource::<PublishedContentCatalogEpoch>()
@@ -10852,6 +10899,7 @@ mod tests {
         world.init_resource::<PublishedMaterialCatalog>();
         world.init_resource::<PublishedProceduralRecipeCatalog>();
         world.init_resource::<PublishedCreatureCatalog>();
+        world.init_resource::<PublishedDialogueCatalog>();
         world.init_resource::<PublishedVehicleCatalog>();
         world.init_resource::<PublishedSpacecraftCatalog>();
         world.init_resource::<PublishedContentCatalogEpoch>();

@@ -64,6 +64,9 @@ use crate::world::co_op_platformer::{
     platformer_party_boundary_and_bubble_system, platformer_pressure_gate_system,
     spawn_shared_platformer_stage, PlatformerWorkshopProgress,
 };
+use crate::world::dialogue_director::{
+    dialogue_director_tick_system, DialogueDirector, DialogueFlags, DialogueStateChange,
+};
 use crate::world::discussion::{
     discussion_script, settlement_discussion_id, settlement_guardian_role, DiscussionState,
 };
@@ -397,7 +400,14 @@ impl Plugin for WorldPlugin {
             .init_resource::<WorldRouteRegistry>()
             .init_resource::<RaidRegistry>()
             .init_resource::<DiscussionState>()
+            .init_resource::<DialogueDirector>()
+            .init_resource::<DialogueFlags>()
+            .add_message::<DialogueStateChange>()
             .init_resource::<PlatformerWorkshopProgress>()
+            .add_systems(
+                Update,
+                dialogue_director_tick_system.run_if(in_state(AppState::Playing)),
+            )
             .add_plugins(GrassPlugin)
             .add_plugins(MaterialPlugin::<TerrainMaterial>::default())
             .add_systems(
@@ -21572,7 +21582,9 @@ fn spawn_magic_crystals(
 /// past the last authored route clamp to it, so finishing the set leaves the
 /// party in the final level rather than in nothing.
 fn platformer_route_index(progress: &PlatformerWorkshopProgress) -> usize {
-    let last = crate::world::platformer_routes::ROUTES.len().saturating_sub(1);
+    let last = crate::world::platformer_routes::ROUTES
+        .len()
+        .saturating_sub(1);
     (progress.current_level as usize).min(last)
 }
 
@@ -24157,4 +24169,3 @@ mod tests {
         ));
     }
 }
-

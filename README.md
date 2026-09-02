@@ -1,9 +1,23 @@
 # Starfall I
+## A Bevy Design Engine. 
 
-A Bevy 0.19 action platformer RPG prototype about a family of star-powered heroes defending Earth from the dimension-hopping Scallarians, dragon royalty, and Dr. Bile's mirror humans.
+A Bevy 0.19 Suite of Design Tools for Creating Games. 
 
-The current build keeps the existing open 3D world, chapter director, RPG stats, loot, crafting, armor, companions, and Bevy/Avian physics stack, then rethemes the game around cartoon star beams, energy tools, wall jumps, ledge hanging, and Mario-style platforming layered over Secret of Mana-style combat pacing.
+Current 
 
+3d Open world Action RPG Engine Split Screen 4 player Local.
+
+4 player local shared screen RPG Platformer Engine.
+
+Future: 
+Battle Racing Engines For, Space Flight, Car Racing and Water Racing. 
+
+
+The Template Game is the Sequal to my Game Heavy Water
+
+Heavy Water 2 Is set 50 Years in the future From our Original Game. The AI Robot Invasion. Has been thwarted by the Grandparents of our Lost Heroes. Separated at Birth They Find Each Other Here on Earth in a time of Great Peril defending our home from Ancient Humanoid Reptiles from Earth & Dr. Vile's synthetic humanoids.
+
+The current build keeps the existing open 3D world, chapter director, RPG stats, loot, crafting, armor, companions, and Bevy/Avian physics stack, then rethemes the game around cartoon star beams, energy tools, wall jumps, ledge hanging, and Friendly Kids action RPG easy going  platforming layered over fun jumping climbing and magic, energy and suite uprgades in Game. 
 ## Current Build
 
 Implemented:
