@@ -328,6 +328,11 @@ fn apply_boot_overrides(app: &mut App) {
     if std::env::var_os("STARFALL_AUTOSTART").is_some() {
         app.insert_state(AppState::Playing);
     }
+    // Boot straight into a shared-screen platformer route for level iteration.
+    if std::env::var_os("STARFALL_PLATFORMER").is_some() {
+        app.insert_state(AppState::Playing);
+        *app.world_mut().resource_mut::<PlayExperience>() = PlayExperience::SharedPlatformer;
+    }
     // Boot straight into the Character Studio for design-tool iteration.
     if std::env::var_os("STARFALL_STUDIO").is_some() {
         app.insert_state(AppState::CharacterStudio);

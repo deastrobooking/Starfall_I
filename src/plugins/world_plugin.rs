@@ -3991,7 +3991,12 @@ fn generate_city(
     mut water_mats: ResMut<Assets<WaterMaterial>>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
     asset_server: Res<AssetServer>,
-    session: (Res<PlaySessionTransition>, Res<PlayExperience>),
+    // Grouped: Bevy caps a system at 16 parameters.
+    session: (
+        Res<PlaySessionTransition>,
+        Res<PlayExperience>,
+        Res<PlatformerWorkshopProgress>,
+    ),
     settings: Res<GameSettings>,
     current: Res<CurrentChapter>,
     economy: Res<SettlementEconomy>,
@@ -4004,7 +4009,36 @@ fn generate_city(
     }
 
     if *session.1 == PlayExperience::SharedPlatformer {
-        spawn_shared_platformer_stage(&mut commands, &mut meshes, &mut mats);
+        // Chunk-composed routes are the authored levels; the hand-built
+        // beginner course remains the fallback so a route that fails
+        // validation never leaves the party in an empty world.
+        let route_index = platformer_route_index(&session.2);
+        match crate::world::platformer_route_spawn::spawn_route_by_index(
+            &mut commands,
+            &mut meshes,
+            &mut mats,
+            route_index,
+            crate::world::co_op_platformer::platformer_spawn(0) - Vec3::Y * 1.0,
+        ) {
+            Ok(built) => {
+                // The session contract is "exactly one stage root", whichever
+                // builder produced the level, so route-built levels register
+                // one too and teardown/queries keep working unchanged.
+                commands.spawn((
+                    Name::new(built.label),
+                    crate::world::co_op_platformer::PlatformerStageRoot,
+                    WorldGeometry,
+                ));
+                let summary = crate::world::platformer_routes::route_by_id(built.id)
+                    .map(|route| route.summary())
+                    .unwrap_or_else(|| built.label.to_string());
+                info!("shared-screen level ready: {summary} — {}", built.brief);
+            }
+            Err(error) => {
+                warn!("route {route_index} unavailable ({error}); using the starter course");
+                spawn_shared_platformer_stage(&mut commands, &mut meshes, &mut mats);
+            }
+        }
         return;
     }
 
@@ -21531,6 +21565,17 @@ fn spawn_magic_crystals(
     }
 }
 
+/// Which authored route the party's progression has reached.
+///
+/// Progression is deliberately simple for the shared-screen format: levels are
+/// an ordered list and the party's furthest checkpoint selects one. Indices
+/// past the last authored route clamp to it, so finishing the set leaves the
+/// party in the final level rather than in nothing.
+fn platformer_route_index(progress: &PlatformerWorkshopProgress) -> usize {
+    let last = crate::world::platformer_routes::ROUTES.len().saturating_sub(1);
+    (progress.current_level as usize).min(last)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -24112,3 +24157,4 @@ mod tests {
         ));
     }
 }
+
