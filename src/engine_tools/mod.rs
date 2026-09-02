@@ -382,6 +382,10 @@ impl PublishedProceduralRecipeCatalog {
         self.entries.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     pub fn material_id(&self, recipe_id: &str, slot: &str) -> Option<&str> {
         self.entries
             .get(recipe_id)?

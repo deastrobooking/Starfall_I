@@ -2,7 +2,7 @@
 //!
 //! Sliders/presets/randomize edit this struct; nothing else mutates entities.
 //! The spec is serialized (JSON) for save/load, and the generator pipeline
-//! (`generators.rs`) turns it into a [`super::patch::CharacterPatch`] each time
+//! (`generators.rs`) turns it into a [`super::generators::CharacterPatch`] each time
 //! it changes. Morph fields are normalized `0.0..=1.0` with `0.5` = neutral.
 
 use serde::{Deserialize, Serialize};

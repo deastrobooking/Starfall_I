@@ -7,6 +7,8 @@ for the map.
 
 | Guide | Use it when you… |
 |---|---|
+| [building-with-starfall.md](building-with-starfall.md) | consume the current library boundary or plan a custom game composition |
+| [creating-a-module.md](creating-a-module.md) | add a removable gameplay, tool, UI, animation, shader, or world capability |
 | [verification.md](verification.md) | are about to land ANY change — gates, debug keys, env flags, smoke runs |
 | [designer-workflow.md](designer-workflow.md) | author content in the Designer edition and ship it into a consumer build |
 | [fixed-tick-motor.md](fixed-tick-motor.md) | touch player movement, input, or add a simulation system |

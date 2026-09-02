@@ -1,8 +1,9 @@
 #![allow(dead_code)] // Design/roadmap scaffolding not yet consumed by systems; narrow per-item as features land.
 /// 3-D turtle graphics interpreter for L-system strings.
 ///
-/// Symbol table
-/// ─────────────────────────────────────────────────────
+/// Symbol table:
+///
+/// ```text
 ///  F A B C   draw a branch segment and move forward
 ///  f          move forward (no segment drawn)
 ///  +          yaw  left   (+angle around local Up)
@@ -16,6 +17,7 @@
 ///  ]          pop state   (exits branch; places leaf cluster at tip)
 ///  L          place leaf cluster at current position
 ///  !          decrement radius by `radius_scale` factor
+/// ```
 ///
 /// All other characters are silently ignored (used as grammar variables).
 use bevy::math::{Quat, Vec3};

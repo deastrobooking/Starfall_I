@@ -14,7 +14,7 @@ movement, and weapon audit remains in `docs/archive/game_review_2026-07.md`.
 >
 > **North star:** *A low-latency, 4-player-first character-action engine on Bevy.*
 > Bevy owns ECS/render/assets/scheduling/windowing. Our engine layer owns the
-> parts that make the game feel insane: movement, combat, camera, hitstop,
+> parts that make games feel responsive: movement, combat, camera, hitstop,
 > determinism, controller latency, and ability logic.
 
 ## Game intent fit
@@ -35,14 +35,14 @@ promise first:
 - **RPG/world systems support the action.** Settlements, raids, pets, chapter
   select, hacking, and save-backed world state are there to create reasons to
   move and fight, not to turn EC# into a detached strategy engine.
-- **Extract only after Starfall proves the need.** The reusable "20 games"
-  engine is a payoff of making Starfall feel excellent first.
+- **Extract through real consumers.** Heavy Water proves full-stack behavior;
+  focused examples prove that each extracted contract is independently usable.
 
 ## Guiding principles
 
-1. **Substrate-first, then feel, then content/extraction.** Make the loop
-   deterministic and measured before tuning feel; tune feel before extracting
-   reusable crates. *"The engine is the controller."*
+1. **Substrate and contracts before crate multiplication.** Establish the
+   public library, plugin ownership, tests, and dependency direction first;
+   extract each proven seam without waiting for every gameplay milestone.
 2. **Non-destructive.** The existing motor, camera, state machines, and content
    stay. We slide a deterministic, profiled, frame-data substrate *underneath*
    them — migrations, not rewrites.
@@ -52,8 +52,9 @@ promise first:
 4. **Measure before optimizing.** Profiling lands first (EC0). Assembly/SIMD are
    the last 1%, only where the profiler proves a hot loop (likely
    particles/projectiles/crowds — never the 4 player motors).
-5. **Extract from a proven game, never speculate.** The workspace crate split
-   (EC7) happens only after the core is real and used in 2+ contexts.
+5. **Extract from a proven game, never speculate.** Heavy Water is the primary
+   consumer; every reusable seam also needs a focused example or test consumer
+   before it becomes a separate crate.
 
 ## Engine version policy
 
@@ -307,15 +308,18 @@ their character in split/shared transitions.
   desync detection. On-ramp to future online rollback (not online yet).
 **Acceptance:** record + replay a session deterministically; replay matches live.
 
-### EC7 — Engine extraction (the 20-games play, LAST)
+### EC7 — Incremental framework extraction (active alongside proven features)
 **Goal:** Reusable engine for future games.
-- Convert to a Cargo workspace; extract proven layers: `forge_geometry`,
-  `forge_assembly` (socket builder), `forge_render` (toon/wind/cloth shaders),
-  `forge_motor`, `forge_combat`, `forge_play` (4-player rig).
-- Data-drive content (parts/recipes/heroes/worlds as RON assets).
-- Prove it by standing up game #2 as a mostly content-only crate.
-**Acceptance:** Starfall I compiles against the engine crates; game #2 is data +
-thin glue.
+- Keep the public library and thin native launcher as the first seam.
+- Define feature/plugin contracts before moving files into workspace crates.
+- Extract neutral schema, core/runtime services, graph kernel, gameplay kits,
+  Forge, and Heavy Water only when their imports point in one direction.
+- Prove each capability with Heavy Water plus a focused independent consumer.
+- Keep authored content data-driven and publish through versioned runtime
+  bundles rather than editor-owned records.
+**Acceptance:** Heavy Water compiles solely against public framework contracts;
+an independent example selects a strict subset; removing a game-mode module
+does not break unrelated modes.
 
 ---
 
@@ -323,7 +327,7 @@ thin glue.
 - ❌ Hand-written assembly / SIMD (wait for EC0 profiler evidence).
 - ❌ Ungated engine bumps on main (current-Bevy tracking happens on a branch and
   lands only after compile/test/smoke validation).
-- ❌ Workspace split before EC7 (premature; boundaries unproven).
+- ❌ Workspace crate multiplication before a public contract and consumer test.
 - ❌ `bevy_silk` cloth (cape is an EC4 vertex-shader job reusing `grass.wgsl`).
 - ❌ Rollback netcode now (EC6 deterministic logs first).
 

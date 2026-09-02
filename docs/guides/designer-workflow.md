@@ -15,7 +15,8 @@ TEST (where supported)     — Creature/Weapon tools can jump into play
    ↓ BACK, tweak, validate again
 PUBLISH TO GAME            — validate everything, bake assets/published/
    ↓
-cargo build --no-default-features   — the consumer Game edition, content included
+cargo build --no-default-features --features heavy-water-demo
+                                    — the demo runtime, content included
 ```
 
 ## Projects
@@ -172,7 +173,7 @@ content is simply the base game.
 
 ```
 cargo test                                        # both content drift guards run here
-cargo build --no-default-features                 # the consumer build
+cargo build --no-default-features --features heavy-water-demo  # demo runtime
 STARFALL_AUTOSTART=1 ./target/debug/starfall-i    # boot straight into play
 ```
 

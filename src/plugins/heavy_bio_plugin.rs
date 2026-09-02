@@ -4,7 +4,7 @@
 //! ECS entities or Starfall's inventory. This module supplies that seam while
 //! preserving two ownership rules:
 //!
-//! - [`HeavyWaterProgress`](crate::world::heavy_water::HeavyWaterProgress) owns
+//! - [`crate::world::heavy_water::HeavyWaterProgress`] owns
 //!   durable Bio records, keyed by local player slot rather than ECS entity ID.
 //! - [`Inventory`] remains the item authority. Bio operations apply atomic
 //!   deltas to the current component; no inventory snapshot is mirrored into

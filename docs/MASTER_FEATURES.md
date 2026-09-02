@@ -1,14 +1,24 @@
-# Starfall I — Master Feature Documentation
+# Heavy Water Demo Game — Master Feature Documentation
 
-This is the single game-facing feature catalog for Starfall I. It consolidates the content that previously lived across milestone notes, roadmap documents, gameplay reviews, and feature summaries into one authoritative reference. The goal is clarity: a project-wide view of what exists, what is stable, what is still in progress, and where the next work should land.
+This is the authoritative game-facing feature catalog for Starfall's Heavy Water
+Demo Game. It records the complete playable showcase: what exists, what is
+stable, what remains in progress, and which systems currently prove framework
+capabilities at production-like scale.
 
-This document is intentionally feature-first. It is not the build guide, engine roadmap, or architecture map. For implementation details, see [DEVELOPMENT.md](DEVELOPMENT.md). For the next project plan, see [PROJECT_PLAN.md](PROJECT_PLAN.md). For historical milestone context, use the materials in [archive/](archive/README.md).
+This document is intentionally demo-feature-first. Reusable ownership and graph
+contracts live in [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md), the
+target filesystem in [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md), implementation
+rules in [DEVELOPMENT.md](DEVELOPMENT.md), and active migration order in
+[PROJECT_PLAN.md](PROJECT_PLAN.md).
 
 ---
 
 ## 1. Product identity
 
-Starfall I is a cartoon action-platformer RPG built around a family of star-powered heroes defending Earth from supernatural and dimensional threats. The current product direction combines:
+Heavy Water is the complete native demo, forkable learning project, and
+first-party consumer of Starfall Engine. As a game, it is a cartoon
+action-platformer RPG built around a family of star-powered heroes defending
+Earth from supernatural and dimensional threats. It combines:
 
 - 1–4 local co-op play
 - exploration across a large 3D world
@@ -19,7 +29,11 @@ Starfall I is a cartoon action-platformer RPG built around a family of star-powe
 - creator-facing systems for character authoring and content generation
 - a strong world-building layer with settlements, raids, robot pets, and strategic infrastructure
 
-The project currently sits between a playable prototype and a more polished production-scale game. Core systems are already in place, but several feature domains still need better integration, validation, and content polish.
+The demo currently sits between a playable prototype and a more polished
+production-scale game. Core systems are already in place, but several feature
+domains still need better integration, validation, content polish, and clean
+module extraction. A feature listed here is not automatically a reusable engine
+API; reusable status requires a public contract and an independent consumer.
 
 ---
 

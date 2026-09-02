@@ -2,7 +2,7 @@
 //!
 //! Vehicle designs inherit the same compare-and-save revision contract,
 //! recovery policy, atomic source writes, and draft/published hashes as other
-//! Forge content. Runtime code consumes baked [`VehicleSpec`] values instead
+//! Forge content. Runtime code consumes baked [`crate::vehicle_forge::VehicleSpec`] values instead
 //! of opening a writable project store.
 
 use super::persistence::{

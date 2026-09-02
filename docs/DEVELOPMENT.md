@@ -1,8 +1,10 @@
-# Starfall I — Developer Documentation
+# Starfall Engine and Heavy Water — Developer Documentation
 
-Everything needed to build, navigate, change, and verify the codebase. For
-*what the game does*, see [MASTER_FEATURES.md](MASTER_FEATURES.md). The older
-[FEATURES.md](FEATURES.md) is retained as a historical reference only.
+Everything needed to build, navigate, change, and verify the current
+all-in-one codebase. Framework ownership is defined in
+[FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md); the repeatable target
+layout is [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md); Heavy Water gameplay is
+cataloged in [MASTER_FEATURES.md](MASTER_FEATURES.md).
 
 ## Contents
 
@@ -67,17 +69,21 @@ grep -ci panic /tmp/smoke.log     # expect 0
 
 ## Repository layout
 
-Source is grouped by **domain**, and each folder's `mod.rs` states what belongs
-in it. When adding a file, put it where its *reason to change* lives.
+Source is currently grouped by **domain**. This is a transitional single-package
+layout: use the ownership rules below for new code, and use
+[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for the target workspace rather
+than treating today's folders as the final framework API.
 
 ```
 src/
-  main.rs        App bootstrap: plugin registration and boot overrides only
+  main.rs        Thin native launcher only
+  lib.rs         Public framework modules, application factories, small prelude
+  app.rs         Current all-in-one app composition and Heavy Water smoke tests
 
-  commands.rs    ┐ Cross-cutting vocabulary every layer speaks. These stay at
-  components.rs  │ the root deliberately — they are not clutter, they are the
-  events.rs      │ shared types that would otherwise create circular folder
-  resources.rs   ┘ dependencies.
+  commands.rs    ┐ Current cross-cutting vocabulary. As feature modules are
+  components/    │ extracted, types move to their owning schema/kit/demo module
+  events.rs      │ rather than growing these roots indefinitely.
+  resources.rs   ┘
 
   engine/        How the game RUNS, never what it is about. Fixed-tick loop and
                  GameSet ordering, Avian shim, per-player input latch, render
@@ -99,22 +105,28 @@ src/
   world/         Content rules: missions, raids, final war, settlement economy,
                  shop transactions, robot pets, hacking, dialogue.
 
-  plugins/       Bevy plugins — the systems that drive everything above. One
-                 plugin per feature area (player, weapon, enemy, world, ui, …).
+  plugins/       Current Bevy systems. New modules keep plugin composition with
+                 the owning feature instead of treating this as a global bin.
 
-  chapters/      The 14 chapter scripts and biome palettes.
-  character_studio/, engine_tools/, robots/, lsystem/
-                 In-game creation tools and their shared services.
+  chapters/      Heavy Water's 14 chapter scripts and biome palettes.
+  character_studio/, engine_tools/
+                 Current native Forge tools and shared editor services.
+  robots/, lsystem/
+                 Current reusable/gameplay candidates pending ownership review.
                  `engine_tools::platformer_prefabs` owns the traversal
                  palette's recipe and generated-mesh source.
 ```
 
-Two rules keep this honest:
+Current rules and target direction:
 
 1. **`plugins/` holds systems; the domain folders hold rules and data.** A
    plugin reads `combat::data`; it does not invent its own damage math.
 2. **Dependencies point inward.** `world/` may use `combat/` and `engine/`;
    `engine/` must not know about either.
+3. **Demo content points to framework contracts.** Engine and reusable kits must
+   never import Heavy Water chapters, names, locations, or campaign rules.
+4. **Graphs author; compiled records run.** Never persist live ECS entities,
+   asset handles, editor selection, or preview-world state.
 
 ## Architectural rules
 
@@ -144,16 +156,19 @@ shape or display name. `PlatformerPrefabKind::behavior()` is the stable intent
 boundary. Runtime adapters consume that intent; project files keep stable
 prefab identities and never serialize Bevy entities or asset handles.
 
-## Editions
+## Product builds
 
-One codebase produces two products (see [PROJECT_PLAN.md](PROJECT_PLAN.md)):
-the default build is the **Designer** edition; `--no-default-features` is the
-consumer **Game** edition. The `designer` cargo feature gates every authoring
-entry point — the Project Hub menu button, the
-Creature/Weapon/Vehicle/Spaceship Forge plugins, the live-editor toggle (Tab /
-Select+Start), and designer env hooks. When you add a tool, gate its entry point
-the same way; when you add gameplay, never reference designer-gated modules
-from ungated code.
+The default build is the native all-in-one Starfall application: Forge plus the
+Heavy Water demo. `--no-default-features` builds the first minimal framework
+surface (the neutral graph kernel). Add `--features heavy-water-demo` to build
+the complete game runtime without Forge. This is a transitional three-profile
+matrix, not the final capability taxonomy.
+
+The target adds capability features and plugin groups for engine core,
+multiplayer, character action, platformer, open world, racing, UI, audio, and
+Forge. Until those gates land, do not claim that dependencies or modules are
+selectively compiled. A tool remains gated by `designer`; ungated runtime code
+must not import a designer-gated module.
 
 ## The simulation frame
 
@@ -229,9 +244,10 @@ migration path rather than invalidating existing profiles.
 
 ## Verification
 
-Both editions must stay green: run checks with default features (Designer) and
-with `--no-default-features` (Game). A change that only compiles as Designer
-is a broken consumer build.
+All current profiles must stay green: default features (Designer + demo),
+`--no-default-features` (minimal framework), and `--no-default-features
+--features heavy-water-demo` (demo runtime). A change that only compiles in the
+all-in-one application is a broken framework boundary.
 
 In rough order of cost:
 

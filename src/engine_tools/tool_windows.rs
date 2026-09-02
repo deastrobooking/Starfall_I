@@ -10,7 +10,7 @@
 //!
 //! The framework is screen-agnostic: the Starfall Forge level workspace and
 //! the Creature/Weapon Forges all build their panels through
-//! [`spawn_tool_window`], and any future creator screen can join by spawning
+//! [`crate::engine_tools::tool_windows::spawn_tool_window`], and any future creator screen can join by spawning
 //! windows under its own UI root.
 
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};

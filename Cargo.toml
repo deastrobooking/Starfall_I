@@ -2,11 +2,31 @@
 name = "starfall-i"
 version = "0.2.0"
 edition = "2021"
-description = "Starfall I - cartoon star-beam platformer RPG (Bevy Engine)"
+description = "Starfall Engine, Starfall Forge, and the native Heavy Water demo game"
+readme = "README.md"
+# The framework API and package layout are still being stabilized. Keep crates.io
+# publishing disabled until licensing, package contents, and semver guarantees
+# are explicitly documented.
+publish = false
+
+[lib]
+name = "starfall_i"
+path = "src/lib.rs"
 
 [[bin]]
 name = "starfall-i"
 path = "src/main.rs"
+required-features = ["heavy-water-demo"]
+
+[[example]]
+name = "hero_gallery"
+path = "examples/hero_gallery.rs"
+required-features = ["heavy-water-demo"]
+
+[[example]]
+name = "modular_character"
+path = "examples/modular_character.rs"
+required-features = ["heavy-water-demo"]
 
 [dependencies]
 bevy = { version = "0.19.1", features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings", "bevy_feathers"] }
@@ -28,11 +48,12 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 objc2 = "0.6.4"
 
 [features]
-# The edition boundary (see docs/PROJECT_PLAN.md). Default builds are the
-# Designer edition; `cargo build --no-default-features` produces the consumer
-# Game edition with every authoring entry point compiled out.
+# The default native application includes Forge and the Heavy Water demo.
+# `--no-default-features` is the minimal framework library; select
+# `heavy-water-demo` explicitly for the complete game without Forge.
 default = ["designer"]
-designer = []
+heavy-water-demo = []
+designer = ["heavy-water-demo"]
 # Use dynamic linking for faster incremental dev builds:  cargo run --features dynamic
 dynamic = ["bevy/dynamic_linking"]
 # EC0: profile with Tracy:  cargo run --release --features tracy  (then open the Tracy client)

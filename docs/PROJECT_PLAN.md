@@ -1,28 +1,74 @@
-# Starfall I — Project Plan
+# Starfall Engine, Forge, and Heavy Water — Project Plan
 
-This project is built around two connected editions of the same codebase:
+Starfall is one native product family with three clear ownership surfaces:
 
-| Edition | Audience | Scope |
+| Surface | Audience | Scope |
 |---|---|---|
-| Game | Players | Campaign, combat, traversal, co-op, save flow, and player-facing creation tools such as character design and garage-style content. |
-| Designer | Creators | Everything in the Game plus the authoring layer: Project Hub, Forge tools, live editing, published content pipelines, and versioned design records. |
+| Engine | Developers and technical creators | Reusable runtime services, gameplay kits, schemas, plugin composition, and native extension contracts. |
+| Forge / Studio | Artists and creators | Project Hub, graph and object tools, live preview, validation, publishing, and eventually integrated code workflows. |
+| Heavy Water Demo Game | Players and framework learners | Complete campaign plus open-world, platformer, racer, RPG, co-op, and creator-feature examples. |
 
-The product boundary is intentionally simple: the Game is the consumer subset, and the Designer edition adds creation and authoring tools without creating a second product tree. The repository continues to use a single cargo workspace and a single engine stack, with the `designer` feature gating tool entry points.
+The existing `designer` Cargo feature remains a transitional build boundary.
+The target framework lets games select capability features and plugin groups;
+Heavy Water is the first-party consumer and the all-in-one application includes
+it by default. Focused templates come after the module contract is proven by
+the complete demo.
 
 ## Current state
 
-The project is strong enough to be called a real prototype-to-production game, but it still contains areas where scope, ownership, and architecture are wider than the current team structure. The game already has meaningful movement, combat, world exploration, and co-op foundations; the next work should reduce risk instead of simply adding more feature surface area.
+The project is already a substantial native engine/game/tool application, but
+its packaging still reflects one binary game: feature dependencies are broad,
+runtime code crosses editor boundaries, and several world/UI/tool plugins are
+monolithic. A public library facade and thin native launcher now establish the
+first framework seam. The next work makes that seam selective, repeatable, and
+usable by a second small consumer before physical crate extraction accelerates.
 
-The active feature inventory lives in [MASTER_FEATURES.md](MASTER_FEATURES.md). The active engine and editor strategy lives in [engine_roadmap.md](engine_roadmap.md) and [editor_roadmap.md](editor_roadmap.md). The historical milestone material remains in [archive/](archive/README.md) for reference only.
+The architecture authority is [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md),
+the filesystem contract is [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md), and the
+Heavy Water inventory is [MASTER_FEATURES.md](MASTER_FEATURES.md). Engine and
+Forge implementation tracks remain in [engine_roadmap.md](engine_roadmap.md) and
+[editor_roadmap.md](editor_roadmap.md).
 
 ## Product strategy
 
-1. Keep the Game edition compact and stable.
-2. Keep the Designer edition authoritative for authored content and validation.
-3. Treat the Game and Designer editions as one product family, not two divergent codebases.
-4. Make the next milestone work about clarity and integration, not about adding every remaining idea.
+1. Make Heavy Water use the same public contracts available to another game.
+2. Keep the native all-in-one Create/Learn/Play experience first class.
+3. Let developers compile and activate only the capabilities they need.
+4. Make graphs excellent authoring formats while retaining unlimited native
+   Rust, Bevy, WGSL, animation, UI, and tool extensions.
+5. Standardize project/module files before automating creation and upgrades.
+6. Extract crates from proven dependency seams rather than directory aesthetics.
 
 ## Next workstreams
+
+### 0. Framework and module foundation
+
+Priority: establish the reusable product contract before adding more global
+feature surface.
+
+Work:
+- keep `src/main.rs` a thin launcher and move complete application composition
+  through the public library boundary
+- define explicit Core, Runtime, Gameplay Kit, Forge, Heavy Water Shared, Open
+  World, Platformer, Racer, RPG, Campaign, and Presentation plugin ownership
+- add capability Cargo features with representative minimal consumer builds
+- introduce a neutral schema/runtime catalog boundary before moving Forge code
+- establish one typed graph kernel with domain-specific object, behavior,
+  animation, UI, shader, world/city, and narrative graph languages
+- define native registration contracts for nodes, inspectors, widgets,
+  importers, validators, shaders, animation processors, and publish steps
+- split Heavy Water by removable game-mode modules and prove the public API with
+  one focused external example
+- add validated project/module manifests only when parser, migration, and
+  round-trip tests land with them
+
+Deliverables:
+- public application/library seam with behavior parity
+- documented and tested dependency direction
+- first selectable capability bundle and consumer example
+- first compiled graph vertical slice from Forge source to runtime behavior
+- Heavy Water Platformer extracted as the initial game-mode module
+- documentation and package checks in CI
 
 ### 1. Architecture and ownership cleanup
 

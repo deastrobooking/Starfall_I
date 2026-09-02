@@ -6,10 +6,10 @@
 //! *double-count* them (frame with several ticks).
 //!
 //! This module fixes that with a latch/consume buffer per player:
-//! * [`latch_player_input`] runs once per render frame (before the fixed loop)
+//! * `latch_player_input` runs once per render frame (before the fixed loop)
 //!   and OR-accumulates edge events + sums look-delta into a pending buffer,
 //!   while snapshotting held/analog state.
-//! * [`consume_fixed_input`] runs once per fixed tick, snapshots the pending
+//! * `consume_fixed_input` runs once per fixed tick, snapshots the pending
 //!   buffer into [`FixedInput`] for that tick, and clears the edge accumulator.
 //!
 //! EC1a introduced the additive buffer. EC1b now consumes [`FixedInput`] in the

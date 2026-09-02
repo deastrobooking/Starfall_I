@@ -1,8 +1,8 @@
 //! Bridge between the Weapon Forge and the versioned project contract.
 //!
 //! Mirrors `creature_records`: a designed weapon is a
-//! [`ContentCategory::Weapon`] record whose payload carries the complete
-//! [`WeaponSpec`] as a generator field, so weapon authoring inherits the same
+//! `ContentCategory::Weapon` record whose payload carries the complete
+//! [`crate::combat::weapon_forge::WeaponSpec`] as a generator field, so weapon authoring inherits the same
 //! atomic writes, recovery snapshots, draft/published hashes, and validation
 //! gates as every other content type rather than inventing its own save path.
 

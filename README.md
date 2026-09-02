@@ -1,375 +1,209 @@
-# Starfall I
-## A Bevy Design Engine. 
+# Starfall Engine
 
-A Bevy 0.19 Suite of Design Tools for Creating Games. 
+Starfall is a native Rust and Bevy framework for building modular 3D games with
+local multiplayer, action gameplay, procedural worlds, and in-engine creation
+tools. **Starfall Forge** is the authoring environment, and the complete
+**Heavy Water Demo Game** is the framework's native feature showcase, learning
+project, and forkable all-in-one starting point.
 
-Current 
+The project is both a playable game and an engine under active extraction. The
+existing application already runs the complete demo and creator tools; the
+public library boundary landed first, while fine-grained Cargo features,
+graph-compiled gameplay modules, and separate workspace crates remain active
+framework work. The documentation distinguishes current behavior from target
+architecture rather than presenting roadmap interfaces as shipped APIs.
 
-3d Open world Action RPG Engine Split Screen 4 player Local.
+## What is included
 
-4 player local shared screen RPG Platformer Engine.
+| Surface | Purpose | Current state |
+|---|---|---|
+| Starfall Engine | Bevy/Avian runtime, fixed simulation, input, rendering, reusable gameplay systems | Running in the demo; library facade available |
+| Starfall Forge | Project, character, creature, weapon, vehicle, spaceship, world, and dialogue authoring | Native Designer build |
+| Heavy Water Demo Game | Open-world action RPG, shared platformer, racing/traversal, campaign, and 1–4 player examples | Complete native demo application |
+| Graph framework | Typed object, behavior, animation, UI, shader, world, and narrative graphs | Architecture defined; staged implementation |
+| Templates and IDE | Generated projects, feature scaffolding, code integration, and guided workflows | Planned after module contracts stabilize |
 
-Future: 
-Battle Racing Engines For, Space Flight, Car Racing and Water Racing. 
+The design principle is simple: **limit setup and accidental complexity, not
+creative range**. Artists receive strong defaults and visual workflows;
+programmers retain native Rust, Bevy, and WGSL extension points.
 
+## Run the all-in-one application
 
-The Template Game is the Sequal to my Game Heavy Water
-
-Heavy Water 2 Is set 50 Years in the future From our Original Game. The AI Robot Invasion. Has been thwarted by the Grandparents of our Lost Heroes. Separated at Birth They Find Each Other Here on Earth in a time of Great Peril defending our home from Ancient Humanoid Reptiles from Earth & Dr. Vile's synthetic humanoids.
-
-The current build keeps the existing open 3D world, chapter director, RPG stats, loot, crafting, armor, companions, and Bevy/Avian physics stack, then rethemes the game around cartoon star beams, energy tools, wall jumps, ledge hanging, and Friendly Kids action RPG easy going  platforming layered over fun jumping climbing and magic, energy and suite uprgades in Game. 
-## Current Build
-
-Implemented:
-
-- Vehicle and Spaceship Forge runtime bridge: published cars, trucks, and
-  motorcycles spawn as stable-ID mountable rides using the existing single
-  player motor; boats bind to authored water routes; fighters and bombers use
-  the existing flight controls. Fighter, bomber, destroyer, command-ship, and
-  orbital-base recipes also populate a deterministic strategic fleet at
-  liberated sites, contribute to raid defense, and appear in the F7 command
-  overlay. Craft catalogs load before direct-to-play startup and refresh after
-  same-process publishing; packaged builds support `STARFALL_ASSET_ROOT`.
-- Player-select flow for 1-4 local players, independently switchable first-/third-person split-screen cameras, shared boss-mode camera, per-player HUD panels, per-player save snapshots, keyboard/gamepad input, and character customization.
-- Runtime character-blueprint foundation with serializable body recipes, procedural part/material/socket/rig data, taller Dreamcast-anime sci-fantasy default heroes, in-game body steppers, gameplay-linked body stats, stride-aware animation, and visual foot grounding.
-- Starfall Forge ET5d topology tools: the in-game level workspace provides controller-focused authoring controls, transactional transforms, stable world adapters, atomic project/recovery saves, draft publishing, per-record source files, cross-file hash recovery, and focus-follow scrolling panels. Material records expose six typed shader families, presets, bounded parameters, live previews, publish validation, stable runtime catalogs, and persistent scene-object material bindings. Deterministic Biome/Road/Building/Cave/City recipes provide bounded parameters, stable material slots, road splines, room/zone nodes, portal edges, navigation/collision preflight, and controller-driven validation. Valid recipes compile into a single atomically replaced sandbox root with cached assets; invalid drafts retain the previous valid root and never mutate shipped world geometry. World Kit controls select individual spline points or topology nodes, display stable IDs/coordinates, nudge XYZ with the shared snap setting, and mark the selection in the sandbox viewport. Typed Door/Stair/Tunnel/Portal edge controls mark endpoints, preview the connection, and connect/remove edges through undoable recipe transactions. Red/green/blue viewport handles directly drag selected recipe elements with snapped live sandbox preview and one atomic transaction on release. Road points additionally expose automatic/explicit Hermite tangents with magenta previews, sampled curved deck compilation, and typed Merge/Split/Cross/Loop-Link junction connectors. Building, cave, city, and biome nodes expose typed Doorway, Stair Landing, Encounter, Item, and Portal sockets with stable local transforms, orange facing previews, controller create/select/snap/delete controls, socket-aware connector compilation, and legacy center-endpoint compatibility. Persisted terrain origins and clearances drive controller project-selected/project-all actions against the exact shipped terrain collider; green viewport targets preview landing heights, rooms rest their bottom faces on terrain, road centerlines honor clearance, and every projection remains undoable.
-- Rendering foundation: branchless scene-lit toon/grass plus realistic stylized water with four interacting wave bands, analytic normals, optical-depth color, Fresnel sky reflection, sun glints, scattering, crest/shore foam, and separate ocean/river profiles. A bounded five-material Energy combat palette, player-owned damage/parry Shield pulses, and texture-free Ice/Snow and Lava domain materials use Bevy 0.19 shader contracts. Forge compiles and edits every shader family; F11 reports active cameras, shots, transient VFX, and material totals.
-- Eight-sibling hero roster foundation: Vincenzo, Antonio, Angelo, Joseph, Gabriella, Nova, Aurora, and Fortuna have distinct default looks, signature weapon/special identities, and shared speed/strength/flight/magic power axes.
-- Campaign-shared robot pet foundation: rescued/store-built pet records, robot salvage from defeated enemies, named robot-part materials, save/load persistence, and combination recipes for cars, motorcycles, tanks, boats, submarines, space jets, giant mechs, spaceships, and megaships.
-- Chapter-select tech-upgrade foundation: spend robot salvage on beam, missile, Sprite Turret, armor health, rejuvenation, and mech command ranks; upgrades save/load and already affect weapon damage, turret damage, max health, and paid rejuvenation reserve.
-- Authored level rewards now introduce robot rescue pods and tech caches across the campaign, feeding robot parts, upgrade-route hints, rejuvenation reserve, and small robot-pet power amplification into chapter progression.
-- Open 3D world generation with authored anchors, moving platforms, laser turrets, terrain biomes, foliage, glass/metal/stone-brick city facades, hidden city reward rooms, secret cave systems, and dragon-domain spaces.
-- Loading hardening: the rotating saves are scanned once before the first state transition, chapter travel shows an immediate full-screen loading card, procedural roads/facades/nature share primitive meshes, and fresh grass work is capped at two meshes / 24,000 candidate vertices per frame. On the same M3 Pro optimized-development smoke (`STARFALL_SEED=424242`), the queued world fell from 108,755 meshes and roughly 1.33 GiB resident memory to 9,257 meshes queued in 0.80-0.90 seconds and roughly 548-567 MiB during startup.
-- Everest-range world-map foundation: the imported Everest heightmap now spans a 200 x 200 mile `20_000`-unit range, with smoothed height/slope terrain color layers, snowfields, glacier streams, alpine forests, sci-fantasy outposts, carved mountain path corridors, glowing guide studs, dragon-lair silhouettes, visible fast-travel beacons, and clickable chapter-select map markers for all 14 chapters.
-- Exploration settlement foundation: eight additional cities, villages, harbors, and outposts now appear physically in the range, use terrain-aware grounded/terraced/sky-district layouts with four world-cardinal ramps on every floating mega-city foundation plus mountain-inset gates, show as map markers, expose `WorldAnchor`s for future subquests, and hold saved exploration caches.
-- Settlement builder/economy vertical slice: settlement terminals unlock after cache recovery or site liberation, spend shared resources and robot salvage on farms, factories, spaceports, power plants, research labs, defense outposts, and bridge hubs, save/load build tiers, tick bounded passive outputs, and spawn physical rebuilt modules in the world.
-- Raid counteroffensive slice: liberated Cloudrail City can enter an `UnderAttack` warning, spawn a visible Scallarian UFO marker plus drone swarm, resolve through player combat or static settlement defenses, and save/load raid state. Active RouteBlockade records preserve their soldier wave while placing a terrain-grounded Scallarian siege tank at one per four-unit cadence (indices 0, 4, 8, …).
-- Command strategy first slice: `CommandRegistry` tracks 9 commandable asset kinds (Worker/Scout/FighterDrones, TurretDrone, GroundMech, Boat, FighterJet, Ship, MegaShip) with health/readiness/assignment; assets assigned to a liberated site add to its raid defense score so players can auto-resolve threats with positioned forces; F7 overlay shows asset roster grouped by site; save/load persistent.
-- Tech hacking first slice: small Scallarian drones are hackable with interact, grant the saved `blueprint_scallarian_drone_core`, add a Scout Drone command asset, temporarily link as a friendly follower, and pulse nearby hostile enemies from the owner's fire/melee input.
-- Great Scientist temple subquests now fill the wider map with optional dungeon-like labs and chapter-select map hints that grant full mechanics upgrades: Ancient Flight Core, Solar Sabre Glyph, Nova Missile Matrix, and Aegis Armor Frame.
-- Traversal toy courses with slingshot launch pads, rotating elevators, moving brick jumps, wall-jump shafts, and ramp towers that reward optional exploration.
-- Chapter 1 north-coast ocean route with an island behind the mountain range, dock markers, a visible wake lane, and a boardable boat.
-- Chapter director with 14 scripted chapters, dialogue, spawn waves, full relic puzzles, five-piece relic-fragment sub puzzles, per-chapter secret-cave discoveries, discoverable beacons, bosses, and unlock progression.
-- Shared-screen cave and castle dungeons: all fourteen mountain caves have physical 13.5-meter ancient stone gates with luminous rune crowns, animated collision-backed doors, and world-space interaction; fast travel is an earned convenience, not the only entrance. Mountain caves plus dragon lair and scientist-temple gates switch the full four-player party into a single-camera top-down hack-and-slash/platforming mode. Terrain-safe cave insets and adaptive continuous tunnel floors eliminate floor gaps, mountain wedges, excessive grades, and floating chambers. Each mountain cave supplies a connected Entrance Gallery → Traversal Tunnel → Star Chamber room graph; party-centroid progression moves the shared camera between adjacent room zones without boundary bounce or room skipping. Entering a Star Chamber triggers an encounter-owned wave, lowers its physical seal, and reopens the chamber while awakening its reward only after every owned enemy is defeated. Discovery checkpoints unlock purple `C` fast-travel buttons on the Everest map. Each linked dungeon has a glowing return portal; `E` / D-pad Down returns all active players to safe exterior slots and restores their normal cameras.
-- Castle boss escalation: key dragon/domain bosses escape to airships after their castle defeat, forcing an airship-deck guard fight and rematch.
-- Boss and aerial-threat encounters can link local multiplayer into one full-screen party camera and pull distant players toward the fight before restoring split-screen afterward.
-- Platforming movement: acceleration, sprinting, analog magnitude, jump buffering, variable jump release, apex gravity, coyote time, wall slides, multi-charge wall jumps, ledge hangs/climb-ups, free climbing, dodges, momentum roll, heavy-input stomp bounce, downhill acceleration, parries, jetpack modes, air dash, slam, hoverboard boost, and grapple zip/swing drive.
-- Fixed-tick character motor (EC1, default ON): traversal/grapple/motor simulation runs at 64 Hz in `FixedUpdate` with a per-player latched input buffer (button edges fire exactly once per tick at any frame rate) and overstep-interpolated camera follow. Legacy per-frame motor stays one toggle away (`F10` or `STARFALL_LEGACY_MOTOR=1`).
-- Per-player Star Loadout: press `I` or LB+Select during play for a real button-based Weapons/Armor/Items/Specials/Rides menu. Controller navigation is owner-scoped and captures only that player's gameplay input. Primary/special selection, armor infusion, quick item, complete inventory stacks, and traversal ride persist in `players[]`. The Rocket Hoverboard is a selectable ride with a visible metallic deck, emissive rails, twin thrusters, fast ground carving, airborne steering, jump-held lift, and LB boost flight.
-- Hit-reaction layer (EC2 first slice): bounded hitstop freeze-frames on impacts and kills, enemy flinch with AI/attack suppression, impact hit-flash, death dissolve instead of blink-out, split-screen-aware floating damage numbers, proximity-scaled outgoing camera shake, plus the earlier faction resistances, enemy defense scaling, and drained knockback shoves.
-- Procedural retro SFX bus: every combat/reward beat (fire, slash, hit, parry, kill, hurt, loot, chest, level-up, reload) is synthesized at startup from chip-style recipes — square/saw sweeps, noise bursts, bit-crush — with zero external audio assets, per-sound polyphony cooldowns, deterministic pitch jitter, and the settings SFX volume respected.
-- Player music and action-audio tool: Bevy MP3 decoding powers an independent background Music Deck (`F6`) with previous/next, pause, deterministic shuffle, current-track display, separate music volume, hot rescan, keyboard controls, and D-pad/A navigation once open. Players can copy personal MP3s into `assets/user_music` or point `STARFALL_MUSIC_DIR` at an external folder. A separate `assets/user_sfx/actions.json` registry assigns MP3 one-shots to validated modular action IDs and hot reloads with the same `R` command; unassigned/invalid/missing standard actions keep the procedural arcade effect instead of going silent.
-- Character Studio GLB export: one button serializes the generated character — every part, color, and transform — into a standards-compliant `.glb` (hand-rolled glTF 2.0 writer, zero new dependencies) saved into the versioned preset library; opens in Quick Look, Blender, and Bevy itself. The first brick of the modding pipeline.
-- Deterministic gameplay RNG: one seeded resource with independent combat/loot/world/cosmetic streams replaces scattered thread randomness; every session logs its seed and `STARFALL_SEED=<n>` reproduces it — the foundation for replays, ghosts, and desync debugging.
-- Frame-data melee combat: every combo move is authored in `assets/combat/moves.json` — startup/active/recovery windows, cancel timing, damage, knockback, per-move hitstop — editable without recompiling; attacks now wind up, strike, and chain through cancel windows like a fighting game.
-- Tiered loot: drop chance, quantity, and rolls scale with the kill — rift champions guarantee an energy core plus bonus drops, while scouts stay pocket change.
-- Faction boss variety: dragons fly and breathe fire, Scallarian rift champions blink around the arena summoning portal reinforcements and detonating laser novas, and corrupted-human reactor mechs strafe, barrage, charge-dash into shockwaves, and cycle invulnerable shield windows — three distinct boss brains with three HP phases each.
-- High-speed stunt-road network: fourteen mountain trunks/cross-links form multiple connected racing circuits. Roads query the exact terrain-triangle collider and densely sample thirteen lanes across their complete width. They remain terrain-following by default, climb mountains at a controlled grade, and become supported viaducts only where ridge clearance requires it. Every route end receives a long ground entrance, while every sustained sky-road run receives recurring uphill-only side ramps with protected guardrail merge mouths and its own support columns. Taller outer barriers contain players and vehicles, and collidable center medians separate opposite boost-arrow directions. The southeast range now blends `assets/terrain/RACE.png` into a dedicated Grand Raceway district with two network entrances, a 94-unit-wide closed circuit, embedded boost lanes, four launch ramps, six ordered gates, two rivals, checkpoints/recovery, and two `R` fast-travel points on the chapter map. Motion Boot and Aegis logic upgrades strengthen road-pad impulse and sustain. The wider network also combines vertical loops, strongly banked mega-curves, 28 trunk boost ramps, 18 elevated neon grind lines, automatic Sonic-style approach/transfer springs, settlement rings/spurs, NPC traffic, and guided hoverboard adhesion. Rail grinding is per-player, supports either approach direction, forces the Rocket Hoverboard for stability, and allows jump-off transfers with preserved speed. Every settlement ring is also a three-lap four-gate race course with two hovercraft rivals. Airtime, rail transfers, and stick-driven aerial rotations build a per-player combo that banks on clean landing, animates the board spin, expands the stunt camera/FOV, reports score, and drives owner-mapped controller rumble.
-- Heavy Water Star City continuation: one 56-chord elevated ring circles world origin at radius 280 and deck height 80. Its 32-unit collidable deck carries continuous two-way neon lanes, eight paired boost stations, safety rails, a direction divider, and terrain-founded supports. Four smooth 24-section cardinal ramps climb from driveable ground mouths to protected outer-lane merges, and the complete loop/access network participates in procedural building and prop keepout.
-- Explorable buildings now replace selected solid blocks throughout downtown, industrial, residential, and settlement districts. These use textured exterior/interior materials, open doorways, hollow collision shells, multiple wood floors, smooth ramp-backed stair flights with visible treads, partitioned rooms, sparse furniture, interior lights, and windows. Background buildings remain lightweight for four-player performance.
-- Controller feel now preserves analog movement strength, supports trigger-axis fallback for LT/RT aim/fire, and uses explicit kinematic-controller step/snap tuning for smoother traversal over small terrain lips.
-- RPG combat with unlimited-ammo primary beams and special tools, swept projectile collision, stronger body-centered aim assistance, arm-cannon charge shots, magic-user tracking beams, Star Sabre controller support and animated slash poses, melee combos, armor elements, XP, perks, crafting, rewards, and save/load. Homing Star acquires/reacquires hostile targets, steers with a capped turn rate, leaves an energy trail, and reports SEEK/LOCK per player in the HUD. Authored upgrades now add Tri-Star tracking, a four-child Moon Bubble cluster, the higher-level multi-Homing-Star branch, and a persistent owner-scoped Sprite combat drone that follows, checks line of sight, and fires attributed projectiles. Aiming and firing with the Star Sabre drawn also triggers the owner-scoped Mega Beam Cannon: a cover-clipped 220-unit beam plus twenty deterministic homing explosive seekers on a six-second cooldown.
-- Heavy Water enemy/vehicle continuation: wasteland patrols combine single-shot Scout drones, staged three-bolt Heavy Fighters, and four-laser-spread Siege Gunships. The procedural Scallarian Tank enemy fires real splash shells and appears on exact local terrain in RouteBlockades plus DimensionalAlien encounters in Chapters 4 and 13; its runtime kill grants Tread Unit salvage. Everest spider mechs now fire paired homing splash missiles from a 32-unit stand-off. Robot assembly modes render party-owned procedural ATV, tank, giant-mech, space-fighter, and starship bodies. Sprint triggers a short shared turbo, while Tank mode grants temporary armor and replaces handheld fire with an aim-driven explosive cannon.
-- Heavy Water offline systems foundation: schema-v5 continuation state now carries the 100-slot material economy, all 25 crafting recipes, 19 build blocks, 16 runtime prefab plans, five material vendors, deterministic mining/rewards, atomic Power Jewel sockets, all 133 Bio species, twelve garden plots, personal companion/care/rescue records, exact combat continuity catalogs, the independent ATV/fighter fleet, and the deterministic Bio clock. Runtime bridges keep canonical Starfall inventory/credits authoritative, seed Heavy mining state, tick gardens, apply mounted jewels once in primary/Homing Star damage, and expose typed vehicle spawn/mount/eject/turbo/Ghost Ride commands without double-driving Starfall physics. The owner-aware Workshop includes Crafting, Jewels, Bio Garden, and Market Uplink tabs with atomic inventory/wallet operations.
-- Heavy Water legacy-region foundation: all 11 region identities retain sourced entry anchors, travel gates, return anchors, persistent clears/rescues, regional sky/weather/space profiles, live-map marker projection, destructible prop/mining cooldown state, and configurable offline arena scoring. Typed travel remains staged until a world consumer completes teardown, teleport, and mount in that order, so the optional continuation layer does not replace Starfall's 14-chapter campaign.
-- Heavy Water world-event foundation: the recurring nine-site invasion scheduler, warning/active/resolved lifecycle, strategic rewards, six-NPC/24-line continuity cast, and eleven-section field manual are typed, owner/campaign scoped, and save-backed. They emit advisory encounter/presentation descriptors so Starfall's native raids, combat, dialogue, and UI remain authoritative.
-
-In progress:
-
-- Local multiplayer is playable at the input/camera/player level, and save snapshots, HUD panels, companions, crafting, chests, hidden rewards, enemy loot pickups, camera shake, damage flash, and vehicle buffs are now keyed per player. Chapter scripting uses the party center for encounter placement, while some campaign systems remain intentionally shared.
-- Per-player perks are functional and saved, with clickable chapter-select rows and shared controller focus navigation; four-pad hardware/TV acceptance remains.
-- `WaveInfo` remains as legacy compatibility data while the chapter director owns the main progression loop.
-- Character design is the single playable-character editor, with GLB-inspired base models, modular silhouette presets, armor layers, and saved per-slot loadouts.
-- Menu actions are rendered as clearly named Bevy buttons across the main flow; action-critical controls avoid icon-only font glyphs. The shared focus layer supplies deterministic initial focus, spatial arrows/WASD/D-pad/left-stick navigation with held repeat, mouse-hover synchronization on real pointer movement or clicks, focused/pressed/disabled styling, Enter/Space/controller-South activation, and Escape/controller-East Back routing. Character Studio retains its specialized field navigator.
-- Heavy Water continuation boundaries remain explicit: current vehicle bodies follow the authoritative player/mode and are not independently colliding, world-mountable, damageable, or destructible vehicles. Physical legacy-region/world-prop mounting, the build/companion/full-Dex/live-map panels, and authoritative online play remain unported; online remains a separate secure-server program.
-
-## Cast
-
-Wizard Scientists:
-Giacoma, Giovanni, Gabrio
-
-Hero Brothers:
-Vincenzo, Antonio aka Tony, Angelo, Joseph aka Little Joe
-
-Hero Sisters:
-Gabriella, Nova, Aurora, Fortuna
-
-Dragon Royalty and Domains:
-Collosar, King of the Dragons in Tibet; Tarack, his wife; Spikey, their youngest son; Shread, their oldest son; Pink Flame, their daughter; Ragar, uncle to the king in the Colorado Rockies; Blackskull, uncle to the king in Antarctica.
-
-Rivals and Villains:
-The Scallarians invading Earth from another dimension, Dr. Bile, and the four mirror humans Zark, Crush, Fang, and Sharp.
-
-## Gameplay Direction
-
-- Classic action platforming with tuned acceleration, jump buffering, coyote time, wall slides, chained wall jumps, edge grabs, ledge hanging, and climb-ups.
-- Procedural cartoon characters with reachable idle, walk, run, sprint, jump, fall, combat, flight, wall-slide, climbing, grapple, and hanging poses.
-- RPG combat with light/heavy melee combos, parry, dodge, armor elements, loot, crafting, XP, perks, and chapter progression.
-- Robot pets are the long-term vehicle/mech spine: rescue pets during the campaign or build them from enemy salvage, then combine them into ground, water, air, space, mech, and megaship forms as production systems come online.
-- All human heroes share star-powered speed, strength, flight, and magic, but each sibling starts with a different signature weapon/special profile; rescued robot pets amplify those shared power axes by role.
-- Cartoon star beams and energy weapons instead of guns.
-- Open-world level spaces with puzzle gates, cities, villages, harbors, outposts, moving platforms, rotating elevators, slingshot launch pads, windup laser turrets, hidden city reward rooms, hidden cave systems, Great Scientist temple labs, sprawling dragon lair dungeons, five-piece relic fragments inside moving obstacle courses, encounter waves, and boss fights.
-- Castle bosses now turn into two-stage set pieces: win the castle fight, chase the boss onto a turret-guarded airship deck with moving cover, clear the guards, then defeat them again.
-- Flying drones and large dragon bosses add aerial pressure, fireballs, breath attacks, shockwave hazards, and shared-screen party battle moments.
-- 4-player local multiplayer remains the design target; the current implementation has the core player split plus per-player HUD/save/companions/crafting/chests/vehicle buffs, but still needs per-player support in a few reward and feedback systems.
-
-## Quick Start
+Requirements: a current stable Rust toolchain and the native dependencies
+required by Bevy, Avian, and audio capture.
 
 ```sh
+git clone <your-fork-or-repository-url>
+cd Starfall_I
 cargo run
 ```
 
-For the player-facing Game edition without creator entry points:
+The default **Designer** build includes Forge and Heavy Water. To run the
+complete demo without Forge entry points:
 
 ```sh
-cargo run --no-default-features
+cargo run --no-default-features --features heavy-water-demo
 ```
 
-For faster incremental builds:
+The minimal framework library currently exposes the neutral typed-graph kernel
+without compiling the demo modules or native executable:
+
+```sh
+cargo check --no-default-features
+```
+
+For faster local iteration with Bevy dynamic linking:
 
 ```sh
 cargo run --features dynamic
 ```
 
-## Game Flow
+Useful direct boot modes:
 
-The top-level flow includes the player-facing `MainMenu`, `PlayerSelect`,
-`CharacterDesign`, `CharacterStudio`, `ChapterSelect`, `RobotGarage`, `Playing`,
-`Paused`, `GameOver`, and `Victory` states. The creator path branches from the
-title into `ProjectHub`, which opens `CreatureForge`, `WeaponForge`,
-`VehicleForge`, `SpaceshipForge`, or the Forge level workspace running inside
-`Playing` with protected editor mode enabled.
+```sh
+STARFALL_AUTOSTART=1 cargo run
+STARFALL_PLATFORMER=1 cargo run
+STARFALL_STUDIO=1 cargo run
+STARFALL_EDITOR=1 cargo run
+```
 
-Chapter select is now the 200 x 200 mile Everest Range fast-travel map. It uses `1-9`, `0`, `Q`, `W`, `R`, and `T` for chapters 1-14, and unlocked map markers are clickable. Starting a chapter moves the party to that chapter's in-world heightmap beacon. Press `E` from chapter select for the character editor. Press `Esc` / controller Start during play to pause or resume. The pause menu freezes physics/gameplay, can save, can save-and-return to the title, and has a controls/tips page.
+See [developer documentation](docs/DEVELOPMENT.md) for the complete environment
+and verification reference.
 
-Character design supports GLB-inspired base model buttons, visible prefab export/import, outfit/accent/hair swatches, accessory toggles, and body-shape controls for height, shoulders, chest, arms, legs, hands, feet, head, and mass. The advanced Character Studio is an RPG-maker-style modeling workspace with an expressive 1980s-anime face treatment, nine hairstyles, twelve tops/jackets, eight bottoms, nine shoe/boot styles, coverage-safe clothing layers, and distinct cloth/denim/leather/metal materials. Named seeds include Star Hero, Shadow Raider, Mana Adventurer, Street Runner, and Mecha Robot. Twenty-six body/face morphs include chest shape, face length, eye shape/spacing/tilt/depth, brow angle, nose bridge/tip, chin width, and lip fullness. Parametric almond-eye surfaces, fitted eyelids, cheek planes, restrained lips, and tagged eyes/brows/mouth support a cleaner cartoon-anime read plus runtime blinking and pose-driven expressions. Soft, Heroic, Chibi, and Rival face seeds provide quick starting points without replacing the current body or outfit. Non-destructive Neutral, Joy, Determined, and Surprised previews test the authored face without entering gameplay or altering saved values. Six fantasy-flair choices add star/moon gems, a royal mantle, arcane halo, or mecha wings, while Crystal and Dragon mecha suites extend the original armor silhouette. It also provides clearly labeled workflow sections, draggable morph sliders, precise steppers, reset/undo, named color swatches, model measurements, front/profile/back views, and full-body/face framing. `SAVE VERSION` writes a reusable library preset; `USE IN GAME` assigns the exact advanced recipe to the selected local-player slot and returns to player select with a `STUDIO CUSTOM` label. Studio recipes persist in campaign saves and spawn through the runtime procedural mesh builder. The custom mesh animation bridge drives region-aware idle, walk, run, sprint, jump, fall, shooting, Sabre, hover, glide, flight, and air-dash motion from the same authoritative player pose state as stock heroes.
+## Use the current framework boundary
 
-The studio also includes a guarded external-rig diagnostic backend. It maps the skinned AMP GLB onto Starfall's canonical 17-joint humanoid contract and automatically falls back to the generated model if loading fails. Production Blender assets must add the documented 26 named shape keys before external rigs become the editable default; see the [Character Studio pipeline](docs/guides/character-studio-pipeline.md).
+The repository now has a library target in addition to the native launcher.
+During the workspace transition, a local game or tool can depend on the
+all-in-one framework directly:
 
-The Game Maker toolchain includes a playable GM2 Creature Forge reached from
-Project Hub. Serializable `CreatureSpec` assets wrap the existing robot geometry
-while adding deterministic seeds, robot/monster type, topology, role, faction,
-material response, stable IDs, validation, modifiers, and curated Star Guardian,
-Raider Gunner, Retro Mecha, Crystal Golem, Sky Manta, and Cave Crawler presets.
-The Forge provides a live preview, undo/reset, project-backed saves, versioned
-preset export/load, and controller menu focus. Published creature records enter
-the runtime catalog by content ID and can override dungeon enemy spawners; role
-metadata supplies the combat statline, with safe fallback when a record is not
-published.
+```toml
+[dependencies]
+starfall-i = { path = "../Starfall_I" }
+```
 
-Perk training is also in chapter select. Leveling up grants one perk point; spend points with:
+The complete native application factory is public:
 
-| Key | Perk |
-|---|---|
-| `A` | Family Vitality |
-| `S` | Second Wind |
-| `D` | Star Focus |
-| `F` | Pocket Constellation |
-| `G` | Wall-Dancer Evasion |
-| `H` | Lucky Parry |
+```rust
+fn main() {
+    starfall_i::build_app().run();
+}
+```
 
-Tech upgrades are also in chapter select and spend robot salvage:
+This is intentionally the first compatibility boundary, not the final modular
+API. New games will progressively select capability features and plugin groups
+such as core, local multiplayer, character action, platforming, world, racing,
+and Forge. Track that transition in the
+[framework architecture](docs/FRAMEWORK_ARCHITECTURE.md) and
+[project plan](docs/PROJECT_PLAN.md).
 
-| Key | Upgrade |
-|---|---|
-| `Z` | Beam Capacitors |
-| `X` | Nova Missile Forge |
-| `C` | Sprite Turret Lattice |
-| `V` | Armor Plating |
-| `B` | Rejuvenation Matrix |
-| `N` | Mech Command Link |
+## Heavy Water Demo Game
 
-## Controls
+Heavy Water is the first-party consumer of Starfall and must use the same
+public contracts available to future games. It demonstrates:
 
-Settings & Accessibility can rebind the discrete Player 1 keyboard actions,
-cycle Standard/Nintendo/Swap A-B/Swap X-Y controller face layouts, invert look
-Y, or restore the shipped defaults. Movement axes and the LB/Select/D-pad chord
-grammar remain fixed so every action stays reachable.
+- one-to-four-player local input, split-screen, and shared-camera play
+- an open 3D action-RPG campaign with traversal, combat, progression, cities,
+  dungeons, settlements, vehicles, and world events
+- a bounded shared-screen co-op platformer using the production player stack
+- road, hoverboard, water, air, and space traversal/racing foundations
+- procedural and imported characters, data-driven combat, audio, shaders, and
+  published Forge content
+- native creator workflows that move from project records to validated runtime
+  catalogs
 
-Keyboard and mouse:
+The game remains intentionally substantial. Users can play it, learn from it,
+fork and rename it, remove feature modules, or keep the complete all-in-one
+engine/game experience. Its detailed feature inventory is in
+[Heavy Water features](docs/MASTER_FEATURES.md); its architecture role is in
+[the demo-game guide](docs/games/heavy-water/README.md).
 
-| Input | Action |
-|---|---|
-| `WASD` | Move |
-| Mouse | Look |
-| `Space` | Jump, wall jump, hold for jetpack; triple-tap to switch flight/hover control; trigger slingshots |
-| Hold toward wall while falling | Wall slide |
-| `E` near wall while falling/hanging | Hang or climb up |
-| `E` | Interact; trigger nearby slingshots |
-| `G` | Fire the grapple hook; zip, swing, or pull the selected target |
-| `Q` | Dodge/drop; Rocket Hoverboard overdrive; Saber Comet Dash/Meteor Pound after blueprint |
-| `LMB` | Fire active star beam / Star Sabre slash; fire the cannon while Tank mode is active |
-| `RMB` | Aim |
-| `Shift` | Sprint; trigger the shared turbo burst while a non-boat vehicle mode is active |
-| `R` | Reload active star beam |
-| `V` / `B` | Light / heavy mana combo; heavy input stomps while airborne |
-| `F` | Parry |
-| `T` | Toggle the starter Star Sabre |
-| `1-6` | Select primary star beam |
-| `7` | Homing Star |
-| `8` | Tri-Star Burst |
-| `9` | Moon Bubble |
-| `0` | Sprite Turret |
-| `C` | Crafting |
-| `I` | Open/close Star Loadout |
-| `H` | Use equipped quick item |
-| `J` | Enter vehicle / board nearby boat; Jet Bike cycles ground → flight → off |
-| `M` | Open map |
-| `P` | Toggle first-person / third-person camera |
-| `Esc` | Back / pause |
-| `F7` | Command-asset roster overlay |
-| `F8` | Controller diagnostics overlay |
-| `F9` | Toggle collider debug overlay during play |
-| `F10` | Fixed-tick motor A/B toggle (legacy vs. 64 Hz) |
-| `F11` | Perf overlay: FPS, frame ms, entities, sim ticks, cameras, materials |
+## Framework model
 
-Pause menu shortcuts:
+Starfall uses four ownership layers:
 
-| Input | Action |
-|---|---|
-| `Esc` / Start | Resume |
-| `S` / `F5` / Select | Save |
-| `T` | Save and return to title |
-| `F5` | Save |
+```text
+Engine capability
+      ↓
+Reusable gameplay kit
+      ↓
+Heavy Water game-mode module
+      ↓
+Campaign and application composition
+```
 
-Controller:
+- Engine code supplies schedules, services, schemas, registries, and runtime
+  contracts.
+- Gameplay kits supply reusable mechanics such as movement, combat, local
+  multiplayer, vehicles, and platforming.
+- Demo modules combine those mechanics into Open World, Platformer, Racer, RPG,
+  and Campaign features.
+- Forge authors graphs and records, validates them, previews disposable ECS
+  worlds, and publishes deterministic runtime data.
 
-The first controller connected before launch or hot-plugged while the game is
-running automatically binds to Player 1. Additional controllers press Start in
-Player Select to join as Players 2–4; keyboard and mouse remain available to P1.
+Graphs are the authoring format; typed plugins, ECS components, assets, and
+compiled execution plans are the runtime format. Native code can register new
+nodes, components, inspectors, importers, widgets, shader functions, validators,
+and build steps.
 
-| Input | Action |
-|---|---|
-| Left stick | Analog move |
-| Right stick | Look |
-| South | Jump, wall jump, hold for jetpack; triple-tap to switch flight/hover control; trigger slingshots |
-| East | Dodge/drop; Rocket Hoverboard overdrive (Grind while rail-bound); Saber Comet Dash/Meteor Pound after blueprint |
-| West | Reload active star beam |
-| North | Parry |
-| RT | Fire star beam; fire the cannon while Tank mode is active |
-| LT | Aim |
-| LB + North | Toggle Star Sabre; RB performs its animated slash |
-| LT + North | Alternate Star Sabre toggle |
-| LB | Sprint; trigger the shared turbo burst while a non-boat vehicle mode is active |
-| LB + Select | Open/close the owning player's Star Loadout |
-| LB + West | Use equipped quick item |
-| RB | Star Sabre slash while drawn |
-| Select + RB | Fire the grapple hook; zip, swing, or pull the selected target |
-| D-Pad Left / Right | Previous / next primary beam |
-| D-Pad Up / Down | Next / previous special weapon; cycles through none |
-| Select | Crafting |
-| Select + D-Pad Left | Toggle this player's first-person / third-person camera |
-| Select + D-Pad Up | Enter vehicle; Jet Bike cycles ground → flight → off |
-| Select + D-Pad Down | Interact / hang / climb / trigger slingshots |
-| Select + D-Pad Right | Open map |
-| Start | Pause |
-| Guide / L3 + R3 | Additional Star Sabre toggle fallback |
-| R3 / L3 | Light / heavy combo; L3 performs Saber Cyclone Slash after blueprint |
-
-## Star Beam Loadout
-
-| Slot | Weapon |
-|---|---|
-| 1 | Starlight Popper |
-| 2 | Comet Stream |
-| 3 | Sparkle Fan |
-| 4 | Nova Orb |
-| 5 | Rainbow Ray |
-| 6 | Star Bubble Bombs |
-
-Special tools:
-Homing Star, Tri-Star Burst, Moon Bubble, and the persistent Sprite combat drone
-deployed through Sprite Turret.
-
-Rocket Hoverboard controls: select it from Star Loadout → Rides, move to carve,
-jump to launch, hold jump for rocket lift, and hold LB while airborne for a
-faster forward boost. Fuel uses the existing per-player jet gauge.
-
-## Chapters
-
-1. Invasion of the Scallarians - the Starfall Lab opens under attack, and Star Engine Grotto is hidden nearby.
-2. Tony's Shortcut - wall jumps across the rift city, Giovanni's scattered rift-caliper fragments, and the Rift-Glass Underpass.
-3. Sisters Of The Star - Gabriella, Nova, Aurora, and Fortuna join near the Sister Starwell Cave.
-4. Four Brothers - Angelo and Little Joe complete the team around the Brother Trial Burrow.
-5. Dr. Bile - Zark, Crush, Fang, and Sharp emerge around Gabrio's mirror-resonator fragments and the Mirror Sludge Cavern.
-6. Tibet Peak - Collosar tests the heroes, then flees from Crownroot Ice Cave to the Crown Airship.
-7. Tarack's Ember - the dragon queen tests the family around Ember Breathing Hollow and aboard the Ember Airship.
-8. Spikes And Shreds - Spikey and Shread run wild before the Fangroot Scrap Tunnel and Shread's Scrapwing rematch.
-9. Pink Flame - garden puzzles, rift blooms, and Pink Flame Root Cave.
-10. Rockies Domain - Ragar's Colorado mountain domain, Giovanni's granite-sextant fragments, Granite Echo Cave, and Granite Airship.
-11. Blackskull Ice - Antarctica opens below with Icebreaker Under-Cave, then the Icebreaker Airship hunts overhead.
-12. Mana Switchworks - open-world puzzle battle through Mana Gear Grotto.
-13. Scallarian Front - the crown gate appears above the Crown Gate Underpath.
-14. Starfall - the family closes the sky inside the Starfall Core Hollow.
-
-## Documentation
-
-- **[Master Features](docs/MASTER_FEATURES.md)** — canonical current feature baseline and maturity boundaries
-- **[Project Plan](docs/PROJECT_PLAN.md)** — active production order and next workstreams
-- **[Heavy Water Port Ledger](docs/HEAVY_WATER_PORT.md)** — verified sequel-continuity parity and explicit remaining boundaries
-- **[Documentation Map](docs/README.md)** — what every doc is for, living vs. snapshot
-- **[Developer Guides](docs/guides/README.md)** — process how-tos: [verification gates](docs/guides/verification.md), [fixed-tick motor](docs/guides/fixed-tick-motor.md), [combat feel](docs/guides/combat-feel.md), [character-studio pipeline](docs/guides/character-studio-pipeline.md)
-- [Engine Core Roadmap](docs/engine_roadmap.md) — `EC#` fixed-tick/combat/profiling substrate track
-- [Architecture Overview](docs/DEVELOPMENT.md)
-- [Gameplay Systems Reference](docs/MASTER_FEATURES.md)
-- [Improvement Notes](docs/archive/improvements.md) — historical May snapshot, not the active backlog
-- [July 2026 Gameplay Review](docs/archive/game_review_2026-07.md)
-- [Motion Mechanics Roadmap](docs/archive/playerengine.md)
-- [Naming Guide](docs/naming.md)
-- [Historical Agent Next Steps](docs/archive/agent_next_steps.md) — dated delivery evidence, not the active backlog
-- [Engine Upgrade Milestones](docs/archive/engine_upgrade_milestones.md) — campaign/engine milestones `M#`; also defines the `MM#` / `AI#` naming convention
-- [Game Maker Toolchain](docs/MASTER_FEATURES.md) — current creator-tool inventory and maturity boundaries
-- [Engine Tools Multistage Pass](docs/archive/engine_tools_multistage_pass.md) — Blender capability triage and ET1–ET11 implementation program
-- [Parallel Review Triage — July 2026](docs/archive/parallel_review_triage_2026-07.md) — evidence-based disposition of the external 156-item suggestion inventory
-
-## Project Structure
+## Current repository map
 
 ```text
 src/
-  main.rs                         App bootstrap and plugin registration
-  platform_paths.rs               Platform data root and bounded sanitized crash reports
-  game_loop.rs                    Fixed-tick scheduling and performance diagnostics
-  input_buffer.rs                 Per-player render-to-fixed input buffering
-  spatial_lod.rs                  Shared camera-aware LOD profiles
-  state.rs                        AppState flow
-  events.rs                       Event definitions and EventsPlugin
-  damage.rs                       Health, resistances, and shared damage helpers
-  rendering.rs                    Local Bevy render bundles used by world/entity spawners
-  resources.rs                    Shared resources and progression state
-  character_blueprint.rs          Serializable character recipes, procedural parts, sockets, rig, animation, movement data
-  discussion.rs                   Settlement dialogue scripts and MP3 voice hooks
-  perks.rs                        Heart / Star / Acrobat perk tree
-  characters.rs                   Retro cartoon character construction, colors, and presets
-  chapters/mod.rs                 Starfall I chapter scripts and biomes
-  components/player.rs            Player stats, movement, wall jump, edge grab, input state
-  components/weapon.rs            Star beam, special tool, projectile, and Star Sabre definitions
-  components/enemy.rs             Enemy stats, flying drones, dragon bosses, projectiles
-  components/faction.rs           Story groups and radio colors
-  components/discoverable.rs      Discoverable, relic puzzle, relic fragment, and secret cave data
-  components/armor.rs             Armor sets and elemental damage reduction
-  components/companion.rs         Companion identity and assist behavior data
-  components/inventory.rs         Inventory item stacks
-  components/mods.rs              Weapon and armor mod definitions
-  components/world.rs             Buildings, chests, moving platforms, turrets, anchors, NPCs, loot
-  plugins/input_plugin.rs         Keyboard/gamepad input mapping
-  plugins/player_plugin.rs        Movement feel, ledge hang, wall jump, stamina, perks, damage
-  plugins/character_plugin.rs     Simple idle/walk/jump/hang animation poses
-  plugins/character_design_plugin.rs Color/accessory designer and preview
-  plugins/chapter_plugin.rs       Chapter director and encounter progression
-  plugins/weapon_plugin.rs        Star beam firing, specials, melee, Star Sabre, VFX
-  plugins/enemy_plugin.rs         Enemy spawning, AI, drones, bosses, rewards, loot
-  plugins/world_plugin.rs         Terrain, settlements, dialogue NPCs, guardian ships, caves, props, turrets
-  plugins/discoverable_plugin.rs  Discoverable pickups, secret caves, relic puzzles, and fragment assembly
-  plugins/armor_plugin.rs         Armor repair, elemental cycling, and perk max-health sync
-  plugins/chest_plugin.rs         Chest spawn, interaction, and loot rolls
-  plugins/crafting_plugin.rs      Crafting recipes and crafting panel state
-  plugins/companion_plugin.rs     Companion follow, healing, and assist attacks
-  plugins/radio_plugin.rs         Radio chatter queue to UI messages
-  plugins/vehicle_plugin.rs       Vehicle enter/exit and driving physics
-  plugins/ui_plugin.rs            Menus, HUD, discussion GUI, crafting panel, chapter/perk UI
-  plugins/save_plugin.rs          Save/load and autosave
-  robots/                         Robot presets, style data, and factory
-  lsystem/                        Procedural tree grammar and turtle interpreter
-assets/
-  shaders/grass.wgsl              Wind-animated grass shader
+  lib.rs               Public framework boundary and deliberately small prelude
+  main.rs              Thin native launcher
+  app.rs               Complete Heavy Water/Forge application composition
+  engine/              Simulation, physics adapter, input buffer, rendering, paths
+  engine_tools/        Current Forge records, editor services, and publishing
+  plugins/             Bevy runtime and authoring system plugins
+  components/          Shared ECS vocabulary
+  character/           Character recipes, assembly, meshes, rigs, and presets
+  character_studio/    Advanced native character authoring
+  combat/              Damage, frame data, feedback, perks, tricks, and upgrades
+  world/               World rules, game modes, missions, economy, and demo content
+  audio/               Procedural SFX and user audio
+  robots/              Robot/creature construction
+  chapters/            Heavy Water campaign content
+
+assets/                Current shared and Heavy Water assets (separation staged)
+docs/                  Living architecture, guides, game reference, and archive
+examples/              Focused code examples
 ```
+
+The target repeatable workspace and module filesystem is documented in
+[PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md). Do not infer the target tree
+from the current transitional source layout.
+
+## Documentation
+
+- [Documentation map](docs/README.md)
+- [Framework architecture](docs/FRAMEWORK_ARCHITECTURE.md)
+- [Repeatable project structure](docs/PROJECT_STRUCTURE.md)
+- [Build with Starfall](docs/guides/building-with-starfall.md)
+- [Create a module](docs/guides/creating-a-module.md)
+- [Developer and verification guide](docs/DEVELOPMENT.md)
+- [Starfall Forge roadmap](docs/editor_roadmap.md)
+- [Engine roadmap](docs/engine_roadmap.md)
+- [Heavy Water feature catalog](docs/MASTER_FEATURES.md)
+- [Active project plan](docs/PROJECT_PLAN.md)
+
+## Verification
+
+```sh
+cargo check --all-targets --locked
+cargo test --locked
+cargo check --all-targets --locked --no-default-features
+cargo test --locked --no-default-features
+cargo check --all-targets --locked --no-default-features --features heavy-water-demo
+cargo test --locked --no-default-features --features heavy-water-demo
+```
+
+Detailed gates and native smoke tests are in
+[docs/guides/verification.md](docs/guides/verification.md).
+
+## Project status
+
+Starfall is production-minded but pre-stable framework software. Save formats,
+published content, and demo behavior already have compatibility concerns; the
+new public framework API, module manifests, graph schemas, and package layout do
+not yet carry a stable semver guarantee. Crates.io publishing remains disabled
+until licensing, package contents, and compatibility policy are explicit.

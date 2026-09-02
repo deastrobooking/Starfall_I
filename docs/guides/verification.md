@@ -7,17 +7,25 @@ cargo fmt --all -- --check
 cargo check --all-targets --locked
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked                     # Designer edition
-cargo check --all-targets --locked --no-default-features
+cargo check --all-targets --locked --no-default-features  # minimal framework
 cargo clippy --all-targets --locked --no-default-features -- -D warnings
-cargo test --locked --no-default-features  # Game edition
+cargo test --locked --no-default-features
+cargo check --all-targets --locked --no-default-features --features heavy-water-demo
+cargo clippy --all-targets --locked --no-default-features --features heavy-water-demo -- -D warnings
+cargo test --locked --no-default-features --features heavy-water-demo  # demo runtime
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
 cargo build --locked
 STARFALL_AUTOSTART=1 ./target/debug/starfall-i
                                # observe ~15s in Playing, then quit; zero panics
 ```
 
 GitHub Actions runs formatting once, then applies the all-target check, strict
-Clippy, and test gates independently to the Designer and Game editions on
-macOS. Local verification should keep the same locked dependency graph.
+Clippy, and test gates independently to the Designer, demo-runtime, and minimal
+framework profiles on macOS. Local verification keeps the same locked graph.
+
+Framework work also adds a focused consumer or feature-combination check for
+every new public bundle. A module is not reusable merely because the complete
+Heavy Water application compiles with it present.
 
 For app/plugin registration changes, the fast headless guard is:
 

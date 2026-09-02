@@ -1,6 +1,6 @@
 //! Runtime boundary for Heavy Water continuity combat purchases and cooldowns.
 //!
-//! Durable unlocks live in [`HeavyWaterProgress`], while Starfall's
+//! Durable unlocks live in [`crate::world::heavy_water::HeavyWaterProgress`], while Starfall's
 //! [`Inventory`] and [`PlayerStats`] remain the only material/wallet authority.
 //! Every purchase below stages all three values and commits them together.
 #![allow(dead_code)] // Public purchase seam; player-facing combat lab lands incrementally.

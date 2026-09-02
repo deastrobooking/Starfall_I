@@ -13,7 +13,7 @@
 //! [`CartoonCharacterConfig`] (palette + feature flags + build width).
 //!
 //! Figure space is normalized: feet at `y = 0`, head top at `y ≈ 1.0`, torso
-//! centre at [`TORSO_CENTER_Y`]. At attach time the rig is scaled/offset to fill
+//! centre at `TORSO_CENTER_Y`. At attach time the rig is scaled/offset to fill
 //! the player's physics capsule and parented under the player entity.
 
 use bevy::prelude::*;

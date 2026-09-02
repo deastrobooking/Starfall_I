@@ -1,24 +1,30 @@
-# Starfall I Agent Guide
+# Starfall Engine and Heavy Water Agent Guide
 
-This file is the concise handoff for future Codex/agent work on Starfall I.
+This file is the concise handoff for future work on Starfall Engine, Starfall
+Forge, and the Heavy Water Demo Game.
 Read `docs/README.md` first for the documentation authority map. The current
-game-facing baseline is `docs/MASTER_FEATURES.md`, the active production order
-is `docs/PROJECT_PLAN.md`, and the Forge architecture plan is
-`docs/editor_roadmap.md`. Files under `docs/archive/` are dated evidence only;
-consult them for history, not current priorities.
+framework contract is `docs/FRAMEWORK_ARCHITECTURE.md`, the repeatable layout is
+`docs/PROJECT_STRUCTURE.md`, the Heavy Water baseline is
+`docs/MASTER_FEATURES.md`, and active order is `docs/PROJECT_PLAN.md`. Files
+under `docs/archive/` are dated evidence only.
 
 ## Project North Star
 
-Starfall I is a family-friendly cartoon action platformer RPG built in Rust with
-Bevy `0.19.1` and Avian `0.7`. The fantasy is 1-4 local players controlling a
-family of star-powered heroes through open 3D
+Starfall is a native Rust/Bevy game framework and Forge authoring environment;
+Heavy Water is its complete demo, first-party consumer, learning project, and
+forkable all-in-one game. Engine capabilities must not import Heavy Water
+content, and the demo must use the same public contracts available to future
+games. The game fantasy is 1-4 local players controlling a family of
+star-powered heroes through open 3D
 chapters, secret caves, dragon domains, airship rematches, RPG loot, crafting,
 companions, vehicles, and expressive star-beam combat.
 
-The AAA target is not just more features. It means movement, camera, combat,
+The quality target is not just more features. It means movement, camera, combat,
 local multiplayer, save data, progression, UI, performance, accessibility,
 audio, art direction, tooling, and QA all move toward production quality
-together.
+together. Framework work also requires removable modules, typed graph/document
+contracts, deterministic publishing, native extension points, and focused
+consumer examples.
 
 ## Current Baseline
 
@@ -242,9 +248,10 @@ together.
   active loadout persistence plus the Star Loadout button GUI are now delivered;
   four-pad acceptance, broader vehicle bodies, and missile obstacle casts remain.
 - Current gates for Rust/engine work are `cargo fmt --all -- --check`, locked
-  all-target check, strict Clippy, and tests for both the default Designer and
-  `--no-default-features` Game editions. See `docs/guides/verification.md` for
-  the exact commands mirrored by CI.
+  all-target check, strict Clippy, and tests for the default Designer profile,
+  the `heavy-water-demo` runtime profile, and the minimal
+  `--no-default-features` framework profile. See
+  `docs/guides/verification.md` for the exact commands mirrored by CI.
 - The July 2026 audit is `docs/archive/game_review_2026-07.md`. Shared menu navigation
   now includes spatial D-pad/stick focus, repeat, Confirm, Back, and disabled
   skipping/styles. Speed roads include checkpoints, recovery, and guided

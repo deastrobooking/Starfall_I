@@ -1,0 +1,75 @@
+//! Starfall Engine and the native Heavy Water demo application.
+//!
+//! The minimal library exposes Starfall's neutral typed-graph foundation. The
+//! `heavy-water-demo` feature adds the complete current runtime and application;
+//! `designer` adds Forge and implies the demo while the finer engine/gameplay
+//! capability split is developed.
+
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
+pub mod graph;
+
+#[cfg(feature = "heavy-water-demo")]
+pub mod app;
+#[cfg(feature = "heavy-water-demo")]
+pub mod audio;
+#[cfg(feature = "heavy-water-demo")]
+pub mod chapters;
+#[cfg(feature = "heavy-water-demo")]
+pub mod character;
+#[cfg(feature = "heavy-water-demo")]
+pub mod character_studio;
+#[cfg(feature = "heavy-water-demo")]
+pub mod combat;
+#[cfg(feature = "heavy-water-demo")]
+pub mod commands;
+#[cfg(feature = "heavy-water-demo")]
+pub mod components;
+#[cfg(feature = "heavy-water-demo")]
+pub mod engine;
+#[cfg(feature = "heavy-water-demo")]
+pub mod engine_tools;
+#[cfg(feature = "heavy-water-demo")]
+pub mod events;
+#[cfg(feature = "heavy-water-demo")]
+pub mod framework;
+#[cfg(feature = "heavy-water-demo")]
+pub mod lsystem;
+#[cfg(feature = "heavy-water-demo")]
+pub mod plugins;
+#[cfg(feature = "heavy-water-demo")]
+pub mod resources;
+#[cfg(feature = "heavy-water-demo")]
+pub mod robots;
+#[cfg(feature = "heavy-water-demo")]
+pub mod spaceship_forge;
+#[cfg(feature = "heavy-water-demo")]
+pub mod vehicle_forge;
+#[cfg(feature = "heavy-water-demo")]
+pub mod world;
+
+#[cfg(feature = "heavy-water-demo")]
+pub use app::{build_app, build_headless_app, build_starfall_app, StarfallAppMode};
+
+/// Common imports for the selected framework capabilities.
+///
+/// The prelude stays intentionally small. Domain-specific types should be
+/// imported from their owning modules so feature dependencies remain visible.
+pub mod prelude {
+    pub use crate::graph::{GraphRegistryPlugin, NodeRegistry};
+
+    #[cfg(feature = "heavy-water-demo")]
+    pub use crate::app::{build_app, build_headless_app, build_starfall_app, StarfallAppMode};
+    #[cfg(feature = "heavy-water-demo")]
+    pub use crate::engine::game_loop::{GameLoopPlugin, GameSet};
+    #[cfg(feature = "heavy-water-demo")]
+    pub use crate::engine::physics::PhysicsCompatPlugin;
+    #[cfg(feature = "heavy-water-demo")]
+    pub use crate::engine::state::AppState;
+    #[cfg(feature = "heavy-water-demo")]
+    pub use crate::events::EventsPlugin;
+    #[cfg(feature = "designer")]
+    pub use crate::framework::StarfallForgePlugins;
+    #[cfg(feature = "heavy-water-demo")]
+    pub use crate::framework::{HeavyWaterDemoPlugins, StarfallFoundationPlugins};
+}

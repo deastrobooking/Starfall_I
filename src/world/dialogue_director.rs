@@ -56,7 +56,10 @@ pub enum DialogueStateChange {
     },
     /// The conversation is now blocked on input: either a choice is required
     /// or a `WaitForInput` cue fired.
-    AwaitingInput { content_id: String, player_index: u8 },
+    AwaitingInput {
+        content_id: String,
+        player_index: u8,
+    },
     /// The graph reached an exit node, the owner cancelled, or a close was
     /// requested by gameplay. `completed` distinguishes reaching the end of
     /// the graph from an early cancel.
@@ -274,7 +277,6 @@ impl DialogueDirector {
         enum Halt {
             No,
             Wait(usize),
-            Close,
         }
         let (events, halt) = {
             let active = self.active.as_ref().expect("checked above");
@@ -328,10 +330,6 @@ impl DialogueDirector {
 
         match halt {
             Halt::No => {}
-            Halt::Close => {
-                self.close(changes, false);
-                return;
-            }
             Halt::Wait(index) => {
                 let active = self.active.as_mut().expect("checked above");
                 active.fired_cues.insert(index);
@@ -383,6 +381,10 @@ impl DialogueDirector {
         }
         if active.waiting_for_input {
             active.waiting_for_input = false;
+            // An explicit WaitForInput cue pauses the current node's timeline;
+            // owner input releases that gate but must not also skip the node.
+            // A later advance may perform the ordinary cursor transition.
+            return true;
         }
         let graph = catalog
             .get(&active.content_id)
@@ -543,9 +545,7 @@ impl DialogueDirector {
         }
         // Auto-advance only applies to cutscene mode; gameplay conversations
         // always let the player set the pace.
-        if graph.mode
-            != crate::engine_tools::dialogue_records::DialoguePlaybackMode::Cutscene
-        {
+        if graph.mode != crate::engine_tools::dialogue_records::DialoguePlaybackMode::Cutscene {
             return;
         }
         let player_index = active.player_index;
@@ -644,7 +644,10 @@ mod tests {
         assert_eq!(director.current_node(&catalog).unwrap().node_id, "opening");
         assert!(matches!(
             changes.as_slice(),
-            [DialogueStateChange::Started { .. }, DialogueStateChange::NodeEntered { .. }]
+            [
+                DialogueStateChange::Started { .. },
+                DialogueStateChange::NodeEntered { .. }
+            ]
         ));
 
         // One channel: a second start is refused without disturbing the first.

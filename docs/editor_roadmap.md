@@ -11,6 +11,14 @@ ECS preview worlds, and publish a versioned runtime bundle. The Game edition
 must consume only neutral schema/runtime crates and published output; it must
 not depend on editor implementation modules.
 
+Forge is also the native front end for Starfall's typed graph framework. One
+shared graph kernel supplies IDs, ports, connections, commands, migrations,
+validation, and compilation; Object, Behavior, Animation, UI, Shader,
+World/City, Dialogue, Mission, and Campaign graphs remain specialized graph
+languages. Native plugins can register nodes, inspectors, widgets, importers,
+animation processors, shaders, validators, and publish steps without expanding
+a closed central enum.
+
 ```text
 content schema/assets <- runtime catalog <- game
 content schema/assets <- editor document <- editor tools/UI
@@ -57,11 +65,13 @@ and runtime code still imports types through the `engine_tools` namespace.
 
 ## M1 — Establish architectural seams
 
-- Add a library target and keep `main.rs` as thin composition.
+- Library target and thin `main.rs` launcher landed; continue moving
+  application/plugin composition behind public framework contracts.
 - Define neutral `content_schema` and `runtime_catalog` ownership; move runtime
   readers and publish-manifest types out of `engine_tools`.
 - Compose explicit Platform/Core, GameRuntime, Presentation, EditorCore, and
-  EditorUI plugin groups. Give every resource and schedule edge one owner.
+  EditorUI plugin groups, then Heavy Water Shared/Open World/Platformer/Racer/
+  RPG/Campaign groups. Give every resource and schedule edge one owner.
 - Split `engine_tools/mod.rs` first by document/session, command/history,
   viewport, hierarchy/selection, registry, validation, and UI concerns.
 - Add one headless workflow test: open project, edit, undo/redo, save/reload,

@@ -255,7 +255,7 @@ pub struct ProjectileAssets {
     pub energy_magic: Handle<EnergyMaterial>,
     pub energy_sabre: Handle<EnergyMaterial>,
     pub energy_sabre_core: Handle<EnergyMaterial>,
-    /// One aura material per [`BladeColor`], built once at startup and indexed
+    /// One aura material per [`crate::combat::blades::BladeColor`], built once at startup and indexed
     /// by `BladeColor as usize`, so equipping a blade recolours the sabre
     /// without allocating a material per swing.
     pub energy_sabre_blades: Vec<Handle<EnergyMaterial>>,
