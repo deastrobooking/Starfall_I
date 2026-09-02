@@ -10,7 +10,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use bevy::prelude::*;
+use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
 pub const GRAPH_SCHEMA_VERSION: u32 = 1;
@@ -601,5 +602,15 @@ mod tests {
             registry.register_definition(source_definition()),
             Err(NodeRegistryError::DuplicateType(_))
         ));
+    }
+
+    #[test]
+    fn graph_documents_round_trip_through_json() {
+        let graph = GraphDocument::new(id("test.serialized_graph"), GraphDomain::Object);
+        let encoded = serde_json::to_string_pretty(&graph).unwrap();
+        assert_eq!(
+            serde_json::from_str::<GraphDocument>(&encoded).unwrap(),
+            graph
+        );
     }
 }

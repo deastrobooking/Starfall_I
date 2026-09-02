@@ -1,0 +1,12 @@
+[package]
+name = "starfall-project"
+version = "0.1.0"
+edition = "2021"
+description = "Versioned Starfall project and module manifests"
+publish = false
+
+[dependencies]
+semver = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+starfall-graph = { path = "../starfall-graph" }
+toml = "1.1.3"

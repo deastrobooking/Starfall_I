@@ -72,9 +72,9 @@ and verification reference.
 
 ## Use the current framework boundary
 
-The repository now has a library target in addition to the native launcher.
-During the workspace transition, a local game or tool can depend on the
-all-in-one framework directly:
+The repository now has a library target plus independently buildable graph and
+project-manifest crates. During the workspace transition, a local game or tool
+can depend on the all-in-one framework directly:
 
 ```toml
 [dependencies]
@@ -95,6 +95,19 @@ such as core, local multiplayer, character action, platforming, world, racing,
 and Forge. Track that transition in the
 [framework architecture](docs/FRAMEWORK_ARCHITECTURE.md) and
 [project plan](docs/PROJECT_PLAN.md).
+
+Tools that only need graph documents or project discovery can avoid the game:
+
+```toml
+[dependencies]
+starfall-graph = { path = "../Starfall_I/crates/starfall-graph" }
+starfall-project = { path = "../Starfall_I/crates/starfall-project" }
+```
+
+The checked-in `starfall.project.toml` and per-crate
+`starfall.module.toml` files are schema-versioned, migrated, validated, and
+round-trip tested. The all-in-one facade re-exports them as
+`starfall_i::graph` and `starfall_i::project`.
 
 ## Heavy Water Demo Game
 
@@ -148,10 +161,15 @@ and build steps.
 ## Current repository map
 
 ```text
+crates/
+  starfall-graph/    Independent typed graph documents and node registry
+  starfall-project/  Independent project/module manifest parser and validator
+
 src/
   lib.rs               Public framework boundary and deliberately small prelude
   main.rs              Thin native launcher
   app.rs               Complete Heavy Water/Forge application composition
+  heavy_water/         Stable demo-game ownership facade during extraction
   engine/              Simulation, physics adapter, input buffer, rendering, paths
   engine_tools/        Current Forge records, editor services, and publishing
   plugins/             Bevy runtime and authoring system plugins
@@ -167,6 +185,7 @@ src/
 assets/                Current shared and Heavy Water assets (separation staged)
 docs/                  Living architecture, guides, game reference, and archive
 examples/              Focused code examples
+starfall.project.toml  Authoritative project identity, paths, and modules
 ```
 
 The target repeatable workspace and module filesystem is documented in
@@ -189,12 +208,12 @@ from the current transitional source layout.
 ## Verification
 
 ```sh
-cargo check --all-targets --locked
-cargo test --locked
-cargo check --all-targets --locked --no-default-features
-cargo test --locked --no-default-features
-cargo check --all-targets --locked --no-default-features --features heavy-water-demo
-cargo test --locked --no-default-features --features heavy-water-demo
+cargo check --workspace --all-targets --locked
+cargo test --workspace --locked
+cargo check --workspace --all-targets --locked --no-default-features
+cargo test --workspace --locked --no-default-features
+cargo check --workspace --all-targets --locked --no-default-features --features heavy-water-demo
+cargo test --workspace --locked --no-default-features --features heavy-water-demo
 ```
 
 Detailed gates and native smoke tests are in

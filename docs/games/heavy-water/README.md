@@ -27,6 +27,16 @@ Open World, Platformer, and Racer remain independent modes. Shared identity,
 save, and progression contracts may be used by several modes; campaign code
 selects and transitions between them.
 
+The first source-level boundary is available now:
+
+- `starfall_i::heavy_water::shared` exposes shared progression contracts.
+- `starfall_i::heavy_water::platformer` exposes the bounded platformer data,
+  route language, spawning API, and `HeavyWaterPlatformerPlugin`.
+
+This is a compatibility facade while the implementation leaves `world/`.
+The platformer plugin now owns its workshop state and continuous rules; world
+scene activation and teardown are the next ownership transfer.
+
 ## Why the demo remains complete
 
 Focused templates will eventually provide smaller starting points, but the

@@ -27,8 +27,8 @@ cataloged in [MASTER_FEATURES.md](MASTER_FEATURES.md).
 
 ```bash
 cargo run                 # play
-cargo test                # full suite (fast; no GPU or window needed)
-cargo clippy --all-targets
+cargo test --workspace                # full suite; no GPU or window needed
+cargo clippy --workspace --all-targets
 cargo build               # debug binary at target/debug/starfall-i
 ```
 
@@ -251,8 +251,8 @@ all-in-one application is a broken framework boundary.
 
 In rough order of cost:
 
-1. `cargo test` — unit and integration tests, no GPU required.
-2. `cargo clippy --all-targets` — the tree is warning-clean apart from a few
+1. `cargo test --workspace` — unit and integration tests, no GPU required.
+2. `cargo clippy --workspace --all-targets` — the tree is warning-clean apart from a few
    known dead-code items; keep it that way.
 3. Headless boot smoke (above) — proves plugins register and assets load.
 4. Manual play — the only way to judge feel. Tuning constants are deliberately

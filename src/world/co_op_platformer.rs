@@ -18,9 +18,44 @@ use crate::components::world::{
 };
 use crate::engine::physics::prelude::{Collider, KinematicCharacterController, RigidBody};
 use crate::engine::rendering::{PbrBundle, PointLightBundle};
+use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
-use crate::resources::PlayExperience;
+use crate::resources::{PlayExperience, PlaySessionTransition};
+
+/// Runtime rules for Heavy Water's bounded shared-screen platformer mode.
+///
+/// World scene generation remains a host concern during the transition, while
+/// this plugin owns the mode's state and continuous gameplay rules. That seam
+/// lets the scene-spawn path move without changing the public mode contract.
+pub struct HeavyWaterPlatformerPlugin;
+
+impl Plugin for HeavyWaterPlatformerPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PlatformerWorkshopProgress>()
+            .add_systems(
+                Update,
+                (
+                    platformer_party_boundary_and_bubble_system,
+                    platformer_checkpoint_and_reward_system,
+                    platformer_pressure_gate_system,
+                    platformer_encounter_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            );
+    }
+}
+
+pub fn reset_platformer_progress(
+    transition: Res<PlaySessionTransition>,
+    experience: Res<PlayExperience>,
+    mut progress: ResMut<PlatformerWorkshopProgress>,
+) {
+    if !transition.resuming_from_pause && *experience == PlayExperience::SharedPlatformer {
+        *progress = PlatformerWorkshopProgress::default();
+    }
+}
 
 pub const PLATFORMER_STAGE_ID: &str = "starbound_coop_course_01";
 pub const PLATFORMER_STAGE_LABEL: &str = "Starbound Starter Courses";
@@ -1172,6 +1207,15 @@ pub fn platformer_encounter_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platformer_plugin_registers_its_owned_state() {
+        let mut app = App::new();
+        app.add_plugins(HeavyWaterPlatformerPlugin);
+        assert!(app
+            .world()
+            .contains_resource::<PlatformerWorkshopProgress>());
+    }
 
     #[test]
     fn platformer_spawns_are_inside_the_start_boundary() {

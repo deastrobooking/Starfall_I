@@ -28,6 +28,17 @@ starfall/
 Crates are extracted only after imports obey the intended dependency direction.
 Folders may represent these boundaries before they become packages.
 
+Current extraction status:
+
+- `crates/starfall-graph` is an independent package containing the typed graph
+  document and native-node registration kernel.
+- `crates/starfall-project` is an independent package containing project and
+  module manifest parsing, migration, validation, and deterministic encoding.
+- `src/lib.rs` remains the transitional all-in-one facade and re-exports both.
+- Heavy Water exposes `shared` and `platformer` ownership through
+  `src/heavy_water/`; the underlying files are still being disentangled from
+  the historical `world` plugin.
+
 ## Game project
 
 ```text
@@ -133,9 +144,14 @@ Directories optimize discovery; manifests provide authority. A future IDE must
 read `starfall.project.toml` and `starfall.module.toml` rather than infer enabled
 features, launch scenes, asset roots, or dependencies from paths.
 
-Manifest schemas will not be declared stable until a parser, validator,
-migration fixture, and round-trip test land together. Documentation examples
-before that point are proposals, not accepted project input.
+Manifest schema version 1 is now accepted project input. Its parser, legacy
+version-0 display-name migration, semantic validation, repository fixtures, and
+round-trip tests live in `crates/starfall-project`. Future schema changes must
+add migrations and fixtures before increasing either schema version.
+
+Manifest paths always use `/`, are relative to the manifest directory, and may
+not contain `.` or `..` segments, drive prefixes, or backslashes. This makes the
+same document safe and deterministic on macOS, Linux, and Windows.
 
 ## Placement questions
 

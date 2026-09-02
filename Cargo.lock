@@ -5588,6 +5588,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "starfall-graph"
+version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "starfall-i"
 version = "0.2.0"
 dependencies = [
@@ -5602,6 +5612,18 @@ dependencies = [
  "rodio",
  "serde",
  "serde_json",
+ "starfall-graph",
+ "starfall-project",
+]
+
+[[package]]
+name = "starfall-project"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "starfall-graph",
+ "toml",
 ]
 
 [[package]]

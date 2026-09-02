@@ -9,6 +9,10 @@ readme = "README.md"
 # are explicitly documented.
 publish = false
 
+[workspace]
+members = ["crates/starfall-graph", "crates/starfall-project"]
+resolver = "2"
+
 [lib]
 name = "starfall_i"
 path = "src/lib.rs"
@@ -29,6 +33,8 @@ path = "examples/modular_character.rs"
 required-features = ["heavy-water-demo"]
 
 [dependencies]
+starfall-graph = { path = "crates/starfall-graph" }
+starfall-project = { path = "crates/starfall-project" }
 bevy = { version = "0.19.1", features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings", "bevy_feathers"] }
 # Same decoder Bevy plays audio with (version-locked through the workspace):
 # used at import time so any file we accept cannot panic at playback time.

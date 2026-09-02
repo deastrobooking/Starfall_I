@@ -17,11 +17,14 @@ the complete demo.
 ## Current state
 
 The project is already a substantial native engine/game/tool application, but
-its packaging still reflects one binary game: feature dependencies are broad,
+most packaging still reflects one binary game: feature dependencies are broad,
 runtime code crosses editor boundaries, and several world/UI/tool plugins are
-monolithic. A public library facade and thin native launcher now establish the
-first framework seam. The next work makes that seam selective, repeatable, and
-usable by a second small consumer before physical crate extraction accelerates.
+monolithic. A public library facade and thin native launcher establish the main
+compatibility seam. `starfall-graph` and `starfall-project` are now independent
+workspace crates, versioned manifests are validated and round-trip tested, and
+Heavy Water has a public `shared`/`platformer` ownership facade. The next work
+extracts a compiled graph vertical slice and removes platformer scene spawning
+from the historical global world plugin.
 
 The architecture authority is [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md),
 the filesystem contract is [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md), and the
@@ -59,8 +62,8 @@ Work:
   importers, validators, shaders, animation processors, and publish steps
 - split Heavy Water by removable game-mode modules and prove the public API with
   one focused external example
-- add validated project/module manifests only when parser, migration, and
-  round-trip tests land with them
+- extend the delivered versioned project/module manifests only alongside
+  parser migrations, validation, and round-trip fixtures
 
 Deliverables:
 - public application/library seam with behavior parity

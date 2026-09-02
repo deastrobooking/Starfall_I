@@ -7,7 +7,13 @@
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-pub mod graph;
+/// Typed graph contracts supplied by the independent `starfall-graph` crate.
+///
+/// The re-export preserves the convenient `starfall_i::graph` facade while
+/// allowing graph tools and native extensions to depend on the smaller crate.
+pub use starfall_graph as graph;
+/// Versioned project and module manifest contracts.
+pub use starfall_project as project;
 
 #[cfg(feature = "heavy-water-demo")]
 pub mod app;
@@ -34,6 +40,8 @@ pub mod events;
 #[cfg(feature = "heavy-water-demo")]
 pub mod framework;
 #[cfg(feature = "heavy-water-demo")]
+pub mod heavy_water;
+#[cfg(feature = "heavy-water-demo")]
 pub mod lsystem;
 #[cfg(feature = "heavy-water-demo")]
 pub mod plugins;
@@ -57,6 +65,7 @@ pub use app::{build_app, build_headless_app, build_starfall_app, StarfallAppMode
 /// imported from their owning modules so feature dependencies remain visible.
 pub mod prelude {
     pub use crate::graph::{GraphRegistryPlugin, NodeRegistry};
+    pub use crate::project::{ModuleManifest, ProjectManifest};
 
     #[cfg(feature = "heavy-water-demo")]
     pub use crate::app::{build_app, build_headless_app, build_starfall_app, StarfallAppMode};

@@ -307,6 +307,7 @@ mod app_smoke_tests {
         assert!(app.is_plugin_added::<PlayerPlugin>());
         assert!(app.is_plugin_added::<WeaponPlugin>());
         assert!(app.is_plugin_added::<WorldPlugin>());
+        assert!(app.is_plugin_added::<world::co_op_platformer::HeavyWaterPlatformerPlugin>());
         assert!(app.is_plugin_added::<PublishedVehicleRuntimePlugin>());
         assert!(app.is_plugin_added::<PublishedSpacecraftRuntimePlugin>());
         assert!(app.is_plugin_added::<SavePlugin>());

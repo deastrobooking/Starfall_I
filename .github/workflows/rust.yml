@@ -68,16 +68,16 @@ jobs:
           shared-key: verification-${{ matrix.cache_key }}
 
       - name: Check all targets
-        run: cargo check --all-targets --locked ${{ matrix.cargo_args }}
+        run: cargo check --workspace --all-targets --locked ${{ matrix.cargo_args }}
 
       - name: Clippy
-        run: cargo clippy --all-targets --locked ${{ matrix.cargo_args }} -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked ${{ matrix.cargo_args }} -- -D warnings
 
       - name: Test
-        run: cargo test --locked ${{ matrix.cargo_args }}
+        run: cargo test --workspace --locked ${{ matrix.cargo_args }}
 
       - name: Documentation
         if: matrix.edition == 'Designer'
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --no-deps
+        run: cargo doc --workspace --locked --no-deps

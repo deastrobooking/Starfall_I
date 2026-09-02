@@ -4,16 +4,16 @@
 
 ```sh
 cargo fmt --all -- --check
-cargo check --all-targets --locked
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked                     # Designer edition
-cargo check --all-targets --locked --no-default-features  # minimal framework
-cargo clippy --all-targets --locked --no-default-features -- -D warnings
-cargo test --locked --no-default-features
-cargo check --all-targets --locked --no-default-features --features heavy-water-demo
-cargo clippy --all-targets --locked --no-default-features --features heavy-water-demo -- -D warnings
-cargo test --locked --no-default-features --features heavy-water-demo  # demo runtime
-RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked                     # Designer edition
+cargo check --workspace --all-targets --locked --no-default-features  # minimal framework
+cargo clippy --workspace --all-targets --locked --no-default-features -- -D warnings
+cargo test --workspace --locked --no-default-features
+cargo check --workspace --all-targets --locked --no-default-features --features heavy-water-demo
+cargo clippy --workspace --all-targets --locked --no-default-features --features heavy-water-demo -- -D warnings
+cargo test --workspace --locked --no-default-features --features heavy-water-demo  # demo runtime
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --locked --no-deps
 cargo build --locked
 STARFALL_AUTOSTART=1 ./target/debug/starfall-i
                                # observe ~15s in Playing, then quit; zero panics

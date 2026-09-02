@@ -1,0 +1,20 @@
+schema_version = 1
+
+[project]
+id = "starfall.all_in_one"
+name = "Starfall Engine and Heavy Water Demo"
+version = "0.2.0"
+
+[paths]
+content = "assets"
+source_assets = "assets"
+imported_assets = "assets/imported"
+published = "build/published"
+
+[[modules]]
+id = "starfall.engine.graph"
+version = "=0.1.0"
+
+[[modules]]
+id = "starfall.engine.project"
+version = "=0.1.0"

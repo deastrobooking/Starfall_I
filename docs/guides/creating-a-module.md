@@ -8,10 +8,35 @@ the same contract expected of future third-party modules.
 
 ```text
 my_feature/
+├── starfall.module.toml
 ├── mod.rs
 ├── plugin.rs
 └── tests.rs
 ```
+
+A native package declares its identity and dependencies explicitly:
+
+```toml
+schema_version = 1
+
+[module]
+id = "my_game.platformer"
+name = "My Platformer"
+version = "0.1.0"
+kind = "game-feature"
+source_root = "src"
+
+[[dependencies]]
+id = "starfall.gameplay.platformer"
+version = "^0.1"
+
+[provides]
+graph_nodes = ["my_game.platformer.launch_pad"]
+```
+
+The IDs use Starfall stable-ID syntax, versions use semantic versioning, paths
+must stay within the module, and dependencies may not be duplicated. The
+`starfall-project` crate parses, migrates, validates, and re-encodes this format.
 
 Add `components.rs`, `events.rs`, `resources.rs`, `systems/`, `data/`, or `ui/`
 only when those responsibilities exist.

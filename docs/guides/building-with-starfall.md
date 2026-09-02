@@ -36,6 +36,21 @@ For the minimal typed-graph framework without Heavy Water modules:
 starfall-i = { path = "../Starfall_I", default-features = false }
 ```
 
+Tools can depend on the extracted contracts without pulling in the root game
+package:
+
+```toml
+[dependencies]
+starfall-graph = { path = "../Starfall_I/crates/starfall-graph" }
+starfall-project = { path = "../Starfall_I/crates/starfall-project" }
+```
+
+`starfall-graph` includes a runnable native-node registration example:
+
+```sh
+cargo run -p starfall-graph --example native_extension
+```
+
 Select the complete demo runtime without Forge explicitly:
 
 ```toml
@@ -60,6 +75,13 @@ use starfall_i::plugins::PlayerPlugin;
 
 Keeping ownership visible prevents a convenience prelude from turning into an
 unstable export of the entire codebase.
+
+Heavy Water code should use the transitional public ownership facade:
+
+```rust
+use starfall_i::heavy_water::platformer::HeavyWaterPlatformerPlugin;
+use starfall_i::heavy_water::shared::HeavyWaterProgress;
+```
 
 ## Target custom-game workflow
 

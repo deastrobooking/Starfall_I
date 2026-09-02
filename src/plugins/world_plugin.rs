@@ -60,9 +60,8 @@ use crate::resources::{
 };
 use crate::world::arcade_dungeon::{spawn_arcade_prototype_dungeon, ArcadeDungeonPortal};
 use crate::world::co_op_platformer::{
-    platformer_checkpoint_and_reward_system, platformer_encounter_system,
-    platformer_party_boundary_and_bubble_system, platformer_pressure_gate_system,
-    spawn_shared_platformer_stage, PlatformerWorkshopProgress,
+    reset_platformer_progress, spawn_shared_platformer_stage, HeavyWaterPlatformerPlugin,
+    PlatformerWorkshopProgress,
 };
 use crate::world::dialogue_director::{
     dialogue_director_tick_system, DialogueDirector, DialogueFlags, DialogueStateChange,
@@ -403,12 +402,12 @@ impl Plugin for WorldPlugin {
             .init_resource::<DialogueDirector>()
             .init_resource::<DialogueFlags>()
             .add_message::<DialogueStateChange>()
-            .init_resource::<PlatformerWorkshopProgress>()
             .add_systems(
                 Update,
                 dialogue_director_tick_system.run_if(in_state(AppState::Playing)),
             )
             .add_plugins(GrassPlugin)
+            .add_plugins(HeavyWaterPlatformerPlugin)
             .add_plugins(MaterialPlugin::<TerrainMaterial>::default())
             .add_systems(
                 OnEnter(AppState::Playing),
@@ -423,17 +422,6 @@ impl Plugin for WorldPlugin {
                     .after(generate_city),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
-            .add_systems(
-                Update,
-                (
-                    platformer_party_boundary_and_bubble_system,
-                    platformer_checkpoint_and_reward_system,
-                    platformer_pressure_gate_system,
-                    platformer_encounter_system,
-                )
-                    .chain()
-                    .run_if(in_state(AppState::Playing)),
-            )
             .add_systems(
                 Update,
                 (
@@ -575,16 +563,6 @@ impl Plugin for WorldPlugin {
 
 fn campaign_experience(experience: Res<PlayExperience>) -> bool {
     *experience == PlayExperience::Campaign
-}
-
-fn reset_platformer_progress(
-    transition: Res<PlaySessionTransition>,
-    experience: Res<PlayExperience>,
-    mut progress: ResMut<PlatformerWorkshopProgress>,
-) {
-    if !transition.resuming_from_pause && *experience == PlayExperience::SharedPlatformer {
-        *progress = PlatformerWorkshopProgress::default();
-    }
 }
 
 fn update_day_night(

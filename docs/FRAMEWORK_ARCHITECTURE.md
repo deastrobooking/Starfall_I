@@ -36,16 +36,18 @@ editor sessions, undo history, or draft-only records.
 Starfall uses one graph kernel with multiple typed graph languages. It does not
 use one untyped graph for every problem.
 
-The shared kernel owns:
+The extracted `starfall-graph` crate currently owns:
 
 - stable graph, node, port, and connection IDs
 - typed values, signals, object references, and asset references
 - deterministic serialization and source-control-friendly ordering
 - node definitions, categories, documentation, and registry discovery
-- schema versions, migrations, validation, and actionable diagnostics
-- command-based editing, transactions, undo, and redo
-- subgraphs, instance overrides, and dependency tracking
-- compilation from authoring documents into bounded runtime plans
+- graph and node schema versions plus structural validation diagnostics
+
+The next graph-kernel slices add migrations, command-based editing,
+transactions, undo/redo, subgraphs, instance overrides, dependency tracking,
+and compilation contracts. Domain compilation remains outside the neutral
+crate.
 
 Domain graph families include Object/Prefab, Behavior, Animation, UI, Material
 and Shader, World and City, Dialogue, Mission, Encounter, and Campaign graphs.
@@ -105,6 +107,12 @@ it does not maintain a closed central enum of every possible extension.
 A Starfall module is the distributable unit of capability. It may contain Rust
 code, graphs, objects, UI, shaders, animations, assets, docs, and tests. Its
 manifest declares requirements and provided registrations.
+
+Manifest schema version 1 is implemented by the independent
+`starfall-project` crate. It supplies safe TOML parsing, legacy migration,
+stable-ID and semantic-version validation, project-relative path validation,
+duplicate dependency diagnostics, and deterministic round trips. It performs
+no filesystem mutation.
 
 Every module documents:
 

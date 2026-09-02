@@ -1,0 +1,11 @@
+schema_version = 1
+
+[module]
+id = "starfall.engine.graph"
+name = "Starfall Graph"
+version = "0.1.0"
+kind = "engine"
+source_root = "src"
+
+[provides]
+graph_nodes = []
