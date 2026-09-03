@@ -16,6 +16,7 @@ starfall/
 │   ├── starfall-runtime/         Published catalogs and runtime adapters
 │   ├── starfall-gameplay/        Reusable gameplay kits
 │   ├── starfall-platformer/      Extracted renderer-neutral platformer kit
+│   ├── starfall-platformer-graph/ Optional route graph/compiler adapter
 │   ├── starfall-graph/           Typed graph kernel and compilation contracts
 │   ├── starfall-forge/           Native authoring environment
 │   └── starfall-project/         Manifests, discovery, validation, scaffolding
@@ -38,7 +39,11 @@ Current extraction status:
 - `crates/starfall-platformer` is an independent gameplay-kit package
   containing prefab intent, movement envelopes, chunk/socket validation, route
   assembly, and route validation with only a vector-math dependency.
-- `src/lib.rs` remains the transitional all-in-one facade and re-exports both.
+- `crates/starfall-platformer-graph` is an independent adapter package joining
+  those two contracts. It owns platformer node definitions, compiled route JSON
+  schema version 1, graph diagnostics, catalog resolution, and runtime assembly.
+- `src/lib.rs` remains the transitional all-in-one facade and re-exports all
+  extracted framework packages.
 - Heavy Water exposes `shared` and `platformer` ownership through
   `src/heavy_water/`. Its platformer plugin owns scene entry, spawning, runtime
   rules, tagging, and teardown; its themed catalog, rendering adapters,

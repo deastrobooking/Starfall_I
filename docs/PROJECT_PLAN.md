@@ -22,9 +22,11 @@ runtime code crosses editor boundaries, and several world/UI/tool plugins are
 monolithic. A public library facade and thin native launcher establish the main
 compatibility seam. `starfall-graph` and `starfall-project` are now independent
 workspace crates, versioned manifests are validated and round-trip tested, and
-Heavy Water has a public `shared`/`platformer` ownership facade. The next work
-extracts a compiled graph vertical slice and makes the delivered reusable
-platformer kit consume serialized, versioned authored records.
+Heavy Water has a public `shared`/`platformer` ownership facade. The first
+compiled graph vertical slice now joins the neutral graph kernel to the
+reusable platformer kit through an optional adapter and produces serialized,
+versioned route records. The next work connects that record to Heavy Water's
+published runtime catalog without introducing a Forge dependency.
 
 The architecture authority is [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md),
 the filesystem contract is [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md), and the
@@ -69,6 +71,10 @@ Work:
   controller-neutral movement envelopes, chunk/socket validation, route
   assembly, and resolver-based route validation; Heavy Water retains only its
   themed catalogue and runtime/presentation adapters
+- `starfall-platformer-graph` now registers typed route nodes and compiles a
+  validated linear graph into owned schema-versioned JSON; runtime compilation
+  resolves chunk IDs through a game-supplied catalog, validates the movement
+  envelope, and assembles renderer-neutral geometry
 - extend the delivered versioned project/module manifests only alongside
   parser migrations, validation, and round-trip fixtures
 
@@ -76,7 +82,7 @@ Deliverables:
 - public application/library seam with behavior parity
 - documented and tested dependency direction
 - first selectable capability bundle and consumer example
-- first compiled graph vertical slice from Forge source to runtime behavior
+- first compiled graph vertical slice from authored source to runtime geometry
 - Heavy Water Platformer extracted as the initial game-mode module
 - documentation and package checks in CI
 

@@ -22,3 +22,7 @@ version = "=0.1.0"
 [[modules]]
 id = "starfall.gameplay.platformer"
 version = "=0.1.0"
+
+[[modules]]
+id = "starfall.gameplay.platformer_graph"
+version = "=0.1.0"

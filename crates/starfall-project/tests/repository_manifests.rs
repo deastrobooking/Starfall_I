@@ -15,6 +15,7 @@ fn extracted_crate_manifests_are_current_and_valid() {
     for source in [
         include_str!("../../starfall-graph/starfall.module.toml"),
         include_str!("../../starfall-platformer/starfall.module.toml"),
+        include_str!("../../starfall-platformer-graph/starfall.module.toml"),
         include_str!("../starfall.module.toml"),
     ] {
         let manifest = ModuleManifest::parse(source).unwrap();

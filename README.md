@@ -9,10 +9,12 @@ project, and forkable all-in-one starting point.
 The project is both a playable game and an engine under active extraction. The
 existing application already runs the complete demo and creator tools; the
 public library boundary landed first, and graph, project-manifest, and
-platformer-kit workspace crates are now independently buildable. Fine-grained
-runtime Cargo features and graph-compiled gameplay remain active framework
-work. The documentation distinguishes current behavior from target
-architecture rather than presenting roadmap interfaces as shipped APIs.
+platformer-kit workspace crates are now independently buildable. The first
+domain compiler turns typed platformer graphs into versioned route documents
+and catalog-resolved runtime geometry. Fine-grained runtime Cargo features
+remain active framework work. The documentation distinguishes current behavior
+from target architecture rather than presenting roadmap interfaces as shipped
+APIs.
 
 ## What is included
 
@@ -21,7 +23,7 @@ architecture rather than presenting roadmap interfaces as shipped APIs.
 | Starfall Engine | Bevy/Avian runtime, fixed simulation, input, rendering, reusable gameplay systems | Running in the demo; library facade available |
 | Starfall Forge | Project, character, creature, weapon, vehicle, spaceship, world, and dialogue authoring | Native Designer build |
 | Heavy Water Demo Game | Open-world action RPG, shared platformer, racing/traversal, campaign, and 1–4 player examples | Complete native demo application |
-| Graph framework | Typed object, behavior, animation, UI, shader, world, and narrative graphs | Neutral typed kernel extracted; domain compilers staged |
+| Graph framework | Typed object, behavior, animation, UI, shader, world, and narrative graphs | Neutral typed kernel plus platformer route compiler extracted |
 | Templates and IDE | Generated projects, feature scaffolding, code integration, and guided workflows | Planned after module contracts stabilize |
 
 The design principle is simple: **limit setup and accidental complexity, not
@@ -46,9 +48,9 @@ complete demo without Forge entry points:
 cargo run --no-default-features --features heavy-water-demo
 ```
 
-The minimal framework exposes typed graphs, versioned manifests, and the
-renderer-neutral platformer kit without compiling demo modules or the native
-executable:
+The minimal framework exposes typed graphs, versioned manifests, the
+renderer-neutral platformer kit, and its optional graph compiler without
+compiling demo modules or the native executable:
 
 ```sh
 cargo check --no-default-features
@@ -74,9 +76,10 @@ and verification reference.
 
 ## Use the current framework boundary
 
-The repository now has a library target plus independently buildable graph and
-project-manifest crates. During the workspace transition, a local game or tool
-can depend on the all-in-one framework directly:
+The repository now has a library target plus independently buildable graph,
+platformer, platformer-graph, and project-manifest crates. During the
+workspace transition, a local game or tool can depend on the all-in-one
+framework directly:
 
 ```toml
 [dependencies]
@@ -98,18 +101,30 @@ and Forge. Track that transition in the
 [framework architecture](docs/FRAMEWORK_ARCHITECTURE.md) and
 [project plan](docs/PROJECT_PLAN.md).
 
-Tools that only need graph documents or project discovery can avoid the game:
+Tools and focused games can select only the extracted contracts they need:
 
 ```toml
 [dependencies]
 starfall-graph = { path = "../Starfall_I/crates/starfall-graph" }
+starfall-platformer = { path = "../Starfall_I/crates/starfall-platformer" }
+starfall-platformer-graph = { path = "../Starfall_I/crates/starfall-platformer-graph" }
 starfall-project = { path = "../Starfall_I/crates/starfall-project" }
 ```
 
 The checked-in `starfall.project.toml` and per-crate
 `starfall.module.toml` files are schema-versioned, migrated, validated, and
 round-trip tested. The all-in-one facade re-exports them as
-`starfall_i::graph` and `starfall_i::project`.
+`starfall_i::graph`, `starfall_i::platformer`, `starfall_i::platformer_graph`,
+and `starfall_i::project`.
+
+The platformer graph adapter is deliberately optional: code-authored games can
+use `starfall-platformer` alone, while Forge-style route authoring adds
+`starfall-platformer-graph`. Try the end-to-end graph, JSON, catalog, and
+runtime assembly example with:
+
+```sh
+cargo run -p starfall-platformer-graph --example route_graph
+```
 
 ## Heavy Water Demo Game
 
@@ -167,6 +182,7 @@ and build steps.
 crates/
   starfall-graph/    Independent typed graph documents and node registry
   starfall-platformer/ Renderer-neutral prefab, movement, chunk, and route kit
+  starfall-platformer-graph/ Optional typed route authoring/compiler adapter
   starfall-project/  Independent project/module manifest parser and validator
 
 src/

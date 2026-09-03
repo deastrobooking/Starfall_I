@@ -43,6 +43,7 @@ package:
 [dependencies]
 starfall-graph = { path = "../Starfall_I/crates/starfall-graph" }
 starfall-platformer = { path = "../Starfall_I/crates/starfall-platformer" }
+starfall-platformer-graph = { path = "../Starfall_I/crates/starfall-platformer-graph" }
 starfall-project = { path = "../Starfall_I/crates/starfall-project" }
 ```
 
@@ -59,6 +60,20 @@ Run its complete custom-catalog example with:
 
 ```sh
 cargo run -p starfall-platformer --example custom_route
+```
+
+Add `starfall-platformer-graph` only when routes should be authored as typed
+graphs. Its `register_platformer_nodes` function contributes route Start,
+Chunk, and End definitions to any `NodeRegistry` without changing the neutral
+kernel. `compile_platformer_graph` produces an owned
+`PlatformerRouteDocument`; serialize that as deterministic JSON, then call
+`compile_runtime` with the game's chunk catalog and movement envelope. The
+catalog keeps visuals and game content outside the reusable compiler.
+
+Run the complete vertical slice:
+
+```sh
+cargo run -p starfall-platformer-graph --example route_graph
 ```
 
 Select the complete demo runtime without Forge explicitly:

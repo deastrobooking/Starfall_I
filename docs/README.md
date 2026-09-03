@@ -11,7 +11,7 @@ Engine**, the native **Starfall Forge** authoring environment, and the complete
 | Evaluating or running Starfall | [Repository README](../README.md) |
 | Building a game with the framework | [Building With Starfall](guides/building-with-starfall.md) |
 | Creating a reusable feature | [Creating a Starfall Module](guides/creating-a-module.md) |
-| Understanding ownership and graph design | [Framework Architecture](FRAMEWORK_ARCHITECTURE.md) |
+| Understanding ownership and graph compilation | [Framework Architecture](FRAMEWORK_ARCHITECTURE.md) |
 | Navigating or generating projects | [Repeatable Project Structure](PROJECT_STRUCTURE.md) |
 | Contributing native engine/game code | [Developer Documentation](DEVELOPMENT.md) |
 | Authoring content in Forge | [Designer Workflow](guides/designer-workflow.md) |

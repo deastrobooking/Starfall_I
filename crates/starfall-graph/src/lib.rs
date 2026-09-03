@@ -14,12 +14,22 @@ use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::Resource;
 use serde::{Deserialize, Serialize};
 
-pub const GRAPH_SCHEMA_VERSION: u32 = 1;
+pub const GRAPH_SCHEMA_VERSION: u32 = 2;
 
 /// A stable, serialized identity. Display labels are never identities.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct StableId(String);
+
+impl<'de> Deserialize<'de> for StableId {
+    fn deserialize<Deserializer>(deserializer: Deserializer) -> Result<Self, Deserializer::Error>
+    where
+        Deserializer: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
 
 impl StableId {
     pub fn new(value: impl Into<String>) -> Result<Self, StableIdError> {
@@ -88,6 +98,7 @@ pub enum GraphDomain {
     Dialogue,
     Mission,
     Campaign,
+    Platformer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -502,6 +513,7 @@ mod tests {
         assert!(StableId::new("heavy_water.city/shop-door").is_ok());
         assert!(StableId::new("Shop Door").is_err());
         assert!(StableId::new("").is_err());
+        assert!(serde_json::from_str::<StableId>(r#""invalid id""#).is_err());
     }
 
     #[test]

@@ -691,37 +691,43 @@ impl RouteDefinition {
             Ok(chunks) => chunks,
             Err(problem) => return vec![problem],
         };
-        if chunks.is_empty() {
-            return vec![RouteProblem::Empty];
-        }
-
-        let mut problems = Vec::new();
-        if chunks[0].role != ChunkRole::Arrival {
-            problems.push(RouteProblem::DoesNotOpenOnArrival);
-        }
-        if !matches!(
-            chunks[chunks.len() - 1].role,
-            ChunkRole::Arena | ChunkRole::Boss
-        ) {
-            problems.push(RouteProblem::NoDestination);
-        }
-        for chunk in chunks.iter().skip(1) {
-            if chunk.role == ChunkRole::Arrival {
-                problems.push(RouteProblem::ArrivalMidRoute {
-                    id: chunk.id.to_string(),
-                });
-            }
-        }
-        for chunk in &chunks {
-            for problem in chunk.validate(envelope) {
-                problems.push(RouteProblem::BadChunk {
-                    id: chunk.id.to_string(),
-                    problem,
-                });
-            }
-        }
-        problems
+        validate_resolved_route(&chunks, envelope)
     }
+}
+
+/// Validates an already resolved route. Graph/document compilers use this
+/// entry point after resolving owned serialized IDs through a game catalog.
+pub fn validate_resolved_route(chunks: &[ChunkDef], envelope: JumpEnvelope) -> Vec<RouteProblem> {
+    if chunks.is_empty() {
+        return vec![RouteProblem::Empty];
+    }
+
+    let mut problems = Vec::new();
+    if chunks[0].role != ChunkRole::Arrival {
+        problems.push(RouteProblem::DoesNotOpenOnArrival);
+    }
+    if !matches!(
+        chunks[chunks.len() - 1].role,
+        ChunkRole::Arena | ChunkRole::Boss
+    ) {
+        problems.push(RouteProblem::NoDestination);
+    }
+    for chunk in chunks.iter().skip(1) {
+        if chunk.role == ChunkRole::Arrival {
+            problems.push(RouteProblem::ArrivalMidRoute {
+                id: chunk.id.to_string(),
+            });
+        }
+    }
+    for chunk in chunks {
+        for problem in chunk.validate(envelope) {
+            problems.push(RouteProblem::BadChunk {
+                id: chunk.id.to_string(),
+                problem,
+            });
+        }
+    }
+    problems
 }
 
 #[cfg(test)]

@@ -14,6 +14,8 @@
 pub use starfall_graph as graph;
 /// Renderer-neutral platformer prefab, envelope, chunk, and route contracts.
 pub use starfall_platformer as platformer;
+/// Platformer route graph nodes, documents, and compiler adapters.
+pub use starfall_platformer_graph as platformer_graph;
 /// Versioned project and module manifest contracts.
 pub use starfall_project as project;
 
@@ -68,6 +70,10 @@ pub use app::{build_app, build_headless_app, build_starfall_app, StarfallAppMode
 pub mod prelude {
     pub use crate::graph::{GraphRegistryPlugin, NodeRegistry};
     pub use crate::platformer::{ChunkDef, JumpEnvelope, MovementProfile, PlatformerPrefabKind};
+    pub use crate::platformer_graph::{
+        compile_platformer_graph, register_platformer_nodes, PlatformerRouteDocument,
+        PlatformerRouteGraph, PlatformerRouteGraphBuilder,
+    };
     pub use crate::project::{ModuleManifest, ProjectManifest};
 
     #[cfg(feature = "heavy-water-demo")]

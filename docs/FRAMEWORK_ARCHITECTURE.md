@@ -44,6 +44,13 @@ The extracted `starfall-graph` crate currently owns:
 - node definitions, categories, documentation, and registry discovery
 - graph and node schema versions plus structural validation diagnostics
 
+The first domain vertical slice is implemented in the separate
+`starfall-platformer-graph` adapter. It registers Start, Chunk, and End nodes,
+compiles one deterministic linear flow into an owned schema-versioned JSON
+route document, resolves game-owned chunk IDs through a supplied catalog, and
+runs the platformer kit's geometry validation before route assembly. Neither
+the graph kernel nor the platformer kit depends on this adapter.
+
 The next graph-kernel slices add migrations, command-based editing,
 transactions, undo/redo, subgraphs, instance overrides, dependency tracking,
 and compilation contracts. Domain compilation remains outside the neutral
@@ -154,9 +161,11 @@ its state, entry/reset, authored-route spawning with fallback, continuous
 rules, scene tagging, and teardown. `WorldPlugin` owns only campaign entities
 tagged `WorldOwned`; application composition installs the two plugins as
 siblings. The reusable prefab intent, movement-envelope math, chunk/socket
-validation, route schema, and route assembly now live in the independent
-`starfall-platformer` gameplay-kit crate. Heavy Water supplies the themed
-catalog, materials, encounters, rewards, and runtime scene adapter.
+validation, code-authored route contract, and route assembly now live in the
+independent `starfall-platformer` gameplay-kit crate. The optional platformer
+graph adapter owns the portable authored route document and compilation step.
+Heavy Water supplies the themed catalog, materials, encounters, rewards, and
+runtime scene adapter.
 
 ## Native Studio experience
 

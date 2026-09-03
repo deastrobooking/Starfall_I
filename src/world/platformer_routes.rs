@@ -143,6 +143,25 @@ pub fn route_by_id(id: &str) -> Option<RouteDef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::{NodeRegistry, StableId};
+    use crate::platformer_graph::{
+        compile_platformer_graph, register_platformer_nodes, PlatformerRouteGraphBuilder,
+    };
+
+    fn stable_id(value: &str) -> StableId {
+        StableId::new(value).expect("Heavy Water route IDs must be graph-safe")
+    }
+
+    fn theme_id(theme: ChunkTheme) -> StableId {
+        let value = match theme {
+            ChunkTheme::Cityscape => "heavy_water.theme.cityscape",
+            ChunkTheme::Mountain => "heavy_water.theme.mountain",
+            ChunkTheme::Castle => "heavy_water.theme.castle",
+            ChunkTheme::Cavern => "heavy_water.theme.cavern",
+            ChunkTheme::Custom(value) => value,
+        };
+        stable_id(value)
+    }
 
     #[test]
     fn every_shipped_route_is_playable_end_to_end() {
@@ -159,6 +178,44 @@ mod tests {
                 route.label,
                 route.id,
                 problems.join("; ")
+            );
+        }
+    }
+
+    #[test]
+    fn every_shipped_route_crosses_the_public_graph_document_runtime_boundary() {
+        let mut registry = NodeRegistry::default();
+        register_platformer_nodes(&mut registry).unwrap();
+
+        for route in ROUTES {
+            let mut builder = PlatformerRouteGraphBuilder::new(
+                stable_id(route.id),
+                route.label,
+                theme_id(route.theme),
+            )
+            .brief(route.brief);
+            for (index, chunk_id) in route.chunks.iter().enumerate() {
+                builder = builder.chunk(stable_id(&format!("chunk_{index}")), stable_id(chunk_id));
+            }
+
+            let graph = builder.build();
+            let authored = compile_platformer_graph(&graph, &registry).unwrap();
+            let json = authored.document.to_json_pretty().unwrap();
+            let loaded = crate::platformer_graph::PlatformerRouteDocument::parse(&json).unwrap();
+            let runtime = loaded
+                .compile_runtime([0.0; 3], JumpEnvelope::standard(), chunk_by_id)
+                .unwrap();
+
+            assert_eq!(runtime.chunks.len(), route.chunks.len(), "{}", route.id);
+            assert_eq!(
+                loaded
+                    .chunks
+                    .iter()
+                    .map(StableId::as_str)
+                    .collect::<Vec<_>>(),
+                route.chunks,
+                "{}",
+                route.id
             );
         }
     }

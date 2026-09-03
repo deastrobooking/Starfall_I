@@ -75,6 +75,12 @@ layout: use the ownership rules below for new code, and use
 than treating today's folders as the final framework API.
 
 ```
+crates/
+  starfall-graph/             Independent typed graph kernel
+  starfall-platformer/        Renderer-neutral platformer gameplay kit
+  starfall-platformer-graph/  Optional graph-to-route compiler adapter
+  starfall-project/           Versioned project and module manifests
+
 src/
   main.rs        Thin native launcher only
   lib.rs         Public framework modules, application factories, small prelude
@@ -116,6 +122,11 @@ src/
                  `engine_tools::platformer_prefabs` owns the traversal
                  palette's recipe and generated-mesh source.
 ```
+
+The adapter package is the reference dependency pattern for domain tools: it
+depends on the neutral graph kernel and a gameplay kit, while neither lower
+layer imports it. Its runnable `route_graph` example and Heavy Water contract
+test both prove graph → JSON → catalog → validated runtime assembly.
 
 Current rules and target direction:
 
