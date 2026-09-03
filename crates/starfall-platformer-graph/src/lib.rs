@@ -127,13 +127,18 @@ impl PlatformerRouteDocument {
 
     pub fn parse(source: &str) -> Result<Self, PlatformerRouteLoadError> {
         let document: Self = serde_json::from_str(source)?;
-        if document.schema_version != PLATFORMER_ROUTE_SCHEMA_VERSION {
+        document.validate_schema()?;
+        Ok(document)
+    }
+
+    pub fn validate_schema(&self) -> Result<(), PlatformerRouteLoadError> {
+        if self.schema_version != PLATFORMER_ROUTE_SCHEMA_VERSION {
             return Err(PlatformerRouteLoadError::UnsupportedSchema {
-                found: document.schema_version,
+                found: self.schema_version,
                 supported: PLATFORMER_ROUTE_SCHEMA_VERSION,
             });
         }
-        Ok(document)
+        Ok(())
     }
 
     /// Resolves game-owned chunk IDs and runs the reusable geometry checks.

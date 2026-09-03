@@ -76,6 +76,14 @@ Run the complete vertical slice:
 cargo run -p starfall-platformer-graph --example route_graph
 ```
 
+In the all-in-one Designer build,
+`engine_tools::platformer_route_records::create_platformer_route` stores that
+same graph as a typed Forge project record. Its project `content_id` identifies
+the editable asset; the separate graph `route_id` is the durable runtime/save
+identity. Publishing compiles all such records into
+`platformer_routes.json`. Heavy Water uses a valid published document when its
+runtime ID matches a built-in route and otherwise keeps the built-in level.
+
 Select the complete demo runtime without Forge explicitly:
 
 ```toml

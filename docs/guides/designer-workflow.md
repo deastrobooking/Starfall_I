@@ -155,7 +155,8 @@ persistence is a separate save-schema milestone.
 1. Runs the store's validate-and-promote gate — one broken record publishes
    nothing.
 2. Persists published hashes into the project.
-3. Bakes weapons, creatures, vehicles, and spacecraft into
+3. Bakes weapons, creatures, vehicles, spacecraft, dialogue graphs, and
+   compiled platformer routes into
    `assets/published/` as deterministic JSON (sorted by id — republishing
    without edits is byte-identical).
 
@@ -163,7 +164,10 @@ The result appears in the hub status line and refreshes craft catalogs in the
 same Designer process. The Game edition loads `assets/published/` read-only
 before the first state transition: published weapons go on sale priced by the
 forge's own derivation, published creatures become spawnable, and vehicle and
-spacecraft recipes populate their gameplay adapters. Packaged builds may set
+spacecraft recipes populate their gameplay adapters, and valid platformer
+route documents override matching built-in route IDs. Routes with unsupported
+schemas, missing Heavy Water chunks, or invalid movement geometry are skipped.
+Packaged builds may set
 `STARFALL_ASSET_ROOT`; otherwise an `assets/` folder beside the executable is
 preferred before the development checkout fallback.
 Missing files are a first-class empty state, so a build with no published

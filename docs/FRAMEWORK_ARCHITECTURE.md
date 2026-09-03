@@ -51,6 +51,13 @@ route document, resolves game-owned chunk IDs through a supplied catalog, and
 runs the platformer kit's geometry validation before route assembly. Neither
 the graph kernel nor the platformer kit depends on this adapter.
 
+Forge can persist these graphs as typed project records and compiles them to
+`platformer_routes.json` during the existing atomic publish transaction. The
+consumer never loads Forge payloads: it validates each compiled document's
+schema and Heavy Water chunk references before adding it to the runtime
+catalog. A published document overrides a built-in demo route only when their
+stable runtime route IDs match; missing or invalid output falls back safely.
+
 The next graph-kernel slices add migrations, command-based editing,
 transactions, undo/redo, subgraphs, instance overrides, dependency tracking,
 and compilation contracts. Domain compilation remains outside the neutral

@@ -18,6 +18,8 @@ pub mod mesh_uv;
 pub(crate) mod persistence;
 /// Reusable structural and kinetic platforming prefab recipes.
 pub mod platformer_prefabs;
+/// Typed platformer route graphs stored in versioned Forge project records.
+pub mod platformer_route_records;
 mod presets;
 pub mod project_registry;
 /// Designer→Game publish step: bake validated records to assets/published/.
@@ -9853,6 +9855,9 @@ fn collect_project_diagnostics(session: &EditorProjectSession) -> Vec<String> {
         .into_iter()
         .map(|error| format!("{error:?}"))
         .chain(dialogue_records::validate_dialogue_records(
+            &session.project,
+        ))
+        .chain(platformer_route_records::validate_platformer_route_records(
             &session.project,
         ))
         .chain(session.store.source_diagnostics(&session.project))

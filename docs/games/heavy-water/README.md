@@ -40,11 +40,11 @@ world generator explicitly skips platformer sessions and cleans only its own
 campaign entities. Reusable prefab intent, movement envelopes, chunk/socket
 validation, and route assembly now come from `starfall-platformer`; Heavy Water
 owns the themed catalogue, materials, encounter pockets, rewards, and scene
-adapter. A repository contract test also converts every shipped Heavy Water
-route through `starfall-platformer-graph`, round-trips its schema-versioned JSON,
-resolves the real Heavy Water catalog, and assembles runtime geometry. This
-keeps the demo usable as a learning project while Forge publication is wired
-into the shipping runtime path.
+adapter. Forge route records now compile into the atomic published generation;
+the Game consumer validates them against the real Heavy Water catalog and uses
+a valid document in place of a built-in level with the same stable route ID.
+Invalid or absent content retains the built-in fallback. Repository tests also
+send every shipped route through the graph, JSON, catalog, and runtime boundary.
 
 ## Why the demo remains complete
 

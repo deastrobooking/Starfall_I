@@ -128,6 +128,12 @@ depends on the neutral graph kernel and a gameplay kit, while neither lower
 layer imports it. Its runnable `route_graph` example and Heavy Water contract
 test both prove graph → JSON → catalog → validated runtime assembly.
 
+Forge stores platformer graph sources in typed project records and publishes
+compiled `platformer_routes.json` beside the other immutable generation files.
+`PublishedContentPlugin` loads that file before the first state transition,
+revalidates it through Heavy Water's chunk catalog, and keeps built-in routes
+as the failure-safe fallback.
+
 Current rules and target direction:
 
 1. **`plugins/` holds systems; the domain folders hold rules and data.** A

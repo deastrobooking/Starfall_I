@@ -3,8 +3,9 @@
 //! Authoring happens in versioned `ForgeProject` stores that consumers never
 //! see. Publishing is the one-way bridge: validate every draft through the
 //! store's own gate (`ForgeProject::publish_drafts`), then bake the published
-//! weapons, creatures, vehicles, and spacecraft into plain JSON under an immutable generation in
-//! `assets/published/`. A manifest committed last selects the complete
+//! weapons, creatures, vehicles, spacecraft, dialogue, and platformer routes
+//! into plain JSON under an immutable generation in `assets/published/`. A
+//! manifest committed last selects the complete
 //! generation. The consumer Game edition loads those files and nothing else;
 //! it has no writer for any of this.
 //!
@@ -21,6 +22,7 @@ use super::dialogue_records;
 use super::persistence::{
     ContentCategory, ForgeProject, ProjectIoError, ProjectLoadSource, ProjectStore,
 };
+use super::platformer_route_records;
 use super::project_registry::ForgeProjectRegistry;
 use super::spaceship_records;
 use super::vehicle_records;
@@ -39,6 +41,7 @@ const CREATURES_FILE: &str = "creatures.json";
 const VEHICLES_FILE: &str = "vehicles.json";
 const SPACESHIPS_FILE: &str = "spaceships.json";
 const DIALOGUES_FILE: &str = "dialogues.json";
+const PLATFORMER_ROUTES_FILE: &str = "platformer_routes.json";
 const PUBLISHED_OUTPUT_LOCK_FILE: &str = ".publish.lock";
 
 static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
@@ -111,6 +114,7 @@ struct BakedGeneration {
     vehicles_json: Vec<u8>,
     spaceships_json: Vec<u8>,
     dialogues_json: Vec<u8>,
+    platformer_routes_json: Vec<u8>,
     manifest_json: Vec<u8>,
     report: PublishReport,
 }
@@ -161,6 +165,7 @@ pub struct PublishReport {
     pub vehicles: usize,
     pub spaceships: usize,
     pub dialogues: usize,
+    pub platformer_routes: usize,
     /// Records in categories that have no game-side loader yet.
     pub skipped: usize,
     /// The generation is visible to readers, but the final directory sync
@@ -171,8 +176,13 @@ pub struct PublishReport {
 impl PublishReport {
     pub fn summary(&self) -> String {
         let mut parts = vec![format!(
-            "Published {} weapon(s), {} creature(s), {} vehicle(s), {} spacecraft, {} dialogue(s)",
-            self.weapons, self.creatures, self.vehicles, self.spaceships, self.dialogues
+            "Published {} weapon(s), {} creature(s), {} vehicle(s), {} spacecraft, {} dialogue(s), {} platformer route(s)",
+            self.weapons,
+            self.creatures,
+            self.vehicles,
+            self.spaceships,
+            self.dialogues,
+            self.platformer_routes
         )];
         if self.skipped > 0 {
             parts.push(format!("{} record(s) have no loader yet", self.skipped));
@@ -250,9 +260,38 @@ fn bake_dialogues(project: &ForgeProject) -> Result<Vec<PublishedDialogue>, Stri
     Ok(dialogues)
 }
 
+/// Compile typed authoring graphs into the smaller route documents consumed by
+/// Game builds. Structural graph errors fail publication before staging.
+fn bake_platformer_routes(
+    project: &ForgeProject,
+) -> Result<Vec<starfall_platformer_graph::PlatformerRouteDocument>, String> {
+    let mut routes = Vec::new();
+    for (content_id, _) in platformer_route_records::platformer_route_entries(project) {
+        routes.push(
+            platformer_route_records::compile_record(project, &content_id)
+                .map_err(|error| format!("{content_id}: {error:?}"))?,
+        );
+    }
+    routes.sort_by(|left, right| left.id.cmp(&right.id));
+    if let Some(duplicate) = routes
+        .windows(2)
+        .find(|pair| pair[0].id == pair[1].id)
+        .map(|pair| pair[0].id.clone())
+    {
+        return Err(format!(
+            "platformer route runtime id {duplicate} is authored more than once"
+        ));
+    }
+    Ok(routes)
+}
+
 /// Records that exist in the project but have no baked representation yet.
 fn unbaked_record_count(project: &ForgeProject) -> usize {
     let dialogue_ids = dialogue_records::dialogue_entries(project)
+        .into_iter()
+        .map(|(content_id, _)| content_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    let platformer_route_ids = platformer_route_records::platformer_route_entries(project)
         .into_iter()
         .map(|(content_id, _)| content_id)
         .collect::<std::collections::BTreeSet<_>>();
@@ -267,6 +306,7 @@ fn unbaked_record_count(project: &ForgeProject) -> usize {
                     | ContentCategory::Vehicle
                     | ContentCategory::Spaceship
             ) && !dialogue_ids.contains(&record.content_id)
+                && !platformer_route_ids.contains(&record.content_id)
         })
         .count()
 }
@@ -277,6 +317,7 @@ fn generation_id(
     vehicles_json: &[u8],
     spaceships_json: &[u8],
     dialogues_json: &[u8],
+    platformer_routes_json: &[u8],
 ) -> String {
     // Stable FNV-1a rather than DefaultHasher: the id must remain reproducible
     // across processes and Rust releases because it names an immutable output
@@ -294,6 +335,8 @@ fn generation_id(
         spaceships_json,
         DIALOGUES_FILE.as_bytes(),
         dialogues_json,
+        PLATFORMER_ROUTES_FILE.as_bytes(),
+        platformer_routes_json,
     ] {
         for byte in bytes {
             hash ^= u64::from(*byte);
@@ -312,17 +355,21 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
     let vehicles = bake_vehicles(project)?;
     let spaceships = bake_spaceships(project)?;
     let dialogues = bake_dialogues(project)?;
+    let platformer_routes = bake_platformer_routes(project)?;
     let weapons_json = serde_json::to_vec_pretty(&weapons).map_err(|e| e.to_string())?;
     let creatures_json = serde_json::to_vec_pretty(&creatures).map_err(|e| e.to_string())?;
     let vehicles_json = serde_json::to_vec_pretty(&vehicles).map_err(|e| e.to_string())?;
     let spaceships_json = serde_json::to_vec_pretty(&spaceships).map_err(|e| e.to_string())?;
     let dialogues_json = serde_json::to_vec_pretty(&dialogues).map_err(|e| e.to_string())?;
+    let platformer_routes_json =
+        serde_json::to_vec_pretty(&platformer_routes).map_err(|e| e.to_string())?;
     let generation = generation_id(
         &weapons_json,
         &creatures_json,
         &vehicles_json,
         &spaceships_json,
         &dialogues_json,
+        &platformer_routes_json,
     );
     let manifest_json = serde_json::to_vec_pretty(&PublishedGenerationManifest {
         schema_version: PUBLISHED_MANIFEST_SCHEMA,
@@ -335,6 +382,7 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
         vehicles: vehicles.len(),
         spaceships: spaceships.len(),
         dialogues: dialogues.len(),
+        platformer_routes: platformer_routes.len(),
         skipped: unbaked_record_count(project),
         durability_warning: None,
     };
@@ -345,6 +393,7 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
         vehicles_json,
         spaceships_json,
         dialogues_json,
+        platformer_routes_json,
         manifest_json,
         report,
     })
@@ -439,11 +488,14 @@ fn generation_matches(path: &Path, baked: &BakedGeneration) -> Result<bool, Stri
         .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
     let dialogues = std::fs::read(path.join(DIALOGUES_FILE))
         .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
+    let platformer_routes = std::fs::read(path.join(PLATFORMER_ROUTES_FILE))
+        .map_err(|error| format!("Could not verify {}: {error}", path.display()))?;
     Ok(weapons == baked.weapons_json
         && creatures == baked.creatures_json
         && vehicles == baked.vehicles_json
         && spaceships == baked.spaceships_json
-        && dialogues == baked.dialogues_json)
+        && dialogues == baked.dialogues_json
+        && platformer_routes == baked.platformer_routes_json)
 }
 
 fn cleanup_staging(path: &Path) {
@@ -504,6 +556,10 @@ fn stage_generation(out_dir: &Path, baked: BakedGeneration) -> Result<StagedGene
         write_synced(&staging_dir.join(VEHICLES_FILE), &baked.vehicles_json)?;
         write_synced(&staging_dir.join(SPACESHIPS_FILE), &baked.spaceships_json)?;
         write_synced(&staging_dir.join(DIALOGUES_FILE), &baked.dialogues_json)?;
+        write_synced(
+            &staging_dir.join(PLATFORMER_ROUTES_FILE),
+            &baked.platformer_routes_json,
+        )?;
         File::open(&staging_dir)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| {
@@ -983,6 +1039,59 @@ mod tests {
     }
 
     #[test]
+    fn platformer_route_graphs_compile_into_the_atomic_generation() {
+        let dir = test_dir("platformer_routes");
+        let mut project = ForgeProject::default();
+        let baseline_skipped = unbaked_record_count(&project);
+        let _content_id = platformer_route_records::create_platformer_route(
+            &mut project,
+            "Published Rooftops",
+            starfall_graph::StableId::new("route_city_rooftops").unwrap(),
+            starfall_graph::StableId::new("heavy_water.theme.cityscape").unwrap(),
+            [
+                starfall_graph::StableId::new("city_rooftop_arrival").unwrap(),
+                starfall_graph::StableId::new("city_plaza_arena").unwrap(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(unbaked_record_count(&project), baseline_skipped);
+
+        let report = bake_project_to(&project, &dir).expect("route bake succeeds");
+        assert_eq!(report.platformer_routes, 1);
+        assert!(report.summary().contains("1 platformer route(s)"));
+        let path = published_file_in(&dir, PLATFORMER_ROUTES_FILE).unwrap();
+        let routes: Vec<starfall_platformer_graph::PlatformerRouteDocument> =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].id.as_str(), "route_city_rooftops");
+        assert_eq!(routes[0].chunks.len(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn duplicate_platformer_runtime_ids_refuse_publication() {
+        let mut project = ForgeProject::default();
+        for display_name in ["First Route Record", "Second Route Record"] {
+            platformer_route_records::create_platformer_route(
+                &mut project,
+                display_name,
+                starfall_graph::StableId::new("route_city_rooftops").unwrap(),
+                starfall_graph::StableId::new("heavy_water.theme.cityscape").unwrap(),
+                [
+                    starfall_graph::StableId::new("city_rooftop_arrival").unwrap(),
+                    starfall_graph::StableId::new("city_plaza_arena").unwrap(),
+                ],
+            )
+            .unwrap();
+        }
+
+        let error = bake_platformer_routes(&project).unwrap_err();
+        assert!(error.contains("route_city_rooftops"));
+        assert!(error.contains("authored more than once"));
+    }
+
+    #[test]
     fn an_invalid_dialogue_fails_the_whole_bake() {
         let dir = test_dir("invalid_dialogue");
         let mut project = ForgeProject::default();
@@ -1419,6 +1528,7 @@ mod tests {
             vehicles: 0,
             spaceships: 0,
             dialogues: 0,
+            platformer_routes: 0,
             skipped: 1,
             durability_warning: None,
         };

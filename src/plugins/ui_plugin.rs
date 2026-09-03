@@ -77,7 +77,7 @@ use crate::world::missions::{
     active_custom_mission, chapter_mission, mission_for_travel_anchor, CustomMissionState,
     SPECIAL_MISSION_TRAVEL_POINTS,
 };
-use crate::world::published_content::ReloadPublishedCraftCatalogs;
+use crate::world::published_content::ReloadPublishedContentCatalogs;
 use crate::world::published_craft::PublishedFleet;
 use crate::world::robot_pets::{RobotPartKind, RobotPetCollection};
 use crate::world::settlement_economy::SettlementEconomy;
@@ -2129,7 +2129,7 @@ fn project_hub_action_system(
     mut next_state: ResMut<NextState<AppState>>,
     mut next_tool_mode: ResMut<NextState<EngineToolMode>>,
     mut hub_status: Query<&mut Text, With<ProjectHubStatusText>>,
-    mut craft_reload: MessageWriter<ReloadPublishedCraftCatalogs>,
+    mut content_reload: MessageWriter<ReloadPublishedContentCatalogs>,
 ) {
     for (interaction, button) in interactions.iter() {
         if *interaction != Interaction::Pressed {
@@ -2190,7 +2190,7 @@ fn project_hub_action_system(
                 let outcome = crate::engine_tools::publish::publish_active_project(&registry);
                 let message = match outcome {
                     Ok(report) => {
-                        craft_reload.write(ReloadPublishedCraftCatalogs);
+                        content_reload.write(ReloadPublishedContentCatalogs);
                         format!("PUBLISHED ✓  {}", report.summary())
                     }
                     Err(error) => format!("PUBLISH FAILED — {error}"),

@@ -12,6 +12,7 @@
 //! level cannot ship that opens mid-air or ends without a destination.
 
 use bevy::prelude::*;
+use std::collections::BTreeMap;
 
 use super::platformer_chunk_library::chunk_by_id;
 #[cfg(test)]
@@ -22,6 +23,51 @@ use super::platformer_chunks::{
 
 /// One authored level.
 pub type RouteDef = RouteDefinition;
+
+/// Consumer-side catalog of compiled Forge routes. Heavy Water only accepts
+/// entries that resolve against its own chunk catalog and movement envelope.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct PublishedPlatformerRouteCatalog {
+    entries: BTreeMap<String, crate::platformer_graph::PlatformerRouteDocument>,
+}
+
+impl PublishedPlatformerRouteCatalog {
+    pub fn get(&self, id: &str) -> Option<&crate::platformer_graph::PlatformerRouteDocument> {
+        self.entries.get(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn seed_from_published(
+        &mut self,
+        routes: impl IntoIterator<Item = crate::platformer_graph::PlatformerRouteDocument>,
+    ) -> usize {
+        if !self.entries.is_empty() {
+            return 0;
+        }
+        for route in routes {
+            self.entries.entry(route.id.to_string()).or_insert(route);
+        }
+        self.entries.len()
+    }
+
+    pub fn replace(
+        &mut self,
+        routes: impl IntoIterator<Item = crate::platformer_graph::PlatformerRouteDocument>,
+    ) -> usize {
+        self.entries.clear();
+        for route in routes {
+            self.entries.entry(route.id.to_string()).or_insert(route);
+        }
+        self.entries.len()
+    }
+}
 
 /// Heavy Water catalogue convenience methods over the reusable route schema.
 pub trait HeavyWaterRouteExt {

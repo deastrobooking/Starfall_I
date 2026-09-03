@@ -367,6 +367,48 @@ mod tests {
     }
 
     #[test]
+    fn a_valid_published_route_overrides_the_matching_builtin_level() {
+        let mut catalog =
+            super::super::platformer_routes::PublishedPlatformerRouteCatalog::default();
+        catalog.seed_from_published([crate::platformer_graph::PlatformerRouteDocument {
+            schema_version: crate::platformer_graph::PLATFORMER_ROUTE_SCHEMA_VERSION,
+            id: crate::graph::StableId::new("route_city_rooftops").unwrap(),
+            label: "Forge Rooftop Override".into(),
+            brief: "Published route selected".into(),
+            theme: crate::graph::StableId::new("heavy_water.theme.cityscape").unwrap(),
+            chunks: vec![
+                crate::graph::StableId::new("city_rooftop_arrival").unwrap(),
+                crate::graph::StableId::new("city_plaza_arena").unwrap(),
+            ],
+        }]);
+        let mut app = spawn_app();
+        let world = app.world_mut();
+        let built = world
+            .resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+                world.resource_scope(|world, mut materials: Mut<Assets<StandardMaterial>>| {
+                    let mut queue = bevy::ecs::world::CommandQueue::default();
+                    let mut commands = Commands::new(&mut queue, world);
+                    let built = spawn_route_by_index_with_catalog(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        Some(&catalog),
+                        0,
+                        Vec3::ZERO,
+                    );
+                    queue.apply(world);
+                    built
+                })
+            })
+            .unwrap();
+
+        assert_eq!(built.id, "route_city_rooftops");
+        assert_eq!(built.label, "Forge Rooftop Override");
+        assert_eq!(built.brief, "Published route selected");
+        assert!(built.pieces > 0);
+    }
+
+    #[test]
     fn an_index_past_the_last_level_is_refused_rather_than_guessed() {
         let mut app = spawn_app();
         let world = app.world_mut();
@@ -415,10 +457,47 @@ pub fn spawn_route_by_index(
     index: usize,
     start: Vec3,
 ) -> Result<SpawnedRoute, String> {
+    spawn_route_by_index_with_catalog(commands, meshes, materials, None, index, start)
+}
+
+/// Build a route while allowing a validated published document with the same
+/// stable ID to override Heavy Water's built-in definition.
+pub fn spawn_route_by_index_with_catalog(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    published: Option<&super::platformer_routes::PublishedPlatformerRouteCatalog>,
+    index: usize,
+    start: Vec3,
+) -> Result<SpawnedRoute, String> {
     use super::platformer_chunks::JumpEnvelope;
     use super::platformer_routes::route_at;
 
     let route = route_at(index).ok_or_else(|| format!("no route at index {index}"))?;
+    if let Some(document) = published.and_then(|catalog| catalog.get(route.id)) {
+        let compiled = document
+            .compile_runtime(
+                start.to_array(),
+                JumpEnvelope::standard(),
+                super::platformer_chunk_library::chunk_by_id,
+            )
+            .map_err(|error| format!("published route {} is not playable: {error}", route.id))?;
+        let climb = super::platformer_chunks::route_climb(&compiled.chunks);
+        let finish = compiled
+            .chunks
+            .last()
+            .map(|chunk| chunk.world_exit())
+            .unwrap_or(start);
+        let pieces = spawn_route(commands, meshes, materials, &compiled.chunks);
+        return Ok(SpawnedRoute {
+            id: document.id.to_string(),
+            label: document.label.clone(),
+            brief: document.brief.clone(),
+            pieces,
+            climb,
+            finish,
+        });
+    }
     let problems = route.validate(JumpEnvelope::standard());
     if !problems.is_empty() {
         return Err(format!(
@@ -434,9 +513,9 @@ pub fn spawn_route_by_index(
     let placed = route.assemble(start).map_err(|problem| problem.message())?;
     let pieces = spawn_route(commands, meshes, materials, &placed);
     Ok(SpawnedRoute {
-        id: route.id,
-        label: route.label,
-        brief: route.brief,
+        id: route.id.into(),
+        label: route.label.into(),
+        brief: route.brief.into(),
         pieces,
         climb: super::platformer_chunks::route_climb(&placed),
         finish: placed
@@ -449,9 +528,9 @@ pub fn spawn_route_by_index(
 /// What a successful route build produced, for HUD text and progression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpawnedRoute {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub brief: &'static str,
+    pub id: String,
+    pub label: String,
+    pub brief: String,
     pub pieces: usize,
     pub climb: f32,
     /// Where the route ends — the party's destination for this level.

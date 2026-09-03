@@ -22,7 +22,7 @@ use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
 use crate::resources::{PlayExperience, PlaySessionTransition};
-use crate::world::platformer_routes::HeavyWaterRouteExt;
+use crate::world::platformer_routes::PublishedPlatformerRouteCatalog;
 
 /// Runtime rules for Heavy Water's bounded shared-screen platformer mode.
 ///
@@ -34,6 +34,7 @@ pub struct HeavyWaterPlatformerPlugin;
 impl Plugin for HeavyWaterPlatformerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PlatformerWorkshopProgress>()
+            .init_resource::<PublishedPlatformerRouteCatalog>()
             .add_systems(
                 OnEnter(AppState::Playing),
                 (
@@ -81,6 +82,7 @@ fn spawn_platformer_scene(
     transition: Res<PlaySessionTransition>,
     experience: Res<PlayExperience>,
     progress: Res<PlatformerWorkshopProgress>,
+    published_routes: Res<PublishedPlatformerRouteCatalog>,
     existing_stage: Query<(), With<PlatformerStageRoot>>,
 ) {
     if transition.resuming_from_pause
@@ -94,18 +96,21 @@ fn spawn_platformer_scene(
     // remains a safe fallback so invalid authored data cannot create an empty
     // play session.
     let route_index = platformer_route_index(&progress);
-    match super::platformer_route_spawn::spawn_route_by_index(
+    match super::platformer_route_spawn::spawn_route_by_index_with_catalog(
         &mut commands,
         &mut meshes,
         &mut materials,
+        Some(&published_routes),
         route_index,
         platformer_spawn(0) - Vec3::Y,
     ) {
         Ok(built) => {
-            commands.spawn((Name::new(built.label), PlatformerStageRoot, WorldGeometry));
-            let summary = super::platformer_routes::route_by_id(built.id)
-                .map(|route| route.summary())
-                .unwrap_or_else(|| built.label.to_string());
+            commands.spawn((
+                Name::new(built.label.clone()),
+                PlatformerStageRoot,
+                WorldGeometry,
+            ));
+            let summary = format!("{} · {:.0}m up", built.label, built.climb);
             info!("shared-screen level ready: {summary} — {}", built.brief);
         }
         Err(error) => {

@@ -25,8 +25,11 @@ workspace crates, versioned manifests are validated and round-trip tested, and
 Heavy Water has a public `shared`/`platformer` ownership facade. The first
 compiled graph vertical slice now joins the neutral graph kernel to the
 reusable platformer kit through an optional adapter and produces serialized,
-versioned route records. The next work connects that record to Heavy Water's
-published runtime catalog without introducing a Forge dependency.
+versioned route records. Forge now stores the typed source graph, compiles it
+inside the atomic publication transaction, and Game builds validate the output
+against Heavy Water's chunk catalog before allowing stable-ID overrides. The
+next work is the visual Forge route editor and catalog picker over these
+delivered contracts.
 
 The architecture authority is [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md),
 the filesystem contract is [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md), and the
@@ -75,6 +78,10 @@ Work:
   validated linear graph into owned schema-versioned JSON; runtime compilation
   resolves chunk IDs through a game-supplied catalog, validates the movement
   envelope, and assembles renderer-neutral geometry
+- Forge route records now publish deterministic `platformer_routes.json` in
+  the immutable generation; consumer builds reject unsupported schemas,
+  missing chunks, bad geometry, and duplicate runtime IDs, then safely prefer
+  matching published routes over Heavy Water's built-in fallback definitions
 - extend the delivered versioned project/module manifests only alongside
   parser migrations, validation, and round-trip fixtures
 

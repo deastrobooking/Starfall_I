@@ -11,17 +11,19 @@ existing application already runs the complete demo and creator tools; the
 public library boundary landed first, and graph, project-manifest, and
 platformer-kit workspace crates are now independently buildable. The first
 domain compiler turns typed platformer graphs into versioned route documents
-and catalog-resolved runtime geometry. Fine-grained runtime Cargo features
-remain active framework work. The documentation distinguishes current behavior
-from target architecture rather than presenting roadmap interfaces as shipped
-APIs.
+and catalog-resolved runtime geometry. Forge project records now publish those
+documents into the same atomic content generation as other assets; Game builds
+validate them against Heavy Water's catalog and prefer matching route IDs over
+built-in definitions. Fine-grained runtime Cargo features remain active
+framework work. The documentation distinguishes current behavior from target
+architecture rather than presenting roadmap interfaces as shipped APIs.
 
 ## What is included
 
 | Surface | Purpose | Current state |
 |---|---|---|
 | Starfall Engine | Bevy/Avian runtime, fixed simulation, input, rendering, reusable gameplay systems | Running in the demo; library facade available |
-| Starfall Forge | Project, character, creature, weapon, vehicle, spaceship, world, and dialogue authoring | Native Designer build |
+| Starfall Forge | Project, character, creature, weapon, vehicle, spaceship, world, dialogue, and platformer-route authoring | Native Designer build |
 | Heavy Water Demo Game | Open-world action RPG, shared platformer, racing/traversal, campaign, and 1–4 player examples | Complete native demo application |
 | Graph framework | Typed object, behavior, animation, UI, shader, world, and narrative graphs | Neutral typed kernel plus platformer route compiler extracted |
 | Templates and IDE | Generated projects, feature scaffolding, code integration, and guided workflows | Planned after module contracts stabilize |

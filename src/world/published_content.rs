@@ -24,6 +24,8 @@ use crate::resources::{ShopCatalog, ShopCategory, ShopItem};
 use crate::robots::creature::CreatureSpec;
 use crate::spaceship_forge::PublishedSpacecraftCatalog;
 use crate::vehicle_forge::PublishedVehicleCatalog;
+use crate::world::platformer_chunk_library::chunk_by_id;
+use crate::world::platformer_routes::PublishedPlatformerRouteCatalog;
 
 pub struct PublishedContentPlugin;
 
@@ -39,9 +41,9 @@ impl Default for PublishedContentRoot {
 }
 
 /// Same-process publisher/editor bridge. The immutable generation manifest is
-/// resolved once when handled, so both craft catalogs advance together.
+/// resolved once when handled, so every reloadable catalog advances together.
 #[derive(Message, Debug, Clone, Copy, Default)]
-pub struct ReloadPublishedCraftCatalogs;
+pub struct ReloadPublishedContentCatalogs;
 
 /// One-shot content load before Bevy's initial state transition. Direct-to-
 /// Playing boots can therefore resolve authored craft during their first
@@ -53,21 +55,23 @@ impl Plugin for PublishedContentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PublishedVehicleCatalog>()
             .init_resource::<PublishedSpacecraftCatalog>()
+            .init_resource::<PublishedPlatformerRouteCatalog>()
             .init_resource::<PublishedContentRoot>()
-            .add_message::<ReloadPublishedCraftCatalogs>()
+            .add_message::<ReloadPublishedContentCatalogs>()
             .add_systems(PublishedContentBootstrap, load_published_content)
-            .add_systems(Update, reload_published_craft_catalogs);
+            .add_systems(Update, reload_published_content_catalogs);
         app.world_mut()
             .resource_mut::<MainScheduleOrder>()
             .insert_startup_before(StateTransition, PublishedContentBootstrap);
     }
 }
 
-fn reload_published_craft_catalogs(
-    mut requests: MessageReader<ReloadPublishedCraftCatalogs>,
+fn reload_published_content_catalogs(
+    mut requests: MessageReader<ReloadPublishedContentCatalogs>,
     root: Res<PublishedContentRoot>,
     mut vehicle_catalog: ResMut<PublishedVehicleCatalog>,
     mut spacecraft_catalog: ResMut<PublishedSpacecraftCatalog>,
+    mut platformer_route_catalog: ResMut<PublishedPlatformerRouteCatalog>,
 ) {
     if requests.read().next().is_none() {
         return;
@@ -109,7 +113,10 @@ fn reload_published_craft_catalogs(
         .collect::<Vec<_>>();
     let vehicle_count = vehicle_catalog.replace(vehicles);
     let spacecraft_count = spacecraft_catalog.replace(spacecraft);
-    info!("published craft reloaded: {vehicle_count} vehicle(s), {spacecraft_count} spacecraft");
+    let route_count = platformer_route_catalog.replace(valid_platformer_routes(&snapshot));
+    info!(
+        "published content reloaded: {vehicle_count} vehicle(s), {spacecraft_count} spacecraft, {route_count} platformer route(s)"
+    );
 }
 
 /// Parse a published file, treating "missing" as empty and only warning on
@@ -142,6 +149,35 @@ fn read_published<T: serde::de::DeserializeOwned>(
     }
 }
 
+fn valid_platformer_routes(
+    snapshot: &PublishedGenerationSnapshot,
+) -> Vec<crate::platformer_graph::PlatformerRouteDocument> {
+    read_published(snapshot, "platformer_routes.json")
+        .into_iter()
+        .filter_map(|route: crate::platformer_graph::PlatformerRouteDocument| {
+            if let Err(error) = route.validate_schema() {
+                warn!(
+                    "published platformer route {} is invalid ({error}); ignoring",
+                    route.id
+                );
+                return None;
+            }
+            if let Err(error) = route.compile_runtime(
+                [0.0; 3],
+                crate::platformer::JumpEnvelope::standard(),
+                chunk_by_id,
+            ) {
+                warn!(
+                    "published platformer route {} is invalid ({error}); ignoring",
+                    route.id
+                );
+                return None;
+            }
+            Some(route)
+        })
+        .collect()
+}
+
 /// The shop entry for a published weapon. Priced by the same derivation the
 /// forge showed the designer, so the shop can never disagree with the tool.
 fn shop_item_for_published(weapon: &PublishedWeapon) -> ShopItem {
@@ -163,6 +199,7 @@ fn load_published_content(
     mut dialogue_catalog: ResMut<PublishedDialogueCatalog>,
     mut vehicle_catalog: ResMut<PublishedVehicleCatalog>,
     mut spacecraft_catalog: ResMut<PublishedSpacecraftCatalog>,
+    mut platformer_route_catalog: ResMut<PublishedPlatformerRouteCatalog>,
 ) {
     // Keep one immutable manifest resolution for the whole logical load. A
     // publish that commits concurrently is picked up on the next load, never
@@ -265,6 +302,18 @@ fn load_published_content(
         let seeded = spacecraft_catalog.seed_from_published(specs);
         if seeded > 0 {
             info!("published content: {seeded} spacecraft design(s) available");
+        }
+    }
+
+    // Route documents are compiled again against the consumer's real chunk
+    // catalog and movement envelope. Structurally valid Forge output that
+    // references unavailable game content is skipped rather than becoming a
+    // broken selectable level.
+    let routes = valid_platformer_routes(&snapshot);
+    if !routes.is_empty() {
+        let seeded = platformer_route_catalog.seed_from_published(routes);
+        if seeded > 0 {
+            info!("published content: {seeded} platformer route(s) available");
         }
     }
 }
@@ -467,6 +516,70 @@ mod tests {
             .expect("valid dialogue must resolve by content id");
         assert_eq!(graph.nodes.len(), 2);
         assert!(!catalog.contains("starfall.dialogue.broken"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn published_platformer_routes_resolve_the_game_catalog_and_skip_broken_entries() {
+        use crate::graph::StableId;
+        use crate::platformer_graph::{
+            compile_platformer_graph, register_platformer_nodes, PlatformerRouteGraphBuilder,
+        };
+
+        let root = test_dir("platformer_route_bootstrap");
+        let generation = "eeeeeeeeeeeeeeee";
+        let directory = root.join("generations").join(generation);
+        std::fs::create_dir_all(&directory).unwrap();
+        let id = |value: &str| StableId::new(value).unwrap();
+        let compile = |route_id: &str, chunk_ids: &[&str]| {
+            let mut builder = PlatformerRouteGraphBuilder::new(
+                id(route_id),
+                route_id,
+                id("heavy_water.theme.cityscape"),
+            );
+            for (index, chunk_id) in chunk_ids.iter().enumerate() {
+                builder = builder.chunk(id(&format!("chunk_{index}")), id(chunk_id));
+            }
+            let graph = builder.build();
+            let mut registry = crate::graph::NodeRegistry::default();
+            register_platformer_nodes(&mut registry).unwrap();
+            compile_platformer_graph(&graph, &registry)
+                .unwrap()
+                .document
+        };
+        let routes = [
+            compile(
+                "route_city_rooftops",
+                &["city_rooftop_arrival", "city_plaza_arena"],
+            ),
+            compile(
+                "route_broken_catalog_reference",
+                &["missing_arrival", "city_plaza_arena"],
+            ),
+        ];
+        std::fs::write(
+            directory.join("platformer_routes.json"),
+            serde_json::to_vec_pretty(&routes).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("current.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "generation": generation,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut app = craft_bootstrap_app(root.clone());
+        app.insert_state(AppState::Playing);
+        app.update();
+        let catalog = app.world().resource::<PublishedPlatformerRouteCatalog>();
+        assert_eq!(catalog.len(), 1);
+        assert!(catalog.get("route_city_rooftops").is_some());
+        assert!(catalog.get("route_broken_catalog_reference").is_none());
 
         let _ = std::fs::remove_dir_all(root);
     }
