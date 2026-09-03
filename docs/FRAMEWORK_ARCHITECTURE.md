@@ -149,6 +149,15 @@ progression contracts, but not on one another. Campaign composition selects and
 transitions between them. Each must be removable without leaving unrelated
 modules uncompilable.
 
+The first implemented mode boundary is `HeavyWaterPlatformerPlugin`. It owns
+its state, entry/reset, authored-route spawning with fallback, continuous
+rules, scene tagging, and teardown. `WorldPlugin` owns only campaign entities
+tagged `WorldOwned`; application composition installs the two plugins as
+siblings. The reusable prefab intent, movement-envelope math, chunk/socket
+validation, route schema, and route assembly now live in the independent
+`starfall-platformer` gameplay-kit crate. Heavy Water supplies the themed
+catalog, materials, encounters, rewards, and runtime scene adapter.
+
 ## Native Studio experience
 
 The eventual Starfall Studio shell has three first-class activities:

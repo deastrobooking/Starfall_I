@@ -42,6 +42,7 @@ package:
 ```toml
 [dependencies]
 starfall-graph = { path = "../Starfall_I/crates/starfall-graph" }
+starfall-platformer = { path = "../Starfall_I/crates/starfall-platformer" }
 starfall-project = { path = "../Starfall_I/crates/starfall-project" }
 ```
 
@@ -49,6 +50,15 @@ starfall-project = { path = "../Starfall_I/crates/starfall-project" }
 
 ```sh
 cargo run -p starfall-graph --example native_extension
+```
+
+A focused platformer game can consume `MovementProfile`, `JumpEnvelope`,
+`ChunkDef`, `RouteDefinition`, and `PlatformerPrefabKind` from
+`starfall-platformer` without compiling Heavy Water, Forge, rendering, or ECS.
+Run its complete custom-catalog example with:
+
+```sh
+cargo run -p starfall-platformer --example custom_route
 ```
 
 Select the complete demo runtime without Forge explicitly:

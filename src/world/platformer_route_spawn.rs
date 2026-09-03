@@ -9,6 +9,7 @@
 use bevy::prelude::*;
 
 use super::platformer_chunks::{ChunkPiece, ChunkTheme, PlacedChunk};
+use super::platformer_routes::HeavyWaterRouteExt;
 use crate::components::world::{
     CollapsePlatform, CollapsePlatformState, MovingPlatform, SpringJumpPad, WalkableSurface,
     WorldGeometry,
@@ -32,8 +33,13 @@ struct ThemeMaterials {
 }
 
 fn theme_materials(theme: ChunkTheme, materials: &mut Assets<StandardMaterial>) -> ThemeMaterials {
-    let stone = theme.stone_color();
-    let accent = theme.accent_color();
+    let (stone, accent) = match theme {
+        ChunkTheme::Cityscape => (Color::srgb(0.20, 0.24, 0.38), Color::srgb(0.10, 0.85, 1.00)),
+        ChunkTheme::Mountain => (Color::srgb(0.34, 0.33, 0.36), Color::srgb(0.75, 0.90, 1.00)),
+        ChunkTheme::Castle => (Color::srgb(0.40, 0.36, 0.30), Color::srgb(1.00, 0.78, 0.25)),
+        ChunkTheme::Cavern => (Color::srgb(0.17, 0.15, 0.22), Color::srgb(0.55, 0.35, 1.00)),
+        ChunkTheme::Custom(_) => (Color::srgb(0.28, 0.30, 0.36), Color::srgb(0.42, 0.72, 0.92)),
+    };
     ThemeMaterials {
         stone: materials.add(StandardMaterial {
             base_color: stone,

@@ -9,102 +9,24 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlatformerPrefabKind {
-    Ladder,
-    Stairs,
-    Tower,
-    Castle,
-    FloatingIsland,
-    MovingPlatform,
-    SpringPlatform,
-    FlipPanel,
-    RotatingBridge,
-    CollapseBridge,
-    SpikeBridge,
-}
+pub use starfall_platformer::{PlatformerBehavior, PlatformerPrefabKind};
 
-/// Stable gameplay intent exported by a prefab recipe. Runtime adapters use
-/// this instead of guessing behavior from a mesh or display name.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PlatformerBehavior {
-    StaticTraversal,
-    Climbable,
-    Oscillate { distance: f32, seconds: f32 },
-    Bounce { launch_speed: f32 },
-    FlipOnJump,
-    Rotate { degrees_per_second: f32 },
-    Collapse { warning_seconds: f32 },
-    Hazard,
-}
-
-impl PlatformerPrefabKind {
-    pub const ALL: [Self; 11] = [
-        Self::Ladder,
-        Self::Stairs,
-        Self::Tower,
-        Self::Castle,
-        Self::FloatingIsland,
-        Self::MovingPlatform,
-        Self::SpringPlatform,
-        Self::FlipPanel,
-        Self::RotatingBridge,
-        Self::CollapseBridge,
-        Self::SpikeBridge,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Ladder => "Ladder",
-            Self::Stairs => "Stairs",
-            Self::Tower => "Star Tower",
-            Self::Castle => "Star Castle",
-            Self::FloatingIsland => "Floating Island",
-            Self::MovingPlatform => "Moving Platform",
-            Self::SpringPlatform => "Pulse Spring",
-            Self::FlipPanel => "Flip Panel",
-            Self::RotatingBridge => "Rotating Bridge",
-            Self::CollapseBridge => "Collapse Bridge",
-            Self::SpikeBridge => "Spike Bridge",
-        }
-    }
-
-    pub fn accent_color(self) -> Color {
-        match self {
-            Self::Ladder => Color::srgb(0.93, 0.67, 0.24),
-            Self::Stairs => Color::srgb(0.34, 0.72, 0.94),
-            Self::Tower => Color::srgb(0.56, 0.48, 0.92),
-            Self::Castle => Color::srgb(0.46, 0.57, 0.88),
-            Self::FloatingIsland => Color::srgb(0.36, 0.82, 0.58),
-            Self::MovingPlatform => Color::srgb(0.19, 0.84, 0.94),
-            Self::SpringPlatform => Color::srgb(1.0, 0.32, 0.64),
-            Self::FlipPanel => Color::srgb(0.96, 0.30, 0.38),
-            Self::RotatingBridge => Color::srgb(0.98, 0.70, 0.20),
-            Self::CollapseBridge => Color::srgb(0.83, 0.48, 0.22),
-            Self::SpikeBridge => Color::srgb(0.75, 0.25, 0.36),
-        }
-    }
-
-    pub fn behavior(self) -> PlatformerBehavior {
-        match self {
-            Self::Ladder => PlatformerBehavior::Climbable,
-            Self::MovingPlatform => PlatformerBehavior::Oscillate {
-                distance: 6.0,
-                seconds: 3.0,
-            },
-            Self::SpringPlatform => PlatformerBehavior::Bounce { launch_speed: 1.1 },
-            Self::FlipPanel => PlatformerBehavior::FlipOnJump,
-            Self::RotatingBridge => PlatformerBehavior::Rotate {
-                degrees_per_second: 42.0,
-            },
-            Self::CollapseBridge => PlatformerBehavior::Collapse {
-                warning_seconds: 0.65,
-            },
-            Self::SpikeBridge => PlatformerBehavior::Hazard,
-            Self::Stairs | Self::Tower | Self::Castle | Self::FloatingIsland => {
-                PlatformerBehavior::StaticTraversal
-            }
-        }
+/// Heavy Water/Forge preview color for a reusable prefab kind. Color is a
+/// presentation concern and intentionally stays outside `starfall-platformer`.
+pub fn platformer_prefab_accent_color(kind: PlatformerPrefabKind) -> Color {
+    match kind {
+        PlatformerPrefabKind::Ladder => Color::srgb(0.93, 0.67, 0.24),
+        PlatformerPrefabKind::Stairs => Color::srgb(0.34, 0.72, 0.94),
+        PlatformerPrefabKind::Tower => Color::srgb(0.56, 0.48, 0.92),
+        PlatformerPrefabKind::Castle => Color::srgb(0.46, 0.57, 0.88),
+        PlatformerPrefabKind::FloatingIsland => Color::srgb(0.36, 0.82, 0.58),
+        PlatformerPrefabKind::MovingPlatform => Color::srgb(0.19, 0.84, 0.94),
+        PlatformerPrefabKind::SpringPlatform => Color::srgb(1.0, 0.32, 0.64),
+        PlatformerPrefabKind::FlipPanel => Color::srgb(0.96, 0.30, 0.38),
+        PlatformerPrefabKind::RotatingBridge => Color::srgb(0.98, 0.70, 0.20),
+        PlatformerPrefabKind::CollapseBridge => Color::srgb(0.83, 0.48, 0.22),
+        PlatformerPrefabKind::SpikeBridge => Color::srgb(0.75, 0.25, 0.36),
+        PlatformerPrefabKind::Custom(_) => Color::srgb(0.52, 0.62, 0.78),
     }
 }
 
@@ -132,6 +54,7 @@ impl PlatformerPrefabDesign {
             PlatformerPrefabKind::RotatingBridge => (Vec3::new(12.0, 0.65, 2.4), 6),
             PlatformerPrefabKind::CollapseBridge => (Vec3::new(12.0, 0.55, 3.0), 8),
             PlatformerPrefabKind::SpikeBridge => (Vec3::new(12.0, 1.1, 3.2), 8),
+            PlatformerPrefabKind::Custom(_) => (Vec3::splat(2.0), 4),
         };
         Self {
             kind,
@@ -428,6 +351,7 @@ fn build_geometry(design: PlatformerPrefabDesign) -> MeshBuilder {
                 }
             }
         }
+        PlatformerPrefabKind::Custom(_) => out.cuboid(Vec3::ZERO, s),
     }
     out
 }

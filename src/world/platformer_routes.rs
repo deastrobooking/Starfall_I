@@ -14,90 +14,43 @@
 use bevy::prelude::*;
 
 use super::platformer_chunk_library::chunk_by_id;
+#[cfg(test)]
+use super::platformer_chunks::ChunkRole;
 use super::platformer_chunks::{
-    assemble_route, route_climb, ChunkDef, ChunkProblem, ChunkRole, ChunkTheme, JumpEnvelope,
-    PlacedChunk,
+    ChunkDef, ChunkTheme, JumpEnvelope, PlacedChunk, RouteDefinition, RouteProblem,
 };
 
 /// One authored level.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RouteDef {
-    pub id: &'static str,
-    pub label: &'static str,
-    /// One line telling the party what this level is about.
-    pub brief: &'static str,
-    pub theme: ChunkTheme,
-    /// Chunk ids in travel order.
-    pub chunks: &'static [&'static str],
+pub type RouteDef = RouteDefinition;
+
+/// Heavy Water catalogue convenience methods over the reusable route schema.
+pub trait HeavyWaterRouteExt {
+    fn resolve(&self) -> Result<Vec<ChunkDef>, RouteProblem>;
+    fn assemble(&self, start: Vec3) -> Result<Vec<PlacedChunk>, RouteProblem>;
+    fn total_climb(&self) -> f32;
+    fn summary(&self) -> String;
+    fn validate(&self, envelope: JumpEnvelope) -> Vec<RouteProblem>;
 }
 
-/// Why a route failed validation.
-#[derive(Debug, Clone, PartialEq)]
-pub enum RouteProblem {
-    Empty,
-    /// A chunk id with no entry in the catalogue.
-    UnknownChunk(String),
-    /// The party would begin somewhere that is not an arrival.
-    DoesNotOpenOnArrival,
-    /// The route just stops; nothing marks it finished.
-    NoDestination,
-    /// A chunk inside the route failed its own validation.
-    BadChunk {
-        id: String,
-        problem: ChunkProblem,
-    },
-    /// An arrival appears after the opening, which reads as a false start.
-    ArrivalMidRoute {
-        id: String,
-    },
-}
-
-impl RouteProblem {
-    pub fn message(&self) -> String {
-        match self {
-            RouteProblem::Empty => "route has no chunks".to_string(),
-            RouteProblem::UnknownChunk(id) => format!("no chunk named '{id}' in the catalogue"),
-            RouteProblem::DoesNotOpenOnArrival => {
-                "a route must open on an arrival chunk so the party lands somewhere safe"
-                    .to_string()
-            }
-            RouteProblem::NoDestination => {
-                "a route must end on an arena or boss chunk so arriving means something".to_string()
-            }
-            RouteProblem::BadChunk { id, problem } => {
-                format!("chunk '{id}': {}", problem.message())
-            }
-            RouteProblem::ArrivalMidRoute { id } => {
-                format!("'{id}' is an arrival in the middle of a route")
-            }
-        }
-    }
-}
-
-impl RouteDef {
+impl HeavyWaterRouteExt for RouteDefinition {
     /// Resolve every chunk id, failing on the first unknown one.
-    pub fn resolve(&self) -> Result<Vec<ChunkDef>, RouteProblem> {
-        self.chunks
-            .iter()
-            .map(|id| chunk_by_id(id).ok_or_else(|| RouteProblem::UnknownChunk((*id).to_string())))
-            .collect()
+    fn resolve(&self) -> Result<Vec<ChunkDef>, RouteProblem> {
+        self.resolve_with(chunk_by_id)
     }
 
     /// Build the route's world geometry starting from `start`.
-    pub fn assemble(&self, start: Vec3) -> Result<Vec<PlacedChunk>, RouteProblem> {
-        Ok(assemble_route(&self.resolve()?, start))
+    fn assemble(&self, start: Vec3) -> Result<Vec<PlacedChunk>, RouteProblem> {
+        self.assemble_with(start, chunk_by_id)
     }
 
     /// Total height the party climbs across the whole level.
-    pub fn total_climb(&self) -> f32 {
-        self.assemble(Vec3::ZERO)
-            .map(|route| route_climb(&route))
-            .unwrap_or(0.0)
+    fn total_climb(&self) -> f32 {
+        self.total_climb_with(chunk_by_id).unwrap_or(0.0)
     }
 
     /// A one-line description for level select and load logs: what the level
     /// is, how far it travels, and how much of it is climb.
-    pub fn summary(&self) -> String {
+    fn summary(&self) -> String {
         let chunks = match self.resolve() {
             Ok(chunks) => chunks,
             Err(problem) => return problem.message(),
@@ -114,41 +67,8 @@ impl RouteDef {
     }
 
     /// Check the route's shape and every chunk it uses.
-    pub fn validate(&self, envelope: JumpEnvelope) -> Vec<RouteProblem> {
-        let chunks = match self.resolve() {
-            Ok(chunks) => chunks,
-            Err(problem) => return vec![problem],
-        };
-        if chunks.is_empty() {
-            return vec![RouteProblem::Empty];
-        }
-
-        let mut problems = Vec::new();
-        if chunks[0].role != ChunkRole::Arrival {
-            problems.push(RouteProblem::DoesNotOpenOnArrival);
-        }
-        if !matches!(
-            chunks[chunks.len() - 1].role,
-            ChunkRole::Arena | ChunkRole::Boss
-        ) {
-            problems.push(RouteProblem::NoDestination);
-        }
-        for chunk in chunks.iter().skip(1) {
-            if chunk.role == ChunkRole::Arrival {
-                problems.push(RouteProblem::ArrivalMidRoute {
-                    id: chunk.id.to_string(),
-                });
-            }
-        }
-        for chunk in &chunks {
-            for problem in chunk.validate(envelope) {
-                problems.push(RouteProblem::BadChunk {
-                    id: chunk.id.to_string(),
-                    problem,
-                });
-            }
-        }
-        problems
+    fn validate(&self, envelope: JumpEnvelope) -> Vec<RouteProblem> {
+        self.validate_with(envelope, chunk_by_id)
     }
 }
 

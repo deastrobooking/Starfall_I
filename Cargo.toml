@@ -10,7 +10,11 @@ readme = "README.md"
 publish = false
 
 [workspace]
-members = ["crates/starfall-graph", "crates/starfall-project"]
+members = [
+    "crates/starfall-graph",
+    "crates/starfall-platformer",
+    "crates/starfall-project",
+]
 resolver = "2"
 
 [lib]
@@ -34,6 +38,7 @@ required-features = ["heavy-water-demo"]
 
 [dependencies]
 starfall-graph = { path = "crates/starfall-graph" }
+starfall-platformer = { path = "crates/starfall-platformer" }
 starfall-project = { path = "crates/starfall-project" }
 bevy = { version = "0.19.1", features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings", "bevy_feathers"] }
 # Same decoder Bevy plays audio with (version-locked through the workspace):

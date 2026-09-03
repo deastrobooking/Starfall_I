@@ -18,3 +18,7 @@ version = "=0.1.0"
 [[modules]]
 id = "starfall.engine.project"
 version = "=0.1.0"
+
+[[modules]]
+id = "starfall.gameplay.platformer"
+version = "=0.1.0"

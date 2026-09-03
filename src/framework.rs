@@ -21,6 +21,7 @@ use crate::engine_tools::{tool_windows::ToolWindowsPlugin, EngineToolsPlugin};
 use crate::events::EventsPlugin;
 use crate::graph::GraphRegistryPlugin;
 use crate::plugins::*;
+use crate::world::co_op_platformer::HeavyWaterPlatformerPlugin;
 use crate::world::{missions::MissionPlugin, published_content::PublishedContentPlugin};
 
 /// Shared runtime and authoring substrate currently used by every Starfall
@@ -55,6 +56,7 @@ impl PluginGroup for HeavyWaterDemoPlugins {
         PluginGroupBuilder::start::<Self>()
             .add(InputPlugin)
             .add(UiPlugin)
+            .add(HeavyWaterPlatformerPlugin)
             .add(WorldPlugin)
             .add(PlayerPlugin)
             .add(CharacterPlugin)

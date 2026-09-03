@@ -8,9 +8,10 @@ project, and forkable all-in-one starting point.
 
 The project is both a playable game and an engine under active extraction. The
 existing application already runs the complete demo and creator tools; the
-public library boundary landed first, while fine-grained Cargo features,
-graph-compiled gameplay modules, and separate workspace crates remain active
-framework work. The documentation distinguishes current behavior from target
+public library boundary landed first, and graph, project-manifest, and
+platformer-kit workspace crates are now independently buildable. Fine-grained
+runtime Cargo features and graph-compiled gameplay remain active framework
+work. The documentation distinguishes current behavior from target
 architecture rather than presenting roadmap interfaces as shipped APIs.
 
 ## What is included
@@ -20,7 +21,7 @@ architecture rather than presenting roadmap interfaces as shipped APIs.
 | Starfall Engine | Bevy/Avian runtime, fixed simulation, input, rendering, reusable gameplay systems | Running in the demo; library facade available |
 | Starfall Forge | Project, character, creature, weapon, vehicle, spaceship, world, and dialogue authoring | Native Designer build |
 | Heavy Water Demo Game | Open-world action RPG, shared platformer, racing/traversal, campaign, and 1–4 player examples | Complete native demo application |
-| Graph framework | Typed object, behavior, animation, UI, shader, world, and narrative graphs | Architecture defined; staged implementation |
+| Graph framework | Typed object, behavior, animation, UI, shader, world, and narrative graphs | Neutral typed kernel extracted; domain compilers staged |
 | Templates and IDE | Generated projects, feature scaffolding, code integration, and guided workflows | Planned after module contracts stabilize |
 
 The design principle is simple: **limit setup and accidental complexity, not
@@ -45,8 +46,9 @@ complete demo without Forge entry points:
 cargo run --no-default-features --features heavy-water-demo
 ```
 
-The minimal framework library currently exposes the neutral typed-graph kernel
-without compiling the demo modules or native executable:
+The minimal framework exposes typed graphs, versioned manifests, and the
+renderer-neutral platformer kit without compiling demo modules or the native
+executable:
 
 ```sh
 cargo check --no-default-features
@@ -118,6 +120,7 @@ public contracts available to future games. It demonstrates:
 - an open 3D action-RPG campaign with traversal, combat, progression, cities,
   dungeons, settlements, vehicles, and world events
 - a bounded shared-screen co-op platformer using the production player stack
+  with an independently composed scene/rules lifecycle
 - road, hoverboard, water, air, and space traversal/racing foundations
 - procedural and imported characters, data-driven combat, audio, shaders, and
   published Forge content
@@ -163,6 +166,7 @@ and build steps.
 ```text
 crates/
   starfall-graph/    Independent typed graph documents and node registry
+  starfall-platformer/ Renderer-neutral prefab, movement, chunk, and route kit
   starfall-project/  Independent project/module manifest parser and validator
 
 src/

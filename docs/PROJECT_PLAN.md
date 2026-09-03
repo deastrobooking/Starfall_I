@@ -23,8 +23,8 @@ monolithic. A public library facade and thin native launcher establish the main
 compatibility seam. `starfall-graph` and `starfall-project` are now independent
 workspace crates, versioned manifests are validated and round-trip tested, and
 Heavy Water has a public `shared`/`platformer` ownership facade. The next work
-extracts a compiled graph vertical slice and removes platformer scene spawning
-from the historical global world plugin.
+extracts a compiled graph vertical slice and makes the delivered reusable
+platformer kit consume serialized, versioned authored records.
 
 The architecture authority is [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md),
 the filesystem contract is [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md), and the
@@ -62,6 +62,13 @@ Work:
   importers, validators, shaders, animation processors, and publish steps
 - split Heavy Water by removable game-mode modules and prove the public API with
   one focused external example
+- the first Platformer mode boundary now owns entry/reset, route or fallback
+  spawning, continuous rules, entity tagging, and teardown; the campaign world
+  generator explicitly declines that mode and owns only `WorldOwned` entities
+- `starfall-platformer` now independently owns prefab behavior intent,
+  controller-neutral movement envelopes, chunk/socket validation, route
+  assembly, and resolver-based route validation; Heavy Water retains only its
+  themed catalogue and runtime/presentation adapters
 - extend the delivered versioned project/module manifests only alongside
   parser migrations, validation, and round-trip fixtures
 

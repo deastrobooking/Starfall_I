@@ -34,8 +34,13 @@ The first source-level boundary is available now:
   route language, spawning API, and `HeavyWaterPlatformerPlugin`.
 
 This is a compatibility facade while the implementation leaves `world/`.
-The platformer plugin now owns its workshop state and continuous rules; world
-scene activation and teardown are the next ownership transfer.
+The platformer plugin owns its workshop state, entry/reset, route or fallback
+spawning, continuous rules, mode-owned entity tagging, and teardown. The global
+world generator explicitly skips platformer sessions and cleans only its own
+campaign entities. Reusable prefab intent, movement envelopes, chunk/socket
+validation, and route assembly now come from `starfall-platformer`; Heavy Water
+owns the themed catalogue, materials, encounter pockets, rewards, and scene
+adapter.
 
 ## Why the demo remains complete
 

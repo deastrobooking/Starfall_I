@@ -59,10 +59,6 @@ use crate::resources::{
     WorldRouteState, WorldSiteRegistry, WorldSiteState,
 };
 use crate::world::arcade_dungeon::{spawn_arcade_prototype_dungeon, ArcadeDungeonPortal};
-use crate::world::co_op_platformer::{
-    reset_platformer_progress, spawn_shared_platformer_stage, HeavyWaterPlatformerPlugin,
-    PlatformerWorkshopProgress,
-};
 use crate::world::dialogue_director::{
     dialogue_director_tick_system, DialogueDirector, DialogueFlags, DialogueStateChange,
 };
@@ -311,6 +307,12 @@ struct CelestialVisual {
 // ── Plugin ────────────────────────────────────────────────────────────────────
 pub struct WorldPlugin;
 
+/// Marks scene entities owned by the campaign/open-world generator. Other game
+/// modes may share `WorldGeometry` systems without surrendering their teardown
+/// lifecycle to this plugin.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct WorldOwned;
+
 /// Last completed procedural-world boot. Kept as a resource so automated
 /// smoke runs and logs can distinguish save I/O from world/mesh generation
 /// stalls.
@@ -407,13 +409,13 @@ impl Plugin for WorldPlugin {
                 dialogue_director_tick_system.run_if(in_state(AppState::Playing)),
             )
             .add_plugins(GrassPlugin)
-            .add_plugins(HeavyWaterPlatformerPlugin)
             .add_plugins(MaterialPlugin::<TerrainMaterial>::default())
             .add_systems(
                 OnEnter(AppState::Playing),
-                reset_platformer_progress.before(generate_city),
+                (generate_city, tag_world_scene_entities)
+                    .chain()
+                    .run_if(not_shared_platformer_experience),
             )
-            .add_systems(OnEnter(AppState::Playing), generate_city)
             .add_systems(
                 OnEnter(AppState::Playing),
                 (build_city_rooftop_routes, build_building_cluster_lods)
@@ -422,6 +424,7 @@ impl Plugin for WorldPlugin {
                     .after(generate_city),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
+            .add_systems(Update, tag_world_scene_entities.run_if(campaign_experience))
             .add_systems(
                 Update,
                 (
@@ -563,6 +566,19 @@ impl Plugin for WorldPlugin {
 
 fn campaign_experience(experience: Res<PlayExperience>) -> bool {
     *experience == PlayExperience::Campaign
+}
+
+fn not_shared_platformer_experience(experience: Res<PlayExperience>) -> bool {
+    *experience != PlayExperience::SharedPlatformer
+}
+
+fn tag_world_scene_entities(
+    mut commands: Commands,
+    scene_entities: Query<Entity, (Added<WorldGeometry>, Without<WorldOwned>)>,
+) {
+    for entity in scene_entities.iter() {
+        commands.entity(entity).insert(WorldOwned);
+    }
 }
 
 fn update_day_night(
@@ -3940,7 +3956,7 @@ fn spawn_beam_vfx(
 fn cleanup_world(
     mut commands: Commands,
     transition: Res<PlaySessionTransition>,
-    world_q: Query<Entity, (With<WorldGeometry>, Without<ChildOf>)>,
+    world_q: Query<Entity, (With<WorldOwned>, Without<ChildOf>)>,
     tree_q: Query<Entity, (With<TreeRoot>, Without<ChildOf>, Without<WorldGeometry>)>,
 ) {
     if transition.pausing {
@@ -3957,7 +3973,7 @@ fn cleanup_world(
 
 fn cleanup_world_for_menu(
     mut commands: Commands,
-    world_q: Query<Entity, (With<WorldGeometry>, Without<ChildOf>)>,
+    world_q: Query<Entity, (With<WorldOwned>, Without<ChildOf>)>,
     tree_q: Query<Entity, (With<TreeRoot>, Without<ChildOf>, Without<WorldGeometry>)>,
 ) {
     for e in world_q.iter() {
@@ -3979,12 +3995,7 @@ fn generate_city(
     mut water_mats: ResMut<Assets<WaterMaterial>>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
     asset_server: Res<AssetServer>,
-    // Grouped: Bevy caps a system at 16 parameters.
-    session: (
-        Res<PlaySessionTransition>,
-        Res<PlayExperience>,
-        Res<PlatformerWorkshopProgress>,
-    ),
+    transition: Res<PlaySessionTransition>,
     settings: Res<GameSettings>,
     current: Res<CurrentChapter>,
     economy: Res<SettlementEconomy>,
@@ -3992,41 +4003,7 @@ fn generate_city(
     mut world_site_registry: ResMut<WorldSiteRegistry>,
     mut world_route_registry: ResMut<WorldRouteRegistry>,
 ) {
-    if session.0.resuming_from_pause || !existing_world.is_empty() {
-        return;
-    }
-
-    if *session.1 == PlayExperience::SharedPlatformer {
-        // Chunk-composed routes are the authored levels; the hand-built
-        // beginner course remains the fallback so a route that fails
-        // validation never leaves the party in an empty world.
-        let route_index = platformer_route_index(&session.2);
-        match crate::world::platformer_route_spawn::spawn_route_by_index(
-            &mut commands,
-            &mut meshes,
-            &mut mats,
-            route_index,
-            crate::world::co_op_platformer::platformer_spawn(0) - Vec3::Y * 1.0,
-        ) {
-            Ok(built) => {
-                // The session contract is "exactly one stage root", whichever
-                // builder produced the level, so route-built levels register
-                // one too and teardown/queries keep working unchanged.
-                commands.spawn((
-                    Name::new(built.label),
-                    crate::world::co_op_platformer::PlatformerStageRoot,
-                    WorldGeometry,
-                ));
-                let summary = crate::world::platformer_routes::route_by_id(built.id)
-                    .map(|route| route.summary())
-                    .unwrap_or_else(|| built.label.to_string());
-                info!("shared-screen level ready: {summary} — {}", built.brief);
-            }
-            Err(error) => {
-                warn!("route {route_index} unavailable ({error}); using the starter course");
-                spawn_shared_platformer_stage(&mut commands, &mut meshes, &mut mats);
-            }
-        }
+    if transition.resuming_from_pause || !existing_world.is_empty() {
         return;
     }
 
@@ -21551,19 +21528,6 @@ fn spawn_magic_crystals(
             }
         }
     }
-}
-
-/// Which authored route the party's progression has reached.
-///
-/// Progression is deliberately simple for the shared-screen format: levels are
-/// an ordered list and the party's furthest checkpoint selects one. Indices
-/// past the last authored route clamp to it, so finishing the set leaves the
-/// party in the final level rather than in nothing.
-fn platformer_route_index(progress: &PlatformerWorkshopProgress) -> usize {
-    let last = crate::world::platformer_routes::ROUTES
-        .len()
-        .saturating_sub(1);
-    (progress.current_level as usize).min(last)
 }
 
 #[cfg(test)]

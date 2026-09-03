@@ -1,0 +1,9 @@
+[package]
+name = "starfall-platformer"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable platformer prefab, movement-envelope, chunk, and route contracts for Starfall"
+publish = false
+
+[dependencies]
+bevy_math = "0.19.1"

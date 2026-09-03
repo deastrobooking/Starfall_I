@@ -2745,7 +2745,7 @@ fn apply_catalog_material(world: &mut World, entity: Entity, content_id: &str) -
 
 fn primitive_standard_color(primitive: EditorPrimitive) -> Color {
     if let Some(kind) = editor_platformer_kind(primitive) {
-        return kind.accent_color();
+        return platformer_prefabs::platformer_prefab_accent_color(kind);
     }
     match primitive {
         EditorPrimitive::Empty => Color::WHITE,

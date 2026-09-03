@@ -2,9 +2,9 @@
 //!
 //! The course deliberately reuses Starfall's production jump, wall-climb,
 //! ledge, stomp, melee, and local-controller systems. This module owns only the
-//! format-specific contract: authored side-progressing geometry, P1-led bounds,
-//! catch-up bubbles, co-op switches, compact battle pockets, checkpoints, and
-//! workshop-part rewards.
+//! format-specific contract and lifecycle: authored side-progressing geometry,
+//! P1-led bounds, catch-up bubbles, co-op switches, compact battle pockets,
+//! checkpoints, workshop-part rewards, scene entry, and teardown.
 
 use bevy::prelude::*;
 
@@ -22,6 +22,7 @@ use crate::engine::state::AppState;
 use crate::events::UiMessageEvent;
 use crate::plugins::enemy_plugin::spawn_enemy_entity;
 use crate::resources::{PlayExperience, PlaySessionTransition};
+use crate::world::platformer_routes::HeavyWaterRouteExt;
 
 /// Runtime rules for Heavy Water's bounded shared-screen platformer mode.
 ///
@@ -33,6 +34,16 @@ pub struct HeavyWaterPlatformerPlugin;
 impl Plugin for HeavyWaterPlatformerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PlatformerWorkshopProgress>()
+            .add_systems(
+                OnEnter(AppState::Playing),
+                (
+                    reset_platformer_progress,
+                    spawn_platformer_scene,
+                    tag_platformer_scene_entities,
+                )
+                    .chain(),
+            )
+            .add_systems(OnExit(AppState::Playing), cleanup_platformer_scene)
             .add_systems(
                 Update,
                 (
@@ -47,6 +58,12 @@ impl Plugin for HeavyWaterPlatformerPlugin {
     }
 }
 
+/// Marks scene entities owned by the platformer mode. These entities may also
+/// carry `WorldGeometry` for shared simulation systems, but only this plugin
+/// controls their lifecycle.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PlatformerOwned;
+
 pub fn reset_platformer_progress(
     transition: Res<PlaySessionTransition>,
     experience: Res<PlayExperience>,
@@ -55,6 +72,78 @@ pub fn reset_platformer_progress(
     if !transition.resuming_from_pause && *experience == PlayExperience::SharedPlatformer {
         *progress = PlatformerWorkshopProgress::default();
     }
+}
+
+fn spawn_platformer_scene(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    transition: Res<PlaySessionTransition>,
+    experience: Res<PlayExperience>,
+    progress: Res<PlatformerWorkshopProgress>,
+    existing_stage: Query<(), With<PlatformerStageRoot>>,
+) {
+    if transition.resuming_from_pause
+        || *experience != PlayExperience::SharedPlatformer
+        || !existing_stage.is_empty()
+    {
+        return;
+    }
+
+    // Chunk-composed routes are authoritative. The hand-built beginner course
+    // remains a safe fallback so invalid authored data cannot create an empty
+    // play session.
+    let route_index = platformer_route_index(&progress);
+    match super::platformer_route_spawn::spawn_route_by_index(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        route_index,
+        platformer_spawn(0) - Vec3::Y,
+    ) {
+        Ok(built) => {
+            commands.spawn((Name::new(built.label), PlatformerStageRoot, WorldGeometry));
+            let summary = super::platformer_routes::route_by_id(built.id)
+                .map(|route| route.summary())
+                .unwrap_or_else(|| built.label.to_string());
+            info!("shared-screen level ready: {summary} — {}", built.brief);
+        }
+        Err(error) => {
+            warn!("route {route_index} unavailable ({error}); using the starter course");
+            spawn_shared_platformer_stage(&mut commands, &mut meshes, &mut materials);
+        }
+    }
+}
+
+fn tag_platformer_scene_entities(
+    mut commands: Commands,
+    experience: Res<PlayExperience>,
+    scene_entities: Query<Entity, (Added<WorldGeometry>, Without<PlatformerOwned>)>,
+) {
+    if *experience != PlayExperience::SharedPlatformer {
+        return;
+    }
+    for entity in scene_entities.iter() {
+        commands.entity(entity).insert(PlatformerOwned);
+    }
+}
+
+fn cleanup_platformer_scene(
+    mut commands: Commands,
+    transition: Res<PlaySessionTransition>,
+    scene_entities: Query<Entity, (With<PlatformerOwned>, Without<ChildOf>)>,
+) {
+    if transition.pausing {
+        return;
+    }
+    for entity in scene_entities.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn platformer_route_index(progress: &PlatformerWorkshopProgress) -> usize {
+    let last = super::platformer_routes::ROUTES.len().saturating_sub(1);
+    (progress.current_level as usize).min(last)
 }
 
 pub const PLATFORMER_STAGE_ID: &str = "starbound_coop_course_01";
@@ -1207,6 +1296,8 @@ pub fn platformer_encounter_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::asset::AssetApp;
+    use bevy::state::app::StatesPlugin;
 
     #[test]
     fn platformer_plugin_registers_its_owned_state() {
@@ -1215,6 +1306,37 @@ mod tests {
         assert!(app
             .world()
             .contains_resource::<PlatformerWorkshopProgress>());
+    }
+
+    #[test]
+    fn platformer_plugin_owns_spawn_and_teardown() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_state::<AppState>()
+            .init_resource::<PlayExperience>()
+            .init_resource::<PlaySessionTransition>()
+            .add_message::<UiMessageEvent>()
+            .add_plugins(HeavyWaterPlatformerPlugin);
+        *app.world_mut().resource_mut::<PlayExperience>() = PlayExperience::SharedPlatformer;
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Playing);
+
+        app.update();
+
+        let mut stages = app.world_mut().query::<&PlatformerStageRoot>();
+        assert_eq!(stages.iter(app.world()).count(), 1);
+        let mut owned = app.world_mut().query::<&PlatformerOwned>();
+        assert!(owned.iter(app.world()).count() > 1);
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::MainMenu);
+        app.update();
+
+        assert_eq!(owned.iter(app.world()).count(), 0);
     }
 
     #[test]

@@ -1,0 +1,8 @@
+schema_version = 1
+
+[module]
+id = "starfall.gameplay.platformer"
+name = "Starfall Platformer Kit"
+version = "0.1.0"
+kind = "gameplay-kit"
+source_root = "src"

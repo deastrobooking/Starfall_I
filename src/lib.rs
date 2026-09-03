@@ -12,6 +12,8 @@
 /// The re-export preserves the convenient `starfall_i::graph` facade while
 /// allowing graph tools and native extensions to depend on the smaller crate.
 pub use starfall_graph as graph;
+/// Renderer-neutral platformer prefab, envelope, chunk, and route contracts.
+pub use starfall_platformer as platformer;
 /// Versioned project and module manifest contracts.
 pub use starfall_project as project;
 
@@ -65,6 +67,7 @@ pub use app::{build_app, build_headless_app, build_starfall_app, StarfallAppMode
 /// imported from their owning modules so feature dependencies remain visible.
 pub mod prelude {
     pub use crate::graph::{GraphRegistryPlugin, NodeRegistry};
+    pub use crate::platformer::{ChunkDef, JumpEnvelope, MovementProfile, PlatformerPrefabKind};
     pub use crate::project::{ModuleManifest, ProjectManifest};
 
     #[cfg(feature = "heavy-water-demo")]

@@ -5613,7 +5613,15 @@ dependencies = [
  "serde",
  "serde_json",
  "starfall-graph",
+ "starfall-platformer",
  "starfall-project",
+]
+
+[[package]]
+name = "starfall-platformer"
+version = "0.1.0"
+dependencies = [
+ "bevy_math",
 ]
 
 [[package]]

@@ -159,8 +159,9 @@ prefab identities and never serialize Bevy entities or asset handles.
 ## Product builds
 
 The default build is the native all-in-one Starfall application: Forge plus the
-Heavy Water demo. `--no-default-features` builds the first minimal framework
-surface (the neutral graph kernel). Add `--features heavy-water-demo` to build
+Heavy Water demo. `--no-default-features` builds the minimal graph,
+project-manifest, and renderer-neutral platformer contracts. Add
+`--features heavy-water-demo` to build
 the complete game runtime without Forge. This is a transitional three-profile
 matrix, not the final capability taxonomy.
 
