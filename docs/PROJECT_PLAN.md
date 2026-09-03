@@ -27,9 +27,13 @@ compiled graph vertical slice now joins the neutral graph kernel to the
 reusable platformer kit through an optional adapter and produces serialized,
 versioned route records. Forge now stores the typed source graph, compiles it
 inside the atomic publication transaction, and Game builds validate the output
-against Heavy Water's chunk catalog before allowing stable-ID overrides. The
-next work is the visual Forge route editor and catalog picker over these
-delivered contracts.
+against Heavy Water's chunk catalog before allowing stable-ID overrides.
+Project Hub now provides the first end-to-end standalone export: a background
+Game-only release build staged with shipped assets, one selected immutable
+content generation, and a versioned bundle manifest. The next packaging work is
+project-owned asset roots and dependency-aware cooking; the next graph UX work
+is the visual Forge route editor and catalog picker over the delivered
+contracts.
 
 The architecture authority is [FRAMEWORK_ARCHITECTURE.md](FRAMEWORK_ARCHITECTURE.md),
 the filesystem contract is [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md), and the
@@ -82,6 +86,9 @@ Work:
   the immutable generation; consumer builds reject unsupported schemas,
   missing chunks, bad geometry, and duplicate runtime IDs, then safely prefer
   matching published routes over Heavy Water's built-in fallback definitions
+- Project Hub now exports the active project in a background job: publish,
+  optimized Game-only build, shared runtime assets, one pinned generation, and
+  a schema-versioned manifest are committed as a standalone host-native folder
 - extend the delivered versioned project/module manifests only alongside
   parser migrations, validation, and round-trip fixtures
 
@@ -196,6 +203,8 @@ Priority: enforce the product boundary and make authoring reliable.
 Work:
 - keep Game edition free from editor dependencies
 - continue the publish and runtime catalog boundary work
+- evolve the landed folder exporter toward project-owned asset roots,
+  dependency-aware cooking, cross-target builds, signing, and installers
 - complete the Bevy 0.19 Forge viewport rollout: the technicolor infinite grid
   and selection/space/snap/undo transform-gizmo adapter are active; native 3D
   stroke labels now identify sockets, spawns, routes, water flow, and gameplay

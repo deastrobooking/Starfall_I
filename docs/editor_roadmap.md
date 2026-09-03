@@ -56,12 +56,18 @@ The governing rules are:
 - Unified editor/Project Hub publishing around immutable hashed generations and
   atomic `current.json` promotion, with locked hash rollback, one consumer
   generation snapshot, durability warnings, and legacy flat-file fallback.
+- Added a background Project Hub exporter that republishes, builds the
+  Game-only release feature set, stages runtime assets plus exactly the selected
+  generation, writes a versioned bundle manifest, and never replaces an older
+  export.
 - Added locked Designer/Game check, strict-Clippy, and test jobs to CI. Updated
   vulnerable transitive lockfile versions without changing Bevy or Avian.
 
-M0 intentionally does not claim editor/runtime isolation, universal undo, or
-complete cooking. Publish currently bakes Weapon and Creature records only,
-and runtime code still imports types through the `engine_tools` namespace.
+M0 intentionally does not claim editor/runtime isolation, universal undo,
+complete cooking, cross-platform packaging, or installers. Publish currently
+bakes weapons, creatures, vehicles, spacecraft, dialogue, and platformer
+routes, while runtime code still imports types through the `engine_tools`
+namespace.
 
 ## M1 — Establish architectural seams
 
@@ -103,6 +109,8 @@ default document.
   and content-addressed cache identities using BLAKE3 or SHA-256.
 - Publish an atomic versioned bundle covering every supported content category;
   validate that Game boots and plays using the bundle alone.
+- Evolve the landed host-native folder exporter into dependency-aware cooking,
+  cross-target builds, signing, installers, patches, and product branding.
 - Add migration fixtures, deterministic cook tests, package budgets, and stale
   generation cleanup policy.
 

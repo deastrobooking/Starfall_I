@@ -13,6 +13,8 @@ pub mod dialogue_records;
 pub mod editable_mesh;
 /// Shared button/row/label widgets for Forge authoring screens.
 pub mod forge_widgets;
+/// Standalone native Game bundle assembly from one published Forge project.
+pub mod game_export;
 pub mod mesh_selection;
 pub mod mesh_uv;
 pub(crate) mod persistence;

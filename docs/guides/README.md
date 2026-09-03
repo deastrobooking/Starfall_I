@@ -11,6 +11,7 @@ for the map.
 | [creating-a-module.md](creating-a-module.md) | add a removable gameplay, tool, UI, animation, shader, or world capability |
 | [verification.md](verification.md) | are about to land ANY change — gates, debug keys, env flags, smoke runs |
 | [designer-workflow.md](designer-workflow.md) | author content in the Designer edition and ship it into a consumer build |
+| [exporting-a-game.md](exporting-a-game.md) | package the active Forge project as a standalone host-native game |
 | [fixed-tick-motor.md](fixed-tick-motor.md) | touch player movement, input, or add a simulation system |
 | [combat-feel.md](combat-feel.md) | add/tune hit feedback (hitstop, knockback, flinch, numbers, shake) or hook a new gameplay event |
 | [character-studio-pipeline.md](character-studio-pipeline.md) | extend the character generator (morphs, wardrobe, presets, saves) |

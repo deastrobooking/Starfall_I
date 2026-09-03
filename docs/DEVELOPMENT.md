@@ -32,6 +32,11 @@ cargo clippy --workspace --all-targets
 cargo build               # debug binary at target/debug/starfall-i
 ```
 
+The Designer's Project Hub **EXPORT GAME** action performs the locked,
+Game-only release build in the background and assembles a standalone folder at
+`<project>/build/exports/`. Its current bundle contract and limitations are in
+[Exporting a Game](guides/exporting-a-game.md).
+
 The project is **Bevy 0.19 + Avian 3D**, with a local physics compatibility
 shim so gameplay code never talks to the physics backend directly.
 

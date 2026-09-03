@@ -15,6 +15,7 @@ Engine**, the native **Starfall Forge** authoring environment, and the complete
 | Navigating or generating projects | [Repeatable Project Structure](PROJECT_STRUCTURE.md) |
 | Contributing native engine/game code | [Developer Documentation](DEVELOPMENT.md) |
 | Authoring content in Forge | [Designer Workflow](guides/designer-workflow.md) |
+| Exporting a standalone native game | [Exporting a Game](guides/exporting-a-game.md) |
 | Learning from the complete game | [Heavy Water Demo Game](games/heavy-water/README.md) |
 
 ## Authorities

@@ -14,9 +14,11 @@ domain compiler turns typed platformer graphs into versioned route documents
 and catalog-resolved runtime geometry. Forge project records now publish those
 documents into the same atomic content generation as other assets; Game builds
 validate them against Heavy Water's catalog and prefer matching route IDs over
-built-in definitions. Fine-grained runtime Cargo features remain active
-framework work. The documentation distinguishes current behavior from target
-architecture rather than presenting roadmap interfaces as shipped APIs.
+built-in definitions. The Project Hub can now turn the active project into a
+versioned standalone native Game folder with one background **EXPORT GAME**
+action. Fine-grained runtime Cargo features and complete asset cooking remain
+active framework work. The documentation distinguishes current behavior from
+target architecture rather than presenting roadmap interfaces as shipped APIs.
 
 ## What is included
 
@@ -24,6 +26,7 @@ architecture rather than presenting roadmap interfaces as shipped APIs.
 |---|---|---|
 | Starfall Engine | Bevy/Avian runtime, fixed simulation, input, rendering, reusable gameplay systems | Running in the demo; library facade available |
 | Starfall Forge | Project, character, creature, weapon, vehicle, spaceship, world, dialogue, and platformer-route authoring | Native Designer build |
+| Game exporter | Publish, optimized Game-only build, selected content snapshot, and standalone folder assembly | Project Hub background action |
 | Heavy Water Demo Game | Open-world action RPG, shared platformer, racing/traversal, campaign, and 1–4 player examples | Complete native demo application |
 | Graph framework | Typed object, behavior, animation, UI, shader, world, and narrative graphs | Neutral typed kernel plus platformer route compiler extracted |
 | Templates and IDE | Generated projects, feature scaffolding, code integration, and guided workflows | Planned after module contracts stabilize |
@@ -49,6 +52,13 @@ complete demo without Forge entry points:
 ```sh
 cargo run --no-default-features --features heavy-water-demo
 ```
+
+To ship the active Forge project, open **CREATOR TOOLS**, choose or create the
+project, and press **EXPORT GAME**. Forge publishes the project, builds the
+optimized Game-only executable, and creates a new immutable folder under
+`<project>/build/exports/`. The folder contains the executable, `assets/`, and
+`starfall.bundle.json`; it does not need the Forge project or repository to
+run. See [Exporting a Game](docs/guides/exporting-a-game.md).
 
 The minimal framework exposes typed graphs, versioned manifests, the
 renderer-neutral platformer kit, and its optional graph compiler without
@@ -220,6 +230,7 @@ from the current transitional source layout.
 - [Framework architecture](docs/FRAMEWORK_ARCHITECTURE.md)
 - [Repeatable project structure](docs/PROJECT_STRUCTURE.md)
 - [Build with Starfall](docs/guides/building-with-starfall.md)
+- [Export a standalone game](docs/guides/exporting-a-game.md)
 - [Create a module](docs/guides/creating-a-module.md)
 - [Developer and verification guide](docs/DEVELOPMENT.md)
 - [Starfall Forge roadmap](docs/editor_roadmap.md)

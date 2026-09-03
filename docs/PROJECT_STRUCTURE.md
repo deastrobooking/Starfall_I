@@ -75,7 +75,8 @@ my-game/
 │   └── imported/
 ├── build/
 │   ├── cache/
-│   └── published/
+│   ├── published/
+│   └── exports/                   Immutable host-platform game bundles
 ├── docs/
 └── tests/
 ```
@@ -83,6 +84,11 @@ my-game/
 Project source, imported originals, derived cache, and published output are
 separate roots. A packaged game consumes published output; it does not require
 Forge drafts or import metadata.
+
+The current all-in-one application now creates host-platform exports at
+`<Forge project>/build/exports/<project-id>-<os>-<arch>-<timestamp>/`. That
+landed path is deliberately compatible with this target tree even while shared
+source assets and the central publication cache await project-root extraction.
 
 ## Feature module
 

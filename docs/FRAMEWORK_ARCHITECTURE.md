@@ -78,7 +78,8 @@ graph/document
     → validate
     → compile
     → preview or simulate
-    → publish immutable runtime bundle
+    → publish immutable runtime catalogs
+    → export executable + assets + selected catalogs
     → runtime catalog loads compiled records
 ```
 

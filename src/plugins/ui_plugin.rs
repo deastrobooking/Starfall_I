@@ -125,6 +125,7 @@ impl Plugin for UiPlugin {
             .init_resource::<AuthoringTextInputCapture>()
             .init_resource::<ChapterProgressionOwner>()
             .init_resource::<CustomMissionState>()
+            .init_resource::<GameExportJob>()
             .configure_sets(
                 Update,
                 (
@@ -334,7 +335,7 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                project_hub_action_system
+                (project_hub_action_system, game_export_status_system)
                     .in_set(MenuUiSet::ActionConsumers)
                     .run_if(in_state(AppState::ProjectHub)),
             )
@@ -535,6 +536,40 @@ struct ProjectHubButton(ProjectHubAction);
 /// outcome where they clicked, not in a log file.
 #[derive(Component)]
 struct ProjectHubStatusText;
+
+/// One background native export at a time. Cargo release builds and large
+/// asset copies must never stall the Designer's UI thread.
+#[derive(Resource, Default)]
+struct GameExportJob {
+    receiver: std::sync::Mutex<
+        Option<
+            std::sync::mpsc::Receiver<
+                Result<crate::engine_tools::game_export::GameExportReport, String>,
+            >,
+        >,
+    >,
+}
+
+impl GameExportJob {
+    fn start(&self, registry: ForgeProjectRegistry) -> bool {
+        let mut receiver = self
+            .receiver
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if receiver.is_some() {
+            return false;
+        }
+        let (sender, next_receiver) = std::sync::mpsc::channel();
+        *receiver = Some(next_receiver);
+        std::thread::spawn(move || {
+            let result =
+                crate::engine_tools::game_export::build_and_export_active_project(&registry);
+            let _ = sender.send(result);
+        });
+        true
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProjectHubAction {
     /// Continue the registry's active project.
@@ -554,6 +589,9 @@ enum ProjectHubAction {
     /// Validate the active project and bake it to `assets/published/` — the
     /// Designer→Game content bridge (docs/PROJECT_PLAN.md P1).
     Publish,
+    /// Build a Game-only native executable and package it with shipped assets
+    /// plus the active project's newly published generation.
+    ExportGame,
     /// Open the GLB-based imported character editor.
     ImportedCharacterForge,
     Back,
@@ -2065,6 +2103,12 @@ fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>
             );
             spawn_project_hub_button(
                 root,
+                "EXPORT GAME".to_string(),
+                ProjectHubAction::ExportGame,
+                Color::srgb(0.16, 0.46, 0.36),
+            );
+            spawn_project_hub_button(
+                root,
                 "BACK".to_string(),
                 ProjectHubAction::Back,
                 Color::srgb(0.22, 0.26, 0.38),
@@ -2106,6 +2150,7 @@ fn project_hub_requires_active_project(action: ProjectHubAction) -> bool {
             | ProjectHubAction::VehicleForge
             | ProjectHubAction::SpaceshipForge
             | ProjectHubAction::Publish
+            | ProjectHubAction::ExportGame
     )
 }
 
@@ -2130,6 +2175,7 @@ fn project_hub_action_system(
     mut next_tool_mode: ResMut<NextState<EngineToolMode>>,
     mut hub_status: Query<&mut Text, With<ProjectHubStatusText>>,
     mut content_reload: MessageWriter<ReloadPublishedContentCatalogs>,
+    export_job: Res<GameExportJob>,
 ) {
     for (interaction, button) in interactions.iter() {
         if *interaction != Interaction::Pressed {
@@ -2200,8 +2246,63 @@ fn project_hub_action_system(
                     *text = Text::new(message.clone());
                 }
             }
+            ProjectHubAction::ExportGame => {
+                let message = if export_job.start(registry.clone()) {
+                    "EXPORT STARTED — publishing content and building the optimized Game edition in the background…"
+                        .to_string()
+                } else {
+                    "EXPORT IN PROGRESS — wait for the current Game bundle to finish.".to_string()
+                };
+                info!("{message}");
+                for mut text in hub_status.iter_mut() {
+                    *text = Text::new(message.clone());
+                }
+            }
             ProjectHubAction::Back => next_state.set(AppState::MainMenu),
         }
+    }
+}
+
+fn game_export_status_system(
+    export_job: Res<GameExportJob>,
+    mut hub_status: Query<&mut Text, With<ProjectHubStatusText>>,
+    mut content_reload: MessageWriter<ReloadPublishedContentCatalogs>,
+) {
+    let outcome = {
+        let mut receiver = export_job
+            .receiver
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(active) = receiver.as_ref() else {
+            return;
+        };
+        match active.try_recv() {
+            Ok(result) => {
+                *receiver = None;
+                Some(result)
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                *receiver = None;
+                Some(Err(
+                    "Export worker stopped before reporting a result".to_string()
+                ))
+            }
+        }
+    };
+    let Some(outcome) = outcome else {
+        return;
+    };
+    let message = match outcome {
+        Ok(report) => {
+            content_reload.write(ReloadPublishedContentCatalogs);
+            format!("EXPORTED ✓  {}", report.summary())
+        }
+        Err(error) => format!("EXPORT FAILED — {error}"),
+    };
+    info!("{message}");
+    for mut text in hub_status.iter_mut() {
+        *text = Text::new(message.clone());
     }
 }
 
@@ -10415,6 +10516,9 @@ mod menu_navigation_tests {
         ));
         assert!(project_hub_requires_active_project(
             ProjectHubAction::Publish
+        ));
+        assert!(project_hub_requires_active_project(
+            ProjectHubAction::ExportGame
         ));
         assert!(!project_hub_requires_active_project(
             ProjectHubAction::NewProject

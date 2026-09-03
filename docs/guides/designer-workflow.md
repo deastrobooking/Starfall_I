@@ -15,8 +15,9 @@ TEST (where supported)     — Creature/Weapon tools can jump into play
    ↓ BACK, tweak, validate again
 PUBLISH TO GAME            — validate everything, bake assets/published/
    ↓
-cargo build --no-default-features --features heavy-water-demo
-                                    — the demo runtime, content included
+EXPORT GAME                — optimized runtime + selected content + assets
+   ↓
+<project>/build/exports/    — standalone native game folders
 ```
 
 ## Projects
@@ -172,6 +173,27 @@ Packaged builds may set
 preferred before the development checkout fallback.
 Missing files are a first-class empty state, so a build with no published
 content is simply the base game.
+
+## Exporting a standalone game
+
+**EXPORT GAME** runs the complete publish-and-package path in a background
+worker so the Designer remains responsive. It:
+
+1. Publishes and validates the active project.
+2. Builds `starfall-i` in release mode with `heavy-water-demo` and without the
+   Designer feature.
+3. Copies the executable and shipped runtime assets into a staging folder.
+4. Installs only the immutable content generation selected by that publish.
+5. Writes `starfall.bundle.json` and commits the finished folder with one
+   rename under `<project>/build/exports/`.
+
+Every export receives a new OS/architecture/timestamp identity. Existing
+exports are never replaced. A failed build or copy does not leave a finished
+bundle, and the status and final path appear in the Project Hub. The current
+slice exports for the host platform; cross-platform builds, dependency-aware
+asset cooking, signing, installers, and project-specific executable branding
+remain packaging milestones. See [Exporting a Game](exporting-a-game.md) for
+the bundle contract.
 
 ## Verifying your content ships
 

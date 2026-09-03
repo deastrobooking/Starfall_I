@@ -123,7 +123,7 @@ Creator-facing systems include:
 - Weapon Forge
 - Vehicle Forge
 - Spaceship Forge
-- Project Hub and publish workflows
+- Project Hub, atomic publish, and background standalone Game export workflows
 - level authoring and live editing foundations
 
 The design goal is clear: some content creation is for players, while authoring and world editing remain designed for a creator/editor product boundary.
@@ -341,6 +341,8 @@ The project’s editor/product boundary is strong in concept and already well-do
 
 Included features:
 - Project Hub and project registry
+- host-native Game folder export with a Game-only release binary, selected
+  immutable content generation, bundle manifest, and failure-safe staging
 - creature, weapon, vehicle, and spaceship tools
 - Creature Forge style-space controls compiled from stable saved dimensions,
   preventing repeated preview rebuilds from compounding morphology

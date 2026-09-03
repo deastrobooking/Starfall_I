@@ -44,6 +44,17 @@ const DIALOGUES_FILE: &str = "dialogues.json";
 const PLATFORMER_ROUTES_FILE: &str = "platformer_routes.json";
 const PUBLISHED_OUTPUT_LOCK_FILE: &str = ".publish.lock";
 
+/// Complete runtime payload of one published generation. Exporters use this
+/// same list as the Game loaders so a bundle cannot silently omit a catalog.
+pub(crate) const PUBLISHED_CONTENT_FILES: [&str; 6] = [
+    WEAPONS_FILE,
+    CREATURES_FILE,
+    VEHICLES_FILE,
+    SPACESHIPS_FILE,
+    DIALOGUES_FILE,
+    PLATFORMER_ROUTES_FILE,
+];
+
 static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
 static PUBLISHED_PROCESS_LOCK: Mutex<()> = Mutex::new(());
 
@@ -160,6 +171,10 @@ pub struct PublishedDialogue {
 /// What a publish run produced, for the hub status line.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PublishReport {
+    /// Stable content hash naming the immutable generation selected by this
+    /// publish. Exporters must use this identity rather than rereading the
+    /// mutable `current.json` pointer after a long native build.
+    pub generation: String,
     pub weapons: usize,
     pub creatures: usize,
     pub vehicles: usize,
@@ -377,6 +392,7 @@ fn prepare_generation(project: &ForgeProject) -> Result<BakedGeneration, String>
     })
     .map_err(|e| e.to_string())?;
     let report = PublishReport {
+        generation: generation.clone(),
         weapons: weapons.len(),
         creatures: creatures.len(),
         vehicles: vehicles.len(),
@@ -713,6 +729,19 @@ pub(crate) fn published_generation_in(
 /// consumers must retain [`PublishedGenerationSnapshot`] instead.
 pub(crate) fn published_file_in(out_dir: &Path, file: &str) -> Result<PathBuf, String> {
     Ok(published_generation_in(out_dir)?.file(file))
+}
+
+/// Resolve one already-published immutable generation by identity. This is
+/// the export-safe path: another Forge process may advance `current.json`
+/// while an optimized native build is still running.
+pub(crate) fn published_generation_dir(
+    out_dir: &Path,
+    generation: &str,
+) -> Result<PathBuf, String> {
+    if generation.len() != 16 || !generation.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!("Invalid published generation id: {generation:?}"));
+    }
+    Ok(out_dir.join(PUBLISHED_GENERATIONS_DIR).join(generation))
 }
 
 fn bake_project_to_with_promote(
@@ -1152,8 +1181,13 @@ mod tests {
         });
         start.wait();
 
-        alpha_thread.join().unwrap().unwrap();
-        beta_thread.join().unwrap().unwrap();
+        let alpha_report = alpha_thread.join().unwrap().unwrap();
+        let beta_report = beta_thread.join().unwrap().unwrap();
+        for report in [&alpha_report, &beta_report] {
+            assert!(published_generation_dir(&published, &report.generation)
+                .unwrap()
+                .is_dir());
+        }
 
         let selected = read_generation_manifest(&published)
             .unwrap()
@@ -1523,6 +1557,7 @@ mod tests {
 
         assert_eq!(unbaked_record_count(&project), baseline + 1);
         let report = PublishReport {
+            generation: "0123456789abcdef".into(),
             weapons: 1,
             creatures: 0,
             vehicles: 0,
