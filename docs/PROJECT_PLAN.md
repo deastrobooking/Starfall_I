@@ -20,7 +20,10 @@ The project is already a substantial native engine/game/tool application, but
 most packaging still reflects one binary game: feature dependencies are broad,
 runtime code crosses editor boundaries, and several world/UI/tool plugins are
 monolithic. A public library facade and thin native launcher establish the main
-compatibility seam. `starfall-graph` and `starfall-project` are now independent
+compatibility seam. The minimal facade now excludes native rendering, physics,
+and audio dependencies, with a separate public-API consumer and a CI dependency
+gate; detailed runtime/Forge separation still remains. `starfall-graph` and
+`starfall-project` are now independent
 workspace crates, versioned manifests are validated and round-trip tested, and
 Heavy Water has a public `shared`/`platformer` ownership facade. The first
 compiled graph vertical slice now joins the neutral graph kernel to the
@@ -64,6 +67,9 @@ Work:
 - define explicit Core, Runtime, Gameplay Kit, Forge, Heavy Water Shared, Open
   World, Platformer, Racer, RPG, Campaign, and Presentation plugin ownership
 - add capability Cargo features with representative minimal consumer builds
+- the minimal facade now gates native dependencies behind `heavy-water-demo`;
+  `starfall-framework-consumer` proves the public graph/platformer path without
+  native backends, and CI protects that boundary including build modifiers
 - introduce a neutral schema/runtime catalog boundary before moving Forge code
 - establish one typed graph kernel with domain-specific object, behavior,
   animation, UI, shader, world/city, and narrative graph languages
@@ -99,6 +105,15 @@ Deliverables:
 - first compiled graph vertical slice from authored source to runtime geometry
 - Heavy Water Platformer extracted as the initial game-mode module
 - documentation and package checks in CI
+
+September framework review follow-up: the minimal dependency boundary is now
+enforced. The next extraction should move published records, validation, and
+catalog contracts out of `engine_tools`: `world/published_content.rs` still
+imports its runtime types and dialogue validator from that authoring module,
+which also compiles native capture and publishing code in the Game profile.
+Then separate demo-specific performance counters from `engine/game_loop.rs`,
+which currently imports weapon VFX and world geometry types. Those are concrete
+dependency inversions to resolve before exposing smaller runtime plugin groups.
 
 ### 1. Architecture and ownership cleanup
 

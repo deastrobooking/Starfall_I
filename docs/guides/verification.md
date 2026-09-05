@@ -27,6 +27,19 @@ Framework work also adds a focused consumer or feature-combination check for
 every new public bundle. A module is not reusable merely because the complete
 Heavy Water application compiles with it present.
 
+The minimal public facade has a separate consumer package and dependency gate:
+
+```sh
+cargo run -p starfall-framework-consumer --locked
+python3 scripts/check_framework_dependencies.py
+```
+
+The gate checks the minimal facade, its `dynamic,tracy` modifier combination,
+and the isolated consumer for rendering, physics, window, and native audio
+dependencies. Run it on the host platform; CI also runs it on Linux in a job
+without native game system libraries. Workspace-wide checks alone cannot prove
+isolation because Cargo unifies features requested by workspace packages.
+
 For app/plugin registration changes, the fast headless guard is:
 
 ```sh

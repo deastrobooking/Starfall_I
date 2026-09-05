@@ -29,12 +29,33 @@ fn main() {
 `build_headless_app` constructs the same game registration without window,
 renderer, or audio backends for tests and tools.
 
-For the minimal typed-graph framework without Heavy Water modules:
+For the minimal graph, project-manifest, and platformer contracts without Heavy
+Water modules or native rendering, physics, and audio dependencies:
 
 ```toml
 [dependencies]
 starfall-i = { path = "../Starfall_I", default-features = false }
 ```
+
+The minimal facade still uses Bevy's app/ECS/math crates through the extracted
+contracts. The full `bevy` package, Avian, window/GPU backends, and native audio
+are activated only by `heavy-water-demo` (also implied by `designer`). The
+`dynamic` and `tracy` modifiers configure Bevy only when the demo is selected;
+they do not activate it on their own.
+
+The separate `examples/framework_consumer` package depends only on this public
+facade. It authors a two-chunk route, round-trips the compiled JSON, assembles
+the route against its own catalog, and checks missing-catalog rejection:
+
+```sh
+cargo run -p starfall-framework-consumer --locked
+python3 scripts/check_framework_dependencies.py
+```
+
+Select the consumer by package when checking isolation. A `--workspace` build
+with the root package's defaults enabled unifies the demo features into the
+consumer too. CI runs the isolated consumer on Linux without native game
+system libraries and guards its dependency tree against runtime backends.
 
 Tools can depend on the extracted contracts without pulling in the root game
 package:

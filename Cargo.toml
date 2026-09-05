@@ -15,6 +15,7 @@ members = [
     "crates/starfall-platformer",
     "crates/starfall-platformer-graph",
     "crates/starfall-project",
+    "examples/framework_consumer",
 ]
 resolver = "2"
 
@@ -42,35 +43,49 @@ starfall-graph = { path = "crates/starfall-graph" }
 starfall-platformer = { path = "crates/starfall-platformer" }
 starfall-platformer-graph = { path = "crates/starfall-platformer-graph" }
 starfall-project = { path = "crates/starfall-project" }
-bevy = { version = "0.19.1", features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings", "bevy_feathers"] }
+bevy = { version = "0.19.1", optional = true, features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings", "bevy_feathers"] }
 # Same decoder Bevy plays audio with (version-locked through the workspace):
 # used at import time so any file we accept cannot panic at playback time.
-rodio = { version = "0.22", default-features = false, features = ["mp3"] }
+rodio = { version = "0.22", optional = true, default-features = false, features = ["mp3"] }
 # Designer-only microphone capture uses the same native audio backend already
 # present through Bevy/rodio. Capture is opt-in from the Dialogue Forge.
-cpal = "0.17"
-avian3d = "0.7"
-rand = "0.8"
-noise = "0.8"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-dirs = "6"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+cpal = { version = "0.17", optional = true }
+avian3d = { version = "0.7", optional = true }
+rand = { version = "0.8", optional = true }
+noise = { version = "0.8", optional = true }
+serde = { version = "1", optional = true, features = ["derive"] }
+serde_json = { version = "1", optional = true }
+dirs = { version = "6", optional = true }
+image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6.4"
+objc2 = { version = "0.6.4", optional = true }
 
 [features]
 # The default native application includes Forge and the Heavy Water demo.
 # `--no-default-features` is the minimal framework library; select
 # `heavy-water-demo` explicitly for the complete game without Forge.
 default = ["designer"]
-heavy-water-demo = []
+# Keep native application dependencies behind the same boundary as src/lib.rs.
+# Runtime still shares some Forge implementation until schema extraction lands.
+heavy-water-demo = [
+    "dep:avian3d",
+    "dep:bevy",
+    "dep:cpal",
+    "dep:dirs",
+    "dep:image",
+    "dep:noise",
+    "dep:objc2",
+    "dep:rand",
+    "dep:rodio",
+    "dep:serde",
+    "dep:serde_json",
+]
 designer = ["heavy-water-demo"]
 # Use dynamic linking for faster incremental dev builds:  cargo run --features dynamic
-dynamic = ["bevy/dynamic_linking"]
+dynamic = ["bevy?/dynamic_linking"]
 # EC0: profile with Tracy:  cargo run --release --features tracy  (then open the Tracy client)
-tracy = ["bevy/trace_tracy"]
+tracy = ["bevy?/trace_tracy"]
 
 [profile.dev]
 opt-level = 1

@@ -190,6 +190,16 @@ not guess project meaning from folder names alone.
 
 ## Architectural enforcement
 
+The root facade's `heavy-water-demo` feature now owns its native application
+dependencies. With defaults disabled, only the four extracted contract crates
+remain direct dependencies; Bevy app/ECS/math are still used by those contracts.
+`dynamic` and `tracy` use weak feature forwarding and do not activate Bevy by
+themselves. The separate `starfall-framework-consumer` package proves graph
+authoring, document serialization, and catalog-based route assembly through
+the public facade. CI guards its dependency tree and executes it on Linux
+without native game system libraries. The Game profile still includes shared
+Forge implementation until the neutral schema/runtime extraction is complete.
+
 - Engine modules cannot import Heavy Water modules.
 - Runtime modules cannot import editor-only implementation.
 - Backend-specific physics access goes through the engine adapter.

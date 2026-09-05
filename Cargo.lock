@@ -5588,6 +5588,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "starfall-framework-consumer"
+version = "0.1.0"
+dependencies = [
+ "starfall-i",
+]
+
+[[package]]
 name = "starfall-graph"
 version = "0.1.0"
 dependencies = [

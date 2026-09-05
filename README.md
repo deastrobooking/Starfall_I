@@ -16,8 +16,9 @@ documents into the same atomic content generation as other assets; Game builds
 validate them against Heavy Water's catalog and prefer matching route IDs over
 built-in definitions. The Project Hub can now turn the active project into a
 versioned standalone native Game folder with one background **EXPORT GAME**
-action. Fine-grained runtime Cargo features and complete asset cooking remain
-active framework work. The documentation distinguishes current behavior from
+action. The minimal facade excludes native rendering, physics, and audio
+dependencies. Fine-grained runtime Cargo features and complete asset cooking
+remain active framework work. The documentation distinguishes current behavior from
 target architecture rather than presenting roadmap interfaces as shipped APIs.
 
 ## What is included

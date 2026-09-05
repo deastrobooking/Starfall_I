@@ -1,6 +1,7 @@
 //! Starfall Engine and the native Heavy Water demo application.
 //!
-//! The minimal library exposes Starfall's neutral typed-graph foundation. The
+//! The minimal library exposes Starfall's graph, project, and platformer
+//! contracts without rendering, physics, or native audio dependencies. The
 //! `heavy-water-demo` feature adds the complete current runtime and application;
 //! `designer` adds Forge and implies the demo while the finer engine/gameplay
 //! capability split is developed.
