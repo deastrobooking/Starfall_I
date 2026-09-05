@@ -89,12 +89,12 @@ it on camera cuts, resize, scene change and split/shared transitions.
 
 | ID | Feature set and ownership | Acceptance gate | State |
 |---|---|---|---|
-| RL0 | Standalone rendering lab: geometry and lighting fixtures, frame-indexed camera/occluder motion, 1/2/4 views, fixed resolution, warmup, report schema, device features and timing | Runs without demo/Forge; exact view coverage; finite statistics; new report per run; no false GPU measurements | Implemented; validation underway |
+| RL0 | Standalone rendering lab: geometry and lighting fixtures, frame-indexed camera/occluder motion, 1/2/4 views, fixed resolution, warmup, report schema, device features and timing | Runs without demo/Forge; exact view coverage; finite statistics; new report per run; no false GPU measurements | Implemented and exercised natively; report completion does not certify visual parity |
 | RL1 | Baseline campaign scenes: city, four-player combat, platformer, race road, interior and Forge; production quality tiers | Release captures on named hardware; CPU/GPU costs labeled separately; frame pacing and visible work recorded | Planned |
-| GI0 | Probe/voxel configuration, checked resource arithmetic, CPU reference traversal and deterministic GPU validation fixture | Overflow/zero/NaN rejection; ray bounds; empty/solid/outside/boundary/axis-aligned cases; CPU/GPU agreement | Implemented; GPU validation underway |
-| VG0 | Pinned Bevy meshlet eligibility and asset audit; ordinary-mesh comparison | Actual adapter feature report; materials/MSAA restrictions visible; preserve fallback | Next after RL0 |
+| GI0 | Probe/voxel configuration, checked resource arithmetic, CPU reference traversal and deterministic GPU validation fixture | Overflow/zero/NaN rejection; ray bounds; empty/solid/outside/boundary/axis-aligned cases; CPU/GPU agreement | Passed on M3 Pro/Metal: 520 rays, zero mismatches, maximum absolute error 0.000000477 |
+| VG0 | Pinned Bevy meshlet eligibility and asset audit; ordinary-mesh comparison | Actual adapter feature report; materials/MSAA restrictions visible; preserve fallback | Implemented; audit found multi-camera shadow/quality blockers |
 | VG1 | Background offline preprocessing; cluster bounds, hierarchy, geometric error, locked seams, versioned baked asset, source/processor hashes | Invalid meshes rejected; bounded deterministic ranges; cancellation and failed bakes preserve last-good asset | Planned |
-| VG2 | Opt-in resident meshlet scene, per-view selection, debug LOD/cluster color, shadow/material parity | Compare same source scene against stock renderer for 1/2/4 views; no holes, double cuts, overflow or unsupported-feature exit | Planned |
+| VG2 | Opt-in resident meshlet scene, per-view selection, debug LOD/cluster color, shadow/material parity | Compare same source scene against stock renderer for 1/2/4 views; no holes, double cuts, overflow or unsupported-feature exit | Resident fixture implemented; multi-camera shadow parity failed; no production promotion |
 | VG3 | Frustum/cone/HZB occlusion validation, reverse-Z handling, previous/current frame recovery | No disappearances on disocclusion, fast camera motion, camera cuts or split changes | Planned |
 | VG4 | Streaming pages, pinned coarse fallback, asynchronous upload/eviction, residency and request budgets | Missing finer pages select a complete resident cut; bounded memory and no render-thread disk waits | Planned |
 | GI1 | Conservative static/dynamic voxel occupancy, linear albedo/emission/direct-radiance injection, world-to-volume transforms and dirty-region updates | Moving blockers and lights update correct cells; thin-wall and volume-edge reference cases; fixed memory/work caps | Planned |
@@ -153,8 +153,9 @@ cargo run --release --locked --no-default-features --features render-lab \
 # Add --validate-probes to run the one-shot voxel GPU/CPU comparison before warmup.
 ```
 
-The lab renders stock PBR; it does not yet deliver dynamic GI or virtualized
-geometry. Geometry uses a repeatable high-resolution sphere grid; lighting
+The lab defaults to stock PBR. Its opt-in meshlet mode uses Bevy's experimental
+resident renderer; dynamic GI and streamed geometry remain future work.
+Geometry uses a repeatable high-resolution sphere grid; lighting
 uses colored walls, a point light and a moving blocker for future GI comparison.
 Reports distinguish enabled device capabilities from installed render features.
 The pinned Bevy implementation disables encoder timestamp writes on macOS;
@@ -171,6 +172,86 @@ checks every output against the CPU DDA reference, and requires agreement within
 absolute tolerance. Validation happens before warmup; one dispatch and its
 readback are excluded from the timing interval. This fixture is independent of
 the visible scene and does not yet apply indirect illumination to its materials.
+
+## Resident meshlet comparison
+
+```sh
+cargo build --release --locked --no-default-features \
+  --features render-lab-meshlets --example render_lab
+target/release/examples/render_lab --renderer pbr --views 4 \
+  --output target/render-lab/pbr-4.json --capture target/render-lab/pbr-4.png
+target/release/examples/render_lab --renderer meshlets --views 4 \
+  --output target/render-lab/meshlets-4.json --capture target/render-lab/meshlets-4.png
+# Repeat at 1 and 2 views, using new filenames for each report and capture.
+```
+
+Use the same feature-enabled executable for both sides of the comparison.
+The meshlet feature adds the processor dependencies required by pinned Bevy;
+it is absent from the default game and minimal framework. The adapter checks
+the actual enabled device features and Metal/Vulkan backend before registering
+`MeshletPlugin`. A missing build feature, unsupported device, lighting-scene
+request, or failed fixture cook retains PBR and records a reason. Inspect
+`geometry_backend.active` and `scene_inventory.meshlet_instances` before
+treating a run as meshlet evidence.
+
+Both paths share the exact indexed sphere mesh, opaque StandardMaterial,
+transforms, lights, camera path, resolution and MSAA-off setting. The UV
+sphere's duplicate seam/pole positions and normals are canonicalized before
+either path receives it; an exact-position edge-incidence test requires a closed,
+non-degenerate surface. UV coordinates and source triangle indices are retained.
+The PBR floor remains in both paths. Every 3D camera renders into a texture matching
+its tile size; a final 2D camera composes those images into the fixed window.
+This avoids a native Bevy 0.19.1 meshlet attachment-size validation failure with
+sub-viewports of a shared window. PBR uses the same composition path, including
+its cost. Reports identify it as `per_view_texture_then_ui_composite`; earlier
+direct-window baselines are not an equivalent comparison. One sphere is cooked during Startup and shared
+by every instance; cook time and asset format version are recorded separately.
+This bounded procedural bake is a lab fixture, not the background asset pipeline
+specified by VG1. The plugin preallocates 2²¹ cluster slots (8 MiB for that
+buffer alone); reports do not claim this is total GPU memory or used clusters.
+`visible_mesh_entities` counts only ordinary Mesh3d CPU candidates and excludes
+GPU-culled meshlet instances. Cluster counts and selected triangle counts remain
+unavailable. Capture holds the last measured camera pose and writes a new PNG
+after timing ends; a capture failure exits unsuccessfully while retaining the
+completed timing report. Capture verifies physical dimensions and non-uniform
+content in every tile. A blank capture is saved for diagnosis but fails the run;
+this sanity check cannot establish shadow, material or LOD parity.
+
+`--shadows off` separates surface/LOD artifacts from shadow errors.
+`--meshlet-precision 1..16` controls position quantization at 1/2^n centimeters
+(default 4, matching pinned Bevy). Record both settings in comparisons. Neither
+knob changes source geometry or silently substitutes a different renderer.
+
+After building, automate the 1/2/4-view geometry/PBR, geometry/meshlet and
+lighting/PBR matrix with one executable and no overlapping runs:
+
+```sh
+python3 scripts/benchmark_render_lab.py --output target/render-lab/new-matrix
+```
+
+The runner requires a new directory, captures every case, validates GPU probe
+traversal before warmup, and rejects a fallback/debug build or a change of
+source/device/composition between runs. Each case has a configurable 600-second
+timeout. `summary.json` records frame mean/p95;
+individual reports retain all percentiles and settings. A completed matrix
+establishes measurement comparability, not visual acceptance or production
+performance. Use `--shadows off` to run the same matrix without shadow maps.
+
+The September 5 native pass fixed mismatched attachments through per-view
+targets and removed visible sphere seam cracks by canonicalizing duplicate
+positions. It also exposed incorrect two-/four-camera meshlet shadows. A full
+four-camera shadowed run produced a blank capture and severe frame stalls;
+its successful process exit was not a rendering pass and motivated the blank
+capture guard. Keep this backend opt-in. The immediate geometry work is to
+isolate/fix per-view shadow ownership in the pinned backend before adding
+production assets or claiming performance gains. GI1 voxel updates/radiance
+injection remains the next independent lighting slice.
+
+The initial eligibility scope excludes masked/transparent/transmissive assets,
+custom vertex attributes and custom vertex shaders. Existing Starfall material
+families need separate meshlet-fragment compatibility work. Debug cluster/LOD
+color, thin geometry, large scenes, disocclusion, camera cuts, split transitions,
+memory pressure and published-asset fallback remain promotion gates.
 
 ## Source basis
 

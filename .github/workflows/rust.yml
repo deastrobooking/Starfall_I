@@ -79,6 +79,9 @@ jobs:
           - edition: Rendering lab
             cargo_args: --no-default-features --features render-lab
             cache_key: render-lab
+          - edition: Meshlet lab
+            cargo_args: --no-default-features --features render-lab-meshlets
+            cache_key: render-lab-meshlets
 
     steps:
       - name: Checkout
@@ -104,7 +107,7 @@ jobs:
         run: cargo test --workspace --locked ${{ matrix.cargo_args }}
 
       - name: Documentation
-        if: matrix.edition == 'Designer'
+        if: matrix.edition == 'Designer' || matrix.edition == 'Meshlet lab'
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --locked --no-deps
+        run: cargo doc --workspace --locked --no-deps ${{ matrix.cargo_args }}

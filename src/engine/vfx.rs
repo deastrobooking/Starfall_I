@@ -141,9 +141,14 @@ fn load_authored_documents(dir: &std::path::Path) -> Vec<(String, VfxSystemDocum
                 continue;
             }
         };
-        match VfxSystemDocument::parse(&text).and_then(|document| document.validate_schema().map(|_| document)) {
+        match VfxSystemDocument::parse(&text)
+            .and_then(|document| document.validate_schema().map(|_| document))
+        {
             Ok(document) => documents.push((document.id.to_string(), document)),
-            Err(error) => warn!("{} is not a valid VFX document: {error}; ignoring", path.display()),
+            Err(error) => warn!(
+                "{} is not a valid VFX document: {error}; ignoring",
+                path.display()
+            ),
         }
     }
     documents
@@ -665,12 +670,20 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("good.json"), impact_spark().to_json_pretty().unwrap()).unwrap();
+        std::fs::write(
+            dir.join("good.json"),
+            impact_spark().to_json_pretty().unwrap(),
+        )
+        .unwrap();
         std::fs::write(dir.join("bad.json"), "{ not valid json").unwrap();
         std::fs::write(dir.join("ignored.txt"), "not json at all").unwrap();
 
         let documents = load_authored_documents(&dir);
-        assert_eq!(documents.len(), 1, "the malformed file must be skipped, not fatal");
+        assert_eq!(
+            documents.len(),
+            1,
+            "the malformed file must be skipped, not fatal"
+        );
         assert_eq!(documents[0].0, "impact_spark");
 
         std::fs::remove_dir_all(&dir).ok();

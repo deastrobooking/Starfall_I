@@ -5,11 +5,15 @@ use serde::{Deserialize, Serialize};
 
 pub const USAGE: &str = "Starfall rendering lab
   --scene geometry|lighting       Deterministic test scene (default geometry)
+  --renderer pbr|meshlets         Requested backend (default pbr); fallback is reported
+  --shadows on|off               Shadow maps (default on); isolate geometry from shadows
+  --meshlet-precision 4          Quantization exponent, 1..16 (units: 1/2^n centimeters)
   --views 1|2|4                   Cameras sharing one fixed-size window (default 1)
   --width 1280 --height 720       Physical window pixels
   --grid 8                       Geometry grid side, 1..32
   --warmup 120 --frames 300       Warmup and measured frame counts
   --validate-probes              Compare bounded GPU voxel rays with the CPU oracle first
+  --capture path.png             Optional final-pose screenshot after measurement
   --output path.json             Required; existing reports are never overwritten
 
 Example: cargo run --release --no-default-features --features render-lab \
@@ -22,10 +26,24 @@ pub enum LabScene {
     Lighting,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabRenderer {
+    #[default]
+    Pbr,
+    Meshlets,
+}
+
 /// Bounded, explicit inputs recorded alongside every measurement.
 #[derive(Resource, Debug, Clone, Serialize, Deserialize)]
 pub struct LabConfig {
     pub scene: LabScene,
+    #[serde(default)]
+    pub renderer: LabRenderer,
+    #[serde(default = "default_shadows")]
+    pub shadows: bool,
+    #[serde(default = "default_meshlet_precision")]
+    pub meshlet_precision: u8,
     pub views: u32,
     pub width: u32,
     pub height: u32,
@@ -34,6 +52,8 @@ pub struct LabConfig {
     pub measured_frames: u32,
     #[serde(default)]
     pub validate_probes: bool,
+    #[serde(default)]
+    pub capture: Option<PathBuf>,
     pub output: PathBuf,
 }
 
@@ -41,6 +61,9 @@ impl LabConfig {
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut config = Self {
             scene: LabScene::Geometry,
+            renderer: LabRenderer::Pbr,
+            shadows: default_shadows(),
+            meshlet_precision: default_meshlet_precision(),
             views: 1,
             width: 1280,
             height: 720,
@@ -48,6 +71,7 @@ impl LabConfig {
             warmup_frames: 120,
             measured_frames: 300,
             validate_probes: false,
+            capture: None,
             output: PathBuf::new(),
         };
         let mut args = args.into_iter();
@@ -69,6 +93,24 @@ impl LabConfig {
                     .map_err(|_| format!("Invalid integer for {flag}"))
             };
             match flag.as_str() {
+                "--shadows" => {
+                    config.shadows = match value.as_str() {
+                        "on" => true,
+                        "off" => false,
+                        _ => return Err("Shadows must be on or off".into()),
+                    }
+                }
+                "--meshlet-precision" => {
+                    config.meshlet_precision = u8::try_from(number()?)
+                        .map_err(|_| "Meshlet precision must be within 1..16")?
+                }
+                "--renderer" => {
+                    config.renderer = match value.as_str() {
+                        "pbr" => LabRenderer::Pbr,
+                        "meshlets" => LabRenderer::Meshlets,
+                        _ => return Err("Renderer must be pbr or meshlets".into()),
+                    }
+                }
                 "--scene" => {
                     config.scene = match value.as_str() {
                         "geometry" => LabScene::Geometry,
@@ -83,6 +125,7 @@ impl LabConfig {
                 "--warmup" => config.warmup_frames = number()?,
                 "--frames" => config.measured_frames = number()?,
                 "--output" => config.output = value.into(),
+                "--capture" => config.capture = Some(value.into()),
                 _ => return Err(format!("Unknown option: {flag}")),
             }
         }
@@ -98,6 +141,7 @@ impl LabConfig {
             return Err("Resolution must be within 320..3840 by 240..2160".into());
         }
         if !(1..=32).contains(&self.grid)
+            || !(1..=16).contains(&self.meshlet_precision)
             || !(1..=3600).contains(&self.warmup_frames)
             || !(1..=10_000).contains(&self.measured_frames)
         {
@@ -106,8 +150,21 @@ impl LabConfig {
         if self.output.as_os_str().is_empty() || self.output.file_name().is_none() {
             return Err("Supply --output with a new JSON report filename".into());
         }
+        if self.capture.as_ref().is_some_and(|path| {
+            path.extension().is_none_or(|extension| extension != "png") || path == &self.output
+        }) {
+            return Err("Capture must have a .png filename distinct from the report".into());
+        }
         Ok(())
     }
+}
+
+fn default_shadows() -> bool {
+    true
+}
+
+fn default_meshlet_precision() -> u8 {
+    4
 }
 
 /// Tile the full pixel extent, including odd resolutions, without gaps/overlap.
@@ -144,6 +201,12 @@ mod tests {
             vec!["--width", "0"],
             vec!["--views", "2", "--views", "4"],
             vec!["--typo", "1"],
+            vec!["--renderer", "unknown"],
+            vec!["--capture", "image.jpg"],
+            vec!["--shadows", "yes"],
+            vec!["--meshlet-precision", "0"],
+            vec!["--meshlet-precision", "17"],
+            vec!["--meshlet-precision", "256"],
         ] {
             let mut args = args;
             args.extend(["--output", "report.json"]);
@@ -156,6 +219,19 @@ mod tests {
                 .views,
             4
         );
+    }
+
+    #[test]
+    fn renderer_selection_and_legacy_config_default_are_explicit() {
+        let config = parse(&["--renderer", "meshlets", "--output", "report.json"]).unwrap();
+        assert_eq!(config.renderer, LabRenderer::Meshlets);
+        let mut legacy = serde_json::to_value(config).unwrap();
+        legacy.as_object_mut().unwrap().remove("renderer");
+        legacy.as_object_mut().unwrap().remove("capture");
+        let restored: LabConfig = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.renderer, LabRenderer::Pbr);
+        assert!(restored.capture.is_none());
+        assert!(parse(&["--output", "same.png", "--capture", "same.png"]).is_err());
     }
 
     #[test]

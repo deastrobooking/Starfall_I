@@ -1,10 +1,7 @@
 use std::{collections::BTreeMap, fs, io::Write, path::Path};
 
 use bevy::prelude::*;
-use bevy::render::{
-    renderer::{RenderAdapterInfo, RenderDevice},
-    settings::WgpuFeatures,
-};
+use bevy::render::renderer::{RenderAdapterInfo, RenderDevice};
 use serde::{Deserialize, Serialize};
 
 use super::probe_gpu::ProbeValidationReport;
@@ -62,14 +59,7 @@ pub struct DeviceReport {
 
 impl DeviceReport {
     pub(crate) fn capture(adapter: &RenderAdapterInfo, device: &RenderDevice) -> Self {
-        // Matches the pinned Bevy 0.19.1 MeshletPlugin contract. This only reports
-        // capability; the lab does not register that experimental renderer yet.
-        let required = WgpuFeatures::TEXTURE_INT64_ATOMIC
-            | WgpuFeatures::TEXTURE_ATOMIC
-            | WgpuFeatures::SHADER_INT64
-            | WgpuFeatures::SUBGROUP
-            | WgpuFeatures::DEPTH_CLIP_CONTROL
-            | WgpuFeatures::IMMEDIATES;
+        let required = super::geometry::required_features();
         let features = device.features();
         let limits = device.limits();
         Self {
@@ -93,7 +83,8 @@ pub struct ViewReport {
     pub view: u32,
     pub viewport_origin: [u32; 2],
     pub viewport_size: [u32; 2],
-    /// CPU visibility candidates, not GPU rasterized triangles or draw calls.
+    /// Ordinary Mesh3d CPU visibility candidates. Excludes GPU-culled meshlets;
+    /// not a count of rasterized triangles or draw calls.
     pub visible_mesh_entities: Option<SampleSummary>,
 }
 
@@ -109,7 +100,11 @@ pub struct LabReport {
     pub device: DeviceReport,
     pub scene_inventory: SceneInventory,
     pub renderer: String,
+    #[serde(default)]
+    pub geometry_backend: Option<super::GeometryBackendReport>,
     pub present_mode: String,
+    #[serde(default)]
+    pub view_composition: String,
     pub frame_time_ms: SampleSummary,
     pub views: Vec<ViewReport>,
     /// Independently sampled asynchronous render diagnostics. Do not sum these
@@ -130,7 +125,7 @@ impl LabReport {
     }
 }
 
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())

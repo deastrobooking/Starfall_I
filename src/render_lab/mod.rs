@@ -1,15 +1,18 @@
 //! Standalone rendering lab for reproducible multi-view experiments.
 //!
-//! This capability has no Heavy Water or Forge dependency. It measures a stock
-//! renderer baseline before optional GI/virtual-geometry backends are promoted.
+//! This capability has no Heavy Water or Forge dependency. It compares stock
+//! PBR with opt-in resident meshlets and validates bounded GPU probe traversal.
 
+mod capture;
 mod config;
+mod geometry;
 mod probe_gpu;
 pub mod probe_reference;
 mod report;
 mod scene;
 
-pub use config::{LabConfig, LabScene, USAGE};
+pub use config::{LabConfig, LabRenderer, LabScene, USAGE};
+pub use geometry::GeometryBackendReport;
 pub use probe_gpu::ProbeValidationReport;
 pub use report::{DeviceReport, LabReport, SampleSummary, ViewReport};
 pub use scene::SceneInventory;
@@ -60,6 +63,10 @@ pub fn run(config: LabConfig) -> AppExit {
         eprintln!("Report already exists: {}", config.output.display());
         return AppExit::error();
     }
+    if config.capture.as_ref().is_some_and(|path| path.exists()) {
+        eprintln!("Capture already exists; choose a new filename");
+        return AppExit::error();
+    }
     let mut app = App::new();
     app.add_plugins((
         DefaultPlugins
@@ -82,13 +89,17 @@ pub fn run(config: LabConfig) -> AppExit {
                 ..default()
             }),
         RenderDiagnosticsPlugin,
+        geometry::GeometryBackendPlugin,
     ))
     .insert_resource(WinitSettings::continuous())
     .init_resource::<ProbeValidationState>()
     .insert_resource(ClearColor(Color::srgb(0.035, 0.045, 0.06)))
     .init_resource::<LabState>()
     .add_systems(Startup, scene::setup)
-    .add_systems(Update, scene::animate)
+    .add_systems(
+        Update,
+        (scene::animate, capture::capture_finished_run).chain(),
+    )
     .add_systems(Last, collect);
     if config.validate_probes {
         app.add_plugins(ProbeValidationPlugin);
@@ -104,6 +115,7 @@ fn collect(
     adapter: Res<RenderAdapterInfo>,
     device: Res<RenderDevice>,
     inventory: Res<SceneInventory>,
+    geometry: Res<GeometryBackendReport>,
     validation: Res<ProbeValidationState>,
     views: Query<(&LabView, &Camera, &VisibleEntities)>,
     mut state: ResMut<LabState>,
@@ -182,13 +194,18 @@ fn collect(
         exit.write(AppExit::error());
         return;
     };
+    let layout = config::view_rects(config.views, UVec2::new(config.width, config.height));
     let mut view_reports: Vec<_> = views
         .iter()
         .filter_map(|(view, camera, _)| {
             let rect = camera.physical_viewport_rect()?;
+            let tile = layout.get(view.0 as usize)?;
+            if rect.size() != tile.size() {
+                return None;
+            }
             Some(ViewReport {
                 view: view.0,
-                viewport_origin: rect.min.to_array(),
+                viewport_origin: tile.min.to_array(),
                 viewport_size: rect.size().to_array(),
                 visible_mesh_entities: state
                     .visible
@@ -219,8 +236,14 @@ fn collect(
         config: config.clone(),
         device: DeviceReport::capture(&adapter, &device),
         scene_inventory: inventory.clone(),
-        renderer: "bevy_standard_pbr".into(),
+        renderer: match geometry.active {
+            LabRenderer::Pbr => "bevy_standard_pbr",
+            LabRenderer::Meshlets => "bevy_meshlets_with_pbr_floor",
+        }
+        .into(),
+        geometry_backend: Some(geometry.clone()),
         present_mode: "auto_no_vsync".into(),
+        view_composition: "per_view_texture_then_ui_composite".into(),
         frame_time_ms,
         views: view_reports,
         gpu_timestamps_observed: render_diagnostics_ms
@@ -252,7 +275,9 @@ fn collect(
                 report.frame_time_ms.p95,
                 report.frame_time_ms.p99
             );
-            exit.write(AppExit::Success);
+            if config.capture.is_none() {
+                exit.write(AppExit::Success);
+            }
         }
         Err(error) => {
             error!("{error}");
@@ -272,8 +297,10 @@ fn source_fingerprint() -> String {
     for source in [
         include_str!("mod.rs"),
         include_str!("config.rs"),
+        include_str!("capture.rs"),
         include_str!("report.rs"),
         include_str!("scene.rs"),
+        include_str!("geometry.rs"),
         include_str!("probe_reference.rs"),
         include_str!("probe_gpu.rs"),
         include_str!("probe_trace.wgsl"),

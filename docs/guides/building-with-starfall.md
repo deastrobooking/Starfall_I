@@ -130,6 +130,9 @@ cargo run --release --locked --no-default-features --features render-lab \
 This runs without Heavy Water or Forge plugins and exits after a bounded
 warmup/measurement sequence. See the [rendering feature program](../RENDERING_PROGRAM.md)
 for scene coverage, report semantics and the GI/geometry integration sequence.
+Select `render-lab-meshlets` and pass `--renderer meshlets` for the experimental
+resident geometry comparison. The lab records unsupported-device/build fallback
+to PBR. `--capture new-file.png` captures the held final pose after measurement.
 
 The public prelude contains only application and engine-level entry points.
 Import gameplay types from their owning modules:

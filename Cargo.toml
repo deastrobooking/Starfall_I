@@ -90,7 +90,9 @@ heavy-water-demo = [
 ]
 designer = ["heavy-water-demo"]
 # Standalone native rendering experiments, without Heavy Water or Forge modules.
-render-lab = ["dep:bevy", "dep:serde", "dep:serde_json"]
+render-lab = ["dep:bevy", "dep:image", "dep:serde", "dep:serde_json"]
+# Experimental geometry comparison and procedural fixture cooking, opt-in only.
+render-lab-meshlets = ["render-lab", "bevy/meshlet_processor"]
 # Use dynamic linking for faster incremental dev builds:  cargo run --features dynamic
 dynamic = ["bevy?/dynamic_linking"]
 # EC0: profile with Tracy:  cargo run --release --features tracy  (then open the Tracy client)

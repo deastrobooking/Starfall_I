@@ -192,7 +192,9 @@ not guess project meaning from folder names alone.
 
 The root facade's `heavy-water-demo` feature owns its complete native application
 dependencies. The separate `render-lab` capability selects Bevy and report
-serialization for isolated rendering experiments without demo or Forge modules.
+serialization and image capture for isolated rendering experiments without demo
+or Forge modules. `render-lab-meshlets` adds the pinned experimental meshlet
+renderer/processor to that lab; it does not enable the Heavy Water runtime.
 With defaults disabled and neither native capability selected, only extracted
 contract crates remain direct dependencies; Bevy app/ECS/math are still used by those contracts.
 `dynamic` and `tracy` use weak feature forwarding and do not activate Bevy by
