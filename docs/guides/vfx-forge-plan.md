@@ -89,9 +89,14 @@ mirrors `starfall-platformer-graph`'s dependency footprint):
 `framework::StarfallFoundationPlugins` — available in both editions):
 
 - `VfxCatalog` — the built-in compiled systems, hand-authored as
-  `VfxSystemDocument`s in Rust and compiled once at `Startup` (same
-  "Rust catalog first" sequencing `world::platformer_chunk_library` used
-  before any file-based loading existed for chunks).
+  `VfxSystemDocument`s in Rust and compiled once at `Startup`, **plus** any
+  `<asset_root>/vfx/*.json` file: `load_authored_documents` parses, validates,
+  and compiles each one, overriding a built-in id or adding a new one. A
+  missing `vfx/` directory is a first-class empty state and a bad file is
+  skipped with a warning rather than crashing — the same contract
+  `world::published_content` uses for every other loose content type. This is
+  the actual "no engine recompile" delivery: drop a JSON file next to the
+  executable and retune or add an effect, no rebuild required.
 - Two shipped systems:
   - **`impact_spark`** — a 10-particle one-shot burst, wired live to
     `EnemyDamagedEvent`: every enemy hit in the actual game now fires a
@@ -114,7 +119,7 @@ mirrors `starfall-platformer-graph`'s dependency footprint):
 | WGSL codegen, GPU compute simulation | CPU simulation, entity-per-particle |
 | Node-graph editor authoring | Hand-authored Rust documents (same schema a future graph would emit) |
 | Sprite/ribbon/mesh/light renderers | Particles render as small unlit orbs (matches the existing hit-flash convention) |
-| `assets/published/` publish pipeline integration | Built-in Rust catalog only; no Designer authoring UI yet |
+| `assets/published/` publish pipeline integration | Loose `assets/vfx/*.json` files load and override the Rust catalog, but there is no Designer authoring UI or Forge project/versioning yet |
 | Event system between emitters (death → spawn) | Not modeled; `SpawnVfxEvent` chaining could add this later |
 | Data interfaces (skinned-mesh/spline sampling) | Not modeled |
 
@@ -165,22 +170,38 @@ Once Phase 1's compile target is proven in real gameplay (it now is —
    and treats a bad document as "skip it," never "crash the game" — the
    established contract for every other published content type.
 
+## Shipped since Phase 1's first pass
+
+- **Loose file loading**: `<asset_root>/vfx/*.json` documents load at
+  `Startup` alongside the built-in Rust catalog, overriding a matching id or
+  adding a new one — a bad file is skipped with a warning, never fatal.
+  `SpawnVfxEvent::system_id` and the emitter/particle components moved from
+  `&'static str` to `String` to support ids that only exist at runtime.
+  2 new tests (`load_authored_documents`: missing-directory empty state,
+  good-file-loads-and-bad-file-is-skipped).
+
 ## Near-term follow-ups (not gated on Phase 2/3)
 
 - Spawn `ember_torch` from castle/stairwell chunk trim pieces in
-  `world::platformer_chunk_library` once `world_plugin`'s route-spawn path is
-  stable again (it currently has an unrelated compile error from a concurrent
-  session's dialogue-system additions pushing a system tuple past Bevy's
-  20-parameter cap).
+  `world::platformer_chunk_library`. `world::platformer_route_spawn::spawn_route`
+  is a plain function called once at level-build time (`&mut Commands`, no
+  `MessageWriter` in scope) — wiring this in cleanly means either threading a
+  list of `(system_id, position)` ember spots back out of `spawn_route` for
+  the caller to fire, or giving `Commands` a way to queue a message write
+  directly. Either is a small, self-contained change; deferred only because
+  it touches the chunk-authoring surface rather than because anything is
+  currently broken.
 - True camera-facing sprite billboards (a textured quad rotated to face the
   active split-screen camera) instead of the current unlit-orb approximation,
   for effects where a flat glow sprite reads better than a small sphere
   (smoke, dust, glow blooms).
-- A `spawn_vfx_on_weapon_fire` hook analogous to the damage hook, once a
-  muzzle-flash `VfxSystemDocument` is authored.
-- RON/JSON file loading for `VfxSystemDocument` (the type already round-trips
-  through `serde_json`) so non-programmers can iterate on existing effects
-  without a graph editor, as an interim step before Phase 3.
+- A `spawn_vfx_on_weapon_fire` hook analogous to the damage hook. Blocked on
+  more than just authoring a muzzle-flash document: `WeaponFiredEvent` is
+  currently a unit struct with no position, fired from ~8 call sites across
+  `plugins/weapon_plugin.rs`. Giving it a position field means updating every
+  writer (and checking nothing else consuming the event assumes it stays a
+  unit struct) — a real but slightly bigger change than the hook itself,
+  intentionally not bundled into this pass to keep it reviewable on its own.
 
 ## Verification
 

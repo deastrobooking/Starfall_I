@@ -54,9 +54,9 @@ impl Plugin for VfxPlugin {
 /// so any gameplay system can trigger a built-in effect without depending on
 /// this module's internals — `combat::feedback` and future weapon/prefab
 /// hooks fire the same event this module's own damage hook uses.
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone)]
 pub struct SpawnVfxEvent {
-    pub system_id: &'static str,
+    pub system_id: String,
     pub position: Vec3,
 }
 
@@ -73,33 +73,80 @@ const MAX_LIVE_PARTICLES: usize = 500;
 /// `world::platformer_chunk_library` shipped with.
 #[derive(Resource)]
 pub struct VfxCatalog {
-    systems: Vec<(&'static str, CompiledVfxSystem)>,
+    systems: Vec<(String, CompiledVfxSystem)>,
 }
 
 impl VfxCatalog {
     fn get(&self, system_id: &str) -> Option<&CompiledVfxSystem> {
         self.systems
             .iter()
-            .find(|(id, _)| *id == system_id)
+            .find(|(id, _)| id == system_id)
             .map(|(_, system)| system)
     }
 }
 
 fn setup_vfx(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     let registry = ModuleRegistry::builtin();
-    let systems = built_in_documents()
+    let mut systems: Vec<(String, CompiledVfxSystem)> = built_in_documents()
         .into_iter()
         .map(|(id, document)| {
             let compiled = document.compile_runtime(&registry).unwrap_or_else(|error| {
                 panic!("built-in VFX system '{id}' failed to compile: {error}")
             });
-            (id, compiled)
+            (id.to_string(), compiled)
         })
         .collect();
+    let vfx_dir = crate::engine::platform_paths::asset_root().join("vfx");
+    for (id, document) in load_authored_documents(&vfx_dir) {
+        match document.compile_runtime(&registry) {
+            Ok(compiled) => match systems.iter_mut().find(|(existing, _)| *existing == id) {
+                Some(slot) => slot.1 = compiled,
+                None => systems.push((id, compiled)),
+            },
+            Err(error) => warn!("authored VFX system '{id}' failed to compile: {error}; ignoring"),
+        }
+    }
     commands.insert_resource(VfxCatalog { systems });
     commands.insert_resource(VfxAssets {
         particle_mesh: meshes.add(Mesh::from(Sphere::new(0.18))),
     });
+}
+
+/// Loose, designer-editable VFX documents outside the (not-yet-built) Forge
+/// publish pipeline: any `<asset_root>/vfx/*.json` file is parsed as a
+/// [`VfxSystemDocument`] and, if it validates and compiles, added to the
+/// catalog — overriding a built-in system of the same id, or adding a new
+/// one. A missing directory is a first-class empty state and a bad file is
+/// skipped with a warning, matching every other loose/published content
+/// loader in this codebase (`world::published_content`): a typo'd asset
+/// should never crash the game, only lose the effect.
+///
+/// Takes the directory explicitly (rather than resolving `asset_root()`
+/// itself) so tests can point it at a temp directory instead of racing on
+/// the process-global `STARFALL_ASSET_ROOT` environment variable.
+fn load_authored_documents(dir: &std::path::Path) -> Vec<(String, VfxSystemDocument)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut documents = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) => {
+                warn!("could not read {}: {error}; ignoring", path.display());
+                continue;
+            }
+        };
+        match VfxSystemDocument::parse(&text).and_then(|document| document.validate_schema().map(|_| document)) {
+            Ok(document) => documents.push((document.id.to_string(), document)),
+            Err(error) => warn!("{} is not a valid VFX document: {error}; ignoring", path.display()),
+        }
+    }
+    documents
 }
 
 #[derive(Resource)]
@@ -115,7 +162,7 @@ fn trigger_impact_spark_on_damage(
 ) {
     for event in damaged.read() {
         spawn.write(SpawnVfxEvent {
-            system_id: "impact_spark",
+            system_id: "impact_spark".to_string(),
             position: event.position,
         });
     }
@@ -129,7 +176,7 @@ fn trigger_impact_spark_on_damage(
 /// moment it finishes spawning.
 #[derive(Component)]
 struct VfxEmitterInstance {
-    system_id: &'static str,
+    system_id: String,
     emitter_index: usize,
     origin: Vec3,
     age: f32,
@@ -143,7 +190,7 @@ fn handle_spawn_requests(
     catalog: Res<VfxCatalog>,
 ) {
     for request in requests.read() {
-        let Some(system) = catalog.get(request.system_id) else {
+        let Some(system) = catalog.get(&request.system_id) else {
             warn!(
                 "SpawnVfxEvent referenced unknown VFX system '{}'",
                 request.system_id
@@ -152,7 +199,7 @@ fn handle_spawn_requests(
         };
         for (index, _emitter) in system.emitters.iter().enumerate() {
             commands.spawn(VfxEmitterInstance {
-                system_id: request.system_id,
+                system_id: request.system_id.clone(),
                 emitter_index: index,
                 origin: request.position,
                 age: 0.0,
@@ -175,7 +222,7 @@ fn advance_emitters_and_spawn_particles(
     let dt = time.delta_secs();
     let mut budget = MAX_LIVE_PARTICLES.saturating_sub(live_particles.iter().count());
     for (entity, mut instance) in emitters.iter_mut() {
-        let Some(system) = catalog.get(instance.system_id) else {
+        let Some(system) = catalog.get(&instance.system_id) else {
             commands.entity(entity).despawn();
             continue;
         };
@@ -210,7 +257,7 @@ fn advance_emitters_and_spawn_particles(
             budget -= 1;
             spawn_particle(
                 &mut commands,
-                instance.system_id,
+                instance.system_id.clone(),
                 instance.emitter_index,
                 emitter,
                 instance.origin,
@@ -231,7 +278,7 @@ fn advance_emitters_and_spawn_particles(
 
 fn spawn_particle(
     commands: &mut Commands,
-    system_id: &'static str,
+    system_id: String,
     emitter_index: usize,
     emitter: &CompiledEmitter,
     origin: Vec3,
@@ -332,7 +379,7 @@ fn random_direction_in_cone(rng: &mut impl Rng, axis: Vec3, half_angle: f32) -> 
 
 #[derive(Component)]
 struct VfxParticle {
-    system_id: &'static str,
+    system_id: String,
     emitter_index: usize,
     velocity: Vec3,
     age: f32,
@@ -359,7 +406,7 @@ fn simulate_particles(
             commands.entity(entity).despawn();
             continue;
         }
-        let Some(system) = catalog.get(particle.system_id) else {
+        let Some(system) = catalog.get(&particle.system_id) else {
             commands.entity(entity).despawn();
             continue;
         };
@@ -598,6 +645,35 @@ mod tests {
                 .compile_runtime(&registry)
                 .unwrap_or_else(|error| panic!("'{id}' failed to compile: {error}"));
         }
+    }
+
+    #[test]
+    fn a_missing_authored_directory_is_a_first_class_empty_state() {
+        let dir = std::env::temp_dir().join("starfall_vfx_test_missing_dir_does_not_exist");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(load_authored_documents(&dir).is_empty());
+    }
+
+    #[test]
+    fn authored_documents_load_and_a_bad_file_is_skipped_not_fatal() {
+        let dir = std::env::temp_dir().join(format!(
+            "starfall_vfx_test_authored_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("good.json"), impact_spark().to_json_pretty().unwrap()).unwrap();
+        std::fs::write(dir.join("bad.json"), "{ not valid json").unwrap();
+        std::fs::write(dir.join("ignored.txt"), "not json at all").unwrap();
+
+        let documents = load_authored_documents(&dir);
+        assert_eq!(documents.len(), 1, "the malformed file must be skipped, not fatal");
+        assert_eq!(documents[0].0, "impact_spark");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
