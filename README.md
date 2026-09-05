@@ -236,6 +236,7 @@ from the current transitional source layout.
 - [Developer and verification guide](docs/DEVELOPMENT.md)
 - [Starfall Forge roadmap](docs/editor_roadmap.md)
 - [Engine roadmap](docs/engine_roadmap.md)
+- [Rendering and creation program](docs/RENDERING_PROGRAM.md)
 - [Heavy Water feature catalog](docs/MASTER_FEATURES.md)
 - [Active project plan](docs/PROJECT_PLAN.md)
 

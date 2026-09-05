@@ -15,6 +15,7 @@ members = [
     "crates/starfall-platformer",
     "crates/starfall-platformer-graph",
     "crates/starfall-project",
+    "crates/starfall-vfx-graph",
     "examples/framework_consumer",
 ]
 resolver = "2"
@@ -27,6 +28,11 @@ path = "src/lib.rs"
 name = "starfall-i"
 path = "src/main.rs"
 required-features = ["heavy-water-demo"]
+
+[[example]]
+name = "render_lab"
+path = "examples/render_lab.rs"
+required-features = ["render-lab"]
 
 [[example]]
 name = "hero_gallery"
@@ -43,6 +49,7 @@ starfall-graph = { path = "crates/starfall-graph" }
 starfall-platformer = { path = "crates/starfall-platformer" }
 starfall-platformer-graph = { path = "crates/starfall-platformer-graph" }
 starfall-project = { path = "crates/starfall-project" }
+starfall-vfx-graph = { path = "crates/starfall-vfx-graph" }
 bevy = { version = "0.19.1", optional = true, features = ["jpeg", "wav", "mp3", "bevy_dev_tools", "bevy_settings", "bevy_feathers"] }
 # Same decoder Bevy plays audio with (version-locked through the workspace):
 # used at import time so any file we accept cannot panic at playback time.
@@ -82,6 +89,8 @@ heavy-water-demo = [
     "dep:serde_json",
 ]
 designer = ["heavy-water-demo"]
+# Standalone native rendering experiments, without Heavy Water or Forge modules.
+render-lab = ["dep:bevy", "dep:serde", "dep:serde_json"]
 # Use dynamic linking for faster incremental dev builds:  cargo run --features dynamic
 dynamic = ["bevy?/dynamic_linking"]
 # EC0: profile with Tracy:  cargo run --release --features tracy  (then open the Tracy client)

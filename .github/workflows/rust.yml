@@ -76,6 +76,9 @@ jobs:
           - edition: Framework
             cargo_args: --no-default-features
             cache_key: framework
+          - edition: Rendering lab
+            cargo_args: --no-default-features --features render-lab
+            cache_key: render-lab
 
     steps:
       - name: Checkout

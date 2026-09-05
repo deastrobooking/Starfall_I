@@ -190,9 +190,11 @@ not guess project meaning from folder names alone.
 
 ## Architectural enforcement
 
-The root facade's `heavy-water-demo` feature now owns its native application
-dependencies. With defaults disabled, only the four extracted contract crates
-remain direct dependencies; Bevy app/ECS/math are still used by those contracts.
+The root facade's `heavy-water-demo` feature owns its complete native application
+dependencies. The separate `render-lab` capability selects Bevy and report
+serialization for isolated rendering experiments without demo or Forge modules.
+With defaults disabled and neither native capability selected, only extracted
+contract crates remain direct dependencies; Bevy app/ECS/math are still used by those contracts.
 `dynamic` and `tracy` use weak feature forwarding and do not activate Bevy by
 themselves. The separate `starfall-framework-consumer` package proves graph
 authoring, document serialization, and catalog-based route assembly through

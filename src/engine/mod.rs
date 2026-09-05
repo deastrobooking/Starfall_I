@@ -20,6 +20,7 @@
 //! | [`state`] | `AppState` — the top-level screen/mode machine |
 //! | [`platform_paths`] | OS-specific save/config/crash locations |
 //! | [`machine_settings`] | Machine-local Forge and render preferences |
+//! | [`vfx`] | Data-driven particle systems ("Niagara-lite") |
 
 pub mod bindings;
 pub mod game_loop;
@@ -31,3 +32,4 @@ pub mod platform_paths;
 pub mod rendering;
 pub mod spatial_lod;
 pub mod state;
+pub mod vfx;

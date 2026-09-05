@@ -56,6 +56,12 @@ Forge implementation tracks remain in [engine_roadmap.md](engine_roadmap.md) and
 
 ## Next workstreams
 
+The active September rendering request is mapped in
+[RENDERING_PROGRAM.md](RENDERING_PROGRAM.md). Start with the isolated one-, two-,
+and four-view lab, then validated voxel/probe and meshlet experiments. Reuse
+the existing Forge shell, command system and publishing contracts. Keep the
+neutral schema extraction below as the integration boundary for cooked assets.
+
 ### 0. Framework and module foundation
 
 Priority: establish the reusable product contract before adding more global
@@ -205,6 +211,13 @@ Work:
 - continue tuning movement and combat feel as data rather than code hardening
 - validate boss pacing, attack readability, and counterplay
 - keep the fixed-tick and response model consistent with the game’s design philosophy
+- a data-driven VFX runtime (`starfall-vfx-graph` + `engine::vfx`, "Niagara-lite")
+  now ships Phase 1: a module-registry compiler and a CPU-simulated particle
+  runtime, wired live to enemy-damage impacts (`impact_spark`) alongside the
+  existing hit-flash orb. See [vfx-forge-plan.md](guides/vfx-forge-plan.md) for
+  the full architecture, the GPU-compute and node-graph-editor phases, and the
+  near-term follow-ups (ember/torch ambience on platformer routes, muzzle-flash
+  hookup, publish-pipeline integration)
 
 Deliverables:
 - clearer combat readability

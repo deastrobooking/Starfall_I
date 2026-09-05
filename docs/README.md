@@ -28,6 +28,7 @@ Engine**, the native **Starfall Forge** authoring environment, and the complete
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Current build, code organization, implementation rules, verification |
 | [MASTER_FEATURES.md](MASTER_FEATURES.md) | Heavy Water's current gameplay and creator-feature inventory |
 | [engine_roadmap.md](engine_roadmap.md) | Simulation, input, combat substrate, and engine extraction milestones |
+| [RENDERING_PROGRAM.md](RENDERING_PROGRAM.md) | Dynamic GI, virtual geometry, rendering benchmarks and their Forge integration |
 | [editor_roadmap.md](editor_roadmap.md) | Forge document, preview, publishing, and extensibility milestones |
 | [naming.md](naming.md) | Canonical Heavy Water names and terminology |
 | [HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md) | Heavy Water continuity and port ledger |

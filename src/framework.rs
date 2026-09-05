@@ -16,6 +16,7 @@ use crate::combat::{
 };
 use crate::engine::{
     game_loop::GameLoopPlugin, input_buffer::InputBufferPlugin, spatial_lod::SpatialLodPlugin,
+    vfx::VfxPlugin,
 };
 use crate::engine_tools::{tool_windows::ToolWindowsPlugin, EngineToolsPlugin};
 use crate::events::EventsPlugin;
@@ -41,6 +42,7 @@ impl PluginGroup for StarfallFoundationPlugins {
             .add(CombatDataPlugin)
             .add(TrickDataPlugin)
             .add(CombatFeedbackPlugin)
+            .add(VfxPlugin)
             .add(SfxPlugin)
             .add(MusicPlayerPlugin)
             .add(InputBufferPlugin)

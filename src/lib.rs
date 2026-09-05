@@ -5,6 +5,8 @@
 //! `heavy-water-demo` feature adds the complete current runtime and application;
 //! `designer` adds Forge and implies the demo while the finer engine/gameplay
 //! capability split is developed.
+//! The independent `render-lab` feature supplies native rendering experiments
+//! without the demo or Forge modules.
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
@@ -19,6 +21,11 @@ pub use starfall_platformer as platformer;
 pub use starfall_platformer_graph as platformer_graph;
 /// Versioned project and module manifest contracts.
 pub use starfall_project as project;
+/// VFX system documents, module registry, and runtime compiler ("Niagara-lite").
+pub use starfall_vfx_graph as vfx_graph;
+
+#[cfg(feature = "render-lab")]
+pub mod render_lab;
 
 #[cfg(feature = "heavy-water-demo")]
 pub mod app;

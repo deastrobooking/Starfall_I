@@ -3,6 +3,10 @@
 Current cross-roadmap order is in `docs/PROJECT_PLAN.md`; the July menu, road,
 movement, and weapon audit remains in `docs/archive/game_review_2026-07.md`.
 
+The dynamic GI / virtual geometry / rendering-tools feature map and acceptance
+sequence live in [RENDERING_PROGRAM.md](RENDERING_PROGRAM.md). Its first slice is
+a selectable, isolated rendering lab with explicit multi-camera measurements.
+
 > **Track prefix:** `EC#` — *Engine Core*. The substrate that makes the game feel
 > like a tight character-action game: fixed-tick determinism, input buffering,
 > frame-data combat, profiling, and (eventually) reusable engine crates.

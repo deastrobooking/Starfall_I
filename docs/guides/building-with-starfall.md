@@ -38,9 +38,10 @@ starfall-i = { path = "../Starfall_I", default-features = false }
 ```
 
 The minimal facade still uses Bevy's app/ECS/math crates through the extracted
-contracts. The full `bevy` package, Avian, window/GPU backends, and native audio
-are activated only by `heavy-water-demo` (also implied by `designer`). The
-`dynamic` and `tracy` modifiers configure Bevy only when the demo is selected;
+contracts. The full `bevy` package and its window/GPU/audio backends are selected
+by native capabilities: `heavy-water-demo` (also implied by `designer`) or the
+isolated `render-lab`. Avian stays behind `heavy-water-demo`.
+The `dynamic` and `tracy` modifiers configure Bevy only when a native capability is selected;
 they do not activate it on their own.
 
 The separate `examples/framework_consumer` package depends only on this public
@@ -117,6 +118,18 @@ starfall-i = {
 ```
 
 ## Learn the current domains
+
+For isolated rendering experiments, use the optional `render-lab` capability:
+
+```sh
+cargo run --release --locked --no-default-features --features render-lab \
+  --example render_lab -- --views 4 --validate-probes \
+  --output target/render-lab/four-views.json
+```
+
+This runs without Heavy Water or Forge plugins and exits after a bounded
+warmup/measurement sequence. See the [rendering feature program](../RENDERING_PROGRAM.md)
+for scene coverage, report semantics and the GI/geometry integration sequence.
 
 The public prelude contains only application and engine-level entry points.
 Import gameplay types from their owning modules:

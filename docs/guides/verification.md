@@ -40,6 +40,28 @@ dependencies. Run it on the host platform; CI also runs it on Linux in a job
 without native game system libraries. Workspace-wide checks alone cannot prove
 isolation because Cargo unifies features requested by workspace packages.
 
+The isolated rendering capability adds a fourth CI profile:
+
+```sh
+cargo check --workspace --all-targets --locked --no-default-features --features render-lab
+cargo clippy --workspace --all-targets --locked --no-default-features --features render-lab -- -D warnings
+cargo test --workspace --locked --no-default-features --features render-lab
+```
+
+For lab/WGSL changes, run the native GPU/CPU probe comparison before collecting
+performance evidence; its exit status fails on mismatched results or timeout:
+
+```sh
+cargo run --release --locked --no-default-features --features render-lab \
+  --example render_lab -- --views 4 --validate-probes \
+  --output target/render-lab/probe-check.json
+```
+
+Run both lab scenes at 1/2/4 views for renderer changes, with distinct report
+names. Reports identify their compiled lab source, reject replacement of old
+evidence, and omit unavailable GPU timings. See
+[RENDERING_PROGRAM.md](../RENDERING_PROGRAM.md) for coverage and promotion gates.
+
 For app/plugin registration changes, the fast headless guard is:
 
 ```sh
