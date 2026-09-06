@@ -18,6 +18,7 @@ use crate::engine_tools::character_records::{
     ImportedMaterialEdit, ImportedMeshEdit, ImportedPartAssignment, ImportedPartSlot,
     ImportedUvEdit, ImportedUvProjection,
 };
+use crate::engine_tools::forge_widgets::{action_button, widget_row, ForgeWidgetStyle};
 use crate::engine_tools::mesh_selection::{pick_face, selected_face_mesh, MeshTopology};
 use crate::engine_tools::mesh_uv::{
     apply_uv_edit, rasterize_face_paint, selection_boundary_edges, static_mesh_copy,
@@ -484,47 +485,31 @@ impl ImportedPartPreset {
     }
 }
 
+/// This tool's [`ForgeWidgetStyle`] — same accent (cyan-on-navy) it always
+/// used, now expressed through the shared widget kit instead of a local
+/// reimplementation. `min_width: 0.0` preserves the original's
+/// content-hugging buttons (it never set a `min_width`).
+fn widget_style() -> ForgeWidgetStyle {
+    ForgeWidgetStyle {
+        button_background: Color::srgb(0.10, 0.18, 0.30),
+        button_border: Color::srgb(0.28, 0.72, 0.92),
+        text: Color::WHITE,
+        font_size: 12.0,
+        min_width: 0.0,
+        ..Default::default()
+    }
+}
+
 fn forge_button(
     parent: &mut ChildSpawnerCommands,
     label: impl Into<String>,
     action: ImportedForgeAction,
 ) {
-    parent
-        .spawn((
-            Button,
-            ImportedForgeButton(action),
-            Node {
-                min_height: Val::Px(36.0),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                margin: UiRect::all(Val::Px(2.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.10, 0.18, 0.30)),
-            BorderColor::all(Color::srgb(0.28, 0.72, 0.92)),
-        ))
-        .with_children(|button| {
-            button.spawn((
-                Text::new(label),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-        });
+    action_button(parent, label, ImportedForgeButton(action), &widget_style());
 }
 
 fn forge_row(parent: &mut ChildSpawnerCommands, build: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(build);
+    widget_row(parent, build);
 }
 
 fn setup_forge(

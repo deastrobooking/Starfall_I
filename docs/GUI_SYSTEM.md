@@ -236,10 +236,26 @@ trees are still the norm everywhere except those 5 fields.
 | Vehicle Forge | `src/plugins/vehicle_forge_plugin.rs` | 1,414 | `VehicleForgePlugin` only | Yes (incl. `stepper_row` as of this pass) | cyan `srgb(0.08, 0.62, 0.74)` |
 | Spaceship Forge | `src/plugins/spaceship_forge_plugin.rs` | 1,421 | `SpaceshipForgePlugin` only | Yes (incl. `stepper_row` as of this pass) | purple `srgb(0.44, 0.30, 0.82)` |
 | Creature Forge | `src/plugins/creature_forge_plugin.rs` | 1,100 | `CreatureForgePlugin` only | Yes | — |
-| Imported Character Forge | `src/plugins/imported_character_forge_plugin.rs` | 2,617 | `ImportedCharacterForgePlugin` only | **No** — own `forge_button`/`forge_row` | — |
-| Character Studio | `src/character_studio/mod.rs` | 2,507 | `CharacterStudioPlugin`, `StudioState`, `pub fn studio_spec_to_blueprint` | **No** — own `spawn_action_button`/`spawn_small_button`/`spawn_morph_slider` | — |
+| Imported Character Forge | `src/plugins/imported_character_forge_plugin.rs` | 2,617 | `ImportedCharacterForgePlugin` only | Yes as of this pass — `forge_button`/`forge_row` are now thin wrappers over `action_button`/`widget_row` | cyan `srgb(0.28, 0.72, 0.92)` |
+| Character Studio | `src/character_studio/mod.rs` | 2,507 | `CharacterStudioPlugin`, `StudioState`, `pub fn studio_spec_to_blueprint` | Deliberately not — see below | — |
 | Project Hub (launcher) | inside `src/plugins/ui_plugin.rs` | — | (private; part of `UiPlugin`) | No — fixed full-screen menu, not a tool window | n/a |
 | Dialogue Forge | *(does not exist as a separate screen)* | — | Reachable only as `EditorAction::CreateDialogueGraph`/`DialogueAddNode`/`DialogueCycleMode` inside the World Kit Forge's Registry panel | — | — |
+
+**Character Studio's widgets are not adoption debt — they're a different,
+intentional design.** `spawn_action_button`/`spawn_small_button` have no
+border at all (`forge_widgets::action_button` always draws one), and
+`spawn_small_button` is a fixed 36×36 icon button rather than a
+min-width/min-height label button; `spawn_morph_slider` is a drag-value
+slider with no equivalent widget shape in `forge_widgets` at all. These read
+as a deliberately borderless, compact control language for a
+procedural-sculpting tool with dozens of morph sliders on screen at once, not
+as accidental drift from the same intended pattern the way Vehicle/Spaceship
+Forge's field rows were. Forcing them onto `action_button` as it stands today
+would either visibly add borders that were never there or require growing
+`ForgeWidgetStyle` with an optional-border/fixed-size mode used by exactly
+one tool — not attempted in this pass. If Character Studio's look is ever
+meant to unify with the other Forges, that is a design decision to make
+explicitly, not a drive-by refactor.
 
 Every Forge plugin except Character Studio exposes **only its `Plugin`
 marker struct** as public API — everything else (action enums, field enums,
@@ -311,12 +327,11 @@ none exist in the GUI files; the drift lives in the code, not in comments.
    there is no `SPACING_SM/MD/LG` equivalent. `stepper_row`'s new
    `readout_min_width`/`readout_text` fields (this pass) are a first,
    narrow, opt-in step — not a general fix.
-3. **`forge_widgets` is adopted by only 4 of 6 Forge-family screens.**
-   `imported_character_forge_plugin.rs` (`forge_button`/`forge_row`) and
-   `character_studio/mod.rs` (`spawn_action_button`/`spawn_small_button`)
-   each reimplement the same button/row vocabulary with their own drifting
-   background/border colors instead of calling `forge_widgets::action_button`
-   /`widget_row`. Not converted in this pass — see "Suggested next slices."
+3. **`forge_widgets` is adopted by 5 of 6 Forge-family screens** as of this
+   pass (Imported Character Forge converted; see below). Character Studio
+   remains the one holdout, deliberately — its borderless, fixed-size icon
+   buttons and slider are a different control language, not drift from the
+   same pattern (see the per-screen inventory table's note).
 4. **The Project Hub launcher lives inside `ui_plugin.rs`**, architecturally
    separated from the tools it launches into. Anyone adding a new Forge entry
    point needs to know to look there, not in `engine_tools`.
@@ -338,25 +353,39 @@ none exist in the GUI files; the drift lives in the code, not in comments.
   screens' local functions are now thin wrappers over the shared primitive;
   call sites and visuals are unchanged (verified: same widths/colors
   preserved per-tool via their `widget_style()`).
+- Converted `imported_character_forge_plugin.rs`'s `forge_button`/`forge_row`
+  into thin wrappers over `forge_widgets::action_button`/`widget_row` (its own
+  `widget_style()`, `min_width: 0.0` to preserve content-hugging buttons). Two
+  small, deliberate, and low-risk visual changes come with this: padding
+  shifts from 4px to the shared 3px vertical inset, and inter-button spacing
+  moves from explicit 2px button margins to `widget_row`'s 6px column-gap/5px
+  row-gap — the latter is a slightly *larger* gap, and both changes make this
+  screen's buttons match the spacing already shipped in Weapon/Creature Forge.
+  `forge_row`'s `width: 100%` was dropped in favor of `widget_row`'s implicit
+  flex-stretch, which is what the four already-converted Forge screens already
+  rely on inside the same `ToolWindowContent` container — not independently
+  screenshot-verified for this screen specifically, so give the Imported
+  Character Forge a look after this lands.
+- Investigated Character Studio and concluded its widgets should **not** be
+  force-converted (see the per-screen table) — a design judgment, not a gap.
 - This document.
 
 ## Suggested next slices (not started)
 
 Ranked by leverage, cheapest first — each is independently shippable:
 
-1. **Adopt `forge_widgets` in `imported_character_forge_plugin.rs` and
-   `character_studio/mod.rs`**, retiring their local `forge_button`/`forge_row`
-   /`spawn_action_button`/`spawn_small_button`. Mechanical, same shape as this
-   pass's `stepper_row` consolidation, but touches two large (2,500+ and
-   2,600+ line) actively-used files — do one at a time, verify visuals.
-2. **Introduce a shared spacing scale** (e.g. `forge_widgets::spacing` with
+1. **Introduce a shared spacing scale** (e.g. `forge_widgets::spacing` with
    `XS`/`SM`/`MD`/`LG` `Val::Px` constants) and migrate `widget_row`/panel
    padding onto it before asking individual screens to adopt it.
-3. **Adopt `UiTheme` in at least one Forge screen** as a proof that the
+2. **Adopt `UiTheme` in at least one Forge screen** as a proof that the
    palette generalizes beyond `ui_plugin.rs`, before mandating it everywhere.
-4. **Give Dialogue Forge its own screen** using the same `spawn_tool_window`
+3. **Give Dialogue Forge its own screen** using the same `spawn_tool_window`
    + `forge_widgets` pattern as Weapon/Vehicle/Spaceship/Creature Forge,
    closing the one content type that doesn't get first-class tool windows.
+4. **If Character Studio's look should ever unify with the other Forges**,
+   grow `ForgeWidgetStyle`/`action_button` with an explicit opt-in
+   borderless/fixed-size mode first, as its own reviewed decision — don't
+   retrofit it silently as part of an unrelated pass.
 5. **Registries for tools/panels/inspectors** per `editor_roadmap.md` M5 —
    the actual extensibility jump (a new Forge screen becomes a registration,
    not a new hand-wired plugin-group entry in `framework.rs`). Substantially
