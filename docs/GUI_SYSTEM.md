@@ -343,17 +343,19 @@ none exist in the GUI files; the drift lives in the code, not in comments.
    `Color::srgb(...)` literals (9–31 per file) instead of drawing from the
    one shared semantic palette that already exists for exactly this purpose.
 2. **A shared spacing scale now exists** (`engine_tools::gui_spacing`:
-   `XS`/`SM`/`MD`/`LG`, added this pass) **but only `forge_widgets.rs` and
-   `tool_windows.rs` draw from it.** Every other screen — `ui_plugin.rs`
-   alone has 253 raw `Val::Px(...)` literals — still invents its own values.
-   `stepper_row`'s `readout_min_width`/`readout_text` fields remain a
-   narrower, opt-in styling step on top of this, for values that aren't pure
-   spacing.
-3. **`forge_widgets` is adopted by 5 of 6 Forge-family screens** as of this
-   pass (Imported Character Forge converted; see below). Character Studio
-   remains the one holdout, deliberately — its borderless, fixed-size icon
-   buttons and slider are a different control language, not drift from the
-   same pattern (see the per-screen inventory table's note).
+   `XS`/`SM`/`MD`/`LG`) **and every gap/margin/padding literal in
+   `forge_widgets.rs`, `tool_windows.rs`, and all five Forge-family screens
+   now draws from it** (added across this pass). `character_studio` and
+   `ui_plugin.rs` (253 raw `Val::Px(...)` literals) still invent their own
+   values — see "Suggested next slices." `stepper_row`'s
+   `readout_min_width`/`readout_text` fields remain a narrower, opt-in
+   styling step on top of this, for values that aren't pure spacing.
+3. **`forge_widgets` is adopted by 5 of 6 Forge-family screens** (Imported
+   Character Forge and Creature Forge's stray `forge_row` converted this
+   pass — see below). Character Studio remains the one holdout, deliberately
+   — its borderless, fixed-size icon buttons and slider are a different
+   control language, not drift from the same pattern (see the per-screen
+   inventory table's note).
 4. **The Project Hub launcher lives inside `ui_plugin.rs`**, architecturally
    separated from the tools it launches into. Anyone adding a new Forge entry
    point needs to know to look there, not in `engine_tools`.
@@ -361,7 +363,7 @@ none exist in the GUI files; the drift lives in the code, not in comments.
    inside the World Kit Forge's Registry panel, unlike every other content
    type, which gets its own Forge plugin and tool windows.
 
-## What changed in this pass (2026-09-05)
+## What changed in this pass (2026-09-05 – 2026-09-06)
 
 - Fixed the `UiTheme` naming collision: `engine_tools/mod.rs` now imports
   Bevy's Feathers theme resource as `FeathersUiTheme`, not `UiTheme`, so it
@@ -394,18 +396,26 @@ none exist in the GUI files; the drift lives in the code, not in comments.
   `forge_widgets.rs` and `tool_windows.rs` onto it — see "The spacing scale"
   section above for the one value that actually changed (`widget_row`'s
   column gap, 6px→5px).
+- Adopted `gui_spacing` in the remaining Forge screens: found and converted
+  `creature_forge_plugin.rs`'s own stray `forge_row` (identical shape to
+  Imported Character Forge's pre-conversion `forge_row` — same fix, same
+  reasoning) into a `widget_row` wrapper, and mapped `weapon_forge_plugin.rs`'s
+  two remaining hand-rolled Nodes (a spec-text bottom margin, and a
+  library-list row's gaps/margin) onto the scale, consolidating 6px→`SM`
+  (5px) and 4px→`XS` (3px) in the process. Vehicle, Spaceship, and Imported
+  Character Forge had no remaining local spacing literals to convert — this
+  closes out "adopt `gui_spacing` in the Forge screens" for all five.
 - This document.
 
 ## Suggested next slices (not started)
 
 Ranked by leverage, cheapest first — each is independently shippable:
 
-1. **Adopt `gui_spacing` in the Forge screens themselves** (Weapon/Vehicle/
-   Spaceship/Creature/Imported-Character each still hand-roll their own
-   `Val::Px` literals outside what `forge_widgets`/`tool_windows` already
-   cover), then push further into `character_studio` and eventually
-   `ui_plugin.rs`. Bottom-up adoption, screen by screen — the scale existing
-   doesn't retrofit anything on its own.
+1. **Push `gui_spacing` further into `character_studio` and eventually
+   `ui_plugin.rs`.** The five Forge-family screens are done as of this pass
+   (see "What changed" below) — every remaining hand-rolled gap/margin/
+   padding literal in the GUI is in those two files (`ui_plugin.rs` alone
+   still has 253 raw `Val::Px(...)`). Bottom-up, screen by screen.
 2. **Adopt `UiTheme` in at least one Forge screen** as a proof that the
    palette generalizes beyond `ui_plugin.rs`, before mandating it everywhere.
 3. **Give Dialogue Forge its own screen** using the same `spawn_tool_window`

@@ -13,7 +13,7 @@ use crate::character::mesh_modifiers::MeshModifier;
 use crate::engine::platform_paths;
 use crate::engine::state::AppState;
 use crate::engine_tools::creature_records;
-use crate::engine_tools::forge_widgets::ForgeWidgetStyle;
+use crate::engine_tools::forge_widgets::{widget_row, ForgeWidgetStyle};
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::resources::GameSettings;
@@ -389,17 +389,7 @@ fn forge_button(parent: &mut ChildSpawnerCommands, label: String, action: ForgeA
 }
 
 fn forge_row(parent: &mut ChildSpawnerCommands, content: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(6.0),
-            row_gap: Val::Px(6.0),
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(content);
+    widget_row(parent, content);
 }
 
 fn spawn_forge_ui(commands: &mut Commands) {

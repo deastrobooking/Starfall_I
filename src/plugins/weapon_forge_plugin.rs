@@ -23,6 +23,7 @@ use crate::combat::weapon_forge::{
 };
 use crate::engine::state::AppState;
 use crate::engine_tools::forge_widgets::{action_button, widget_row, ForgeWidgetStyle};
+use crate::engine_tools::gui_spacing;
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
 use crate::engine_tools::weapon_records;
@@ -507,7 +508,7 @@ fn spawn_weapon_forge_ui(commands: &mut Commands) {
                         },
                         TextColor(Color::srgb(0.92, 0.90, 0.80)),
                         Node {
-                            margin: UiRect::bottom(Val::Px(6.0)),
+                            margin: UiRect::bottom(gui_spacing::SM),
                             ..default()
                         },
                     ));
@@ -828,10 +829,10 @@ NAME it, then SAVE.",
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Row,
                     flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(6.0),
-                    row_gap: Val::Px(6.0),
+                    column_gap: gui_spacing::SM,
+                    row_gap: gui_spacing::SM,
                     align_items: AlignItems::Center,
-                    margin: UiRect::bottom(Val::Px(4.0)),
+                    margin: UiRect::bottom(gui_spacing::XS),
                     ..default()
                 })
                 .with_children(|row| {
