@@ -255,7 +255,9 @@ viewport systems must run after `ToolWindowSystemSet::PointerState` before
 starting a mouse gesture. `MenuFocus` provides shared controller navigation,
 filters hidden or covered controls, and keeps focused controls in their owning
 scroll surface. Full-screen launchers use responsive scroll/reflow rather than
-floating chrome.
+floating chrome. For the full creator-GUI architecture — the tool-window and
+widget public API, a per-Forge-screen inventory, Feathers adoption status, and
+known styling inconsistencies — see [GUI_SYSTEM.md](GUI_SYSTEM.md).
 
 ## Saves
 

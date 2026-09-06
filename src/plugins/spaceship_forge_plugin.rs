@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use super::ui_plugin::{MenuButtonDisabled, MenuScrollPanel};
 use crate::engine::state::AppState;
 use crate::engine_tools::forge_widgets::{
-    action_button, section_label, widget_row, ForgeWidgetStyle,
+    action_button, section_label, stepper_row, widget_row, ForgeWidgetStyle,
 };
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::spaceship_records;
@@ -474,6 +474,8 @@ fn widget_style() -> ForgeWidgetStyle {
         button_border: Color::srgb(0.46, 0.34, 0.84),
         text: Color::srgb(0.94, 0.94, 1.0),
         min_width: 96.0,
+        readout_text: Color::srgb(0.84, 0.88, 0.96),
+        readout_min_width: 164.0,
         ..Default::default()
     }
 }
@@ -670,43 +672,23 @@ fn spawn_spaceship_forge_ui(commands: &mut Commands) {
 }
 
 fn spawn_field_row(parent: &mut ChildSpawnerCommands, field: SpacecraftField) {
-    widget_row(parent, |row| {
-        row.spawn((
-            Text::new(""),
-            SpaceshipFieldText(field),
-            Node {
-                min_width: Val::Px(164.0),
-                ..default()
-            },
-            TextFont {
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(0.84, 0.88, 0.96)),
-        ));
-        forge_button(row, "−", SpaceshipAction::Adjust(field, -field.step()));
-        forge_button(row, "+", SpaceshipAction::Adjust(field, field.step()));
-    });
+    stepper_row(
+        parent,
+        SpaceshipFieldText(field),
+        SpaceshipButton(SpaceshipAction::Adjust(field, -field.step())),
+        SpaceshipButton(SpaceshipAction::Adjust(field, field.step())),
+        &widget_style(),
+    );
 }
 
 fn spawn_system_row(parent: &mut ChildSpawnerCommands, system: SpacecraftSystem) {
-    widget_row(parent, |row| {
-        row.spawn((
-            Text::new(""),
-            SpaceshipSystemText(system),
-            Node {
-                min_width: Val::Px(164.0),
-                ..default()
-            },
-            TextFont {
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(0.84, 0.88, 0.96)),
-        ));
-        forge_button(row, "−", SpaceshipAction::AdjustSystem(system, -1));
-        forge_button(row, "+", SpaceshipAction::AdjustSystem(system, 1));
-    });
+    stepper_row(
+        parent,
+        SpaceshipSystemText(system),
+        SpaceshipButton(SpaceshipAction::AdjustSystem(system, -1)),
+        SpaceshipButton(SpaceshipAction::AdjustSystem(system, 1)),
+        &widget_style(),
+    );
 }
 
 const SPACESHIP_NAME_LIMIT: usize = 64;

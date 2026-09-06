@@ -41,7 +41,11 @@ use std::time::Duration;
 use bevy::dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridSettings};
 use bevy::ecs::system::SystemParam;
 use bevy::feathers::controls::{FeathersTextInput, FeathersTextInputContainer};
-use bevy::feathers::theme::UiTheme;
+// Bevy's own Feathers theme resource — named identically to (and unrelated
+// to) `crate::plugins::ui_foundation::UiTheme`, the app's semantic color
+// palette. Aliased so its only real use here — probing whether Feathers is
+// installed at all — can't be misread as the app's palette.
+use bevy::feathers::theme::UiTheme as FeathersUiTheme;
 use bevy::gizmos::prelude::{
     TransformGizmoCamera, TransformGizmoFocus, TransformGizmoMode as BevyTransformGizmoMode,
     TransformGizmoSettings as BevyTransformGizmoSettings,
@@ -4067,7 +4071,7 @@ fn spawn_editor_workspace_ui(commands: &mut Commands) {
 /// retain the deterministic manual keyboard-input fallback used by tests.
 fn spawn_forge_editable_fields(
     mut commands: Commands,
-    theme: Option<Res<UiTheme>>,
+    theme: Option<Res<FeathersUiTheme>>,
     panels: Query<(Entity, &EditorPanelKind)>,
 ) {
     if theme.is_none() {

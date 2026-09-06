@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use super::ui_plugin::{MenuButtonDisabled, MenuScrollPanel};
 use crate::engine::state::AppState;
 use crate::engine_tools::forge_widgets::{
-    action_button, section_label, widget_row, ForgeWidgetStyle,
+    action_button, section_label, stepper_row, widget_row, ForgeWidgetStyle,
 };
 use crate::engine_tools::project_registry::ForgeProjectRegistry;
 use crate::engine_tools::tool_windows::{spawn_tool_window, ToolWindowStyle};
@@ -394,6 +394,8 @@ fn widget_style() -> ForgeWidgetStyle {
         button_border: Color::srgb(0.12, 0.66, 0.78),
         text: Color::srgb(0.92, 0.98, 1.0),
         min_width: 96.0,
+        readout_text: Color::srgb(0.84, 0.91, 0.96),
+        readout_min_width: 160.0,
         ..Default::default()
     }
 }
@@ -611,23 +613,13 @@ fn spawn_vehicle_forge_ui(commands: &mut Commands) {
 }
 
 fn spawn_field_row(parent: &mut ChildSpawnerCommands, field: VehicleField) {
-    widget_row(parent, |row| {
-        row.spawn((
-            Text::new(""),
-            VehicleForgeFieldText(field),
-            Node {
-                min_width: Val::Px(160.0),
-                ..default()
-            },
-            TextFont {
-                font_size: FontSize::Px(12.0),
-                ..default()
-            },
-            TextColor(Color::srgb(0.84, 0.91, 0.96)),
-        ));
-        forge_button(row, "−", VehicleForgeAction::Adjust(field, -field.step()));
-        forge_button(row, "+", VehicleForgeAction::Adjust(field, field.step()));
-    });
+    stepper_row(
+        parent,
+        VehicleForgeFieldText(field),
+        VehicleForgeButton(VehicleForgeAction::Adjust(field, -field.step())),
+        VehicleForgeButton(VehicleForgeAction::Adjust(field, field.step())),
+        &widget_style(),
+    );
 }
 
 const VEHICLE_NAME_LIMIT: usize = 64;

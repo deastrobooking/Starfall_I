@@ -130,6 +130,16 @@ default document.
   shell, logical-coordinate fitting, pointer-routed scrolling and viewport
   capture, responsive full-screen creator surfaces, progressive default layouts,
   and geometry-aware shared controller focus.
+- The current GUI architecture, public widget/tool-window API, a per-Forge-
+  screen inventory, and known styling inconsistencies are now documented in
+  [GUI_SYSTEM.md](GUI_SYSTEM.md) (2026-09-05). First alignment slice landed
+  alongside it: a shared `forge_widgets::stepper_row` replaced Vehicle and
+  Spaceship Forge's near-duplicate hand-rolled field-row widgets, and the
+  `bevy::feathers::theme::UiTheme` / `ui_foundation::UiTheme` naming collision
+  was resolved. Remaining slices (Character Studio/Imported Character Forge
+  widget adoption, a shared spacing scale, `UiTheme` adoption outside
+  `ui_plugin.rs`, a dedicated Dialogue Forge screen) are tracked in that doc's
+  "Suggested next slices," ordered before the registries work below.
 - Add registries for tools, panels, inspectors, importers, builders, validators,
   commands, shortcuts, and persisted docking/layout.
 - Add named workspace presets/reset, task-grouped Registry navigation, action

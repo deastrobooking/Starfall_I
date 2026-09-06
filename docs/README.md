@@ -14,6 +14,7 @@ Engine**, the native **Starfall Forge** authoring environment, and the complete
 | Understanding ownership and graph compilation | [Framework Architecture](FRAMEWORK_ARCHITECTURE.md) |
 | Navigating or generating projects | [Repeatable Project Structure](PROJECT_STRUCTURE.md) |
 | Contributing native engine/game code | [Developer Documentation](DEVELOPMENT.md) |
+| Building or aligning a creator-tool GUI screen | [GUI System](GUI_SYSTEM.md) |
 | Authoring content in Forge | [Designer Workflow](guides/designer-workflow.md) |
 | Exporting a standalone native game | [Exporting a Game](guides/exporting-a-game.md) |
 | Learning from the complete game | [Heavy Water Demo Game](games/heavy-water/README.md) |
@@ -26,6 +27,7 @@ Engine**, the native **Starfall Forge** authoring environment, and the complete
 | [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) | Repeatable workspace, game, module, content, and build paths |
 | [PROJECT_PLAN.md](PROJECT_PLAN.md) | Active priorities and migration sequence |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Current build, code organization, implementation rules, verification |
+| [GUI_SYSTEM.md](GUI_SYSTEM.md) | Creator/authoring GUI architecture, public widget/tool-window API, per-screen inventory, known inconsistencies |
 | [MASTER_FEATURES.md](MASTER_FEATURES.md) | Heavy Water's current gameplay and creator-feature inventory |
 | [engine_roadmap.md](engine_roadmap.md) | Simulation, input, combat substrate, and engine extraction milestones |
 | [RENDERING_PROGRAM.md](RENDERING_PROGRAM.md) | Dynamic GI, virtual geometry, rendering benchmarks and their Forge integration |

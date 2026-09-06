@@ -25,6 +25,12 @@ pub struct ForgeWidgetStyle {
     /// 36 px matches the UI accessibility pass: touch/click targets never
     /// drop below comfortable size in any tool.
     pub min_height: f32,
+    /// Muted tint for a live [`stepper_row`] readout — dimmer than `text` so
+    /// a displayed number reads as data rather than as an available action.
+    pub readout_text: Color,
+    /// Minimum width reserved for a [`stepper_row`] readout label, so a
+    /// stack of stepper rows keeps its +/− buttons aligned into a column.
+    pub readout_min_width: f32,
 }
 
 impl Default for ForgeWidgetStyle {
@@ -36,6 +42,8 @@ impl Default for ForgeWidgetStyle {
             font_size: 13.0,
             min_width: 104.0,
             min_height: 36.0,
+            readout_text: Color::srgb(0.84, 0.90, 0.96),
+            readout_min_width: 160.0,
         }
     }
 }
@@ -92,6 +100,38 @@ pub fn widget_row(
             ..default()
         })
         .with_children(build);
+}
+
+/// A row pairing a live numeric readout with −/+ stepper buttons — the
+/// standard "adjust one field" unit shared by every specs-driven forge
+/// (Vehicle, Spaceship, and whatever comes next). The caller supplies the
+/// readout's own marker component (e.g. `VehicleForgeFieldText(field)`) so
+/// each tool's own display-refresh system still owns writing the text, and
+/// its own decrement/increment action bundles so interaction stays per-tool.
+pub fn stepper_row(
+    parent: &mut ChildSpawnerCommands,
+    readout_marker: impl Bundle,
+    decrement_action: impl Bundle,
+    increment_action: impl Bundle,
+    style: &ForgeWidgetStyle,
+) {
+    widget_row(parent, |row| {
+        row.spawn((
+            Text::new(""),
+            readout_marker,
+            Node {
+                min_width: Val::Px(style.readout_min_width),
+                ..default()
+            },
+            TextFont {
+                font_size: FontSize::Px(style.font_size - 1.0),
+                ..default()
+            },
+            TextColor(style.readout_text),
+        ));
+        action_button(row, "−", decrement_action, style);
+        action_button(row, "+", increment_action, style);
+    });
 }
 
 /// A muted section heading inside a panel.
