@@ -45,6 +45,26 @@ route into `AppState`/Forge-plugin destinations
 the Hub is a `ProjectHubAction` variant in `ui_plugin.rs`, not a change in
 `engine_tools`.
 
+## The spacing scale — `src/engine_tools/gui_spacing.rs`
+
+Added in this pass. Four constants — `XS = Val::Px(3.0)`, `SM = Val::Px(5.0)`,
+`MD = Val::Px(8.0)`, `LG = Val::Px(12.0)` — replacing the near-identical but
+independently-chosen gap/padding literals `tool_windows.rs` and
+`forge_widgets.rs` used to carry separately (`6.0`/`5.0`/`8.0`/`3.0`/`12.0`
+across the two files). Both now import it (`use super::gui_spacing;`); no
+other screen does yet — see "Known inconsistencies" and "Suggested next
+slices" below for what adopting it further would look like. There is
+deliberately no `XL` step: add one when a real screen needs a wider gap, not
+speculatively.
+
+One value actually changed rather than just being renamed:
+`forge_widgets::widget_row`'s `column_gap` moved from `6.0` to `SM` (`5.0`),
+matching the row gap it already used — a 1px, imperceptible-in-practice
+consolidation, and exactly the kind of homogenization this scale exists to
+make possible. Everything else (`action_button`'s padding, `widget_row`'s
+bottom margin and row gap, `tool_windows`'s content padding and row gap) maps
+onto the new constants at its exact prior value.
+
 ## The tool-window shell — `src/engine_tools/tool_windows.rs`
 
 The one genuinely mature, tested, documented piece of the creator GUI. Every
@@ -322,11 +342,13 @@ none exist in the GUI files; the drift lives in the code, not in comments.
    half of the app.** Every Forge/Character-Studio screen invents its own
    `Color::srgb(...)` literals (9–31 per file) instead of drawing from the
    one shared semantic palette that already exists for exactly this purpose.
-2. **No shared spacing/sizing scale exists anywhere.** Every screen writes
-   its own `Val::Px(...)` literals (`ui_plugin.rs` alone has 253 of them);
-   there is no `SPACING_SM/MD/LG` equivalent. `stepper_row`'s new
-   `readout_min_width`/`readout_text` fields (this pass) are a first,
-   narrow, opt-in step — not a general fix.
+2. **A shared spacing scale now exists** (`engine_tools::gui_spacing`:
+   `XS`/`SM`/`MD`/`LG`, added this pass) **but only `forge_widgets.rs` and
+   `tool_windows.rs` draw from it.** Every other screen — `ui_plugin.rs`
+   alone has 253 raw `Val::Px(...)` literals — still invents its own values.
+   `stepper_row`'s `readout_min_width`/`readout_text` fields remain a
+   narrower, opt-in styling step on top of this, for values that aren't pure
+   spacing.
 3. **`forge_widgets` is adopted by 5 of 6 Forge-family screens** as of this
    pass (Imported Character Forge converted; see below). Character Studio
    remains the one holdout, deliberately — its borderless, fixed-size icon
@@ -358,9 +380,9 @@ none exist in the GUI files; the drift lives in the code, not in comments.
   `widget_style()`, `min_width: 0.0` to preserve content-hugging buttons). Two
   small, deliberate, and low-risk visual changes come with this: padding
   shifts from 4px to the shared 3px vertical inset, and inter-button spacing
-  moves from explicit 2px button margins to `widget_row`'s 6px column-gap/5px
-  row-gap — the latter is a slightly *larger* gap, and both changes make this
-  screen's buttons match the spacing already shipped in Weapon/Creature Forge.
+  moves from explicit 2px button margins to `widget_row`'s 5px column-/row-gap
+  — a slightly *larger* gap, and both changes make this screen's buttons
+  match the spacing already shipped in Weapon/Creature Forge.
   `forge_row`'s `width: 100%` was dropped in favor of `widget_row`'s implicit
   flex-stretch, which is what the four already-converted Forge screens already
   rely on inside the same `ToolWindowContent` container — not independently
@@ -368,15 +390,22 @@ none exist in the GUI files; the drift lives in the code, not in comments.
   Character Forge a look after this lands.
 - Investigated Character Studio and concluded its widgets should **not** be
   force-converted (see the per-screen table) — a design judgment, not a gap.
+- Added `engine_tools::gui_spacing` (`XS`/`SM`/`MD`/`LG`) and migrated
+  `forge_widgets.rs` and `tool_windows.rs` onto it — see "The spacing scale"
+  section above for the one value that actually changed (`widget_row`'s
+  column gap, 6px→5px).
 - This document.
 
 ## Suggested next slices (not started)
 
 Ranked by leverage, cheapest first — each is independently shippable:
 
-1. **Introduce a shared spacing scale** (e.g. `forge_widgets::spacing` with
-   `XS`/`SM`/`MD`/`LG` `Val::Px` constants) and migrate `widget_row`/panel
-   padding onto it before asking individual screens to adopt it.
+1. **Adopt `gui_spacing` in the Forge screens themselves** (Weapon/Vehicle/
+   Spaceship/Creature/Imported-Character each still hand-roll their own
+   `Val::Px` literals outside what `forge_widgets`/`tool_windows` already
+   cover), then push further into `character_studio` and eventually
+   `ui_plugin.rs`. Bottom-up adoption, screen by screen — the scale existing
+   doesn't retrofit anything on its own.
 2. **Adopt `UiTheme` in at least one Forge screen** as a proof that the
    palette generalizes beyond `ui_plugin.rs`, before mandating it everywhere.
 3. **Give Dialogue Forge its own screen** using the same `spawn_tool_window`

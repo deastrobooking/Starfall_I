@@ -18,6 +18,8 @@ use bevy::prelude::*;
 use bevy::ui::{ComputedStackIndex, FocusPolicy, RelativeCursorPosition, UiSystems};
 use bevy::window::PrimaryWindow;
 
+use super::gui_spacing;
+
 /// Window chrome state. Lives on the window root node.
 #[derive(Component, Debug, Default)]
 pub struct ToolWindow {
@@ -756,8 +758,8 @@ pub fn spawn_tool_window(
                             Display::Flex
                         },
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(5.0),
-                        padding: UiRect::all(Val::Px(12.0)),
+                        row_gap: gui_spacing::SM,
+                        padding: UiRect::all(gui_spacing::LG),
                         height: style.content_height,
                         overflow: Overflow::scroll_y(),
                         ..default()

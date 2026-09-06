@@ -15,6 +15,8 @@ pub mod editable_mesh;
 pub mod forge_widgets;
 /// Standalone native Game bundle assembly from one published Forge project.
 pub mod game_export;
+/// The shared spacing scale every creator-tool GUI surface draws from.
+pub mod gui_spacing;
 pub mod mesh_selection;
 pub mod mesh_uv;
 pub(crate) mod persistence;

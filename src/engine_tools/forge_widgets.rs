@@ -13,6 +13,8 @@
 
 use bevy::prelude::*;
 
+use super::gui_spacing;
+
 /// Visual defaults for forge widgets. One per tool, usually derived from the
 /// tool-window accent so buttons match their window chrome.
 #[derive(Clone, Copy)]
@@ -64,7 +66,7 @@ pub fn action_button(
             Node {
                 min_width: Val::Px(style.min_width),
                 min_height: Val::Px(style.min_height),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                padding: UiRect::axes(gui_spacing::MD, gui_spacing::XS),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border: UiRect::all(Val::Px(1.0)),
@@ -93,10 +95,10 @@ pub fn widget_row(
     parent
         .spawn(Node {
             flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(6.0),
-            margin: UiRect::bottom(Val::Px(5.0)),
+            column_gap: gui_spacing::SM,
+            margin: UiRect::bottom(gui_spacing::SM),
             flex_wrap: FlexWrap::Wrap,
-            row_gap: Val::Px(5.0),
+            row_gap: gui_spacing::SM,
             ..default()
         })
         .with_children(build);
