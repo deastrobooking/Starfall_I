@@ -405,6 +405,13 @@ none exist in the GUI files; the drift lives in the code, not in comments.
   (5px) and 4px→`XS` (3px) in the process. Vehicle, Spaceship, and Imported
   Character Forge had no remaining local spacing literals to convert — this
   closes out "adopt `gui_spacing` in the Forge screens" for all five.
+- **First M5 registry slice**: merged the Project Hub's two hand-kept-in-sync
+  per-Forge facts (`project_hub_authoring_actions`'s label/accent,
+  `project_hub_forge_destination`'s separate match on `AppState`) into one
+  `ForgeHubEntry` table. `project_hub_forge_destination` is now a lookup
+  against that table instead of an independently-maintained match — behavior
+  identical (same 4 destinations, same `None` for Imported Character Forge).
+  See `editor_roadmap.md`'s M5 section for what this does and doesn't cover.
 - This document.
 
 ## Suggested next slices (not started)

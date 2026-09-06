@@ -140,6 +140,21 @@ default document.
   widget adoption, a shared spacing scale, `UiTheme` adoption outside
   `ui_plugin.rs`, a dedicated Dialogue Forge screen) are tracked in that doc's
   "Suggested next slices," ordered before the registries work below.
+- **Registries — first slice landed (2026-09-06):** `ui_plugin.rs`'s Project
+  Hub used to keep a Forge's label/accent in one table
+  (`project_hub_authoring_actions`) and its `AppState` destination in a
+  separately hand-matched function (`project_hub_forge_destination`) — two
+  places that had to agree for every entry, the exact "hand-wired... instead
+  of registration" pattern this milestone exists to remove. `ForgeHubEntry`
+  merges them into one table; a destination-less entry (Imported Character
+  Forge, whose click handler also sets `ImportedForgeReturnTarget`) is now an
+  explicit `None` rather than an implicit omission. This is a small, single-
+  file slice, not the registry system this bullet describes — a Bevy
+  `PluginGroupBuilder` composition in `framework.rs` is still how a Forge
+  plugin itself gets registered, and that is compile-time by nature; what
+  moved here is the *discovery/UI* metadata a Forge needs to show up in the
+  Hub. The remaining kinds below (panels, inspectors, importers, builders,
+  validators, commands, shortcuts, persisted docking/layout) are unstarted.
 - Add registries for tools, panels, inspectors, importers, builders, validators,
   commands, shortcuts, and persisted docking/layout.
 - Add named workspace presets/reset, task-grouped Registry navigation, action

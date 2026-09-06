@@ -597,36 +597,63 @@ enum ProjectHubAction {
     Back,
 }
 
+/// One Forge's full Project Hub registration: its button label and accent
+/// plus — for the common case of a plain state transition — its `AppState`
+/// destination. This is the registry `docs/GUI_SYSTEM.md`'s M5 slice calls
+/// for in miniature: before it existed, a Forge's label/color lived in
+/// [`project_hub_authoring_actions`] while its destination lived in a
+/// separate hand-matched `project_hub_forge_destination`, and the two had to
+/// be kept in sync by hand for every entry. Now there is exactly one place
+/// per Forge.
+///
+/// `destination` is `None` for Forges whose entry does more than a plain
+/// state transition — Imported Character Forge also has to set
+/// `ImportedForgeReturnTarget`, a side effect this table doesn't model, so
+/// its click handling stays a dedicated match arm in
+/// [`project_hub_action_system`] rather than a table lookup.
+struct ForgeHubEntry {
+    label: &'static str,
+    action: ProjectHubAction,
+    accent: Color,
+    destination: Option<AppState>,
+}
+
 /// Authoring destinations shown together in the responsive Project Hub. Keep
-/// this one registry as the source for labels, ordering, and state actions so
-/// adding a Forge cannot create a visible button that routes somewhere else.
-fn project_hub_authoring_actions() -> [(&'static str, ProjectHubAction, Color); 5] {
+/// this one registry as the source for labels, ordering, accents, and
+/// destinations so adding a Forge cannot create a visible button that routes
+/// somewhere else — or a destination with no visible button.
+fn project_hub_authoring_actions() -> [ForgeHubEntry; 5] {
     [
-        (
-            "CREATURE FORGE",
-            ProjectHubAction::CreatureForge,
-            Color::srgb(0.12, 0.42, 0.28),
-        ),
-        (
-            "WEAPON FORGE",
-            ProjectHubAction::WeaponForge,
-            Color::srgb(0.16, 0.28, 0.52),
-        ),
-        (
-            "VEHICLE FORGE",
-            ProjectHubAction::VehicleForge,
-            Color::srgb(0.42, 0.24, 0.12),
-        ),
-        (
-            "SPACESHIP FORGE",
-            ProjectHubAction::SpaceshipForge,
-            Color::srgb(0.24, 0.18, 0.50),
-        ),
-        (
-            "IMPORTED CHARACTER FORGE",
-            ProjectHubAction::ImportedCharacterForge,
-            Color::srgb(0.12, 0.32, 0.46),
-        ),
+        ForgeHubEntry {
+            label: "CREATURE FORGE",
+            action: ProjectHubAction::CreatureForge,
+            accent: Color::srgb(0.12, 0.42, 0.28),
+            destination: Some(AppState::CreatureForge),
+        },
+        ForgeHubEntry {
+            label: "WEAPON FORGE",
+            action: ProjectHubAction::WeaponForge,
+            accent: Color::srgb(0.16, 0.28, 0.52),
+            destination: Some(AppState::WeaponForge),
+        },
+        ForgeHubEntry {
+            label: "VEHICLE FORGE",
+            action: ProjectHubAction::VehicleForge,
+            accent: Color::srgb(0.42, 0.24, 0.12),
+            destination: Some(AppState::VehicleForge),
+        },
+        ForgeHubEntry {
+            label: "SPACESHIP FORGE",
+            action: ProjectHubAction::SpaceshipForge,
+            accent: Color::srgb(0.24, 0.18, 0.50),
+            destination: Some(AppState::SpaceshipForge),
+        },
+        ForgeHubEntry {
+            label: "IMPORTED CHARACTER FORGE",
+            action: ProjectHubAction::ImportedCharacterForge,
+            accent: Color::srgb(0.12, 0.32, 0.46),
+            destination: None,
+        },
     ]
 }
 
@@ -1504,13 +1531,10 @@ fn mapped_menu_face(
 }
 
 fn project_hub_forge_destination(action: ProjectHubAction) -> Option<AppState> {
-    match action {
-        ProjectHubAction::CreatureForge => Some(AppState::CreatureForge),
-        ProjectHubAction::WeaponForge => Some(AppState::WeaponForge),
-        ProjectHubAction::VehicleForge => Some(AppState::VehicleForge),
-        ProjectHubAction::SpaceshipForge => Some(AppState::SpaceshipForge),
-        _ => None,
-    }
+    project_hub_authoring_actions()
+        .into_iter()
+        .find(|entry| entry.action == action)
+        .and_then(|entry| entry.destination)
 }
 
 fn forge_back_destination(state: &AppState) -> Option<AppState> {
@@ -2092,8 +2116,8 @@ fn setup_project_hub(mut commands: Commands, registry: Res<ForgeProjectRegistry>
                 ProjectHubAction::NewProject,
                 Color::srgb(0.14, 0.36, 0.30),
             );
-            for (label, action, color) in project_hub_authoring_actions() {
-                spawn_project_hub_button(root, label.to_string(), action, color);
+            for entry in project_hub_authoring_actions() {
+                spawn_project_hub_button(root, entry.label.to_string(), entry.action, entry.accent);
             }
             spawn_project_hub_button(
                 root,
@@ -10468,22 +10492,47 @@ mod menu_navigation_tests {
     fn project_hub_registers_each_forge_once_with_its_exact_label() {
         let actions = project_hub_authoring_actions();
         let expected = [
-            ("CREATURE FORGE", ProjectHubAction::CreatureForge),
-            ("WEAPON FORGE", ProjectHubAction::WeaponForge),
-            ("VEHICLE FORGE", ProjectHubAction::VehicleForge),
-            ("SPACESHIP FORGE", ProjectHubAction::SpaceshipForge),
+            (
+                "CREATURE FORGE",
+                ProjectHubAction::CreatureForge,
+                Some(AppState::CreatureForge),
+            ),
+            (
+                "WEAPON FORGE",
+                ProjectHubAction::WeaponForge,
+                Some(AppState::WeaponForge),
+            ),
+            (
+                "VEHICLE FORGE",
+                ProjectHubAction::VehicleForge,
+                Some(AppState::VehicleForge),
+            ),
+            (
+                "SPACESHIP FORGE",
+                ProjectHubAction::SpaceshipForge,
+                Some(AppState::SpaceshipForge),
+            ),
             (
                 "IMPORTED CHARACTER FORGE",
                 ProjectHubAction::ImportedCharacterForge,
+                // Its entry does more than a plain state transition — see
+                // `ForgeHubEntry`'s doc comment.
+                None,
             ),
         ];
 
-        assert_eq!(actions.map(|(label, action, _)| (label, action)), expected);
-        for (index, (_, action, _)) in actions.iter().enumerate() {
+        assert_eq!(
+            actions
+                .iter()
+                .map(|entry| (entry.label, entry.action, entry.destination.clone()))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        for (index, entry) in actions.iter().enumerate() {
             assert!(
                 actions[..index]
                     .iter()
-                    .all(|(_, previous, _)| previous != action),
+                    .all(|previous| previous.action != entry.action),
                 "each Project Hub destination must have one stable action"
             );
         }
