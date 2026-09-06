@@ -412,6 +412,13 @@ none exist in the GUI files; the drift lives in the code, not in comments.
   against that table instead of an independently-maintained match — behavior
   identical (same 4 destinations, same `None` for Imported Character Forge).
   See `editor_roadmap.md`'s M5 section for what this does and doesn't cover.
+- **Second M5 registry slice**: `forge_back_destination` turned out to be a
+  *third* independent hardcoded list of the same 4 Forge states (this one
+  pairing them with "back goes to `AppState::ProjectHub`"), found while
+  looking at what else referenced those states after the first slice. Now
+  derived from `ForgeHubEntry` instead of re-listing them — adding a Forge to
+  the table now gets a correct Back button by construction, not by
+  remembering to update a fourth place.
 - This document.
 
 ## Suggested next slices (not started)

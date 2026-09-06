@@ -1537,15 +1537,18 @@ fn project_hub_forge_destination(action: ProjectHubAction) -> Option<AppState> {
         .and_then(|entry| entry.destination)
 }
 
+/// Any Forge whose [`ForgeHubEntry`] has a plain `AppState` destination backs
+/// out to the Project Hub — derived from that one table rather than
+/// independently re-listing the same states, which is what this function
+/// used to do before the M5 registry slice that introduced `ForgeHubEntry`.
+/// Imported Character Forge (`destination: None`) is correctly excluded: its
+/// own state has its own return-target logic (see the
+/// `AppState::ImportedCharacterForge` arm in `menu_back_navigation`).
 fn forge_back_destination(state: &AppState) -> Option<AppState> {
-    matches!(
-        state,
-        AppState::CreatureForge
-            | AppState::WeaponForge
-            | AppState::VehicleForge
-            | AppState::SpaceshipForge
-    )
-    .then_some(AppState::ProjectHub)
+    project_hub_authoring_actions()
+        .iter()
+        .any(|entry| entry.destination.as_ref() == Some(state))
+        .then_some(AppState::ProjectHub)
 }
 
 fn default_menu_focus(buttons: &[(Entity, Vec2)]) -> Option<Entity> {

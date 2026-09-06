@@ -155,6 +155,12 @@ default document.
   moved here is the *discovery/UI* metadata a Forge needs to show up in the
   Hub. The remaining kinds below (panels, inspectors, importers, builders,
   validators, commands, shortcuts, persisted docking/layout) are unstarted.
+  **Second slice (2026-09-06):** `forge_back_destination` was a *third*
+  independent hardcoded list of the same 4 Forge states, this time paired
+  with "goes back to `AppState::ProjectHub`" — now derived from the same
+  `ForgeHubEntry` table instead of re-enumerating them. Same pattern, same
+  file, same low-risk shape as the first slice; adding a Forge to the table
+  now also gets its Back button right by construction.
 - Add registries for tools, panels, inspectors, importers, builders, validators,
   commands, shortcuts, and persisted docking/layout.
 - Add named workspace presets/reset, task-grouped Registry navigation, action
