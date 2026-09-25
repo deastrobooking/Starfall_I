@@ -20,6 +20,7 @@ impl Plugin for ChestPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Playing), spawn_chests)
             .add_systems(OnEnter(AppState::MainMenu), cleanup_chests_for_menu)
+            .add_systems(OnEnter(AppState::SwitchingMode), cleanup_chests_for_menu)
             .add_systems(OnExit(AppState::Playing), cleanup_chests)
             .add_systems(
                 Update,

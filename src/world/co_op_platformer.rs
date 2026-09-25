@@ -45,6 +45,11 @@ impl Plugin for HeavyWaterPlatformerPlugin {
                     .chain(),
             )
             .add_systems(OnExit(AppState::Playing), cleanup_platformer_scene)
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_platformer_for_menu)
+            .add_systems(
+                OnEnter(AppState::SwitchingMode),
+                cleanup_platformer_for_menu,
+            )
             .add_systems(
                 Update,
                 (
@@ -141,6 +146,15 @@ fn cleanup_platformer_scene(
     if transition.pausing {
         return;
     }
+    for entity in scene_entities.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn cleanup_platformer_for_menu(
+    mut commands: Commands,
+    scene_entities: Query<Entity, (With<PlatformerOwned>, Without<ChildOf>)>,
+) {
     for entity in scene_entities.iter() {
         commands.entity(entity).despawn();
     }

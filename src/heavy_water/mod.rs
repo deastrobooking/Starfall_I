@@ -4,6 +4,14 @@
 //! incrementally moved out of the historical `world` namespace. New game code
 //! should import through this module instead of deep implementation paths.
 
+pub mod modes;
+
+/// Puzzle encounters reusable across Heavy Water's play modes.
+pub mod puzzles {
+    pub use crate::components::discoverable::{PuzzleArchetype, PuzzleNode, PuzzleNodeKind, PuzzleRelicEncounter};
+    pub use crate::world::puzzles::HeavyWaterPuzzlePlugin;
+}
+
 /// Identity, progression, and save contracts shared across Heavy Water modes.
 pub mod shared {
     pub use crate::world::heavy_water::*;

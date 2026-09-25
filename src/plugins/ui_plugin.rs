@@ -1,3 +1,5 @@
+mod modes;
+
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
@@ -108,6 +110,7 @@ enum MenuUiSet {
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        modes::install(app);
         app.add_plugins(UiFoundationPlugin)
             // Headless builds omit WindowPlugin, but shared focus still drains
             // this stream. Registration is idempotent in windowed builds.
@@ -421,6 +424,7 @@ enum PauseAction {
     Controls,
     Shop,
     Settings,
+    Modes,
     Back,
 }
 #[derive(Component, Clone, Copy)]
@@ -432,6 +436,7 @@ enum PausePage {
     Controls,
     Shop,
     Settings,
+    Modes,
 }
 #[derive(Resource)]
 struct PauseMenuState {
@@ -2347,6 +2352,8 @@ fn setup_pause_menu(
     world_site_registry: Res<WorldSiteRegistry>,
     published_recipes: Res<PublishedProceduralRecipeCatalog>,
     theme: Res<UiTheme>,
+    modes: Res<crate::heavy_water::modes::HeavyWaterModes>,
+    experience: Res<PlayExperience>,
     player_q: Query<(&PlayerIndex, &Transform), With<Player>>,
 ) {
     menu.page = menu.requested_page.take().unwrap_or(PausePage::Main);
@@ -2428,6 +2435,7 @@ fn setup_pause_menu(
                         Color::srgb(0.10, 0.38, 0.58),
                     ),
                     ("SAVE GAME", PauseAction::Save, Color::srgb(0.10, 0.48, 0.28)),
+                    ("CHANGE PLAY MODE", PauseAction::Modes, Color::srgb(0.18, 0.32, 0.55)),
                     ("MAIN MENU", PauseAction::Title, Color::srgb(0.48, 0.18, 0.18)),
                     (
                         "CONTROLS",
@@ -2440,6 +2448,8 @@ fn setup_pause_menu(
                     spawn_pause_button(page, label, action, color);
                 }
             });
+
+            modes::spawn_picker(root, &modes, *experience);
 
             root.spawn((
                 Node {
@@ -3449,6 +3459,9 @@ fn pause_menu_action_system(
         }
         PauseAction::Settings => {
             menu.page = PausePage::Settings;
+        }
+        PauseAction::Modes => {
+            menu.page = PausePage::Modes;
         }
         PauseAction::Back => {
             menu.page = PausePage::Main;

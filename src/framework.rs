@@ -56,6 +56,7 @@ pub struct HeavyWaterDemoPlugins;
 impl PluginGroup for HeavyWaterDemoPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
+            .add(crate::heavy_water::modes::HeavyWaterModesPlugin)
             .add(InputPlugin)
             .add(UiPlugin)
             .add(HeavyWaterPlatformerPlugin)

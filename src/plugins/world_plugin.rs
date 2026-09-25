@@ -424,6 +424,7 @@ impl Plugin for WorldPlugin {
                     .after(generate_city),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_world_for_menu)
+            .add_systems(OnEnter(AppState::SwitchingMode), cleanup_world_for_menu)
             .add_systems(Update, tag_world_scene_entities.run_if(campaign_experience))
             .add_systems(
                 Update,

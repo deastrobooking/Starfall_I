@@ -350,6 +350,7 @@ impl Plugin for PlayerPlugin {
                 ),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_players_for_menu)
+            .add_systems(OnEnter(AppState::SwitchingMode), cleanup_players_for_menu)
             .add_systems(OnExit(AppState::Playing), release_cursor)
             .add_systems(
                 Update,

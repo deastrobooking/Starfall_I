@@ -39,6 +39,7 @@ pub mod platformer_chunks;
 pub mod platformer_route_spawn;
 pub mod platformer_routes;
 pub mod published_content;
+pub mod puzzles;
 pub mod published_craft;
 pub mod raids;
 pub mod robot_pets;

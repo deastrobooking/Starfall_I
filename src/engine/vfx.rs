@@ -38,6 +38,14 @@ impl Plugin for VfxPlugin {
         app.add_message::<SpawnVfxEvent>()
             .add_systems(Startup, setup_vfx)
             .add_systems(
+                OnEnter(crate::engine::state::AppState::MainMenu),
+                cleanup_vfx,
+            )
+            .add_systems(
+                OnEnter(crate::engine::state::AppState::SwitchingMode),
+                cleanup_vfx,
+            )
+            .add_systems(
                 Update,
                 (
                     trigger_impact_spark_on_damage,
@@ -47,6 +55,15 @@ impl Plugin for VfxPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+fn cleanup_vfx(
+    mut commands: Commands,
+    effects: Query<Entity, Or<(With<VfxEmitterInstance>, With<VfxParticle>)>>,
+) {
+    for entity in effects.iter() {
+        commands.entity(entity).try_despawn();
     }
 }
 
@@ -456,7 +473,12 @@ fn simulate_particles(
 /// it. Its `GpuModuleKernel::wgsl_fn` translation lives in
 /// `starfall_vfx_graph::GpuModuleRegistry::builtin` — the two are meant to
 /// read as the same three lines of math in two languages; keep them that way.
-pub(crate) fn apply_update_module(module: &CompiledModule, velocity: Vec3, age: f32, dt: f32) -> Vec3 {
+pub(crate) fn apply_update_module(
+    module: &CompiledModule,
+    velocity: Vec3,
+    age: f32,
+    dt: f32,
+) -> Vec3 {
     match module.kind {
         "gravity" => Vec3::new(
             velocity.x,

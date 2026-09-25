@@ -20,6 +20,10 @@ impl Plugin for CompanionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Playing), setup_companions)
             .add_systems(OnEnter(AppState::MainMenu), cleanup_companions_for_menu)
+            .add_systems(
+                OnEnter(AppState::SwitchingMode),
+                cleanup_companions_for_menu,
+            )
             .add_systems(OnExit(AppState::Playing), cleanup_companions)
             .add_systems(
                 Update,

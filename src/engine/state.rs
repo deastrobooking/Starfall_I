@@ -27,6 +27,8 @@ pub enum AppState {
     ChapterSelect,
     RobotGarage,
     Playing,
+    /// Tear down one play scene before entering another with the same party.
+    SwitchingMode,
     Paused,
     GameOver,
     Victory,

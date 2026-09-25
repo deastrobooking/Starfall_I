@@ -58,6 +58,10 @@ impl Plugin for PublishedSpacecraftRuntimePlugin {
             .add_systems(
                 OnEnter(AppState::MainMenu),
                 cleanup_published_spacecraft_runtime,
+            )
+            .add_systems(
+                OnEnter(AppState::SwitchingMode),
+                cleanup_published_spacecraft_runtime,
             );
     }
 }

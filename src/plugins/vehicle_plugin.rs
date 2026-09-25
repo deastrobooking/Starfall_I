@@ -46,6 +46,7 @@ impl Plugin for VehiclePlugin {
             .add_systems(OnEnter(AppState::Playing), reset_vehicle_state_on_enter)
             .add_systems(OnExit(AppState::Playing), cleanup_vehicle_visuals_on_exit)
             .add_systems(OnEnter(AppState::MainMenu), cleanup_vehicle_visuals)
+            .add_systems(OnEnter(AppState::SwitchingMode), cleanup_vehicle_visuals)
             .add_systems(
                 Update,
                 (

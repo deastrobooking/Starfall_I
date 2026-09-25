@@ -1170,7 +1170,9 @@ mod tests {
         )];
         let kernel = compile_update_kernel(&registry, &modules).expect("compiles");
         assert!(kernel.wgsl_source.contains("struct Particle"));
-        assert!(kernel.wgsl_source.contains("var<storage, read_write> particles"));
+        assert!(kernel
+            .wgsl_source
+            .contains("var<storage, read_write> particles"));
         assert!(kernel.wgsl_source.contains("fn update_particles"));
         assert!(kernel.wgsl_source.contains("@compute"));
     }

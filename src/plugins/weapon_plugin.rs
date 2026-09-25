@@ -275,6 +275,10 @@ impl Plugin for WeaponPlugin {
                 cleanup_weapon_transients_for_menu,
             )
             .add_systems(
+                OnEnter(AppState::SwitchingMode),
+                cleanup_weapon_transients_for_menu,
+            )
+            .add_systems(
                 Update,
                 update_aim_solution_system
                     .before(weapon_fire_system)

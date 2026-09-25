@@ -337,6 +337,7 @@ impl Plugin for GrassPlugin {
         app.init_resource::<GrassField>()
             .add_plugins(MaterialPlugin::<GrassMaterial>::default())
             .add_systems(OnEnter(AppState::MainMenu), disarm_grass_field)
+            .add_systems(OnEnter(AppState::SwitchingMode), disarm_grass_field)
             .add_systems(OnExit(AppState::Playing), retire_grass_field)
             .add_systems(
                 Update,

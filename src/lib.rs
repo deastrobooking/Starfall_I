@@ -24,6 +24,8 @@ pub use starfall_project as project;
 /// VFX system documents, module registry, and runtime compiler ("Niagara-lite").
 pub use starfall_vfx_graph as vfx_graph;
 
+pub mod play_modes;
+
 #[cfg(feature = "render-lab")]
 pub mod render_lab;
 

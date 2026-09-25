@@ -60,6 +60,7 @@ impl Plugin for EnemyPlugin {
                 (setup_enemies, setup_enemy_attack_assets),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_enemies_for_menu)
+            .add_systems(OnEnter(AppState::SwitchingMode), cleanup_enemies_for_menu)
             .add_systems(OnExit(AppState::Playing), cleanup_enemies)
             .add_systems(
                 Update,

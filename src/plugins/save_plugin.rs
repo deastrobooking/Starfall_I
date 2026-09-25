@@ -86,6 +86,11 @@ struct InitialSaveCache {
     selected: Option<(u8, SaveData)>,
 }
 
+/// One-use in-memory transfer between play modes. Uses the existing player
+/// snapshot format without writing a save slot or reloading stale disk state.
+#[derive(Resource, Default)]
+pub(crate) struct ModeSessionCarryover(pub Option<SaveData>);
+
 impl InitialSaveCache {
     fn record_scan(&mut self, selected: Option<(u8, SaveData)>) {
         self.scan_complete = true;
@@ -269,6 +274,7 @@ struct LoadRegistriesParam<'w> {
     final_war_registry: ResMut<'w, FinalWarRegistry>,
     heavy_world_events: ResMut<'w, HeavyWorldEventsStore>,
     initial_save_cache: ResMut<'w, InitialSaveCache>,
+    mode_carryover: ResMut<'w, ModeSessionCarryover>,
 }
 
 // ── Save Data ─────────────────────────────────────────────────────────────────
@@ -727,6 +733,7 @@ impl Plugin for SavePlugin {
         app.init_resource::<SaveState>()
             .init_resource::<SaveRotationState>()
             .init_resource::<InitialSaveCache>()
+            .init_resource::<ModeSessionCarryover>()
             .init_resource::<HeavyWaterProgress>()
             .init_resource::<HeavyBioClock>()
             .init_resource::<HeavyWorldEventsStore>()
@@ -1133,6 +1140,14 @@ pub fn save_current_session(sp: &SaveParams) -> Result<(), String> {
     save_game(SaveSnapshot::from_params(sp, players))
 }
 
+pub(crate) fn capture_mode_session(sp: &SaveParams) -> Result<SaveData, String> {
+    let players = collect_player_saves(&sp.player_q, &sp.vehicle_state);
+    if players.is_empty() {
+        return Err("No active players to transfer".into());
+    }
+    Ok(build_save_data(SaveSnapshot::from_params(sp, players)))
+}
+
 // ── Systems ───────────────────────────────────────────────────────────────────
 fn hydrate_progress_from_disk(
     mut progress: ResMut<ChapterProgress>,
@@ -1238,7 +1253,7 @@ fn load_save_on_enter(
             &mut Inventory,
             &mut QuickItemSlot,
             &mut TraversalModeState,
-            &PlayerProgression,
+            &mut PlayerProgression,
         ),
         With<Player>,
     >,
@@ -1266,9 +1281,15 @@ fn load_save_on_enter(
     // progression. Consume that exact record for the first gameplay entry so
     // loading is consistent and does not repeat disk I/O. Later non-pause
     // entries scan again and can observe saves written during the session.
-    let (data, global_state_already_hydrated) = match regs.initial_save_cache.take_scan() {
-        Some(selected) => (selected.map(|(_, data)| data), true),
-        None => (load_save(), false),
+    let carryover = regs.mode_carryover.0.take();
+    let switching_mode = carryover.is_some();
+    let (data, global_state_already_hydrated) = if let Some(data) = carryover {
+        (Some(data), true)
+    } else {
+        match regs.initial_save_cache.take_scan() {
+            Some(selected) => (selected.map(|(_, data)| data), true),
+            None => (load_save(), false),
+        }
     };
 
     if let Some(data) = data {
@@ -1296,11 +1317,14 @@ fn load_save_on_enter(
             mut inventory,
             mut quick,
             mut traversal,
-            progression,
+            mut progression,
         ) in player_q.iter_mut()
         {
             active_players += 1;
             if let Some(saved) = player_save_for(&data, index.0) {
+                if switching_mode {
+                    saved.apply_progression(&mut progression);
+                }
                 saved.apply_loadout(
                     &mut weapons,
                     &mut specials,
@@ -1314,11 +1338,13 @@ fn load_save_on_enter(
                     &mut stats,
                     &mut health,
                     &armor,
-                    progression,
+                    &progression,
                 );
             }
         }
-        wave.wave_number = data.wave_number;
+        if !switching_mode {
+            wave.wave_number = data.wave_number;
+        }
         if !global_state_already_hydrated {
             progress.completed = data.completed_chapters;
             progress.discoverables = data.discoverables;
@@ -1354,6 +1380,9 @@ fn load_save_on_enter(
             *regs.hacking_registry = data.hacking.clone();
             regs.final_war_registry
                 .apply_save_record(data.final_war.clone());
+        }
+        if switching_mode {
+            return;
         }
         let loaded_players = data.players.len().max(active_players);
         msg_ev.write(UiMessageEvent {
