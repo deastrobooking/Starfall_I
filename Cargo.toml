@@ -44,6 +44,11 @@ name = "modular_character"
 path = "examples/modular_character.rs"
 required-features = ["heavy-water-demo"]
 
+[[example]]
+name = "vfx_gpu_validate"
+path = "examples/vfx_gpu_validate.rs"
+required-features = ["heavy-water-demo"]
+
 [dependencies]
 starfall-graph = { path = "crates/starfall-graph" }
 starfall-platformer = { path = "crates/starfall-platformer" }

@@ -130,23 +130,85 @@ Phase 1 already built, so nothing here needs to be rewritten to unlock them.
 
 ## Phase 2 — GPU compute backend
 
-Only worth doing once particle counts or module complexity actually pressure
-frame time on the CPU path (measure first, per this codebase's engine-roadmap
-principle). When it is:
+The original sequencing here said this was "only worth doing once particle
+counts or module complexity actually pressure frame time on the CPU path
+(measure first)" — that measurement was never taken; this slice went ahead
+anyway at the user's explicit direction. Worth knowing if you're deciding
+whether to build on it further: nothing about the CPU path (still the only
+thing the live game runs) was shown to need this yet.
 
-1. Each `ModuleSpec` gains a WGSL snippet alongside its Rust interpretation in
-   `apply_update_module` (both stay in sync off one source of truth — the
-   `ModuleSpec` — the same way `platformer_chunks` keeps one validator both
-   the game and its tests consult).
-2. A compiler pass concatenates the WGSL for a `CompiledEmitter`'s modules
-   into one compute shader, cached by content hash of the module list so
-   identical module combinations across emitters/systems share a pipeline.
-3. Particles move from ECS entities to a storage buffer per emitter; spawn
-   and update become two dispatched compute passes; rendering becomes one
-   indirect draw per emitter instead of N entity draws.
-4. CPU path stays as the reference implementation and as the low-particle-count
-   fallback (mobile/low-power, or debug builds where GPU readback for tests
-   matters).
+**Shipped in this pass — steps 1 and 2, plus real, GPU-verified proof of
+correctness, not just working code:**
+
+1. `starfall-vfx-graph::GpuModuleRegistry` gives `gravity`/`drag`/`curl_noise`
+   — the three *motion-affecting* update modules — a WGSL translation
+   alongside their existing Rust interpretation in `apply_update_module`
+   (`src/engine/vfx.rs`, refactored from a `&mut VfxParticle` mutator to a
+   pure `(module, velocity, age, dt) -> velocity` function so both sides can
+   be called and compared directly). `color_over_life`/`size_over_life` are
+   deliberately not covered: they're a single per-particle curve/gradient
+   lookup per frame, not the iterative math a compute kernel exists to
+   offload.
+2. `compile_update_kernel(&GpuModuleRegistry, &[CompiledModule]) ->
+   CompiledGpuKernel` concatenates an emitter's update-module chain into one
+   self-contained WGSL compute shader (particle struct, storage-buffer
+   bindings, every module function the chain needs defined once even if a
+   kind repeats, and the entry point that calls them in authored order),
+   plus the packed `[f32; 4]`-per-module parameter buffer to upload
+   alongside it. `cache_key` (the joined module kind names) is what a future
+   runtime would key pipeline reuse on — two emitters with the same ordered
+   module *kinds* share one compiled pipeline regardless of parameter
+   values. 7 unit tests, all pure string/data assertions, no GPU needed:
+   codegen contains the right function names and call order, params pack
+   into the right slots, identical chains share a cache key, an unsupported
+   module kind (e.g. `color_over_life`) fails to compile rather than being
+   silently dropped.
+3. **`src/engine/vfx_gpu.rs` + `examples/vfx_gpu_validate.rs`**: a real,
+   dispatched, GPU-verified correctness proof — not a claim it "should"
+   work. Mirrors `render_lab::probe_gpu`'s exact one-shot
+   dispatch/readback/compare pattern: six fixture particles run through the
+   compiled `gravity+drag+curl_noise` kernel on the GPU (`ExtractResourcePlugin`
+   → `prepare_pipeline`/`prepare_bind_group` → dispatch from the render graph
+   → `Readback`/`ReadbackComplete`), and the result is compared against
+   `apply_update_module` — the same function the live CPU path calls — run
+   in plain Rust for the same fixture and `dt`. Actually run on this
+   project's own hardware (Metal, Apple M3 Pro) via
+   `cargo run --example vfx_gpu_validate --features heavy-water-demo`:
+   **0 mismatches across 6 particles, max absolute error ~1.9×10⁻⁹** — floating-
+   point noise, not a real disagreement. Re-run twice more to confirm this
+   wasn't a fluke; identical result both times.
+
+**Explicitly not done — this is a correctness proof for a compute kernel, not
+a working particle system:**
+
+- **No continuous, steady-state simulation.** This is a one-shot dispatch
+  against a hand-built fixture, exactly like `probe_gpu`'s own validation
+  pass. Running this every frame against a live, growing/shrinking particle
+  pool is a different, harder problem: double-buffered or in-place update
+  without racing the spawn pass, particles entering/leaving the buffer as
+  emitters spawn and particles expire, and a readback strategy that doesn't
+  stall a frame waiting on the GPU (this pass's readback is fire-and-forget
+  with no latency budget, fine for a validation tool, not fine for gameplay).
+- **No GPU-driven spawning.** New particles still only exist by being
+  written into the CPU-visible fixture at setup time here.
+- **No rendering.** The fixture never becomes anything visible — no indirect
+  draw, no sprite/mesh renderer reading the storage buffer. The CPU path
+  (`VfxPlugin` in `src/engine/vfx.rs`) is still the only thing that puts a
+  particle on screen, and remains so until a renderer is built.
+- **Not wired into `VfxCatalog`/`VfxPlugin` at all.** `vfx_gpu.rs` is
+  reachable only from its own example; the live game (both editions) never
+  loads `VfxGpuValidationPlugin`.
+
+**The actual next slice**, if this is picked back up: pick one currently-CPU
+system (`ember_torch` is the natural choice — it already only uses
+`drag`+`curl_noise`, both GPU-covered) and build genuinely continuous
+GPU simulation for it: a persistent storage buffer sized to
+`max_particles`, a spawn pass that claims dead slots, an update pass that
+runs every frame instead of once, and *some* renderer reading that buffer —
+even reusing the CPU path's per-particle-entity rendering by copying GPU
+results back to Transforms would prove the loop before committing to
+indirect draw. That is a materially bigger, real-time-systems-shaped task
+than this pass; treat it as its own milestone, not a follow-up.
 
 ## Phase 3 — node-graph editor
 

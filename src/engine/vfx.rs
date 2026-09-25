@@ -421,7 +421,7 @@ fn simulate_particles(
         };
 
         for module in &emitter.update_modules {
-            apply_update_module(module, &mut particle, dt);
+            particle.velocity = apply_update_module(module, particle.velocity, particle.age, dt);
         }
         transform.translation += particle.velocity * dt;
 
@@ -450,25 +450,33 @@ fn simulate_particles(
     }
 }
 
-fn apply_update_module(module: &CompiledModule, particle: &mut VfxParticle, dt: f32) {
+/// The CPU reference implementation of one motion-affecting update module,
+/// exposed `pub(crate)` so `engine::vfx_gpu`'s CPU/GPU cross-validation calls
+/// this exact function rather than a second hand-copied implementation of
+/// it. Its `GpuModuleKernel::wgsl_fn` translation lives in
+/// `starfall_vfx_graph::GpuModuleRegistry::builtin` — the two are meant to
+/// read as the same three lines of math in two languages; keep them that way.
+pub(crate) fn apply_update_module(module: &CompiledModule, velocity: Vec3, age: f32, dt: f32) -> Vec3 {
     match module.kind {
-        "gravity" => {
-            particle.velocity.y -= module.float("strength", 0.0) * dt;
-        }
+        "gravity" => Vec3::new(
+            velocity.x,
+            velocity.y - module.float("strength", 0.0) * dt,
+            velocity.z,
+        ),
         "drag" => {
             let coefficient = module.float("coefficient", 0.0);
-            particle.velocity *= (1.0 - coefficient * dt).max(0.0);
+            velocity * (1.0 - coefficient * dt).max(0.0)
         }
         "curl_noise" => {
             let strength = module.float("strength", 0.0);
             let scale = module.float("scale", 1.0);
-            let offset = cheap_curl_noise(particle.velocity, particle.age * scale);
-            particle.velocity += offset * strength * dt;
+            let offset = cheap_curl_noise(velocity, age * scale);
+            velocity + offset * strength * dt
         }
         // color_over_life / size_over_life are sampled directly against the
         // particle's Transform/material in `simulate_particles`, since they
         // drive presentation rather than motion.
-        _ => {}
+        _ => velocity,
     }
 }
 
