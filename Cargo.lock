@@ -5701,6 +5701,7 @@ dependencies = [
  "starfall-platformer",
  "starfall-platformer-graph",
  "starfall-project",
+ "starfall-runtime",
  "starfall-vfx-graph",
 ]
 
@@ -5731,6 +5732,10 @@ dependencies = [
  "starfall-graph",
  "toml",
 ]
+
+[[package]]
+name = "starfall-runtime"
+version = "0.1.0"
 
 [[package]]
 name = "starfall-vfx-graph"

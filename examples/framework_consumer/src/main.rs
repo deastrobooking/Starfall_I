@@ -29,6 +29,19 @@ fn catalog(chunk_id: &str) -> Option<ChunkDef> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let budget = starfall_i::runtime::budget::ResourceBudget::new(2);
+    let reservation = budget.reserve(2).expect("fits the example budget");
+    assert!(budget.reserve(1).is_none());
+    drop(reservation);
+    assert_eq!(budget.snapshot().live, 0);
+    let mut history = starfall_i::runtime::history::TickHistory::new(2, 16);
+    history.push(1, [1_u8; 4], 4).expect("first tick");
+    history.push(2, [2_u8; 4], 4).expect("second tick");
+    history.push(3, [3_u8; 4], 4).expect("rolling tick");
+    assert_eq!(history.iter().next().unwrap().tick, 2);
+    let mut frames = starfall_i::runtime::stats::FrameSamples::new(60);
+    frames.record_ms(16.0);
+    assert_eq!(frames.summary().p99_ms, 16.0);
     let mut registry = NodeRegistry::default();
     register_platformer_nodes(&mut registry)?;
     let graph = PlatformerRouteGraphBuilder::new(

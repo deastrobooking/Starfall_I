@@ -1,0 +1,8 @@
+[package]
+name = "starfall-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Renderer-independent bounded runtime services for Starfall"
+
+[dependencies]

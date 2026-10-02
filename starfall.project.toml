@@ -12,6 +12,10 @@ imported_assets = "assets/imported"
 published = "build/published"
 
 [[modules]]
+id = "starfall.engine.runtime"
+version = "=0.1.0"
+
+[[modules]]
 id = "starfall.engine.graph"
 version = "=0.1.0"
 

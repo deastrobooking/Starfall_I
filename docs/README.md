@@ -34,6 +34,7 @@ Engine**, the native **Starfall Forge** authoring environment, and the complete
 | [editor_roadmap.md](editor_roadmap.md) | Forge document, preview, publishing, and extensibility milestones |
 | [naming.md](naming.md) | Canonical Heavy Water names and terminology |
 | [HEAVY_WATER_PORT.md](HEAVY_WATER_PORT.md) | Heavy Water continuity and port ledger |
+| [RUNTIME_FOUNDATIONS.md](RUNTIME_FOUNDATIONS.md) | Runtime service requirements, reference history, and further engine work |
 | [guides/README.md](guides/README.md) | Task-oriented how-to index |
 
 `FEATURES.md` is a legacy detailed snapshot. Current feature statements belong

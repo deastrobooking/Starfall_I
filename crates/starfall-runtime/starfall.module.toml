@@ -1,0 +1,8 @@
+schema_version = 1
+
+[module]
+id = "starfall.engine.runtime"
+name = "Starfall Runtime"
+version = "0.1.0"
+kind = "engine"
+source_root = "src"

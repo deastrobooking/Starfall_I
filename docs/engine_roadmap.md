@@ -307,6 +307,11 @@ production meshes.
 their character in split/shared transitions.
 
 ### EC6 — Determinism payoff
+**Delivered foundation (2026-10-02):** bounded per-slot command/transform history,
+explicit input-before-motor scheduling, and Designer F12 diagnostic export.
+These are diagnostic clips, not playable replays; world/physics/RNG snapshot
+restore and fixed combat/AI remain open. See [runtime foundations](RUNTIME_FOUNDATIONS.md).
+
 **Goal:** Cash in EC1's determinism.
 - Deterministic input log → instant replay, ghosts, training mode, combo trials,
   desync detection. On-ramp to future online rollback (not online yet).

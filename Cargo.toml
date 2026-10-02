@@ -11,6 +11,7 @@ publish = false
 
 [workspace]
 members = [
+    "crates/starfall-runtime",
     "crates/starfall-graph",
     "crates/starfall-platformer",
     "crates/starfall-platformer-graph",
@@ -50,6 +51,7 @@ path = "examples/vfx_gpu_validate.rs"
 required-features = ["heavy-water-demo"]
 
 [dependencies]
+starfall-runtime = { path = "crates/starfall-runtime" }
 starfall-graph = { path = "crates/starfall-graph" }
 starfall-platformer = { path = "crates/starfall-platformer" }
 starfall-platformer-graph = { path = "crates/starfall-platformer-graph" }

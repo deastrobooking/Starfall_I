@@ -15,7 +15,8 @@
 //! EC1a introduced the additive buffer. EC1b now consumes [`FixedInput`] in the
 //! default-on fixed traversal, grapple, and motor chain; the legacy `Update`
 //! motor remains available as an A/B escape hatch. Combat migration and replay
-//! capture remain later engine-core work.
+//! playback remain later engine-core work. The flight recorder captures the
+//! resolved commands after each fixed update.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -173,15 +174,9 @@ impl FixedInput {
         out.sabre_attack = self.edges.sabre_attack;
         out.enter_vehicle = self.edges.enter_vehicle;
         out.look_delta = self.edges.look_delta;
-        if self.edges.weapon_slot.is_some() {
-            out.weapon_slot = self.edges.weapon_slot;
-        }
-        if self.edges.special_slot.is_some() {
-            out.special_slot = self.edges.special_slot;
-        }
-        if self.edges.traversal.is_some() {
-            out.traversal_mode_switch = self.edges.traversal;
-        }
+        out.weapon_slot = self.edges.weapon_slot;
+        out.special_slot = self.edges.special_slot;
+        out.traversal_mode_switch = self.edges.traversal;
         out
     }
 }
@@ -205,9 +200,22 @@ fn latch_player_input(
     players: Query<(&PlayerIndex, &PlayerInput)>,
     mut buffers: ResMut<PlayerInputBuffers>,
 ) {
+    // Slot reuse must never inherit held buttons or pending edges from a
+    // despawned player. Ownership remains explicit, independent of query order.
+    buffers
+        .buffers
+        .retain(|key, _| players.iter().any(|(idx, _)| idx.0 == *key));
+    buffers
+        .fixed
+        .retain(|key, _| players.iter().any(|(idx, _)| idx.0 == *key));
     for (idx, input) in &players {
         buffers.buffers.entry(idx.0).or_default().latch(input);
     }
+}
+
+fn clear_input_buffers(mut buffers: ResMut<PlayerInputBuffers>) {
+    buffers.buffers.clear();
+    buffers.fixed.clear();
 }
 
 /// Runs once per fixed tick: snapshot each player's buffer into `FixedInput`.
@@ -232,16 +240,86 @@ impl Plugin for InputBufferPlugin {
             // Latch after device input is written (PreUpdate), before the fixed loop.
             .add_systems(
                 RunFixedMainLoop,
-                latch_player_input.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+                latch_player_input
+                    .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
+                    .run_if(in_state(crate::engine::state::AppState::Playing)),
             )
             // Consume first thing each fixed tick.
-            .add_systems(FixedUpdate, consume_fixed_input);
+            .add_systems(
+                FixedPreUpdate,
+                consume_fixed_input.run_if(in_state(crate::engine::state::AppState::Playing)),
+            )
+            .add_systems(
+                OnExit(crate::engine::state::AppState::Playing),
+                clear_input_buffers,
+            );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selectors_do_not_repeat_on_catchup_ticks() {
+        let input = PlayerInput {
+            weapon_slot: Some(2),
+            special_slot: Some(1),
+            traversal_mode_switch: Some(TraversalMode::Flight),
+            ..default()
+        };
+        let mut buffer = PlayerBuffer::default();
+        buffer.latch(&input);
+        assert_eq!(buffer.consume().overlay(&input).weapon_slot, Some(2));
+        let second = buffer.consume().overlay(&input);
+        assert_eq!(second.weapon_slot, None);
+        assert_eq!(second.special_slot, None);
+        assert_eq!(second.traversal_mode_switch, None);
+    }
+
+    #[test]
+    fn despawned_player_cannot_leave_commands_for_reused_slot() {
+        let mut app = App::new();
+        app.init_resource::<PlayerInputBuffers>()
+            .add_systems(Update, (latch_player_input, consume_fixed_input).chain());
+        let entity = app
+            .world_mut()
+            .spawn((
+                PlayerIndex(2),
+                PlayerInput {
+                    fire: true,
+                    jump: true,
+                    ..default()
+                },
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<PlayerInputBuffers>()
+                .fixed(2)
+                .unwrap()
+                .held
+                .fire
+        );
+        app.world_mut().despawn(entity);
+        app.update();
+        assert!(app
+            .world()
+            .resource::<PlayerInputBuffers>()
+            .fixed(2)
+            .is_none());
+        app.world_mut()
+            .spawn((PlayerIndex(2), PlayerInput::default()));
+        app.update();
+        assert_eq!(
+            *app.world()
+                .resource::<PlayerInputBuffers>()
+                .fixed(2)
+                .unwrap(),
+            FixedInput::default()
+        );
+    }
 
     fn input_with(edit: impl FnOnce(&mut PlayerInput)) -> PlayerInput {
         let mut i = PlayerInput::default();

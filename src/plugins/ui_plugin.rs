@@ -1484,7 +1484,10 @@ fn menu_back_navigation(
         AppState::MainMenu if main_menu.page == MainMenuPage::Settings => {
             main_menu.page = MainMenuPage::Home;
         }
-        AppState::MainMenu | AppState::Playing | AppState::CharacterStudio => {}
+        AppState::MainMenu
+        | AppState::Playing
+        | AppState::SwitchingMode
+        | AppState::CharacterStudio => {}
         AppState::ProjectHub => next_state.set(AppState::MainMenu),
         AppState::CreatureForge
         | AppState::WeaponForge

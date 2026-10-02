@@ -21,6 +21,8 @@ pub use starfall_platformer as platformer;
 pub use starfall_platformer_graph as platformer_graph;
 /// Versioned project and module manifest contracts.
 pub use starfall_project as project;
+/// Renderer-independent history, resource budgets, and frame statistics.
+pub use starfall_runtime as runtime;
 /// VFX system documents, module registry, and runtime compiler ("Niagara-lite").
 pub use starfall_vfx_graph as vfx_graph;
 

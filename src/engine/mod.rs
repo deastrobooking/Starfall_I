@@ -23,6 +23,7 @@
 //! | [`vfx`] | Data-driven particle systems ("Niagara-lite") |
 
 pub mod bindings;
+pub mod flight_recorder;
 pub mod game_loop;
 pub mod game_rng;
 pub mod input_buffer;

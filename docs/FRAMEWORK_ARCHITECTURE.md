@@ -31,6 +31,15 @@ core ──→ runtime ──→ gameplay kits
 Runtime code may consume published schemas. It must not depend on Forge UI,
 editor sessions, undo history, or draft-only records.
 
+## Runtime services
+
+The extracted `starfall-runtime` crate supplies dependency-free resource
+reservations, bounded tick history, and frame-time statistics. It is exposed as
+`starfall_i::runtime`; Heavy Water's input diagnostics, sound admission and F11
+overlay consume the same public API as the independent framework example.
+Native adapters remain in `src/engine` and `src/audio`. See the
+[runtime foundations](RUNTIME_FOUNDATIONS.md) for design requirements and scope.
+
 ## Graph architecture
 
 Starfall uses one graph kernel with multiple typed graph languages. It does not

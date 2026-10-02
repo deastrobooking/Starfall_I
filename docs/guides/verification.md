@@ -110,6 +110,11 @@ root. Reports sanitize local home/install paths and retain the newest five.
 | F9 | collider debug draw | `world_plugin` |
 | F10 | fixed-tick motor A/B toggle | `game_loop` |
 | F11 | perf overlay (FPS, frame ms, entities, sim ticks, cameras, materials, total combat VFX, Saber VFX/cap) | `game_loop` |
+| F12 | Designer: export the retained input diagnostic clip; logs the output path | `flight_recorder` |
+
+F11 also reports wall-frame p95/p99/max, SFX live/peak/refused voice counts,
+and retained input ticks. Clips are not playable replays. See
+[runtime foundations](../RUNTIME_FOUNDATIONS.md) for capture and retention semantics.
 
 ## Profiling
 

@@ -26,6 +26,28 @@ use crate::events::{
     WeaponReloadedEvent,
 };
 use crate::resources::GameSettings;
+use crate::runtime::budget::{Reservation, ResourceBudget};
+
+/// Shared cap across procedural and imported one-shot action sounds.
+#[derive(Resource)]
+pub struct SfxVoiceBudget(pub ResourceBudget);
+
+impl Default for SfxVoiceBudget {
+    fn default() -> Self {
+        Self(ResourceBudget::new(32))
+    }
+}
+
+#[derive(Component)]
+struct SfxVoice {
+    _reservation: Reservation,
+}
+
+fn clear_sfx_voices(mut commands: Commands, voices: Query<Entity, With<SfxVoice>>) {
+    for entity in &voices {
+        commands.entity(entity).despawn();
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum SfxKind {
@@ -228,6 +250,7 @@ fn play(
     library: &mut SfxLibrary,
     action_registry: &mut ActionSfxRegistry,
     settings: &GameSettings,
+    budget: &SfxVoiceBudget,
     action_id: &str,
     kind: SfxKind,
 ) {
@@ -242,12 +265,18 @@ fn play(
     let Some(handle) = custom.or_else(|| library.handles.get(&kind).cloned()) else {
         return;
     };
+    let Some(reservation) = budget.0.reserve(1) else {
+        return;
+    };
     library.cooldowns.insert(kind, SFX_COOLDOWN);
     let level = library.mix.get(&kind).copied().unwrap_or(0.5)
         * settings.master_volume
         * settings.sfx_volume;
     let speed = if is_custom { 1.0 } else { library.jitter() };
     commands.spawn((
+        SfxVoice {
+            _reservation: reservation,
+        },
         AudioPlayer::new(handle),
         PlaybackSettings::DESPAWN
             .with_volume(Volume::Linear(level))
@@ -259,18 +288,28 @@ fn play_modular_action(
     commands: &mut Commands,
     registry: &mut ActionSfxRegistry,
     settings: &GameSettings,
+    budget: &SfxVoiceBudget,
     action_id: &str,
 ) {
-    if settings.sfx_volume <= 0.01 || registry.cooldowns.contains_key(action_id) {
+    if settings.master_volume <= 0.01
+        || settings.sfx_volume <= 0.01
+        || registry.cooldowns.contains_key(action_id)
+    {
         return;
     }
     let Some(handle) = registry.handles.get(action_id).cloned() else {
+        return;
+    };
+    let Some(reservation) = budget.0.reserve(1) else {
         return;
     };
     registry
         .cooldowns
         .insert(action_id.to_string(), SFX_COOLDOWN);
     commands.spawn((
+        SfxVoice {
+            _reservation: reservation,
+        },
         AudioPlayer::new(handle),
         PlaybackSettings::DESPAWN.with_volume(Volume::Linear(
             (settings.master_volume * settings.sfx_volume * 0.55).clamp(0.0, 1.0),
@@ -284,6 +323,7 @@ fn play_modular_action(
 fn combat_sfx_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
+    budget: Res<SfxVoiceBudget>,
     library: Option<ResMut<SfxLibrary>>,
     action_registry: Option<ResMut<ActionSfxRegistry>>,
     mut fired: MessageReader<WeaponFiredEvent>,
@@ -310,6 +350,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "weapon.fire",
             SfxKind::Shoot,
         );
@@ -320,6 +361,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "melee.slash",
             SfxKind::Slash,
         );
@@ -330,6 +372,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "combat.hit",
             SfxKind::Hit,
         );
@@ -340,6 +383,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "combat.parry",
             SfxKind::Parry,
         );
@@ -350,6 +394,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "combat.kill",
             SfxKind::Kill,
         );
@@ -360,6 +405,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "player.hurt",
             SfxKind::Hurt,
         );
@@ -370,6 +416,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "reward.loot",
             SfxKind::Loot,
         );
@@ -380,6 +427,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "reward.chest",
             SfxKind::Chest,
         );
@@ -390,6 +438,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "player.level_up",
             SfxKind::LevelUp,
         );
@@ -400,6 +449,7 @@ fn combat_sfx_system(
             lib,
             actions,
             &settings,
+            &budget,
             "weapon.reload",
             SfxKind::Reload,
         );
@@ -409,6 +459,7 @@ fn combat_sfx_system(
 fn modular_action_sfx_system(
     mut commands: Commands,
     settings: Res<GameSettings>,
+    budget: Res<SfxVoiceBudget>,
     library: Option<ResMut<SfxLibrary>>,
     registry: Option<ResMut<ActionSfxRegistry>>,
     mut actions: MessageReader<ModularActionSfxEvent>,
@@ -422,13 +473,20 @@ fn modular_action_sfx_system(
     for action in actions.read() {
         if valid_action_id(&action.action_id) {
             if registry.is_assigned(&action.action_id) {
-                play_modular_action(&mut commands, &mut registry, &settings, &action.action_id);
+                play_modular_action(
+                    &mut commands,
+                    &mut registry,
+                    &settings,
+                    &budget,
+                    &action.action_id,
+                );
             } else {
                 play(
                     &mut commands,
                     &mut library,
                     &mut registry,
                     &settings,
+                    &budget,
                     &action.action_id,
                     modular_fallback_kind(&action.action_id),
                 );
@@ -471,7 +529,9 @@ pub struct SfxPlugin;
 
 impl Plugin for SfxPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ModularActionSfxEvent>()
+        app.init_resource::<SfxVoiceBudget>()
+            .add_systems(OnExit(AppState::Playing), clear_sfx_voices)
+            .add_message::<ModularActionSfxEvent>()
             .add_message::<AudioLibraryReloadEvent>()
             .add_systems(Startup, bake_sfx_library)
             .add_systems(Update, reload_action_sfx_system)
@@ -492,6 +552,51 @@ impl Plugin for SfxPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_sound_burst_is_capped_and_despawn_releases_capacity() {
+        use bevy::ecs::world::CommandQueue;
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let budget = SfxVoiceBudget(ResourceBudget::new(2));
+        let mut registry = ActionSfxRegistry::default();
+        for id in ["a", "b", "c"] {
+            registry.handles.insert(id.into(), Handle::default());
+        }
+        let mut settings = GameSettings {
+            master_volume: 1.0,
+            sfx_volume: 1.0,
+            ..default()
+        };
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            for id in ["a", "b", "c"] {
+                play_modular_action(&mut commands, &mut registry, &settings, &budget, id);
+            }
+        }
+        assert_eq!(budget.0.snapshot().live, 2);
+        assert_eq!(budget.0.snapshot().refused, 1);
+        assert!(!registry.cooldowns.contains_key("c"));
+        queue.apply(&mut world);
+        let entities: Vec<_> = world
+            .query_filtered::<Entity, With<SfxVoice>>()
+            .iter(&world)
+            .collect();
+        assert_eq!(entities.len(), 2);
+        for entity in entities {
+            world.despawn(entity);
+        }
+        assert_eq!(budget.0.snapshot().live, 0);
+        settings.master_volume = 0.0;
+        play_modular_action(
+            &mut Commands::new(&mut queue, &world),
+            &mut registry,
+            &settings,
+            &budget,
+            "c",
+        );
+        assert_eq!(budget.0.snapshot().live, 0);
+    }
 
     #[test]
     fn action_ids_are_bounded_and_path_safe() {

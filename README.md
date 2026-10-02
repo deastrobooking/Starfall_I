@@ -227,6 +227,12 @@ from the current transitional source layout.
 
 ## Documentation
 
+Starfall runtime services now provide bounded input diagnostics,
+sound-effect voice admission, and frame-time percentiles. The dependency-free
+`starfall-runtime` crate is public through `starfall_i::runtime`. See the
+[runtime foundations](docs/RUNTIME_FOUNDATIONS.md) for shipped scope, design requirements,
+and the remaining renderer, AI, networking and replay integration requirements.
+
 - [Documentation map](docs/README.md)
 - [Framework architecture](docs/FRAMEWORK_ARCHITECTURE.md)
 - [Repeatable project structure](docs/PROJECT_STRUCTURE.md)

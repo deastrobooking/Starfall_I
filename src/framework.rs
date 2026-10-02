@@ -46,6 +46,7 @@ impl PluginGroup for StarfallFoundationPlugins {
             .add(SfxPlugin)
             .add(MusicPlayerPlugin)
             .add(InputBufferPlugin)
+            .add(crate::engine::flight_recorder::FlightRecorderPlugin)
     }
 }
 

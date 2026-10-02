@@ -77,6 +77,20 @@ pub const FIXED_HZ: f64 = 64.0;
 #[derive(Resource, Default)]
 pub struct FixedTickCount(pub u64);
 
+/// Rolling wall-frame intervals; independent of virtual time and hitstop.
+#[derive(Resource)]
+pub struct FrameTiming(pub crate::runtime::stats::FrameSamples);
+
+impl Default for FrameTiming {
+    fn default() -> Self {
+        Self(crate::runtime::stats::FrameSamples::new(600))
+    }
+}
+
+fn sample_frame_time(time: Res<Time<Real>>, mut timing: ResMut<FrameTiming>) {
+    timing.0.record_ms(time.delta_secs_f64() * 1000.0);
+}
+
 /// EC1b render interpolation: world position captured at the START of the most
 /// recent fixed tick. Presentation systems (camera follow) lerp between this
 /// and the live transform by `Time<Fixed>::overstep_fraction()`, hiding the
@@ -142,7 +156,9 @@ impl Plugin for GameLoopPlugin {
         .init_resource::<FixedTickCount>()
         .init_resource::<SimConfig>()
         .init_resource::<PerfOverlay>()
-        .add_systems(FixedUpdate, count_fixed_tick)
+        .init_resource::<FrameTiming>()
+        .add_systems(PreUpdate, sample_frame_time)
+        .add_systems(FixedFirst, count_fixed_tick)
         .add_systems(Update, toggle_fixed_motor)
         .configure_sets(
             Update,
@@ -285,12 +301,27 @@ fn update_perf_overlay(
     state: Res<PerfOverlay>,
     diagnostics: Res<DiagnosticsStore>,
     ticks: Res<FixedTickCount>,
+    timing: Res<FrameTiming>,
+    history: Option<Res<crate::engine::flight_recorder::FlightRecorder>>,
+    voices: Option<Res<crate::audio::sfx::SfxVoiceBudget>>,
     render: RenderPerfCounts,
     mut text_q: Query<&mut Text, With<PerfOverlayText>>,
 ) {
     if !state.visible {
         return;
     }
+    let frame_summary = timing.0.summary();
+    let history_ticks = history.as_ref().map_or(0, |history| history.len());
+    let voice_counts = voices.as_ref().map(|voices| voices.0.snapshot());
+    let voice_text = voice_counts.map_or_else(
+        || "unavailable".into(),
+        |counts| {
+            format!(
+                "{}/{} (peak {}, refused {})",
+                counts.live, counts.limit, counts.peak, counts.refused
+            )
+        },
+    );
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|d| d.smoothed())
@@ -336,6 +367,11 @@ fn update_perf_overlay(
         *text = Text::new(format!(
             "PERF (F11)\nFPS:   {fps:5.1}\nframe: {frame_ms:5.2} ms\nents:  {entities:.0}\ncams:  {cameras}\nshots: {projectiles}  vfx: {transient_vfx}\nsaber: {sabre_vfx}/{SABRE_VFX_ENTITY_BUDGET}\nmats:  {custom_materials} custom / {standard_materials} standard\nlod:   {lod_profiles} profiles / {lod_renderables} meshes / {lod_proxies} proxies\nterrain visible: {terrain_high_visible}/{terrain_high_total} high  {terrain_proxy_visible}/{terrain_proxy_total} proxy\nbuilding proxy:  {building_proxy_visible}/{building_proxy_total} visible\nsim:   {} ticks @{:.0}Hz",
             ticks.0, FIXED_HZ,
+        ));
+        text.0.push_str(&format!(
+            "\nframe p95/p99/max: {:.2}/{:.2}/{:.2} ms ({} samples)\nsfx voices: {}\nhistory: {} ticks (F12 export)",
+            frame_summary.p95_ms, frame_summary.p99_ms, frame_summary.max_ms,
+            frame_summary.samples, voice_text, history_ticks,
         ));
     }
 }
