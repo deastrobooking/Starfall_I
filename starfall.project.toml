@@ -20,6 +20,10 @@ id = "starfall.engine.graph"
 version = "=0.1.0"
 
 [[modules]]
+id = "starfall.engine.vfx_graph"
+version = "=0.1.0"
+
+[[modules]]
 id = "starfall.engine.project"
 version = "=0.1.0"
 

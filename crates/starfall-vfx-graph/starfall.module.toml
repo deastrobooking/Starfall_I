@@ -1,0 +1,12 @@
+schema_version = 1
+
+[module]
+id = "starfall.engine.vfx_graph"
+name = "Starfall VFX Graph"
+version = "0.1.0"
+kind = "engine"
+source_root = "src"
+
+[[dependencies]]
+id = "starfall.engine.graph"
+version = "^0.1"

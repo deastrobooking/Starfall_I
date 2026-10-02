@@ -42,6 +42,17 @@ Current extraction status:
 - `crates/starfall-platformer-graph` is an independent adapter package joining
   those two contracts. It owns platformer node definitions, compiled route JSON
   schema version 1, graph diagnostics, catalog resolution, and runtime assembly.
+- `crates/starfall-vfx-graph` is an independent package containing the
+  "Niagara-lite" VFX authoring document, module registry, CPU and GPU-kernel
+  compilers, and curve/gradient sampling, with only a `serde`/`starfall-graph`
+  dependency.
+- `crates/starfall-runtime` is an independent package containing dependency-free
+  resource-reservation ledgers, bounded tick history, and frame-time
+  statistics — see [runtime foundations](RUNTIME_FOUNDATIONS.md). Its name
+  anticipates the target workspace's `starfall-runtime` above but is narrower
+  in scope today (no published-catalog ownership yet); reconcile the two
+  before the target layout is finalized rather than letting the name imply
+  more than this crate currently does.
 - `src/lib.rs` remains the transitional all-in-one facade and re-exports all
   extracted framework packages.
 - Heavy Water exposes `shared` and `platformer` ownership through
