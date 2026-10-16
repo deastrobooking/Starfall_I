@@ -792,6 +792,7 @@ enum PlayerHudTextKind {
     SpecialAmmo,
     TraversalStatus,
     SabreStatus,
+    LootToast,
 }
 
 #[derive(Component)]
@@ -6877,6 +6878,7 @@ fn spawn_player_hud_panel(
                 "SABER: WAVE 1",
                 10.0,
             );
+            spawn_player_hud_text(panel, player_index, PlayerHudTextKind::LootToast, "", 12.0);
         });
 }
 
@@ -7015,6 +7017,7 @@ fn aim_reticle_system(
 
 // ── HUD Update ────────────────────────────────────────────────────────────────
 fn hud_update_system(
+    time: Res<Time>,
     player_q: Query<
         (
             &PlayerIndex,
@@ -7040,6 +7043,9 @@ fn hud_update_system(
     >,
     wave: Res<WaveInfo>,
     current: Res<CurrentChapter>,
+    mut loot_events: MessageReader<LootCollectedEvent>,
+    mut loot_toast_timers: Local<[f32; 4]>,
+    mut loot_toast_texts: Local<[Option<String>; 4]>,
     missile_q: Query<&TrackingMissile>,
     mut row_q: Query<(&mut Visibility, &PlayerHudBarRow)>,
     mut hud_visuals: ParamSet<(
@@ -7052,6 +7058,30 @@ fn hud_update_system(
         Query<&mut Text, With<EnemyCountText>>,
     )>,
 ) {
+    for event in loot_events.read() {
+        let index = usize::from(event.player_index);
+        let (Some(timer), Some(text)) = (
+            loot_toast_timers.get_mut(index),
+            loot_toast_texts.get_mut(index),
+        ) else {
+            continue;
+        };
+        *timer = 3.0;
+        *text = Some(format!(
+            "+{} {}",
+            event.amount,
+            event.loot_type.replace('_', " ").to_uppercase()
+        ));
+    }
+    for (index, timer) in loot_toast_timers.iter_mut().enumerate() {
+        if *timer > 0.0 {
+            *timer = (*timer - time.delta_secs()).max(0.0);
+            if *timer == 0.0 {
+                loot_toast_texts[index] = None;
+            }
+        }
+    }
+
     for (
         index,
         health,
@@ -7159,6 +7189,11 @@ fn hud_update_system(
                         progression.shop.equipped_weapon.as_deref(),
                     ),
                 ),
+                PlayerHudTextKind::LootToast => loot_toast_texts
+                    .get(usize::from(marker.player_index))
+                    .and_then(Option::as_deref)
+                    .unwrap_or("")
+                    .to_string(),
             });
         }
     }

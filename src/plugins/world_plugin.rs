@@ -947,6 +947,7 @@ fn discussion_interaction_system(
         return;
     }
 
+    let mut nearest: Option<(f32, u8, &'static str, &DiscussionNpc)> = None;
     for (player_index, player_transform, input) in player_q.iter() {
         if !input.interact {
             continue;
@@ -961,40 +962,47 @@ fn discussion_interaction_system(
             continue;
         }
 
-        let mut nearest: Option<(f32, &DiscussionNpc)> = None;
         for (npc_transform, npc) in npc_q.iter() {
             let distance = player_transform
                 .translation
                 .distance(npc_transform.translation);
-            if distance <= npc.interact_radius
-                && nearest
-                    .map(|(nearest_distance, _)| distance < nearest_distance)
-                    .unwrap_or(true)
-            {
-                nearest = Some((distance, npc));
+            if distance > npc.interact_radius {
+                continue;
+            }
+            let replace = nearest
+                .as_ref()
+                .map(|(best_distance, best_player, best_script, _)| {
+                    distance
+                        .total_cmp(best_distance)
+                        .then_with(|| player_index.0.cmp(best_player))
+                        .then_with(|| npc.id.cmp(best_script))
+                        .is_lt()
+                })
+                .unwrap_or(true);
+            if replace {
+                nearest = Some((distance, player_index.0, npc.id, npc));
             }
         }
+    }
 
-        let Some((_, npc)) = nearest else {
-            continue;
-        };
-
-        if discussion.start(npc.script_id, player_index.0) {
-            let title = discussion
-                .script()
-                .map(|script| script.title)
-                .unwrap_or(npc.role);
-            msg_ev.write(UiMessageEvent {
-                text: format!(
-                    "P{} talking with {} - {}",
-                    player_index.0 + 1,
-                    npc.display_name,
-                    title
-                ),
-                duration: 2.0,
-            });
-        }
+    let Some((_, player_index, _, npc)) = nearest else {
         return;
+    };
+
+    if discussion.start(npc.script_id, player_index) {
+        let title = discussion
+            .script()
+            .map(|script| script.title)
+            .unwrap_or(npc.role);
+        msg_ev.write(UiMessageEvent {
+            text: format!(
+                "P{} talking with {} - {}",
+                player_index + 1,
+                npc.display_name,
+                title
+            ),
+            duration: 2.0,
+        });
     }
 }
 

@@ -38,8 +38,11 @@ save formats, engine contracts, or feature parity commitments.
 1. Make shared interactions deterministic and owner-attributed. Guidance,
    chest claims, loot pickup, and indexed enemy-target selection now resolve
    equal-distance players by stable slot rather than ECS query order; loot
-   events also identify the recipient. Continue auditing simultaneous
-   interact, shop, and reward paths for explicit ownership and feedback.
+   events identify the recipient and each player's HUD shows their own loot
+   receipt. NPC conversations choose the closest eligible player and resolve
+   exact ties by slot and NPC identity; concurrent hack starts resolve ties by
+   slot. Continue auditing simultaneous interact, shop, and reward paths for
+   explicit ownership and feedback.
 2. Close player-scoped UX gaps: menu focus, controller prompts, loadout,
    crafting, rewards, and accessibility must identify the acting player and
    avoid leaking another player's state.

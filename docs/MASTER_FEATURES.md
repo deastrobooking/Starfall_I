@@ -166,7 +166,9 @@ Included features:
 - per-player score slots with computed party aggregates; chest-open scoring and
   events preserve the nearest player's stable local index; equal-distance
   interactions and loot awards resolve by stable player slot, and loot events
-  carry the recipient slot
+  carry the recipient slot; each player's HUD shows their own short-lived loot
+  receipt; simultaneous NPC interactions select the closest eligible player,
+  with stable tie-breaking for dialogue and hacking ownership
 
 Current strength:
 - ownership boundaries are already much clearer than a typical prototype

@@ -59,7 +59,7 @@ fn hack_interaction_system(
                     player_xf.translation.distance(target_xf.translation),
                 )
             })
-            .min_by(|a, b| a.4.total_cmp(&b.4))
+            .min_by(|a, b| a.4.total_cmp(&b.4).then_with(|| a.2.0.cmp(&b.2.0)))
         else {
             continue;
         };

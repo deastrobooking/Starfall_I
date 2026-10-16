@@ -137,10 +137,12 @@ Work:
   party totals; chest proximity resolves the actual nearest `PlayerIndex`,
   updates only that player's score, and emits owner-bearing chest events.
   Equal-distance chest and enemy-loot claims now use stable player-slot
-  tie-breaking, and `LootCollectedEvent` carries the recipient slot. Kill and
-  damage scoring remain disabled until enemy damage/lifecycle events carry an
-  authoritative player source; adding that attribution is the next score
-  ownership step
+  tie-breaking, `LootCollectedEvent` carries the recipient slot, and the
+  recipient's own HUD shows the loot receipt. NPC dialogue arbitration now
+  chooses the nearest eligible player and resolves ties consistently; hacking
+  ties also resolve by stable player slot. Kill and damage scoring remain
+  disabled until enemy damage/lifecycle events carry an authoritative player
+  source; adding that attribution is the next score ownership step
 - reduce plugin-level overloading in the largest gameplay systems
 - improve domain boundaries between world logic, UI logic, and player simulation
 - continue the editor/game separation work started in [editor_roadmap.md](editor_roadmap.md)
